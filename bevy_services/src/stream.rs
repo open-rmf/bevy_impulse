@@ -17,7 +17,10 @@
 
 use bevy::{
     prelude::Component,
-    ecs::system::EntityCommands,
+    ecs::{
+        world::EntityMut,
+        system::EntityCommands,
+    },
 };
 
 pub trait Stream: Send + Sync + 'static {}
@@ -32,37 +35,54 @@ impl<T: Stream> Default for StreamOut<T> {
 }
 
 pub trait IntoStreamOutComponents {
-    fn into_stream_out_components(cmds: &mut EntityCommands);
+    fn cmd_stream_out_components(cmds: &mut EntityCommands);
+    fn mut_stream_out_components(entity_mut: &mut EntityMut);
 }
 
 impl<T: Stream> IntoStreamOutComponents for T {
-    fn into_stream_out_components(cmds: &mut EntityCommands) {
+    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
         cmds.insert(StreamOut::<T>::default());
+    }
+    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
+        entity_mut.insert(StreamOut::<T>::default());
     }
 }
 
 impl IntoStreamOutComponents for () {
-    fn into_stream_out_components(_: &mut EntityCommands) { }
+    fn cmd_stream_out_components(_: &mut EntityCommands) { }
+    fn mut_stream_out_components(_: &mut EntityMut) { }
 }
 
 impl<T1: IntoStreamOutComponents> IntoStreamOutComponents for (T1,) {
-    fn into_stream_out_components(cmds: &mut EntityCommands) {
-        T1::into_stream_out_components(cmds);
+    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
+        T1::cmd_stream_out_components(cmds);
+    }
+    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
+        T1::mut_stream_out_components(entity_mut);
     }
 }
 
 impl<T1: IntoStreamOutComponents, T2: IntoStreamOutComponents> IntoStreamOutComponents for (T1, T2) {
-    fn into_stream_out_components(cmds: &mut EntityCommands) {
-        T1::into_stream_out_components(cmds);
-        T2::into_stream_out_components(cmds);
+    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
+        T1::cmd_stream_out_components(cmds);
+        T2::cmd_stream_out_components(cmds);
+    }
+    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
+        T1::mut_stream_out_components(entity_mut);
+        T2::mut_stream_out_components(entity_mut);
     }
 }
 
 impl<T1: IntoStreamOutComponents, T2: IntoStreamOutComponents, T3: IntoStreamOutComponents> IntoStreamOutComponents for (T1, T2, T3) {
-    fn into_stream_out_components(cmds: &mut EntityCommands) {
-        T1::into_stream_out_components(cmds);
-        T2::into_stream_out_components(cmds);
-        T3::into_stream_out_components(cmds);
+    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
+        T1::cmd_stream_out_components(cmds);
+        T2::cmd_stream_out_components(cmds);
+        T3::cmd_stream_out_components(cmds);
+    }
+    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
+        T1::mut_stream_out_components(entity_mut);
+        T2::mut_stream_out_components(entity_mut);
+        T3::mut_stream_out_components(entity_mut);
     }
 }
 
