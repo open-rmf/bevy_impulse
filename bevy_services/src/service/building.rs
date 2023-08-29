@@ -16,11 +16,12 @@
 */
 
 use crate::{
-    Provider, Assistant, Service, GenericAssistant, Delivery, stream::*,
+    Req, Resp, Provider, Assistant, Service, GenericAssistant, Delivery,
+    stream::*,
 };
 
 use bevy::{
-    prelude::{App, In},
+    prelude::{App, In, Entity},
     ecs::{
         world::EntityMut,
         system::{
@@ -32,20 +33,36 @@ use bevy::{
 pub mod traits {
     use super::*;
 
-    /// This trait is used to implement adding a service to an App at startup.
+    /// This trait is used to implement adding an async service to an App at
+    /// startup.
     pub trait AsyncServiceAdd<Marker> {
         type Request;
         type Response;
         type Streams;
-        fn add_service(self, app: &mut App);
+        fn add_async_service(self, app: &mut App);
     }
 
-    /// This trait is used to implement spawning a service through Commands
+    /// This trait is used to implement adding a blocking service to an App at
+    /// startup.
+    pub trait BlockingServiceAdd<Marker> {
+        type Request;
+        type Response;
+        fn add_blocking_service(self, app: &mut App);
+    }
+
+    /// This trait is used to implement spawning an async service through Commands
     pub trait AsyncServiceSpawn<Marker> {
         type Request;
         type Response;
         type Streams;
         fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams>;
+    }
+
+    /// This trait is used to implement spawning a blocking service through Commands
+    pub trait BlockingServiceSpawn<Marker> {
+        type Request;
+        type Response;
+        fn spawn_blocking_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response>;
     }
 
     /// This trait allows service systems to be converted into a builder that
@@ -58,6 +75,13 @@ pub mod traits {
         fn parallel(self) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()>;
         fn with<With>(self, with: With) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, (), With, ()>;
         fn also<Also>(self, also: Also) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, (), (), Also>;
+    }
+
+    pub trait IntoBlockingServiceBuilder<Marker> {
+        type Request;
+        type Response;
+        fn with<With>(self, with: With) -> BlockingServiceBuilder<Self::Request, Self::Response, With, ()>;
+        fn also<Also>(self, also: Also) -> BlockingServiceBuilder<Self::Request, Self::Response, (), Also>;
     }
 
     /// This trait is used to set the delivery mode of an async service.
@@ -78,14 +102,16 @@ pub mod traits {
         fn apply<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
     }
 
-    /// This trait allows users to perform more operations with a service while
-    /// adding it to an App.
+    /// This trait allows users to perform more operations with a service
+    /// provider while adding it to an App.
     pub trait AlsoAdd<Request, Response, Streams> {
         fn apply<'w>(self, app: &mut App, provider: Provider<Request, Response, Streams>);
     }
 }
 
 use traits::*;
+
+pub struct BuilderMarker;
 
 pub struct AsyncServiceBuilder<Request, Response, Streams, Deliver, With, Also> {
     service: Service<Request, Response>,
@@ -95,99 +121,26 @@ pub struct AsyncServiceBuilder<Request, Response, Streams, Deliver, With, Also> 
     also: Also,
 }
 
-pub struct BuilderMarker;
-
-impl<Request, Response, Streams, Deliver, With, Also>
-AsyncServiceAdd<BuilderMarker>
-for AsyncServiceBuilder<Request, Response, Streams, Deliver, With, Also>
-where
-    Streams: IntoStreamOutComponents,
-    Deliver: DeliveryChoice,
-    With: WithEntityMut,
-    Also: AlsoAdd<Request, Response, Streams>,
-    Request: 'static,
-    Response: 'static,
-    Streams: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn add_service(self, app: &mut App) {
-        let mut entity_mut = app.world.spawn(self.service);
-        let provider = Provider::<Request, Response, Streams>::new(entity_mut.id());
-        Streams::mut_stream_out_components(&mut entity_mut);
-        self.deliver.apply_entity_mut(&mut entity_mut);
-        self.with.apply(entity_mut);
-        self.also.apply(app, provider);
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys>
-AsyncServiceAdd<(Request, Response, Streams, Task, M)> for Sys
-where
-    Sys: IntoSystem<Request, Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
-    Streams: IntoStreamOutComponents + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn add_service(self, app: &mut App) {
-        // AsyncServiceBuilder::new(self).add_service(app)
-        AsyncServiceAdd::<BuilderMarker>::add_service(
-            AsyncServiceBuilder::new(self), app
-        );
-    }
-}
-
-impl<Request, Response, Streams, Deliver, With>
-AsyncServiceSpawn<BuilderMarker>
-for AsyncServiceBuilder<Request, Response, Streams, Deliver, With, ()>
-where
-    Streams: IntoStreamOutComponents,
-    Deliver: DeliveryChoice,
-    With: WithEntityCommands,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Request, Response, Streams> {
-        let mut entity_cmds = commands.spawn(self.service);
-        let provider = Provider::<Request, Response, Streams>::new(entity_cmds.id());
-        Streams::cmd_stream_out_components(&mut entity_cmds);
-        self.deliver.apply_entity_commands(&mut entity_cmds);
-        self.with.apply(&mut entity_cmds);
-        provider
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys> AsyncServiceSpawn<(Request, Response, Streams, Task, M)> for Sys
-where
-    Sys: IntoSystem<Request, Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
-    Streams: IntoStreamOutComponents + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
-        AsyncServiceBuilder::new(self).spawn_service(commands)
-    }
-}
-
 impl<Request, Response, Streams> AsyncServiceBuilder<Request, Response, Streams, (), (), ()> {
     /// Start building a new async service by providing the system that will
     /// provide the service.
-    pub fn new<M, Sys, Task>(service: Sys) -> Self
+    pub fn simple<M, Sys, Task>(service: Sys) -> Self
     where
-        Sys: IntoSystem<Request, Task, M>,
-        Task: FnOnce(Assistant<Streams>) -> Option<Response>,
+        Sys: IntoSystem<Req<Request>, Task, M>,
+        Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>>,
+        Request: 'static,
+        Response: 'static,
+        Streams: 'static,
+        Task: 'static,
+    {
+        let peel = |In((_, request)): In<(Entity, Req<Request>)>| request;
+        Self::self_aware(peel.pipe(service))
+    }
+
+    pub fn self_aware<M, Sys, Task>(service: Sys) -> Self
+    where
+        Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
+        Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>>,
         Request: 'static,
         Response: 'static,
         Streams: 'static,
@@ -195,7 +148,8 @@ impl<Request, Response, Streams> AsyncServiceBuilder<Request, Response, Streams,
     {
         let service = Service::Async(
             Box::new(IntoSystem::into_system(
-                service.pipe(
+                service
+                .pipe(
                     |In(task): In<Task>| {
                         let task: Box<dyn FnOnce(GenericAssistant) -> Option<Response>> = Box::new(
                             move |assistant: GenericAssistant| {
@@ -246,8 +200,8 @@ impl<Request, Response, Streams, With, Also> AsyncServiceBuilder<Request, Respon
     }
 }
 
-impl<Request, Response, Streams, Deliver, Also> AsyncServiceBuilder<Request, Response, Streams, Deliver, (), Also> {
-    pub fn with<With>(self, with: With) -> AsyncServiceBuilder<Request, Response, Streams, Deliver, With, Also> {
+impl<Request, Response, Streams, Deliver> AsyncServiceBuilder<Request, Response, Streams, Deliver, (), ()> {
+    pub fn with<With>(self, with: With) -> AsyncServiceBuilder<Request, Response, Streams, Deliver, With, ()> {
         AsyncServiceBuilder {
             service: self.service,
             streams: Default::default(),
@@ -270,10 +224,94 @@ impl<Request, Response, Streams, Deliver, With> AsyncServiceBuilder<Request, Res
     }
 }
 
+impl<Request, Response, Streams, Deliver, With, Also>
+AsyncServiceAdd<BuilderMarker>
+for AsyncServiceBuilder<Request, Response, Streams, Deliver, With, Also>
+where
+    Streams: IntoStreamOutComponents,
+    Deliver: DeliveryChoice,
+    With: WithEntityMut,
+    Also: AlsoAdd<Request, Response, Streams>,
+    Request: 'static,
+    Response: 'static,
+    Streams: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+    fn add_async_service(self, app: &mut App) {
+        let mut entity_mut = app.world.spawn(self.service);
+        let provider = Provider::<Request, Response, Streams>::new(entity_mut.id());
+        Streams::mut_stream_out_components(&mut entity_mut);
+        self.deliver.apply_entity_mut(&mut entity_mut);
+        self.with.apply(entity_mut);
+        self.also.apply(app, provider);
+    }
+}
+
+impl<Request, Response, Streams, Task, M, Sys>
+AsyncServiceAdd<(Request, Response, Streams, Task, M)> for Sys
+where
+    Sys: IntoSystem<Req<Request>, Task, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
+    Streams: IntoStreamOutComponents + 'static,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+    fn add_async_service(self, app: &mut App) {
+        // AsyncServiceBuilder::new(self).add_service(app)
+        AsyncServiceAdd::<BuilderMarker>::add_async_service(
+            AsyncServiceBuilder::simple(self), app
+        );
+    }
+}
+
+impl<Request, Response, Streams, Deliver, With>
+AsyncServiceSpawn<BuilderMarker>
+for AsyncServiceBuilder<Request, Response, Streams, Deliver, With, ()>
+where
+    Streams: IntoStreamOutComponents,
+    Deliver: DeliveryChoice,
+    With: WithEntityCommands,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+    fn spawn_service(self, commands: &mut Commands) -> Provider<Request, Response, Streams> {
+        let mut entity_cmds = commands.spawn(self.service);
+        let provider = Provider::<Request, Response, Streams>::new(entity_cmds.id());
+        Streams::cmd_stream_out_components(&mut entity_cmds);
+        self.deliver.apply_entity_commands(&mut entity_cmds);
+        self.with.apply(&mut entity_cmds);
+        provider
+    }
+}
+
+impl<Request, Response, Streams, Task, M, Sys> AsyncServiceSpawn<(Request, Response, Streams, Task, M)> for Sys
+where
+    Sys: IntoSystem<Req<Request>, Task, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
+    Streams: IntoStreamOutComponents + 'static,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
+        AsyncServiceBuilder::simple(self).spawn_service(commands)
+    }
+}
+
 impl<Request, Response, Streams, Task, M, Sys>
 IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<Request, Task, M>,
+    Sys: IntoSystem<Req<Request>, Task, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
@@ -283,16 +321,167 @@ where
     type Response = Response;
     type Streams = Streams;
     fn serial(self) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()> {
-        AsyncServiceBuilder::new(self).serial()
+        AsyncServiceBuilder::simple(self).serial()
     }
     fn parallel(self) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()> {
-        AsyncServiceBuilder::new(self).parallel()
+        AsyncServiceBuilder::simple(self).parallel()
     }
     fn with<With>(self, with: With) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, (), With, ()> {
-        AsyncServiceBuilder::new(self).with(with)
+        AsyncServiceBuilder::simple(self).with(with)
     }
     fn also<Also>(self, also: Also) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, (), (), Also> {
-        AsyncServiceBuilder::new(self).also(also)
+        AsyncServiceBuilder::simple(self).also(also)
+    }
+}
+
+pub struct SelfAware;
+
+impl<Request, Response, Streams, Task, M, Sys>
+IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
+where
+    Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
+    Streams: IntoStreamOutComponents + 'static,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+    fn serial(self) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()> {
+        AsyncServiceBuilder::self_aware(self).serial()
+    }
+    fn parallel(self) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()> {
+        AsyncServiceBuilder::self_aware(self).parallel()
+    }
+    fn with<With>(self, with: With) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, (), With, ()> {
+        AsyncServiceBuilder::self_aware(self).with(with)
+    }
+    fn also<Also>(self, also: Also) -> AsyncServiceBuilder<Self::Request, Self::Response, Self::Streams, (), (), Also> {
+        AsyncServiceBuilder::self_aware(self).also(also)
+    }
+}
+
+pub struct BlockingServiceBuilder<Request, Response, With, Also> {
+    service: Service<Request, Response>,
+    with: With,
+    also: Also,
+}
+
+impl<Request, Response> BlockingServiceBuilder<Request, Response, (), ()> {
+    pub fn simple<M, Sys>(service: Sys) -> Self
+    where
+        Sys: IntoSystem<Req<Request>, Response, M>,
+        Request: 'static,
+        Response: 'static,
+    {
+        let peel = |In((_, request)): In<(Entity, Req<Request>)>| request;
+        Self::self_aware(peel.pipe(service))
+    }
+
+    pub fn self_aware<M, Sys>(service: Sys) -> Self
+    where
+        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
+        Request: 'static,
+        Response: 'static,
+    {
+        let service = Service::Blocking(Box::new(IntoSystem::into_system(service)));
+        Self {
+            service,
+            with: (),
+            also: (),
+        }
+    }
+}
+
+impl<Request, Response> BlockingServiceBuilder<Request, Response, (), ()> {
+    pub fn with<With>(self, with: With) -> BlockingServiceBuilder<Request, Response, With, ()> {
+        BlockingServiceBuilder {
+            service: self.service,
+            with,
+            also: self.also,
+        }
+    }
+}
+
+impl<Request, Response, With> BlockingServiceBuilder<Request, Response, With, ()> {
+    pub fn also<Also>(self, also: Also) -> BlockingServiceBuilder<Request, Response, With, Also> {
+        BlockingServiceBuilder {
+            service: self.service,
+            with: self.with,
+            also,
+        }
+    }
+}
+
+impl<Request, Response, With, Also>
+BlockingServiceAdd<BuilderMarker>
+for BlockingServiceBuilder<Request, Response, With, Also>
+where
+    With: WithEntityMut,
+    Also: AlsoAdd<Request, Response, ()>,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    fn add_blocking_service(self, app: &mut App) {
+        let entity_mut = app.world.spawn(self.service);
+        let provider = Provider::<Request, Response, ()>::new(entity_mut.id());
+        self.with.apply(entity_mut);
+        self.also.apply(app, provider);
+    }
+}
+
+impl<Request, Response, With, Also>
+BlockingServiceSpawn<BuilderMarker>
+for BlockingServiceBuilder<Request, Response, With, Also>
+where
+    With: WithEntityCommands,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    fn spawn_blocking_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response> {
+        let mut entity_cmds = commands.spawn(self.service);
+        let provider = Provider::<Request, Response, ()>::new(entity_cmds.id());
+        self.with.apply(&mut entity_cmds);
+        provider
+    }
+}
+
+impl<Request, Response, M, Sys>
+IntoBlockingServiceBuilder<(Request, Response, M)> for Sys
+where
+    Sys: IntoSystem<Req<Request>, Response, M>,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    fn with<With>(self, with: With) -> BlockingServiceBuilder<Self::Request, Self::Response, With, ()> {
+        BlockingServiceBuilder::simple(self).with(with)
+    }
+    fn also<Also>(self, also: Also) -> BlockingServiceBuilder<Self::Request, Self::Response, (), Also> {
+        BlockingServiceBuilder::simple(self).also(also)
+    }
+}
+
+impl<Request, Response, M, Sys>
+IntoBlockingServiceBuilder<(Request, Response, M, SelfAware)> for Sys
+where
+    Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    fn with<With>(self, with: With) -> BlockingServiceBuilder<Self::Request, Self::Response, With, ()> {
+        BlockingServiceBuilder::self_aware(self).with(with)
+    }
+    fn also<Also>(self, also: Also) -> BlockingServiceBuilder<Self::Request, Self::Response, (), Also> {
+        BlockingServiceBuilder::self_aware(self).also(also)
     }
 }
 

@@ -15,22 +15,52 @@
  *
 */
 
-use crate::{
-    Assistant, GenericAssistant,
-    stream::*,
-};
-
 use bevy::{
-    prelude::{Entity, Component, App},
-    ecs::system::{BoxedSystem, IntoSystem, EntityCommands, Commands},
+    prelude::{Entity, App},
+    ecs::system::{IntoSystem, EntityCommands, Commands},
     utils::define_label,
 };
 
 mod building;
-pub use building::traits::*;
+pub use building::{ServiceBuilder, BlockingServiceBuilder, traits::*};
 
 mod delivery;
 pub(crate) use delivery::*;
+
+mod internal;
+pub(crate) use internal::*;
+
+/// Use Req to indicate the request data structure that your service's system
+/// takes as input. For example this signature can be used for simple services
+/// that only need the request data as input:
+///
+/// ```rust
+/// fn my_service(
+///     In(Req(request)): In<Req<MyRequestData>>,
+///     other: Query<&OtherComponents>,
+/// ) -> impl FnOnce(Assistant<()>) -> Resp<MyResponseData> {
+///     /* ... */
+/// }
+/// ```
+///
+/// On the other hand, the systems of more complex services might also need to
+/// know what entity is providing the service, e.g. if the service provider is
+/// configured with additional components that need to be queried when a request
+/// comes in. For that you can use the self-aware signature:
+///
+/// ```rust
+/// fn my_self_aware_service(
+///     In((me, Req(request))): In<(Entity, Req<MyRequestData>)>,
+///     query_service_params: Query<&MyServiceParams>,
+///     other: Query<&OtherComponents>,
+/// ) -> impl FnOnce(Assistant<()>) -> Resp<MyResponseData> {
+///     let my_params = query_service_params.get(me).unwrap();
+///     /* ... */
+/// }
+/// ```
+pub struct Req<Request>(pub Request);
+
+pub struct Resp<Response>(pub Response);
 
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
@@ -84,7 +114,7 @@ pub trait SpawnServicesExt<'w, 's> {
         service: Sys
     ) -> EntityCommands<'w, 's, 'a>
     where
-        Sys: IntoSystem<Request, Response, M>,
+        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
         Request: 'static,
         Response: 'static;
 }
@@ -102,7 +132,7 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
         service: Sys
     ) -> EntityCommands<'w, 's, 'a>
     where
-        Sys: IntoSystem<Request, Response, M>,
+        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
         Request: 'static,
         Response: 'static,
     {
@@ -126,7 +156,7 @@ pub trait AddServicesExt {
         service: Sys,
     ) -> &mut Self
     where
-        Sys: IntoSystem<Request, Response, M>,
+        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
         Request: 'static,
         Response: 'static;
 }
@@ -136,7 +166,7 @@ impl AddServicesExt for App {
     where
         S: AsyncServiceAdd<M>,
     {
-        service.add_service(self);
+        service.add_async_service(self);
         self
     }
 
@@ -145,26 +175,13 @@ impl AddServicesExt for App {
         service: Sys,
     ) -> &mut Self
     where
-        Sys: IntoSystem<Request, Response, M>,
+        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
         Request: 'static,
         Response: 'static,
     {
         self.world.spawn(Service::Blocking(Box::new(IntoSystem::into_system(service))));
         self
     }
-}
-
-/// A service is a type of system that takes in a request and produces a
-/// response, optionally emitting events from its streams using the provided
-/// assistant.
-#[derive(Component)]
-pub(crate) enum Service<Request, Response> {
-    /// The service takes in the request and blocks execution until the response
-    /// is produced.
-    Blocking(BoxedSystem<Request, Response>),
-    /// The service produces a task that runs asynchronously in the bevy thread
-    /// pool.
-    Async(BoxedSystem<Request, Box<dyn FnOnce(GenericAssistant) -> Option<Response>>>),
 }
 
 define_label!(
@@ -178,6 +195,7 @@ define_label!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Assistant;
     use bevy::prelude::*;
 
     #[derive(Component)]
@@ -260,7 +278,7 @@ mod tests {
     }
 
     fn sys_async_service(
-        In(name): In<String>,
+        In(Req(name)): In<Req<String>>,
         people: Query<&TestPeople>,
     ) -> impl FnOnce(Assistant<()>) -> Option<u64> {
         let mut matching_people = Vec::new();
@@ -282,7 +300,7 @@ mod tests {
     }
 
     fn sys_blocking_service(
-        In(name): In<String>,
+        In((_, Req(name))): In<(Entity, Req<String>)>,
         people: Query<&TestPeople>,
     ) -> u64 {
         let mut sum = 0;
