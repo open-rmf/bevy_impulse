@@ -22,7 +22,7 @@ use bevy::{
 };
 
 mod building;
-pub use building::{ServiceBuilder, BlockingServiceBuilder, traits::*};
+pub use building::{ServiceBuilder, traits::*};
 
 mod delivery;
 pub(crate) use delivery::*;
@@ -60,6 +60,12 @@ pub(crate) use internal::*;
 /// ```
 pub struct Req<Request>(pub Request);
 
+/// Use Resp to indicate the response data structure that your service's system
+/// provides as its final output.
+///
+/// This struct as well as [`Req`] are used to allow the Rust compiler to infer
+/// what kind of service you are providing (async/blocking, simple/self-aware)
+/// based on the function signature of your system.
 pub struct Resp<Response>(pub Response);
 
 /// Provider is the public API handle for referring to an existing service
@@ -103,83 +109,31 @@ impl<Request, Response, Streams> Provider<Request, Response, Streams> {
 /// any system.
 pub trait SpawnServicesExt<'w, 's> {
     /// Call this with Commands to create a new async service from any system.
-    fn spawn_async_service<'a, M, S: AsyncServiceSpawn<M>>(
+    fn spawn_service<'a, M, S: ServiceSpawn<M>>(
         &'a mut self,
         service: S,
     ) -> Provider<S::Request, S::Response, S::Streams>;
-
-    /// Call this with Commands to create a new blocking service from any system.
-    fn spawn_blocking_service<'a, Request, Response, M, Sys>(
-        &'a mut self,
-        service: Sys
-    ) -> EntityCommands<'w, 's, 'a>
-    where
-        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
-        Request: 'static,
-        Response: 'static;
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
-    fn spawn_async_service<'a, M, S: AsyncServiceSpawn<M>>(
+    fn spawn_service<'a, M, S: ServiceSpawn<M>>(
         &'a mut self,
         service: S,
     ) -> Provider<S::Request, S::Response, S::Streams> {
         service.spawn_service(self)
-    }
-
-    fn spawn_blocking_service<'a, Request, Response, M, Sys>(
-        &'a mut self,
-        service: Sys
-    ) -> EntityCommands<'w, 's, 'a>
-    where
-        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
-        Request: 'static,
-        Response: 'static,
-    {
-        self.spawn(Service::Blocking(Box::new(IntoSystem::into_system(service))))
     }
 }
 
 /// This trait extends the App interface so that services can be added while
 /// configuring an App.
 pub trait AddServicesExt {
-    /// Call this on an App to create an async service that is available
-    /// immediately.
-    fn add_async_service<M, S>(&mut self, service: S) -> &mut Self
-    where
-        S: AsyncServiceAdd<M>;
-
-    /// Call this on an App to create a blocking service that is available
-    /// immediately.
-    fn add_blocking_service<'a, Request, Response, M, Sys>(
-        &mut self,
-        service: Sys,
-    ) -> &mut Self
-    where
-        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
-        Request: 'static,
-        Response: 'static;
+    /// Call this on an App to create a service that is available immediately.
+    fn add_service<M, S: ServiceAdd<M>>(&mut self, service: S) -> &mut Self;
 }
 
 impl AddServicesExt for App {
-    fn add_async_service<M, S>(&mut self, service: S) -> &mut Self
-    where
-        S: AsyncServiceAdd<M>,
-    {
-        service.add_async_service(self);
-        self
-    }
-
-    fn add_blocking_service<'a, Request, Response, M, Sys>(
-        &mut self,
-        service: Sys,
-    ) -> &mut Self
-    where
-        Sys: IntoSystem<(Entity, Req<Request>), Response, M>,
-        Request: 'static,
-        Response: 'static,
-    {
-        self.world.spawn(Service::Blocking(Box::new(IntoSystem::into_system(service))));
+    fn add_service<M, S: ServiceAdd<M>>(&mut self, service: S) -> &mut Self {
+        service.add_service(self);
         self
     }
 }
@@ -197,6 +151,7 @@ mod tests {
     use super::*;
     use crate::Assistant;
     use bevy::prelude::*;
+    use bevy::ecs::world::EntityMut;
 
     #[derive(Component)]
     struct TestPeople {
@@ -207,6 +162,11 @@ mod tests {
     #[derive(Resource)]
     struct TestSystemRan(bool);
 
+    #[derive(Resource)]
+    struct MyServiceProvider {
+        provider: Provider<String, u64>,
+    }
+
     #[test]
     fn test_spawn_async_service() {
         let mut app = App::new();
@@ -214,6 +174,47 @@ mod tests {
             .insert_resource(TestSystemRan(false))
             .add_systems(Startup, sys_spawn_async_service)
             .add_systems(Update, sys_find_service);
+
+        app.update();
+        assert!(app.world.resource::<TestSystemRan>().0);
+    }
+
+    #[test]
+    fn test_add_async_service() {
+        let mut app = App::new();
+        app
+            .insert_resource(TestSystemRan(false))
+            .add_service(sys_async_service)
+            .add_systems(Update, sys_find_service);
+
+        app.update();
+        assert!(app.world.resource::<TestSystemRan>().0);
+    }
+
+    #[test]
+    fn test_add_async_service_serial() {
+        let mut app = App::new();
+        app
+            .insert_resource(TestSystemRan(false))
+            .add_service(sys_async_service.serial())
+            .add_systems(Update, sys_find_service);
+
+        app.update();
+        assert!(app.world.resource::<TestSystemRan>().0);
+    }
+
+    #[test]
+    fn test_add_built_async_service() {
+        let mut app = App::new();
+        app
+            .insert_resource(TestSystemRan(false))
+            .add_service(
+                sys_async_service
+                .also(|app: &mut App, provider| {
+                    app.insert_resource(MyServiceProvider { provider });
+                })
+            )
+            .add_systems(Update, sys_use_my_service_provider);
 
         app.update();
         assert!(app.world.resource::<TestSystemRan>().0);
@@ -232,45 +233,11 @@ mod tests {
     }
 
     #[test]
-    fn test_add_async_service() {
-        let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
-            .add_async_service(sys_async_service)
-            .add_systems(Update, sys_find_service);
-
-        app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
-    }
-
-    #[derive(Resource)]
-    struct MyServiceProvider {
-        provider: Provider<String, u64>,
-    }
-
-    #[test]
-    fn test_add_built_async_service() {
-        let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
-            .add_async_service(
-                sys_async_service
-                .also(|app: &mut App, provider| {
-                    app.insert_resource(MyServiceProvider { provider });
-                })
-            )
-            .add_systems(Update, sys_use_my_service_provider);
-
-        app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
-    }
-
-    #[test]
     fn test_add_blocking_service() {
         let mut app = App::new();
         app
             .insert_resource(TestSystemRan(false))
-            .add_blocking_service(sys_blocking_service)
+            .add_service(sys_blocking_service)
             .add_systems(Update, sys_find_service);
 
         app.update();
@@ -280,7 +247,7 @@ mod tests {
     fn sys_async_service(
         In(Req(name)): In<Req<String>>,
         people: Query<&TestPeople>,
-    ) -> impl FnOnce(Assistant<()>) -> Option<u64> {
+    ) -> impl FnOnce(Assistant<()>) -> Option<Resp<u64>> {
         let mut matching_people = Vec::new();
         for person in &people {
             if person.name == name {
@@ -289,33 +256,34 @@ mod tests {
         }
 
         move |_: Assistant<()>| {
-            Some(matching_people.into_iter().fold(0, |sum, age| sum + age))
+            Some(Resp(matching_people.into_iter().fold(0, |sum, age| sum + age)))
         }
     }
 
     fn sys_spawn_async_service(
         mut commands: Commands,
     ) {
-        commands.spawn_async_service(sys_async_service);
+        commands.spawn_service(sys_async_service);
     }
 
     fn sys_blocking_service(
-        In((_, Req(name))): In<(Entity, Req<String>)>,
+        In(Req(name)): In<Req<String>>,
+        // In((_, Req(name))): In<(Entity, Req<String>)>,
         people: Query<&TestPeople>,
-    ) -> u64 {
+    ) -> Resp<u64> {
         let mut sum = 0;
         for person in &people {
             if person.name == name {
                 sum += person.age;
             }
         }
-        sum
+        Resp(sum)
     }
 
     fn sys_spawn_blocking_service(
         mut commands: Commands,
     ) {
-        commands.spawn_blocking_service(sys_blocking_service);
+        commands.spawn_service(sys_blocking_service);
     }
 
     fn sys_find_service(
