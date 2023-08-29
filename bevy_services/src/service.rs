@@ -16,8 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Entity, App},
-    ecs::system::{IntoSystem, EntityCommands, Commands},
+    prelude::{Entity, App, In, Commands},
     utils::define_label,
 };
 
@@ -38,7 +37,7 @@ pub(crate) use internal::*;
 /// fn my_service(
 ///     In(Req(request)): In<Req<MyRequestData>>,
 ///     other: Query<&OtherComponents>,
-/// ) -> impl FnOnce(Assistant<()>) -> Resp<MyResponseData> {
+/// ) -> impl FnOnce(Assistant) -> Resp<MyResponseData> {
 ///     /* ... */
 /// }
 /// ```
@@ -53,22 +52,23 @@ pub(crate) use internal::*;
 ///     In((me, Req(request))): In<(Entity, Req<MyRequestData>)>,
 ///     query_service_params: Query<&MyServiceParams>,
 ///     other: Query<&OtherComponents>,
-/// ) -> impl FnOnce(Assistant<()>) -> Resp<MyResponseData> {
+/// ) -> Job<impl FnOnce(Assistant<()>) -> MyResponseData> {
 ///     let my_params = query_service_params.get(me).unwrap();
 ///     /* ... */
 /// }
 /// ```
 pub struct Req<Request>(pub Request);
 
-/// Use Resp to indicate the response data structure that your service's system
-/// provides as its final output.
+/// Wrap [`Resp`] around the return value of your service's system to indicate
+/// it will immediately return a response to the request. This means your
+/// service is blocking and all other system execution will halt while it is
+/// running. It should only be used for services that execute very quickly.
 ///
-/// This struct as well as [`Req`] are used to allow the Rust compiler to infer
-/// what kind of service you are providing (async/blocking, simple/self-aware)
-/// based on the function signature of your system.
+/// To define an async service use [`Job`].
 pub struct Resp<Response>(pub Response);
 
-
+/// Wrap [`Job`] around the return value of your service's system to provide a
+/// function that will be passed along as a task.
 pub struct Job<Task>(pub Task);
 
 /// Provider is the public API handle for referring to an existing service
@@ -153,14 +153,19 @@ define_label!(
 mod tests {
     use super::*;
     use crate::Assistant;
-    use bevy::prelude::*;
-    use bevy::ecs::world::EntityMut;
+    use bevy::{
+        prelude::*,
+        ecs::world::EntityMut,
+    };
 
     #[derive(Component)]
     struct TestPeople {
         name: String,
         age: u64,
     }
+
+    #[derive(Component)]
+    struct Multiplier(u64);
 
     #[derive(Resource)]
     struct TestSystemRan(bool);
@@ -236,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_blocking_service() {
+    fn test_add_simple_blocking_service() {
         let mut app = App::new();
         app
             .insert_resource(TestSystemRan(false))
@@ -247,10 +252,27 @@ mod tests {
         assert!(app.world.resource::<TestSystemRan>().0);
     }
 
+    #[test]
+    fn test_add_self_aware_blocking_service() {
+        let mut app = App::new();
+        app
+            .insert_resource(TestSystemRan(false))
+            .add_service(
+                sys_self_aware_blocking_service
+                .with(|mut entity_mut: EntityMut| {
+                    entity_mut.insert(Multiplier(2));
+                })
+            )
+            .add_systems(Update, sys_find_service);
+
+        app.update();
+        assert!(app.world.resource::<TestSystemRan>().0);
+    }
+
     fn sys_async_service(
         In(Req(name)): In<Req<String>>,
         people: Query<&TestPeople>,
-    ) -> Job<impl FnOnce(Assistant<()>) -> Option<u64>> {
+    ) -> Job<impl FnOnce(Assistant) -> Option<u64>> {
         let mut matching_people = Vec::new();
         for person in &people {
             if person.name == name {
@@ -258,7 +280,7 @@ mod tests {
             }
         }
 
-        let job = move |_: Assistant<()>| {
+        let job = move |_: Assistant| {
             Some(matching_people.into_iter().fold(0, |sum, age| sum + age))
         };
         Job(job)
@@ -270,9 +292,23 @@ mod tests {
         commands.spawn_service(sys_async_service);
     }
 
+    fn sys_self_aware_blocking_service(
+        In((me, Req(name))): In<(Entity, Req<String>)>,
+        people: Query<&TestPeople>,
+        multipliers: Query<&Multiplier>,
+    ) -> Resp<u64> {
+        let mut sum = 0;
+        let multiplier = multipliers.get(me).unwrap().0;
+        for person in &people {
+            if person.name == name {
+                sum += multiplier * person.age;
+            }
+        }
+        Resp(sum)
+    }
+
     fn sys_blocking_service(
-        In((_, Req(name))): In<(Entity, Req<String>)>,
-        // In((_, Req(name))): In<(Entity, Req<String>)>,
+        In(Req(name)): In<Req<String>>,
         people: Query<&TestPeople>,
     ) -> Resp<u64> {
         let mut sum = 0;
@@ -287,7 +323,7 @@ mod tests {
     fn sys_spawn_blocking_service(
         mut commands: Commands,
     ) {
-        commands.spawn_service(sys_blocking_service);
+        commands.spawn_service(sys_self_aware_blocking_service);
     }
 
     fn sys_find_service(

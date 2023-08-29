@@ -15,7 +15,7 @@
  *
 */
 
-pub struct Assistant<Streams> {
+pub struct Assistant<Streams = ()> {
     _ignore: std::marker::PhantomData<Streams>,
 }
 
