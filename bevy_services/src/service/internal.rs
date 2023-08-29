@@ -15,12 +15,13 @@
  *
 */
 
-use crate::{GenericAssistant, Req, Resp};
+use crate::{GenericAssistant, Req, Resp, Job};
 use bevy::{
     prelude::{Entity, Component},
     ecs::system::BoxedSystem,
 };
 
+pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response>>>;
 
 /// A service is a type of system that takes in a request and produces a
 /// response, optionally emitting events from its streams using the provided
@@ -32,5 +33,5 @@ pub(crate) enum Service<Request, Response> {
     Blocking(BoxedSystem<(Entity, Req<Request>), Resp<Response>>),
     /// The service produces a task that runs asynchronously in the bevy thread
     /// pool.
-    Async(BoxedSystem<(Entity, Req<Request>), Box<dyn FnOnce(GenericAssistant) -> Option<Resp<Response>>>>),
+    Async(BoxedSystem<(Entity, Req<Request>), BoxedJob<Response>>),
 }

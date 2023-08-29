@@ -68,6 +68,9 @@ pub struct Req<Request>(pub Request);
 /// based on the function signature of your system.
 pub struct Resp<Response>(pub Response);
 
+
+pub struct Job<Task>(pub Task);
+
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
 /// - [`crate::ServiceDiscovery`].iter()
@@ -247,7 +250,7 @@ mod tests {
     fn sys_async_service(
         In(Req(name)): In<Req<String>>,
         people: Query<&TestPeople>,
-    ) -> impl FnOnce(Assistant<()>) -> Option<Resp<u64>> {
+    ) -> Job<impl FnOnce(Assistant<()>) -> Option<u64>> {
         let mut matching_people = Vec::new();
         for person in &people {
             if person.name == name {
@@ -255,9 +258,10 @@ mod tests {
             }
         }
 
-        move |_: Assistant<()>| {
-            Some(Resp(matching_people.into_iter().fold(0, |sum, age| sum + age)))
-        }
+        let job = move |_: Assistant<()>| {
+            Some(matching_people.into_iter().fold(0, |sum, age| sum + age))
+        };
+        Job(job)
     }
 
     fn sys_spawn_async_service(
@@ -267,7 +271,7 @@ mod tests {
     }
 
     fn sys_blocking_service(
-        In(Req(name)): In<Req<String>>,
+        In((_, Req(name))): In<(Entity, Req<String>)>,
         // In((_, Req(name))): In<(Entity, Req<String>)>,
         people: Query<&TestPeople>,
     ) -> Resp<u64> {

@@ -16,7 +16,8 @@
 */
 
 use crate::{
-    Req, Resp, Provider, Assistant, Service, GenericAssistant, Delivery,
+    Req, Resp, Job, BoxedJob, Provider, Assistant, Service, GenericAssistant,
+    Delivery,
     stream::*,
 };
 
@@ -191,11 +192,11 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
             .pipe(service)
             .pipe(
                 |In(task): In<Task>| {
-                    let task: Box<dyn FnOnce(GenericAssistant) -> Option<Resp<Response>>> = Box::new(
+                    let task: BoxedJob<Response> = Job(Box::new(
                         move |_: GenericAssistant| {
-                            task().map(Resp)
+                            task()
                         }
-                    );
+                    ));
                     task
                 }
             );
@@ -217,8 +218,8 @@ impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), 
     /// perform the service.
     pub fn simple_async<M, Sys, Task>(service: Sys) -> Self
     where
-        Sys: IntoSystem<Req<Request>, Task, M>,
-        Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>>,
+        Sys: IntoSystem<Req<Request>, Job<Task>, M>,
+        Task: FnOnce(Assistant<Streams>) -> Option<Response>,
         Request: 'static,
         Response: 'static,
         Streams: 'static,
@@ -233,8 +234,8 @@ impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), 
     /// have parameters configurable by the user.
     pub fn self_aware_async<M, Sys, Task>(service: Sys) -> Self
     where
-        Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
-        Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>>,
+        Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
+        Task: FnOnce(Assistant<Streams>) -> Option<Response>,
         Request: 'static,
         Response: 'static,
         Streams: 'static,
@@ -244,12 +245,12 @@ impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), 
             Box::new(IntoSystem::into_system(
                 service
                 .pipe(
-                    |In(task): In<Task>| {
-                        let task: Box<dyn FnOnce(GenericAssistant) -> Option<Resp<Response>>> = Box::new(
+                    |In(Job(task)): In<Job<Task>>| {
+                        let task: BoxedJob<Response> = Job(Box::new(
                             move |assistant: GenericAssistant| {
                                 task(assistant.into_specific())
                             }
-                        );
+                        ));
                         task
                     }
                 )
@@ -346,8 +347,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 ServiceAdd<(Request, Response, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<Req<Request>, Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -356,7 +357,6 @@ where
     type Response = Response;
     type Streams = Streams;
     fn add_service(self, app: &mut App) {
-        // AsyncServiceBuilder::new(self).add_service(app)
         ServiceAdd::<BuilderMarker>::add_service(
             ServiceBuilder::simple_async(self), app
         );
@@ -366,8 +366,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 ServiceAdd<(Request, Response, Streams, Task, M, SelfAware)> for Sys
 where
-    Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -474,8 +474,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 ServiceSpawn<AsyncMarker<(Request, Response, Streams, Task, M)>> for Sys
 where
-    Sys: IntoSystem<Req<Request>, Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -493,8 +493,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 ServiceSpawn<AsyncMarker<(SelfAware, Request, Response, Streams, Task, M, SelfAware)>> for Sys
 where
-    Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -512,8 +512,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 IntoServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<Req<Request>, Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -536,8 +536,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<Req<Request>, Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -558,8 +558,8 @@ pub struct SelfAware;
 impl<Request, Response, Streams, Task, M, Sys>
 IntoServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
 where
-    Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
@@ -582,8 +582,8 @@ where
 impl<Request, Response, Streams, Task, M, Sys>
 IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
 where
-    Sys: IntoSystem<(Entity, Req<Request>), Task, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Resp<Response>> + 'static,
+    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
+    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
     Streams: IntoStreamOutComponents + 'static,
     Request: 'static,
     Response: 'static,
