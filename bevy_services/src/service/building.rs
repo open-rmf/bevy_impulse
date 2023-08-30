@@ -101,8 +101,6 @@ pub mod traits {
 use traits::*;
 
 pub struct BuilderMarker;
-pub struct AsyncMarker<T>(std::marker::PhantomData<T>);
-pub struct BlockingMarker<T>(std::marker::PhantomData<T>);
 
 pub struct ServiceBuilder<Request, Response, Streams, Deliver, With, Also> {
     service: Service<Request, Response>,
@@ -329,7 +327,6 @@ where
     Also: AlsoAdd<Request, Response, Streams>,
     Request: 'static,
     Response: 'static,
-    Streams: 'static,
 {
     type Request = Request;
     type Response = Response;
@@ -344,75 +341,18 @@ where
     }
 }
 
-impl<Request, Response, Streams, Task, M, Sys>
-ServiceAdd<(Request, Response, Streams, Task, M)> for Sys
+impl<M, S: IntoServiceBuilder<M>> ServiceAdd<M> for S
 where
-    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
-    Streams: IntoStreamOutComponents + 'static,
-    Request: 'static,
-    Response: 'static,
+    S::Streams: IntoStreamOutComponents,
+    S::DefaultDeliver: DeliveryChoice,
+    S::Request: 'static,
+    S::Response: 'static,
 {
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
+    type Request = S::Request;
+    type Response = S::Response;
+    type Streams = S::Streams;
     fn add_service(self, app: &mut App) {
-        ServiceAdd::<BuilderMarker>::add_service(
-            ServiceBuilder::simple_async(self), app
-        );
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys>
-ServiceAdd<(Request, Response, Streams, Task, M, SelfAware)> for Sys
-where
-    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
-    Streams: IntoStreamOutComponents + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn add_service(self, app: &mut App) {
-        ServiceAdd::<BuilderMarker>::add_service(
-            ServiceBuilder::self_aware_async(self), app
-        );
-    }
-}
-
-impl<Request, Response, M, Sys>
-ServiceAdd<(Request, Response, M)> for Sys
-where
-    Sys: IntoSystem<Req<Request>, Resp<Response>, M>,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = ();
-    fn add_service(self, app: &mut App) {
-        ServiceAdd::<BuilderMarker>::add_service(
-            ServiceBuilder::simple_blocking(self), app
-        );
-    }
-}
-
-impl<Request, Response, M, Sys>
-ServiceAdd<(Request, Response, M, SelfAware)> for Sys
-where
-    Sys: IntoSystem<(Entity, Req<Request>), Resp<Response>, M>,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = ();
-    fn add_service(self, app: &mut App) {
-        ServiceAdd::<BuilderMarker>::add_service(
-            ServiceBuilder::self_aware_blocking(self), app
-        );
+        ServiceAdd::<BuilderMarker>::add_service(self.builder(), app);
     }
 }
 
@@ -439,73 +379,18 @@ where
     }
 }
 
-impl<Request, Response, M, Sys> ServiceSpawn<BlockingMarker<(Request, Response, M)>> for Sys
+impl<M, S: IntoServiceBuilder<M>> ServiceSpawn<M> for S
 where
-    Sys: IntoSystem<Req<Request>, Resp<Response>, M>,
-    Request: 'static,
-    Response: 'static,
+    S::Streams: IntoStreamOutComponents,
+    S::DefaultDeliver: DeliveryChoice,
+    S::Request: 'static,
+    S::Response: 'static,
 {
-    type Request = Request;
-    type Response = Response;
-    type Streams = ();
+    type Request = S::Request;
+    type Response = S::Response;
+    type Streams = S::Streams;
     fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
-        ServiceSpawn::<BuilderMarker>::spawn_service(
-            ServiceBuilder::simple_blocking(self), commands
-        )
-    }
-}
-
-impl<Request, Response, M, Sys> ServiceSpawn<BlockingMarker<(Request, Response, SelfAware, M)>> for Sys
-where
-    Sys: IntoSystem<(Entity, Req<Request>), Resp<Response>, M>,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = ();
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
-        ServiceSpawn::<BuilderMarker>::spawn_service(
-            ServiceBuilder::self_aware_blocking(self), commands
-        )
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys>
-ServiceSpawn<AsyncMarker<(Request, Response, Streams, Task, M)>> for Sys
-where
-    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
-    Streams: IntoStreamOutComponents + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
-        ServiceSpawn::<BuilderMarker>::spawn_service(
-            ServiceBuilder::simple_async(self), commands
-        )
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys>
-ServiceSpawn<AsyncMarker<(SelfAware, Request, Response, Streams, Task, M, SelfAware)>> for Sys
-where
-    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static,
-    Streams: IntoStreamOutComponents + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
-        ServiceSpawn::<BuilderMarker>::spawn_service(
-            ServiceBuilder::self_aware_async(self), commands
-        )
+        ServiceSpawn::<BuilderMarker>::spawn_service(self.builder(), commands)
     }
 }
 
