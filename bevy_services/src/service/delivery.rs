@@ -15,22 +15,424 @@
  *
 */
 
-use crate::RequestLabelId;
+use crate::{RequestLabelId, GenericAssistant, Req, Resp, Job};
+use arrayvec::ArrayVec;
 
-use bevy::prelude::{Component, Entity};
+use bevy::{
+    prelude::{Component, Entity, World, Bundle, Resource},
+    ecs::system::{Command, BoxedSystem},
+    tasks::Task,
+};
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    sync::Weak,
+    collections::{HashMap, VecDeque}
+};
 
-///
+#[derive(Resource)]
+struct BlockingDeliveryQueue {
+    is_delivering: bool,
+    queue: VecDeque<(DispatchCommand, fn(&mut World, DispatchCommand))>,
+}
+
+#[derive(Component)]
+pub(crate) struct Detached;
+
+#[derive(Component)]
+pub(crate) struct Held(pub(crate) Weak<()>);
+
+
+pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response>>>;
+
+/// A service is a type of system that takes in a request and produces a
+/// response, optionally emitting events from its streams using the provided
+/// assistant.
+#[derive(Component)]
+pub(crate) enum Service<Request, Response> {
+    /// The service takes in the request and blocks execution until the response
+    /// is produced.
+    Blocking(Option<BoxedSystem<(Entity, Req<Request>), Resp<Response>>>),
+    /// The service produces a task that runs asynchronously in the bevy thread
+    /// pool.
+    Async(Option<BoxedSystem<(Entity, Req<Request>), BoxedJob<Response>>>),
+}
+
+impl<Request, Response> Service<Request, Response> {
+    fn is_blocking(&self) -> bool {
+        matches!(self, Service::Blocking(_))
+    }
+}
+
+/// This struct encapsulates the data for flushing a command
+#[derive(Clone, Copy)]
+pub(crate) struct DispatchCommand {
+    pub(crate) provider: Entity,
+    pub(crate) target: Entity,
+}
+
+impl DispatchCommand {
+    pub(crate) fn new(provider: Entity, target: Entity) -> Self {
+        Self { provider, target }
+    }
+}
+
+impl Command for DispatchCommand {
+    fn apply(self, world: &mut World) {
+        let Some(provider_ref) = world.get_entity(self.provider) else {
+            cancel(world, self.target);
+            return;
+        };
+
+        let Some(dispatcher) = provider_ref.get::<Dispatch>() else {
+            cancel(world, self.target);
+            return;
+        };
+
+        (dispatcher.0)(world, self);
+    }
+}
+
+pub(crate) struct MakeFork<Response: 'static + Send + Sync + Clone> {
+    provider: Entity,
+    branches: [Entity; 2],
+    _ignore: std::marker::PhantomData<Response>,
+}
+
+impl<Response: 'static + Send + Sync + Clone> MakeFork<Response> {
+    pub(crate) fn new(provider: Entity, branches: [Entity; 2]) -> Self {
+        Self { provider, branches, _ignore: Default::default() }
+    }
+}
+
+impl<Response: 'static + Send + Sync + Clone> Command for MakeFork<Response> {
+    fn apply(self, world: &mut World) {
+        world
+            .entity_mut(self.provider)
+            .insert(Fork {
+                targets: ArrayVec::from(self.branches)
+            })
+            .insert(Dispatch::new_fork::<Response>());
+    }
+}
+
+fn cancel(world: &mut World, target: Entity) {
+
+}
+
+fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
+    world: &mut World,
+    cmd: DispatchCommand,
+) {
+    let mut blocking_delivery = world.resource_mut::<BlockingDeliveryQueue>();
+    blocking_delivery.queue.push_back((cmd, dispatch_single_blocking::<Request, Response>));
+    if blocking_delivery.is_delivering {
+        // Blocking services are already being delivered, so to keep things
+        // simple we will add this dispatch command to the queue and let the
+        // services be processed one at a time. Otherwise service recursion gets
+        // messy or even impossible.
+        return;
+    }
+
+    blocking_delivery.is_delivering = true;
+    while let Some((cmd, dispatch)) = world.resource_mut::<BlockingDeliveryQueue>().queue.pop_back() {
+        dispatch(world, cmd);
+    }
+    world.resource_mut::<BlockingDeliveryQueue>().is_delivering = false;
+}
+
+fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
+    world: &mut World,
+    cmd: DispatchCommand,
+) {
+    let DispatchCommand{target, provider} = cmd;
+    let request = if let Some(mut target) = world.get_entity_mut(target) {
+        // INVARIANT: If the target entity exists then it must have been created
+        // for the purpose of this service. PromiseCommands must have
+        // inserted a RequestStorage of the correct type and placed that command
+        // before the RequestCommand that triggered this dispatch. No outside
+        // code is allowed to remove the RequestStorage component from the
+        // entity. No other code can take the request data out of the
+        // RequestStorage, and this code will only ever do it once per target.
+        // Therefore if the implementation is correct and the entity exists then
+        // this component must exist and it must contain the data inside.
+        target.get_mut::<RequestStorage<Request>>().unwrap().0.take().unwrap()
+    } else {
+        // The target entity does not exist which implies the request has been
+        // canceled. We no longer need to deliver on it.
+        cancel(world, target);
+        return;
+    };
+
+    // Note: We need to fully remove the service callback from the component so
+    // that we can call it on the world without upsetting the borrow rules (e.g.
+    // the compiler doesn't know if the service callback might try to change the
+    // very same component that is storing it).
+    //
+    // We could consider using Arc/Rc so that we don't need to fully remove the
+    // callback, but then we need to wrap it with Mutex so that we can get a
+    // mutable reference, since calling a system is a mutable operation.
+    let mut service = if let Some(mut provider_ref) = world.get_entity_mut(provider) {
+        match &mut *provider_ref.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
+            Service::Blocking(blocking) => blocking.take().unwrap(),
+            _ => {
+                // INVARIANT: dispatch_blocking will only be used if the service
+                // was set to the Blocking type. We do not allow the Service
+                // component to be changed after the initial creation of the
+                // service provider. Therefore it would not make sense for this
+                // to ever match any variant besides Blocking.
+                panic!(
+                    "dispatch_blocking was called on a service provider \
+                    [{provider:?}] that does not provide a blocking service. \
+                    This is an internal error within bevy_services, please \
+                    report it to the maintainers."
+                );
+            }
+        }
+    } else {
+        // If the provider has been despawned then we treat this request as
+        // canceled.
+        cancel(world, target);
+        return;
+    };
+
+    let Resp(response) = service.run((provider, Req(request)), world);
+    service.apply_deferred(world);
+    if let Some(mut provider_ref) = world.get_entity_mut(provider) {
+        match &mut *provider_ref.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
+            Service::Blocking(blocking) => {
+                *blocking = Some(service);
+            }
+            _ => {
+                // INVARIANT: There should be no way for the service type to be
+                // changed after it has initially been set.
+                panic!(
+                    "The service type of provider [{provider:?}] was changed \
+                    while its service was running. This is an internal error \
+                    within bevy_services, please report it to the maintainers."
+                );
+            }
+        }
+    } else {
+        // Apparently the service was despawned by the service itself .. ?
+        // But we can still deliver the response to the target, so we will not
+        // consider this to be canceled.
+    }
+
+    if let Some(mut target_mut) = world.get_entity_mut(target) {
+        target_mut.insert(ResponseStorage(Some(response)));
+        handle_response(world, target);
+    } else {
+        // Apparently the task was canceled by the service itself .. ?
+        cancel(world, target);
+    }
+}
+
+fn dispatch_async_request<Request, Response>(
+    world: &mut World,
+    cmd: DispatchCommand,
+) {
+
+}
+
+fn dispatch_then<Input, Response>(
+    world: &mut World,
+    cmd: DispatchCommand,
+) {
+
+}
+
+fn dispatch_fork<Response: 'static + Send + Sync + Clone>(
+    world: &mut World,
+    cmd: DispatchCommand,
+) {
+    let Some(mut provider_mut) = world.get_entity_mut(cmd.provider) else {
+        cancel(world, cmd.target);
+        return;
+    };
+
+    provider_mut.remove::<UnusedTarget>();
+    if let Some(response) = {
+        if let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() {
+            if let Some(mut fork_mut) = provider_mut.get_mut::<Fork>() {
+                fork_mut.targets.retain(|t| *t != cmd.target);
+                if fork_mut.targets.is_empty() {
+                    // We can safely despawn this fork entity because it has
+                    // provided to all the targets that it's supposed to.
+                    provider_mut.despawn();
+                } else {
+                    // If there is still another fork expecting the response to
+                    // arrive, then we should clone the response and re-insert
+                    // it into the storage.
+                    provider_mut.insert(ResponseStorage(Some(response.clone())));
+                }
+            }
+            Some(response)
+        } else {
+            provider_mut.insert(Pending(pending_fork::<Response>));
+            None
+        }
+    } {
+        // We have a response that we can provide to the target immediately
+        let Some(mut target_mut) = world.get_entity_mut(cmd.target) else {
+            cancel(world, cmd.target);
+            return;
+        };
+        target_mut.insert(ResponseStorage(Some(response)));
+    }
+}
+
+fn pending_fork<Response: 'static + Send + Sync + Clone>(
+    world: &mut World,
+    queue: &mut VecDeque<Entity>,
+    provider: Entity,
+) {
+    let Some(mut provider_mut) = world.get_entity_mut(provider) else {
+        return
+    };
+    let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() else {
+        // Maybe panic here instead? Why wasn't the response available when the
+        // pending was triggered?
+        let fork = provider_mut.get::<Fork>().unwrap();
+        for target in fork.targets {
+            cancel(world, target);
+        }
+        provider_mut.despawn();
+        return
+    };
+
+    let mut fork = provider_mut.take::<Fork>().unwrap();
+    let mut response_storage = Some(response);
+    // This somewhat complex loop helps to prevent us from making an unnecessary
+    // clone of the response data.
+    while let Some(next_target) = fork.targets.pop() {
+        let response = if !fork.targets.is_empty() {
+            response_storage.as_ref().unwrap().clone()
+        } else {
+            response_storage.take().unwrap()
+        };
+        let Some(mut target_mut) = world.get_entity_mut(next_target) else {
+            continue
+        };
+        target_mut.insert(ResponseStorage(Some(response)));
+        queue.push_back(next_target);
+    }
+}
+
+fn handle_response(
+    world: &mut World,
+    target: Entity,
+) {
+
+}
+
+#[derive(Component)]
+pub(crate) struct RequestStorage<Request>(pub(crate) Option<Request>);
+
+#[derive(Component)]
+pub(crate) struct ResponseStorage<Response>(pub(crate) Option<Response>);
+
+#[derive(Component)]
+pub(crate) struct Fork {
+    targets: ArrayVec<Entity, 2>,
+}
+
+#[derive(Component)]
+pub(crate) struct Then {
+    provider: Entity,
+}
+
+impl Then {
+    pub(crate) fn new(provider: Entity) -> Self {
+        Self { provider }
+    }
+}
+
+#[derive(Component)]
+struct TaskStorage<Response>(Task<Response>);
+
+#[derive(Component)]
+pub(crate) enum OnCancel {
+    OneTime(BoxedSystem),
+    Service(Entity),
+}
+
+#[derive(Component)]
+pub(crate) struct UnusedTarget;
+
+#[derive(Component)]
+struct PollTask {
+    provider: Entity,
+    poll: fn(&mut World, Entity, Entity),
+}
+
+fn poll_task<Response>(world: &mut World, storage: Entity) {
+
+}
+
+/// This component determines how a provider responds to a dispatch request.
+#[derive(Component)]
+pub(crate) struct Dispatch(fn(&mut World, DispatchCommand));
+
+/// This component determines how a target responds to a pending delivery being
+/// fulfilled. The arguments are
+/// - The world
+/// - A queue of entities whose pending behaviors should be triggered next. When
+///   this callback is triggered, it should add to the queue any targets that it
+///   is delivering responses to.
+/// - The entity that owns this Pending component.
+#[derive(Component)]
+pub(crate) struct Pending(fn(&mut World, &mut VecDeque<Entity>, Entity));
+
+#[derive(Component)]
+struct PollResponse(fn(&mut World, Entity));
+
+impl Dispatch {
+    fn new_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>() -> Self {
+        Dispatch(dispatch_blocking::<Request, Response>)
+    }
+
+    fn new_async<Request: 'static + Send + Sync, Response: 'static + Send + Sync>() -> Self {
+        Dispatch(dispatch_async_request::<Request, Response>)
+    }
+
+    fn new_fork<Response: 'static + Send + Sync + Clone>() -> Self {
+        Dispatch(dispatch_fork::<Response>)
+    }
+
+    pub(crate) fn new_then<Input: 'static + Send + Sync, Response: 'static + Send + Sync>() -> Self {
+        Dispatch(dispatch_then::<Input, Response>)
+    }
+}
+
+#[derive(Bundle)]
+pub(crate) struct ServiceBundle<Request: 'static, Response: 'static> {
+    service: Service<Request, Response>,
+    dispatch: Dispatch,
+}
+
+impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceBundle<Request, Response> {
+    pub(crate) fn new(service: Service<Request, Response>) -> Self {
+        let dispatch = if service.is_blocking() {
+            Dispatch::new_blocking::<Request, Response>()
+        } else {
+            Dispatch::new_async::<Request, Response>()
+        };
+
+        Self { service, dispatch }
+    }
+}
+
+
+#[derive(Component)]
 pub(crate) struct DeliveryInstructions {
-    label: RequestLabelId,
-    interrupting: bool,
-    interruptible: bool,
+    pub(crate) label: RequestLabelId,
+    pub(crate) queue: bool,
+    pub(crate) ensure: bool,
 }
 
 pub(crate) struct DeliveryOrder {
-    target: Entity,
-    instructions: Option<DeliveryInstructions>,
+    pub(crate) target: Entity,
+    pub(crate) instructions: Option<DeliveryInstructions>,
 }
 
 /// The delivery mode determines whether service requests are carried out one at

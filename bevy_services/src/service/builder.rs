@@ -17,8 +17,9 @@
 
 use crate::{
     Req, Resp, Job, BoxedJob, Provider, Assistant, Service, GenericAssistant,
-    Delivery,
+    Delivery, ServiceBundle,
     stream::*,
+    private,
 };
 
 use bevy::{
@@ -36,7 +37,7 @@ pub mod traits {
 
     /// This trait is used to implement adding an async service to an App at
     /// startup.
-    pub trait ServiceAdd<Marker> {
+    pub trait ServiceAdd<Marker>: private::Sealed<Marker> {
         type Request;
         type Response;
         type Streams;
@@ -44,7 +45,7 @@ pub mod traits {
     }
 
     /// This trait is used to implement spawning an async service through Commands
-    pub trait ServiceSpawn<Marker> {
+    pub trait ServiceSpawn<Marker>: private::Sealed<Marker> {
         type Request;
         type Response;
         type Streams;
@@ -53,7 +54,7 @@ pub mod traits {
 
     /// This trait allows service systems to be converted into a builder that
     /// can be used to customize how the service is configured.
-    pub trait IntoServiceBuilder<Marker> {
+    pub trait IntoServiceBuilder<Marker>: private::Sealed<Marker> {
         type Request;
         type Response;
         type Streams;
@@ -65,7 +66,7 @@ pub mod traits {
 
     /// This trait allows async service systems to be converted into a builder
     /// by specifying whether it should have serial or parallel service delivery.
-    pub trait IntoAsyncServiceBuilder<Marker> {
+    pub trait IntoAsyncServiceBuilder<Marker>: private::Sealed<Marker> {
         type Request;
         type Response;
         type Streams;
@@ -74,7 +75,7 @@ pub mod traits {
     }
 
     /// This trait is used to set the delivery mode of a service.
-    pub trait DeliveryChoice {
+    pub trait DeliveryChoice: private::Sealed<()> {
         fn apply_entity_mut<'w>(self, entity_mut: &mut EntityMut<'w>);
         fn apply_entity_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
     }
@@ -124,7 +125,7 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, ()
             .pipe(service)
             .pipe(|In(response): In<Response>| Resp(response));
 
-        let service = Service::Blocking(Box::new(service));
+        let service = Service::Blocking(Some(Box::new(service)));
         Self {
             service,
             streams: Default::default(),
@@ -141,7 +142,7 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, ()
         Response: 'static,
     {
         let peel = |In((_, request)): In<(Entity, Req<Request>)>| request;
-        let service = Service::Blocking(Box::new(peel.pipe(service)));
+        let service = Service::Blocking(Some(Box::new(peel.pipe(service))));
         Self {
             service,
             streams: Default::default(),
@@ -157,7 +158,7 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, ()
         Request: 'static,
         Response: 'static,
     {
-        let service = Service::Blocking(Box::new(IntoSystem::into_system(service)));
+        let service = Service::Blocking(Some(Box::new(IntoSystem::into_system(service))));
         Self {
             service,
             streams: Default::default(),
@@ -199,7 +200,7 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
                 }
             );
 
-        let service = Service::Async(Box::new(service));
+        let service = Service::Async(Some(Box::new(service)));
 
         Self {
             service,
@@ -239,7 +240,7 @@ impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), 
         Streams: 'static,
         Task: 'static,
     {
-        let service = Service::Async(
+        let service = Service::Async(Some(
             Box::new(IntoSystem::into_system(
                 service
                 .pipe(
@@ -253,7 +254,7 @@ impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), 
                     }
                 )
             ))
-        );
+        ));
 
         Self {
             service,
@@ -325,14 +326,14 @@ where
     Deliver: DeliveryChoice,
     With: WithEntityMut,
     Also: AlsoAdd<Request, Response, Streams>,
-    Request: 'static,
-    Response: 'static,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
 {
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
     fn add_service(self, app: &mut App) {
-        let mut entity_mut = app.world.spawn(self.service);
+        let mut entity_mut = app.world.spawn(ServiceBundle::new(self.service));
         let provider = Provider::<Request, Response, Streams>::new(entity_mut.id());
         Streams::mut_stream_out_components(&mut entity_mut);
         self.deliver.apply_entity_mut(&mut entity_mut);
@@ -345,8 +346,8 @@ impl<M, S: IntoServiceBuilder<M>> ServiceAdd<M> for S
 where
     S::Streams: IntoStreamOutComponents,
     S::DefaultDeliver: DeliveryChoice,
-    S::Request: 'static,
-    S::Response: 'static,
+    S::Request: 'static + Send + Sync,
+    S::Response: 'static + Send + Sync,
 {
     type Request = S::Request;
     type Response = S::Response;
@@ -363,14 +364,14 @@ where
     Streams: IntoStreamOutComponents,
     Deliver: DeliveryChoice,
     With: WithEntityCommands,
-    Request: 'static,
-    Response: 'static,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
 {
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
     fn spawn_service(self, commands: &mut Commands) -> Provider<Request, Response, Streams> {
-        let mut entity_cmds = commands.spawn(self.service);
+        let mut entity_cmds = commands.spawn(ServiceBundle::new(self.service));
         let provider = Provider::<Request, Response, Streams>::new(entity_cmds.id());
         Streams::cmd_stream_out_components(&mut entity_cmds);
         self.deliver.apply_entity_commands(&mut entity_cmds);
@@ -379,12 +380,15 @@ where
     }
 }
 
+impl<Request, Response, Streams, Deliver, With, Also>
+private::Sealed<BuilderMarker> for ServiceBuilder<Request, Response, Streams, Deliver, With, Also> { }
+
 impl<M, S: IntoServiceBuilder<M>> ServiceSpawn<M> for S
 where
     S::Streams: IntoStreamOutComponents,
     S::DefaultDeliver: DeliveryChoice,
-    S::Request: 'static,
-    S::Response: 'static,
+    S::Request: 'static + Send + Sync,
+    S::Response: 'static + Send + Sync,
 {
     type Request = S::Request;
     type Response = S::Response;
@@ -417,6 +421,9 @@ where
         self.builder().also(also)
     }
 }
+
+impl<Request, Response, Streams, Task, M, Sys>
+private::Sealed<(Request, Response, Streams, Task, M)> for Sys { }
 
 impl<Request, Response, Streams, Task, M, Sys>
 IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
@@ -465,6 +472,9 @@ where
 }
 
 impl<Request, Response, Streams, Task, M, Sys>
+private::Sealed<(Request, Response, Streams, Task, M, SelfAware)> for Sys { }
+
+impl<Request, Response, Streams, Task, M, Sys>
 IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
 where
     Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
@@ -507,6 +517,9 @@ where
 }
 
 impl<Request, Response, M, Sys>
+private::Sealed<(Request, Response, M)> for Sys { }
+
+impl<Request, Response, M, Sys>
 IntoServiceBuilder<(Request, Response, M, SelfAware)> for Sys
 where
     Sys: IntoSystem<(Entity, Req<Request>), Resp<Response>, M>,
@@ -528,6 +541,9 @@ where
     }
 }
 
+impl<Request, Response, M, Sys>
+private::Sealed<(Request, Response, M, SelfAware)> for Sys { }
+
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
 /// user has indicated that the service should be executed in serial.
 pub struct SerialChosen;
@@ -541,6 +557,8 @@ impl DeliveryChoice for SerialChosen {
         entity_commands.insert(Delivery::serial());
     }
 }
+
+impl private::Sealed<()> for SerialChosen { }
 
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
 /// user has indicated that the service should be executed in parallel.
@@ -556,6 +574,8 @@ impl DeliveryChoice for ParallelChosen {
     }
 }
 
+impl private::Sealed<()> for ParallelChosen { }
+
 /// When this is used in the Deliver type parameter of ServiceBuilder, the user
 /// has indicated that the service is blocking and therefore does not have a
 /// delivery type.
@@ -570,6 +590,8 @@ impl DeliveryChoice for BlockingChosen {
     }
 }
 
+impl private::Sealed<()> for BlockingChosen { }
+
 impl DeliveryChoice for () {
     fn apply_entity_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
         ParallelChosen.apply_entity_commands(entity_commands)
@@ -578,6 +600,8 @@ impl DeliveryChoice for () {
         ParallelChosen.apply_entity_mut(entity_mut)
     }
 }
+
+impl private::Sealed<()> for () { }
 
 impl<T: FnOnce(EntityMut)> WithEntityMut for T {
     fn apply<'w>(self, entity_mut: EntityMut<'w>) {

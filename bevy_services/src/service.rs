@@ -15,61 +15,13 @@
  *
 */
 
-use bevy::{
-    prelude::{Entity, App, In, Commands},
-    utils::define_label,
-};
+use bevy::prelude::{Entity, App, Commands};
 
-mod building;
-pub use building::{ServiceBuilder, traits::*};
+mod builder;
+pub use builder::{ServiceBuilder, traits::*};
 
 mod delivery;
 pub(crate) use delivery::*;
-
-mod internal;
-pub(crate) use internal::*;
-
-/// Use Req to indicate the request data structure that your service's system
-/// takes as input. For example this signature can be used for simple services
-/// that only need the request data as input:
-///
-/// ```rust
-/// fn my_service(
-///     In(Req(request)): In<Req<MyRequestData>>,
-///     other: Query<&OtherComponents>,
-/// ) -> impl FnOnce(Assistant) -> Resp<MyResponseData> {
-///     /* ... */
-/// }
-/// ```
-///
-/// On the other hand, the systems of more complex services might also need to
-/// know what entity is providing the service, e.g. if the service provider is
-/// configured with additional components that need to be queried when a request
-/// comes in. For that you can use the self-aware signature:
-///
-/// ```rust
-/// fn my_self_aware_service(
-///     In((me, Req(request))): In<(Entity, Req<MyRequestData>)>,
-///     query_service_params: Query<&MyServiceParams>,
-///     other: Query<&OtherComponents>,
-/// ) -> Job<impl FnOnce(Assistant<()>) -> MyResponseData> {
-///     let my_params = query_service_params.get(me).unwrap();
-///     /* ... */
-/// }
-/// ```
-pub struct Req<Request>(pub Request);
-
-/// Wrap [`Resp`] around the return value of your service's system to indicate
-/// it will immediately return a response to the request. This means your
-/// service is blocking and all other system execution will halt while it is
-/// running. It should only be used for services that execute very quickly.
-///
-/// To define an async service use [`Job`].
-pub struct Resp<Response>(pub Response);
-
-/// Wrap [`Job`] around the return value of your service's system to provide a
-/// function that will be passed along as a task.
-pub struct Job<Task>(pub Task);
 
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
@@ -141,18 +93,10 @@ impl AddServicesExt for App {
     }
 }
 
-define_label!(
-    /// A strongly-typed class of labels used to identify requests that have been
-    /// issued to a service.
-    RequestLabel,
-    /// Strongly-typed identifier for a [`RequestLabel`].
-    RequestLabelId,
-);
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Assistant;
+    use crate::{Req, Resp, Job, Assistant};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,
@@ -172,6 +116,7 @@ mod tests {
 
     #[derive(Resource)]
     struct MyServiceProvider {
+        #[allow(unused)]
         provider: Provider<String, u64>,
     }
 
