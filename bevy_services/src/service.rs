@@ -20,9 +20,6 @@ use bevy::prelude::{Entity, App, Commands};
 mod builder;
 pub use builder::{ServiceBuilder, traits::*};
 
-mod delivery;
-pub(crate) use delivery::*;
-
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
 /// - [`crate::ServiceDiscovery`].iter()
@@ -96,7 +93,7 @@ impl AddServicesExt for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Req, Resp, Job, Assistant};
+    use crate::{Req, Resp, Job, Assistant, Service};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,

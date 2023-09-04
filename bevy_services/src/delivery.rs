@@ -16,7 +16,6 @@
 */
 
 use crate::{RequestLabelId, GenericAssistant, Req, Resp, Job};
-use arrayvec::ArrayVec;
 
 use bevy::{
     prelude::{Component, Entity, World, Bundle, Resource},
@@ -28,6 +27,15 @@ use std::{
     sync::Weak,
     collections::{HashMap, VecDeque}
 };
+
+mod fork;
+pub(crate) use fork::*;
+
+mod map;
+pub(crate) use map::*;
+
+mod then;
+pub(crate) use then::*;
 
 #[derive(Resource)]
 struct BlockingDeliveryQueue {
@@ -41,6 +49,8 @@ pub(crate) struct Detached;
 #[derive(Component)]
 pub(crate) struct Held(pub(crate) Weak<()>);
 
+#[derive(Component)]
+pub(crate) struct Target(pub(crate) Entity);
 
 pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response>>>;
 
@@ -91,31 +101,7 @@ impl Command for DispatchCommand {
         (dispatcher.0)(world, self);
     }
 }
-
-pub(crate) struct MakeFork<Response: 'static + Send + Sync + Clone> {
-    provider: Entity,
-    branches: [Entity; 2],
-    _ignore: std::marker::PhantomData<Response>,
-}
-
-impl<Response: 'static + Send + Sync + Clone> MakeFork<Response> {
-    pub(crate) fn new(provider: Entity, branches: [Entity; 2]) -> Self {
-        Self { provider, branches, _ignore: Default::default() }
-    }
-}
-
-impl<Response: 'static + Send + Sync + Clone> Command for MakeFork<Response> {
-    fn apply(self, world: &mut World) {
-        world
-            .entity_mut(self.provider)
-            .insert(Fork {
-                targets: ArrayVec::from(self.branches)
-            })
-            .insert(Dispatch::new_fork::<Response>());
-    }
-}
-
-fn cancel(world: &mut World, target: Entity) {
+pub(crate) fn cancel(world: &mut World, target: Entity) {
 
 }
 
@@ -234,90 +220,6 @@ fn dispatch_async_request<Request, Response>(
 
 }
 
-fn dispatch_then<Input, Response>(
-    world: &mut World,
-    cmd: DispatchCommand,
-) {
-
-}
-
-fn dispatch_fork<Response: 'static + Send + Sync + Clone>(
-    world: &mut World,
-    cmd: DispatchCommand,
-) {
-    let Some(mut provider_mut) = world.get_entity_mut(cmd.provider) else {
-        cancel(world, cmd.target);
-        return;
-    };
-
-    provider_mut.remove::<UnusedTarget>();
-    if let Some(response) = {
-        if let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() {
-            if let Some(mut fork_mut) = provider_mut.get_mut::<Fork>() {
-                fork_mut.targets.retain(|t| *t != cmd.target);
-                if fork_mut.targets.is_empty() {
-                    // We can safely despawn this fork entity because it has
-                    // provided to all the targets that it's supposed to.
-                    provider_mut.despawn();
-                } else {
-                    // If there is still another fork expecting the response to
-                    // arrive, then we should clone the response and re-insert
-                    // it into the storage.
-                    provider_mut.insert(ResponseStorage(Some(response.clone())));
-                }
-            }
-            Some(response)
-        } else {
-            provider_mut.insert(Pending(pending_fork::<Response>));
-            None
-        }
-    } {
-        // We have a response that we can provide to the target immediately
-        let Some(mut target_mut) = world.get_entity_mut(cmd.target) else {
-            cancel(world, cmd.target);
-            return;
-        };
-        target_mut.insert(ResponseStorage(Some(response)));
-    }
-}
-
-fn pending_fork<Response: 'static + Send + Sync + Clone>(
-    world: &mut World,
-    queue: &mut VecDeque<Entity>,
-    provider: Entity,
-) {
-    let Some(mut provider_mut) = world.get_entity_mut(provider) else {
-        return
-    };
-    let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() else {
-        // Maybe panic here instead? Why wasn't the response available when the
-        // pending was triggered?
-        let fork = provider_mut.get::<Fork>().unwrap();
-        for target in fork.targets {
-            cancel(world, target);
-        }
-        provider_mut.despawn();
-        return
-    };
-
-    let mut fork = provider_mut.take::<Fork>().unwrap();
-    let mut response_storage = Some(response);
-    // This somewhat complex loop helps to prevent us from making an unnecessary
-    // clone of the response data.
-    while let Some(next_target) = fork.targets.pop() {
-        let response = if !fork.targets.is_empty() {
-            response_storage.as_ref().unwrap().clone()
-        } else {
-            response_storage.take().unwrap()
-        };
-        let Some(mut target_mut) = world.get_entity_mut(next_target) else {
-            continue
-        };
-        target_mut.insert(ResponseStorage(Some(response)));
-        queue.push_back(next_target);
-    }
-}
-
 fn handle_response(
     world: &mut World,
     target: Entity,
@@ -330,22 +232,6 @@ pub(crate) struct RequestStorage<Request>(pub(crate) Option<Request>);
 
 #[derive(Component)]
 pub(crate) struct ResponseStorage<Response>(pub(crate) Option<Response>);
-
-#[derive(Component)]
-pub(crate) struct Fork {
-    targets: ArrayVec<Entity, 2>,
-}
-
-#[derive(Component)]
-pub(crate) struct Then {
-    provider: Entity,
-}
-
-impl Then {
-    pub(crate) fn new(provider: Entity) -> Self {
-        Self { provider }
-    }
-}
 
 #[derive(Component)]
 struct TaskStorage<Response>(Task<Response>);
@@ -371,7 +257,7 @@ fn poll_task<Response>(world: &mut World, storage: Entity) {
 
 /// This component determines how a provider responds to a dispatch request.
 #[derive(Component)]
-pub(crate) struct Dispatch(fn(&mut World, DispatchCommand));
+pub(crate) struct Dispatch(pub(crate) fn(&mut World, DispatchCommand));
 
 /// This component determines how a target responds to a pending delivery being
 /// fulfilled. The arguments are
@@ -381,7 +267,7 @@ pub(crate) struct Dispatch(fn(&mut World, DispatchCommand));
 ///   is delivering responses to.
 /// - The entity that owns this Pending component.
 #[derive(Component)]
-pub(crate) struct Pending(fn(&mut World, &mut VecDeque<Entity>, Entity));
+pub(crate) struct Pending(pub(crate) fn(&mut World, &mut VecDeque<Entity>, Entity));
 
 #[derive(Component)]
 struct PollResponse(fn(&mut World, Entity));
@@ -393,14 +279,6 @@ impl Dispatch {
 
     fn new_async<Request: 'static + Send + Sync, Response: 'static + Send + Sync>() -> Self {
         Dispatch(dispatch_async_request::<Request, Response>)
-    }
-
-    fn new_fork<Response: 'static + Send + Sync + Clone>() -> Self {
-        Dispatch(dispatch_fork::<Response>)
-    }
-
-    pub(crate) fn new_then<Input: 'static + Send + Sync, Response: 'static + Send + Sync>() -> Self {
-        Dispatch(dispatch_then::<Input, Response>)
     }
 }
 

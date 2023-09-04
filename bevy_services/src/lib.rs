@@ -18,6 +18,9 @@
 pub mod assistant;
 pub use assistant::*;
 
+mod delivery;
+pub(crate) use delivery::*;
+
 pub mod discovery;
 pub use discovery::*;
 

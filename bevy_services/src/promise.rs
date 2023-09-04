@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    Detached, Held, DispatchCommand, Provider, UnusedTarget, Dispatch, Then,
-    MakeFork,
+    Detached, Held, DispatchCommand, Provider, UnusedTarget, MakeThen,
+    MakeFork, MakeMap,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -98,10 +98,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
     /// This can only be applied when the Response can be cloned.
     pub fn fork(
         self,
-        f: impl FnOnce(PromiseCommands<'w, 's, 'a, Response, ()>),
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, ()>),
     ) -> PromiseCommands<'w, 's, 'a, Response, ()>
     where
-        Response: Clone
+        Response: Clone,
     {
         let left_target = self.commands.spawn(UnusedTarget).id();
         let right_target = self.commands.spawn(UnusedTarget).id();
@@ -121,22 +121,22 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
     /// system parameters don't need to be queried to perform the transformation.
     pub fn map<U: 'static + Send + Sync>(
         self,
-        f: impl FnOnce(Response) -> U,
+        f: impl FnOnce(Response) -> U + Send + Sync + 'static,
     ) -> PromiseCommands<'w, 's, 'a, U, ()> {
-
+        self.commands.add(MakeMap::new(self.target, Box::new(f)));
+        let map_target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(DispatchCommand::new(self.provider, self.target));
+        PromiseCommands::new(self.target, map_target, self.commands)
     }
 
-    /// Forward the response of the service into a new service request as soon
-    /// as the response is delivered.
+    /// Use the response of the service as a new service request as soon as the
+    /// response is delivered.
     pub fn then<U: 'static + Send + Sync, ThenStreams>(
         self,
-        provider: Provider<Response, U, ThenStreams>
+        service_provider: Provider<Response, U, ThenStreams>
     ) -> PromiseCommands<'w, 's, 'a, U, ThenStreams> {
         let then_target = self.commands.spawn(UnusedTarget).id();
-        self.commands.entity(self.target)
-            .remove::<UnusedTarget>()
-            .insert(Then::new(provider.get()))
-            .insert(Dispatch::new_then::<Response, U>());
+        self.commands.add(MakeThen::<Response>::new(self.target, service_provider.get()));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
         PromiseCommands::new(self.target, then_target, self.commands)
     }

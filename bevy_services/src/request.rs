@@ -39,7 +39,9 @@ pub trait RequestExt<'w, 's> {
         &'a mut self,
         provider: Provider<Request, Response, Streams>,
         request: impl SubmitRequest<Request>,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams>;
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams>
+    where
+        Response: 'static + Send + Sync;
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
@@ -47,7 +49,10 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         provider: Provider<Request, Response, Streams>,
         request: impl SubmitRequest<Request>,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams> {
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams>
+    where
+        Response: 'static + Send + Sync,
+    {
         let target = request.apply(self);
         self.entity(target).insert(UnusedTarget);
         PromiseCommands::new(provider.get(), target, self)
