@@ -153,8 +153,8 @@ impl<Request, E> RequestBuilder<Request, Chosen, (), E> {
     ///
     /// The default behavior, if you do **not** trigger this method, is for this
     /// new labeled request to supplant all prior requests that share the same
-    /// label, sending them to the canceled state (unless the request
-    /// was marked with [`ensure()`]).
+    /// label, sending them to the canceled state (unless the prior request was
+    /// marked with [`ensure()`]).
     ///
     /// This modifer can only be applied to a labeled request because it does
     /// not make sense for unlabeled requests.

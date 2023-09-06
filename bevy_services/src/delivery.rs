@@ -130,7 +130,7 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
     world: &mut World,
     cmd: DispatchCommand,
 ) {
-    let DispatchCommand{target, provider} = cmd;
+    let DispatchCommand {target, provider} = cmd;
     let request = if let Some(mut target) = world.get_entity_mut(target) {
         // INVARIANT: If the target entity exists then it must have been created
         // for the purpose of this service. PromiseCommands must have
@@ -153,13 +153,9 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
     // that we can call it on the world without upsetting the borrow rules (e.g.
     // the compiler doesn't know if the service callback might try to change the
     // very same component that is storing it).
-    //
-    // We could consider using Arc/Rc so that we don't need to fully remove the
-    // callback, but then we need to wrap it with Mutex so that we can get a
-    // mutable reference, since calling a system is a mutable operation.
-    let mut service = if let Some(mut provider_ref) = world.get_entity_mut(provider) {
-        match &mut *provider_ref.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
-            Service::Blocking(blocking) => blocking.take().unwrap(),
+    let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+        match &mut *provider_mut.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
+            Service::Blocking(service) => service.take().unwrap(),
             _ => {
                 // INVARIANT: dispatch_blocking will only be used if the service
                 // was set to the Blocking type. We do not allow the Service
@@ -217,7 +213,80 @@ fn dispatch_async_request<Request, Response>(
     world: &mut World,
     cmd: DispatchCommand,
 ) {
+    let DispatchCommand {target, provider} = cmd;
 
+    let instructions = if let Some(mut target_mut) = world.get_entity_mut(target) {
+        target_mut.take::<DeliveryInstructions>()
+    } else {
+        // The target entity does not exist which implies the request has been
+        // canceled. We no longer need to deliver on it.
+        cancel(world, target);
+        return;
+    };
+
+    let Some(mut provider_mut) = world.get_entity_mut(provider) else {
+        // The async service has been despawned, so we should treat the request
+        // as canceled.
+        cancel(world, target);
+        return;
+    };
+
+    // INVARIANT: Async services should always have a Delivery component
+    let mut delivery = provider_mut.get_mut::<Delivery>().unwrap();
+
+    let deliver = insert_new_order(
+        delivery.as_mut(),
+        DeliveryOrder { target, instructions }
+    );
+
+    if !deliver {
+        // It is not yet time to deliver on the service. We need to wait for
+        // other async tasks to finish first.
+        return;
+    }
+
+    // Note: We need to fully remove the service callback from the component so
+    // that we can call it on the world without upsetting the borrow rules.
+    let mut service = match &mut *provider_mut.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
+        Service::Async(service) => service.take().unwrap(),
+        _ => {
+            // INVARIANT: dispatch_async_request will only be used if the
+            // service was set to Async type.
+            panic!(
+                "dispatch_async_request was called on a service provider \
+                [{provider:?}] that does not provide an async service. \
+                This is an internal error within bevy_services, please \
+                report it to the maintainers."
+            );
+        }
+    };
+}
+
+fn insert_new_order(
+    delivery: &mut Delivery,
+    order: DeliveryOrder,
+) -> bool {
+    match delivery {
+        Delivery::Serial(serial) => {
+            match order.instructions {
+                Some(instructions) => {
+
+                }
+                None => {
+                    if serial.delivering.is_none() {
+                        serial.delivering = Some(order);
+                        true
+                    } else {
+                        serial.queue.push_back(order);
+                        false
+                    }
+                }
+            }
+        }
+        Delivery::Parallel(parallel) => {
+
+        }
+    }
 }
 
 fn handle_response(
@@ -301,7 +370,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceBun
 }
 
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub(crate) struct DeliveryInstructions {
     pub(crate) label: RequestLabelId,
     pub(crate) queue: bool,

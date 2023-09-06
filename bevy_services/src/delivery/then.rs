@@ -123,9 +123,3 @@ fn pending_then<Input: 'static + Send + Sync>(
 struct Then {
     service: Entity,
 }
-
-impl Then {
-    pub(crate) fn new(service: Entity) -> Self {
-        Self { service }
-    }
-}
