@@ -9,3 +9,4 @@ authors = ["Grey <mxgrey@intrinsic.ai>"]
 [dependencies]
 bevy = "0.11"
 arrayvec = "*"
+smallvec = "*"

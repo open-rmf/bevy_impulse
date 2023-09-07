@@ -20,8 +20,10 @@ use crate::{RequestLabelId, GenericAssistant, Req, Resp, Job};
 use bevy::{
     prelude::{Component, Entity, World, Bundle, Resource},
     ecs::system::{Command, BoxedSystem},
-    tasks::Task,
+    tasks::{Task, AsyncComputeTaskPool},
 };
+
+use smallvec::SmallVec;
 
 use std::{
     sync::Weak,
@@ -52,7 +54,7 @@ pub(crate) struct Held(pub(crate) Weak<()>);
 #[derive(Component)]
 pub(crate) struct Target(pub(crate) Entity);
 
-pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response>>>;
+pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response> + Send>>;
 
 /// A service is a type of system that takes in a request and produces a
 /// response, optionally emitting events from its streams using the provided
@@ -102,6 +104,10 @@ impl Command for DispatchCommand {
     }
 }
 pub(crate) fn cancel(world: &mut World, target: Entity) {
+
+}
+
+fn abort(world: &mut World, target: Entity) {
 
 }
 
@@ -209,7 +215,7 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
     }
 }
 
-fn dispatch_async_request<Request, Response>(
+fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
     world: &mut World,
     cmd: DispatchCommand,
 ) {
@@ -234,15 +240,22 @@ fn dispatch_async_request<Request, Response>(
     // INVARIANT: Async services should always have a Delivery component
     let mut delivery = provider_mut.get_mut::<Delivery>().unwrap();
 
-    let deliver = insert_new_order(
+    let update = insert_new_order(
         delivery.as_mut(),
         DeliveryOrder { target, instructions }
     );
 
-    if !deliver {
-        // It is not yet time to deliver on the service. We need to wait for
-        // other async tasks to finish first.
-        return;
+    match update {
+        DeliveryUpdate::Immediate => { /* Continue */ }
+        DeliveryUpdate::Queued { canceled, stop } => {
+            if let Some(target) = stop {
+                abort(world, target);
+            }
+            for target in canceled {
+                cancel(world, target);
+            }
+            return;
+        }
     }
 
     // Note: We need to fully remove the service callback from the component so
@@ -260,33 +273,141 @@ fn dispatch_async_request<Request, Response>(
             );
         }
     };
+
+    if let Some(mut target_mut) = world.get_entity_mut(target) {
+        // INVARIANT: See the rationale in dispatch_single_blocking
+        let request = target_mut.get_mut::<RequestStorage<Request>>().unwrap().0.take().unwrap();
+        let Job(job) = service.run((provider, Req(request)), world);
+        service.apply_deferred(world);
+
+        let task = AsyncComputeTaskPool::get().spawn(async move {
+            job(GenericAssistant {  })
+        });
+
+        if let Some(mut target_mut) = world.get_entity_mut(target) {
+            target_mut.insert((
+                TaskStorage(task),
+                PollTask {
+                    provider,
+                    poll: poll_task::<Response>,
+                }
+            ));
+        } else {
+            // The target has been despawned, so we treat that as the request
+            // being canceled.
+            cancel(world, target);
+        }
+    } else {
+        cancel(world, target);
+    };
+
+    let Some(mut provider_mut) = world.get_entity_mut(provider) else {
+        // The async service was despawned by the service itself, so we should
+        // treat the request as canceled.
+        abort(world, target);
+        return;
+    };
+    match &mut *provider_mut.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
+        Service::Async(async_service) => {
+            *async_service = Some(service);
+        }
+        _ => {
+            // INVARIANT: There should be no way for the service type to be
+            // changed after it has initially been set.
+            panic!(
+                "The service type of provider [{provider:?}] was changed while \
+                its service was running. This is an internal error within \
+                bevy_services, please report it to the maintainers."
+            );
+        }
+    }
+}
+
+enum DeliveryUpdate {
+    /// The new request should be delivered immediately
+    Immediate,
+    /// The new request has been placed in the queue
+    Queued {
+        /// Queued requests that have been canceled
+        canceled: SmallVec<[Entity; 3]>,
+        /// An actively running task that has been canceled
+        stop: Option<Entity>,
+    }
 }
 
 fn insert_new_order(
     delivery: &mut Delivery,
     order: DeliveryOrder,
-) -> bool {
+) -> DeliveryUpdate {
     match delivery {
         Delivery::Serial(serial) => {
-            match order.instructions {
+            insert_serial_order(serial, order)
+        }
+        Delivery::Parallel(parallel) => {
+            match &order.instructions {
                 Some(instructions) => {
-
+                    insert_serial_order(
+                        parallel
+                            .labeled
+                            .entry(instructions.label.clone())
+                            .or_default(),
+                        order,
+                    )
                 }
                 None => {
-                    if serial.delivering.is_none() {
-                        serial.delivering = Some(order);
-                        true
-                    } else {
-                        serial.queue.push_back(order);
-                        false
-                    }
+                    DeliveryUpdate::Immediate
                 }
             }
         }
-        Delivery::Parallel(parallel) => {
-
-        }
     }
+}
+
+fn insert_serial_order(
+    serial: &mut SerialDelivery,
+    order: DeliveryOrder,
+) -> DeliveryUpdate {
+    let Some(delivering) = &serial.delivering else {
+        // INVARIANT: If there is anything in the queue then it should have been
+        // moved into delivering when the last delivering was finished. If
+        // delivering is empty then the queue should be as well.
+        assert!(serial.queue.is_empty());
+        return DeliveryUpdate::Immediate;
+    };
+
+    let Some(incoming_instructions) = order.instructions else {
+        serial.queue.push_back(order);
+        return DeliveryUpdate::Queued {
+            canceled: SmallVec::new(),
+            stop: None,
+        };
+    };
+
+    let mut canceled = SmallVec::new();
+    let mut stop = None;
+
+    let should_discard = |prior_instructions: &DeliveryInstructions| {
+        prior_instructions.label == incoming_instructions.label
+        && !prior_instructions.ensure
+    };
+
+    if !incoming_instructions.queue {
+        serial.queue.retain(|e| {
+            let discard = e.instructions.as_ref().is_some_and(should_discard);
+            if discard {
+                canceled.push(e.target);
+            }
+
+            !discard
+        });
+    }
+
+    if delivering.instructions.as_ref().is_some_and(should_discard) {
+        stop = Some(delivering.target);
+    }
+
+    serial.queue.push_back(order);
+
+    DeliveryUpdate::Queued { canceled, stop }
 }
 
 fn handle_response(
@@ -303,7 +424,7 @@ pub(crate) struct RequestStorage<Request>(pub(crate) Option<Request>);
 pub(crate) struct ResponseStorage<Response>(pub(crate) Option<Response>);
 
 #[derive(Component)]
-struct TaskStorage<Response>(Task<Response>);
+struct TaskStorage<Response>(Task<Option<Response>>);
 
 #[derive(Component)]
 pub(crate) enum OnCancel {
@@ -320,7 +441,7 @@ struct PollTask {
     poll: fn(&mut World, Entity, Entity),
 }
 
-fn poll_task<Response>(world: &mut World, storage: Entity) {
+fn poll_task<Response>(world: &mut World, provider: Entity, target: Entity) {
 
 }
 
