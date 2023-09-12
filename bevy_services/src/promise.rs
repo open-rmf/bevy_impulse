@@ -91,16 +91,6 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         HeldPromise::new(self.target, holding)
     }
 
-    /// Apply a label to the request. For more information about request labels,
-    /// see [`crate::LabelBuilder`].
-    pub fn label(
-        self,
-        label: impl ApplyLabel,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, Chosen> {
-        label.apply(&mut self.commands.entity(self.target));
-        PromiseCommands::new(self.provider, self.target, self.commands)
-    }
-
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different delivery chains: one
     /// determined by the `f` callback provided to this function and the other
@@ -158,6 +148,18 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         self.commands.add(MakeThen::<Response>::new(self.target, service_provider.get()));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
         PromiseCommands::new(self.target, then_target, self.commands)
+    }
+}
+
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams, ()> {
+    /// Apply a label to the request. For more information about request labels
+    /// see [`crate::LabelBuilder`].
+    pub fn label(
+        self,
+        label: impl ApplyLabel,
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, Chosen> {
+        label.apply(&mut self.commands.entity(self.target));
+        PromiseCommands::new(self.provider, self.target, self.commands)
     }
 }
 
