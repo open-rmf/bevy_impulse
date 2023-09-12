@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{Provider, PromiseCommands, Req, UnusedTarget};
+use crate::{Provider, PromiseCommands, UnusedTarget, RequestStorage};
 
 use bevy::{
     prelude::Commands,
@@ -23,7 +23,7 @@ use bevy::{
 };
 
 mod internal;
-pub use internal::SubmitRequest;
+pub use internal::{ApplyLabel, BuildLabel};
 
 define_label!(
     /// A strongly-typed class of labels used to identify requests that have been
@@ -35,118 +35,81 @@ define_label!(
 
 pub trait RequestExt<'w, 's> {
     /// Call this with [`Commands`] to request a service
-    fn request<'a, Request, Response, Streams>(
+    fn request<'a, Request: 'static + Send + Sync, Response, Streams>(
         &'a mut self,
         provider: Provider<Request, Response, Streams>,
-        request: impl SubmitRequest<Request>,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams>
+        request: Request,
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, ()>
     where
         Response: 'static + Send + Sync;
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
-    fn request<'a, Request, Response, Streams>(
+    fn request<'a, Request: 'static + Send + Sync, Response, Streams>(
         &'a mut self,
         provider: Provider<Request, Response, Streams>,
-        request: impl SubmitRequest<Request>,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams>
+        request: Request,
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, ()>
     where
         Response: 'static + Send + Sync,
     {
-        let target = request.apply(self);
-        self.entity(target).insert(UnusedTarget);
+        let target = self
+            .spawn(RequestStorage(Some(request)))
+            .insert(UnusedTarget)
+            .id();
         PromiseCommands::new(provider.get(), target, self)
     }
 }
 
-pub struct RequestBuilder<Request, L, Q, E> {
-    request: Request,
-    label: Option<RequestLabelId>,
+/// By default when a service provider receives a new request with the same
+/// label as an earlier request, the earlier request will be canceled,
+/// whether it is already being executed or whether it is sitting in a
+/// queue. If the earlier request was already delivered then the labeling
+/// has no effect.
+///
+/// To change the default behavior there are two modifiers you can apply to
+/// this label:
+/// - `.queue()` asks for the request to be queued up to run after all
+///   other requests with this same label have been fulfilled and not cancel
+///   any of them.
+/// - `.ensure()` asks for this request to not be canceled even if another
+///   request comes in with the same label. The new request will instead be
+///   queued after this one.
+///
+/// You can choose to use either, both, or neither of these modifiers in
+/// whatever way fits your use case. No matter what modifiers you choose
+/// (or don't choose) the same service provider will never simultaneously
+/// execute its service for two requests with the same label value. To that
+/// extent, applying a label always guarantees mutual exclusivity between
+/// requests.
+///
+/// This mutual exclusivity can be useful if the service involves making
+/// modifications to the world which would conflict with each other when two
+/// related requests are being delivered at the same time.
+pub struct LabelBuilder<Q, E> {
+    label: RequestLabelId,
     queue: bool,
     ensure: bool,
-    _ignore: std::marker::PhantomData<(L, Q, E)>,
+    _ignore: std::marker::PhantomData<(Q, E)>,
 }
 
 pub struct Chosen;
 
-impl<Request> Req<Request> {
-    /// Convert the request into a labeled request managed by a [`RequestBuilder`].
-    pub fn label(self, label: impl RequestLabel) -> RequestBuilder<Request, Chosen, (), ()> {
-        RequestBuilder::new(self.0).label(label)
-    }
-}
-
-impl<Request> RequestBuilder<Request, (), (), ()> {
-    /// Put a label on this request.
-    ///
-    /// By default when a service provider receives a new request with the same
-    /// label as an earlier request, the earlier request will be canceled,
-    /// whether it is already being executed or whether it is sitting in a
-    /// queue. If the earlier request was already delivered then the labeling
-    /// has no effect.
-    ///
-    /// To change the default behavior there are two modifiers you can call on
-    /// this request after the label is applied:
-    /// - `.queue()` asks for this request to be queued up to run after all
-    ///   other requests with this same label have been fulfilled and not cancel
-    ///   any of them.
-    /// - `.ensure()` asks for this request to not be canceled even if another
-    ///   request comes in with the same label. The new request will instead be
-    ///   queued.
-    ///
-    /// You can choose to use either, both, or neither of these modifiers in
-    /// whatever way fits your use case. No matter what modifiers you choose
-    /// (or don't choose) the same service provider will never simultaneously
-    /// execute its service for two requests with the same label value. To that
-    /// extent, giving a request label always guarantees mutual exclusivity.
-    ///
-    /// This mutual exclusivity can be useful if the service involves making
-    /// modifications to the world which would conflict with each other when two
-    /// related requests are being delivered at the same time.
-    pub fn label(self, label: impl RequestLabel) -> RequestBuilder<Request, Chosen, (), ()> {
-        RequestBuilder {
-            request: self.request,
-            label: Some(label.as_label()),
+impl LabelBuilder<(), ()> {
+    /// Begin building a label for a request. You do not need to call this
+    /// function explicitly. You can instead use `.queue()` or `.ensure()`
+    /// directly on a `RequestLabel` instance.
+    pub fn new(label: impl RequestLabel) -> LabelBuilder<(), ()> {
+        LabelBuilder {
+            label: label.as_label(),
             queue: false,
             ensure: false,
             _ignore: Default::default()
         }
     }
-
-    /// Create a new request builder to pass into the [`Commands`]`::request`
-    /// method. Alternatively you can use [`Req`] as a shortcut, e.g.:
-    ///
-    /// Simple request with default settings:
-    /// ```
-    /// commands
-    ///     .request(provider, Req(request))
-    ///     .detach();
-    /// ```
-    ///
-    /// Labeled request with default settings:
-    /// ```
-    /// commands
-    ///     .request(
-    ///         provider,
-    ///         Req(request).label(my_label)
-    ///     )
-    ///     .detach();
-    /// ```
-    ///
-    /// Using `.label()` on `Req` will automatically change it into a
-    /// [`RequestBuilder`].
-    pub fn new(request: Request) -> Self {
-        Self {
-            request,
-            label: None,
-            queue: false,
-            ensure: false,
-            _ignore: Default::default(),
-        }
-    }
 }
 
-impl<Request, E> RequestBuilder<Request, Chosen, (), E> {
+impl<E> LabelBuilder<(), E> {
     /// Queue this labeled request to be handled **after** all other requests
     /// with the same label have been fulfilled. Do not automatically cancel
     /// pending requests that have the same label.
@@ -158,9 +121,8 @@ impl<Request, E> RequestBuilder<Request, Chosen, (), E> {
     ///
     /// This modifer can only be applied to a labeled request because it does
     /// not make sense for unlabeled requests.
-    pub fn queue(self) -> RequestBuilder<Request, Chosen, Chosen, E> {
-        RequestBuilder {
-            request: self.request,
+    pub fn queue(self) -> LabelBuilder<Chosen, E> {
+        LabelBuilder {
             label: self.label,
             queue: true,
             ensure: self.ensure,
@@ -169,7 +131,7 @@ impl<Request, E> RequestBuilder<Request, Chosen, (), E> {
     }
 }
 
-impl<Request, Q> RequestBuilder<Request, Chosen, Q, ()> {
+impl<Q> LabelBuilder<Q, ()> {
     /// Ensure that this request is resolved even if another request with the
     /// same label arrives.
     ///
@@ -180,9 +142,8 @@ impl<Request, Q> RequestBuilder<Request, Chosen, Q, ()> {
     ///
     /// This modifier can only be applied to labeled requests because it does
     /// not make sense for unlabeled requests.
-    pub fn ensure(self) -> RequestBuilder<Request, Chosen, Q, Chosen> {
-        RequestBuilder {
-            request: self.request,
+    pub fn ensure(self) -> LabelBuilder<Q, Chosen> {
+        LabelBuilder {
             label: self.label,
             queue: self.queue,
             ensure: true,
@@ -190,4 +151,3 @@ impl<Request, Q> RequestBuilder<Request, Chosen, Q, ()> {
         }
     }
 }
-

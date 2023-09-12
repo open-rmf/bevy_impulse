@@ -16,35 +16,63 @@
 */
 
 use crate::{
-    Req, RequestBuilder, DeliveryInstructions, RequestStorage,
-    private,
+    LabelBuilder, DeliveryInstructions, RequestLabel, Chosen, private,
 };
 
-use bevy::prelude::{Commands, Entity};
+use bevy::ecs::system::EntityCommands;
 
-pub trait SubmitRequest<Request>: private::Sealed<()> {
-    fn apply<'w, 's>(self, commands: &mut Commands<'w, 's>) -> Entity;
+/// This trait is used to put a label onto a request. After using
+/// [`bevy::prelude::Commands`]`::request`, you can apply a label using the
+/// [`crate::PromiseCommands`] that you receive:
+///
+/// ```
+/// commands
+///     .request(provider, request_data)
+///     .label(my_label) // This takes in an impl ApplyLabel
+///     .detach();
+/// ```
+///
+/// You can either pass in a [`RequestLabel`] struct directly or use
+/// [`LabelBuilder`] to assign it queue/ensure qualities.
+pub trait ApplyLabel: private::Sealed<()> {
+    fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>);
 }
 
-impl<Request: Send + Sync + 'static> SubmitRequest<Request> for Req<Request> {
-    fn apply<'w, 's>(self, commands: &mut Commands<'w, 's>) -> Entity {
-        RequestBuilder::new(self.0).apply(commands)
+impl<T: RequestLabel> ApplyLabel for T {
+    fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>) {
+        LabelBuilder::new(self).apply(commands)
     }
 }
-impl<Request> private::Sealed<()> for Req<Request> { }
+impl<T: RequestLabel> private::Sealed<()> for T { }
 
-impl<Request: 'static + Send + Sync, L, Q, E> SubmitRequest<Request> for RequestBuilder<Request, L, Q, E> {
-    fn apply<'w, 's>(self, commands: &mut Commands<'w, 's>) -> Entity {
-        let target = commands.spawn(RequestStorage(Some(self.request))).id();
-        if let Some(label) = self.label {
-            commands.entity(target).insert(DeliveryInstructions {
-                label,
-                queue: self.queue,
-                ensure: self.ensure,
-            });
-        }
-
-        target
+impl<Q, E> ApplyLabel for LabelBuilder<Q, E> {
+    fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>) {
+        commands.insert(DeliveryInstructions {
+            label: self.label,
+            queue: self.queue,
+            ensure: self.ensure,
+        });
     }
 }
-impl<Request, L, Q, E> private::Sealed<()> for RequestBuilder<Request, L, Q, E> { }
+impl<Q, E> private::Sealed<()> for LabelBuilder<Q, E> { }
+
+/// This trait gives a convenient way to convert a label into a [`LabelBuilder`]
+/// which can add more specifications about how a labeled request should behave.
+pub trait BuildLabel: private::Sealed<()> {
+    fn queue(self) -> LabelBuilder<Chosen, ()>;
+    fn ensure(self) -> LabelBuilder<(), Chosen>;
+}
+
+impl<T: RequestLabel> BuildLabel for T {
+    /// Specify that the labeled request should queue itself instead of
+    /// canceling prior requests with the same label.
+    fn queue(self) -> LabelBuilder<Chosen, ()> {
+        LabelBuilder::new(self).queue()
+    }
+
+    /// Specify that the labeled request should not allow itself to be canceled
+    /// by later requests with the same label.
+    fn ensure(self) -> LabelBuilder<(), Chosen> {
+        LabelBuilder::new(self).ensure()
+    }
+}

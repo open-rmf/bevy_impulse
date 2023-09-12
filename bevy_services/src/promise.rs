@@ -17,7 +17,7 @@
 
 use crate::{
     Detached, Held, DispatchCommand, Provider, UnusedTarget, MakeThen,
-    MakeFork, MakeMap,
+    MakeFork, MakeMap, Chosen, ApplyLabel,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -41,15 +41,16 @@ use std::sync::Arc;
 /// If you do not select one of the above then the service request will be
 /// canceled without ever attempting to run.
 #[must_use]
-pub struct PromiseCommands<'w, 's, 'a, Response, Streams> {
+pub struct PromiseCommands<'w, 's, 'a, Response, Streams, L> {
     provider: Entity,
     target: Entity,
     commands: &'a mut Commands<'w, 's>,
     response: std::marker::PhantomData<Response>,
     streams: std::marker::PhantomData<Streams>,
+    labeling: std::marker::PhantomData<L>,
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams> {
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Response, Streams, L> {
     /// Have the service run until it is finished without holding onto any
     /// promise. Immediately after the service is finished, the storage for the
     /// promise will automatically be freed up.
@@ -90,16 +91,29 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
         HeldPromise::new(self.target, holding)
     }
 
+    /// Apply a label to the request. For more information about request labels,
+    /// see [`crate::LabelBuilder`].
+    pub fn label(
+        self,
+        label: impl ApplyLabel,
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, Chosen> {
+        label.apply(&mut self.commands.entity(self.target));
+        PromiseCommands::new(self.provider, self.target, self.commands)
+    }
+
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different delivery chains: one
     /// determined by the `f` callback provided to this function and the other
     /// determined by the [`PromiseCommands`] that gets returned by this function.
     ///
     /// This can only be applied when the Response can be cloned.
+    ///
+    /// You cannot hook into streams or apply a label after using this function,
+    /// so perform those operations before calling this.
     pub fn fork(
         self,
-        f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, ()>),
-    ) -> PromiseCommands<'w, 's, 'a, Response, ()>
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, (), ()>),
+    ) -> PromiseCommands<'w, 's, 'a, Response, (), Chosen>
     where
         Response: Clone,
     {
@@ -118,11 +132,14 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
 
     /// Apply a simple callback to the response to change its type. Unlike `.then`
     /// the callback is not a system. This is more efficient for cases where
-    /// system parameters don't need to be queried to perform the transformation.
+    /// system parameters don't need to be fetched to perform the transformation.
+    ///
+    /// You cannot hook into streams or apply a label after using this function,
+    /// so perform those operations before calling this.
     pub fn map<U: 'static + Send + Sync>(
         self,
         f: impl FnOnce(Response) -> U + Send + Sync + 'static,
-    ) -> PromiseCommands<'w, 's, 'a, U, ()> {
+    ) -> PromiseCommands<'w, 's, 'a, U, (), Chosen> {
         self.commands.add(MakeMap::new(self.target, Box::new(f)));
         let map_target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(DispatchCommand::new(self.provider, self.target));
@@ -130,17 +147,23 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
     }
 
     /// Use the response of the service as a new service request as soon as the
-    /// response is delivered.
+    /// response is delivered. If you apply a label or hook into streams after
+    /// calling this function, then those will be applied to this new service
+    /// request.
     pub fn then<U: 'static + Send + Sync, ThenStreams>(
         self,
         service_provider: Provider<Response, U, ThenStreams>
-    ) -> PromiseCommands<'w, 's, 'a, U, ThenStreams> {
+    ) -> PromiseCommands<'w, 's, 'a, U, ThenStreams, ()> {
         let then_target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(MakeThen::<Response>::new(self.target, service_provider.get()));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
         PromiseCommands::new(self.target, then_target, self.commands)
     }
+}
 
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Response, Streams, L> {
+    /// Used internally to create a [`PromiseCommands`] that can accept a label
+    /// and hook into streams.
     pub(crate) fn new(
         provider: Entity,
         target: Entity,
@@ -152,6 +175,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
             commands,
             response: Default::default(),
             streams: Default::default(),
+            labeling: Default::default(),
         }
     }
 }
@@ -172,3 +196,4 @@ impl<Response> HeldPromise<Response> {
         Self { target, claim, _ignore: Default::default() }
     }
 }
+
