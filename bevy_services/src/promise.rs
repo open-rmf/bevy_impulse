@@ -149,6 +149,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         self.commands.add(DispatchCommand::new(self.provider, self.target));
         PromiseCommands::new(self.target, then_target, self.commands)
     }
+
+    pub fn then_serve<M>()
 }
 
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams, ()> {

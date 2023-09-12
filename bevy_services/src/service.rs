@@ -20,6 +20,9 @@ use bevy::prelude::{Entity, App, Commands};
 mod builder;
 pub use builder::{ServiceBuilder, traits::*};
 
+mod servable;
+pub use servable::traits::*;
+
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
 /// - [`crate::ServiceDiscovery`].iter()
