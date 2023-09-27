@@ -17,7 +17,7 @@
 
 use crate::{
     Detached, Held, DispatchCommand, Provider, UnusedTarget, MakeThen,
-    MakeFork, MakeMap, Chosen, ApplyLabel,
+    MakeFork, MakeMap, Chosen, ApplyLabel, Servable, MakeThenServe,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -126,10 +126,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     ///
     /// You cannot hook into streams or apply a label after using this function,
     /// so perform those operations before calling this.
-    pub fn map<U: 'static + Send + Sync>(
+    pub fn map<MappedResponse: 'static + Send + Sync>(
         self,
-        f: impl FnOnce(Response) -> U + Send + Sync + 'static,
-    ) -> PromiseCommands<'w, 's, 'a, U, (), Chosen> {
+        f: impl FnOnce(Response) -> MappedResponse + Send + Sync + 'static,
+    ) -> PromiseCommands<'w, 's, 'a, MappedResponse, (), Chosen> {
         self.commands.add(MakeMap::new(self.target, Box::new(f)));
         let map_target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(DispatchCommand::new(self.provider, self.target));
@@ -140,17 +140,36 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// response is delivered. If you apply a label or hook into streams after
     /// calling this function, then those will be applied to this new service
     /// request.
-    pub fn then<U: 'static + Send + Sync, ThenStreams>(
+    pub fn then<ThenResponse: 'static + Send + Sync, ThenStreams>(
         self,
-        service_provider: Provider<Response, U, ThenStreams>
-    ) -> PromiseCommands<'w, 's, 'a, U, ThenStreams, ()> {
+        service_provider: Provider<Response, ThenResponse, ThenStreams>
+    ) -> PromiseCommands<'w, 's, 'a, ThenResponse, ThenStreams, ()> {
         let then_target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(MakeThen::<Response>::new(self.target, service_provider.get()));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
         PromiseCommands::new(self.target, then_target, self.commands)
     }
 
-    pub fn then_serve<M>()
+    /// Use the response of the service as a request into a [`Servable`] object
+    /// as soon as the response is delivered.
+    ///
+    /// [`Servable`] objects cannot accept labels because they are not able to
+    /// do any queueing.
+    pub fn then_serve<M, ThenServe>(
+        self,
+        servable: ThenServe,
+    ) -> PromiseCommands<'w, 's, 'a, ThenServe::Response, ThenServe::Streams, Chosen>
+    where
+        M: 'static + Send,
+        ThenServe: 'static + Send + Sync + Servable<M>,
+        ThenServe::Request: 'static + Send + Sync,
+        ThenServe::Response: 'static + Send + Sync,
+    {
+        let then_serve_target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(MakeThenServe::<ThenServe, M>::new(self.target, servable));
+        self.commands.add(DispatchCommand::new(self.provider, self.target));
+        PromiseCommands::new(self.target, then_serve_target, self.commands)
+    }
 }
 
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams, ()> {

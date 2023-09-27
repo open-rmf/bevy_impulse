@@ -73,6 +73,7 @@ fn dispatch_then<Input: 'static + Send + Sync>(
     let then = provider_mut.take::<Then>().unwrap();
     provider_mut.despawn();
     let Some(mut target_mut) = world.get_entity_mut(cmd.target) else {
+        cancel(world, cmd.target);
         return;
     };
     target_mut.insert(RequestStorage(Some(response)));

@@ -39,6 +39,10 @@ pub(crate) use map::*;
 mod then;
 pub(crate) use then::*;
 
+mod servable;
+pub(crate) use servable::*;
+pub use servable::traits::*;
+
 #[derive(Resource)]
 struct BlockingDeliveryQueue {
     is_delivering: bool,
@@ -288,7 +292,7 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
             target_mut.insert((
                 TaskStorage(task),
                 PollTask {
-                    provider,
+                    provider: Some(provider),
                     poll: poll_task::<Response>,
                 }
             ));
@@ -410,7 +414,7 @@ fn insert_serial_order(
     DeliveryUpdate::Queued { canceled, stop }
 }
 
-fn handle_response(
+pub(crate) fn handle_response(
     world: &mut World,
     target: Entity,
 ) {
@@ -424,7 +428,7 @@ pub(crate) struct RequestStorage<Request>(pub(crate) Option<Request>);
 pub(crate) struct ResponseStorage<Response>(pub(crate) Option<Response>);
 
 #[derive(Component)]
-struct TaskStorage<Response>(Task<Option<Response>>);
+pub(crate) struct TaskStorage<Response>(pub(crate) Task<Option<Response>>);
 
 #[derive(Component)]
 pub(crate) enum OnCancel {
@@ -436,12 +440,12 @@ pub(crate) enum OnCancel {
 pub(crate) struct UnusedTarget;
 
 #[derive(Component)]
-struct PollTask {
-    provider: Entity,
-    poll: fn(&mut World, Entity, Entity),
+pub(crate) struct PollTask {
+    pub(crate) provider: Option<Entity>,
+    pub(crate) poll: fn(&mut World, Entity, Entity),
 }
 
-fn poll_task<Response>(world: &mut World, provider: Entity, target: Entity) {
+pub(crate) fn poll_task<Response>(world: &mut World, provider: Entity, target: Entity) {
 
 }
 
