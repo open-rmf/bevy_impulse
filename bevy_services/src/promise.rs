@@ -21,22 +21,227 @@ use crate::{
 };
 
 use bevy::prelude::{Entity, Commands};
-use std::sync::Arc;
+
+use std::{sync::Arc, future::Future, task::{Context, Poll}, pin::Pin};
+
+mod private;
+use private::*;
+
+/// A promise expects to receive a value in the future.
+#[must_use]
+pub struct Promise<T> {
+    state: PromiseState<T>,
+    target: Arc<PromiseTarget<T>>,
+}
+
+impl<T> Promise<T> {
+    /// Check the last known state of the promise without any polling. This will
+    /// never block, but it also might provide a state that is out of date.
+    ///
+    /// To get a look at the most current state at the cost of synchronizing you
+    /// can use [`peek`].
+    pub fn sneak_peek(&self) -> PromiseState<&T> {
+        self.state.as_ref()
+    }
+
+    /// View the state of the promise. If a response is available, you will
+    /// borrow it, but it will continue to be stored inside the promise.
+    ///
+    /// This requires a mutable reference to the promise because it may try to
+    /// update the current state if needed. To peek at that last known state
+    /// without trying to synchronize you can use [`sneak_peek()`].
+    pub fn peek(&mut self) -> PromiseState<&T> {
+        self.update();
+        self.state.as_ref()
+    }
+
+    /// Try to take the response of the promise. If the response is available,
+    /// it will be contained within the returned state, and the internal state
+    /// of this promise will permanently change to [`PromiseState::Taken`].
+    pub fn take(&mut self) -> PromiseState<T> {
+        self.update();
+        self.state.take()
+    }
+
+    /// Wait for the promise to be resolved. The internal state of the
+    /// [`Promise`] will not be updated; that requires a follow-up call to one
+    /// of the mutable methods.
+    ///
+    /// To both wait for a result and update the Promise's internal state once
+    /// it is available, use [`wait_mut`].
+    pub fn wait(&self) -> &Self {
+        if !self.state.is_pending() {
+            return self;
+        }
+
+        let guard = match self.target.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return self;
+            }
+        };
+        self.target.cv.wait_while(guard, |inner| {
+            inner.result.is_none()
+        });
+        self
+    }
+
+    /// Wait for the promise to be resolved and update the internal state with
+    /// the result.
+    pub fn wait_mut(&mut self) -> &mut Self {
+        if !self.state.is_pending() {
+            return self;
+        }
+
+        let guard = match self.target.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                self.state = PromiseState::Canceled;
+                return self;
+            }
+        };
+        self.target.cv.wait_while(guard, |inner| {
+            match inner.result.take() {
+                Some(PromiseResult::Finished(response)) => {
+                    self.state = PromiseState::Received(response);
+                    return false;
+                }
+                Some(PromiseResult::Canceled) => {
+                    self.state = PromiseState::Canceled;
+                    return false;
+                }
+                None => {
+                    return true;
+                }
+            }
+        });
+        self
+    }
+
+    /// Update the internal state of the promise if it is still pending. This
+    /// will automatically be done by [`peek`] and [`take`] so there is no
+    /// need to call this explicitly unless you want a specific timing for when
+    /// to synchronize the internal state.
+    pub fn update(&mut self) {
+        if self.state.is_pending() {
+            match self.target.inner.lock() {
+                Ok(mut guard) => {
+                    match guard.result.take() {
+                        Some(PromiseResult::Finished(response)) => {
+                            self.state = PromiseState::Received(response);
+                        }
+                        Some(PromiseResult::Canceled) => {
+                            self.state = PromiseState::Canceled;
+                        }
+                        None => {
+                            // Do nothing
+                        }
+                    }
+                }
+                Err(_) => {
+                    // If the mutex is poisoned, that has to mean the sender
+                    // crashed while trying to send the value, so we should
+                    // treat it as canceled.
+                    self.state = PromiseState::Canceled;
+                }
+            }
+        }
+    }
+}
+
+impl<T: Unpin> Future for Promise<T> {
+    type Output = PromiseState<T>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let state = self.get_mut().take();
+        if state.is_pending() {
+            match self.get_mut().target.inner.lock() {
+                Ok(mut inner) => {
+                    inner.waker = Some(cx.waker().clone());
+                }
+                Err(_) => { }
+            }
+            Poll::Pending
+        } else {
+            Poll::Ready(state)
+        }
+    }
+}
+
+/// The state of a promise.
+pub enum PromiseState<T> {
+    /// The promise received its result and can be seen in this state.
+    Received(T),
+    /// The promise is still pending, so you need to keep waiting for the state.
+    Pending,
+    /// The promise has been canceled and will never receive a response.
+    Canceled,
+    /// The promise was delivered and has been taken. It will never be available
+    /// to take again.
+    Taken,
+}
+
+impl<T> PromiseState<T> {
+    pub fn as_ref(&self) -> PromiseState<&T> {
+        match self {
+            Self::Received(value) => PromiseState::Received(value),
+            Self::Pending => PromiseState::Pending,
+            Self::Canceled => PromiseState::Canceled,
+            Self::Taken => PromiseState::Taken,
+        }
+    }
+
+    pub fn is_received(&self) -> bool {
+        matches!(self, Self::Received(_))
+    }
+
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    pub fn is_canceled(&self) -> bool {
+        matches!(self, Self::Canceled)
+    }
+
+    pub fn is_taken(&self) -> bool {
+        matches!(self, Self::Taken)
+    }
+
+    pub fn take(&mut self) -> PromiseState<T> {
+        match *self {
+            Self::Received(response) => {
+                *self = Self::Taken;
+                Self::Received(response)
+            }
+            Self::Pending => {
+                *self = Self::Pending;
+                Self::Pending
+            }
+            Self::Canceled => {
+                *self = Self::Canceled;
+                Self::Canceled
+            }
+            Self::Taken => {
+                *self = Self::Taken;
+                Self::Taken
+            }
+        }
+    }
+}
 
 /// After submitting a service request, use [`PromiseCommands`] to describe how
 /// the response should be handled. At a minimum, for the response to be
 /// delivered, you must choose one of:
 /// - `.detach()`: Let the service run to completion and then discard the
 ///   response data.
-/// - `.hold()`: As long as the [`HeldPromise`] or one of its clones is alive,
+/// - `.take()`: As long as the [`Promise`] or one of its clones is alive,
 ///   the service will continue running to completion and you will be able to
 ///   view the response (or take the response, but only once). If all clones of
-///   the [`HeldPromise`] are dropped before the service is delivered, it will
+///   the [`Promise`] are dropped before the service is delivered, it will
 ///   be canceled.
-/// - `detached_hold()`: As long as the [`HeldPromise`] or one of its clones is
+/// - `detached_take()`: As long as the [`Promise`] or one of its clones is
 ///   alive, you will be able to view the response (or take the response, but
 ///   only once). The service will run to completion even if every clone of the
-///   [`HeldPromise`] is dropped.
+///   [`Promise`] is dropped.
 ///
 /// If you do not select one of the above then the service request will be
 /// canceled without ever attempting to run.
@@ -61,26 +266,25 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         self.commands.add(DispatchCommand::new(self.provider, self.target));
     }
 
-    /// Hold onto the promise so you can reference it later. If all copies of
-    /// the [`HeldPromise`] are dropped then the service request will
-    /// automatically be canceled and the storage for the promise will be freed
-    /// up.
-    pub fn hold(self) -> HeldPromise<Response> {
+    /// Take the promise so you can reference it later. If all copies of
+    /// the [`Promise`] are dropped then the service request will automatically
+    /// be canceled and the storage for the promise will be freed up.
+    pub fn take(self) -> Promise<Response> {
         let holding = Arc::new(());
         self.commands.entity(self.target)
             .remove::<UnusedTarget>()
             .insert(Held(Arc::downgrade(&holding)));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
-        HeldPromise::new(self.target, holding)
+        Promise::new(self.target, holding)
     }
 
     /// Hold onto the promise so you can reference it later. The service request
     /// will continue to be fulfilled even if you drop all copies of the
-    /// [`HeldPromise`]. The storage for the promise will remain available until
-    /// all copies of [`HeldPromise`] are dropped.
+    /// [`Promise`]. The storage for the promise will remain available until
+    /// all copies of [`Promise`] are dropped.
     ///
     /// This is effectively equivalent to running both [`detach`] and [`hold`].
-    pub fn detached_hold(self) -> HeldPromise<Response> {
+    pub fn detached_take(self) -> Promise<Response> {
         self.commands.entity(self.target).insert(Detached);
 
         let holding = Arc::new(());
@@ -88,7 +292,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
             .remove::<UnusedTarget>()
             .insert(Held(Arc::downgrade(&holding)));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
-        HeldPromise::new(self.target, holding)
+        Promise::new(self.target, holding)
     }
 
     /// When the response is delivered, we will make a clone of it and
@@ -202,21 +406,3 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         }
     }
 }
-
-#[must_use]
-pub struct HeldPromise<Response> {
-    /// Where will the promised value be stored once it is delivered.
-    target: Entity,
-    /// Keeps track of whether the promise is being watched for.
-    claim: Arc<()>,
-    _ignore: std::marker::PhantomData<Response>,
-}
-
-impl<Response> HeldPromise<Response> {
-    /// This is only used internally. To obtain a HeldPromise as a user, use
-    /// [`Commands`]`::request(~)` and then call [`PromiseCommands`]`::hold()`.
-    fn new(target: Entity, claim: Arc<()>) -> Self {
-        Self { target, claim, _ignore: Default::default() }
-    }
-}
-
