@@ -17,11 +17,17 @@
 
 use crate::{Promise, PromiseState};
 
-use std::{task::Waker, sync::{Arc, Weak, Mutex, Condvar}};
+use std::{task::Waker, sync::{Arc, Weak, Mutex, Condvar}, any::Any};
 
 pub(crate) struct Sender<Response> {
     target: Weak<PromiseTarget<Response>>,
     sent: bool,
+}
+
+/// Tracks whether there is any expectation for the Sender to deliver on its
+/// promise (i.e. whether the promise still has a target) without any generics.
+pub(crate) struct Expectation {
+    target: Weak<dyn Any + Send + Sync + 'static>,
 }
 
 impl<T> Sender<T> {
@@ -46,6 +52,13 @@ impl<T> Sender<T> {
             waker.wake();
         }
         target.cv.notify_all();
+    }
+
+    pub(crate) fn expectation(&self) -> Expectation
+    where
+        T: Send
+    {
+        Expectation { target: self.target.clone() }
     }
 }
 

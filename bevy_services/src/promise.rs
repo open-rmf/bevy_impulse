@@ -24,7 +24,7 @@ use bevy::prelude::{Entity, Commands};
 
 use std::{sync::Arc, future::Future, task::{Context, Poll}, pin::Pin};
 
-mod private;
+pub(crate) mod private;
 use private::*;
 
 /// A promise expects to receive a value in the future.
@@ -266,19 +266,19 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         self.commands.add(DispatchCommand::new(self.provider, self.target));
     }
 
-    /// Take the promise so you can reference it later. If all copies of
-    /// the [`Promise`] are dropped then the service request will automatically
+    /// Take the promise so you can reference it later. If all copies of the
+    /// [`Promise`] are dropped then the service request will automatically
     /// be canceled and the storage for the promise will be freed up.
     pub fn take(self) -> Promise<Response> {
-        let holding = Arc::new(());
+        let (promise, sender) = Promise::new();
         self.commands.entity(self.target)
             .remove::<UnusedTarget>()
             .insert(Held(Arc::downgrade(&holding)));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
-        Promise::new(self.target, holding)
+        promise
     }
 
-    /// Hold onto the promise so you can reference it later. The service request
+    /// Take the promise so you can reference it later. The service request
     /// will continue to be fulfilled even if you drop all copies of the
     /// [`Promise`]. The storage for the promise will remain available until
     /// all copies of [`Promise`] are dropped.

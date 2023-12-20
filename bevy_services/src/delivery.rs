@@ -25,10 +25,7 @@ use bevy::{
 
 use smallvec::SmallVec;
 
-use std::{
-    sync::Weak,
-    collections::{HashMap, VecDeque}
-};
+use std::collections::{HashMap, VecDeque};
 
 mod fork;
 pub(crate) use fork::*;
@@ -43,17 +40,14 @@ mod servable;
 pub(crate) use servable::*;
 pub use servable::traits::*;
 
+mod terminate;
+pub(crate) use terminate::*;
+
 #[derive(Resource)]
 struct BlockingDeliveryQueue {
     is_delivering: bool,
     queue: VecDeque<(DispatchCommand, fn(&mut World, DispatchCommand))>,
 }
-
-#[derive(Component)]
-pub(crate) struct Detached;
-
-#[derive(Component)]
-pub(crate) struct Held(pub(crate) Weak<()>);
 
 #[derive(Component)]
 pub(crate) struct Target(pub(crate) Entity);
