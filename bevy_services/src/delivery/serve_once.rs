@@ -89,13 +89,11 @@ where
     S::Request: 'static + Send + Sync,
     S::Response: 'static + Send + Sync,
 {
-    type Parameters = (ServableStorage<S>, TargetStorage);
-
-    fn parameters(self) -> Self::Parameters {
-        (
+    fn set_parameters(self, entity: Entity, world: &mut World) {
+        world.entity_mut(entity).insert((
             ServableStorage(self.service),
             TargetStorage(self.target),
-        )
+        ));
     }
 
     fn execute(

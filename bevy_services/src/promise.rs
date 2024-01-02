@@ -260,10 +260,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// promise. Immediately after the service is finished, the storage for the
     /// promise will automatically be freed up.
     pub fn detach(self) {
-        self.commands.entity(self.target)
-            .insert(Detached)
-            .remove::<UnusedTarget>();
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
+        self.commands.entity(self.target).insert(Detached);
         self.commands.add(Terminate::<Response>::new(self.target, None));
     }
 
@@ -272,8 +269,6 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// be canceled and the storage for the promise will be freed up.
     pub fn take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.entity(self.target).remove::<UnusedTarget>();
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
         self.commands.add(Terminate::new(self.target, Some(sender)));
         promise
     }
@@ -286,10 +281,6 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// This is effectively equivalent to running both [`detach`] and [`hold`].
     pub fn detached_take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.entity(self.target)
-            .insert(Detached)
-            .remove::<UnusedTarget>();
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
         self.commands.add(Terminate::new(self.target, Some(sender)));
         promise
     }

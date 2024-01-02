@@ -23,7 +23,7 @@ use arrayvec::ArrayVec;
 use std::collections::VecDeque;
 
 use crate::{
-    DispatchCommand, Dispatch, UnusedTarget, InputStorage, InputBundle, Pending,
+    DispatchCommand, Dispatch, UnusedTarget, InputStorage, InputBundle,
     cancel,
 };
 

@@ -20,7 +20,10 @@ use crate::{
     OperationStatus, DispatchCommand,
 };
 
-use bevy::prelude::{Component, Entity, World};
+use bevy::{
+    prelude::{Component, Entity, World},
+    ecs::system::EntityCommands,
+};
 
 use std::collections::VecDeque;
 
@@ -42,13 +45,11 @@ impl Serve {
 }
 
 impl Operation for Serve {
-    type Parameters = (ProviderStorage, TargetStorage);
-
-    fn parameters(self) -> Self::Parameters {
-        (
+    fn set_parameters(self, entity: Entity, world: &mut World) {
+        world.entity_mut(entity).insert((
             ProviderStorage(self.provider),
-            TargetStorage(self.target),23
-        )
+            TargetStorage(self.target),
+        ));
     }
 
     fn execute(

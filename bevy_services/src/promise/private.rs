@@ -54,6 +54,20 @@ impl<T> Sender<T> {
         target.cv.notify_all();
     }
 
+    pub(crate) fn on_cancel(&mut self, f: impl FnOnce()) {
+        match self.target.upgrade() {
+            Some(target) => {
+                let mut guard = match target.inner.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+
+                guard.on_drop = Some(Box::new(f));
+            }
+            None => f(),
+        }
+    }
+
     pub(crate) fn expectation(&self) -> Expectation
     where
         T: Send
@@ -88,11 +102,23 @@ pub(crate) enum PromiseResult<T> {
 pub(crate) struct PromiseTargetInner<T> {
     pub(crate) result: Option<PromiseResult<T>>,
     pub(crate) waker: Option<Waker>,
+    pub(crate) on_drop: Option<Box<dyn FnOnce()>>,
+    pub(crate) sent: bool,
 }
 
 impl<T> PromiseTargetInner<T> {
     pub(crate) fn new() -> Self {
-        Self { result: None, waker: None }
+        Self { result: None, waker: None, on_drop: None }
+    }
+}
+
+impl<T> Drop for PromiseTargetInner<T> {
+    fn drop(&mut self) {
+
+        match self.on_drop {
+            Some(f) => f(),
+            None => { }
+        }
     }
 }
 

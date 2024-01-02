@@ -20,7 +20,7 @@ use crate::{UnusedTarget, Queued, cancel};
 use std::collections::VecDeque;
 
 use bevy::{
-    prelude::{Entity, World, Component, Bundle},
+    prelude::{Entity, World, Component},
     ecs::system::Command,
 };
 
@@ -34,9 +34,11 @@ pub(crate) enum OperationStatus {
 }
 
 pub(crate) trait Operation {
-    type Parameters: Bundle;
-
-    fn parameters(self) -> Self::Parameters;
+    fn set_parameters(
+        self,
+        entity: Entity,
+        world: &mut World,
+    );
 
     fn execute(
         source: Entity,
@@ -58,12 +60,10 @@ impl<Op: Operation> PerformOperation<Op> {
 
 impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
     fn apply(self, world: &mut World) {
+        self.operation.set_parameters(self.source, world);
         let mut provider_mut = world.entity_mut(self.source);
         provider_mut
-            .insert((
-                self.operation.parameters(),
-                Operate(perform_operation::<Op>)
-            ))
+            .insert(Operate(perform_operation::<Op>))
             .remove::<UnusedTarget>();
     }
 }

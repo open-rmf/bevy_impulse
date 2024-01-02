@@ -35,13 +35,11 @@ impl<T, U> Map<T, U> {
 }
 
 impl<T: 'static + Send + Sync, U: 'static + Send + Sync> Operation for Map<T, U> {
-    type Parameters = (TargetStorage, MapStorage<T, U>);
-
-    fn parameters(self) -> Self::Parameters {
-        (
+    fn set_parameters(self, entity: Entity, world: &mut World) {
+        world.entity_mut(entity).insert((
             TargetStorage(self.target),
             MapStorage(self.f),
-        )
+        ));
     }
 
     fn execute(
