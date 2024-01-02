@@ -27,18 +27,21 @@ use smallvec::SmallVec;
 
 use std::collections::{HashMap, VecDeque};
 
+mod operation;
+pub(crate) use operation::*;
+
 mod fork;
 pub(crate) use fork::*;
 
 mod map;
 pub(crate) use map::*;
 
-mod then;
-pub(crate) use then::*;
+mod serve;
+pub(crate) use serve::*;
 
-mod servable;
-pub(crate) use servable::*;
-pub use servable::traits::*;
+mod serve_once;
+pub(crate) use serve_once::*;
+pub use serve_once::traits::*;
 
 mod terminate;
 pub(crate) use terminate::*;
@@ -50,7 +53,7 @@ struct BlockingDeliveryQueue {
 }
 
 #[derive(Component)]
-pub(crate) struct Target(pub(crate) Entity);
+pub(crate) struct TargetStorage(pub(crate) Entity);
 
 pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response> + Send>>;
 
@@ -77,12 +80,13 @@ impl<Request, Response> Service<Request, Response> {
 #[derive(Clone, Copy)]
 pub(crate) struct DispatchCommand {
     pub(crate) provider: Entity,
+    pub(crate) source: Entity,
     pub(crate) target: Entity,
 }
 
 impl DispatchCommand {
-    pub(crate) fn new(provider: Entity, target: Entity) -> Self {
-        Self { provider, target }
+    pub(crate) fn new(provider: Entity, source: Entity, target: Entity) -> Self {
+        Self { provider, source, target }
     }
 }
 
@@ -134,8 +138,8 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
     world: &mut World,
     cmd: DispatchCommand,
 ) {
-    let DispatchCommand {target, provider} = cmd;
-    let request = if let Some(mut target) = world.get_entity_mut(target) {
+    let DispatchCommand {provider, source, target} = cmd;
+    let request = if let Some(mut source_mut) = world.get_entity_mut(source) {
         // INVARIANT: If the target entity exists then it must have been created
         // for the purpose of this service. PromiseCommands must have
         // inserted a RequestStorage of the correct type and placed that command
@@ -145,7 +149,9 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
         // RequestStorage, and this code will only ever do it once per target.
         // Therefore if the implementation is correct and the entity exists then
         // this component must exist and it must contain the data inside.
-        target.get_mut::<RequestStorage<Request>>().unwrap().0.take().unwrap()
+        let request = source_mut.take::<InputStorage<Request>>().unwrap().0;
+        source_mut.despawn();
+        request
     } else {
         // The target entity does not exist which implies the request has been
         // canceled. We no longer need to deliver on it.
@@ -205,10 +211,9 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
     }
 
     if let Some(mut target_mut) = world.get_entity_mut(target) {
-        target_mut.insert(ResponseStorage(Some(response)));
-        handle_response(world, target);
+        target_mut.insert(InputBundle::new(response));
     } else {
-        // Apparently the task was canceled by the service itself .. ?
+        // The target is no longer available for a delivery
         cancel(world, target);
     }
 }
@@ -217,10 +222,13 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
     world: &mut World,
     cmd: DispatchCommand,
 ) {
-    let DispatchCommand {target, provider} = cmd;
+    let DispatchCommand {provider, source, target} = cmd;
 
-    let instructions = if let Some(mut target_mut) = world.get_entity_mut(target) {
-        target_mut.take::<DeliveryInstructions>()
+    let (instructions, request) = if let Some(mut source_mut) = world.get_entity_mut(source) {
+        (
+            source_mut.take::<DeliveryInstructions>(),
+            source_mut.take::<InputStorage<Request>>().unwrap().0,
+        )
     } else {
         // The target entity does not exist which implies the request has been
         // canceled. We no longer need to deliver on it.
@@ -273,9 +281,10 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
     };
 
     if let Some(mut target_mut) = world.get_entity_mut(target) {
-        // INVARIANT: See the rationale in dispatch_single_blocking
-        let request = target_mut.get_mut::<RequestStorage<Request>>().unwrap().0.take().unwrap();
         let Job(job) = service.run((provider, Req(request)), world);
+        // FIXME: This is not currently handling recursion correctly. If the
+        // async service calls itself while producing the job, then this will
+        // lead to a panic.
         service.apply_deferred(world);
 
         let task = AsyncComputeTaskPool::get().spawn(async move {
@@ -415,11 +424,31 @@ pub(crate) fn handle_response(
 
 }
 
+/// Marker trait to indicate when an input is ready without knowing the type of
+/// input.
 #[derive(Component)]
-pub(crate) struct RequestStorage<Request>(pub(crate) Option<Request>);
+pub(crate) struct InputReady;
 
 #[derive(Component)]
-pub(crate) struct ResponseStorage<Response>(pub(crate) Option<Response>);
+pub(crate) struct InputStorage<Input>(pub(crate) Input);
+
+impl<Input> InputStorage<Input> {
+    pub(crate) fn take(self) -> Input {
+        self.0
+    }
+}
+
+#[derive(Bundle)]
+pub(crate) struct InputBundle<Input: 'static + Send + Sync> {
+    value: InputStorage<Input>,
+    ready: InputReady,
+}
+
+impl<Input: 'static + Send + Sync> InputBundle<Input> {
+    pub(crate) fn new(value: Input) -> Self {
+        Self { value: InputStorage(value), ready: InputReady }
+    }
+}
 
 #[derive(Component)]
 pub(crate) struct TaskStorage<Response>(pub(crate) Task<Option<Response>>);
@@ -447,15 +476,10 @@ pub(crate) fn poll_task<Response>(world: &mut World, provider: Entity, target: E
 #[derive(Component)]
 pub(crate) struct Dispatch(pub(crate) fn(&mut World, DispatchCommand));
 
-/// This component determines how a target responds to a pending delivery being
-/// fulfilled. The arguments are
-/// - The world
-/// - A queue of entities whose pending behaviors should be triggered next. When
-///   this callback is triggered, it should add to the queue any targets that it
-///   is delivering responses to.
-/// - The entity that owns this Pending component.
+/// This component indicates that a source entity has been queued for a service
+/// so it should not be despawned yet.
 #[derive(Component)]
-pub(crate) struct Pending(pub(crate) fn(&mut World, &mut VecDeque<Entity>, Entity));
+pub(crate) struct Queued(pub(crate) Entity);
 
 #[derive(Component)]
 struct PollResponse(fn(&mut World, Entity));

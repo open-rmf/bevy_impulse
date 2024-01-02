@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    ResponseStorage, cancel,
+    InputStorage, cancel, Pending,
     promise::private::{Sender, Expectation}
 };
 
@@ -36,24 +36,35 @@ pub(crate) struct Expected(pub(crate) Expectation);
 #[derive(Component)]
 pub(crate) struct Termination<T>(pub(crate) Sender<T>);
 
-pub(crate) struct Terminate<Response: 'static + Send + Sync + Clone> {
+pub(crate) struct Terminate<Response: 'static + Send + Sync> {
     storage: Entity,
-    sender: Sender<Response>,
+    sender: Option<Sender<Response>>,
 }
 
-impl<Response: 'static + Send + Sync + Clone> Command for Terminate<Response> {
+impl<Response: 'static + Send + Sync> Terminate<Response> {
+    pub(crate) fn new(storage: Entity, sender: Option<Sender<Response>>) -> Self {
+        Self { storage, sender }
+    }
+}
+
+impl<Response: 'static + Send + Sync> Command for Terminate<Response> {
     fn apply(self, world: &mut bevy::prelude::World) {
         let mut storage_mut = world.entity_mut(self.storage);
-        if let Some(ResponseStorage(Some(response))) = storage_mut.take::<ResponseStorage<Response>>() {
-            self.sender.send(response);
+        if let Some(InputStorage(response)) = storage_mut.take::<InputStorage<Response>>() {
+            if let Some(sender) = self.sender {
+                sender.send(response)
+            }
+
+            storage_mut.despawn();
             return;
         }
 
         // The response was not ready yet, so we need to put in a Pending
         // component to keep polling for the next response.
-        storage_mut
-            .insert(Expected(self.sender.expectation()))
-            .insert()
+        if let Some(sender) = &self.sender {
+            storage_mut.insert(Expected(sender.expectation()));
+        }
+        storage_mut.insert(Pending(pending_termination::<Response>));
     }
 }
 
@@ -66,14 +77,11 @@ fn pending_termination<Response: 'static + Send + Sync>(
         return;
     };
 
-    let Some(ResponseStorage(Some(response))) = storage_mut.take::<ResponseStorage<Response>>() else {
-        if !storage_mut.contains::<Detached>() {
-            let Some(termination) = storage_mut.get::<Termination<Response>>() else {
-                cancel(world, storage);
-                return;
-            };
-
-            termination.0.expectation().
-        }
+    let Some(InputStorage(response)) = storage_mut.take::<InputStorage<Response>>() else {
+        storage_mut.despawn();
+        cancel(world, storage);
+        return;
     };
+
+
 }

@@ -16,15 +16,16 @@
 */
 
 use crate::{
-    Req, Resp, Job, Assistant, IntoStreamOutComponents, BoxedJob,
-    GenericAssistant, RequestStorage, ResponseStorage, TaskStorage, PollTask,
-    Dispatch, DispatchCommand, UnusedTarget, Pending, Target,
+    Req, Resp, Job, Assistant, IntoStreamBundle, BoxedJob,
+    GenericAssistant, InputStorage, InputBundle, TaskStorage, PollTask,
+    TargetStorage, Operation,
+    OperationStatus,
     cancel, handle_response, poll_task, private,
 };
 
 use bevy::{
     prelude::{World, Entity, Component, IntoSystem, In},
-    ecs::system::{Command, BoxedSystem},
+    ecs::system::BoxedSystem,
     tasks::AsyncComputeTaskPool,
 };
 
@@ -40,7 +41,7 @@ pub mod traits {
         type Request;
         type Response;
         type Streams;
-        fn serve(self, world: &mut World, target: Entity);
+        fn serve(self, source: Entity, world: &mut World);
     }
 
     pub trait Holdable<Marker>: private::Sealed<Marker> {
@@ -63,119 +64,84 @@ use traits::*;
 #[derive(Component)]
 struct ServableStorage<ThenServe>(ThenServe);
 
-pub(crate) struct MakeThenServe<ThenServe, M> {
-    provider: Entity,
-    servable: ThenServe,
+pub(crate) struct ServeOnce<S, M> {
+    service: S,
+    target: Entity,
     _ignore: std::marker::PhantomData<M>,
 }
 
-impl<M, ThenServe> MakeThenServe<ThenServe, M> {
-    pub(crate) fn new(provider: Entity, servable: ThenServe) -> Self {
-        Self { provider, servable, _ignore: Default::default() }
+impl<M, S: Servable<M>> ServeOnce<S, M> {
+    pub(crate) fn new(
+        service: S,
+        target: Entity,
+    ) -> Self {
+        Self {
+            service,
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
-impl<M, ThenServe> Command for MakeThenServe<ThenServe, M>
+impl<M, S> Operation for ServeOnce<S, M>
 where
-    M: 'static + Send,
-    ThenServe: 'static + Send + Sync + Servable<M>,
-    ThenServe::Request: 'static + Send + Sync,
+    S: 'static + Send + Sync + Servable<M>,
+    S::Request: 'static + Send + Sync,
+    S::Response: 'static + Send + Sync,
 {
-    fn apply(self, world: &mut World) {
-        world
-            .entity_mut(self.provider)
-            .insert(ServableStorage(self.servable))
-            .insert(Dispatch::new_then_serve::<M, ThenServe>());
+    type Parameters = (ServableStorage<S>, TargetStorage);
+
+    fn parameters(self) -> Self::Parameters {
+        (
+            ServableStorage(self.service),
+            TargetStorage(self.target),
+        )
     }
-}
 
-impl Dispatch {
-    fn new_then_serve<M, ThenServe>() -> Self
-    where
-        ThenServe: 'static + Send + Sync + Servable<M>,
-        ThenServe::Request: 'static + Send +Sync,
-    {
-        Dispatch(dispatch_then_serve::<M, ThenServe>)
+    fn execute(
+        source: Entity,
+        world: &mut World,
+        queue: &mut VecDeque<Entity>,
+    ) -> Result<super::OperationStatus, ()> {
+        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+        let ServableStorage(service) = source_mut.take::<ServableStorage<S>>().ok_or(())?;
+        service.serve(source, world);
+        Ok(OperationStatus::Finished)
     }
-}
-
-fn dispatch_then_serve<M, ThenServe: 'static + Send + Sync + Servable<M>>(
-    world: &mut World,
-    cmd: DispatchCommand,
-)
-where
-    ThenServe::Request: 'static + Send + Sync,
-{
-    let Some(mut provider_mut) = world.get_entity_mut(cmd.provider) else {
-        cancel(world, cmd.target);
-        return;
-    };
-
-    provider_mut.remove::<UnusedTarget>();
-    let Some(ResponseStorage(Some(request))) = provider_mut.take::<ResponseStorage<ThenServe::Request>>() else {
-        provider_mut
-            .insert(Target(cmd.target))
-            .insert(Pending(pending_then_serve::<M, ThenServe>));
-        return;
-    };
-
-    let ServableStorage(servable) = provider_mut.take::<ServableStorage<ThenServe>>().unwrap();
-    provider_mut.despawn();
-    let Some(mut target_mut) = world.get_entity_mut(cmd.target) else {
-        cancel(world, cmd.target);
-        return;
-    };
-    target_mut.insert(RequestStorage(Some(request)));
-    servable.serve(world, cmd.target);
-}
-
-fn pending_then_serve<M, ThenServe>(
-    world: &mut World,
-    queue: &mut VecDeque<Entity>,
-    provider: Entity,
-)
-where
-    ThenServe: 'static + Send + Sync + Servable<M>,
-    ThenServe::Request: 'static + Send + Sync,
-{
-    let mut provider_mut = world.entity_mut(provider);
-    let ServableStorage(servable) = provider_mut.take::<ServableStorage<ThenServe>>().unwrap();
-    let target = provider_mut.get::<Target>().unwrap().0;
-    let Some(ResponseStorage(Some(request))) = provider_mut.take::<ResponseStorage<ThenServe::Request>>() else {
-        cancel(world, target);
-        return;
-    };
-    provider_mut.despawn();
-    let Some(mut target_mut) = world.get_entity_mut(target) else {
-        cancel(world, target);
-        return;
-    };
-    target_mut.insert(RequestStorage(Some(request)));
-    servable.serve(world, target);
-    queue.push_back(target);
 }
 
 fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Send + Sync, Streams>(
+    source: Entity,
     world: &mut World,
     service: &mut HoldableService<Request, Response>,
-    target: Entity,
 ) {
-    let request = if let Some(mut target) = world.get_entity_mut(target) {
-        target.get_mut::<RequestStorage<Request>>().unwrap().0.take().unwrap()
-    } else {
-        cancel(world, target);
+    let Some(mut source_mut) = world.get_entity_mut(source) else {
+        cancel(world, source);
         return;
     };
+
+    let Some(InputStorage(request)) = source_mut.take::<InputStorage<Request>>() else {
+        cancel(world, source);
+        return;
+    };
+
+    let Some(TargetStorage(target)) = source_mut.get::<TargetStorage>() else {
+        cancel(world, source);
+        return;
+    };
+
+    source_mut.despawn();
 
     match service {
         HoldableService::Blocking(service) => {
             let Resp(response) = service.run(Req(request), world);
             service.apply_deferred(world);
-            if let Some(mut target_mut) = world.get_entity_mut(target) {
-                target_mut.insert(ResponseStorage(Some(response)));
-                handle_response(world, target);
+
+            if let Some(mut target_mut) = world.get_entity_mut(*target) {
+                target_mut.insert(InputBundle::new(response));
+                handle_response(world, *target);
             } else {
-                cancel(world, target);
+                cancel(world, *target);
             }
         }
         HoldableService::Async(service) => {
@@ -186,7 +152,7 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
                 job(GenericAssistant {  })
             });
 
-            if let Some(mut target_mut) = world.get_entity_mut(target) {
+            if let Some(mut target_mut) = world.get_entity_mut(*target) {
                 target_mut.insert((
                     TaskStorage(task),
                     PollTask {
@@ -195,7 +161,7 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
                     }
                 ));
             } else {
-                cancel(world, target);
+                cancel(world, *target);
             }
         }
     }
@@ -209,7 +175,7 @@ enum HoldableService<Request, Response> {
 pub struct HeldService<Request, Response, Streams> {
     service: HoldableService<Request, Response>,
     initialized: bool,
-    dispatch: fn(&mut World, &mut HoldableService<Request, Response>, Entity),
+    dispatch: fn(Entity, &mut World, &mut HoldableService<Request, Response>),
     _ignore: std::marker::PhantomData<Streams>,
 }
 
@@ -237,7 +203,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<HeldServiceMarker> f
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn serve(mut self, world: &mut World, target: Entity) {
+    fn serve(mut self, source: Entity, world: &mut World) {
         if !self.initialized {
             match &mut self.service {
                 HoldableService::Blocking(service) => {
@@ -248,7 +214,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<HeldServiceMarker> f
                 }
             }
         }
-        (self.dispatch)(world, &mut self.service, target);
+        (self.dispatch)(source, world, &mut self.service);
     }
 }
 impl<Request, Response, Streams> private::Sealed<HeldServiceMarker> for HeldService<Request, Response, Streams> { }
@@ -258,7 +224,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<SharedServiceMarker>
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn serve(self, world: &mut World, target: Entity) {
+    fn serve(self, source: Entity, world: &mut World) {
         let mut servable: std::sync::MutexGuard<'_, HeldService<Request, Response, Streams>> = {
             let mut sentinel = match self.sentinel.lock() {
                 Ok(sentinel) => sentinel,
@@ -272,7 +238,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<SharedServiceMarker>
                 }
             };
 
-            sentinel.queued.push_back(target);
+            sentinel.queued.push_back(source);
             if sentinel.running {
                 // If the system is already running then we cannot run it now.
                 // Instead we'll just leave its queued count incremented and
@@ -305,7 +271,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<SharedServiceMarker>
             servable.initialized = true;
         }
 
-        while let Some(target) = {
+        while let Some(source) = {
             let mut sentinel = match self.sentinel.lock() {
                 Ok(sentinel) => sentinel,
                 Err(poisoned) => {
@@ -327,7 +293,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<SharedServiceMarker>
                 None
             }
         } {
-            (servable.dispatch)(world, &mut servable.service, target);
+            (servable.dispatch)(source, world, &mut servable.service);
         }
     }
 }
@@ -359,7 +325,7 @@ Holdable<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -399,8 +365,8 @@ where
     type Request = Request;
     type Response = Response;
     type Streams = ();
-    fn serve(self, world: &mut World, target: Entity) {
-        self.hold().serve(world, target);
+    fn serve(self, source: Entity, world: &mut World) {
+        self.hold().serve(source, world);
     }
 }
 
@@ -409,15 +375,15 @@ Servable<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn serve(self, world: &mut World, target: Entity) {
-        self.hold().serve(world, target);
+    fn serve(self, source: Entity, world: &mut World) {
+        self.hold().serve(source, world);
     }
 }
 
@@ -453,7 +419,7 @@ Shareable<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {

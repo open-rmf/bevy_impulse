@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::Component,
+    prelude::{Component, Bundle},
     ecs::{
         world::EntityMut,
         system::EntityCommands,
@@ -25,6 +25,8 @@ use bevy::{
 
 pub trait Stream: Send + Sync + 'static {}
 
+/// StreamOut is a marker component that indicates what streams are offered by
+/// a service.
 #[derive(Component)]
 struct StreamOut<T: Stream>(std::marker::PhantomData<T>);
 
@@ -34,55 +36,38 @@ impl<T: Stream> Default for StreamOut<T> {
     }
 }
 
-pub trait IntoStreamOutComponents {
-    fn cmd_stream_out_components(cmds: &mut EntityCommands);
-    fn mut_stream_out_components(entity_mut: &mut EntityMut);
+#[derive(Component)]
+struct StreamHandler<T: Stream> {
+    handler: Box<dyn FnMut(T) + 'static + Send + Sync>,
 }
 
-impl<T: Stream> IntoStreamOutComponents for T {
-    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
-        cmds.insert(StreamOut::<T>::default());
-    }
-    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
-        entity_mut.insert(StreamOut::<T>::default());
+impl<T: Stream> Default for StreamHandler<T> {
+    fn default() -> Self {
+        StreamHandler { handler: None }
     }
 }
 
-impl IntoStreamOutComponents for () {
-    fn cmd_stream_out_components(_: &mut EntityCommands) { }
-    fn mut_stream_out_components(_: &mut EntityMut) { }
+pub trait IntoStreamBundle {
+    type StreamOutBundle: Bundle + Default;
 }
 
-impl<T1: IntoStreamOutComponents> IntoStreamOutComponents for (T1,) {
-    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
-        T1::cmd_stream_out_components(cmds);
-    }
-    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
-        T1::mut_stream_out_components(entity_mut);
-    }
+impl<T: Stream> IntoStreamBundle for T {
+    type StreamOutBundle = StreamOut<T>;
 }
 
-impl<T1: IntoStreamOutComponents, T2: IntoStreamOutComponents> IntoStreamOutComponents for (T1, T2) {
-    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
-        T1::cmd_stream_out_components(cmds);
-        T2::cmd_stream_out_components(cmds);
-    }
-    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
-        T1::mut_stream_out_components(entity_mut);
-        T2::mut_stream_out_components(entity_mut);
-    }
+impl IntoStreamBundle for () {
+    type StreamOutBundle = ();
 }
 
-impl<T1: IntoStreamOutComponents, T2: IntoStreamOutComponents, T3: IntoStreamOutComponents> IntoStreamOutComponents for (T1, T2, T3) {
-    fn cmd_stream_out_components(cmds: &mut EntityCommands) {
-        T1::cmd_stream_out_components(cmds);
-        T2::cmd_stream_out_components(cmds);
-        T3::cmd_stream_out_components(cmds);
-    }
-    fn mut_stream_out_components(entity_mut: &mut EntityMut) {
-        T1::mut_stream_out_components(entity_mut);
-        T2::mut_stream_out_components(entity_mut);
-        T3::mut_stream_out_components(entity_mut);
-    }
+impl<T1: Stream> IntoStreamBundle for (T1,) {
+    type StreamOutBundle = StreamOut<T1>;
+}
+
+impl<T1: IntoStreamBundle, T2: IntoStreamBundle> IntoStreamBundle for (T1, T2) {
+    type StreamOutBundle = (T1::StreamOutBundle, T2::StreamOutBundle);
+}
+
+impl<T1: IntoStreamBundle, T2: IntoStreamBundle, T3: IntoStreamBundle> IntoStreamBundle for (T1, T2, T3) {
+    type StreamOutBundle = (T1::StreamOutBundle, T2::StreamOutBundle, T3::StreamOutBundle);
 }
 

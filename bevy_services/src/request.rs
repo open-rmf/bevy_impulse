@@ -15,7 +15,10 @@
  *
 */
 
-use crate::{Provider, PromiseCommands, UnusedTarget, RequestStorage};
+use crate::{
+    Provider, PromiseCommands, UnusedTarget, InputBundle, PerformOperation, Serve,
+    Stream,
+};
 
 use bevy::{
     prelude::Commands,
@@ -35,7 +38,7 @@ define_label!(
 
 pub trait RequestExt<'w, 's> {
     /// Call this with [`Commands`] to request a service
-    fn request<'a, Request: 'static + Send + Sync, Response, Streams>(
+    fn request<'a, Request: 'static + Send + Sync, Response, Streams: Stream>(
         &'a mut self,
         provider: Provider<Request, Response, Streams>,
         request: Request,
@@ -45,7 +48,7 @@ pub trait RequestExt<'w, 's> {
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
-    fn request<'a, Request: 'static + Send + Sync, Response, Streams>(
+    fn request<'a, Request: 'static + Send + Sync, Response, Streams: Stream>(
         &'a mut self,
         provider: Provider<Request, Response, Streams>,
         request: Request,
@@ -53,11 +56,11 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
     where
         Response: 'static + Send + Sync,
     {
-        let target = self
-            .spawn(RequestStorage(Some(request)))
-            .insert(UnusedTarget)
-            .id();
-        PromiseCommands::new(provider.get(), target, self)
+        let source = self.spawn(InputBundle::new(request)).id();
+        let target = self.spawn(UnusedTarget).id();
+        self.add(PerformOperation::new(source, Serve::new(provider, target)));
+
+        PromiseCommands::new(source, target, self)
     }
 }
 

@@ -23,7 +23,7 @@ use arrayvec::ArrayVec;
 use std::collections::VecDeque;
 
 use crate::{
-    DispatchCommand, Dispatch, UnusedTarget, ResponseStorage, Pending,
+    DispatchCommand, Dispatch, UnusedTarget, InputStorage, InputBundle, Pending,
     cancel,
 };
 
@@ -67,7 +67,7 @@ fn dispatch_fork<Response: 'static + Send + Sync + Clone>(
 
     provider_mut.remove::<UnusedTarget>();
     if let Some(response) = {
-        if let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() {
+        if let Some(InputStorage(response)) = provider_mut.take::<InputStorage<Response>>() {
             if let Some(mut fork_mut) = provider_mut.get_mut::<Fork>() {
                 fork_mut.targets.retain(|t| *t != cmd.target);
                 if fork_mut.targets.is_empty() {
@@ -78,7 +78,7 @@ fn dispatch_fork<Response: 'static + Send + Sync + Clone>(
                     // If there is still another fork expecting the response to
                     // arrive, then we should clone the response and re-insert
                     // it into the storage.
-                    provider_mut.insert(ResponseStorage(Some(response.clone())));
+                    provider_mut.insert(InputBundle::new(response.clone()));
                 }
             }
             Some(response)
@@ -92,7 +92,7 @@ fn dispatch_fork<Response: 'static + Send + Sync + Clone>(
             cancel(world, cmd.target);
             return;
         };
-        target_mut.insert(ResponseStorage(Some(response)));
+        target_mut.insert(InputBundle::new(response));
     }
 }
 
@@ -104,7 +104,7 @@ fn pending_fork<Response: 'static + Send + Sync + Clone>(
     let Some(mut provider_mut) = world.get_entity_mut(provider) else {
         return
     };
-    let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() else {
+    let Some(InputStorage(response)) = provider_mut.take::<InputStorage<Response>>() else {
         // Maybe panic here instead? Why wasn't the response available when the
         // pending was triggered?
         let fork = provider_mut.take::<Fork>().unwrap();
@@ -128,7 +128,7 @@ fn pending_fork<Response: 'static + Send + Sync + Clone>(
         let Some(mut target_mut) = world.get_entity_mut(next_target) else {
             continue
         };
-        target_mut.insert(ResponseStorage(Some(response)));
+        target_mut.insert(InputBundle::new(response));
         queue.push_back(next_target);
     }
 }

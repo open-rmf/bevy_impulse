@@ -15,94 +15,51 @@
  *
 */
 
-use bevy::{
-    prelude::{Entity, World, Component},
-    ecs::system::Command,
-};
+use bevy::prelude::{Entity, World, Component};
 use std::collections::VecDeque;
 
-use crate::{
-    UnusedTarget, Target, Dispatch, DispatchCommand, ResponseStorage, Pending,
-    cancel,
-};
+use crate::{TargetStorage, InputStorage, InputBundle, Operation, OperationStatus};
 
-pub(crate) struct MakeMap<Response, U> {
-    provider: Entity,
-    f: Box<dyn FnOnce(Response) -> U + Send + Sync>,
+pub(crate) struct Map<T, U> {
+    target: Entity,
+    f: Box<dyn FnOnce(T) -> U + Send + Sync>,
 }
 
-impl<Response, U> MakeMap<Response, U> {
+impl<T, U> Map<T, U> {
     pub(crate) fn new(
-        provider: Entity,
-        f: Box<dyn FnOnce(Response) -> U + Send + Sync>,
+        target: Entity,
+        f: Box<dyn FnOnce(T) -> U + Send + Sync>,
     ) -> Self {
-        MakeMap { provider, f }
+        Map { target, f }
     }
 }
 
-impl<Response: 'static + Send + Sync, U: 'static + Send + Sync> Command for MakeMap<Response, U> {
-    fn apply(self, world: &mut World) {
-        world
-            .entity_mut(self.provider)
-            .insert(Map(self.f))
-            .insert(Dispatch::new_map::<Response, U>());
+impl<T: 'static + Send + Sync, U: 'static + Send + Sync> Operation for Map<T, U> {
+    type Parameters = (TargetStorage, MapStorage<T, U>);
+
+    fn parameters(self) -> Self::Parameters {
+        (
+            TargetStorage(self.target),
+            MapStorage(self.f),
+        )
     }
-}
 
-impl Dispatch {
-    fn new_map<Response: 'static + Send + Sync, U: 'static + Send + Sync>() -> Self {
-        Dispatch(dispatch_map::<Response, U>)
+    fn execute(
+        source: Entity,
+        world: &mut World,
+        queue: &mut VecDeque<Entity>,
+    ) -> Result<super::OperationStatus, ()> {
+        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+        let InputStorage(input) = source_mut.take::<InputStorage<T>>().ok_or(())?;
+        let MapStorage(f) = source_mut.take::<MapStorage<T, U>>().ok_or(())?;
+        let TargetStorage(target) = source_mut.get::<TargetStorage>().ok_or(())?;
+        let mut target_mut = world.get_entity_mut(*target).ok_or(())?;
+
+        let u = (f)(input);
+        target_mut.insert(InputBundle::new(u));
+        Ok(OperationStatus::Finished)
     }
-}
-
-fn dispatch_map<Response: 'static + Send + Sync, U: 'static + Send + Sync>(
-    world: &mut World,
-    cmd: DispatchCommand,
-) {
-    let Some(mut provider_mut) = world.get_entity_mut(cmd.provider) else {
-        cancel(world, cmd.target);
-        return;
-    };
-
-    provider_mut.remove::<UnusedTarget>();
-    let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() else {
-        provider_mut
-            .insert(Target(cmd.target))
-            .insert(Pending(pending_map::<Response, U>));
-        return;
-    };
-
-    let map = provider_mut.take::<Map<Response, U>>().unwrap();
-    provider_mut.despawn();
-    let u = (map.0)(response);
-    let Some(mut target_mut) = world.get_entity_mut(cmd.target) else {
-        cancel(world, cmd.target);
-        return;
-    };
-
-    target_mut.insert(ResponseStorage(Some(u)));
-}
-
-fn pending_map<Response: 'static + Send + Sync, U: 'static + Send + Sync>(
-    world: &mut World,
-    queue: &mut VecDeque<Entity>,
-    provider: Entity,
-) {
-    let mut provider_mut = world.entity_mut(provider);
-    let map = provider_mut.take::<Map<Response, U>>().unwrap();
-    let target = provider_mut.get::<Target>().unwrap().0;
-    let Some(ResponseStorage(Some(response))) = provider_mut.take::<ResponseStorage<Response>>() else {
-        cancel(world, target);
-        return;
-    };
-    let u = (map.0)(response);
-
-    let Some(mut target_mut) = world.get_entity_mut(target) else {
-        return
-    };
-    target_mut.insert(ResponseStorage(Some(u)));
-    queue.push_back(target);
 }
 
 #[derive(Component)]
-struct Map<Response, U>(Box<dyn FnOnce(Response) -> U + Send + Sync>);
+struct MapStorage<T, U>(Box<dyn FnOnce(T) -> U + Send + Sync>);

@@ -322,7 +322,7 @@ impl<Request, Response, Streams, Deliver, With, Also>
 ServiceAdd<BuilderMarker>
 for ServiceBuilder<Request, Response, Streams, Deliver, With, Also>
 where
-    Streams: IntoStreamOutComponents,
+    Streams: IntoStreamBundle,
     Deliver: DeliveryChoice,
     With: WithEntityMut,
     Also: AlsoAdd<Request, Response, Streams>,
@@ -344,7 +344,7 @@ where
 
 impl<M, S: IntoServiceBuilder<M>> ServiceAdd<M> for S
 where
-    S::Streams: IntoStreamOutComponents,
+    S::Streams: IntoStreamBundle,
     S::DefaultDeliver: DeliveryChoice,
     S::Request: 'static + Send + Sync,
     S::Response: 'static + Send + Sync,
@@ -361,7 +361,7 @@ impl<Request, Response, Streams, Deliver, With>
 ServiceSpawn<BuilderMarker>
 for ServiceBuilder<Request, Response, Streams, Deliver, With, ()>
 where
-    Streams: IntoStreamOutComponents,
+    Streams: IntoStreamBundle,
     Deliver: DeliveryChoice,
     With: WithEntityCommands,
     Request: 'static + Send + Sync,
@@ -385,7 +385,7 @@ private::Sealed<BuilderMarker> for ServiceBuilder<Request, Response, Streams, De
 
 impl<M, S: IntoServiceBuilder<M>> ServiceSpawn<M> for S
 where
-    S::Streams: IntoStreamOutComponents,
+    S::Streams: IntoStreamBundle,
     S::DefaultDeliver: DeliveryChoice,
     S::Request: 'static + Send + Sync,
     S::Response: 'static + Send + Sync,
@@ -403,7 +403,7 @@ IntoServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static,
     Response: 'static,
 {
@@ -430,7 +430,7 @@ IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static,
     Response: 'static,
 {
@@ -452,7 +452,7 @@ IntoServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
 where
     Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static,
     Response: 'static,
 {
@@ -479,7 +479,7 @@ IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sy
 where
     Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
     Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamOutComponents + 'static,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static,
     Response: 'static,
 {

@@ -16,11 +16,11 @@
 */
 
 use crate::{
-    Detached, Held, DispatchCommand, Provider, UnusedTarget, MakeThen,
-    MakeFork, MakeMap, Chosen, ApplyLabel, Servable, MakeThenServe,
+    Detached, DispatchCommand, Provider, UnusedTarget, Terminate, PerformOperation,
+    MakeFork, Map, Chosen, ApplyLabel, Servable, Serve, ServeOnce, Stream,
 };
 
-use bevy::prelude::{Entity, Commands};
+use bevy::{prelude::{Entity, Commands}, ecs::system::Command};
 
 use std::{sync::Arc, future::Future, task::{Context, Poll}, pin::Pin};
 
@@ -261,9 +261,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// promise will automatically be freed up.
     pub fn detach(self) {
         self.commands.entity(self.target)
-            .remove::<UnusedTarget>()
-            .insert(Detached);
+            .insert(Detached)
+            .remove::<UnusedTarget>();
         self.commands.add(DispatchCommand::new(self.provider, self.target));
+        self.commands.add(Terminate::<Response>::new(self.target, None));
     }
 
     /// Take the promise so you can reference it later. If all copies of the
@@ -271,10 +272,9 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// be canceled and the storage for the promise will be freed up.
     pub fn take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.entity(self.target)
-            .remove::<UnusedTarget>()
-            .insert(Held(Arc::downgrade(&holding)));
+        self.commands.entity(self.target).remove::<UnusedTarget>();
         self.commands.add(DispatchCommand::new(self.provider, self.target));
+        self.commands.add(Terminate::new(self.target, Some(sender)));
         promise
     }
 
@@ -285,14 +285,13 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     ///
     /// This is effectively equivalent to running both [`detach`] and [`hold`].
     pub fn detached_take(self) -> Promise<Response> {
-        self.commands.entity(self.target).insert(Detached);
-
-        let holding = Arc::new(());
+        let (promise, sender) = Promise::new();
         self.commands.entity(self.target)
-            .remove::<UnusedTarget>()
-            .insert(Held(Arc::downgrade(&holding)));
+            .insert(Detached)
+            .remove::<UnusedTarget>();
         self.commands.add(DispatchCommand::new(self.provider, self.target));
-        Promise::new(self.target, holding)
+        self.commands.add(Terminate::new(self.target, Some(sender)));
+        promise
     }
 
     /// When the response is delivered, we will make a clone of it and
@@ -334,24 +333,24 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         self,
         f: impl FnOnce(Response) -> MappedResponse + Send + Sync + 'static,
     ) -> PromiseCommands<'w, 's, 'a, MappedResponse, (), Chosen> {
-        self.commands.add(MakeMap::new(self.target, Box::new(f)));
-        let map_target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
-        PromiseCommands::new(self.target, map_target, self.commands)
+        let source = self.target;
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(PerformOperation::new(source, Map::new(target, Box::new(f))));
+        PromiseCommands::new(source, target, self.commands)
     }
 
     /// Use the response of the service as a new service request as soon as the
     /// response is delivered. If you apply a label or hook into streams after
     /// calling this function, then those will be applied to this new service
     /// request.
-    pub fn then<ThenResponse: 'static + Send + Sync, ThenStreams>(
+    pub fn then<ThenResponse: 'static + Send + Sync, ThenStreams: Stream>(
         self,
         service_provider: Provider<Response, ThenResponse, ThenStreams>
     ) -> PromiseCommands<'w, 's, 'a, ThenResponse, ThenStreams, ()> {
-        let then_target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(MakeThen::<Response>::new(self.target, service_provider.get()));
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
-        PromiseCommands::new(self.target, then_target, self.commands)
+        let source = self.target;
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(PerformOperation::new(source, Serve::new(service_provider, target)));
+        PromiseCommands::new(source, target, self.commands)
     }
 
     /// Use the response of the service as a request into a [`Servable`] object
@@ -368,11 +367,12 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         ThenServe: 'static + Send + Sync + Servable<M>,
         ThenServe::Request: 'static + Send + Sync,
         ThenServe::Response: 'static + Send + Sync,
+        PerformOperation<ServeOnce<ThenServe, M>>: Command,
     {
-        let then_serve_target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(MakeThenServe::<ThenServe, M>::new(self.target, servable));
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
-        PromiseCommands::new(self.target, then_serve_target, self.commands)
+        let source = self.target;
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(PerformOperation::new(source, ServeOnce::new(servable, target)));
+        PromiseCommands::new(source, target, self.commands)
     }
 }
 
