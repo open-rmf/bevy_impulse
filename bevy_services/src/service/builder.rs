@@ -335,7 +335,7 @@ where
     fn add_service(self, app: &mut App) {
         let mut entity_mut = app.world.spawn(ServiceBundle::new(self.service));
         let provider = Provider::<Request, Response, Streams>::new(entity_mut.id());
-        Streams::mut_stream_out_components(&mut entity_mut);
+        entity_mut.insert(Streams::StreamOutBundle::default());
         self.deliver.apply_entity_mut(&mut entity_mut);
         self.with.apply(entity_mut);
         self.also.apply(app, provider);
@@ -373,7 +373,7 @@ where
     fn spawn_service(self, commands: &mut Commands) -> Provider<Request, Response, Streams> {
         let mut entity_cmds = commands.spawn(ServiceBundle::new(self.service));
         let provider = Provider::<Request, Response, Streams>::new(entity_cmds.id());
-        Streams::cmd_stream_out_components(&mut entity_cmds);
+        entity_cmds.insert(Streams::StreamOutBundle::default());
         self.deliver.apply_entity_commands(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider

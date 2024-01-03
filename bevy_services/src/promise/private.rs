@@ -35,26 +35,32 @@ impl<T> Sender<T> {
         Self { target, sent: false }
     }
 
-    pub(crate) fn send(mut self, value: T) {
-        self.set(PromiseResult::Finished(value));
+    pub(crate) fn send(mut self, value: T) -> Result<(), T> {
+        let result = self.set(PromiseResult::Finished(value));
         self.sent = true;
+        result
     }
 
-    pub(crate) fn set(&mut self, result: PromiseResult<T>) {
+    pub(crate) fn set(&mut self, result: PromiseResult<T>) -> Result<(), T> {
         let Some(target) = self.target.upgrade() else {
-            return;
+            match result {
+                PromiseResult::Finished(value) => return Err(value),
+                PromiseResult::Canceled => return Ok(()),
+            }
         };
-        let Ok(mut inner) = target.inner.lock() else {
-            return;
+        let mut inner = match target.inner.lock() {
+            Ok(inner) => inner,
+            Err(poisoned) => poisoned.into_inner(),
         };
         inner.result = Some(result);
-        if let Some(waker) = inner.waker {
+        if let Some(waker) = inner.waker.take() {
             waker.wake();
         }
         target.cv.notify_all();
+        Ok(())
     }
 
-    pub(crate) fn on_cancel(&mut self, f: impl FnOnce()) {
+    pub(crate) fn on_cancel(&mut self, f: impl FnOnce() + 'static + Send) {
         match self.target.upgrade() {
             Some(target) => {
                 let mut guard = match target.inner.lock() {
@@ -62,7 +68,7 @@ impl<T> Sender<T> {
                     Err(poisoned) => poisoned.into_inner(),
                 };
 
-                guard.on_drop = Some(Box::new(f));
+                guard.on_promise_drop = Some(Box::new(f));
             }
             None => f(),
         }
@@ -70,7 +76,7 @@ impl<T> Sender<T> {
 
     pub(crate) fn expectation(&self) -> Expectation
     where
-        T: Send
+        T: Send + 'static
     {
         Expectation { target: self.target.clone() }
     }
@@ -78,10 +84,9 @@ impl<T> Sender<T> {
 
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
-        if self.sent {
-            return;
+        if !self.sent {
+            self.set(PromiseResult::Canceled);
         }
-        self.set(PromiseResult::Canceled);
     }
 }
 
@@ -102,23 +107,12 @@ pub(crate) enum PromiseResult<T> {
 pub(crate) struct PromiseTargetInner<T> {
     pub(crate) result: Option<PromiseResult<T>>,
     pub(crate) waker: Option<Waker>,
-    pub(crate) on_drop: Option<Box<dyn FnOnce()>>,
-    pub(crate) sent: bool,
+    pub(crate) on_promise_drop: Option<Box<dyn FnOnce() + 'static + Send>>,
 }
 
 impl<T> PromiseTargetInner<T> {
     pub(crate) fn new() -> Self {
-        Self { result: None, waker: None, on_drop: None }
-    }
-}
-
-impl<T> Drop for PromiseTargetInner<T> {
-    fn drop(&mut self) {
-
-        match self.on_drop {
-            Some(f) => f(),
-            None => { }
-        }
+        Self { result: None, waker: None, on_promise_drop: None }
     }
 }
 

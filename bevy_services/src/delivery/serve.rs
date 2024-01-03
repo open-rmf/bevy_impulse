@@ -17,13 +17,10 @@
 
 use crate::{
     Operation, TargetStorage, Provider, Dispatch,
-    OperationStatus, DispatchCommand,
+    OperationStatus, DispatchCommand, dispatch_service,
 };
 
-use bevy::{
-    prelude::{Component, Entity, World},
-    ecs::system::EntityCommands,
-};
+use bevy::prelude::{Component, Entity, World};
 
 use std::collections::VecDeque;
 
@@ -58,13 +55,11 @@ impl Operation for Serve {
         queue: &mut VecDeque<Entity>,
     ) -> Result<OperationStatus, ()> {
         let source_ref = world.get_entity(source).ok_or(())?;
-        let TargetStorage(target) = source_ref.get::<TargetStorage>().ok_or(())?;
-        let ProviderStorage(provider) = source_ref.get::<ProviderStorage>().ok_or(())?;
-        let mut provider_ref = world.get_entity(*provider).ok_or(())?;
-        let service_dispatch = provider_ref.get::<Dispatch>().ok_or(())?;
+        let target = source_ref.get::<TargetStorage>().ok_or(())?.0;
+        let provider = source_ref.get::<ProviderStorage>().ok_or(())?.0;
 
-        (service_dispatch.0)(world, DispatchCommand::new(*provider, source, *target));
-        Ok(OperationStatus::Queued(*provider))
+        dispatch_service(DispatchCommand::new(provider, source, target), world, queue);
+        Ok(OperationStatus::Queued(provider))
     }
 }
 

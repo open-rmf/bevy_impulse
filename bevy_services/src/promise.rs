@@ -16,11 +16,11 @@
 */
 
 use crate::{
-    Detached, DispatchCommand, Provider, UnusedTarget, Terminate, PerformOperation,
-    MakeFork, Map, Chosen, ApplyLabel, Servable, Serve, ServeOnce, Stream,
+    Provider, UnusedTarget, Terminate, PerformOperation,
+    Fork, Map, Chosen, ApplyLabel, Servable, Serve, ServeOnce, Stream,
 };
 
-use bevy::{prelude::{Entity, Commands}, ecs::system::Command};
+use bevy::prelude::{Entity, Commands};
 
 use std::{sync::Arc, future::Future, task::{Context, Poll}, pin::Pin};
 
@@ -82,7 +82,7 @@ impl<T> Promise<T> {
         };
         self.target.cv.wait_while(guard, |inner| {
             inner.result.is_none()
-        });
+        }).ok();
         self
     }
 
@@ -93,28 +93,32 @@ impl<T> Promise<T> {
             return self;
         }
 
-        let guard = match self.target.inner.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                self.state = PromiseState::Canceled;
-                return self;
-            }
-        };
-        self.target.cv.wait_while(guard, |inner| {
-            match inner.result.take() {
-                Some(PromiseResult::Finished(response)) => {
-                    self.state = PromiseState::Received(response);
-                    return false;
-                }
-                Some(PromiseResult::Canceled) => {
+        'waiting: {
+            let guard = match self.target.inner.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
                     self.state = PromiseState::Canceled;
-                    return false;
+                    break 'waiting;
                 }
-                None => {
-                    return true;
+            };
+
+            self.target.cv.wait_while(guard, |inner| {
+                match inner.result.take() {
+                    Some(PromiseResult::Finished(response)) => {
+                        self.state = PromiseState::Available(response);
+                        return false;
+                    }
+                    Some(PromiseResult::Canceled) => {
+                        self.state = PromiseState::Canceled;
+                        return false;
+                    }
+                    None => {
+                        return true;
+                    }
                 }
-            }
-        });
+            }).ok();
+        }
+
         self
     }
 
@@ -128,7 +132,7 @@ impl<T> Promise<T> {
                 Ok(mut guard) => {
                     match guard.result.take() {
                         Some(PromiseResult::Finished(response)) => {
-                            self.state = PromiseState::Received(response);
+                            self.state = PromiseState::Available(response);
                         }
                         Some(PromiseResult::Canceled) => {
                             self.state = PromiseState::Canceled;
@@ -149,12 +153,30 @@ impl<T> Promise<T> {
     }
 }
 
+impl<T> Drop for Promise<T> {
+    fn drop(&mut self) {
+        if self.state.is_pending() {
+            // We never received the result from the sender so we will trigger
+            // the cancelation.
+            let f = match self.target.inner.lock() {
+                Ok(mut guard) => guard.on_promise_drop.take(),
+                Err(_) => None,
+            };
+
+            if let Some(f) = f {
+                f();
+            }
+        }
+    }
+}
+
 impl<T: Unpin> Future for Promise<T> {
     type Output = PromiseState<T>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let state = self.get_mut().take();
+        let self_mut = self.get_mut();
+        let state = self_mut.take();
         if state.is_pending() {
-            match self.get_mut().target.inner.lock() {
+            match self_mut.target.inner.lock() {
                 Ok(mut inner) => {
                     inner.waker = Some(cx.waker().clone());
                 }
@@ -170,7 +192,7 @@ impl<T: Unpin> Future for Promise<T> {
 /// The state of a promise.
 pub enum PromiseState<T> {
     /// The promise received its result and can be seen in this state.
-    Received(T),
+    Available(T),
     /// The promise is still pending, so you need to keep waiting for the state.
     Pending,
     /// The promise has been canceled and will never receive a response.
@@ -183,7 +205,7 @@ pub enum PromiseState<T> {
 impl<T> PromiseState<T> {
     pub fn as_ref(&self) -> PromiseState<&T> {
         match self {
-            Self::Received(value) => PromiseState::Received(value),
+            Self::Available(value) => PromiseState::Available(value),
             Self::Pending => PromiseState::Pending,
             Self::Canceled => PromiseState::Canceled,
             Self::Taken => PromiseState::Taken,
@@ -191,7 +213,7 @@ impl<T> PromiseState<T> {
     }
 
     pub fn is_received(&self) -> bool {
-        matches!(self, Self::Received(_))
+        matches!(self, Self::Available(_))
     }
 
     pub fn is_pending(&self) -> bool {
@@ -207,24 +229,22 @@ impl<T> PromiseState<T> {
     }
 
     pub fn take(&mut self) -> PromiseState<T> {
-        match *self {
-            Self::Received(response) => {
-                *self = Self::Taken;
-                Self::Received(response)
+        let next_value = match self {
+            Self::Available(_) => {
+                Self::Taken
             }
             Self::Pending => {
-                *self = Self::Pending;
                 Self::Pending
             }
             Self::Canceled => {
-                *self = Self::Canceled;
                 Self::Canceled
             }
             Self::Taken => {
-                *self = Self::Taken;
                 Self::Taken
             }
-        }
+        };
+
+        std::mem::replace(self, next_value)
     }
 }
 
@@ -260,8 +280,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// promise. Immediately after the service is finished, the storage for the
     /// promise will automatically be freed up.
     pub fn detach(self) {
-        self.commands.entity(self.target).insert(Detached);
-        self.commands.add(Terminate::<Response>::new(self.target, None));
+        self.commands.add(PerformOperation::new(
+            self.target,
+            Terminate::<Response>::new(None, true),
+        ));
     }
 
     /// Take the promise so you can reference it later. If all copies of the
@@ -269,7 +291,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// be canceled and the storage for the promise will be freed up.
     pub fn take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.add(Terminate::new(self.target, Some(sender)));
+        self.commands.add(PerformOperation::new(
+            self.target,
+            Terminate::new(Some(sender), false),
+        ));
         promise
     }
 
@@ -281,7 +306,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// This is effectively equivalent to running both [`detach`] and [`hold`].
     pub fn detached_take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.add(Terminate::new(self.target, Some(sender)));
+        self.commands.add(PerformOperation::new(
+            self.target,
+            Terminate::new(Some(sender), true),
+        ));
         promise
     }
 
@@ -301,16 +329,16 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     where
         Response: Clone,
     {
+        let source = self.target;
         let left_target = self.commands.spawn(UnusedTarget).id();
         let right_target = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(MakeFork::<Response>::new(
-            self.target,
-            [left_target, right_target],
+        self.commands.add(PerformOperation::new(
+            source,
+            Fork::<Response>::new([left_target, right_target]),
         ));
-        self.commands.add(DispatchCommand::new(self.provider, self.target));
-        f(PromiseCommands::new(self.target, left_target, self.commands));
 
+        f(PromiseCommands::new(self.target, left_target, self.commands));
         PromiseCommands::new(self.target, right_target, self.commands)
     }
 
@@ -354,11 +382,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         servable: ThenServe,
     ) -> PromiseCommands<'w, 's, 'a, ThenServe::Response, ThenServe::Streams, Chosen>
     where
-        M: 'static + Send,
+        M: 'static + Send + Sync,
         ThenServe: 'static + Send + Sync + Servable<M>,
         ThenServe::Request: 'static + Send + Sync,
         ThenServe::Response: 'static + Send + Sync,
-        PerformOperation<ServeOnce<ThenServe, M>>: Command,
     {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();

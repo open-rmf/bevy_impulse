@@ -49,12 +49,14 @@ impl<T: 'static + Send + Sync, U: 'static + Send + Sync> Operation for Map<T, U>
     ) -> Result<super::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let InputStorage(input) = source_mut.take::<InputStorage<T>>().ok_or(())?;
-        let MapStorage(f) = source_mut.take::<MapStorage<T, U>>().ok_or(())?;
-        let TargetStorage(target) = source_mut.get::<TargetStorage>().ok_or(())?;
-        let mut target_mut = world.get_entity_mut(*target).ok_or(())?;
+        let f = source_mut.take::<MapStorage<T, U>>().ok_or(())?.0;
+        let TargetStorage(target) = source_mut.get().ok_or(())?;
+        let target = *target;
+        let mut target_mut = world.get_entity_mut(target).ok_or(())?;
 
-        let u = (f)(input);
+        let u = f(input);
         target_mut.insert(InputBundle::new(u));
+        queue.push_back(target);
         Ok(OperationStatus::Finished)
     }
 }

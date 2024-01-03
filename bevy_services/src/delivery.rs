@@ -19,13 +19,18 @@ use crate::{RequestLabelId, GenericAssistant, Req, Resp, Job};
 
 use bevy::{
     prelude::{Component, Entity, World, Bundle, Resource},
-    ecs::system::{Command, BoxedSystem},
+    ecs::system::BoxedSystem,
     tasks::{Task, AsyncComputeTaskPool},
 };
 
 use smallvec::SmallVec;
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::Context,
+    collections::{HashMap, VecDeque},
+};
 
 mod operation;
 pub(crate) use operation::*;
@@ -47,9 +52,9 @@ mod terminate;
 pub(crate) use terminate::*;
 
 #[derive(Resource)]
-struct BlockingDeliveryQueue {
+struct ServiceQueue {
     is_delivering: bool,
-    queue: VecDeque<(DispatchCommand, fn(&mut World, DispatchCommand))>,
+    queue: VecDeque<DispatchCommand>,
 }
 
 #[derive(Component)]
@@ -90,53 +95,44 @@ impl DispatchCommand {
     }
 }
 
-impl Command for DispatchCommand {
-    fn apply(self, world: &mut World) {
-        let Some(provider_ref) = world.get_entity(self.provider) else {
-            cancel(world, self.target);
-            return;
-        };
-
-        let Some(dispatcher) = provider_ref.get::<Dispatch>() else {
-            cancel(world, self.target);
-            return;
-        };
-
-        (dispatcher.0)(world, self);
-    }
-}
 pub(crate) fn cancel(world: &mut World, target: Entity) {
 
 }
 
-fn abort(world: &mut World, target: Entity) {
-
-}
-
-fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
-    world: &mut World,
+pub(crate) fn dispatch_service(
     cmd: DispatchCommand,
+    world: &mut World,
+    queue: &mut VecDeque<Entity>,
 ) {
-    let mut blocking_delivery = world.resource_mut::<BlockingDeliveryQueue>();
-    blocking_delivery.queue.push_back((cmd, dispatch_single_blocking::<Request, Response>));
-    if blocking_delivery.is_delivering {
-        // Blocking services are already being delivered, so to keep things
-        // simple we will add this dispatch command to the queue and let the
+    let mut service_queue = world.resource_mut::<ServiceQueue>();
+    service_queue.queue.push_back(cmd);
+    if service_queue.is_delivering {
+        // Services are already being delivered, so to keep things simple we
+        // will add this dispatch command to the service queue and let the
         // services be processed one at a time. Otherwise service recursion gets
         // messy or even impossible.
         return;
     }
 
-    blocking_delivery.is_delivering = true;
-    while let Some((cmd, dispatch)) = world.resource_mut::<BlockingDeliveryQueue>().queue.pop_back() {
-        dispatch(world, cmd);
+    service_queue.is_delivering = true;
+    while let Some(cmd) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
+        let Some(provider_ref) = world.get_entity(cmd.provider) else {
+            cancel(world, cmd.source);
+            continue;
+        };
+        let Some(dispatch) = provider_ref.get::<Dispatch>() else {
+            cancel(world, cmd.source);
+            continue;
+        };
+        (dispatch.0)(cmd, world, queue);
     }
-    world.resource_mut::<BlockingDeliveryQueue>().is_delivering = false;
+    world.resource_mut::<ServiceQueue>().is_delivering = false;
 }
 
-fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
-    world: &mut World,
+fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
     cmd: DispatchCommand,
+    world: &mut World,
+    queue: &mut VecDeque<Entity>,
 ) {
     let DispatchCommand {provider, source, target} = cmd;
     let request = if let Some(mut source_mut) = world.get_entity_mut(source) {
@@ -219,8 +215,9 @@ fn dispatch_single_blocking<Request: 'static + Send + Sync, Response: 'static + 
 }
 
 fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
-    world: &mut World,
     cmd: DispatchCommand,
+    world: &mut World,
+    _: &mut VecDeque<Entity>,
 ) {
     let DispatchCommand {provider, source, target} = cmd;
 
@@ -255,7 +252,7 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
         DeliveryUpdate::Immediate => { /* Continue */ }
         DeliveryUpdate::Queued { canceled, stop } => {
             if let Some(target) = stop {
-                abort(world, target);
+                cancel(world, target);
             }
             for target in canceled {
                 cancel(world, target);
@@ -280,38 +277,31 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
         }
     };
 
+    let Job(job) = service.run((provider, Req(request)), world);
+    // FIXME: This is not currently handling recursion correctly. If the
+    // async service calls itself while producing the job, then this will
+    // lead to a panic.
+    service.apply_deferred(world);
+
+    let task = AsyncComputeTaskPool::get().spawn(async move {
+        job(GenericAssistant {  })
+    });
+
     if let Some(mut target_mut) = world.get_entity_mut(target) {
-        let Job(job) = service.run((provider, Req(request)), world);
-        // FIXME: This is not currently handling recursion correctly. If the
-        // async service calls itself while producing the job, then this will
-        // lead to a panic.
-        service.apply_deferred(world);
-
-        let task = AsyncComputeTaskPool::get().spawn(async move {
-            job(GenericAssistant {  })
-        });
-
-        if let Some(mut target_mut) = world.get_entity_mut(target) {
-            target_mut.insert((
-                TaskStorage(task),
-                PollTask {
-                    provider: Some(provider),
-                    poll: poll_task::<Response>,
-                }
-            ));
-        } else {
-            // The target has been despawned, so we treat that as the request
-            // being canceled.
-            cancel(world, target);
-        }
+        target_mut.insert((
+            TaskStorage(task),
+            PollTask(poll_task::<Response>),
+        ));
     } else {
+        // The target has been despawned, so we treat that as the request
+        // being canceled.
         cancel(world, target);
-    };
+    }
 
     let Some(mut provider_mut) = world.get_entity_mut(provider) else {
         // The async service was despawned by the service itself, so we should
         // treat the request as canceled.
-        abort(world, target);
+        cancel(world, target);
         return;
     };
     match &mut *provider_mut.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
@@ -417,13 +407,6 @@ fn insert_serial_order(
     DeliveryUpdate::Queued { canceled, stop }
 }
 
-pub(crate) fn handle_response(
-    world: &mut World,
-    target: Entity,
-) {
-
-}
-
 /// Marker trait to indicate when an input is ready without knowing the type of
 /// input.
 #[derive(Component)]
@@ -451,7 +434,7 @@ impl<Input: 'static + Send + Sync> InputBundle<Input> {
 }
 
 #[derive(Component)]
-pub(crate) struct TaskStorage<Response>(pub(crate) Task<Option<Response>>);
+pub(crate) struct TaskStorage<Response>(Task<Option<Response>>);
 
 #[derive(Component)]
 pub(crate) enum OnCancel {
@@ -463,18 +446,24 @@ pub(crate) enum OnCancel {
 pub(crate) struct UnusedTarget;
 
 #[derive(Component)]
-pub(crate) struct PollTask {
-    pub(crate) provider: Option<Entity>,
-    pub(crate) poll: fn(&mut World, Entity, Entity),
-}
+pub(crate) struct PollTask(fn(Entity, &mut World) -> Result<bool, ()>);
 
-pub(crate) fn poll_task<Response>(world: &mut World, provider: Entity, target: Entity) {
+pub(crate) fn poll_task<Response: 'static + Send + Sync>(
+    source: Entity,
+    world: &mut World,
+) -> Result<bool, ()> {
+    let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+    let task = source_mut.take::<TaskStorage<Response>>().ok_or(())?.0;
+    Pin::new(&mut task).poll(
+        Context::from_waker(waker)
+    )
 
+    Ok(true)
 }
 
 /// This component determines how a provider responds to a dispatch request.
 #[derive(Component)]
-pub(crate) struct Dispatch(pub(crate) fn(&mut World, DispatchCommand));
+pub(crate) struct Dispatch(pub(crate) fn(DispatchCommand, &mut World, &mut VecDeque<Entity>));
 
 /// This component indicates that a source entity has been queued for a service
 /// so it should not be despawned yet.
@@ -511,7 +500,6 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceBun
         Self { service, dispatch }
     }
 }
-
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct DeliveryInstructions {

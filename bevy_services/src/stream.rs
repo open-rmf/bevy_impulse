@@ -28,7 +28,7 @@ pub trait Stream: Send + Sync + 'static {}
 /// StreamOut is a marker component that indicates what streams are offered by
 /// a service.
 #[derive(Component)]
-struct StreamOut<T: Stream>(std::marker::PhantomData<T>);
+pub struct StreamOut<T: Stream>(std::marker::PhantomData<T>);
 
 impl<T: Stream> Default for StreamOut<T> {
     fn default() -> Self {
@@ -39,12 +39,6 @@ impl<T: Stream> Default for StreamOut<T> {
 #[derive(Component)]
 struct StreamHandler<T: Stream> {
     handler: Box<dyn FnMut(T) + 'static + Send + Sync>,
-}
-
-impl<T: Stream> Default for StreamHandler<T> {
-    fn default() -> Self {
-        StreamHandler { handler: None }
-    }
 }
 
 pub trait IntoStreamBundle {
