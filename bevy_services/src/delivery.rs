@@ -26,11 +26,17 @@ use bevy::{
 use smallvec::SmallVec;
 
 use std::{
+    task::Poll,
     future::Future,
     pin::Pin,
     task::Context,
     collections::{HashMap, VecDeque},
+    sync::Arc,
 };
+
+use futures::task::{waker_ref, ArcWake};
+
+use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
 mod operation;
 pub(crate) use operation::*;
@@ -434,7 +440,7 @@ impl<Input: 'static + Send + Sync> InputBundle<Input> {
 }
 
 #[derive(Component)]
-pub(crate) struct TaskStorage<Response>(Task<Option<Response>>);
+struct TaskStorage<Response>(Task<Option<Response>>);
 
 #[derive(Component)]
 pub(crate) enum OnCancel {
@@ -445,20 +451,92 @@ pub(crate) enum OnCancel {
 #[derive(Component)]
 pub(crate) struct UnusedTarget;
 
-#[derive(Component)]
-pub(crate) struct PollTask(fn(Entity, &mut World) -> Result<bool, ()>);
+struct JobWaker {
+    sender: CbSender<Entity>,
+    entity: Entity,
+}
 
+impl ArcWake for JobWaker {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.sender.send(arc_self.entity).ok();
+    }
+}
+
+#[derive(Component)]
+struct JobWakerStorage(Arc<JobWaker>);
+
+#[derive(Resource)]
+struct WakeQueue {
+    sender: CbSender<Entity>,
+    receiver: CbReceiver<Entity>,
+}
+
+impl WakeQueue {
+    fn new() -> WakeQueue {
+        let (sender, receiver) = unbounded();
+        WakeQueue { sender, receiver }
+    }
+}
+
+#[derive(Component)]
+struct PollTask(fn(Entity, &mut World) -> Result<bool, ()>);
+
+#[derive(Bundle)]
+pub(crate) struct TaskBundle<Response: 'static + Send + Sync> {
+    task: TaskStorage<Response>,
+    poll: PollTask,
+}
+
+impl<Response: 'static + Send + Sync> TaskBundle<Response> {
+    pub(crate) fn new(task: Task<Option<Response>>) -> TaskBundle<Response> {
+        TaskBundle {
+            task: TaskStorage(task),
+            poll: PollTask(poll_task::<Response>),
+        }
+    }
+}
+
+/// Ok(true): Task has finished
+/// Ok(false): Task is still running
+/// Err(()): Task is canceled
 pub(crate) fn poll_task<Response: 'static + Send + Sync>(
     source: Entity,
     world: &mut World,
 ) -> Result<bool, ()> {
     let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-    let task = source_mut.take::<TaskStorage<Response>>().ok_or(())?.0;
-    Pin::new(&mut task).poll(
-        Context::from_waker(waker)
-    )
+    let mut task = source_mut.take::<TaskStorage<Response>>().ok_or(())?.0;
+    let waker = if let Some(waker) = source_mut.take::<JobWakerStorage>() {
+        waker.0.clone()
+    } else {
+        let wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
+        let waker = Arc::new(JobWaker {
+            sender: wake_queue.sender.clone(),
+            entity: source,
+        });
+        waker
+    };
 
-    Ok(true)
+    match Pin::new(&mut task).poll(
+        &mut Context::from_waker(&waker_ref(&waker))
+    ) {
+        Poll::Ready(Some(result)) => {
+            // Task has finished
+            world.entity_mut(source).insert(InputStorage(result));
+            Ok(true)
+        }
+        Poll::Ready(None) => {
+            // Task has canceled
+            Err(())
+        }
+        Poll::Pending => {
+            // Task is still running
+            world.entity_mut(source).insert((
+                TaskStorage(task),
+                JobWakerStorage(waker),
+            ));
+            Ok(false)
+        }
+    }
 }
 
 /// This component determines how a provider responds to a dispatch request.

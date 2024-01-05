@@ -17,10 +17,10 @@
 
 use crate::{
     Req, Resp, Job, Assistant, IntoStreamBundle, BoxedJob,
-    GenericAssistant, InputStorage, InputBundle, TaskStorage, PollTask,
+    GenericAssistant, InputStorage, InputBundle, TaskBundle,
     TargetStorage, Operation,
     OperationStatus,
-    cancel, poll_task, private,
+    cancel, private,
 };
 
 use bevy::{
@@ -153,13 +153,7 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
             });
 
             if let Some(mut target_mut) = world.get_entity_mut(target) {
-                target_mut.insert((
-                    TaskStorage(task),
-                    PollTask {
-                        provider: None,
-                        poll: poll_task::<Response>,
-                    }
-                ));
+                target_mut.insert(TaskBundle::new(task));
             } else {
                 cancel(world, target);
             }
