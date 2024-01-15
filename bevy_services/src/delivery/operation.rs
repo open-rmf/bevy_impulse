@@ -15,9 +15,7 @@
  *
 */
 
-use crate::{UnusedTarget, Queued, cancel};
-
-use std::collections::VecDeque;
+use crate::{UnusedTarget, Queued, OperationRoster};
 
 use bevy::{
     prelude::{Entity, World, Component},
@@ -43,7 +41,7 @@ pub(crate) trait Operation {
     fn execute(
         source: Entity,
         world: &mut World,
-        queue: &mut VecDeque<Entity>,
+        roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()>;
 }
 
@@ -69,14 +67,14 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
 }
 
 #[derive(Component)]
-struct Operate(fn(Entity, &mut World, &mut VecDeque<Entity>));
+struct Operate(fn(Entity, &mut World, &mut OperationRoster));
 
 fn perform_operation<Op: Operation>(
     source: Entity,
     world: &mut World,
-    queue: &mut VecDeque<Entity>,
+    roster: &mut OperationRoster,
 ) {
-    match Op::execute(source, world, queue) {
+    match Op::execute(source, world, roster) {
         Ok(OperationStatus::Finished) => {
             world.despawn(source);
         }
@@ -86,11 +84,11 @@ fn perform_operation<Op: Operation>(
             } else {
                 // The source is no longer available even though it was queued.
                 // We should cancel the job right away.
-                cancel(world, source);
+                roster.cancel(source);
             }
         }
         Err(()) => {
-            cancel(world, source);
+            roster.cancel(source);
         }
     }
 }

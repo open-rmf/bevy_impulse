@@ -101,14 +101,32 @@ impl DispatchCommand {
     }
 }
 
-pub(crate) fn cancel(world: &mut World, target: Entity) {
+#[derive(Default)]
+pub struct OperationRoster {
+    /// Operation sources that should be triggered
+    queue: VecDeque<Entity>,
+    /// Operation sources that should be canceled
+    cancel: VecDeque<Entity>,
+}
 
+impl OperationRoster {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn queue(&mut self, source: Entity) {
+        self.queue.push_back(source);
+    }
+
+    pub fn cancel(&mut self, source: Entity) {
+        self.cancel.push_back(source);
+    }
 }
 
 pub(crate) fn dispatch_service(
     cmd: DispatchCommand,
     world: &mut World,
-    queue: &mut VecDeque<Entity>,
+    roster: &mut OperationRoster,
 ) {
     let mut service_queue = world.resource_mut::<ServiceQueue>();
     service_queue.queue.push_back(cmd);
@@ -123,14 +141,14 @@ pub(crate) fn dispatch_service(
     service_queue.is_delivering = true;
     while let Some(cmd) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
         let Some(provider_ref) = world.get_entity(cmd.provider) else {
-            cancel(world, cmd.source);
+            roster.cancel(cmd.source);
             continue;
         };
         let Some(dispatch) = provider_ref.get::<Dispatch>() else {
-            cancel(world, cmd.source);
+            roster.cancel(cmd.source);
             continue;
         };
-        (dispatch.0)(cmd, world, queue);
+        (dispatch.0)(cmd, world, roster);
     }
     world.resource_mut::<ServiceQueue>().is_delivering = false;
 }
@@ -138,7 +156,7 @@ pub(crate) fn dispatch_service(
 fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
     cmd: DispatchCommand,
     world: &mut World,
-    queue: &mut VecDeque<Entity>,
+    roster: &mut OperationRoster,
 ) {
     let DispatchCommand {provider, source, target} = cmd;
     let request = if let Some(mut source_mut) = world.get_entity_mut(source) {
@@ -157,7 +175,7 @@ fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + 
     } else {
         // The target entity does not exist which implies the request has been
         // canceled. We no longer need to deliver on it.
-        cancel(world, target);
+        roster.cancel(target);
         return;
     };
 
@@ -185,7 +203,7 @@ fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + 
     } else {
         // If the provider has been despawned then we treat this request as
         // canceled.
-        cancel(world, target);
+        roster.cancel(target);
         return;
     };
 
@@ -216,14 +234,14 @@ fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + 
         target_mut.insert(InputBundle::new(response));
     } else {
         // The target is no longer available for a delivery
-        cancel(world, target);
+        roster.cancel(target);
     }
 }
 
 fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Send + Sync>(
     cmd: DispatchCommand,
     world: &mut World,
-    _: &mut VecDeque<Entity>,
+    roster: &mut OperationRoster,
 ) {
     let DispatchCommand {provider, source, target} = cmd;
 
@@ -235,14 +253,14 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
     } else {
         // The target entity does not exist which implies the request has been
         // canceled. We no longer need to deliver on it.
-        cancel(world, target);
+        roster.cancel(target);
         return;
     };
 
     let Some(mut provider_mut) = world.get_entity_mut(provider) else {
         // The async service has been despawned, so we should treat the request
         // as canceled.
-        cancel(world, target);
+        roster.cancel(target);
         return;
     };
 
@@ -258,10 +276,10 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
         DeliveryUpdate::Immediate => { /* Continue */ }
         DeliveryUpdate::Queued { canceled, stop } => {
             if let Some(target) = stop {
-                cancel(world, target);
+                roster.cancel(target);
             }
             for target in canceled {
-                cancel(world, target);
+                roster.cancel(target);
             }
             return;
         }
@@ -298,16 +316,20 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
             TaskStorage(task),
             PollTask(poll_task::<Response>),
         ));
+        roster.queue(target);
     } else {
         // The target has been despawned, so we treat that as the request
         // being canceled.
-        cancel(world, target);
+        roster.cancel(target);
+
+        // NOTE: Do NOT return here because the service still needs to be put
+        // back into the provider.
     }
 
     let Some(mut provider_mut) = world.get_entity_mut(provider) else {
         // The async service was despawned by the service itself, so we should
         // treat the request as canceled.
-        cancel(world, target);
+        roster.cancel(target);
         return;
     };
     match &mut *provider_mut.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
@@ -541,7 +563,7 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
 
 /// This component determines how a provider responds to a dispatch request.
 #[derive(Component)]
-pub(crate) struct Dispatch(pub(crate) fn(DispatchCommand, &mut World, &mut VecDeque<Entity>));
+pub(crate) struct Dispatch(pub(crate) fn(DispatchCommand, &mut World, &mut OperationRoster));
 
 /// This component indicates that a source entity has been queued for a service
 /// so it should not be despawned yet.

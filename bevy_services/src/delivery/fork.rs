@@ -18,7 +18,7 @@
 use bevy::prelude::{Entity, World, Component};
 use std::collections::VecDeque;
 
-use crate::{InputStorage, InputBundle, Operation, OperationStatus, cancel};
+use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster};
 
 pub(crate) struct Fork<Response: 'static + Send + Sync + Clone> {
     targets: [Entity; 2],
@@ -43,23 +43,23 @@ impl<T: 'static + Send + Sync + Clone> Operation for Fork<T> {
     fn execute(
         source: Entity,
         world: &mut World,
-        queue: &mut VecDeque<Entity>,
+        roster: &mut OperationRoster,
     ) -> Result<super::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let InputStorage::<T>(input) = source_mut.take().ok_or(())?;
         let ForkStorage(targets) = source_mut.take().ok_or(())?;
         if let Some(mut target_mut) = world.get_entity_mut(targets[0]) {
             target_mut.insert(InputBundle::new(input.clone()));
-            queue.push_back(targets[0]);
+            roster.queue(targets[0]);
         } else {
-            cancel(world, targets[0]);
+            roster.cancel(targets[0]);
         }
 
         if let Some(mut target_mut) = world.get_entity_mut(targets[1]) {
             target_mut.insert(InputBundle::new(input));
-            queue.push_back(targets[1]);
+            roster.queue(targets[1]);
         } else {
-            cancel(world, targets[1]);
+            roster.cancel(targets[1]);
         }
 
         Ok(OperationStatus::Finished)

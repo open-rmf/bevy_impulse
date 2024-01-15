@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Operation, TargetStorage, Provider, Dispatch,
+    Operation, TargetStorage, Provider, Dispatch, OperationRoster,
     OperationStatus, DispatchCommand, dispatch_service,
 };
 
@@ -52,7 +52,7 @@ impl Operation for Serve {
     fn execute(
         source: Entity,
         world: &mut World,
-        queue: &mut VecDeque<Entity>,
+        queue: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let source_ref = world.get_entity(source).ok_or(())?;
         let target = source_ref.get::<TargetStorage>().ok_or(())?.0;

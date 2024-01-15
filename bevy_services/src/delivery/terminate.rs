@@ -15,11 +15,9 @@
  *
 */
 
-use crate::{Operation, InputStorage, OperationStatus, promise::private::Sender};
+use crate::{Operation, InputStorage, OperationStatus, OperationRoster, promise::private::Sender};
 
 use bevy::prelude::{Entity, Component, World, Resource};
-
-use std::collections::VecDeque;
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
@@ -73,7 +71,7 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
     fn execute(
         source: Entity,
         world: &mut World,
-        _: &mut VecDeque<Entity>,
+        _: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         if let Some(sender) = source_mut.take::<SenderStorage<T>>() {

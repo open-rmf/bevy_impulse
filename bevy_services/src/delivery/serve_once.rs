@@ -19,8 +19,7 @@ use crate::{
     Req, Resp, Job, Assistant, IntoStreamBundle, BoxedJob,
     GenericAssistant, InputStorage, InputBundle, TaskBundle,
     TargetStorage, Operation,
-    OperationStatus,
-    cancel, private,
+    OperationStatus, OperationRoster, private,
 };
 
 use bevy::{
@@ -31,7 +30,7 @@ use bevy::{
 
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex}
+    sync::{Arc, Mutex},
 };
 
 pub mod traits {
@@ -41,7 +40,7 @@ pub mod traits {
         type Request;
         type Response;
         type Streams;
-        fn serve(self, source: Entity, world: &mut World, queue: &mut VecDeque<Entity>);
+        fn serve(self, source: Entity, world: &mut World, roster: &mut OperationRoster);
     }
 
     pub trait Holdable<Marker>: private::Sealed<Marker> {
@@ -99,11 +98,11 @@ where
     fn execute(
         source: Entity,
         world: &mut World,
-        queue: &mut VecDeque<Entity>,
+        roster: &mut OperationRoster,
     ) -> Result<super::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let ServableStorage(service) = source_mut.take::<ServableStorage<S>>().ok_or(())?;
-        service.serve(source, world, queue);
+        service.serve(source, world, roster);
         Ok(OperationStatus::Finished)
     }
 }
@@ -111,21 +110,21 @@ where
 fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Send + Sync, Streams>(
     source: Entity,
     world: &mut World,
-    queue: &mut VecDeque<Entity>,
+    roster: &mut OperationRoster,
     service: &mut HoldableService<Request, Response>,
 ) {
     let Some(mut source_mut) = world.get_entity_mut(source) else {
-        cancel(world, source);
+        roster.cancel(source);
         return;
     };
 
     let Some(InputStorage(request)) = source_mut.take::<InputStorage<Request>>() else {
-        cancel(world, source);
+        roster.cancel(source);
         return;
     };
 
     let Some(TargetStorage(target)) = source_mut.get::<TargetStorage>() else {
-        cancel(world, source);
+        roster.cancel(source);
         return;
     };
     let target = *target;
@@ -139,9 +138,9 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
 
             if let Some(mut target_mut) = world.get_entity_mut(target) {
                 target_mut.insert(InputBundle::new(response));
-                queue.push_back(target);
+                roster.queue(target);
             } else {
-                cancel(world, target);
+                roster.cancel(target);
             }
         }
         HoldableService::Async(service) => {
@@ -155,7 +154,7 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
             if let Some(mut target_mut) = world.get_entity_mut(target) {
                 target_mut.insert(TaskBundle::new(task));
             } else {
-                cancel(world, target);
+                roster.cancel(target);
             }
         }
     }
@@ -169,7 +168,7 @@ enum HoldableService<Request, Response> {
 pub struct HeldService<Request, Response, Streams> {
     service: HoldableService<Request, Response>,
     initialized: bool,
-    dispatch: fn(Entity, &mut World, &mut VecDeque<Entity>, &mut HoldableService<Request, Response>),
+    dispatch: fn(Entity, &mut World, &mut OperationRoster, &mut HoldableService<Request, Response>),
     _ignore: std::marker::PhantomData<Streams>,
 }
 
@@ -197,7 +196,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<HeldServiceMarker> f
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn serve(mut self, source: Entity, world: &mut World, queue: &mut VecDeque<Entity>) {
+    fn serve(mut self, source: Entity, world: &mut World, queue: &mut OperationRoster) {
         if !self.initialized {
             match &mut self.service {
                 HoldableService::Blocking(service) => {
@@ -218,7 +217,7 @@ impl<Request: 'static, Response: 'static, Streams> Servable<SharedServiceMarker>
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn serve(self, source: Entity, world: &mut World, queue: &mut VecDeque<Entity>) {
+    fn serve(self, source: Entity, world: &mut World, queue: &mut OperationRoster) {
         let mut servable: std::sync::MutexGuard<'_, HeldService<Request, Response, Streams>> = {
             let mut sentinel = match self.sentinel.lock() {
                 Ok(sentinel) => sentinel,
@@ -359,8 +358,8 @@ where
     type Request = Request;
     type Response = Response;
     type Streams = ();
-    fn serve(self, source: Entity, world: &mut World, queue: &mut VecDeque<Entity>) {
-        self.hold().serve(source, world, queue);
+    fn serve(self, source: Entity, world: &mut World, roster: &mut OperationRoster) {
+        self.hold().serve(source, world, roster);
     }
 }
 
@@ -376,8 +375,8 @@ where
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn serve(self, source: Entity, world: &mut World, queue: &mut VecDeque<Entity>) {
-        self.hold().serve(source, world, queue);
+    fn serve(self, source: Entity, world: &mut World, roster: &mut OperationRoster) {
+        self.hold().serve(source, world, roster);
     }
 }
 

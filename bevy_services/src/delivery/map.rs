@@ -16,9 +16,8 @@
 */
 
 use bevy::prelude::{Entity, World, Component};
-use std::collections::VecDeque;
 
-use crate::{TargetStorage, InputStorage, InputBundle, Operation, OperationStatus};
+use crate::{TargetStorage, InputStorage, InputBundle, Operation, OperationStatus, OperationRoster};
 
 pub(crate) struct Map<T, U> {
     target: Entity,
@@ -45,7 +44,7 @@ impl<T: 'static + Send + Sync, U: 'static + Send + Sync> Operation for Map<T, U>
     fn execute(
         source: Entity,
         world: &mut World,
-        queue: &mut VecDeque<Entity>,
+        roster: &mut OperationRoster,
     ) -> Result<super::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let InputStorage(input) = source_mut.take::<InputStorage<T>>().ok_or(())?;
@@ -56,7 +55,7 @@ impl<T: 'static + Send + Sync, U: 'static + Send + Sync> Operation for Map<T, U>
 
         let u = f(input);
         target_mut.insert(InputBundle::new(u));
-        queue.push_back(target);
+        roster.queue(target);
         Ok(OperationStatus::Finished)
     }
 }
