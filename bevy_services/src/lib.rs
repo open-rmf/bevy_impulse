@@ -15,8 +15,8 @@
  *
 */
 
-pub mod assistant;
-pub use assistant::*;
+pub mod channel;
+pub use channel::*;
 
 mod delivery;
 pub(crate) use delivery::*;

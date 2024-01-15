@@ -16,9 +16,9 @@
 */
 
 use crate::{
-    Req, Resp, Job, Assistant, IntoStreamBundle, BoxedJob,
-    GenericAssistant, InputStorage, InputBundle, TaskBundle,
-    TargetStorage, Operation,
+    Req, Resp, Job, Channel, IntoStreamBundle, BoxedJob,
+    InnerChannel, InputStorage, InputBundle, TaskBundle,
+    TargetStorage, Operation, ChannelQueue,
     OperationStatus, OperationRoster, private,
 };
 
@@ -147,8 +147,9 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
             let Job(job) = service.run(Req(request), world);
             service.apply_deferred(world);
 
+            let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
             let task = AsyncComputeTaskPool::get().spawn(async move {
-                job(GenericAssistant {  })
+                job(InnerChannel::new(sender))
             });
 
             if let Some(mut target_mut) = world.get_entity_mut(target) {
@@ -317,7 +318,7 @@ impl<Request, Response, Streams, Task, M, Sys>
 Holdable<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
+    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
     Streams: IntoStreamBundle + 'static,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -331,8 +332,8 @@ where
             .pipe(
                 |In(Job(task)): In<Job<Task>>| {
                     let task: BoxedJob<Response> = Job(Box::new(
-                        move |assistant: GenericAssistant| {
-                            task(assistant.into_specific())
+                        move |channel: InnerChannel| {
+                            task(channel.into_specific())
                         }
                     ));
                     task
@@ -367,7 +368,7 @@ impl<Request, Response, Streams, Task, M, Sys>
 Servable<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
+    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
     Streams: IntoStreamBundle + 'static,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -411,7 +412,7 @@ impl<Request, Response, Streams, Task, M, Sys>
 Shareable<(Request, Response, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Assistant<Streams>) -> Option<Response> + 'static + Send,
+    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
     Streams: IntoStreamBundle + 'static,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,

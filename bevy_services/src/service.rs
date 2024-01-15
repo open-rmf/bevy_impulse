@@ -93,7 +93,7 @@ impl AddServicesExt for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Req, Resp, Job, Assistant, Service};
+    use crate::{Req, Resp, Job, Channel, Service};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,
@@ -214,7 +214,7 @@ mod tests {
     fn sys_async_service(
         In(Req(name)): In<Req<String>>,
         people: Query<&TestPeople>,
-    ) -> Job<impl FnOnce(Assistant) -> Option<u64>> {
+    ) -> Job<impl FnOnce(Channel) -> Option<u64>> {
         let mut matching_people = Vec::new();
         for person in &people {
             if person.name == name {
@@ -222,7 +222,7 @@ mod tests {
             }
         }
 
-        let job = move |_: Assistant| {
+        let job = move |_: Channel| {
             Some(matching_people.into_iter().fold(0, |sum, age| sum + age))
         };
         Job(job)

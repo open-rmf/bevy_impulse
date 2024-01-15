@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{RequestLabelId, GenericAssistant, Req, Resp, Job};
+use crate::{RequestLabelId, InnerChannel, Req, Resp, Job, ChannelQueue};
 
 use bevy::{
     prelude::{Component, Entity, World, Bundle, Resource},
@@ -66,7 +66,7 @@ struct ServiceQueue {
 #[derive(Component)]
 pub(crate) struct TargetStorage(pub(crate) Entity);
 
-pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(GenericAssistant) -> Option<Response> + Send>>;
+pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(InnerChannel) -> Option<Response> + Send>>;
 
 /// A service is a type of system that takes in a request and produces a
 /// response, optionally emitting events from its streams using the provided
@@ -302,13 +302,11 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
     };
 
     let Job(job) = service.run((provider, Req(request)), world);
-    // FIXME: This is not currently handling recursion correctly. If the
-    // async service calls itself while producing the job, then this will
-    // lead to a panic.
     service.apply_deferred(world);
 
+    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
     let task = AsyncComputeTaskPool::get().spawn(async move {
-        job(GenericAssistant {  })
+        job(InnerChannel::new(sender))
     });
 
     if let Some(mut target_mut) = world.get_entity_mut(target) {
