@@ -79,13 +79,13 @@ impl<T> Promise<T> {
             return self;
         }
 
-        self.impl_wait(None);
+        Self::impl_wait(&self.target, None);
         self
     }
 
     pub fn interruptible_wait(&self, interrupter: &Interrupter) -> &Self
     where
-        T: 'static
+        T: 'static,
     {
         if !self.state.is_pending() {
             // The result arrived and ownership has been transferred to this
@@ -94,7 +94,7 @@ impl<T> Promise<T> {
         }
 
         if let Some(interrupt) = interrupter.push(self.target.clone()) {
-            self.impl_wait(Some(interrupt));
+            Self::impl_wait(&self.target, Some(interrupt));
         }
 
         self
@@ -107,21 +107,31 @@ impl<T> Promise<T> {
             return self;
         }
 
-        'waiting: {
-            let guard = match self.target.inner.lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    self.state = PromiseState::Canceled;
-                    break 'waiting;
-                }
-            };
-
-            self.target.cv.wait_while(guard, |inner| {
-                Self::impl_try_take_result(&mut self.state, &mut inner.result)
-            }).ok();
+        if let Some(mut guard) = Self::impl_wait(&self.target, None) {
+            Self::impl_try_take_result(&mut self.state, &mut guard.result);
         }
 
         self
+    }
+
+    pub fn interruptible_wait_mut(
+        &mut self,
+        interrupter: &Interrupter
+    ) -> &mut Self
+    where
+        T: 'static,
+    {
+        if !self.state.is_pending() {
+            return self;
+        }
+
+        if let Some(interrupt) = interrupter.push(self.target.clone()) {
+            if let Some(mut guard) = Self::impl_wait(&self.target, Some(interrupt)) {
+                Self::impl_try_take_result(&mut self.state, &mut guard.result);
+            }
+        }
+
+        return self;
     }
 
     /// Update the internal state of the promise if it is still pending. This

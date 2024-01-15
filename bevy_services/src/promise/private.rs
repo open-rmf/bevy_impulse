@@ -20,7 +20,7 @@ use crate::{Promise, PromiseState};
 use std::{
     task::Waker, any::Any,
     sync::{
-        Arc, Weak, Mutex, Condvar, atomic::{AtomicBool, Ordering}
+        Arc, Weak, Mutex, MutexGuard, Condvar, atomic::{AtomicBool, Ordering}
     },
 };
 
@@ -103,28 +103,31 @@ impl<T> Promise<T> {
         (promise, sender)
     }
 
-    pub(super) fn impl_wait(&self, interrupt: Option<Arc<AtomicBool>>) {
-        let guard = match self.target.inner.lock() {
+    pub(super) fn impl_wait<'a>(
+        target: &'a PromiseTarget<T>,
+        interrupt: Option<Arc<AtomicBool>>
+    ) -> Option<MutexGuard<'a, PromiseTargetInner<T>>> {
+        let guard = match target.inner.lock() {
             Ok(guard) => guard,
             Err(_) => {
-                return;
+                return None;
             }
         };
 
         if guard.result.is_some() {
             // The result arrived but ownership has not been transferred to this
             // promise.
-            return;
+            return None;
         }
 
-        self.target.cv.wait_while(guard, |inner| {
+        target.cv.wait_while(guard, |inner| {
             if interrupt.as_ref().is_some_and(
                 |interrupt| interrupt.load(Ordering::Relaxed)
             ) {
                 return false;
             }
             inner.result.is_none()
-        }).ok();
+        }).ok()
     }
 
     pub(super) fn impl_try_take_result(
