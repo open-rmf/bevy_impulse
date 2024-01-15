@@ -17,24 +17,73 @@
 
 use crate::{Promise, PromiseState};
 
-use std::{task::Waker, sync::{Arc, Weak, Mutex, Condvar}};
+use std::{
+    task::Waker,
+    sync::{Arc, Weak, Mutex, Condvar, atomic::{AtomicBool, Ordering}},
+};
 
-pub(crate) struct Sender<Response> {
+impl<T> Promise<T> {
+    pub(super) fn impl_wait(&self, interrupt: Option<Arc<AtomicBool>>) {
+        if !self.state.is_pending() {
+            return;
+        }
+
+        let guard = match self.target.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return;
+            }
+        };
+        self.target.cv.wait_while(guard, |inner| {
+            if interrupt.is_some_and(
+                |interrupt| interrupt.load(Ordering::Relaxed)
+            ) {
+                return false;
+            }
+            inner.result.is_none()
+        });
+    }
+
+    pub(super) fn impl_try_take_result(
+        state: &mut PromiseState<T>,
+        result: &mut Option<PromiseResult<T>>,
+    ) -> bool {
+        match result.take() {
+            Some(PromiseResult::Finished(response)) => {
+                *state = PromiseState::Received(response);
+                return false;
+            }
+            Some(PromiseResult::Canceled) => {
+                *state = PromiseState::Canceled;
+                return false;
+            }
+            None => {
+                return true;
+            }
+        }
+    }
+}
+
+pub(super) trait Interruptible {
+    fn interrupt(&self);
+}
+
+pub(super) struct Sender<Response> {
     target: Weak<PromiseTarget<Response>>,
     sent: bool,
 }
 
 impl<T> Sender<T> {
-    pub(crate) fn new(target: Weak<PromiseTarget<T>>) -> Self {
+    pub(super) fn new(target: Weak<PromiseTarget<T>>) -> Self {
         Self { target, sent: false }
     }
 
-    pub(crate) fn send(mut self, value: T) {
+    pub(super) fn send(mut self, value: T) {
         self.set(PromiseResult::Finished(value));
         self.sent = true;
     }
 
-    pub(crate) fn set(&mut self, result: PromiseResult<T>) {
+    pub(super) fn set(&mut self, result: PromiseResult<T>) {
         let Some(target) = self.target.upgrade() else {
             return;
         };
@@ -59,7 +108,7 @@ impl<T> Drop for Sender<T> {
 }
 
 impl<T> Promise<T> {
-    pub(crate) fn new() -> (Self, Sender<T>) {
+    pub(super) fn new() -> (Self, Sender<T>) {
         let target = Arc::new(PromiseTarget::new());
         let sender = Sender::new(Arc::downgrade(&target));
         let promise = Self { state: PromiseState::Pending, target };
@@ -67,32 +116,45 @@ impl<T> Promise<T> {
     }
 }
 
-pub(crate) enum PromiseResult<T> {
+pub(super) enum PromiseResult<T> {
     Finished(T),
     Canceled,
 }
 
-pub(crate) struct PromiseTargetInner<T> {
-    pub(crate) result: Option<PromiseResult<T>>,
-    pub(crate) waker: Option<Waker>,
+pub(super) struct PromiseTargetInner<T> {
+    pub(super) result: Option<PromiseResult<T>>,
+    pub(super) waker: Option<Waker>,
 }
 
 impl<T> PromiseTargetInner<T> {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { result: None, waker: None }
     }
 }
 
-pub(crate) struct PromiseTarget<T> {
-    pub(crate) inner: Mutex<PromiseTargetInner<T>>,
-    pub(crate) cv: Condvar,
+pub(super) struct PromiseTarget<T> {
+    pub(super) inner: Mutex<PromiseTargetInner<T>>,
+    /// Condition variable used to notify waiting Promises that a result is
+    /// available or that an interrupt has been triggered.
+    pub(super) cv: Condvar,
 }
 
 impl<T> PromiseTarget<T> {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             inner: Mutex::new(PromiseTargetInner::new()),
             cv: Condvar::new(),
         }
     }
+}
+
+impl<T> Interruptible for PromiseTarget<T> {
+    fn interrupt(&self) {
+        self.cv.notify_all();
+    }
+}
+
+pub(super) struct Interruptee {
+    pub(super) interrupt: Arc<AtomicBool>,
+    pub(super) interruptible: Arc<dyn Interruptible>,
 }

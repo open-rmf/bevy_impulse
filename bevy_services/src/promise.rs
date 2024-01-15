@@ -18,11 +18,17 @@
 use crate::{
     Detached, Held, DispatchCommand, Provider, UnusedTarget, MakeThen,
     MakeFork, MakeMap, Chosen, ApplyLabel, Servable, MakeThenServe,
+    Provider,
 };
 
 use bevy::prelude::{Entity, Commands};
 
-use std::{sync::Arc, future::Future, task::{Context, Poll}, pin::Pin};
+use std::{
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
+    future::Future,
+    task::{Context, Poll},
+    pin::Pin,
+};
 
 mod private;
 use private::*;
@@ -35,11 +41,12 @@ pub struct Promise<T> {
 }
 
 impl<T> Promise<T> {
-    /// Check the last known state of the promise without any polling. This will
-    /// never block, but it also might provide a state that is out of date.
+    /// Check the last known state of the promise without performing any update.
+    /// This will never block, but it also might provide a state that is out of
+    /// date.
     ///
-    /// To get a look at the most current state at the cost of synchronizing you
-    /// can use [`peek`].
+    /// To borrow a view of the most current state at the cost of synchronizing
+    /// you can use [`peek`].
     pub fn sneak_peek(&self) -> PromiseState<&T> {
         self.state.as_ref()
     }
@@ -70,19 +77,18 @@ impl<T> Promise<T> {
     /// To both wait for a result and update the Promise's internal state once
     /// it is available, use [`wait_mut`].
     pub fn wait(&self) -> &Self {
-        if !self.state.is_pending() {
-            return self;
-        }
+        self.impl_wait(None);
+        self
+    }
 
-        let guard = match self.target.inner.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return self;
-            }
+    pub fn interruptible_wait(&self, interrupter: &Interrupter) -> &Self {
+        let interruptee = Interruptee {
+            interrupt: Arc::new(AtomicBool::new(false)),
+            interruptible: self.target.clone(),
         };
-        self.target.cv.wait_while(guard, |inner| {
-            inner.result.is_none()
-        });
+        let interrupt = interruptee.interrupt.clone();
+        interrupter.push(interruptee);
+        self.impl_wait(Some(interrupt));
         self
     }
 
@@ -101,19 +107,7 @@ impl<T> Promise<T> {
             }
         };
         self.target.cv.wait_while(guard, |inner| {
-            match inner.result.take() {
-                Some(PromiseResult::Finished(response)) => {
-                    self.state = PromiseState::Received(response);
-                    return false;
-                }
-                Some(PromiseResult::Canceled) => {
-                    self.state = PromiseState::Canceled;
-                    return false;
-                }
-                None => {
-                    return true;
-                }
-            }
+            Self::impl_try_take_result(&mut self.state, &mut inner.result)
         });
         self
     }
@@ -225,6 +219,50 @@ impl<T> PromiseState<T> {
                 Self::Taken
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct Interrupter {
+    waiters: Arc<Mutex<Vec<Interruptee>>>,
+}
+
+impl Interrupter {
+    pub fn new() -> Self {
+        Self { waiters: Arc::new(Mutex::new(Vec::new())) }
+    }
+
+    pub fn interrupt(&self) {
+        let mut guard = match self.waiters.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                poisoned.into_inner().clear();
+                return;
+            }
+        };
+        for waiter in &*guard {
+            waiter.interrupt.store(true, Ordering::SeqCst);
+            waiter.interruptible.interrupt();
+        }
+        guard.clear();
+    }
+
+    fn push(&self, interuptee: Interruptee) {
+        let mut guard = match self.waiters.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.clear();
+                guard
+            }
+        };
+        guard.push(interuptee);
+    }
+}
+
+impl Default for Interrupter {
+    fn default() -> Self {
+        Interrupter::new()
     }
 }
 
@@ -373,6 +411,12 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         self.commands.add(MakeThenServe::<ThenServe, M>::new(self.target, servable));
         self.commands.add(DispatchCommand::new(self.provider, self.target));
         PromiseCommands::new(self.target, then_serve_target, self.commands)
+    }
+}
+
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Promise<Response>, Streams, L> {
+    pub fn flatten(self) -> PromiseCommands<'w, 's, 'a, Response, (), ()> {
+
     }
 }
 
