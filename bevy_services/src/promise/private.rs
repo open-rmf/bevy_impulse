@@ -17,7 +17,12 @@
 
 use crate::{Promise, PromiseState};
 
-use std::{task::Waker, sync::{Arc, Weak, Mutex, Condvar}, any::Any};
+use std::{
+    task::Waker, any::Any,
+    sync::{
+        Arc, Weak, Mutex, Condvar, atomic::{AtomicBool, Ordering}
+    },
+};
 
 pub(crate) struct Sender<Response> {
     target: Weak<PromiseTarget<Response>>,
@@ -31,7 +36,7 @@ pub(crate) struct Expectation {
 }
 
 impl<T> Sender<T> {
-    pub(crate) fn new(target: Weak<PromiseTarget<T>>) -> Self {
+    pub(super) fn new(target: Weak<PromiseTarget<T>>) -> Self {
         Self { target, sent: false }
     }
 
@@ -85,7 +90,7 @@ impl<T> Sender<T> {
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
         if !self.sent {
-            self.set(PromiseResult::Canceled);
+            self.set(PromiseResult::Canceled).ok();
         }
     }
 }
@@ -97,6 +102,49 @@ impl<T> Promise<T> {
         let promise = Self { state: PromiseState::Pending, target };
         (promise, sender)
     }
+
+    pub(super) fn impl_wait(&self, interrupt: Option<Arc<AtomicBool>>) {
+        let guard = match self.target.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return;
+            }
+        };
+
+        if guard.result.is_some() {
+            // The result arrived but ownership has not been transferred to this
+            // promise.
+            return;
+        }
+
+        self.target.cv.wait_while(guard, |inner| {
+            if interrupt.as_ref().is_some_and(
+                |interrupt| interrupt.load(Ordering::Relaxed)
+            ) {
+                return false;
+            }
+            inner.result.is_none()
+        }).ok();
+    }
+
+    pub(super) fn impl_try_take_result(
+        state: &mut PromiseState<T>,
+        result: &mut Option<PromiseResult<T>>,
+    ) -> bool {
+        match result.take() {
+            Some(PromiseResult::Finished(response)) => {
+                *state = PromiseState::Available(response);
+                return false;
+            }
+            Some(PromiseResult::Canceled) => {
+                *state = PromiseState::Canceled;
+                return false;
+            }
+            None => {
+                return true;
+            }
+        }
+    }
 }
 
 pub(crate) enum PromiseResult<T> {
@@ -104,28 +152,60 @@ pub(crate) enum PromiseResult<T> {
     Canceled,
 }
 
-pub(crate) struct PromiseTargetInner<T> {
-    pub(crate) result: Option<PromiseResult<T>>,
-    pub(crate) waker: Option<Waker>,
-    pub(crate) on_promise_drop: Option<Box<dyn FnOnce() + 'static + Send>>,
+pub(super) struct PromiseTargetInner<T> {
+    pub(super) result: Option<PromiseResult<T>>,
+    pub(super) waker: Option<Waker>,
+    pub(super) on_promise_drop: Option<Box<dyn FnOnce() + 'static + Send>>,
 }
 
 impl<T> PromiseTargetInner<T> {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { result: None, waker: None, on_promise_drop: None }
     }
 }
 
-pub(crate) struct PromiseTarget<T> {
-    pub(crate) inner: Mutex<PromiseTargetInner<T>>,
-    pub(crate) cv: Condvar,
+pub(super) struct PromiseTarget<T> {
+    pub(super) inner: Mutex<PromiseTargetInner<T>>,
+    pub(super) cv: Condvar,
 }
 
 impl<T> PromiseTarget<T> {
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             inner: Mutex::new(PromiseTargetInner::new()),
             cv: Condvar::new(),
         }
+    }
+}
+
+pub(super) trait Interruptible {
+    fn interrupt(&self);
+}
+
+impl<T> Interruptible for PromiseTarget<T> {
+    fn interrupt(&self) {
+        self.cv.notify_all();
+    }
+}
+
+pub(super) struct Interruptee {
+    pub(super) interrupt: Arc<AtomicBool>,
+    pub(super) interruptible: Arc<dyn Interruptible>,
+}
+
+pub(super) struct InterrupterInner {
+    pub(super) triggered: bool,
+    pub(super) waiters: Vec<Interruptee>,
+}
+
+impl InterrupterInner {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for InterrupterInner {
+    fn default() -> Self {
+        Self { triggered: false, waiters: Vec::new() }
     }
 }

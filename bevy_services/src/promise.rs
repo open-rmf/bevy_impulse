@@ -22,7 +22,10 @@ use crate::{
 
 use bevy::prelude::{Entity, Commands};
 
-use std::{sync::Arc, future::Future, task::{Context, Poll}, pin::Pin};
+use std::{
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
+    future::Future, task::{Context, Poll}, pin::Pin
+};
 
 pub(crate) mod private;
 use private::*;
@@ -35,11 +38,11 @@ pub struct Promise<T> {
 }
 
 impl<T> Promise<T> {
-    /// Check the last known state of the promise without any polling. This will
-    /// never block, but it also might provide a state that is out of date.
+    /// Check the last known state of the promise without performing any update.
+    /// This will never block, but it might provide a state that is out of date.
     ///
-    /// To get a look at the most current state at the cost of synchronizing you
-    /// can use [`peek`].
+    /// To borrow a view of the most current state at the cost of synchronizing
+    /// you can use [`peek`].
     pub fn sneak_peek(&self) -> PromiseState<&T> {
         self.state.as_ref()
     }
@@ -71,18 +74,29 @@ impl<T> Promise<T> {
     /// it is available, use [`wait_mut`].
     pub fn wait(&self) -> &Self {
         if !self.state.is_pending() {
+            // The result arrived and ownership has been transferred to this
+            // promise.
             return self;
         }
 
-        let guard = match self.target.inner.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return self;
-            }
-        };
-        self.target.cv.wait_while(guard, |inner| {
-            inner.result.is_none()
-        }).ok();
+        self.impl_wait(None);
+        self
+    }
+
+    pub fn interruptible_wait(&self, interrupter: &Interrupter) -> &Self
+    where
+        T: 'static
+    {
+        if !self.state.is_pending() {
+            // The result arrived and ownership has been transferred to this
+            // promise.
+            return self;
+        }
+
+        if let Some(interrupt) = interrupter.push(self.target.clone()) {
+            self.impl_wait(Some(interrupt));
+        }
+
         self
     }
 
@@ -103,19 +117,7 @@ impl<T> Promise<T> {
             };
 
             self.target.cv.wait_while(guard, |inner| {
-                match inner.result.take() {
-                    Some(PromiseResult::Finished(response)) => {
-                        self.state = PromiseState::Available(response);
-                        return false;
-                    }
-                    Some(PromiseResult::Canceled) => {
-                        self.state = PromiseState::Canceled;
-                        return false;
-                    }
-                    None => {
-                        return true;
-                    }
-                }
+                Self::impl_try_take_result(&mut self.state, &mut inner.result)
             }).ok();
         }
 
@@ -245,6 +247,87 @@ impl<T> PromiseState<T> {
         };
 
         std::mem::replace(self, next_value)
+    }
+}
+
+pub struct Interrupter {
+    inner: Arc<Mutex<InterrupterInner>>,
+}
+
+impl Interrupter {
+    pub fn new() -> Self {
+        Self { inner: Arc::new(Mutex::new(InterrupterInner::new())) }
+    }
+
+    /// Tell all waiters that are listening to this Interrupter to interrupt
+    /// their waiting.
+    ///
+    /// Any new waiters added to this Interrupter after this is triggered will
+    /// not wait at all until [`Interrupter::reset`] is called for this
+    /// Interrupter.
+    pub fn interrupt(&self) {
+        let mut guard = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let mut inner = poisoned.into_inner();
+                *inner = InterrupterInner::new();
+                return;
+            }
+        };
+        guard.triggered = true;
+        for waiter in &*guard.waiters {
+            waiter.interrupt.store(true, Ordering::SeqCst);
+            waiter.interruptible.interrupt();
+        }
+        guard.waiters.clear();
+    }
+
+    /// If interrupt() has been called on this Interrupter in the past, calling
+    /// this function will clear out the after-effect of that, allowing new
+    /// waiters to wait for a new call to interrupt() to happen.
+    pub fn reset(&self) {
+        match self.inner.lock() {
+            Ok(mut guard) => {
+                guard.triggered = false;
+            }
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                *guard = InterrupterInner::new();
+            }
+        }
+    }
+
+    fn push<T: 'static>(
+        &self,
+        target: Arc<PromiseTarget<T>>
+    ) -> Option<Arc<AtomicBool>> {
+        let mut guard = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                *guard = InterrupterInner::new();
+                guard
+            }
+        };
+
+        if guard.triggered {
+            return None;
+        }
+
+        let interruptee = Interruptee {
+            interrupt: Arc::new(AtomicBool::new(false)),
+            interruptible: target,
+        };
+        let interrupt = interruptee.interrupt.clone();
+
+        guard.waiters.push(interruptee);
+        Some(interrupt)
+    }
+}
+
+impl Default for Interrupter {
+    fn default() -> Self {
+        Interrupter::new()
     }
 }
 
