@@ -24,6 +24,9 @@ use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
 use crate::{StreamHandler, Stream};
 
+use std::cell::RefCell;
+
+#[derive(Clone)]
 pub struct Channel<Streams = ()> {
     inner: InnerChannel,
     _ignore: std::marker::PhantomData<Streams>,
@@ -33,8 +36,7 @@ impl<Streams> Channel<Streams> {
     pub fn batch(&self) -> BatchChannel<Streams> {
         BatchChannel {
             inner: self.inner.clone(),
-            queue: CommandQueue::default(),
-            empty: true,
+            batch: RefCell::new(BatchQueue::new()),
             _ignore: Default::default(),
         }
     }
@@ -42,25 +44,36 @@ impl<Streams> Channel<Streams> {
 
 pub struct BatchChannel<Streams> {
     inner: InnerChannel,
-    queue: CommandQueue,
-    empty: bool,
+    batch: RefCell<BatchQueue>,
     _ignore: std::marker::PhantomData<Streams>,
 }
 
 impl<Streams> BatchChannel<Streams> {
-    pub fn flush(&mut self) {
-        if !self.empty {
+    pub fn flush(&self) {
+        let mut batch = self.batch.borrow_mut();
+        if !batch.empty {
             self.inner.sender.send(
-                std::mem::replace(&mut self.queue, CommandQueue::default())
+                std::mem::replace(&mut batch.queue, CommandQueue::default())
             ).expect("ChannelQueue resource was removed or replaced. This should never happen.");
         }
-        self.empty = true;
+        batch.empty = true;
     }
 }
 
 impl<Streams> Drop for BatchChannel<Streams> {
     fn drop(&mut self) {
         self.flush();
+    }
+}
+
+struct BatchQueue {
+    queue: CommandQueue,
+    empty: bool,
+}
+
+impl BatchQueue {
+    fn new() -> Self {
+        Self { queue: CommandQueue::default(), empty: true }
     }
 }
 
@@ -100,16 +113,16 @@ impl Default for ChannelQueue {
 }
 
 pub trait ChannelTrait {
-    fn push<C: Command>(&mut self, command: C);
+    fn push<C: Command>(&self, command: C);
     fn source(&self) -> Entity;
 }
 
 impl<Streams> ChannelTrait for Channel<Streams> {
-    fn push<C: Command>(&mut self, command: C) {
+    fn push<C: Command>(&self, command: C) {
         let mut queue = CommandQueue::default();
         queue.push(command);
         self.inner.sender.send(queue)
-            .expect("ChannelQueue resource was removed or replace. This should never happen.");
+            .expect("ChannelQueue resource was removed or replaced. This should never happen.");
     }
 
     fn source(&self) -> Entity {
@@ -118,9 +131,10 @@ impl<Streams> ChannelTrait for Channel<Streams> {
 }
 
 impl<Streams> ChannelTrait for BatchChannel<Streams> {
-    fn push<C: Command>(&mut self, command: C) {
-        self.empty = false;
-        self.queue.push(command);
+    fn push<C: Command>(&self, command: C) {
+        let mut batch = self.batch.borrow_mut();
+        batch.empty = false;
+        batch.queue.push(command);
     }
 
     fn source(&self) -> Entity {
@@ -129,7 +143,7 @@ impl<Streams> ChannelTrait for BatchChannel<Streams> {
 }
 
 pub struct StreamChannel<'a, C: ChannelTrait, T> {
-    channel: &'a mut C,
+    channel: &'a C,
     _ignore: std::marker::PhantomData<T>,
 }
 
@@ -161,7 +175,10 @@ impl<T: Stream> Command for StreamCommand<T> {
             StreamHandler::Callback(cb) => {
                 (cb)(self.data);
             }
-            StreamHandler::Held(mut service) => {
+            StreamHandler::Held(service) => {
+
+            }
+            StreamHandler::Shared(service) => {
 
             }
         }

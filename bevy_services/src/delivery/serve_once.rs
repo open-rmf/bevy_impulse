@@ -149,7 +149,7 @@ fn dispatch_held_service<Request: 'static + Send + Sync, Response: 'static + Sen
 
             let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
             let task = AsyncComputeTaskPool::get().spawn(async move {
-                job(InnerChannel::new(sender))
+                job(InnerChannel::new(source, sender))
             });
 
             if let Some(mut target_mut) = world.get_entity_mut(target) {
