@@ -38,27 +38,28 @@ pub use stream::*;
 
 pub(crate) mod private;
 
-/// Use Req to indicate the request data structure that your service's system
-/// takes as input. For example this signature can be used for simple services
-/// that only need the request data as input:
+use bevy::prelude::{Entity, In};
+
+/// Use BlockingReq to indicate that your service is blocking and to specify its
+/// input request type. For example:
 ///
 /// ```
 /// fn my_service(
-///     In(Req(request)): In<Req<MyRequestData>>,
+///     input: InBlockingReq<MyRequestData>,
 ///     other: Query<&OtherComponents>,
 /// ) -> Job<impl FnOnce(Assistant) -> Option<MyResponseData>> {
 ///     /* ... */
 /// }
 /// ```
 ///
-/// On the other hand, the systems of more complex services might also need to
-/// know what entity is providing the service, e.g. if the service provider is
-/// configured with additional components that need to be queried when a request
-/// comes in. For that you can use the self-aware signature:
+/// The systems of more complex services might need to know what entity is
+/// providing the service, e.g. if the service provider is configured with
+/// additional components that need to be queried when a request comes in. For
+/// that you can check the `provider` field of [`BlockingReq`]`:
 ///
 /// ```
 /// fn my_self_aware_service(
-///     In((me, Req(request))): In<(Entity, Req<MyRequestData>)>,
+///     In(BlockingReq{request, provider}): InBlockingReq<MyRequestData>,
 ///     query_service_params: Query<&MyServiceParams>,
 ///     other: Query<&OtherComponents>,
 /// ) -> Job<impl FnOnce(Assistant) -> Option<MyResponseData>> {
@@ -66,52 +67,28 @@ pub(crate) mod private;
 ///     /* ... */
 /// }
 /// ```
-pub struct Req<Request>(pub Request);
+pub struct BlockingReq<Request> {
+    pub request: Request,
+    pub provider: Entity,
+}
 
-/// Wrap [`Resp`] around the return value of your service's system to indicate
-/// it will immediately return a response to the request. This means your
-/// service is blocking and all other system execution will halt while it is
-/// running. It should only be used for services that execute very quickly.
-/// Here is an example:
-/// ```
-/// fn my_blocking_service(
-///     In(Req(request)): In<Req<MyRequestData>>,
-///     other: Query<&OtherComponents>,
-/// ) -> Resp<MyResponseData> {
-///     /* ... */
-///
-///     Resp(my_response)
-/// }
-/// ```
-///
-/// To define an async service use [`Job`].
-pub struct Resp<Response>(pub Response);
+/// Use this to reduce bracket noise when you need `In<BlockingReq<R>>`.
+pub type InBlockingReq<Request> = In<BlockingReq<Request>>;
 
-/// Wrap [`Job`] around the return value of your service's system to provide a
-/// function that will be passed along as a task instead of immediately
-/// returning a response. Here is an example:
+/// Use AsyncReq to indicate that your service is async and to specify its input
+/// request type. Being async means it will return a `Future<Output=Option<Response>>`
+/// which will be processed by a task pool.
 ///
-/// ```
-/// fn my_async_service(
-///     In(Req(request)): In<Req<MyRequestData>>,
-///     other: Query<&OtherComponents>,
-/// ) -> Job<impl FnOnce(Assistant) -> MyResponseData> {
-///     /* ... */
-///
-///     let job = |assistant: Assistant| {
-///         /* ... */
-///         my_response
-///     };
-///
-///     Job(job)
-/// }
-/// ```
-///
-/// By returning [`Job`] you are indicating that your service is async. To have
-/// a blocking service that immediately returns a response, return [`Resp`]
-/// instead.
-pub struct Job<Task>(pub Task);
+/// This comes with a Channel that allows your Future to interact with Bevy's
+/// ECS asynchronously from inside the task pool.
+pub struct AsyncReq<Request, Streams = ()> {
+    pub request: Request,
+    pub channel: Channel<Streams>,
+    pub provider: Entity,
+}
 
+/// Use this to reduce backet noise when you need `In<AsyncReq<R, S>>`.
+pub type InAsyncReq<Request, Streams = ()> = In<AsyncReq<Request, Streams>>;
 
 #[cfg(test)]
 mod tests {

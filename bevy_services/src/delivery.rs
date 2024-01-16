@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{RequestLabelId, InnerChannel, Req, Resp, Job, ChannelQueue};
+use crate::{RequestLabelId, InnerChannel, BlockingReq, AsyncReq, ChannelQueue};
 
 use bevy::{
     prelude::{Component, Entity, World, Bundle, Resource},
@@ -34,7 +34,10 @@ use std::{
     sync::Arc,
 };
 
-use futures::task::{waker_ref, ArcWake};
+use futures::{
+    task::{waker_ref, ArcWake},
+    future::BoxFuture,
+};
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
@@ -66,7 +69,23 @@ struct ServiceQueue {
 #[derive(Component)]
 pub(crate) struct TargetStorage(pub(crate) Entity);
 
-pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(InnerChannel) -> Option<Response> + Send>>;
+pub(crate) struct GenericAsyncReq<Request> {
+    pub(crate) request: Request,
+    pub(crate) channel: InnerChannel,
+    pub(crate) provider: Entity,
+}
+
+impl<Request> GenericAsyncReq<Request> {
+    pub(crate) fn into_specific<Streams>(self) -> AsyncReq<Request, Streams> {
+        AsyncReq {
+            request: self.request,
+            channel: self.channel.into_specific(),
+            provider: self.provider,
+        }
+    }
+}
+
+pub(crate) type Job<Response> = BoxFuture<'static, Option<Response>>;
 
 /// A service is a type of system that takes in a request and produces a
 /// response, optionally emitting events from its streams using the provided
@@ -75,10 +94,10 @@ pub(crate) type BoxedJob<Response> = Job<Box<dyn FnOnce(InnerChannel) -> Option<
 pub(crate) enum Service<Request, Response> {
     /// The service takes in the request and blocks execution until the response
     /// is produced.
-    Blocking(Option<BoxedSystem<(Entity, Req<Request>), Resp<Response>>>),
+    Blocking(Option<BoxedSystem<BlockingReq<Request>, Response>>),
     /// The service produces a task that runs asynchronously in the bevy thread
     /// pool.
-    Async(Option<BoxedSystem<(Entity, Req<Request>), BoxedJob<Response>>>),
+    Async(Option<BoxedSystem<GenericAsyncReq<Request>, Job<Response>>>),
 }
 
 impl<Request, Response> Service<Request, Response> {
@@ -207,7 +226,7 @@ fn dispatch_blocking<Request: 'static + Send + Sync, Response: 'static + Send + 
         return;
     };
 
-    let Resp(response) = service.run((provider, Req(request)), world);
+    let response = service.run(BlockingReq{ request, provider }, world);
     service.apply_deferred(world);
     if let Some(mut provider_ref) = world.get_entity_mut(provider) {
         match &mut *provider_ref.get_mut::<Service<Request, Response>>().unwrap().as_mut() {
@@ -301,13 +320,13 @@ fn dispatch_async_request<Request: 'static + Send + Sync, Response: 'static + Se
         }
     };
 
-    let Job(job) = service.run((provider, Req(request)), world);
+    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+    let channel = InnerChannel::new(source, sender);
+
+    let job = service.run(GenericAsyncReq{request, channel, provider}, world);
     service.apply_deferred(world);
 
-    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-    let task = AsyncComputeTaskPool::get().spawn(async move {
-        job(InnerChannel::new(source, sender))
-    });
+    let task = AsyncComputeTaskPool::get().spawn(job);
 
     if let Some(mut target_mut) = world.get_entity_mut(target) {
         target_mut.insert((

@@ -93,7 +93,7 @@ impl AddServicesExt for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Req, Resp, Job, Channel, Service};
+    use crate::{BlockingReq, InBlockingReq, AsyncReq, InAsyncReq, Channel, Service};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,

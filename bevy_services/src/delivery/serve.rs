@@ -16,13 +16,11 @@
 */
 
 use crate::{
-    Operation, TargetStorage, Provider, Dispatch, OperationRoster,
+    Operation, TargetStorage, Provider, OperationRoster,
     OperationStatus, DispatchCommand, dispatch_service,
 };
 
 use bevy::prelude::{Component, Entity, World};
-
-use std::collections::VecDeque;
 
 pub(crate) struct Serve {
     provider: Entity,

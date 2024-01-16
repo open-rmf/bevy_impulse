@@ -16,7 +16,8 @@
 */
 
 use crate::{
-    Req, Resp, Job, BoxedJob, Provider, Channel, Service, InnerChannel,
+    BlockingReq, InBlockingReq, AsyncReq, InAsyncReq, Job, Provider,
+    Channel, Service, InnerChannel, GenericAsyncReq,
     Delivery, ServiceBundle,
     stream::*,
     private,
@@ -27,10 +28,17 @@ use bevy::{
     ecs::{
         world::EntityMut,
         system::{
-            IntoSystem, Commands, EntityCommands,
+            IntoSystem, Commands, EntityCommands, BoxedSystem,
         }
     }
 };
+
+use std::{
+    pin::Pin,
+    future::Future,
+};
+
+use futures::future::{BoxFuture, FutureExt};
 
 pub mod traits {
     use super::*;
@@ -114,51 +122,16 @@ pub struct ServiceBuilder<Request, Response, Streams, Deliver, With, Also> {
 impl<Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, (), ()> {
     /// Take in a system that has a simple input and output and convert it into
     /// a valid blocking service.
-    pub fn wrap_blocking<M, Sys, Task>(service: Sys) -> Self
+    pub fn new_blocking<M, Sys, Task>(service: Sys) -> Self
     where
         Sys: IntoSystem<Request, Response, M>,
         Request: 'static,
         Response: 'static,
     {
-        let peel = |In((_, Req(request))): In<(Entity, Req<Request>)>| request;
-        let service = peel
-            .pipe(service)
-            .pipe(|In(response): In<Response>| Resp(response));
+        let peel = |In(BlockingReq{request, ..}): InBlockingReq<Request>| request;
+        let service = peel.pipe(service);
 
         let service = Service::Blocking(Some(Box::new(service)));
-        Self {
-            service,
-            streams: Default::default(),
-            deliver: BlockingChosen,
-            with: (),
-            also: (),
-        }
-    }
-
-    pub fn simple_blocking<M, Sys>(service: Sys) -> Self
-    where
-        Sys: IntoSystem<Req<Request>, Resp<Response>, M>,
-        Request: 'static,
-        Response: 'static,
-    {
-        let peel = |In((_, request)): In<(Entity, Req<Request>)>| request;
-        let service = Service::Blocking(Some(Box::new(peel.pipe(service))));
-        Self {
-            service,
-            streams: Default::default(),
-            deliver: BlockingChosen,
-            with: (),
-            also: (),
-        }
-    }
-
-    pub fn self_aware_blocking<M, Sys>(service: Sys) -> Self
-    where
-        Sys: IntoSystem<(Entity, Req<Request>), Resp<Response>, M>,
-        Request: 'static,
-        Response: 'static,
-    {
-        let service = Service::Blocking(Some(Box::new(IntoSystem::into_system(service))));
         Self {
             service,
             streams: Default::default(),
@@ -170,37 +143,57 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, ()
 }
 
 impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
-    /// Take in a system that has one input and outputs a task with no arguments
-    /// and convert it into a valid async service. This service will not be able
-    /// to use an [`Assistant`].
-    ///
-    /// This should only be used as an easy way to force an existing task
-    /// generator into being an async service. A well implemented async service
-    /// should use an [`Assistant`] to at least monitor whether the request has
-    /// been canceled while it's running.
-    pub fn wrap_async<M, Sys, Task>(service: Sys) -> Self
+    /// Start building a service from a system that takes in a simple request
+    /// type and returns a future.
+    pub fn into_async<M, Sys, Task>(system: Sys) -> Self
     where
         Sys: IntoSystem<Request, Task, M>,
-        Task: FnOnce() -> Option<Response> + Send,
+        Task: Future<Output=Option<Response>> + 'static + Send,
         Request: 'static,
         Response: 'static,
-        Task: 'static,
     {
-        let peel = |In((_, Req(request))): In<(Entity, Req<Request>)>| request;
-        let service = peel
-            .pipe(service)
-            .pipe(
-                |In(task): In<Task>| {
-                    let task: BoxedJob<Response> = Job(Box::new(
-                        move |_: InnerChannel| {
-                            task()
-                        }
-                    ));
-                    task
-                }
-            );
+        let peel = |In(GenericAsyncReq { request, .. }): In<GenericAsyncReq<Request>>| request;
 
-        let service = Service::Async(Some(Box::new(service)));
+        let into_task = |In(task): In<Task>| {
+            let task: BoxFuture<'static, Option<Response>> = Box::pin(task);
+            task
+        };
+
+        let service = Service::Async(Some(
+            Box::new(
+                IntoSystem::into_system(
+                    peel
+                    .pipe(system)
+                    .pipe(into_task)
+                )
+            )
+        ));
+
+        Self {
+            service,
+            streams: Default::default(),
+            deliver: (),
+            with: (),
+            also: (),
+        }
+    }
+
+    /// Convert any function that takes a request and returns a future into an
+    /// async service.
+    pub fn into_async_service<Task, F>(f: F) -> Self
+    where
+        F: FnMut(Request) -> Task + 'static + Send + Sync,
+        Task: Future<Output=Response> + 'static + Send,
+        Request: 'static,
+        Response: 'static,
+    {
+        let system = move |In(GenericAsyncReq { request, .. }): In<GenericAsyncReq<Request>>| {
+            let task: BoxFuture<'static, Option<Response>> = Box::pin(f(request).map(|r| Some(r)));
+            task
+        };
+
+        let service = Box::new(IntoSystem::into_system(system));
+        let service = Service::Async(Some(service));
 
         Self {
             service,
@@ -213,47 +206,32 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
 }
 
 impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), (), ()> {
-    /// Start building a new async service by providing the system that will
-    /// perform the service.
-    pub fn simple_async<M, Sys, Task>(service: Sys) -> Self
-    where
-        Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-        Task: FnOnce(Channel<Streams>) -> Option<Response> + Send,
-        Request: 'static,
-        Response: 'static,
-        Streams: 'static,
-        Task: 'static,
-    {
-        let peel = |In((_, request)): In<(Entity, Req<Request>)>| request;
-        Self::self_aware_async(peel.pipe(service))
-    }
 
-    /// Start building a new async service that is self-aware, meaning it knows
-    /// the identity of its provider. This can be used to create services that
-    /// have parameters configurable by the user.
-    pub fn self_aware_async<M, Sys, Task>(service: Sys) -> Self
+    pub fn new_async<M, Sys, Task>(system: Sys) -> Self
     where
-        Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
-        Task: FnOnce(Channel<Streams>) -> Option<Response> + Send,
+        Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
+        Task: Future<Output=Option<Response>> + 'static + Send,
         Request: 'static,
         Response: 'static,
         Streams: 'static,
-        Task: 'static,
     {
+        let into_specific = |In(input): In<GenericAsyncReq<Request>>| {
+            input.into_specific::<Streams>()
+        };
+
+        let into_task = |In(task): In<Task>| {
+            let task: BoxFuture<'static, Option<Response>> = Box::pin(task);
+            task
+        };
+
         let service = Service::Async(Some(
-            Box::new(IntoSystem::into_system(
-                service
-                .pipe(
-                    |In(Job(task)): In<Job<Task>>| {
-                        let task: BoxedJob<Response> = Job(Box::new(
-                            move |assistant: InnerChannel| {
-                                task(assistant.into_specific())
-                            }
-                        ));
-                        task
-                    }
+            Box::new(
+                IntoSystem::into_system(
+                    into_specific
+                    .pipe(system)
+                    .pipe(into_task)
                 )
-            ))
+            )
         ));
 
         Self {
