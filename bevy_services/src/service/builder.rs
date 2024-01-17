@@ -16,29 +16,23 @@
 */
 
 use crate::{
-    BlockingReq, InBlockingReq, AsyncReq, InAsyncReq, Job, Provider,
-    Channel, Service, InnerChannel, GenericAsyncReq,
+    BlockingReq, InBlockingReq, AsyncReq, Provider, Service, GenericAsyncReq,
     Delivery, ServiceBundle,
     stream::*,
     private,
 };
 
 use bevy::{
-    prelude::{App, In, Entity},
+    prelude::{App, In},
     ecs::{
         world::EntityMut,
-        system::{
-            IntoSystem, Commands, EntityCommands, BoxedSystem,
-        }
+        system::{IntoSystem, Commands, EntityCommands}
     }
 };
 
-use std::{
-    pin::Pin,
-    future::Future,
-};
+use std::future::Future;
 
-use futures::future::{BoxFuture, FutureExt};
+use futures::future::BoxFuture;
 
 pub mod traits {
     use super::*;
@@ -74,12 +68,28 @@ pub mod traits {
 
     /// This trait allows async service systems to be converted into a builder
     /// by specifying whether it should have serial or parallel service delivery.
-    pub trait IntoAsyncServiceBuilder<Marker>: private::Sealed<Marker> {
+    pub trait ChooseAsyncServiceDelivery<Marker>: private::Sealed<Marker> {
         type Request;
         type Response;
         type Streams;
         fn serial(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()>;
         fn parallel(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()>;
+    }
+
+    /// This trait allows any system to be converted into a blocking service
+    /// builder.
+    pub trait IntoBlockingServiceBuilder<Marker>: private::Sealed<Marker> {
+        type Request;
+        type Response;
+        fn into_blocking_service(self) -> ServiceBuilder<Self::Request, Self::Response, (), BlockingChosen, (), ()>;
+    }
+
+    /// This trait allows any system that returns a future to be converted into
+    /// an async service builder.
+    pub trait IntoAsyncServiceBuilder<Marker>: private::Sealed<Marker> {
+        type Request;
+        type Response;
+        fn into_async_service(self) -> ServiceBuilder<Self::Request, Self::Response, (), (), (), ()>;
     }
 
     /// This trait is used to set the delivery mode of a service.
@@ -119,23 +129,41 @@ pub struct ServiceBuilder<Request, Response, Streams, Deliver, With, Also> {
     also: Also,
 }
 
-impl<Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, (), ()> {
-    /// Take in a system that has a simple input and output and convert it into
-    /// a valid blocking service.
-    pub fn new_blocking<M, Sys, Task>(service: Sys) -> Self
+impl <Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, (), ()> {
+    /// Start building a new blocking service from a system that uses the
+    /// standard blocking service signature.
+    pub fn new_blocking<M, Sys>(system: Sys) -> Self
+    where
+        Sys: IntoSystem<BlockingReq<Request>, Response, M>,
+        Request: 'static,
+        Response: 'static,
+    {
+        let service = Service::Blocking(Some(Box::new(IntoSystem::into_system(system))));
+        Self {
+            service,
+            streams: Default::default(),
+            deliver: BlockingChosen,
+            with: (),
+            also: (),
+        }
+    }
+
+    /// Convert any system with an input and output into a blocking service.
+    pub fn into_blocking<M, Sys>(system: Sys) -> Self
     where
         Sys: IntoSystem<Request, Response, M>,
         Request: 'static,
         Response: 'static,
     {
-        let peel = |In(BlockingReq{request, ..}): InBlockingReq<Request>| request;
-        let service = peel.pipe(service);
+        let peel = |In(BlockingReq { request, .. }): InBlockingReq<Request>| request;
+        let service = Service::Blocking(Some(
+            Box::new(IntoSystem::into_system(peel.pipe(system)))
+        ));
 
-        let service = Service::Blocking(Some(Box::new(service)));
         Self {
             service,
             streams: Default::default(),
-            deliver: BlockingChosen,
+            deliver: (),
             with: (),
             also: (),
         }
@@ -148,14 +176,14 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
     pub fn into_async<M, Sys, Task>(system: Sys) -> Self
     where
         Sys: IntoSystem<Request, Task, M>,
-        Task: Future<Output=Option<Response>> + 'static + Send,
+        Task: Future<Output=Response> + 'static + Send,
         Request: 'static,
         Response: 'static,
     {
         let peel = |In(GenericAsyncReq { request, .. }): In<GenericAsyncReq<Request>>| request;
 
         let into_task = |In(task): In<Task>| {
-            let task: BoxFuture<'static, Option<Response>> = Box::pin(task);
+            let task: BoxFuture<'static, Response> = Box::pin(task);
             task
         };
 
@@ -177,36 +205,9 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
             also: (),
         }
     }
-
-    /// Convert any function that takes a request and returns a future into an
-    /// async service.
-    pub fn into_async_service<Task, F>(f: F) -> Self
-    where
-        F: FnMut(Request) -> Task + 'static + Send + Sync,
-        Task: Future<Output=Response> + 'static + Send,
-        Request: 'static,
-        Response: 'static,
-    {
-        let system = move |In(GenericAsyncReq { request, .. }): In<GenericAsyncReq<Request>>| {
-            let task: BoxFuture<'static, Option<Response>> = Box::pin(f(request).map(|r| Some(r)));
-            task
-        };
-
-        let service = Box::new(IntoSystem::into_system(system));
-        let service = Service::Async(Some(service));
-
-        Self {
-            service,
-            streams: Default::default(),
-            deliver: (),
-            with: (),
-            also: (),
-        }
-    }
 }
 
 impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), (), ()> {
-
     pub fn new_async<M, Sys, Task>(system: Sys) -> Self
     where
         Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
@@ -376,106 +377,10 @@ where
     }
 }
 
-impl<Request, Response, Streams, Task, M, Sys>
-IntoServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
-where
-    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamBundle + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    type DefaultDeliver = ();
-    fn builder(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, Self::DefaultDeliver, (), ()> {
-        ServiceBuilder::simple_async(self)
-    }
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, (), With, ()> {
-        self.builder().with(with)
-    }
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, (), (), Also> {
-        self.builder().also(also)
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys>
-private::Sealed<(Request, Response, Streams, Task, M)> for Sys { }
-
-impl<Request, Response, Streams, Task, M, Sys>
-IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
-where
-    Sys: IntoSystem<Req<Request>, Job<Task>, M>,
-    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamBundle + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn serial(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()> {
-        ServiceBuilder::simple_async(self).serial()
-    }
-    fn parallel(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()> {
-        ServiceBuilder::simple_async(self).parallel()
-    }
-}
-
-pub struct SelfAware;
-
-impl<Request, Response, Streams, Task, M, Sys>
-IntoServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
-where
-    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
-    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamBundle + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    type DefaultDeliver = ();
-    fn builder(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, Self::DefaultDeliver, (), ()> {
-        ServiceBuilder::self_aware_async(self)
-    }
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, (), With, ()> {
-        self.builder().with(with)
-    }
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, (), (), Also> {
-        self.builder().also(also)
-    }
-}
-
-impl<Request, Response, Streams, Task, M, Sys>
-private::Sealed<(Request, Response, Streams, Task, M, SelfAware)> for Sys { }
-
-impl<Request, Response, Streams, Task, M, Sys>
-IntoAsyncServiceBuilder<(Request, Response, Streams, Task, M, SelfAware)> for Sys
-where
-    Sys: IntoSystem<(Entity, Req<Request>), Job<Task>, M>,
-    Task: FnOnce(Channel<Streams>) -> Option<Response> + 'static + Send,
-    Streams: IntoStreamBundle + 'static,
-    Request: 'static,
-    Response: 'static,
-{
-    type Request = Request;
-    type Response = Response;
-    type Streams = Streams;
-    fn serial(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()> {
-        ServiceBuilder::self_aware_async(self).serial()
-    }
-    fn parallel(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()> {
-        ServiceBuilder::self_aware_async(self).parallel()
-    }
-}
-
 impl<Request, Response, M, Sys>
 IntoServiceBuilder<(Request, Response, M)> for Sys
 where
-    Sys: IntoSystem<Req<Request>, Resp<Response>, M>,
+    Sys: IntoSystem<BlockingReq<Request>, Response, M>,
     Request: 'static,
     Response: 'static,
 {
@@ -497,30 +402,81 @@ where
 impl<Request, Response, M, Sys>
 private::Sealed<(Request, Response, M)> for Sys { }
 
-impl<Request, Response, M, Sys>
-IntoServiceBuilder<(Request, Response, M, SelfAware)> for Sys
+impl<Request, Response, Streams, Task, M, Sys>
+IntoServiceBuilder<(Request, Response, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<(Entity, Req<Request>), Resp<Response>, M>,
+    Sys: IntoSystem<AsyncReq<Request>, Task, M>,
+    Task: Future<Output=Response> + 'static + Send,
+    Streams: IntoStreamBundle + 'static,
     Request: 'static,
     Response: 'static,
 {
     type Request = Request;
     type Response = Response;
-    type Streams = ();
-    type DefaultDeliver = BlockingChosen;
+    type Streams = Streams;
+    type DefaultDeliver = ();
     fn builder(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, Self::DefaultDeliver, (), ()> {
-        ServiceBuilder::self_aware_blocking(self)
+        ServiceBuilder::new_async(self)
     }
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Request, Self::Response, (), BlockingChosen, With, ()> {
-        ServiceBuilder::self_aware_blocking(self).with(with)
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, (), With, ()> {
+        self.builder().with(with)
     }
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Request, Self::Response, (), BlockingChosen, (), Also> {
-        ServiceBuilder::self_aware_blocking(self).also(also)
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, (), (), Also> {
+        self.builder().also(also)
+    }
+}
+
+impl<Request, Response, Streams, Task, M, Sys>
+private::Sealed<(Request, Response, Streams, Task, M)> for Sys { }
+
+impl<Request, Response, Streams, Task, M, Sys>
+ChooseAsyncServiceDelivery<(Request, Response, Streams, Task, M)> for Sys
+where
+    Sys: IntoSystem<AsyncReq<Request>, Task, M>,
+    Task: Future<Output=Response> + 'static + Send,
+    Streams: IntoStreamBundle + 'static,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+    fn serial(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()> {
+        ServiceBuilder::new_async(self).serial()
+    }
+    fn parallel(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()> {
+        ServiceBuilder::new_async(self).parallel()
     }
 }
 
 impl<Request, Response, M, Sys>
-private::Sealed<(Request, Response, M, SelfAware)> for Sys { }
+IntoBlockingServiceBuilder<(Request, Response, M)> for Sys
+where
+    Sys: IntoSystem<Request, Response, M>,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    fn into_blocking_service(self) -> ServiceBuilder<Self::Request, Self::Response, (), BlockingChosen, (), ()> {
+        ServiceBuilder::into_blocking(self)
+    }
+}
+
+impl<Request, Response, Task, M, Sys>
+IntoAsyncServiceBuilder<(Request, Response, (), Task, M)> for Sys
+where
+    Sys: IntoSystem<Request, Task, M>,
+    Task: Future<Output=Response> + 'static + Send,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    fn into_async_service(self) -> ServiceBuilder<Self::Request, Self::Response, (), (), (), ()> {
+        ServiceBuilder::into_async(self)
+    }
+}
 
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
 /// user has indicated that the service should be executed in serial.

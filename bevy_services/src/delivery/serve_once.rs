@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Req, Resp, Job, Channel, IntoStreamBundle, BoxedJob,
+    BlockingReq, AsyncReq, Job, Channel, IntoStreamBundle,
     InnerChannel, InputStorage, InputBundle, TaskBundle,
     TargetStorage, Operation, ChannelQueue,
     OperationStatus, OperationRoster, private,

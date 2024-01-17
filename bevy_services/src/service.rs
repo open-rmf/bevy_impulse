@@ -98,6 +98,7 @@ mod tests {
         prelude::*,
         ecs::world::EntityMut,
     };
+    use std::future::Future;
 
     #[derive(Component)]
     struct TestPeople {
@@ -187,7 +188,7 @@ mod tests {
         let mut app = App::new();
         app
             .insert_resource(TestSystemRan(false))
-            .add_service(sys_blocking_service)
+            .add_service(sys_blocking_system.into_blocking_service())
             .add_systems(Update, sys_find_service);
 
         app.update();
@@ -200,7 +201,7 @@ mod tests {
         app
             .insert_resource(TestSystemRan(false))
             .add_service(
-                sys_self_aware_blocking_service
+                sys_blocking_service
                 .with(|mut entity_mut: EntityMut| {
                     entity_mut.insert(Multiplier(2));
                 })
@@ -212,20 +213,19 @@ mod tests {
     }
 
     fn sys_async_service(
-        In(Req(name)): In<Req<String>>,
+        In(AsyncReq{ request, .. }): InAsyncReq<String>,
         people: Query<&TestPeople>,
-    ) -> Job<impl FnOnce(Channel) -> Option<u64>> {
+    ) -> impl Future<Output=u64> {
         let mut matching_people = Vec::new();
         for person in &people {
-            if person.name == name {
+            if person.name == request {
                 matching_people.push(person.age);
             }
         }
 
-        let job = move |_: Channel| {
-            Some(matching_people.into_iter().fold(0, |sum, age| sum + age))
-        };
-        Job(job)
+        async move {
+            matching_people.into_iter().fold(0, |sum, age| sum + age)
+        }
     }
 
     fn sys_spawn_async_service(
@@ -234,38 +234,38 @@ mod tests {
         commands.spawn_service(sys_async_service);
     }
 
-    fn sys_self_aware_blocking_service(
-        In((me, Req(name))): In<(Entity, Req<String>)>,
+    fn sys_blocking_service(
+        In(BlockingReq{ request, provider }): InBlockingReq<String>,
         people: Query<&TestPeople>,
         multipliers: Query<&Multiplier>,
-    ) -> Resp<u64> {
+    ) -> u64 {
         let mut sum = 0;
-        let multiplier = multipliers.get(me).unwrap().0;
+        let multiplier = multipliers.get(provider).unwrap().0;
         for person in &people {
-            if person.name == name {
+            if person.name == request {
                 sum += multiplier * person.age;
             }
         }
-        Resp(sum)
+        sum
     }
 
-    fn sys_blocking_service(
-        In(Req(name)): In<Req<String>>,
+    fn sys_blocking_system(
+        In(name): In<String>,
         people: Query<&TestPeople>,
-    ) -> Resp<u64> {
+    ) -> u64 {
         let mut sum = 0;
         for person in &people {
             if person.name == name {
                 sum += person.age;
             }
         }
-        Resp(sum)
+        sum
     }
 
     fn sys_spawn_blocking_service(
         mut commands: Commands,
     ) {
-        commands.spawn_service(sys_self_aware_blocking_service);
+        commands.spawn_service(sys_blocking_service);
     }
 
     fn sys_find_service(
