@@ -18,7 +18,10 @@
 use bevy::prelude::{Entity, App, Commands};
 
 mod builder;
-pub use builder::{ServiceBuilder, traits::*};
+pub use builder::ServiceBuilder;
+
+mod traits;
+pub use traits::*;
 
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
