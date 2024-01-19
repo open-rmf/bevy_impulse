@@ -15,13 +15,64 @@
  *
 */
 
-use bevy::prelude::{Entity, App, Commands};
+use crate::OperationRoster;
+
+use bevy::{
+    prelude::{Entity, App, Commands, World},
+    ecs::{
+        world::EntityMut,
+        system::EntityCommands,
+    }
+};
+
+mod blocking;
+pub use blocking::*;
+
+mod serve;
+pub(crate) use serve::*;
 
 mod builder;
 pub use builder::ServiceBuilder;
 
 mod traits;
 pub use traits::*;
+
+pub struct ServeCmd<'a> {
+    /// The entity that holds the service that is being used.
+    pub provider: Entity,
+    /// The entity that holds the [`InputStorage`](crate::InputStorage).
+    pub source: Entity,
+    /// The entity where the response should be placed as [`InputStorage`](crate::InputStorage).
+    pub target: Entity,
+    /// The world that the service must operate on
+    pub world: &'a mut World,
+    /// The operation roster which lets the service queue up more operations to immediately perform
+    pub roster: &'a mut OperationRoster,
+}
+
+pub trait Service {
+    fn serve(cmd: ServeCmd);
+}
+
+pub trait IntoService<M> {
+    type Request;
+    type Response;
+    type Streams;
+    type DefaultDelivery: Default;
+
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>);
+    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
+}
+
+pub(crate) struct ServiceMarker<Request, Response> {
+    _ignore: std::marker::PhantomData<(Request, Response)>,
+}
+
+impl<Request, Response> Default for ServiceMarker<Request, Response> {
+    fn default() -> Self {
+        Self { _ignore: Default::default() }
+    }
+}
 
 /// Provider is the public API handle for referring to an existing service
 /// provider. Downstream users can obtain a Provider using
@@ -31,20 +82,20 @@ pub use traits::*;
 ///
 /// To use a provider, call [`bevy::prelude::Commands`].request(provider, request).
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Provider<Request, Response, Streams = ()> {
+pub struct ServiceRef<Request, Response, Streams = ()> {
     entity: Entity,
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Req, Res, S> Clone for Provider<Req, Res, S> {
+impl<Req, Res, S> Clone for ServiceRef<Req, Res, S> {
     fn clone(&self) -> Self {
         Self { entity: self.entity, _ignore: Default::default() }
     }
 }
 
-impl<Req, Res, S> Copy for Provider<Req, Res, S> { }
+impl<Req, Res, S> Copy for ServiceRef<Req, Res, S> { }
 
-impl<Request, Response, Streams> Provider<Request, Response, Streams> {
+impl<Request, Response, Streams> ServiceRef<Request, Response, Streams> {
     /// Get the underlying entity that the service provider is associated with.
     pub fn get(&self) -> Entity {
         self.entity
@@ -67,14 +118,14 @@ pub trait SpawnServicesExt<'w, 's> {
     fn spawn_service<'a, M, S: ServiceSpawn<M>>(
         &'a mut self,
         service: S,
-    ) -> Provider<S::Request, S::Response, S::Streams>;
+    ) -> ServiceRef<S::Request, S::Response, S::Streams>;
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
     fn spawn_service<'a, M, S: ServiceSpawn<M>>(
         &'a mut self,
         service: S,
-    ) -> Provider<S::Request, S::Response, S::Streams> {
+    ) -> ServiceRef<S::Request, S::Response, S::Streams> {
         service.spawn_service(self)
     }
 }
@@ -96,7 +147,7 @@ impl AddServicesExt for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BlockingReq, InBlockingReq, AsyncReq, InAsyncReq, Channel, Service};
+    use crate::{BlockingReq, InBlockingReq, AsyncReq, InAsyncReq, Channel};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,
@@ -118,7 +169,7 @@ mod tests {
     #[derive(Resource)]
     struct MyServiceProvider {
         #[allow(unused)]
-        provider: Provider<String, u64>,
+        provider: ServiceRef<String, u64>,
     }
 
     #[test]

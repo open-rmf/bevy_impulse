@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Operation, TargetStorage, Provider, OperationRoster,
+    Operation, TargetStorage, ServiceRef, OperationRoster,
     OperationStatus, DispatchCommand, dispatch_service,
 };
 
@@ -29,7 +29,7 @@ pub(crate) struct Serve {
 
 impl Serve {
     pub(crate) fn new<Request, Response, Streams>(
-        provider: Provider<Request, Response, Streams>,
+        provider: ServiceRef<Request, Response, Streams>,
         target: Entity,
     ) -> Self {
         Self {

@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Provider, UnusedTarget, Terminate, PerformOperation,
+    ServiceRef, UnusedTarget, Terminate, PerformOperation,
     Fork, Map, Chosen, ApplyLabel, Servable, Serve, ServeOnce, Stream,
 };
 
@@ -457,7 +457,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// request.
     pub fn then<ThenResponse: 'static + Send + Sync, ThenStreams: Stream>(
         self,
-        service_provider: Provider<Response, ThenResponse, ThenStreams>
+        service_provider: ServiceRef<Response, ThenResponse, ThenStreams>
     ) -> PromiseCommands<'w, 's, 'a, ThenResponse, ThenStreams, ()> {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();

@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    BlockingReq, InBlockingReq, AsyncReq, Provider, Service, GenericAsyncReq,
+    BlockingReq, InBlockingReq, AsyncReq, ServiceRef, Service, GenericAsyncReq,
     Delivery, ServiceBundle,
     stream::*,
     private,
@@ -38,48 +38,43 @@ use super::traits::*;
 
 pub struct BuilderMarker;
 
-pub struct ServiceBuilder<Request, Response, Streams, Deliver, With, Also> {
-    service: Service<Request, Response>,
-    streams: std::marker::PhantomData<Streams>,
+pub struct ServiceBuilder<Srv, Deliver, With, Also> {
+    service: Srv,
     deliver: Deliver,
     with: With,
     also: Also,
 }
 
-impl <Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, (), ()> {
+impl<M, Srv: Service<M>> ServiceBuilder<Srv, Srv::DefaultDelivery, (), ()> {
     /// Start building a new blocking service from a system that uses the
     /// standard blocking service signature.
-    pub fn new_blocking<M, Sys>(system: Sys) -> Self
+    pub fn new(service: Srv) -> Self
     where
-        Sys: IntoSystem<BlockingReq<Request>, Response, M>,
-        Request: 'static,
-        Response: 'static,
+        Srv::Request: 'static,
+        Srv::Response: 'static,
     {
-        let service = Service::Blocking(Some(Box::new(IntoSystem::into_system(system))));
         Self {
             service,
-            streams: Default::default(),
-            deliver: BlockingChosen,
+            deliver: Srv::DefaultDelivery::default(),
             with: (),
             also: (),
         }
     }
 
     /// Convert any system with an input and output into a blocking service.
-    pub fn into_blocking<M, Sys>(system: Sys) -> Self
+    pub fn into_blocking<SysM, Sys>(system: Sys) -> Self
     where
-        Sys: IntoSystem<Request, Response, M>,
-        Request: 'static,
-        Response: 'static,
+        Sys: IntoSystem<Srv::Request, Srv::Response, SysM>,
+        Srv::Request: 'static,
+        Srv::Response: 'static,
     {
-        let peel = |In(BlockingReq { request, .. }): InBlockingReq<Request>| request;
+        let peel = |In(BlockingReq { request, .. }): InBlockingReq<Srv::Request>| request;
         let service = Service::Blocking(Some(
             Box::new(IntoSystem::into_system(peel.pipe(system)))
         ));
 
         Self {
             service,
-            streams: Default::default(),
             deliver: (),
             with: (),
             also: (),
@@ -87,20 +82,20 @@ impl <Request, Response> ServiceBuilder<Request, Response, (), BlockingChosen, (
     }
 }
 
-impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
+impl<M, Srv: Service<M>> ServiceBuilder<Srv, (), (), ()> {
     /// Start building a service from a system that takes in a simple request
     /// type and returns a future.
-    pub fn into_async<M, Sys, Task>(system: Sys) -> Self
+    pub fn into_async<SysM, Sys, Task>(system: Sys) -> Self
     where
-        Sys: IntoSystem<Request, Task, M>,
-        Task: Future<Output=Response> + 'static + Send,
-        Request: 'static,
-        Response: 'static,
+        Sys: IntoSystem<Srv::Request, Task, SysM>,
+        Task: Future<Output=Srv::Response> + 'static + Send,
+        Srv::Request: 'static,
+        Srv::Response: 'static,
     {
-        let peel = |In(GenericAsyncReq { request, .. }): In<GenericAsyncReq<Request>>| request;
+        let peel = |In(GenericAsyncReq { request, .. }): In<GenericAsyncReq<Srv::Request>>| request;
 
         let into_task = |In(task): In<Task>| {
-            let task: BoxFuture<'static, Response> = Box::pin(task);
+            let task: BoxFuture<'static, Srv::Response> = Box::pin(task);
             task
         };
 
@@ -116,45 +111,6 @@ impl<Request, Response> ServiceBuilder<Request, Response, (), (), (), ()> {
 
         Self {
             service,
-            streams: Default::default(),
-            deliver: (),
-            with: (),
-            also: (),
-        }
-    }
-}
-
-impl<Request, Response, Streams> ServiceBuilder<Request, Response, Streams, (), (), ()> {
-    pub fn new_async<M, Sys, Task>(system: Sys) -> Self
-    where
-        Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
-        Task: Future<Output=Option<Response>> + 'static + Send,
-        Request: 'static,
-        Response: 'static,
-        Streams: 'static,
-    {
-        let into_specific = |In(input): In<GenericAsyncReq<Request>>| {
-            input.into_specific::<Streams>()
-        };
-
-        let into_task = |In(task): In<Task>| {
-            let task: BoxFuture<'static, Option<Response>> = Box::pin(task);
-            task
-        };
-
-        let service = Service::Async(Some(
-            Box::new(
-                IntoSystem::into_system(
-                    into_specific
-                    .pipe(system)
-                    .pipe(into_task)
-                )
-            )
-        ));
-
-        Self {
-            service,
-            streams: Default::default(),
             deliver: (),
             with: (),
             also: (),
@@ -230,7 +186,7 @@ where
     type Streams = Streams;
     fn add_service(self, app: &mut App) {
         let mut entity_mut = app.world.spawn(ServiceBundle::new(self.service));
-        let provider = Provider::<Request, Response, Streams>::new(entity_mut.id());
+        let provider = ServiceRef::<Request, Response, Streams>::new(entity_mut.id());
         entity_mut.insert(Streams::StreamOutBundle::default());
         self.deliver.apply_entity_mut(&mut entity_mut);
         self.with.apply(entity_mut);
@@ -266,9 +222,9 @@ where
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Request, Response, Streams> {
+    fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Request, Response, Streams> {
         let mut entity_cmds = commands.spawn(ServiceBundle::new(self.service));
-        let provider = Provider::<Request, Response, Streams>::new(entity_cmds.id());
+        let provider = ServiceRef::<Request, Response, Streams>::new(entity_cmds.id());
         entity_cmds.insert(Streams::StreamOutBundle::default());
         self.deliver.apply_entity_commands(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
@@ -289,7 +245,7 @@ where
     type Request = S::Request;
     type Response = S::Response;
     type Streams = S::Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams> {
+    fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Self::Request, Self::Response, Self::Streams> {
         ServiceSpawn::<BuilderMarker>::spawn_service(self.builder(), commands)
     }
 }
@@ -430,6 +386,7 @@ impl private::Sealed<()> for ParallelChosen { }
 /// When this is used in the Deliver type parameter of ServiceBuilder, the user
 /// has indicated that the service is blocking and therefore does not have a
 /// delivery type.
+#[derive(Default)]
 pub struct BlockingChosen;
 
 impl DeliveryChoice for BlockingChosen {
@@ -480,15 +437,15 @@ impl WithEntityCommands for () {
 
 impl<Request, Response, Streams, T> AlsoAdd<Request, Response, Streams> for T
 where
-    T: FnOnce(&mut App, Provider<Request, Response, Streams>)
+    T: FnOnce(&mut App, ServiceRef<Request, Response, Streams>)
 {
-    fn apply<'w>(self, app: &mut App, provider: Provider<Request, Response, Streams>) {
+    fn apply<'w>(self, app: &mut App, provider: ServiceRef<Request, Response, Streams>) {
         self(app, provider)
     }
 }
 
 impl<Request, Response, Streams> AlsoAdd<Request, Response, Streams> for () {
-    fn apply<'w>(self, _: &mut App, _: Provider<Request, Response, Streams>) {
+    fn apply<'w>(self, _: &mut App, _: ServiceRef<Request, Response, Streams>) {
         // Do nothing
     }
 }

@@ -16,8 +16,17 @@
 */
 
 use crate::{
-
+    ServiceBuilder, ServiceRef,
+    service::builder::{BlockingChosen, SerialChosen, ParallelChosen},
     private
+};
+
+use bevy::{
+    prelude::App,
+    ecs::{
+        world::EntityMut,
+        system::{Commands, EntityCommands},
+    },
 };
 
 /// This trait is used to implement adding an async service to an App at
@@ -34,7 +43,7 @@ pub trait ServiceSpawn<Marker>: private::Sealed<Marker> {
     type Request;
     type Response;
     type Streams;
-    fn spawn_service(self, commands: &mut Commands) -> Provider<Self::Request, Self::Response, Self::Streams>;
+    fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Self::Request, Self::Response, Self::Streams>;
 }
 
 /// This trait allows service systems to be converted into a builder that

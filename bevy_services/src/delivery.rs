@@ -87,25 +87,6 @@ impl<Request> GenericAsyncReq<Request> {
 
 pub(crate) type Job<Response> = BoxFuture<'static, Option<Response>>;
 
-/// A service is a type of system that takes in a request and produces a
-/// response, optionally emitting events from its streams using the provided
-/// assistant.
-#[derive(Component)]
-pub(crate) enum Service<Request, Response> {
-    /// The service takes in the request and blocks execution until the response
-    /// is produced.
-    Blocking(Option<BoxedSystem<BlockingReq<Request>, Response>>),
-    /// The service produces a task that runs asynchronously in the bevy thread
-    /// pool.
-    Async(Option<BoxedSystem<GenericAsyncReq<Request>, Job<Response>>>),
-}
-
-impl<Request, Response> Service<Request, Response> {
-    fn is_blocking(&self) -> bool {
-        matches!(self, Service::Blocking(_))
-    }
-}
-
 /// This struct encapsulates the data for flushing a command
 #[derive(Clone, Copy)]
 pub(crate) struct DispatchCommand {
