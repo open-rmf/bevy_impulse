@@ -16,14 +16,14 @@
 */
 
 use crate::{
-    BlockingReq, IntoService, Service, ServiceBuilder, ServiceMarker, ServeCmd, InputStorage,
+    BlockingReq, InBlockingReq, IntoService, ServiceTrait, ServiceMarker, ServiceRequest, InputStorage,
     InputBundle,
     service::builder::BlockingChosen,
-    service::traits::*
+    private,
 };
 
 use bevy::{
-    prelude::Component,
+    prelude::{Component, In},
     ecs::{
         world::EntityMut,
         system::{IntoSystem, BoxedSystem, EntityCommands},
@@ -33,12 +33,12 @@ use bevy::{
 struct Blocking;
 
 #[derive(Component)]
-struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<Request, Response>>);
+struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingReq<Request>, Response>>);
 
 #[derive(Component)]
-struct UninitBlockingServiceStorage<Request, Response>(BoxedSystem<Request, Response>);
+struct UninitBlockingServiceStorage<Request, Response>(BoxedSystem<BlockingReq<Request>, Response>);
 
-impl<Sys, M, Request, Response> IntoService<(Request, Response, M, Blocking)> for Sys
+impl<Request, Response, M, Sys> IntoService<(Request, Response, M, Blocking)> for Sys
 where
     Sys: IntoSystem<BlockingReq<Request>, Response, M>,
     Request: 'static,
@@ -47,45 +47,39 @@ where
     type Request = Request;
     type Response = Response;
     type Streams = ();
-    type DefaultDelivery = BlockingChosen;
+    type DefaultDeliver = BlockingChosen;
 
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
         entity_commands.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceMarker::<Request, Response>::default(),
+            ServiceMarker::<Request, Response>::new::<BlockingServiceStorage<Request, Response>>(),
         ));
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
         entity_mut.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceMarker::<Request, Response>::default(),
+            ServiceMarker::<Request, Response>::new::<BlockingServiceStorage<Request, Response>>(),
         ));
     }
 }
 
-impl<Request, Response> Service for BlockingServiceStorage<Request, Response> {
-    fn serve(cmd: ServeCmd) {
-        let ServeCmd { provider, source, target, world, roster } = cmd;
-        let request = if let Some(mut source_mut) = world.get_entity_mut(source) {
-            let Some(request) = source_mut.take::<InputStorage<Request>>() else {
-                roster.cancel(source);
-                return;
-            };
-            request.0
-        } else {
-            roster.cancel(source);
+impl<Request, Response> ServiceTrait for BlockingServiceStorage<Request, Response> {
+    fn serve(mut cmd: ServiceRequest) {
+        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
             return;
         };
 
+        let ServiceRequest { provider, source, target, world, roster } = cmd;
+
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            let mut storage = if let Some(storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {
-                storage
+            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {
+                storage.0.take().expect("Service is missing while attempting to serve")
             } else {
                 // Check if the system still needs to be initialized
                 if let Some(uninit) = provider_mut.get_mut::<UninitBlockingServiceStorage<Request, Response>>() {
                     // We need to initialize the service
-                    let service = uninit.0;
+                    let mut service = uninit.0;
                     service.initialize(world);
                     provider_mut.insert(BlockingServiceStorage::<Request, Response>(None));
                     service
@@ -93,10 +87,8 @@ impl<Request, Response> Service for BlockingServiceStorage<Request, Response> {
                     // The provider has had its service removed, so we treat this request as canceled.
                     roster.cancel(source);
                     return;
-                };
-            };
-
-            storage.0.take().expect("Service is missing while attempting to serve")
+                }
+            }
         } else {
             // If the provider has been despawned then we treat this request as canceled.
             roster.cancel(source);
@@ -127,4 +119,48 @@ impl<Request, Response> Service for BlockingServiceStorage<Request, Response> {
             roster.cancel(target);
         }
     }
+}
+
+/// Take any system that was not declared as a service and transform it into a
+/// blocking service that can be passed into a ServiceBuilder.
+pub struct AsBlockingService<Srv>(pub Srv);
+
+/// This trait allows any system to be converted into a blocking service.
+pub trait IntoBlockingService<M>: private::Sealed<M> {
+    fn into_blocking_service(self) -> AsBlockingService<Self>;
+}
+
+impl<Request, Response, M, Sys> IntoBlockingService<(Request, Response, M)> for Sys
+where
+    Sys: IntoSystem<Request, Response, M>,
+    Request: 'static,
+    Response: 'static,
+{
+    fn into_blocking_service(self) -> AsBlockingService<Sys> {
+        AsBlockingService(self)
+    }
+}
+
+impl<Request, Response, M, Sys> IntoService<(Request, Response, M, Sys)> for AsBlockingService<M>
+where
+    Sys: IntoSystem<Request, Response, M>,
+    Request: 'static,
+    Response: 'static,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = ();
+    type DefaultDeliver = BlockingChosen;
+
+    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+        peel_blocking.pipe(self).insert_service_commands(entity_commands)
+    }
+
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
+        peel_blocking.pipe(self).insert_service_mut(entity_mut)
+    }
+}
+
+fn peel_blocking<Request>(In(BlockingReq { request, .. }): InBlockingReq<Request>) -> Request {
+    request
 }

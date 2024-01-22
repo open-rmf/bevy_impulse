@@ -23,8 +23,6 @@ use bevy::{
     },
 };
 
-use crate::{HeldService, SharedService};
-
 pub trait Stream: Send + Sync + 'static {}
 
 /// StreamOut is a marker component that indicates what streams are offered by
@@ -36,13 +34,6 @@ impl<T: Stream> Default for StreamOut<T> {
     fn default() -> Self {
         StreamOut(Default::default())
     }
-}
-
-#[derive(Component)]
-pub(crate) enum StreamHandler<T: Stream> {
-    Callback(Box<dyn FnMut(T) + 'static + Send + Sync>),
-    Held(HeldService<T, (), ()>),
-    Shared(SharedService<T, (), ()>),
 }
 
 pub trait IntoStreamBundle {

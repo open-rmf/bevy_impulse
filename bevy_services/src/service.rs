@@ -18,18 +18,19 @@
 use crate::OperationRoster;
 
 use bevy::{
-    prelude::{Entity, App, Commands, World},
+    prelude::{Entity, App, Commands, World, Component, Bundle},
     ecs::{
         world::EntityMut,
         system::EntityCommands,
-    }
+    },
+    tasks::Task as BevyTask,
 };
+
+mod async_srv;
+pub use async_srv::*;
 
 mod blocking;
 pub use blocking::*;
-
-mod serve;
-pub(crate) use serve::*;
 
 mod builder;
 pub use builder::ServiceBuilder;
@@ -37,12 +38,38 @@ pub use builder::ServiceBuilder;
 mod traits;
 pub use traits::*;
 
-pub struct ServeCmd<'a> {
+/// Marker trait to indicate when an input is ready without knowing the type of
+/// input.
+#[derive(Component)]
+pub(crate) struct InputReady;
+
+#[derive(Component)]
+pub(crate) struct InputStorage<Input>(pub(crate) Input);
+
+impl<Input> InputStorage<Input> {
+    pub(crate) fn take(self) -> Input {
+        self.0
+    }
+}
+
+#[derive(Bundle)]
+pub(crate) struct InputBundle<Input: 'static + Send + Sync> {
+    value: InputStorage<Input>,
+    ready: InputReady,
+}
+
+impl<Input: 'static + Send + Sync> InputBundle<Input> {
+    pub(crate) fn new(value: Input) -> Self {
+        Self { value: InputStorage(value), ready: InputReady }
+    }
+}
+
+pub struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
     pub provider: Entity,
-    /// The entity that holds the [`InputStorage`](crate::InputStorage).
+    /// The entity that holds the [`InputStorage`].
     pub source: Entity,
-    /// The entity where the response should be placed as [`InputStorage`](crate::InputStorage).
+    /// The entity where the response should be placed as [`InputStorage`].
     pub target: Entity,
     /// The world that the service must operate on
     pub world: &'a mut World,
@@ -50,28 +77,37 @@ pub struct ServeCmd<'a> {
     pub roster: &'a mut OperationRoster,
 }
 
-pub trait Service {
-    fn serve(cmd: ServeCmd);
-}
-
-pub trait IntoService<M> {
-    type Request;
-    type Response;
-    type Streams;
-    type DefaultDelivery: Default;
-
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>);
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
+impl<'a> ServiceRequest<'a> {
+    pub fn from_source<B>(&mut self) -> Option<B> {
+        if let Some(mut source_mut) = self.world.get_entity_mut(self.source) {
+            let Some(request) = source_mut.take::<B>() else {
+                self.roster.cancel(self.source);
+                return None;
+            };
+            Some(request.0)
+        } else {
+            self.roster.cancel(self.source);
+            return None;
+        }
+    }
 }
 
 pub(crate) struct ServiceMarker<Request, Response> {
+    hook: fn(ServiceRequest),
     _ignore: std::marker::PhantomData<(Request, Response)>,
 }
 
-impl<Request, Response> Default for ServiceMarker<Request, Response> {
-    fn default() -> Self {
-        Self { _ignore: Default::default() }
+impl<Request, Response> ServiceMarker<Request, Response> {
+    pub(crate) fn new<Srv: ServiceTrait>() -> Self {
+        Self {
+            hook: service_hook::<Srv>,
+            _ignore: Default::default(),
+        }
     }
+}
+
+fn service_hook<Srv: ServiceTrait>(request: ServiceRequest) {
+    Srv::serve(request);
 }
 
 /// Provider is the public API handle for referring to an existing service
@@ -323,7 +359,7 @@ mod tests {
     }
 
     fn sys_find_service(
-        query: Query<&Service<String, u64>>,
+        query: Query<&ServiceMarker<String, u64>>,
         mut ran: ResMut<TestSystemRan>,
     ) {
         assert!(!query.is_empty());

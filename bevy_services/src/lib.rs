@@ -18,11 +18,11 @@
 pub mod channel;
 pub use channel::*;
 
-mod delivery;
-pub(crate) use delivery::*;
-
 pub mod discovery;
 pub use discovery::*;
+
+pub mod operation;
+pub use operation::*;
 
 pub mod promise;
 pub use promise::*;

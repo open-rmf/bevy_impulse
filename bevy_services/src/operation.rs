@@ -15,12 +15,75 @@
  *
 */
 
-use crate::{UnusedTarget, Queued, OperationRoster};
+use crate::RequestLabelId;
 
 use bevy::{
     prelude::{Entity, World, Component},
     ecs::system::Command,
 };
+
+use std::collections::VecDeque;
+
+mod fork;
+pub(crate) use fork::*;
+
+mod map;
+pub(crate) use map::*;
+
+mod serve;
+pub(crate) use serve::*;
+
+mod serve_once;
+pub(crate) use serve_once::*;
+pub use serve_once::traits::*;
+
+mod terminate;
+pub(crate) use terminate::*;
+
+#[derive(Component)]
+pub(crate) struct TargetStorage(pub(crate) Entity);
+
+#[derive(Component)]
+pub(crate) struct UnusedTarget;
+
+#[derive(Default)]
+pub struct OperationRoster {
+    /// Operation sources that should be triggered
+    operate: VecDeque<Entity>,
+    /// Operation sources that should be canceled
+    cancel: VecDeque<Entity>,
+    /// Async services that should pull their next item
+    unblock: VecDeque<BlockingQueue>,
+}
+
+#[derive(Component)]
+pub(crate) struct BlockingQueue {
+    /// The provider that is being blocked
+    pub(crate) provider: Entity,
+    /// The source that is doing the blocking
+    pub(crate) source: Entity,
+    /// The label of the queue that is being blocked
+    pub(crate) label: Option<RequestLabelId>,
+}
+
+impl OperationRoster {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn queue(&mut self, source: Entity) {
+        self.operate.push_back(source);
+    }
+
+    pub fn cancel(&mut self, source: Entity) {
+        self.cancel.push_back(source);
+    }
+
+    pub fn unblock(&mut self, provider: BlockingQueue) {
+        self.unblock.push_back(provider);
+    }
+}
+
 
 pub(crate) enum OperationStatus {
     /// The source entity is no longer needed so it should be despawned.
@@ -30,6 +93,11 @@ pub(crate) enum OperationStatus {
     /// responsible for despawning the entity when it is no longer needed.
     Queued(Entity),
 }
+
+/// This component indicates that a source entity has been queued for a service
+/// so it should not be despawned yet.
+#[derive(Component)]
+pub(crate) struct Queued(pub(crate) Entity);
 
 pub(crate) trait Operation {
     fn set_parameters(

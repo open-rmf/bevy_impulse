@@ -22,7 +22,7 @@ use bevy::{
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-use crate::{StreamHandler, Stream};
+use crate::Stream;
 
 use std::cell::RefCell;
 
@@ -166,23 +166,6 @@ impl<T: Stream> Command for StreamCommand<T> {
         let Some(mut source_mut) = world.get_entity_mut(self.source) else {
             return;
         };
-
-        let Some(mut handler) = source_mut.take::<StreamHandler<T>>() else {
-            return;
-        };
-
-        match &mut handler {
-            StreamHandler::Callback(cb) => {
-                (cb)(self.data);
-            }
-            StreamHandler::Held(service) => {
-
-            }
-            StreamHandler::Shared(service) => {
-
-            }
-        }
-
 
     }
 }

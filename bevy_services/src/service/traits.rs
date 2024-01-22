@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    ServiceBuilder, ServiceRef,
-    service::builder::{BlockingChosen, SerialChosen, ParallelChosen},
+    ServiceBuilder, ServiceRef, ServiceRequest,
+    service::builder::{SerialChosen, ParallelChosen},
     private
 };
 
@@ -28,6 +28,20 @@ use bevy::{
         system::{Commands, EntityCommands},
     },
 };
+
+pub trait ServiceTrait {
+    fn serve(request: ServiceRequest);
+}
+
+pub trait IntoService<M> {
+    type Request;
+    type Response;
+    type Streams;
+    type DefaultDeliver: Default;
+
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>);
+    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
+}
 
 /// This trait is used to implement adding an async service to an App at
 /// startup.
@@ -48,40 +62,15 @@ pub trait ServiceSpawn<Marker>: private::Sealed<Marker> {
 
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
-pub trait IntoServiceBuilder<Marker>: private::Sealed<Marker> {
+pub trait IntoServiceBuilder<M>: private::Sealed<M> {
+    type Service: IntoService<M>;
     type Request;
     type Response;
     type Streams;
     type DefaultDeliver;
-    fn builder(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, Self::DefaultDeliver, (), ()>;
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, Self::DefaultDeliver, With, ()>;
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, Self::DefaultDeliver, (), Also>;
-}
-
-/// This trait allows async service systems to be converted into a builder
-/// by specifying whether it should have serial or parallel service delivery.
-pub trait ChooseAsyncServiceDelivery<Marker>: private::Sealed<Marker> {
-    type Request;
-    type Response;
-    type Streams;
-    fn serial(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, SerialChosen, (), ()>;
-    fn parallel(self) -> ServiceBuilder<Self::Request, Self::Response, Self::Streams, ParallelChosen, (), ()>;
-}
-
-/// This trait allows any system to be converted into a blocking service
-/// builder.
-pub trait IntoBlockingServiceBuilder<Marker>: private::Sealed<Marker> {
-    type Request;
-    type Response;
-    fn into_blocking_service(self) -> ServiceBuilder<Self::Request, Self::Response, (), BlockingChosen, (), ()>;
-}
-
-/// This trait allows any system that returns a future to be converted into
-/// an async service builder.
-pub trait IntoAsyncServiceBuilder<Marker>: private::Sealed<Marker> {
-    type Request;
-    type Response;
-    fn into_async_service(self) -> ServiceBuilder<Self::Request, Self::Response, (), (), (), ()>;
+    fn builder(self) -> ServiceBuilder<Self::Service, <Self::Service as IntoService<M>>::DefaultDeliver, (), ()>;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, <Self::Service as IntoService<M>>::DefaultDeliver, With, ()>;
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, <Self::Service as IntoService<M>>::DefaultDeliver, (), Also>;
 }
 
 /// This trait is used to set the delivery mode of a service.
@@ -105,5 +94,5 @@ pub trait WithEntityCommands {
 /// This trait allows users to perform more operations with a service
 /// provider while adding it to an App.
 pub trait AlsoAdd<Request, Response, Streams> {
-    fn apply<'w>(self, app: &mut App, provider: Provider<Request, Response, Streams>);
+    fn apply<'w>(self, app: &mut App, provider: ServiceRef<Request, Response, Streams>);
 }
