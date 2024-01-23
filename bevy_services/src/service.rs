@@ -235,7 +235,7 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: Stream,
     {
-        builder.into_builder().spawn_service(self)
+        builder.into_service_builder().spawn_service(self)
     }
 }
 
@@ -273,7 +273,7 @@ impl AddServicesExt for App {
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: Stream
     {
-        builder.into_builder().add_service(self);
+        builder.into_service_builder().add_service(self);
         self
     }
 }
@@ -376,10 +376,11 @@ mod tests {
 
     #[test]
     fn test_add_async_service_serial() {
+        let builder = sys_async_service.serial();
         let mut app = App::new();
         app
             .insert_resource(TestSystemRan(false))
-            .add_service(sys_async_service.serial())
+            .add_service(builder)
             .add_systems(Update, sys_find_service);
 
         app.update();

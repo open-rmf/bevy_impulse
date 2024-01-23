@@ -17,6 +17,7 @@
 
 use crate::{
     ServiceBuilder, ServiceRef, ServiceRequest,
+    service::builder::{SerialChosen, ParallelChosen},
     private
 };
 
@@ -47,14 +48,28 @@ pub trait IntoService<M> {
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
 pub trait IntoServiceBuilder<M>: private::Sealed<M> {
-    type Request;
-    type Response;
-    type Streams;
     type Service;
     type Deliver;
     type With;
     type Also;
-    fn into_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also>;
+    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also>;
+}
+
+/// This trait allows users to immediately begin building a service off of a suitable system
+/// without needing to explicitly create a builder.
+pub trait QuickServiceBuild<M>: private::Sealed<M> {
+    type Service;
+    type Deliver;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, ()>;
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::Deliver, (), Also>;
+}
+
+/// This trait allows async service systems to be converted into a builder
+/// by specifying whether it should have serial or parallel service delivery.
+pub trait ChooseAsyncServiceDelivery<M>: private::Sealed<M> {
+    type Service;
+    fn serial(self) -> ServiceBuilder<Self::Service, SerialChosen, (), ()>;
+    fn parallel(self) -> ServiceBuilder<Self::Service, ParallelChosen, (), ()>;
 }
 
 /// This trait is used to set the delivery mode of a service.

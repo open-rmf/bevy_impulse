@@ -18,7 +18,7 @@
 use crate::{
     AsyncReq, InAsyncReq, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
     InputBundle, InnerChannel, ChannelQueue, RequestLabelId, TargetStorage, OperationRoster, BlockingQueue,
-    Stream, ServiceBuilder,
+    Stream, ServiceBuilder, ChooseAsyncServiceDelivery,
     service::builder::{SerialChosen, ParallelChosen},
     private,
 };
@@ -464,14 +464,6 @@ where
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
         peel_async.pipe(self.0).insert_service_mut(entity_mut)
     }
-}
-
-/// This trait allows async service systems to be converted into a builder
-/// by specifying whether it should have serial or parallel service delivery.
-pub trait ChooseAsyncServiceDelivery<Marker>: private::Sealed<Marker> {
-    type Service;
-    fn serial(self) -> ServiceBuilder<Self::Service, SerialChosen, (), ()>;
-    fn parallel(self) -> ServiceBuilder<Self::Service, ParallelChosen, (), ()>;
 }
 
 impl<Request, Streams, Task, M, Srv> ChooseAsyncServiceDelivery<(Request, Streams, Task, M)> for Srv

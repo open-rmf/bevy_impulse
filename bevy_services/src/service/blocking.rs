@@ -30,7 +30,7 @@ use bevy::{
     }
 };
 
-struct Blocking<M>(std::marker::PhantomData<M>);
+pub struct Blocking<M>(std::marker::PhantomData<M>);
 
 #[derive(Component)]
 struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingReq<Request>, Response>>);

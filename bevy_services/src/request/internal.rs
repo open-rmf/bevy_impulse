@@ -25,7 +25,7 @@ use bevy::ecs::system::EntityCommands;
 /// [`bevy::prelude::Commands`]`::request`, you can apply a label using the
 /// [`crate::PromiseCommands`] that you receive:
 ///
-/// ```
+/// ```text
 /// commands
 ///     .request(provider, request_data)
 ///     .label(my_label) // This takes in an impl ApplyLabel

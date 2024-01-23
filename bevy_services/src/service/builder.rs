@@ -143,18 +143,15 @@ where
     }
 }
 
-struct BuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct BuilderMarker<M>(std::marker::PhantomData<M>);
 
 impl<M, Srv: IntoService<M>, Deliver, With, Also> IntoServiceBuilder<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also> {
-    type Request = Srv::Request;
-    type Response = Srv::Response;
-    type Streams = Srv::Streams;
     type Service = Srv;
     type Deliver = Deliver;
     type With = With;
     type Also = Also;
 
-    fn into_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also> {
+    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also> {
         self
     }
 }
@@ -166,21 +163,33 @@ where
 
 }
 
-struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
 
 impl<M, Sys> private::Sealed<IntoBuilderMarker<M>> for Sys { }
 
 impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Service = Srv;
-    type Request = Srv::Request;
-    type Response = Srv::Response;
-    type Streams = Srv::Streams;
     type Deliver = Srv::DefaultDeliver;
     type With = ();
     type Also = ();
 
-    fn into_builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), ()> {
+    fn into_service_builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), ()> {
         ServiceBuilder::new(self)
+    }
+}
+
+impl<M, Srv> QuickServiceBuild<IntoBuilderMarker<M>> for Srv
+where
+    Srv: IntoService<M>,
+{
+    type Service = Srv;
+    type Deliver = Srv::DefaultDeliver;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, ()> {
+        self.into_service_builder().with(with)
+    }
+
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::Deliver, (), Also> {
+        self.into_service_builder().also(also)
     }
 }
 

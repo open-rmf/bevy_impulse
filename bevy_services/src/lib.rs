@@ -44,11 +44,17 @@ use bevy::prelude::{Entity, In};
 /// input request type. For example:
 ///
 /// ```
-/// fn my_service(
-///     input: InBlockingReq<MyRequestData>,
-///     other: Query<&OtherComponents>,
-/// ) -> Job<impl FnOnce(Assistant) -> Option<MyResponseData>> {
-///     /* ... */
+/// use bevy::prelude::*;
+/// use bevy_services::*;
+///
+/// #[derive(Component, Resource)]
+/// struct Precision(i32);
+///
+/// fn rounding_service(
+///     In(input): InBlockingReq<f64>,
+///     global_precision: Res<Precision>,
+/// ) -> f64 {
+///     (input.request * 10_f64.powi(global_precision.0)).floor() * 10_f64.powi(-global_precision.0)
 /// }
 /// ```
 ///
@@ -58,13 +64,19 @@ use bevy::prelude::{Entity, In};
 /// that you can check the `provider` field of [`BlockingReq`]`:
 ///
 /// ```
-/// fn my_self_aware_service(
-///     In(BlockingReq{request, provider}): InBlockingReq<MyRequestData>,
-///     query_service_params: Query<&MyServiceParams>,
-///     other: Query<&OtherComponents>,
-/// ) -> Job<impl FnOnce(Assistant) -> Option<MyResponseData>> {
-///     let my_params = query_service_params.get(me).unwrap();
-///     /* ... */
+/// use bevy::prelude::*;
+/// use bevy_services::*;
+///
+/// #[derive(Component, Resource)]
+/// struct Precision(i32);
+///
+/// fn rounding_service(
+///     In(BlockingReq{request, provider}): InBlockingReq<f64>,
+///     service_precision: Query<&Precision>,
+///     global_precision: Res<Precision>,
+/// ) -> f64 {
+///     let precision = service_precision.get(provider).unwrap_or(&*global_precision).0;
+///     (request * 10_f64.powi(precision)).floor() * 10_f64.powi(-precision)
 /// }
 /// ```
 pub struct BlockingReq<Request> {
