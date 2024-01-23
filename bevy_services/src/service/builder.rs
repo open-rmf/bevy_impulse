@@ -31,8 +31,6 @@ use bevy::{
 
 use super::traits::*;
 
-struct BuilderMarker<M>(std::marker::PhantomData<M>);
-
 pub struct ServiceBuilder<Srv, Deliver, With, Also> {
     service: Srv,
     deliver: Deliver,
@@ -99,20 +97,19 @@ impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, ()> {
     }
 }
 
-impl<Srv, M, Deliver, With, Also> ServiceAdd<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also>
+impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also>
 where
-    Srv: IntoService<M>,
     Deliver: DeliveryChoice,
-    With: WithEntityMut,
-    Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
-    Srv::Request: 'static + Send + Sync,
-    Srv::Response: 'static + Send + Sync,
-    Srv::Streams: Stream,
 {
-    type Request = Srv::Request;
-    type Response = Srv::Response;
-    type Streams = Srv::Streams;
-    fn add_service(self, app: &mut App) {
+    pub(crate) fn add_service<M>(self, app: &mut App)
+    where
+        Srv: IntoService<M>,
+        With: WithEntityMut,
+        Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
+        Srv::Request: 'static + Send + Sync,
+        Srv::Response: 'static + Send + Sync,
+        Srv::Streams: Stream,
+    {
         let mut entity_mut = app.world.spawn(());
         self.service.insert_service_mut(&mut entity_mut);
         let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
@@ -124,46 +121,18 @@ where
     }
 }
 
-struct IntoServiceBuilderMarker<M>(std::marker::PhantomData<M>);
-
-impl<M, S> ServiceAdd<IntoServiceBuilderMarker<M>> for S
+impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, ()>
 where
-    S: IntoServiceBuilder<IntoBuilderMarker<M>>,
-    S::Service: IntoService<M>,
-    S::Streams: IntoStreamBundle,
-    S::DefaultDeliver: DeliveryChoice,
-    S::Request: 'static + Send + Sync,
-    S::Response: 'static + Send + Sync,
-{
-    type Request = S::Request;
-    type Response = S::Response;
-    type Streams = S::Streams;
-    fn add_service(self, app: &mut App) {
-        self.builder()
-        .add_service(app);
-    }
-}
-
-impl<M, S> private::Sealed<IntoServiceBuilderMarker<M>> for S
-where
-    S: IntoServiceBuilder<IntoBuilderMarker<M>>,
-    S::Service: IntoService<M>,
-{
-
-}
-
-impl<M, Srv: IntoService<M>, Deliver, With> ServiceSpawn<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, ()>
-where
-    Srv::Streams: IntoStreamBundle,
     Deliver: DeliveryChoice,
-    With: WithEntityCommands,
-    Srv::Request: 'static + Send + Sync,
-    Srv::Response: 'static + Send + Sync,
 {
-    type Request = Srv::Request;
-    type Response = Srv::Response;
-    type Streams = Srv::Streams;
-    fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Srv::Request, Srv::Response, Srv::Streams> {
+    pub(crate) fn spawn_service<M>(self, commands: &mut Commands) -> ServiceRef<Srv::Request, Srv::Response, Srv::Streams>
+    where
+        Srv: IntoService<M>,
+        With: WithEntityCommands,
+        Srv::Request: 'static + Send + Sync,
+        Srv::Response: 'static + Send + Sync,
+        Srv::Streams: Stream,
+    {
         let mut entity_cmds = commands.spawn(());
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
@@ -174,24 +143,27 @@ where
     }
 }
 
-impl<M, Srv, Deliver, With, Also> private::Sealed<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also> { }
+struct BuilderMarker<M>(std::marker::PhantomData<M>);
 
-impl<M, S> ServiceSpawn<M> for S
-where
-    S: IntoServiceBuilder<M>,
-    S::Service: IntoService<M>,
-    S::DefaultDeliver: DeliveryChoice,
-    S::Request: 'static + Send + Sync,
-    S::Response: 'static + Send + Sync,
-{
-    type Request = S::Request;
-    type Response = S::Response;
-    type Streams = S::Streams;
-    fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Self::Request, Self::Response, Self::Streams> {
-        // ServiceSpawn::spawn_service(self.builder(), commands)
-        self.builder()
-        .spawn_service(commands)
+impl<M, Srv: IntoService<M>, Deliver, With, Also> IntoServiceBuilder<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also> {
+    type Request = Srv::Request;
+    type Response = Srv::Response;
+    type Streams = Srv::Streams;
+    type Service = Srv;
+    type Deliver = Deliver;
+    type With = With;
+    type Also = Also;
+
+    fn into_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also> {
+        self
     }
+}
+
+impl<M, Srv, Deliver, With, Also> private::Sealed<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also>
+where
+    Srv: IntoService<M>,
+{
+
 }
 
 struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
@@ -203,16 +175,12 @@ impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Request = Srv::Request;
     type Response = Srv::Response;
     type Streams = Srv::Streams;
-    type DefaultDeliver = Srv::DefaultDeliver;
+    type Deliver = Srv::DefaultDeliver;
+    type With = ();
+    type Also = ();
 
-    fn builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), ()> {
+    fn into_builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), ()> {
         ServiceBuilder::new(self)
-    }
-    fn with<With>(self, with: With) -> ServiceBuilder<Srv, Srv::DefaultDeliver, With, ()> {
-        self.builder().with(with)
-    }
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), Also> {
-        self.builder().also(also)
     }
 }
 

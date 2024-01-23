@@ -15,7 +15,7 @@
  *
 */
 
-use crate::OperationRoster;
+use crate::{OperationRoster, Stream};
 
 use bevy::{
     prelude::{Entity, App, Commands, World, Component, Bundle, Resource},
@@ -201,18 +201,41 @@ impl<Request, Response, Streams> ServiceRef<Request, Response, Streams> {
 /// any system.
 pub trait SpawnServicesExt<'w, 's> {
     /// Call this with Commands to create a new async service from any system.
-    fn spawn_service<'a, M, S: ServiceSpawn<M>>(
+    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=()>>(
         &'a mut self,
-        service: S,
-    ) -> ServiceRef<S::Request, S::Response, S::Streams>;
+        builder: B,
+    ) -> ServiceRef<
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams,
+        >
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityCommands,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: Stream;
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
-    fn spawn_service<'a, M, S: ServiceSpawn<M>>(
+    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=()>>(
         &'a mut self,
-        service: S,
-    ) -> ServiceRef<S::Request, S::Response, S::Streams> {
-        service.spawn_service(self)
+        builder: B,
+    ) -> ServiceRef<
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams,
+        >
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityCommands,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: Stream,
+    {
+        builder.into_builder().spawn_service(self)
     }
 }
 
@@ -220,12 +243,37 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
 /// configuring an App.
 pub trait AddServicesExt {
     /// Call this on an App to create a service that is available immediately.
-    fn add_service<M, S: ServiceAdd<M>>(&mut self, service: S) -> &mut Self;
+    fn add_service<M1, M2, B: IntoServiceBuilder<M1>>(&mut self, builder: B) -> &mut Self
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+                <B::Service as IntoService<M2>>::Request,
+                <B::Service as IntoService<M2>>::Response,
+                <B::Service as IntoService<M2>>::Streams
+            >,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: Stream;
 }
 
 impl AddServicesExt for App {
-    fn add_service<M, S: ServiceAdd<M>>(&mut self, service: S) -> &mut Self {
-        service.add_service(self);
+    fn add_service<M1, M2, B: IntoServiceBuilder<M1>>(&mut self, builder: B) -> &mut Self
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+                <B::Service as IntoService<M2>>::Request,
+                <B::Service as IntoService<M2>>::Response,
+                <B::Service as IntoService<M2>>::Streams
+            >,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: Stream
+    {
+        builder.into_builder().add_service(self);
         self
     }
 }

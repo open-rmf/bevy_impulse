@@ -17,7 +17,6 @@
 
 use crate::{
     ServiceBuilder, ServiceRef, ServiceRequest,
-    service::builder::{SerialChosen, ParallelChosen},
     private
 };
 
@@ -25,7 +24,7 @@ use bevy::{
     prelude::App,
     ecs::{
         world::EntityMut,
-        system::{Commands, EntityCommands},
+        system::EntityCommands,
     },
 };
 
@@ -45,34 +44,17 @@ pub trait IntoService<M> {
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
 }
 
-/// This trait is used to implement adding an async service to an App at
-/// startup.
-pub trait ServiceAdd<Marker>: private::Sealed<Marker> {
-    type Request;
-    type Response;
-    type Streams;
-    fn add_service(self, app: &mut App);
-}
-
-/// This trait is used to implement spawning an async service through Commands
-pub trait ServiceSpawn<Marker>: private::Sealed<Marker> {
-    type Request;
-    type Response;
-    type Streams;
-    fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Self::Request, Self::Response, Self::Streams>;
-}
-
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
 pub trait IntoServiceBuilder<M>: private::Sealed<M> {
-    type Service;
     type Request;
     type Response;
     type Streams;
-    type DefaultDeliver;
-    fn builder(self) -> ServiceBuilder<Self::Service, Self::DefaultDeliver, (), ()>;
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::DefaultDeliver, With, ()>;
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::DefaultDeliver, (), Also>;
+    type Service;
+    type Deliver;
+    type With;
+    type Also;
+    fn into_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also>;
 }
 
 /// This trait is used to set the delivery mode of a service.

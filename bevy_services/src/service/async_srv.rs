@@ -18,7 +18,7 @@
 use crate::{
     AsyncReq, InAsyncReq, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
     InputBundle, InnerChannel, ChannelQueue, RequestLabelId, TargetStorage, OperationRoster, BlockingQueue,
-    IntoStreamBundle, ServiceBuilder,
+    IntoStreamBundle, ServiceBuilder, Stream,
     service::builder::{SerialChosen, ParallelChosen},
     private,
 };
@@ -59,7 +59,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: 'static + Send + IntoStreamBundle,
+    Streams: IntoStreamBundle + Stream,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -86,7 +86,7 @@ where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
-    Streams: IntoStreamBundle,
+    Streams: IntoStreamBundle + Stream,
 {
     type Request = Request;
     type Response = Task::Output;
