@@ -64,6 +64,15 @@ where
     }
 }
 
+impl<Request, Response, M, Sys> private::Sealed<Blocking<(Request, Response, M)>> for Sys
+where
+    Sys: IntoSystem<BlockingReq<Request>, Response, M>,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+{
+
+}
+
 impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTrait for BlockingServiceStorage<Request, Response> {
     type Request = Request;
     type Response = Response;

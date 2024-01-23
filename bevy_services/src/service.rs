@@ -376,11 +376,10 @@ mod tests {
 
     #[test]
     fn test_add_async_service_serial() {
-        let builder = sys_async_service.serial();
         let mut app = App::new();
         app
             .insert_resource(TestSystemRan(false))
-            .add_service(builder)
+            .add_service(sys_async_service.serial())
             .add_systems(Update, sys_find_service);
 
         app.update();

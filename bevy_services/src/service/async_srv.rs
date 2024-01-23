@@ -47,6 +47,8 @@ use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
 use smallvec::SmallVec;
 
+pub trait IsAsyncService<M> { }
+
 #[derive(Component)]
 struct AsyncServiceStorage<Request, Streams, Task>(Option<BoxedSystem<AsyncReq<Request, Streams>, Task>>);
 
@@ -59,7 +61,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream + Stream,
+    Streams: Stream,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -81,12 +83,35 @@ where
     }
 }
 
+impl<Request, Streams, Task, M, Srv> private::Sealed<(Request, Streams, Task, M)> for Srv
+where
+    Srv: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
+    Task: Future + 'static + Send,
+    Streams: Stream + 'static,
+    Request: 'static + Send + Sync,
+    Task::Output: 'static + Send + Sync,
+{
+
+}
+
+
+impl<Request, Streams, Task, M, Sys> IsAsyncService<(Request, Streams, Task, M)> for Sys
+where
+    Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
+    Task: Future + 'static + Send,
+    Request: 'static + Send + Sync,
+    Task::Output: 'static + Send + Sync,
+    Streams: Stream,
+{
+
+}
+
 impl<Request, Streams, Task> ServiceTrait for AsyncServiceStorage<Request, Streams, Task>
 where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream + Stream,
+    Streams: Stream,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -466,13 +491,21 @@ where
     }
 }
 
-impl<Request, Streams, Task, M, Srv> ChooseAsyncServiceDelivery<(Request, Streams, Task, M)> for Srv
+impl<Request, Task, M, Sys> private::Sealed<(Request, Task, M)> for AsAsyncService<Sys> { }
+
+impl<Request, Task, M, Sys> IsAsyncService<(Request, Task, M)> for AsAsyncService<Sys>
 where
-    Srv: IntoSystem<AsyncReq<Request>, Task, M>,
+    Sys: IntoSystem<Request, Task, M>,
     Task: Future + 'static + Send,
-    Streams: Stream + 'static,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
+{
+
+}
+
+impl<M, Srv> ChooseAsyncServiceDelivery<M> for Srv
+where
+    Srv: IntoService<M> + IsAsyncService<M>,
 {
     type Service = Srv;
     fn serial(self) -> ServiceBuilder<Srv, SerialChosen, (), ()> {
@@ -485,15 +518,4 @@ where
 
 fn peel_async<Request>(In(AsyncReq { request, .. }): InAsyncReq<Request>) -> Request {
     request
-}
-
-impl<Request, Streams, Task, M, Srv> private::Sealed<(Request, Streams, Task, M)> for Srv
-where
-    Srv: IntoSystem<AsyncReq<Request>, Task, M>,
-    Task: Future + 'static + Send,
-    Streams: Stream + 'static,
-    Request: 'static + Send,
-    Task::Output: 'static + Send,
-{
-
 }

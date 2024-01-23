@@ -193,8 +193,6 @@ where
     }
 }
 
-// impl<M, Srv: IntoService<M>> private::Sealed<M> for Srv { }
-
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
 /// user has indicated that the service should be executed in serial
 #[derive(Default)]

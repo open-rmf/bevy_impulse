@@ -35,7 +35,7 @@ pub trait ServiceTrait {
     fn serve(request: ServiceRequest);
 }
 
-pub trait IntoService<M> {
+pub trait IntoService<M>: private::Sealed<M> {
     type Request;
     type Response;
     type Streams;
