@@ -23,8 +23,6 @@ use bevy::{
     },
 };
 
-pub trait Stream: Send + Sync + 'static {}
-
 /// StreamOut is a marker component that indicates what streams are offered by
 /// a service.
 #[derive(Component)]
@@ -36,27 +34,22 @@ impl<T: Stream> Default for StreamOut<T> {
     }
 }
 
-pub trait IntoStreamBundle {
+pub trait Stream: 'static + Send + Sync {
     type StreamOutBundle: Bundle + Default;
 }
 
-impl<T: Stream> IntoStreamBundle for T {
-    type StreamOutBundle = StreamOut<T>;
-}
-
-impl IntoStreamBundle for () {
+impl Stream for () {
     type StreamOutBundle = ();
 }
 
-impl<T1: Stream> IntoStreamBundle for (T1,) {
-    type StreamOutBundle = StreamOut<T1>;
+impl<T1: Stream> Stream for (T1,) {
+    type StreamOutBundle = T1::StreamOutBundle;
 }
 
-impl<T1: IntoStreamBundle, T2: IntoStreamBundle> IntoStreamBundle for (T1, T2) {
+impl<T1: Stream, T2: Stream> Stream for (T1, T2) {
     type StreamOutBundle = (T1::StreamOutBundle, T2::StreamOutBundle);
 }
 
-impl<T1: IntoStreamBundle, T2: IntoStreamBundle, T3: IntoStreamBundle> IntoStreamBundle for (T1, T2, T3) {
+impl<T1: Stream, T2: Stream, T3: Stream> Stream for (T1, T2, T3) {
     type StreamOutBundle = (T1::StreamOutBundle, T2::StreamOutBundle, T3::StreamOutBundle);
 }
-

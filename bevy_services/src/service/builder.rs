@@ -114,7 +114,7 @@ where
         self.service.insert_service_mut(&mut entity_mut);
         let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         // entity_mut.insert(<<Srv as IntoService<M>>::Streams as IntoStreamBundle>::StreamOutBundle::default());
-        entity_mut.insert(<Srv::Streams as IntoStreamBundle>::StreamOutBundle::default());
+        entity_mut.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
         self.deliver.apply_entity_mut(&mut entity_mut);
         self.with.apply(entity_mut);
         self.also.apply(app, provider);
@@ -136,7 +136,7 @@ where
         let mut entity_cmds = commands.spawn(());
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
-        entity_cmds.insert(<Srv::Streams as IntoStreamBundle>::StreamOutBundle::default());
+        entity_cmds.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
         self.deliver.apply_entity_commands(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider

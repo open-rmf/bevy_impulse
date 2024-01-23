@@ -18,7 +18,7 @@
 use crate::{
     AsyncReq, InAsyncReq, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
     InputBundle, InnerChannel, ChannelQueue, RequestLabelId, TargetStorage, OperationRoster, BlockingQueue,
-    IntoStreamBundle, ServiceBuilder, Stream,
+    Stream, ServiceBuilder,
     service::builder::{SerialChosen, ParallelChosen},
     private,
 };
@@ -59,7 +59,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: IntoStreamBundle + Stream,
+    Streams: Stream + Stream,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -86,11 +86,11 @@ where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
-    Streams: IntoStreamBundle + Stream,
+    Streams: Stream + Stream,
 {
     type Request = Request;
     type Response = Task::Output;
-    fn serve(mut cmd: ServiceRequest) {
+    fn serve(cmd: ServiceRequest) {
         let ServiceRequest { provider, source, target, world, roster } = cmd;
 
         let instructions = if let Some(mut source_mut) = world.get_entity_mut(source) {
@@ -141,10 +141,13 @@ where
             if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
                 storage.0.take().expect("Service is missing while attempting to serve")
             } else {
-                if let Some(uninit) = provider_mut.get_mut::<UninitAsyncServiceStorage<Request, Streams, Task>>() {
+                if let Some(uninit) = provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>() {
                     // We need to initialize the service
                     let mut service = uninit.0;
                     service.initialize(world);
+
+                    // Re-obtain the provider since we needed to mutably borrow the world a moment ago
+                    let mut provider_mut = world.entity_mut(provider);
                     provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
                     service
                 } else {
@@ -475,7 +478,7 @@ impl<Request, Streams, Task, M, Srv> ChooseAsyncServiceDelivery<(Request, Stream
 where
     Srv: IntoSystem<AsyncReq<Request>, Task, M>,
     Task: Future + 'static + Send,
-    Streams: IntoStreamBundle + 'static,
+    Streams: Stream + 'static,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {
@@ -496,7 +499,7 @@ impl<Request, Streams, Task, M, Srv> private::Sealed<(Request, Streams, Task, M)
 where
     Srv: IntoSystem<AsyncReq<Request>, Task, M>,
     Task: Future + 'static + Send,
-    Streams: IntoStreamBundle + 'static,
+    Streams: Stream + 'static,
     Request: 'static + Send,
     Task::Output: 'static + Send,
 {

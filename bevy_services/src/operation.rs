@@ -71,7 +71,7 @@ impl OperationRoster {
         self.cancel.push_back(source);
     }
 
-    pub fn unblock(&mut self, provider: BlockingQueue) {
+    pub(crate) fn unblock(&mut self, provider: BlockingQueue) {
         self.unblock.push_back(provider);
     }
 

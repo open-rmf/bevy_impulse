@@ -79,10 +79,13 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
                 storage.0.take().expect("Service is missing while attempting to serve")
             } else {
                 // Check if the system still needs to be initialized
-                if let Some(uninit) = provider_mut.get_mut::<UninitBlockingServiceStorage<Request, Response>>() {
+                if let Some(uninit) = provider_mut.take::<UninitBlockingServiceStorage<Request, Response>>() {
                     // We need to initialize the service
                     let mut service = uninit.0;
                     service.initialize(world);
+
+                    // Re-obtain the provider since we needed to mutably borrow the world a moment ago
+                    let mut provider_mut = world.entity_mut(provider);
                     provider_mut.insert(BlockingServiceStorage::<Request, Response>(None));
                     service
                 } else {

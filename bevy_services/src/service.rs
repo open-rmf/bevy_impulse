@@ -66,7 +66,7 @@ impl<Input: 'static + Send + Sync> InputBundle<Input> {
     }
 }
 
-pub(crate) struct ServiceRequest<'a> {
+pub struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
     pub(crate) provider: Entity,
     /// The entity that holds the [`InputStorage`].
@@ -291,8 +291,9 @@ impl ServiceQueue {
 }
 
 pub(crate) fn dispatch_service(request: ServiceRequest) {
+    let pending = request.pend();
     let mut service_queue = request.world.get_resource_or_insert_with(|| ServiceQueue::new());
-    service_queue.queue.push_back(request.pend());
+    service_queue.queue.push_back(pending);
     if service_queue.is_delivering {
         // Services are already being delivered, so to keep things simple we
         // will add this dispatch command to the service queue and let the
@@ -301,11 +302,11 @@ pub(crate) fn dispatch_service(request: ServiceRequest) {
         return;
     }
 
-    let ServiceRequest { world, roster, .. } = request;
-
     service_queue.is_delivering = true;
+
+    let ServiceRequest { world, roster, .. } = request;
     while let Some(pending) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
-        let PendingServiceRequest { provider, source, target } = pending;
+        let PendingServiceRequest { provider, source, .. } = pending;
         let Some(provider_ref) = world.get_entity(provider) else {
             roster.cancel(source);
             continue;
