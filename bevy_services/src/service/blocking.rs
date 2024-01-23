@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    BlockingReq, InBlockingReq, IntoService, ServiceTrait, ServiceMarker, ServiceRequest, InputStorage,
-    InputBundle,
+    BlockingReq, InBlockingReq, IntoService, ServiceTrait, ServiceRequest, InputStorage,
+    InputBundle, ServiceBundle,
     service::builder::BlockingChosen,
     private,
 };
@@ -30,7 +30,7 @@ use bevy::{
     }
 };
 
-struct Blocking;
+struct Blocking<M>(std::marker::PhantomData<M>);
 
 #[derive(Component)]
 struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingReq<Request>, Response>>);
@@ -38,11 +38,11 @@ struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingReq<
 #[derive(Component)]
 struct UninitBlockingServiceStorage<Request, Response>(BoxedSystem<BlockingReq<Request>, Response>);
 
-impl<Request, Response, M, Sys> IntoService<(Request, Response, M, Blocking)> for Sys
+impl<Request, Response, M, Sys> IntoService<Blocking<(Request, Response, M)>> for Sys
 where
     Sys: IntoSystem<BlockingReq<Request>, Response, M>,
-    Request: 'static,
-    Response: 'static,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
 {
     type Request = Request;
     type Response = Response;
@@ -52,21 +52,23 @@ where
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
         entity_commands.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceMarker::<Request, Response>::new::<BlockingServiceStorage<Request, Response>>(),
+            ServiceBundle::<BlockingServiceStorage<Request, Response>>::new(),
         ));
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
         entity_mut.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceMarker::<Request, Response>::new::<BlockingServiceStorage<Request, Response>>(),
+            ServiceBundle::<BlockingServiceStorage<Request, Response>>::new(),
         ));
     }
 }
 
-impl<Request, Response> ServiceTrait for BlockingServiceStorage<Request, Response> {
+impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTrait for BlockingServiceStorage<Request, Response> {
+    type Request = Request;
+    type Response = Response;
     fn serve(mut cmd: ServiceRequest) {
-        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
+        let Some(InputStorage(request)) = cmd.from_source::<InputStorage<Request>>() else {
             return;
         };
 
@@ -94,6 +96,8 @@ impl<Request, Response> ServiceTrait for BlockingServiceStorage<Request, Respons
             roster.cancel(source);
             return;
         };
+
+        roster.dispose(source);
 
         let response = service.run(BlockingReq { request, provider }, world);
         service.apply_deferred(world);
@@ -127,25 +131,29 @@ pub struct AsBlockingService<Srv>(pub Srv);
 
 /// This trait allows any system to be converted into a blocking service.
 pub trait IntoBlockingService<M>: private::Sealed<M> {
-    fn into_blocking_service(self) -> AsBlockingService<Self>;
+    type Service;
+    fn into_blocking_service(self) -> Self::Service;
 }
 
-impl<Request, Response, M, Sys> IntoBlockingService<(Request, Response, M)> for Sys
+impl<Request, Response, M, Sys> IntoBlockingService<AsBlockingService<(Request, Response, M)>> for Sys
 where
     Sys: IntoSystem<Request, Response, M>,
     Request: 'static,
     Response: 'static,
 {
+    type Service = AsBlockingService<Sys>;
     fn into_blocking_service(self) -> AsBlockingService<Sys> {
         AsBlockingService(self)
     }
 }
 
-impl<Request, Response, M, Sys> IntoService<(Request, Response, M, Sys)> for AsBlockingService<M>
+impl<Request, Response, M, Sys> private::Sealed<AsBlockingService<(Request, Response, M)>> for Sys { }
+
+impl<Request, Response, M, Sys> IntoService<AsBlockingService<(Request, Response, M)>> for AsBlockingService<Sys>
 where
     Sys: IntoSystem<Request, Response, M>,
-    Request: 'static,
-    Response: 'static,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
 {
     type Request = Request;
     type Response = Response;
@@ -153,11 +161,11 @@ where
     type DefaultDeliver = BlockingChosen;
 
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        peel_blocking.pipe(self).insert_service_commands(entity_commands)
+        peel_blocking.pipe(self.0).insert_service_commands(entity_commands)
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
-        peel_blocking.pipe(self).insert_service_mut(entity_mut)
+        peel_blocking.pipe(self.0).insert_service_mut(entity_mut)
     }
 }
 

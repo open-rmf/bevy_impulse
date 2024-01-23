@@ -30,12 +30,12 @@ pub(crate) use fork::*;
 mod map;
 pub(crate) use map::*;
 
-mod serve;
-pub(crate) use serve::*;
+mod request_service;
+pub(crate) use request_service::*;
 
-mod serve_once;
-pub(crate) use serve_once::*;
-pub use serve_once::traits::*;
+// mod serve_once;
+// pub(crate) use serve_once::*;
+// pub use serve_once::traits::*;
 
 mod terminate;
 pub(crate) use terminate::*;
@@ -54,16 +54,8 @@ pub struct OperationRoster {
     cancel: VecDeque<Entity>,
     /// Async services that should pull their next item
     unblock: VecDeque<BlockingQueue>,
-}
-
-#[derive(Component)]
-pub(crate) struct BlockingQueue {
-    /// The provider that is being blocked
-    pub(crate) provider: Entity,
-    /// The source that is doing the blocking
-    pub(crate) source: Entity,
-    /// The label of the queue that is being blocked
-    pub(crate) label: Option<RequestLabelId>,
+    /// Remove these entities as they are no longer needed
+    pub(crate) dispose: Vec<Entity>,
 }
 
 impl OperationRoster {
@@ -82,6 +74,20 @@ impl OperationRoster {
     pub fn unblock(&mut self, provider: BlockingQueue) {
         self.unblock.push_back(provider);
     }
+
+    pub fn dispose(&mut self, entity: Entity) {
+        self.dispose.push(entity);
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct BlockingQueue {
+    /// The provider that is being blocked
+    pub(crate) provider: Entity,
+    /// The source that is doing the blocking
+    pub(crate) source: Entity,
+    /// The label of the queue that is being blocked
+    pub(crate) label: Option<RequestLabelId>,
 }
 
 

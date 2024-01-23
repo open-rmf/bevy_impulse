@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    AsyncReq, InAsyncReq, IntoService, ServiceTrait, ServiceMarker, ServiceRequest, InputStorage,
+    AsyncReq, InAsyncReq, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
     InputBundle, InnerChannel, ChannelQueue, RequestLabelId, TargetStorage, OperationRoster, BlockingQueue,
     IntoStreamBundle, ServiceBuilder,
     service::builder::{SerialChosen, ParallelChosen},
@@ -57,8 +57,8 @@ impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> fo
 where
     Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
     Task: Future + 'static + Send,
-    Request: 'static + Send,
-    Task::Output: 'static + Send,
+    Request: 'static + Send + Sync,
+    Task::Output: 'static + Send + Sync,
     Streams: 'static + Send + IntoStreamBundle,
 {
     type Request = Request;
@@ -69,24 +69,27 @@ where
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
         entity_commands.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceMarker::<Request, Task::Output>::new::<AsyncServiceStorage<Request, Streams, Task>>(),
+            ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
         ));
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
         entity_mut.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceMarker::<Request, Task::Output>::new::<AsyncServiceStorage<Request, Streams, Task>>(),
+            ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
         ));
     }
 }
 
 impl<Request, Streams, Task> ServiceTrait for AsyncServiceStorage<Request, Streams, Task>
 where
-    Request: 'static + Send,
+    Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
+    Task::Output: 'static + Send + Sync,
     Streams: IntoStreamBundle,
 {
+    type Request = Request;
+    type Response = Task::Output;
     fn serve(mut cmd: ServiceRequest) {
         let ServiceRequest { provider, source, target, world, roster } = cmd;
 
@@ -128,7 +131,7 @@ where
         };
 
         let mut cmd = ServiceRequest { provider, source, target, world, roster };
-        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
+        let Some(InputStorage(request)) = cmd.from_source::<InputStorage<Request>>() else {
             return;
         };
 
@@ -164,7 +167,10 @@ where
         let task = AsyncComputeTaskPool::get().spawn(job);
 
         if let Some(mut source_mut) = world.get_entity_mut(source) {
-            source_mut.insert(TaskBundle::new(task, blocking));
+            source_mut.insert(TaskBundle::new(task));
+            if let Some(blocking) = blocking {
+                source_mut.insert(blocking);
+            }
         }
     }
 }
@@ -197,27 +203,24 @@ impl WakeQueue {
 }
 
 #[derive(Component)]
-struct TaskStorage<Response>(BevyTask<Option<Response>>);
+struct TaskStorage<Response>(BevyTask<Response>);
 
 #[derive(Component)]
-struct PollTask(fn(Entity, &mut World) -> Result<bool, ()>);
+struct PollTask(fn(Entity, &mut World, &mut OperationRoster) -> Result<bool, ()>);
 
 #[derive(Bundle)]
 pub(crate) struct TaskBundle<Response: 'static + Send + Sync> {
     task: TaskStorage<Response>,
     poll: PollTask,
-    blocking: Option<BlockingQueue>,
 }
 
 impl<Response: 'static + Send + Sync> TaskBundle<Response> {
     pub(crate) fn new(
-        task: BevyTask<Option<Response>>,
-        blocking: Option<BlockingQueue>,
+        task: BevyTask<Response>,
     ) -> TaskBundle<Response> {
         TaskBundle {
             task: TaskStorage(task),
             poll: PollTask(poll_task::<Response>),
-            blocking,
         }
     }
 }
@@ -246,12 +249,12 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
     match Pin::new(&mut task).poll(
         &mut Context::from_waker(&waker_ref(&waker))
     ) {
-        Poll::Ready(Some(result)) => {
+        Poll::Ready(result) => {
             // Task has finished
             let mut source_mut = world.entity_mut(source);
             let Some(target) = source_mut.take::<TargetStorage>() else {
                 roster.cancel(source);
-                return;
+                return Err(());
             };
             let target = target.0;
 
@@ -261,11 +264,8 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
 
             world.entity_mut(target).insert(InputBundle::new(result));
             roster.queue(target);
+            roster.dispose(source);
             Ok(true)
-        }
-        Poll::Ready(None) => {
-            // Task has canceled
-            Err(())
         }
         Poll::Pending => {
             // Task is still running
@@ -376,10 +376,11 @@ fn insert_serial_order(
 ) -> DeliveryUpdate {
     let Some(delivering) = &serial.delivering else {
         // INVARIANT: If there is anything in the queue then it should have been
-        // moved into delivering when the last delivering was finished. If
+        // moved into delivering when the last delivery was finished. If
         // delivering is empty then the queue should be as well.
         assert!(serial.queue.is_empty());
-        return DeliveryUpdate::Immediate;
+        serial.delivering = Some(order);
+        return DeliveryUpdate::Immediate { blocking: Some(None) };
     };
 
     let Some(incoming_instructions) = order.instructions else {
@@ -423,38 +424,42 @@ fn insert_serial_order(
 pub struct AsAsyncService<Srv>(pub Srv);
 
 pub trait IntoAsyncService<M>: private::Sealed<M> {
-    fn into_async_service(self) -> AsAsyncService<Self>;
+    type Service;
+    fn into_async_service(self) -> Self::Service;
 }
 
-impl<Request, Response, M, Sys> IntoAsyncService<(Request, Response, M)> for Sys
+impl<Request, Response, M, Sys> IntoAsyncService<AsAsyncService<(Request, Response, M)>> for Sys
 where
     Sys: IntoSystem<Request, Response, M>,
     Request: 'static + Send,
     Response: 'static + Send,
 {
-    fn into_async_service(self) -> AsAsyncService<Self> {
+    type Service = AsAsyncService<Sys>;
+    fn into_async_service(self) -> AsAsyncService<Sys> {
         AsAsyncService(self)
     }
 }
+
+impl<Request, Response, M, Sys> private::Sealed<AsAsyncService<(Request, Response, M)>> for Sys { }
 
 impl<Request, Task, M, Sys> IntoService<(Request, Task, M)> for AsAsyncService<Sys>
 where
     Sys: IntoSystem<Request, Task, M>,
     Task: Future + 'static + Send,
-    Request: 'static + Send,
-    Task::Output: 'static + Send,
+    Request: 'static + Send + Sync,
+    Task::Output: 'static + Send + Sync,
 {
     type Request = Request;
     type Response = Task::Output;
     type Streams = ();
-    type DefaultDeliver = BlockingQueue;
+    type DefaultDeliver = ();
 
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        peel_async.pipe(self).insert_service_commands(entity_commands)
+        peel_async.pipe(self.0).insert_service_commands(entity_commands)
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
-        peel_async.pipe(self).insert_service_mut(entity_mut)
+        peel_async.pipe(self.0).insert_service_mut(entity_mut)
     }
 }
 
@@ -471,18 +476,29 @@ where
     Srv: IntoSystem<AsyncReq<Request>, Task, M>,
     Task: Future + 'static + Send,
     Streams: IntoStreamBundle + 'static,
-    Request: 'static + Send,
-    Task::Output: 'static + Send,
+    Request: 'static + Send + Sync,
+    Task::Output: 'static + Send + Sync,
 {
     type Service = Srv;
     fn serial(self) -> ServiceBuilder<Srv, SerialChosen, (), ()> {
-        ServiceBuilder::new_async(self).serial()
+        ServiceBuilder::new(self)
     }
     fn parallel(self) -> ServiceBuilder<Srv, ParallelChosen, (), ()> {
-        ServiceBuilder::new_async(self).parallel()
+        ServiceBuilder::new(self)
     }
 }
 
 fn peel_async<Request>(In(AsyncReq { request, .. }): InAsyncReq<Request>) -> Request {
     request
+}
+
+impl<Request, Streams, Task, M, Srv> private::Sealed<(Request, Streams, Task, M)> for Srv
+where
+    Srv: IntoSystem<AsyncReq<Request>, Task, M>,
+    Task: Future + 'static + Send,
+    Streams: IntoStreamBundle + 'static,
+    Request: 'static + Send,
+    Task::Output: 'static + Send,
+{
+
 }

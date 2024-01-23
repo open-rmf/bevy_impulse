@@ -31,13 +31,24 @@ use bevy::{
 
 use super::traits::*;
 
-pub struct BuilderMarker;
+struct BuilderMarker<M>(std::marker::PhantomData<M>);
 
 pub struct ServiceBuilder<Srv, Deliver, With, Also> {
     service: Srv,
     deliver: Deliver,
     with: With,
     also: Also,
+}
+
+impl<Srv, Deliver: Default> ServiceBuilder<Srv, Deliver, (), ()> {
+    pub(crate) fn new(service: Srv) -> Self {
+        Self {
+            service,
+            deliver: Deliver::default(),
+            with: (),
+            also: (),
+        }
+    }
 }
 
 impl<Srv, With, Also> ServiceBuilder<Srv, (), With, Also> {
@@ -88,7 +99,7 @@ impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, ()> {
     }
 }
 
-impl<Srv, M, Deliver, With, Also> ServiceAdd<(BuilderMarker, M)> for ServiceBuilder<Srv, Deliver, With, Also>
+impl<Srv, M, Deliver, With, Also> ServiceAdd<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also>
 where
     Srv: IntoService<M>,
     Deliver: DeliveryChoice,
@@ -96,6 +107,7 @@ where
     Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
     Srv::Request: 'static + Send + Sync,
     Srv::Response: 'static + Send + Sync,
+    Srv::Streams: Stream,
 {
     type Request = Srv::Request;
     type Response = Srv::Response;
@@ -104,15 +116,20 @@ where
         let mut entity_mut = app.world.spawn(());
         self.service.insert_service_mut(&mut entity_mut);
         let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
-        entity_mut.insert(Srv::Streams::StreamOutBundle::default());
+        // entity_mut.insert(<<Srv as IntoService<M>>::Streams as IntoStreamBundle>::StreamOutBundle::default());
+        entity_mut.insert(<Srv::Streams as IntoStreamBundle>::StreamOutBundle::default());
         self.deliver.apply_entity_mut(&mut entity_mut);
         self.with.apply(entity_mut);
         self.also.apply(app, provider);
     }
 }
 
-impl<M, S: IntoServiceBuilder<M>> ServiceAdd<M> for S
+struct IntoServiceBuilderMarker<M>(std::marker::PhantomData<M>);
+
+impl<M, S> ServiceAdd<IntoServiceBuilderMarker<M>> for S
 where
+    S: IntoServiceBuilder<IntoBuilderMarker<M>>,
+    S::Service: IntoService<M>,
     S::Streams: IntoStreamBundle,
     S::DefaultDeliver: DeliveryChoice,
     S::Request: 'static + Send + Sync,
@@ -122,11 +139,20 @@ where
     type Response = S::Response;
     type Streams = S::Streams;
     fn add_service(self, app: &mut App) {
-        ServiceAdd::<BuilderMarker>::add_service(self.builder(), app);
+        self.builder()
+        .add_service(app);
     }
 }
 
-impl<M, Srv: IntoService<M>, Deliver, With> ServiceSpawn<(BuilderMarker, M)> for ServiceBuilder<Srv, Deliver, With, ()>
+impl<M, S> private::Sealed<IntoServiceBuilderMarker<M>> for S
+where
+    S: IntoServiceBuilder<IntoBuilderMarker<M>>,
+    S::Service: IntoService<M>,
+{
+
+}
+
+impl<M, Srv: IntoService<M>, Deliver, With> ServiceSpawn<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, ()>
 where
     Srv::Streams: IntoStreamBundle,
     Deliver: DeliveryChoice,
@@ -141,18 +167,19 @@ where
         let mut entity_cmds = commands.spawn(());
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
-        entity_cmds.insert(Srv::Streams::StreamOutBundle::default());
+        entity_cmds.insert(<Srv::Streams as IntoStreamBundle>::StreamOutBundle::default());
         self.deliver.apply_entity_commands(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider
     }
 }
 
-impl<Srv, Deliver, With, Also> private::Sealed<BuilderMarker> for ServiceBuilder<Srv, Deliver, With, Also> { }
+impl<M, Srv, Deliver, With, Also> private::Sealed<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also> { }
 
-impl<M, S: IntoServiceBuilder<M>> ServiceSpawn<M> for S
+impl<M, S> ServiceSpawn<M> for S
 where
-    S::Streams: IntoStreamBundle,
+    S: IntoServiceBuilder<M>,
+    S::Service: IntoService<M>,
     S::DefaultDeliver: DeliveryChoice,
     S::Request: 'static + Send + Sync,
     S::Response: 'static + Send + Sync,
@@ -161,14 +188,17 @@ where
     type Response = S::Response;
     type Streams = S::Streams;
     fn spawn_service(self, commands: &mut Commands) -> ServiceRef<Self::Request, Self::Response, Self::Streams> {
-        ServiceSpawn::<BuilderMarker>::spawn_service(self.builder(), commands)
+        // ServiceSpawn::spawn_service(self.builder(), commands)
+        self.builder()
+        .spawn_service(commands)
     }
 }
 
-impl<Request, Response, M, Sys>
-private::Sealed<(Request, Response, M)> for Sys { }
+struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
 
-impl<M, Srv: IntoService<M>> IntoServiceBuilder<M> for Srv {
+impl<M, Sys> private::Sealed<IntoBuilderMarker<M>> for Sys { }
+
+impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Service = Srv;
     type Request = Srv::Request;
     type Response = Srv::Response;
@@ -178,19 +208,19 @@ impl<M, Srv: IntoService<M>> IntoServiceBuilder<M> for Srv {
     fn builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), ()> {
         ServiceBuilder::new(self)
     }
-    fn with<With>(self, with: With) -> ServiceBuilder<Srv, (), With, ()> {
+    fn with<With>(self, with: With) -> ServiceBuilder<Srv, Srv::DefaultDeliver, With, ()> {
         self.builder().with(with)
     }
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Srv, (), (), Also> {
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), Also> {
         self.builder().also(also)
     }
 }
 
-impl<Request, Response, Streams, Task, M, Sys>
-private::Sealed<(Request, Response, Streams, Task, M)> for Sys { }
+// impl<M, Srv: IntoService<M>> private::Sealed<M> for Srv { }
 
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
-/// user has indicated that the service should be executed in serial.
+/// user has indicated that the service should be executed in serial
+#[derive(Default)]
 pub struct SerialChosen;
 
 impl DeliveryChoice for SerialChosen {
@@ -207,6 +237,7 @@ impl private::Sealed<()> for SerialChosen { }
 
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
 /// user has indicated that the service should be executed in parallel.
+#[derive(Default)]
 pub struct ParallelChosen;
 
 impl DeliveryChoice for ParallelChosen {

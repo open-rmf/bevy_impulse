@@ -18,7 +18,7 @@
 use crate::OperationRoster;
 
 use bevy::{
-    prelude::{Entity, App, Commands, World, Component, Bundle},
+    prelude::{Entity, App, Commands, World, Component, Bundle, Resource},
     ecs::{
         world::EntityMut,
         system::EntityCommands,
@@ -37,6 +37,8 @@ pub use builder::ServiceBuilder;
 
 mod traits;
 pub use traits::*;
+
+use std::collections::VecDeque;
 
 /// Marker trait to indicate when an input is ready without knowing the type of
 /// input.
@@ -64,27 +66,60 @@ impl<Input: 'static + Send + Sync> InputBundle<Input> {
     }
 }
 
-pub struct ServiceRequest<'a> {
+pub(crate) struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
-    pub provider: Entity,
+    pub(crate) provider: Entity,
     /// The entity that holds the [`InputStorage`].
-    pub source: Entity,
+    pub(crate) source: Entity,
     /// The entity where the response should be placed as [`InputStorage`].
-    pub target: Entity,
+    pub(crate) target: Entity,
     /// The world that the service must operate on
-    pub world: &'a mut World,
+    pub(crate) world: &'a mut World,
     /// The operation roster which lets the service queue up more operations to immediately perform
-    pub roster: &'a mut OperationRoster,
+    pub(crate) roster: &'a mut OperationRoster,
 }
 
 impl<'a> ServiceRequest<'a> {
-    pub fn from_source<B>(&mut self) -> Option<B> {
+    fn pend(&self) -> PendingServiceRequest {
+        PendingServiceRequest {
+            provider: self.provider,
+            source: self.source,
+            target: self.target,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PendingServiceRequest {
+    pub provider: Entity,
+    pub source: Entity,
+    pub target: Entity,
+}
+
+impl PendingServiceRequest {
+    fn activate<'a>(
+        self,
+        world: &'a mut World,
+        roster: &'a mut OperationRoster
+    ) -> ServiceRequest<'a> {
+        ServiceRequest {
+            provider: self.provider,
+            source: self.source,
+            target: self.target,
+            world,
+            roster
+        }
+    }
+}
+
+impl<'a> ServiceRequest<'a> {
+    pub fn from_source<B: Component>(&mut self) -> Option<B> {
         if let Some(mut source_mut) = self.world.get_entity_mut(self.source) {
             let Some(request) = source_mut.take::<B>() else {
                 self.roster.cancel(self.source);
                 return None;
             };
-            Some(request.0)
+            Some(request)
         } else {
             self.roster.cancel(self.source);
             return None;
@@ -92,16 +127,31 @@ impl<'a> ServiceRequest<'a> {
     }
 }
 
+#[derive(Component)]
 pub(crate) struct ServiceMarker<Request, Response> {
-    hook: fn(ServiceRequest),
     _ignore: std::marker::PhantomData<(Request, Response)>,
 }
 
-impl<Request, Response> ServiceMarker<Request, Response> {
-    pub(crate) fn new<Srv: ServiceTrait>() -> Self {
+impl<Request, Response> Default for ServiceMarker<Request, Response> {
+    fn default() -> Self {
+        Self { _ignore: Default::default() }
+    }
+}
+
+#[derive(Component)]
+struct ServiceHook(fn(ServiceRequest));
+
+#[derive(Bundle)]
+pub(crate) struct ServiceBundle<Srv: ServiceTrait + 'static + Send + Sync> {
+    hook: ServiceHook,
+    marker: ServiceMarker<Srv::Request, Srv::Response>,
+}
+
+impl<Srv: ServiceTrait + 'static + Send + Sync> ServiceBundle<Srv> {
+    fn new() -> Self {
         Self {
-            hook: service_hook::<Srv>,
-            _ignore: Default::default(),
+            hook: ServiceHook(service_hook::<Srv>),
+            marker: Default::default(),
         }
     }
 }
@@ -178,6 +228,49 @@ impl AddServicesExt for App {
         service.add_service(self);
         self
     }
+}
+
+#[derive(Resource)]
+struct ServiceQueue {
+    is_delivering: bool,
+    queue: VecDeque<PendingServiceRequest>,
+}
+
+impl ServiceQueue {
+    fn new() -> Self {
+        Self { is_delivering: false, queue: VecDeque::new() }
+    }
+}
+
+pub(crate) fn dispatch_service(request: ServiceRequest) {
+    let mut service_queue = request.world.get_resource_or_insert_with(|| ServiceQueue::new());
+    service_queue.queue.push_back(request.pend());
+    if service_queue.is_delivering {
+        // Services are already being delivered, so to keep things simple we
+        // will add this dispatch command to the service queue and let the
+        // services be processed one at a time. Otherwise service recursion gets
+        // messy or even impossible.
+        return;
+    }
+
+    let ServiceRequest { world, roster, .. } = request;
+
+    service_queue.is_delivering = true;
+    while let Some(pending) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
+        let PendingServiceRequest { provider, source, target } = pending;
+        let Some(provider_ref) = world.get_entity(provider) else {
+            roster.cancel(source);
+            continue;
+        };
+
+        let Some(hook) = provider_ref.get::<ServiceHook>() else {
+            roster.cancel(source);
+            continue;
+        };
+
+        (hook.0)(pending.activate(world, roster));
+    }
+    world.resource_mut::<ServiceQueue>().is_delivering = false;
 }
 
 #[cfg(test)]

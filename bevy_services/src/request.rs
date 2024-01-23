@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    ServiceRef, PromiseCommands, UnusedTarget, InputBundle, PerformOperation, Serve,
+    ServiceRef, PromiseCommands, UnusedTarget, InputBundle, PerformOperation, RequestService,
     Stream,
 };
 
@@ -58,7 +58,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
     {
         let source = self.spawn(InputBundle::new(request)).id();
         let target = self.spawn(UnusedTarget).id();
-        self.add(PerformOperation::new(source, Serve::new(provider, target)));
+        self.add(PerformOperation::new(source, RequestService::new(provider, target)));
 
         PromiseCommands::new(source, target, self)
     }

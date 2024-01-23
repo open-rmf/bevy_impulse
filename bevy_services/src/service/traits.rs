@@ -30,6 +30,8 @@ use bevy::{
 };
 
 pub trait ServiceTrait {
+    type Request: 'static + Send + Sync;
+    type Response: 'static + Send + Sync;
     fn serve(request: ServiceRequest);
 }
 
@@ -63,14 +65,14 @@ pub trait ServiceSpawn<Marker>: private::Sealed<Marker> {
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
 pub trait IntoServiceBuilder<M>: private::Sealed<M> {
-    type Service: IntoService<M>;
+    type Service;
     type Request;
     type Response;
     type Streams;
     type DefaultDeliver;
-    fn builder(self) -> ServiceBuilder<Self::Service, <Self::Service as IntoService<M>>::DefaultDeliver, (), ()>;
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, <Self::Service as IntoService<M>>::DefaultDeliver, With, ()>;
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, <Self::Service as IntoService<M>>::DefaultDeliver, (), Also>;
+    fn builder(self) -> ServiceBuilder<Self::Service, Self::DefaultDeliver, (), ()>;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::DefaultDeliver, With, ()>;
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::DefaultDeliver, (), Also>;
 }
 
 /// This trait is used to set the delivery mode of a service.

@@ -17,7 +17,7 @@
 
 use crate::{
     ServiceRef, UnusedTarget, Terminate, PerformOperation,
-    Fork, Map, Chosen, ApplyLabel, Servable, Serve, ServeOnce, Stream,
+    Fork, Map, Chosen, ApplyLabel, RequestService, Stream,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -461,28 +461,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     ) -> PromiseCommands<'w, 's, 'a, ThenResponse, ThenStreams, ()> {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(PerformOperation::new(source, Serve::new(service_provider, target)));
-        PromiseCommands::new(source, target, self.commands)
-    }
-
-    /// Use the response of the service as a request into a [`Servable`] object
-    /// as soon as the response is delivered.
-    ///
-    /// [`Servable`] objects cannot accept labels because they are not able to
-    /// do any queueing.
-    pub fn then_serve<M, ThenServe>(
-        self,
-        servable: ThenServe,
-    ) -> PromiseCommands<'w, 's, 'a, ThenServe::Response, ThenServe::Streams, Chosen>
-    where
-        M: 'static + Send + Sync,
-        ThenServe: 'static + Send + Sync + Servable<M>,
-        ThenServe::Request: 'static + Send + Sync,
-        ThenServe::Response: 'static + Send + Sync,
-    {
-        let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(PerformOperation::new(source, ServeOnce::new(servable, target)));
+        self.commands.add(PerformOperation::new(source, RequestService::new(service_provider, target)));
         PromiseCommands::new(source, target, self.commands)
     }
 }

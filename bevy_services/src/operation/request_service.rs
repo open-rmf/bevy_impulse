@@ -16,18 +16,18 @@
 */
 
 use crate::{
-    Operation, TargetStorage, ServiceRef, OperationRoster,
-    OperationStatus, DispatchCommand, dispatch_service,
+    Operation, TargetStorage, ServiceRef, OperationRoster, ServiceRequest,
+    OperationStatus, dispatch_service,
 };
 
 use bevy::prelude::{Component, Entity, World};
 
-pub(crate) struct Serve {
+pub(crate) struct RequestService {
     provider: Entity,
     target: Entity,
 }
 
-impl Serve {
+impl RequestService {
     pub(crate) fn new<Request, Response, Streams>(
         provider: ServiceRef<Request, Response, Streams>,
         target: Entity,
@@ -39,7 +39,7 @@ impl Serve {
     }
 }
 
-impl Operation for Serve {
+impl Operation for RequestService {
     fn set_parameters(self, entity: Entity, world: &mut World) {
         world.entity_mut(entity).insert((
             ProviderStorage(self.provider),
@@ -50,13 +50,13 @@ impl Operation for Serve {
     fn execute(
         source: Entity,
         world: &mut World,
-        queue: &mut OperationRoster,
+        roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let source_ref = world.get_entity(source).ok_or(())?;
         let target = source_ref.get::<TargetStorage>().ok_or(())?.0;
         let provider = source_ref.get::<ProviderStorage>().ok_or(())?.0;
 
-        dispatch_service(DispatchCommand::new(provider, source, target), world, queue);
+        dispatch_service(ServiceRequest { provider, source, target, world, roster });
         Ok(OperationStatus::Queued(provider))
     }
 }
