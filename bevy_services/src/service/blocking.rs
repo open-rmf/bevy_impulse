@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    BlockingReq, InBlockingReq, IntoService, ServiceTrait, ServiceRequest, InputStorage,
+    BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest, InputStorage,
     InputBundle, ServiceBundle,
     service::builder::BlockingChosen,
     private,
@@ -33,14 +33,14 @@ use bevy::{
 pub struct Blocking<M>(std::marker::PhantomData<M>);
 
 #[derive(Component)]
-struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingReq<Request>, Response>>);
+struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingService<Request>, Response>>);
 
 #[derive(Component)]
-struct UninitBlockingServiceStorage<Request, Response>(BoxedSystem<BlockingReq<Request>, Response>);
+struct UninitBlockingServiceStorage<Request, Response>(BoxedSystem<BlockingService<Request>, Response>);
 
 impl<Request, Response, M, Sys> IntoService<Blocking<(Request, Response, M)>> for Sys
 where
-    Sys: IntoSystem<BlockingReq<Request>, Response, M>,
+    Sys: IntoSystem<BlockingService<Request>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -66,7 +66,7 @@ where
 
 impl<Request, Response, M, Sys> private::Sealed<Blocking<(Request, Response, M)>> for Sys
 where
-    Sys: IntoSystem<BlockingReq<Request>, Response, M>,
+    Sys: IntoSystem<BlockingService<Request>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -111,7 +111,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
 
         roster.dispose(source);
 
-        let response = service.run(BlockingReq { request, provider }, world);
+        let response = service.run(BlockingService { request, provider }, world);
         service.apply_deferred(world);
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
@@ -181,6 +181,6 @@ where
     }
 }
 
-fn peel_blocking<Request>(In(BlockingReq { request, .. }): InBlockingReq<Request>) -> Request {
+fn peel_blocking<Request>(In(BlockingService { request, .. }): InBlockingService<Request>) -> Request {
     request
 }

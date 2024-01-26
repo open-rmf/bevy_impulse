@@ -69,7 +69,7 @@ impl<Input: 'static + Send + Sync> InputBundle<Input> {
 pub struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
     pub(crate) provider: Entity,
-    /// The entity that holds the [`InputStorage`].
+    /// The entity that holds the request's [`InputStorage`].
     pub(crate) source: Entity,
     /// The entity where the response should be placed as [`InputStorage`].
     pub(crate) target: Entity,
@@ -325,7 +325,7 @@ pub(crate) fn dispatch_service(request: ServiceRequest) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BlockingReq, InBlockingReq, AsyncReq, InAsyncReq, Channel};
+    use crate::{BlockingService, InBlockingService, AsyncService, InAsyncService, Channel};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,
@@ -445,7 +445,7 @@ mod tests {
     }
 
     fn sys_async_service(
-        In(AsyncReq{ request, .. }): InAsyncReq<String>,
+        In(AsyncService{ request, .. }): InAsyncService<String>,
         people: Query<&TestPeople>,
     ) -> impl Future<Output=u64> {
         let mut matching_people = Vec::new();
@@ -467,7 +467,7 @@ mod tests {
     }
 
     fn sys_blocking_service(
-        In(BlockingReq{ request, provider }): InBlockingReq<String>,
+        In(BlockingService{ request, provider }): InBlockingService<String>,
         people: Query<&TestPeople>,
         multipliers: Query<&Multiplier>,
     ) -> u64 {

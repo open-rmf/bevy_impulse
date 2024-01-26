@@ -21,6 +21,9 @@ pub use channel::*;
 pub mod discovery;
 pub use discovery::*;
 
+pub mod handler;
+pub use handler::*;
+
 pub mod operation;
 pub use operation::*;
 
@@ -40,8 +43,8 @@ pub(crate) mod private;
 
 use bevy::prelude::{Entity, In};
 
-/// Use BlockingReq to indicate that your service is blocking and to specify its
-/// input request type. For example:
+/// Use BlockingService to indicate that your system is a blocking service and
+/// to specify its input request type. For example:
 ///
 /// ```
 /// use bevy::prelude::*;
@@ -51,7 +54,7 @@ use bevy::prelude::{Entity, In};
 /// struct Precision(i32);
 ///
 /// fn rounding_service(
-///     In(input): InBlockingReq<f64>,
+///     In(input): InBlockingService<f64>,
 ///     global_precision: Res<Precision>,
 /// ) -> f64 {
 ///     (input.request * 10_f64.powi(global_precision.0)).floor() * 10_f64.powi(-global_precision.0)
@@ -61,7 +64,7 @@ use bevy::prelude::{Entity, In};
 /// The systems of more complex services might need to know what entity is
 /// providing the service, e.g. if the service provider is configured with
 /// additional components that need to be queried when a request comes in. For
-/// that you can check the `provider` field of [`BlockingReq`]`:
+/// that you can check the `provider` field of `BlockingService`:
 ///
 /// ```
 /// use bevy::prelude::*;
@@ -71,7 +74,7 @@ use bevy::prelude::{Entity, In};
 /// struct Precision(i32);
 ///
 /// fn rounding_service(
-///     In(BlockingReq{request, provider}): InBlockingReq<f64>,
+///     In(BlockingService{request, provider}): InBlockingService<f64>,
 ///     service_precision: Query<&Precision>,
 ///     global_precision: Res<Precision>,
 /// ) -> f64 {
@@ -79,28 +82,47 @@ use bevy::prelude::{Entity, In};
 ///     (request * 10_f64.powi(precision)).floor() * 10_f64.powi(-precision)
 /// }
 /// ```
-pub struct BlockingReq<Request> {
+#[non_exhaustive]
+pub struct BlockingService<Request> {
     pub request: Request,
     pub provider: Entity,
 }
 
-/// Use this to reduce bracket noise when you need `In<BlockingReq<R>>`.
-pub type InBlockingReq<Request> = In<BlockingReq<Request>>;
+/// Use this to reduce bracket noise when you need `In<BlockingService<R>>`.
+pub type InBlockingService<Request> = In<BlockingService<Request>>;
 
-/// Use AsyncReq to indicate that your service is async and to specify its input
-/// request type. Being async means it will return a `Future<Output=Option<Response>>`
-/// which will be processed by a task pool.
+/// Use AsyncService to indicate that your system is an async service and to
+/// specify its input request type. Being async means it must return a
+/// `Future<Output=Response>` which will be processed by a task pool.
 ///
 /// This comes with a Channel that allows your Future to interact with Bevy's
-/// ECS asynchronously from inside the task pool.
-pub struct AsyncReq<Request, Streams = ()> {
+/// ECS asynchronously while it is polled from inside the task pool.
+#[non_exhaustive]
+pub struct AsyncService<Request, Streams = ()> {
     pub request: Request,
     pub channel: Channel<Streams>,
     pub provider: Entity,
 }
 
-/// Use this to reduce backet noise when you need `In<AsyncReq<R, S>>`.
-pub type InAsyncReq<Request, Streams = ()> = In<AsyncReq<Request, Streams>>;
+/// Use this to reduce backet noise when you need `In<AsyncService<R, S>>`.
+pub type InAsyncService<Request, Streams = ()> = In<AsyncService<Request, Streams>>;
+
+/// Use BlockingHandler to indicate that your system is meant to define a
+/// blocking [`Handler`]. Handlers are different from services because they are
+/// not associated with any entity.
+#[non_exhaustive]
+pub struct BlockingHandler<Request> {
+    pub request: Request,
+}
+
+/// Use AsyncHandler to indicate that your system is meant to define an async
+/// [`Handler`]. An async handler is not associated with any entity, and it
+/// must return a `Future<Output=Response>` that will be polled by the async
+/// task pool.
+pub struct AsyncHandler<Request, Streams> {
+    pub request: Request,
+    pub channel: Channel<Streams>,
+}
 
 #[cfg(test)]
 mod tests {

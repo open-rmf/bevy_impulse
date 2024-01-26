@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    AsyncReq, InAsyncReq, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
+    AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
     InputBundle, InnerChannel, ChannelQueue, RequestLabelId, TargetStorage, OperationRoster, BlockingQueue,
     Stream, ServiceBuilder, ChooseAsyncServiceDelivery,
     service::builder::{SerialChosen, ParallelChosen},
@@ -50,14 +50,14 @@ use smallvec::SmallVec;
 pub trait IsAsyncService<M> { }
 
 #[derive(Component)]
-struct AsyncServiceStorage<Request, Streams, Task>(Option<BoxedSystem<AsyncReq<Request, Streams>, Task>>);
+struct AsyncServiceStorage<Request, Streams, Task>(Option<BoxedSystem<AsyncService<Request, Streams>, Task>>);
 
 #[derive(Component)]
-struct UninitAsyncServiceStorage<Request, Streams, Task>(BoxedSystem<AsyncReq<Request, Streams>, Task>);
+struct UninitAsyncServiceStorage<Request, Streams, Task>(BoxedSystem<AsyncService<Request, Streams>, Task>);
 
 impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
+    Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -85,7 +85,7 @@ where
 
 impl<Request, Streams, Task, M, Srv> private::Sealed<(Request, Streams, Task, M)> for Srv
 where
-    Srv: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
+    Srv: IntoSystem<AsyncService<Request, Streams>, Task, M>,
     Task: Future + 'static + Send,
     Streams: Stream + 'static,
     Request: 'static + Send + Sync,
@@ -97,7 +97,7 @@ where
 
 impl<Request, Streams, Task, M, Sys> IsAsyncService<(Request, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<AsyncReq<Request, Streams>, Task, M>,
+    Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -189,7 +189,7 @@ where
 
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let channel = InnerChannel::new(source, sender);
-        let job = service.run(AsyncReq { request, channel: channel.into_specific(), provider }, world);
+        let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
         service.apply_deferred(world);
 
         let task = AsyncComputeTaskPool::get().spawn(job);
@@ -516,6 +516,6 @@ where
     }
 }
 
-fn peel_async<Request>(In(AsyncReq { request, .. }): InAsyncReq<Request>) -> Request {
+fn peel_async<Request>(In(AsyncService { request, .. }): InAsyncService<Request>) -> Request {
     request
 }
