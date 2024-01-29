@@ -123,8 +123,19 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    fn handle(&mut self, request: HandleRequest) {
+    fn handle(&mut self, mut input: HandleRequest) {
+        let Some(request) = input.get_request() else {
+            return;
+        };
 
+        if !self.initialized {
+            self.system.initialize(&mut input.world);
+        }
+
+        let response = self.system.run(BlockingHandler { request }, &mut input.world);
+        self.system.apply_deferred(&mut input.world);
+
+        input.give_response(response);
     }
 }
 
@@ -138,13 +149,26 @@ struct AsyncHandlerSystem<Request, Task, Streams> {
 
 impl<Request, Task, Streams> HandlerTrait<Request, Task::Output, Streams> for AsyncHandlerSystem<Request, Task, Streams>
 where
-    Task: Future,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: Stream,
 {
-    fn handle(&mut self, request: HandleRequest) {
+    fn handle(&mut self, mut input: HandleRequest) {
+        let Some(request) = input.get_request() else {
+            return;
+        };
 
+        let channel = input.get_channel();
+
+        if !self.initialized {
+            self.system.initialize(&mut input.world);
+        }
+
+        let task = self.system.run(AsyncHandler { request, channel }, &mut input.world);
+        self.system.apply_deferred(&mut input.world);
+
+        input.give_task(task);
     }
 }
 
@@ -161,7 +185,7 @@ where
     Streams: 'static + Send + Sync,
 {
     fn handle(&mut self, request: HandleRequest) {
-
+        (self.callback)(request);
     }
 }
 
@@ -199,7 +223,7 @@ impl<Request, Response, M, Sys> private::Sealed<BlockingHandlerMarker<(Request, 
 impl<Request, Task, Streams, M, Sys> AsHandler<AsyncHandlerMarker<(Request, Task, Streams, M)>> for Sys
 where
     Sys: IntoSystem<AsyncHandler<Request, Streams>, Task, M>,
-    Task: Future + 'static,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: Stream,
@@ -319,7 +343,7 @@ pub trait IntoAsyncHandler<M>: private::Sealed<M> {
 impl<Request, Task, M, Sys> IntoAsyncHandler<AsyncHandlerMarker<(Request, Task, (), M)>> for Sys
 where
     Sys: IntoSystem<Request, Task, M>,
-    Task: Future + 'static,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {
