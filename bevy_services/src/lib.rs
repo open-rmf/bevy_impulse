@@ -30,6 +30,9 @@ pub use operation::*;
 pub mod promise;
 pub use promise::*;
 
+pub mod provider;
+pub use provider::*;
+
 pub mod request;
 pub use request::*;
 

@@ -17,12 +17,13 @@
 
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, Stream, InputStorage, InputBundle, TaskBundle,
+    OperationRoster, Stream, InputStorage, InputBundle, TaskBundle, Provider,
+    PerformOperation, OperateHandler,
     private,
 };
 
 use bevy::{
-    prelude::{World, Entity, In, Component},
+    prelude::{World, Entity, In},
     ecs::system::{IntoSystem, BoxedSystem},
     tasks::AsyncComputeTaskPool,
 };
@@ -33,9 +34,14 @@ use std::{
     future::Future,
 };
 
-#[derive(Clone)]
 pub struct Handler<Request, Response, Streams = ()> {
     pub(crate) inner: Arc<Mutex<InnerHandler<Request, Response, Streams>>>,
+}
+
+impl<Request, Response, Streams> Clone for Handler<Request, Response, Streams> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
 }
 
 impl<Request, Response, Streams> Handler<Request, Response, Streams> {
@@ -107,13 +113,27 @@ pub struct PendingHandleRequest {
     pub(crate) target: Entity,
 }
 
+impl PendingHandleRequest {
+    pub(crate) fn activate<'a>(
+        self,
+        world: &'a mut World,
+        roster: &'a mut OperationRoster,
+    ) -> HandleRequest<'a> {
+        HandleRequest {
+            source: self.source,
+            target: self.target,
+            world,
+            roster,
+        }
+    }
+}
+
 pub trait HandlerTrait<Request, Response, Streams> {
     fn handle(&mut self, request: HandleRequest);
 }
 
 pub struct BlockingHandlerMarker<M>(std::marker::PhantomData<M>);
 
-#[derive(Component)]
 struct BlockingHandlerSystem<Request, Response> {
     system: BoxedSystem<BlockingHandler<Request>, Response>,
     initialized: bool,
@@ -142,7 +162,6 @@ where
 
 pub struct AsyncHandlerMarker<M>(std::marker::PhantomData<M>);
 
-#[derive(Component)]
 struct AsyncHandlerSystem<Request, Task, Streams> {
     system: BoxedSystem<AsyncHandler<Request, Streams>, Task>,
     initialized: bool,
@@ -173,7 +192,6 @@ where
     }
 }
 
-#[derive(Component)]
 struct CallbackHandler<F: 'static + Send> {
     callback: F,
 }
@@ -374,5 +392,20 @@ where
         };
 
         f.as_handler()
+    }
+}
+
+impl<Request, Response, Streams> Provider for Handler<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: Stream,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+
+    fn provide(self, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
+        commands.add(PerformOperation::new(source, OperateHandler::new(self, target)));
     }
 }

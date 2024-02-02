@@ -30,12 +30,11 @@ pub(crate) use fork::*;
 mod map;
 pub(crate) use map::*;
 
-mod request_service;
-pub(crate) use request_service::*;
+mod operate_handler;
+pub(crate) use operate_handler::*;
 
-// mod serve_once;
-// pub(crate) use serve_once::*;
-// pub use serve_once::traits::*;
+mod operate_service;
+pub(crate) use operate_service::*;
 
 mod terminate;
 pub(crate) use terminate::*;
@@ -97,7 +96,7 @@ pub(crate) enum OperationStatus {
     /// Do not despawn the source entity of this operation yet because it will
     /// be needed for a service that has been queued. The service will be
     /// responsible for despawning the entity when it is no longer needed.
-    Queued(Entity),
+    Queued{ provider: Entity },
 }
 
 /// This component indicates that a source entity has been queued for a service
@@ -152,7 +151,7 @@ fn perform_operation<Op: Operation>(
         Ok(OperationStatus::Finished) => {
             world.despawn(source);
         }
-        Ok(OperationStatus::Queued(provider)) => {
+        Ok(OperationStatus::Queued{ provider }) => {
             if let Some(mut source_mut) = world.get_entity_mut(source) {
                 source_mut.insert(Queued(provider));
             } else {

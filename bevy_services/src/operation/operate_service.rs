@@ -22,12 +22,12 @@ use crate::{
 
 use bevy::prelude::{Component, Entity, World};
 
-pub(crate) struct RequestService {
+pub(crate) struct OperateService {
     provider: Entity,
     target: Entity,
 }
 
-impl RequestService {
+impl OperateService {
     pub(crate) fn new<Request, Response, Streams>(
         provider: Service<Request, Response, Streams>,
         target: Entity,
@@ -39,7 +39,7 @@ impl RequestService {
     }
 }
 
-impl Operation for RequestService {
+impl Operation for OperateService {
     fn set_parameters(self, entity: Entity, world: &mut World) {
         world.entity_mut(entity).insert((
             ProviderStorage(self.provider),
@@ -57,7 +57,7 @@ impl Operation for RequestService {
         let provider = source_ref.get::<ProviderStorage>().ok_or(())?.0;
 
         dispatch_service(ServiceRequest { provider, source, target, world, roster });
-        Ok(OperationStatus::Queued(provider))
+        Ok(OperationStatus::Queued{ provider })
     }
 }
 

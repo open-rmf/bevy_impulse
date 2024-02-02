@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{OperationRoster, Stream};
+use crate::{OperationRoster, Stream, PerformOperation, OperateService, Provider};
 
 use bevy::{
     prelude::{Entity, App, Commands, World, Component, Bundle, Resource},
@@ -107,7 +107,7 @@ impl PendingServiceRequest {
             source: self.source,
             target: self.target,
             world,
-            roster
+            roster,
         }
     }
 }
@@ -320,6 +320,16 @@ pub(crate) fn dispatch_service(request: ServiceRequest) {
         (hook.0)(pending.activate(world, roster));
     }
     world.resource_mut::<ServiceQueue>().is_delivering = false;
+}
+
+impl<Request, Response, Streams> Provider for Service<Request, Response, Streams> {
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+
+    fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
+        commands.add(PerformOperation::new(source, OperateService::new(self, target)));
+    }
 }
 
 #[cfg(test)]

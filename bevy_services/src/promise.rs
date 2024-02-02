@@ -17,7 +17,7 @@
 
 use crate::{
     Service, UnusedTarget, Terminate, PerformOperation,
-    Fork, Map, Chosen, ApplyLabel, RequestService, Stream,
+    Fork, Map, Chosen, ApplyLabel, OperateService, Stream,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -461,7 +461,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     ) -> PromiseCommands<'w, 's, 'a, ThenResponse, ThenStreams, ()> {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(PerformOperation::new(source, RequestService::new(service_provider, target)));
+        self.commands.add(PerformOperation::new(source, OperateService::new(service_provider, target)));
         PromiseCommands::new(source, target, self.commands)
     }
 }
