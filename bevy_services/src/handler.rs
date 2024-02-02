@@ -33,8 +33,9 @@ use std::{
     future::Future,
 };
 
+#[derive(Clone)]
 pub struct Handler<Request, Response, Streams = ()> {
-    inner: Arc<Mutex<InnerHandler<Request, Response, Streams>>>,
+    pub(crate) inner: Arc<Mutex<InnerHandler<Request, Response, Streams>>>,
 }
 
 impl<Request, Response, Streams> Handler<Request, Response, Streams> {
@@ -50,9 +51,9 @@ impl<Request, Response, Streams> Handler<Request, Response, Streams> {
     }
 }
 
-struct InnerHandler<Request, Response, Streams> {
-    queue: VecDeque<PendingHandleRequest>,
-    handler: Option<Box<dyn HandlerTrait<Request, Response, Streams> + 'static + Send>>,
+pub(crate) struct InnerHandler<Request, Response, Streams> {
+    pub(crate) queue: VecDeque<PendingHandleRequest>,
+    pub(crate) handler: Option<Box<dyn HandlerTrait<Request, Response, Streams> + 'static + Send>>,
 }
 
 pub struct HandleRequest<'a> {

@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    ServiceBuilder, ServiceRef, ServiceRequest,
+    ServiceBuilder, Service, ServiceRequest,
     service::builder::{SerialChosen, ParallelChosen},
     private
 };
@@ -93,5 +93,5 @@ pub trait WithEntityCommands {
 /// This trait allows users to perform more operations with a service
 /// provider while adding it to an App.
 pub trait AlsoAdd<Request, Response, Streams> {
-    fn apply<'w>(self, app: &mut App, provider: ServiceRef<Request, Response, Streams>);
+    fn apply<'w>(self, app: &mut App, provider: Service<Request, Response, Streams>);
 }

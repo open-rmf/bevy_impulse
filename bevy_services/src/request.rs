@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    ServiceRef, PromiseCommands, UnusedTarget, InputBundle, PerformOperation, RequestService,
+    Service, PromiseCommands, UnusedTarget, InputBundle, PerformOperation, RequestService,
     Stream,
 };
 
@@ -40,7 +40,7 @@ pub trait RequestExt<'w, 's> {
     /// Call this with [`Commands`] to request a service
     fn request<'a, Request: 'static + Send + Sync, Response, Streams: Stream>(
         &'a mut self,
-        provider: ServiceRef<Request, Response, Streams>,
+        provider: Service<Request, Response, Streams>,
         request: Request,
     ) -> PromiseCommands<'w, 's, 'a, Response, Streams, ()>
     where
@@ -50,7 +50,7 @@ pub trait RequestExt<'w, 's> {
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
     fn request<'a, Request: 'static + Send + Sync, Response, Streams: Stream>(
         &'a mut self,
-        provider: ServiceRef<Request, Response, Streams>,
+        provider: Service<Request, Response, Streams>,
         request: Request,
     ) -> PromiseCommands<'w, 's, 'a, Response, Streams, ()>
     where

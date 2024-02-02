@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    ServiceRef, IntoService, Delivery,
+    Service, IntoService, Delivery,
     stream::*,
     private,
 };
@@ -112,7 +112,7 @@ where
     {
         let mut entity_mut = app.world.spawn(());
         self.service.insert_service_mut(&mut entity_mut);
-        let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
+        let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         // entity_mut.insert(<<Srv as IntoService<M>>::Streams as IntoStreamBundle>::StreamOutBundle::default());
         entity_mut.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
         self.deliver.apply_entity_mut(&mut entity_mut);
@@ -125,7 +125,7 @@ impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, ()>
 where
     Deliver: DeliveryChoice,
 {
-    pub(crate) fn spawn_service<M>(self, commands: &mut Commands) -> ServiceRef<Srv::Request, Srv::Response, Srv::Streams>
+    pub(crate) fn spawn_service<M>(self, commands: &mut Commands) -> Service<Srv::Request, Srv::Response, Srv::Streams>
     where
         Srv: IntoService<M>,
         With: WithEntityCommands,
@@ -135,7 +135,7 @@ where
     {
         let mut entity_cmds = commands.spawn(());
         self.service.insert_service_commands(&mut entity_cmds);
-        let provider = ServiceRef::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
+        let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
         entity_cmds.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
         self.deliver.apply_entity_commands(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
@@ -281,15 +281,15 @@ impl WithEntityCommands for () {
 
 impl<Request, Response, Streams, T> AlsoAdd<Request, Response, Streams> for T
 where
-    T: FnOnce(&mut App, ServiceRef<Request, Response, Streams>)
+    T: FnOnce(&mut App, Service<Request, Response, Streams>)
 {
-    fn apply<'w>(self, app: &mut App, provider: ServiceRef<Request, Response, Streams>) {
+    fn apply<'w>(self, app: &mut App, provider: Service<Request, Response, Streams>) {
         self(app, provider)
     }
 }
 
 impl<Request, Response, Streams> AlsoAdd<Request, Response, Streams> for () {
-    fn apply<'w>(self, _: &mut App, _: ServiceRef<Request, Response, Streams>) {
+    fn apply<'w>(self, _: &mut App, _: Service<Request, Response, Streams>) {
         // Do nothing
     }
 }

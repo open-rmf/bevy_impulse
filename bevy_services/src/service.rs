@@ -168,20 +168,20 @@ fn service_hook<Srv: ServiceTrait>(request: ServiceRequest) {
 ///
 /// To use a provider, call [`bevy::prelude::Commands`].request(provider, request).
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ServiceRef<Request, Response, Streams = ()> {
+pub struct Service<Request, Response, Streams = ()> {
     entity: Entity,
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Req, Res, S> Clone for ServiceRef<Req, Res, S> {
+impl<Req, Res, S> Clone for Service<Req, Res, S> {
     fn clone(&self) -> Self {
         Self { entity: self.entity, _ignore: Default::default() }
     }
 }
 
-impl<Req, Res, S> Copy for ServiceRef<Req, Res, S> { }
+impl<Req, Res, S> Copy for Service<Req, Res, S> { }
 
-impl<Request, Response, Streams> ServiceRef<Request, Response, Streams> {
+impl<Request, Response, Streams> Service<Request, Response, Streams> {
     /// Get the underlying entity that the service provider is associated with.
     pub fn get(&self) -> Entity {
         self.entity
@@ -204,7 +204,7 @@ pub trait SpawnServicesExt<'w, 's> {
     fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=()>>(
         &'a mut self,
         builder: B,
-    ) -> ServiceRef<
+    ) -> Service<
             <B::Service as IntoService<M2>>::Request,
             <B::Service as IntoService<M2>>::Response,
             <B::Service as IntoService<M2>>::Streams,
@@ -222,7 +222,7 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
     fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=()>>(
         &'a mut self,
         builder: B,
-    ) -> ServiceRef<
+    ) -> Service<
             <B::Service as IntoService<M2>>::Request,
             <B::Service as IntoService<M2>>::Response,
             <B::Service as IntoService<M2>>::Streams,
@@ -347,7 +347,7 @@ mod tests {
     #[derive(Resource)]
     struct MyServiceProvider {
         #[allow(unused)]
-        provider: ServiceRef<String, u64>,
+        provider: Service<String, u64>,
     }
 
     #[test]
