@@ -27,11 +27,11 @@ use std::collections::VecDeque;
 mod fork;
 pub(crate) use fork::*;
 
-mod map;
-pub(crate) use map::*;
-
 mod operate_handler;
 pub(crate) use operate_handler::*;
+
+mod operate_map;
+pub(crate) use operate_map::*;
 
 mod operate_service;
 pub(crate) use operate_service::*;

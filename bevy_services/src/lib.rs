@@ -24,6 +24,9 @@ pub use discovery::*;
 pub mod handler;
 pub use handler::*;
 
+pub mod map;
+pub use map::*;
+
 pub mod operation;
 pub use operation::*;
 
@@ -118,11 +121,34 @@ pub struct BlockingHandler<Request> {
     pub request: Request,
 }
 
-/// Use AsyncHandler to indicate that your system is meant to define an async
-/// [`Handler`]. An async handler is not associated with any entity, and it
-/// must return a `Future<Output=Response>` that will be polled by the async
-/// task pool.
+/// Use AsyncHandler to indicate that your system or function is meant to define
+/// an async [`Handler`]. An async handler is not associated with any entity,
+/// and it must return a [`Future<Output=Response>`](std::future::Future) that
+/// will be polled by the async task pool.
+#[non_exhaustive]
 pub struct AsyncHandler<Request, Streams> {
+    pub request: Request,
+    pub channel: Channel<Streams>,
+}
+
+/// Use BlockingMap to indicate that your function is meant to define a blocking
+/// [`Map`]. A Map is not associated with any entity, it cannot be a Bevy System,
+/// and it can only be used once, making it suitable for functions that only
+/// implement [`FnOnce`].
+#[non_exhaustive]
+pub struct BlockingMap<Request> {
+    pub request: Request,
+}
+
+/// Use AsyncMap to indicate that your function is meant to define an async
+/// [`Map`]. A Map is not associated with any entity, it cannot be a Bevy System,
+/// and it can only be used once, making it suitable for functions that only
+/// implement [`FnOnce`].
+///
+/// An async Map must return a [`Future<Output=Response>`](std::future::Future)
+/// that will be polled by the async task pool.
+#[non_exhaustive]
+pub struct AsyncMap<Request, Streams> {
     pub request: Request,
     pub channel: Channel<Streams>,
 }

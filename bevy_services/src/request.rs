@@ -62,7 +62,6 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let source = self.spawn(InputBundle::new(request)).id();
         let target = self.spawn(UnusedTarget).id();
         provider.provide(source, target, self);
-        // self.add(PerformOperation::new(source, RequestService::new(provider, target)));
 
         PromiseCommands::new(source, target, self)
     }

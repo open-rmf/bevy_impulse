@@ -34,6 +34,14 @@ use std::{
     future::Future,
 };
 
+/// A handler is similar to a [`Service`](crate::Service) except it is not
+/// associated with an [`Entity`]. Instead it can be passed around and shared as an
+/// object. Cloning the Handler will produce a new reference to the same underlying
+/// instance. If the handler has any internal state (e.g. [`Local`](bevy::prelude::Local)
+/// parameters, change trackers, or mutable captured variables), that internal state will
+/// be shared among all its clones.
+///
+/// TODO(@mxgrey): Explain the different ways to instantiate a Handler.
 pub struct Handler<Request, Response, Streams = ()> {
     pub(crate) inner: Arc<Mutex<InnerHandler<Request, Response, Streams>>>,
 }

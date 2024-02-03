@@ -16,8 +16,9 @@
 */
 
 use crate::{
-    Service, UnusedTarget, Terminate, PerformOperation,
-    Fork, Map, Chosen, ApplyLabel, OperateService, Stream,
+    UnusedTarget, Terminate, PerformOperation,
+    Fork, Chosen, ApplyLabel, Stream, Provider,
+    AsMap, IntoBlockingMap, IntoAsyncMap,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -406,6 +407,67 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
         promise
     }
 
+    /// Use the response of the service as a new service request as soon as the
+    /// response is delivered. If you apply a label or hook into streams after
+    /// calling this function, then those will be applied to this new service
+    /// request.
+    pub fn then<P: Provider<Request = Response>>(
+        self,
+        provider: P,
+    ) -> PromiseCommands<'w, 's, 'a, P::Response, P::Streams, ()>
+    where
+        P::Response: 'static + Send + Sync,
+        P::Streams: Stream,
+    {
+        let source = self.target;
+        let target = self.commands.spawn(UnusedTarget).id();
+        provider.provide(source, target, self.commands);
+        PromiseCommands::new(source, target, self.commands)
+    }
+
+    /// Apply a one-time callback whose input is a [`BlockingMap`](crate::BlockingMap)
+    /// or an [`AsyncMap`](crate::AsyncMap).
+    pub fn map<M, F: AsMap<M>>(
+        self,
+        f: F,
+    ) -> PromiseCommands<'w, 's, 'a, <F::MapType as Provider>::Response, <F::MapType as Provider>::Streams, ()>
+    where
+        F::MapType: Provider<Request=Response>,
+        <F::MapType as Provider>::Response: 'static + Send + Sync,
+        <F::MapType as Provider>::Streams: Stream,
+    {
+        self.then(f.as_map())
+    }
+
+    /// Apply a one-time callback whose input is the Response of the current
+    /// PromiseCommands. The output of the map will be the Response of the
+    /// returned PromiseCommands.
+    pub fn map_blocking<U, F>(
+        self,
+        f: F,
+    ) -> PromiseCommands<'w, 's, 'a, U, (), ()>
+    where
+        F: FnOnce(Response) -> U + 'static + Send + Sync,
+        U: 'static + Send + Sync,
+    {
+        self.then(f.into_blocking_map())
+    }
+
+    /// Apply a one-time callback whose output is a Future that will be run in
+    /// the [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool). The
+    /// output of the Future will be the Response of the returned PromiseCommands.
+    pub fn map_async<Task, F>(
+        self,
+        f: F,
+    ) -> PromiseCommands<'w, 's, 'a, Task::Output, (), ()>
+    where
+        F: FnOnce(Response) -> Task + 'static + Send + Sync,
+        Task: Future + 'static + Send + Sync,
+        Task::Output: 'static + Send + Sync,
+    {
+        self.then(f.into_async_map())
+    }
+
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different delivery chains: one
     /// determined by the `f` callback provided to this function and the other
@@ -433,36 +495,6 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
 
         f(PromiseCommands::new(self.target, left_target, self.commands));
         PromiseCommands::new(self.target, right_target, self.commands)
-    }
-
-    /// Apply a simple callback to the response to change its type. Unlike `.then`
-    /// the callback is not a system. This is more efficient for cases where
-    /// system parameters don't need to be fetched to perform the transformation.
-    ///
-    /// You cannot hook into streams or apply a label after using this function,
-    /// so perform those operations before calling this.
-    pub fn map<MappedResponse: 'static + Send + Sync>(
-        self,
-        f: impl FnOnce(Response) -> MappedResponse + Send + Sync + 'static,
-    ) -> PromiseCommands<'w, 's, 'a, MappedResponse, (), Chosen> {
-        let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(PerformOperation::new(source, Map::new(target, Box::new(f))));
-        PromiseCommands::new(source, target, self.commands)
-    }
-
-    /// Use the response of the service as a new service request as soon as the
-    /// response is delivered. If you apply a label or hook into streams after
-    /// calling this function, then those will be applied to this new service
-    /// request.
-    pub fn then<ThenResponse: 'static + Send + Sync, ThenStreams: Stream>(
-        self,
-        service_provider: Service<Response, ThenResponse, ThenStreams>
-    ) -> PromiseCommands<'w, 's, 'a, ThenResponse, ThenStreams, ()> {
-        let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(PerformOperation::new(source, OperateService::new(service_provider, target)));
-        PromiseCommands::new(source, target, self.commands)
     }
 }
 
