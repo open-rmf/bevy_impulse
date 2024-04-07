@@ -218,13 +218,13 @@ impl ArcWake for JobWaker {
 struct JobWakerStorage(Arc<JobWaker>);
 
 #[derive(Resource)]
-struct WakeQueue {
+pub(crate) struct WakeQueue {
     sender: CbSender<Entity>,
-    receiver: CbReceiver<Entity>,
+    pub(crate) receiver: CbReceiver<Entity>,
 }
 
 impl WakeQueue {
-    fn new() -> WakeQueue {
+    pub(crate) fn new() -> WakeQueue {
         let (sender, receiver) = unbounded();
         WakeQueue { sender, receiver }
     }
@@ -234,7 +234,7 @@ impl WakeQueue {
 struct TaskStorage<Response>(BevyTask<Response>);
 
 #[derive(Component)]
-struct PollTask(fn(Entity, &mut World, &mut OperationRoster) -> Result<bool, ()>);
+pub(crate) struct PollTask(pub(crate) fn(Entity, &mut World, &mut OperationRoster));
 
 #[derive(Bundle)]
 pub(crate) struct TaskBundle<Response: 'static + Send + Sync> {
@@ -260,9 +260,16 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
     source: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
-) -> Result<bool, ()> {
-    let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-    let mut task = source_mut.take::<TaskStorage<Response>>().ok_or(())?.0;
+) {
+    let Some(mut source_mut) = world.get_entity_mut(source) else {
+        roster.cancel(source);
+        return;
+    };
+    let Some(mut task) = source_mut.take::<TaskStorage<Response>>().map(|t| t.0) else {
+        roster.cancel(source);
+        return;
+    };
+
     let waker = if let Some(waker) = source_mut.take::<JobWakerStorage>() {
         waker.0.clone()
     } else {
@@ -282,7 +289,7 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
             let mut source_mut = world.entity_mut(source);
             let Some(target) = source_mut.take::<TargetStorage>() else {
                 roster.cancel(source);
-                return Err(());
+                return;
             };
             let target = target.0;
 
@@ -293,7 +300,7 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
             world.entity_mut(target).insert(InputBundle::new(result));
             roster.queue(target);
             roster.dispose(source);
-            Ok(true)
+            return;
         }
         Poll::Pending => {
             // Task is still running
@@ -301,7 +308,6 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
                 TaskStorage(task),
                 JobWakerStorage(waker),
             ));
-            Ok(false)
         }
     }
 }

@@ -360,16 +360,38 @@ impl Default for Interrupter {
 /// If you do not select one of the above then the service request will be
 /// canceled without ever attempting to run.
 #[must_use]
-pub struct PromiseCommands<'w, 's, 'a, Response, Streams, L> {
+pub struct PromiseCommands<'w, 's, 'a, Response, Streams, M> {
     provider: Entity,
     target: Entity,
     commands: &'a mut Commands<'w, 's>,
     response: std::marker::PhantomData<Response>,
     streams: std::marker::PhantomData<Streams>,
-    labeling: std::marker::PhantomData<L>,
+    modifiers: std::marker::PhantomData<M>,
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Response, Streams, L> {
+pub struct Modifiers<IsLabeled, HasOnCancel> {
+    _ignore: std::marker::PhantomData<(IsLabeled, HasOnCancel)>,
+}
+
+/// No request modifiers have been set.
+pub type ModifiersUnset = Modifiers<(), ()>;
+
+/// The request is unlabeled but may have other modifiers.
+pub type NotLabeled<C> = Modifiers<(), C>;
+
+/// The request is labeled and may have other modifiers.
+pub type Labeled<C> = Modifiers<Chosen, C>;
+
+/// The request does not have an on_cancel behavior set and may have other modifiers.
+pub type NoOnCancel<L> = Modifiers<L, ()>;
+
+/// The request has an on_cancel behavior set and may have other modifiers.
+pub type OnCancel<L> = Modifiers<L, Chosen>;
+
+/// All possible request modifiers have been chosen or can no longer be set.
+pub type ModifiersClosed = Modifiers<Chosen, Chosen>;
+
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands<'w, 's, 'a, Response, Streams, Modifiers<L, C>> {
     /// Have the service run until it is finished without holding onto any
     /// promise. Immediately after the service is finished, the storage for the
     /// promise will automatically be freed up.
@@ -414,7 +436,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     pub fn then<P: Provider<Request = Response>>(
         self,
         provider: P,
-    ) -> PromiseCommands<'w, 's, 'a, P::Response, P::Streams, ()>
+    ) -> PromiseCommands<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
     where
         P::Response: 'static + Send + Sync,
         P::Streams: Stream,
@@ -430,7 +452,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     pub fn map<M, F: AsMap<M>>(
         self,
         f: F,
-    ) -> PromiseCommands<'w, 's, 'a, <F::MapType as Provider>::Response, <F::MapType as Provider>::Streams, ()>
+    ) -> PromiseCommands<'w, 's, 'a, <F::MapType as Provider>::Response, <F::MapType as Provider>::Streams, ModifiersUnset>
     where
         F::MapType: Provider<Request=Response>,
         <F::MapType as Provider>::Response: 'static + Send + Sync,
@@ -445,7 +467,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     pub fn map_blocking<U, F>(
         self,
         f: F,
-    ) -> PromiseCommands<'w, 's, 'a, U, (), ()>
+    ) -> PromiseCommands<'w, 's, 'a, U, (), ModifiersUnset>
     where
         F: FnOnce(Response) -> U + 'static + Send + Sync,
         U: 'static + Send + Sync,
@@ -459,7 +481,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     pub fn map_async<Task, F>(
         self,
         f: F,
-    ) -> PromiseCommands<'w, 's, 'a, Task::Output, (), ()>
+    ) -> PromiseCommands<'w, 's, 'a, Task::Output, (), ModifiersUnset>
     where
         F: FnOnce(Response) -> Task + 'static + Send + Sync,
         Task: Future + 'static + Send + Sync,
@@ -479,8 +501,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     /// so perform those operations before calling this.
     pub fn fork(
         self,
-        f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, (), ()>),
-    ) -> PromiseCommands<'w, 's, 'a, Response, (), Chosen>
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, (), ModifiersClosed>),
+    ) -> PromiseCommands<'w, 's, 'a, Response, (), ModifiersClosed>
     where
         Response: Clone,
     {
@@ -498,7 +520,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     }
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams, ()> {
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams, ModifiersUnset> {
     /// Apply a label to the request. For more information about request labels
     /// see [`crate::LabelBuilder`].
     pub fn label(
@@ -510,7 +532,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, '
     }
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Response, Streams, L> {
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, M> PromiseCommands<'w, 's, 'a, Response, Streams, M> {
     /// Used internally to create a [`PromiseCommands`] that can accept a label
     /// and hook into streams.
     pub(crate) fn new(
@@ -524,7 +546,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
             commands,
             response: Default::default(),
             streams: Default::default(),
-            labeling: Default::default(),
+            modifiers: Default::default(),
         }
     }
 }

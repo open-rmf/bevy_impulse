@@ -48,11 +48,11 @@ pub(crate) struct UnusedTarget;
 #[derive(Default)]
 pub struct OperationRoster {
     /// Operation sources that should be triggered
-    operate: VecDeque<Entity>,
+    pub(crate) operate: VecDeque<Entity>,
     /// Operation sources that should be canceled
-    cancel: VecDeque<Entity>,
+    pub(crate) cancel: VecDeque<Entity>,
     /// Async services that should pull their next item
-    unblock: VecDeque<BlockingQueue>,
+    pub(crate) unblock: VecDeque<BlockingQueue>,
     /// Remove these entities as they are no longer needed
     pub(crate) dispose: Vec<Entity>,
 }
@@ -76,6 +76,11 @@ impl OperationRoster {
 
     pub fn dispose(&mut self, entity: Entity) {
         self.dispose.push(entity);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.operate.is_empty() && self.cancel.is_empty()
+        && self.unblock.is_empty() && self.dispose.is_empty()
     }
 }
 
