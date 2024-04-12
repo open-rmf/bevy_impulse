@@ -491,7 +491,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
     }
 
     /// When the response is delivered, we will make a clone of it and
-    /// simultaneously pass that clone along two different delivery chains: one
+    /// simultaneously pass that clone along two different service chains: one
     /// determined by the `f` callback provided to this function and the other
     /// determined by the [`PromiseCommands`] that gets returned by this function.
     ///
@@ -506,6 +506,18 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
     where
         Response: Clone,
     {
+        self.fork_zip(f).1
+    }
+
+    /// Same as [`PromiseCommands::fork`], but the return value of the forking
+    /// function will be zipped with the second fork.
+    pub fn fork_zip<U>(
+        self,
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, (), ModifiersClosed>) -> U,
+    ) -> (U, PromiseCommands<'w, 's, 'a, Response, (), ModifiersClosed>)
+    where
+        Response: Clone,
+    {
         let source = self.target;
         let left_target = self.commands.spawn(UnusedTarget).id();
         let right_target = self.commands.spawn(UnusedTarget).id();
@@ -515,20 +527,56 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
             Fork::<Response>::new([left_target, right_target]),
         ));
 
-        f(PromiseCommands::new(self.target, left_target, self.commands));
-        PromiseCommands::new(self.target, right_target, self.commands)
+        let u = f(PromiseCommands::new(self.target, left_target, self.commands));
+        (u, PromiseCommands::new(self.target, right_target, self.commands))
     }
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams> PromiseCommands<'w, 's, 'a, Response, Streams, ModifiersUnset> {
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, C> PromiseCommands<'w, 's, 'a, Response, Streams, NotLabeled<C>> {
     /// Apply a label to the request. For more information about request labels
     /// see [`crate::LabelBuilder`].
     pub fn label(
         self,
         label: impl ApplyLabel,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, Chosen> {
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, Labeled<C>> {
         label.apply(&mut self.commands.entity(self.target));
         PromiseCommands::new(self.provider, self.target, self.commands)
+    }
+}
+
+impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Response, Streams, NoOnCancel<L>> {
+    /// Build a child chain of services that will be triggered if the request gets
+    /// canceled at the current point in the service chain.
+    pub fn on_cancel(
+        self,
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, (), (), ModifiersClosed>),
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, OnCancel<L>> {
+        self.on_cancel_zip(f).1
+    }
+
+    /// Trigger a specific [`Provider`] in the event that the request gets canceled
+    /// at the current point in the service chain.
+    ///
+    /// This is a convenience wrapper around [`PromiseCommands::on_cancel`] for
+    /// cases where only a single provider needs to be triggered
+    pub fn on_cancel_then<P: Provider<Request = (), Response = (), Streams = ()>>(
+        self,
+        provider: P,
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, OnCancel<L>> {
+        self.on_cancel(|cmds| { cmds.then(provider).detach(); })
+    }
+
+    /// Same as [`PromiseCommands::on_cancel`], but it can take in a function that
+    /// returns a value, and it will return that value zipped with the next chain
+    /// of the PromiseCommands.
+    pub fn on_cancel_zip<U>(
+        self,
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, (), (), ModifiersClosed>) -> U,
+    ) -> (U, PromiseCommands<'w, 's, 'a, Response, Streams, OnCancel<L>>) {
+
+
+        let u = f(PromiseCommands::new(self.target, cancel_target, self.commands));
+        (u, PromiseCommands::new(self.provider, self.target, self.commands))
     }
 }
 

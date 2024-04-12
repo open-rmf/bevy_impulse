@@ -142,7 +142,8 @@ where
         let update = insert_new_order(delivery.as_mut(), DeliveryOrder { source, instructions });
         let blocking = match update {
             DeliveryUpdate::Immediate { blocking } => {
-                blocking.map(|label| BlockingQueue { provider, source, label })
+                let serve_next = serve_next_async_request::<Request, Streams, Task>;
+                blocking.map(|label| BlockingQueue { provider, source, label, serve_next })
             }
             DeliveryUpdate::Queued { canceled, stop } => {
                 if let Some(source) = stop {
@@ -160,7 +161,7 @@ where
             return;
         };
 
-        let ServiceRequest { provider, source, target, world, roster } = cmd;
+        let ServiceRequest { provider, source, target: _, world, roster } = cmd;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
@@ -192,6 +193,12 @@ where
         let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
         service.apply_deferred(world);
 
+        if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+            // The AsyncServiceStorage component must already exist because it was
+            // inserted earier within this function if it did not exist.
+            provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>().unwrap().0 = Some(service);
+        }
+
         let task = AsyncComputeTaskPool::get().spawn(job);
 
         if let Some(mut source_mut) = world.get_entity_mut(source) {
@@ -201,6 +208,132 @@ where
             }
         }
     }
+}
+
+pub(crate) fn serve_next_async_request<Request, Streams, Task>(
+    mut unblock: BlockingQueue,
+    world: &mut World,
+    roster: &mut OperationRoster,
+)
+where
+    Request: 'static + Send + Sync,
+    Task: Future + 'static + Send,
+    Task::Output: 'static + Send + Sync,
+    Streams: Stream,
+{
+    loop {
+        let BlockingQueue { provider, source: finished_source, label, .. } = unblock;
+        let Some(mut provider_mut) = world.get_entity_mut(provider) else {
+            return;
+        };
+        let Some(mut delivery) = provider_mut.get_mut::<Delivery>() else {
+            return;
+        };
+
+        let next_blocking = match &mut *delivery {
+            Delivery::Serial(serial) => {
+                pop_next_delivery::<Request, Streams, Task>(provider, finished_source, serial)
+            }
+            Delivery::Parallel(parallel) => {
+                let label = label.expect(
+                    "A request in a parallel async service was blocking without a label. \
+                    Please report this to the bevy_impulse maintainers; this should not be possible."
+                );
+                let serial = parallel.labeled.get_mut(&label).expect(
+                    "A labeled request in a parallel async service finished but the queue \
+                    for its label has been erased. Please report this to the bevy_impulse \
+                    maintainers; this should not be possible."
+                );
+                pop_next_delivery::<Request, Streams, Task>(provider, finished_source, serial)
+            }
+        };
+
+        let Some(next_blocking) = next_blocking else {
+            // Nothing left to unblock
+            return;
+        };
+
+        let source = next_blocking.source;
+        let Some(mut source_mut) = world.get_entity_mut(source) else {
+            roster.cancel(source);
+            unblock = next_blocking;
+            continue;
+        };
+
+        let Some(target) = source_mut.take::<TargetStorage>() else {
+            roster.cancel(source);
+            unblock = next_blocking;
+            continue;
+        };
+
+        let Some(InputStorage(request)) = source_mut.take::<InputStorage<Request>>() else {
+            roster.cancel(source);
+            unblock = next_blocking;
+            continue;
+        };
+
+        let mut service = world.get_entity_mut(provider)
+            .unwrap()
+            .get_mut::<AsyncServiceStorage<Request, Streams, Task>>()
+            .unwrap()
+            .0
+            .take()
+            .unwrap();
+
+        let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        let channel = InnerChannel::new(source, sender);
+        let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
+        service.apply_deferred(world);
+
+        if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+            provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>().unwrap().0 = Some(service);
+        }
+
+        let task = AsyncComputeTaskPool::get().spawn(job);
+
+        if let Some(mut source_mut) = world.get_entity_mut(source) {
+            source_mut.insert((TaskBundle::new(task), next_blocking));
+        } else {
+            // The request canceled itself while running the service so we should
+            // move on to the next request.
+            unblock = next_blocking;
+            continue;
+        }
+
+        // The next delivery has begun so we can return
+        return;
+    }
+
+}
+
+fn pop_next_delivery<Request, Streams, Task>(
+    provider: Entity,
+    finished_source: Entity,
+    serial: &mut SerialDelivery
+) -> Option<BlockingQueue>
+where
+    Request: 'static + Send + Sync,
+    Task: Future + 'static + Send,
+    Task::Output: 'static + Send + Sync,
+    Streams: Stream,
+{
+    let current = serial.delivering.take().expect(
+        "Unblocking has been requested for an async service that is not currently \
+        executing a request. Please report this to the bevy_impulse maintainers; \
+        this should not be possible."
+    );
+    assert_eq!(current.source, finished_source);
+    let Some(next) = serial.queue.pop_front() else {
+        return None;
+    };
+    let block = BlockingQueue {
+        provider,
+        source: next.source,
+        label: next.instructions.as_ref().map(|x| x.label.clone()),
+        serve_next: serve_next_async_request::<Request, Streams, Task>,
+    };
+    serial.delivering = Some(next);
+    return Some(block);
 }
 
 struct JobWaker {

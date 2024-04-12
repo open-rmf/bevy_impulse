@@ -15,19 +15,27 @@
  *
 */
 
-use bevy::prelude::{Entity, World, QueryState, Added};
+use bevy::prelude::{Entity, World, QueryState, Added, RemovedComponents, IntoSystem};
 
 use smallvec::SmallVec;
 
-use crate::{ChannelQueue, PollTask, WakeQueue, OperationRoster};
+use crate::{
+    ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, operate,
+    dispose_cancellation_chain,
+};
 
-pub fn flush_services(
+fn flush_services(
     world: &mut World,
     mut poll_task_query: QueryState<(Entity, &PollTask), Added<PollTask>>,
+    mut removed_services: RemovedComponents<ServiceHook>,
 ) {
     let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
     while let Ok(mut command_queue) = async_receiver.try_recv() {
         command_queue.apply(world);
+    }
+
+    for removed_service in removed_services.iter() {
+        cancel_service(removed_service, world);
     }
 
     let pollables: SmallVec<[_; 8]> = poll_task_query
@@ -57,15 +65,36 @@ pub fn flush_services(
 
     while !roster.is_empty() {
         for e in roster.cancel.drain(..) {
-            cancel_service(e, world);
+            cancel_request(e, world);
         }
 
         for e in roster.dispose.drain(..) {
-            world.despawn(e);
+            dispose_link(e, world);
+        }
+
+        while let Some(unblock) = roster.unblock.pop_front() {
+            let serve_next = unblock.serve_next;
+            serve_next(unblock, world, &mut roster);
+        }
+
+        while let Some(e) = roster.operate.pop_front() {
+            operate(e, world, &mut roster);
         }
     }
 }
 
+/// Cancel a request from this point in a service chain downwards. This will
+/// trigger any on_cancel reactions that are associated with the canceled point
+/// in the chain and all other points in the chain that come after it.
+fn cancel_request(entity: Entity, world: &mut World) {
+
+}
+
 fn cancel_service(entity: Entity, world: &mut World) {
 
+}
+
+fn dispose_link(source: Entity, world: &mut World) {
+    dispose_cancellation_chain(source, world);
+    world.despawn(source);
 }

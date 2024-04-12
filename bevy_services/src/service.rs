@@ -139,7 +139,7 @@ impl<Request, Response> Default for ServiceMarker<Request, Response> {
 }
 
 #[derive(Component)]
-struct ServiceHook(fn(ServiceRequest));
+pub(crate) struct ServiceHook(fn(ServiceRequest));
 
 #[derive(Bundle)]
 pub(crate) struct ServiceBundle<Srv: ServiceTrait + 'static + Send + Sync> {

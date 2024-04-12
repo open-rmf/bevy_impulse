@@ -16,7 +16,6 @@
 */
 
 use bevy::prelude::{Entity, World, Component};
-use std::collections::VecDeque;
 
 use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster};
 
@@ -67,4 +66,4 @@ impl<T: 'static + Send + Sync + Clone> Operation for Fork<T> {
 }
 
 #[derive(Component)]
-struct ForkStorage([Entity; 2]);
+pub(crate) struct ForkStorage(pub(crate) [Entity; 2]);

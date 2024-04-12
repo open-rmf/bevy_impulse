@@ -39,6 +39,9 @@ pub(crate) use operate_service::*;
 mod terminate;
 pub(crate) use terminate::*;
 
+mod cancel;
+pub(crate) use cancel::*;
+
 #[derive(Component)]
 pub(crate) struct TargetStorage(pub(crate) Entity);
 
@@ -92,6 +95,8 @@ pub(crate) struct BlockingQueue {
     pub(crate) source: Entity,
     /// The label of the queue that is being blocked
     pub(crate) label: Option<RequestLabelId>,
+    /// Function pointer to call when this is no longer blocking
+    pub(crate) serve_next: fn(BlockingQueue, &mut World, &mut OperationRoster),
 }
 
 
@@ -146,6 +151,15 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
 
 #[derive(Component)]
 struct Operate(fn(Entity, &mut World, &mut OperationRoster));
+
+pub(crate) fn operate(entity: Entity, world: &mut World, roster: &mut OperationRoster) {
+    let Some(operator) = world.get::<Operate>(entity) else {
+        roster.cancel(entity);
+        return;
+    };
+    let operator = operator.0;
+    operator(entity, world, roster);
+}
 
 fn perform_operation<Op: Operation>(
     source: Entity,
