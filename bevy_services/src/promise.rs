@@ -392,9 +392,8 @@ pub type WithOnCancel<L> = Modifiers<L, Chosen>;
 pub type ModifiersClosed = Modifiers<Chosen, Chosen>;
 
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands<'w, 's, 'a, Response, Streams, Modifiers<L, C>> {
-    /// Have the service run until it is finished without holding onto any
-    /// promise. Immediately after the service is finished, the storage for the
-    /// promise will automatically be freed up.
+    /// Have the service chain run until it is finished without holding onto any
+    /// [`Promise`].
     pub fn detach(self) {
         self.commands.add(PerformOperation::new(
             self.target,
@@ -402,9 +401,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
         ));
     }
 
-    /// Take the promise so you can reference it later. If all copies of the
-    /// [`Promise`] are dropped then the service request will automatically
-    /// be canceled and the storage for the promise will be freed up.
+    /// Take a [`Promise`] so you can receive the final response in the chain later.
+    /// If the [`Promise`] is dropped then the entire service chain will
+    /// automatically be canceled from whichever link in the chain has not been
+    /// completed yet, triggering every on_cancel branch from that link to the
+    /// end of the chain.
     pub fn take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
         self.commands.add(PerformOperation::new(
@@ -415,18 +416,38 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
     }
 
     /// Take the promise so you can reference it later. The service request
-    /// will continue to be fulfilled even if you drop all copies of the
-    /// [`Promise`]. The storage for the promise will remain available until
-    /// all copies of [`Promise`] are dropped.
+    /// will continue to be fulfilled even if you drop the [`Promise`].
     ///
-    /// This is effectively equivalent to running both [`detach`] and [`hold`].
-    pub fn detached_take(self) -> Promise<Response> {
+    /// This is effectively equivalent to running both [`Self::detach`] and [`Self::take`].
+    pub fn detach_and_take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
         self.commands.add(PerformOperation::new(
             self.target,
             Terminate::new(Some(sender), true),
         ));
         promise
+    }
+
+    /// Have the ancestor links in the service chain run until they are finished,
+    /// even if the remainder of this chain gets dropped. You can continue adding
+    /// links as if this is one continuous chain.
+    ///
+    /// If the ancestor links get canceled, the cancellation cascade will still
+    /// continue past this link. To prevent that from happening, use [`Self::split_chain`].
+    pub fn detach_and_chain(self) -> PromiseCommands<'w, 's, 'a, Response, (), ModifiersClosed> {
+
+    }
+
+    /// If any ancestor links in this chain get canceled, the cancellation cascade
+    /// will be stopped at this link, so no child links from this one will have
+    /// their cancellation branches triggered from a cancellation that happens
+    /// before this link.
+    ///
+    /// If a non-detached descendant of this link gets dropped, the ancestors of
+    /// this link will still be canceled. To prevent a dropped descendant from
+    /// canceling its ancestors, use [`Self::detach_and_chain`].
+    pub fn split_chain(self) -> PromiseCommands<'w, 's, 'a, Response, (), ModifiersClosed> {
+
     }
 
     /// Use the response of the service as a new service request as soon as the
