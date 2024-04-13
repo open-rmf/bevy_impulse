@@ -17,7 +17,7 @@
 
 use crate::{
     Operation, TargetStorage, Handler, HandleRequest, PendingHandleRequest,
-    OperationStatus, Stream,
+    OperationStatus, Stream, SourceStorage,
 };
 
 use bevy::prelude::{Entity, Component};
@@ -47,6 +47,9 @@ where
         entity: Entity,
         world: &mut bevy::prelude::World,
     ) {
+        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
+            target_mut.insert(SourceStorage(entity));
+        }
         world.entity_mut(entity).insert((
             HandlerStorage { handler: self.handler },
             TargetStorage(self.target),

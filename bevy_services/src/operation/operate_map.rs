@@ -19,7 +19,7 @@ use crate::{
     BlockingMap, AsyncMap, Operation,
     OperationRoster, OperationStatus, ChannelQueue, InnerChannel,
     TargetStorage, InputStorage, InputBundle, Stream, TaskBundle,
-    CallBlockingMap, CallAsyncMap,
+    CallBlockingMap, CallAsyncMap, SourceStorage,
 };
 
 use bevy::{
@@ -74,6 +74,9 @@ where
         entity: Entity,
         world: &mut World,
     ) {
+        if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
+            target_mut.insert(SourceStorage(entity));
+        }
         world.entity_mut(entity).insert(self);
     }
 
@@ -90,6 +93,7 @@ where
 
         let response = map.call(BlockingMap { request });
         target_mut.insert(InputBundle::new(response));
+        roster.queue(target);
         Ok(OperationStatus::Finished)
     }
 }

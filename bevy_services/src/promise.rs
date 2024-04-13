@@ -18,7 +18,7 @@
 use crate::{
     UnusedTarget, Terminate, PerformOperation,
     Fork, Chosen, ApplyLabel, Stream, Provider,
-    AsMap, IntoBlockingMap, IntoAsyncMap,
+    AsMap, IntoBlockingMap, IntoAsyncMap, Cancel,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -361,7 +361,7 @@ impl Default for Interrupter {
 /// canceled without ever attempting to run.
 #[must_use]
 pub struct PromiseCommands<'w, 's, 'a, Response, Streams, M> {
-    provider: Entity,
+    source: Entity,
     target: Entity,
     commands: &'a mut Commands<'w, 's>,
     response: std::marker::PhantomData<Response>,
@@ -386,7 +386,7 @@ pub type Labeled<C> = Modifiers<Chosen, C>;
 pub type NoOnCancel<L> = Modifiers<L, ()>;
 
 /// The request has an on_cancel behavior set and may have other modifiers.
-pub type OnCancel<L> = Modifiers<L, Chosen>;
+pub type WithOnCancel<L> = Modifiers<L, Chosen>;
 
 /// All possible request modifiers have been chosen or can no longer be set.
 pub type ModifiersClosed = Modifiers<Chosen, Chosen>;
@@ -540,18 +540,19 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, C> PromiseCommands<'w
         label: impl ApplyLabel,
     ) -> PromiseCommands<'w, 's, 'a, Response, Streams, Labeled<C>> {
         label.apply(&mut self.commands.entity(self.target));
-        PromiseCommands::new(self.provider, self.target, self.commands)
+        PromiseCommands::new(self.source, self.target, self.commands)
     }
 }
 
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w, 's, 'a, Response, Streams, NoOnCancel<L>> {
     /// Build a child chain of services that will be triggered if the request gets
     /// canceled at the current point in the service chain.
-    pub fn on_cancel(
+    pub fn on_cancel<Signal: 'static + Send + Sync>(
         self,
-        f: impl FnOnce(PromiseCommands<'w, 's, '_, (), (), ModifiersClosed>),
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, OnCancel<L>> {
-        self.on_cancel_zip(f).1
+        signal: Signal,
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, Signal, (), ModifiersClosed>),
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, WithOnCancel<L>> {
+        self.on_cancel_zip(signal, f).1
     }
 
     /// Trigger a specific [`Provider`] in the event that the request gets canceled
@@ -559,24 +560,35 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> PromiseCommands<'w
     ///
     /// This is a convenience wrapper around [`PromiseCommands::on_cancel`] for
     /// cases where only a single provider needs to be triggered
-    pub fn on_cancel_then<P: Provider<Request = (), Response = (), Streams = ()>>(
+    pub fn on_cancel_then<Signal, P>(
         self,
+        signal: Signal,
         provider: P,
-    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, OnCancel<L>> {
-        self.on_cancel(|cmds| { cmds.then(provider).detach(); })
+    ) -> PromiseCommands<'w, 's, 'a, Response, Streams, WithOnCancel<L>>
+    where
+        Signal: 'static + Send + Sync,
+        P: Provider<Request = Signal, Response = (), Streams = ()>,
+    {
+        self.on_cancel(signal, |cmds| { cmds.then(provider).detach(); })
     }
 
     /// Same as [`PromiseCommands::on_cancel`], but it can take in a function that
     /// returns a value, and it will return that value zipped with the next chain
     /// of the PromiseCommands.
-    pub fn on_cancel_zip<U>(
+    pub fn on_cancel_zip<Signal: 'static + Send + Sync, U>(
         self,
-        f: impl FnOnce(PromiseCommands<'w, 's, '_, (), (), ModifiersClosed>) -> U,
-    ) -> (U, PromiseCommands<'w, 's, 'a, Response, Streams, OnCancel<L>>) {
+        signal: Signal,
+        f: impl FnOnce(PromiseCommands<'w, 's, '_, Signal, (), ModifiersClosed>) -> U,
+    ) -> (U, PromiseCommands<'w, 's, 'a, Response, Streams, WithOnCancel<L>>) {
+        let cancel_target = self.commands.spawn(UnusedTarget).id();
+        let signal_target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(PerformOperation::new(
+            cancel_target,
+            Cancel::new(self.source, signal_target, signal),
+        ));
 
-
-        let u = f(PromiseCommands::new(self.target, cancel_target, self.commands));
-        (u, PromiseCommands::new(self.provider, self.target, self.commands))
+        let u = f(PromiseCommands::new(cancel_target, signal_target, self.commands));
+        (u, PromiseCommands::new(self.source, self.target, self.commands))
     }
 }
 
@@ -589,7 +601,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, M> PromiseCommands<'w
         commands: &'a mut Commands<'w, 's>,
     ) -> Self {
         Self {
-            provider,
+            source: provider,
             target,
             commands,
             response: Default::default(),

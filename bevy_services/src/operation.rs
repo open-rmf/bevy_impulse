@@ -18,11 +18,13 @@
 use crate::RequestLabelId;
 
 use bevy::{
-    prelude::{Entity, World, Component},
-    ecs::system::Command,
+    prelude::{Entity, World, Component, Query},
+    ecs::system::{Command, SystemParam},
 };
 
 use std::collections::VecDeque;
+
+use arrayvec::ArrayVec;
 
 mod fork;
 pub(crate) use fork::*;
@@ -42,8 +44,55 @@ pub(crate) use terminate::*;
 mod cancel;
 pub(crate) use cancel::*;
 
+/// Keep track of the source for a link in a service chain
+#[derive(Component)]
+pub(crate) struct SourceStorage(pub(crate) Entity);
+
+/// Keep track of the target for a link in a service chain
 #[derive(Component)]
 pub(crate) struct TargetStorage(pub(crate) Entity);
+
+/// Keep track of the targets for a fork in a service chain
+#[derive(Component)]
+pub(crate) struct ForkStorage(pub(crate) [Entity; 2]);
+
+#[derive(SystemParam)]
+pub(crate) struct NextServiceLink<'w, 's> {
+    single_target: Query<'w, 's, &'static TargetStorage>,
+    fork_targets: Query<'w, 's, &'static ForkStorage>,
+}
+
+impl<'w, 's> NextServiceLink<'w, 's> {
+    pub(crate) fn iter(&self, entity: Entity) -> NextServiceLinkIter {
+        if let Ok(target) = self.single_target.get(entity) {
+            return NextServiceLinkIter::Target(Some(target.0));
+        } else if let Ok(fork) = self.fork_targets.get(entity) {
+            return NextServiceLinkIter::Fork(ArrayVec::from_iter(fork.0.iter().cloned()));
+        }
+
+        return NextServiceLinkIter::Target(None);
+    }
+}
+
+enum NextServiceLinkIter {
+    Target(Option<Entity>),
+    Fork(ArrayVec<Entity, 2>),
+}
+
+impl Iterator for NextServiceLinkIter {
+    type Item = Entity;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            NextServiceLinkIter::Target(target) => {
+                return target.take();
+            }
+            NextServiceLinkIter::Fork(fork) => {
+                return fork.pop_at(0);
+            }
+        }
+    }
+}
 
 #[derive(Component)]
 pub(crate) struct UnusedTarget;
@@ -168,7 +217,7 @@ fn perform_operation<Op: Operation>(
 ) {
     match Op::execute(source, world, roster) {
         Ok(OperationStatus::Finished) => {
-            world.despawn(source);
+            roster.dispose(source);
         }
         Ok(OperationStatus::Queued{ provider }) => {
             if let Some(mut source_mut) = world.get_entity_mut(source) {

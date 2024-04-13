@@ -17,10 +17,13 @@
 
 use crate::{
     Operation, TargetStorage, Service, OperationRoster, ServiceRequest,
-    OperationStatus, dispatch_service,
+    SourceStorage, OperationStatus, dispatch_service,
 };
 
-use bevy::prelude::{Component, Entity, World};
+use bevy::{
+    prelude::{Component, Entity, World, Query},
+    ecs::system::SystemState,
+};
 
 pub(crate) struct OperateService {
     provider: Entity,
@@ -41,6 +44,9 @@ impl OperateService {
 
 impl Operation for OperateService {
     fn set_parameters(self, entity: Entity, world: &mut World) {
+        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
+            target_mut.insert(SourceStorage(entity));
+        }
         world.entity_mut(entity).insert((
             ProviderStorage(self.provider),
             TargetStorage(self.target),
@@ -63,3 +69,18 @@ impl Operation for OperateService {
 
 #[derive(Component)]
 struct ProviderStorage(Entity);
+
+pub(crate) fn cancel_service(
+    canceled_provider: Entity,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
+    let mut providers_state: SystemState<Query<(Entity, &ProviderStorage)>> =
+        SystemState::new(world);
+    let providers = providers_state.get(world);
+    for (target, ProviderStorage(provider)) in &providers {
+        if *provider == canceled_provider {
+            roster.cancel(target);
+        }
+    }
+}

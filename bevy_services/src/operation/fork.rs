@@ -15,9 +15,9 @@
  *
 */
 
-use bevy::prelude::{Entity, World, Component};
+use bevy::prelude::{Entity, World};
 
-use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster};
+use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster, ForkStorage, SourceStorage};
 
 pub(crate) struct Fork<Response: 'static + Send + Sync + Clone> {
     targets: [Entity; 2],
@@ -36,7 +36,13 @@ impl<T: 'static + Send + Sync + Clone> Operation for Fork<T> {
         entity: Entity,
         world: &mut World,
     ) {
+        for target in &self.targets {
+            if let Some(mut target_mut) = world.get_entity_mut(*target) {
+                target_mut.insert(SourceStorage(entity));
+            }
+        }
         world.entity_mut(entity).insert(ForkStorage(self.targets));
+
     }
 
     fn execute(
@@ -64,6 +70,3 @@ impl<T: 'static + Send + Sync + Clone> Operation for Fork<T> {
         Ok(OperationStatus::Finished)
     }
 }
-
-#[derive(Component)]
-pub(crate) struct ForkStorage(pub(crate) [Entity; 2]);
