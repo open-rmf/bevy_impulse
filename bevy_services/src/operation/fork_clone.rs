@@ -19,18 +19,18 @@ use bevy::prelude::{Entity, World};
 
 use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster, ForkStorage, SourceStorage};
 
-pub(crate) struct Fork<Response: 'static + Send + Sync + Clone> {
+pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
     targets: [Entity; 2],
     _ignore: std::marker::PhantomData<Response>,
 }
 
-impl<Response: 'static + Send + Sync + Clone> Fork<Response> {
+impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {
     pub(crate) fn new(targets: [Entity; 2]) -> Self {
         Self { targets, _ignore: Default::default() }
     }
 }
 
-impl<T: 'static + Send + Sync + Clone> Operation for Fork<T> {
+impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     fn set_parameters(
         self,
         entity: Entity,

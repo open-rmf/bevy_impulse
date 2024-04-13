@@ -17,7 +17,7 @@
 
 use crate::{
     UnusedTarget, Terminate, PerformOperation,
-    Fork, Chosen, ApplyLabel, Stream, Provider,
+    ForkClone, Chosen, ApplyLabel, Stream, Provider,
     AsMap, IntoBlockingMap, IntoAsyncMap, Cancel,
 };
 
@@ -520,19 +520,19 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
     ///
     /// You cannot hook into streams or apply a label after using this function,
     /// so perform those operations before calling this.
-    pub fn fork(
+    pub fn fork_clone(
         self,
         f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, (), ModifiersClosed>),
     ) -> PromiseCommands<'w, 's, 'a, Response, (), ModifiersClosed>
     where
         Response: Clone,
     {
-        self.fork_zip(f).1
+        self.fork_clone_zip(f).1
     }
 
     /// Same as [`PromiseCommands::fork`], but the return value of the forking
     /// function will be zipped with the second fork.
-    pub fn fork_zip<U>(
+    pub fn fork_clone_zip<U>(
         self,
         f: impl FnOnce(PromiseCommands<'w, 's, '_, Response, (), ModifiersClosed>) -> U,
     ) -> (U, PromiseCommands<'w, 's, 'a, Response, (), ModifiersClosed>)
@@ -545,11 +545,51 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> PromiseCommands
 
         self.commands.add(PerformOperation::new(
             source,
-            Fork::<Response>::new([left_target, right_target]),
+            ForkClone::<Response>::new([left_target, right_target]),
         ));
 
         let u = f(PromiseCommands::new(self.target, left_target, self.commands));
         (u, PromiseCommands::new(self.target, right_target, self.commands))
+    }
+}
+
+impl<'w, 's, 'a, InnerResponse: 'static + Send + Sync, Streams, Err, L, C> PromiseCommands<'w, 's, 'a, Result<InnerResponse, Err>, Streams, Modifiers<L, C>> {
+    pub fn fork_ok(
+        self,
+        f: ...
+    ) -> PromiseCommands<'w, 's, 'a, InnerResponse, (), ModifiersClosed> {
+
+    }
+
+    pub fn fork_ok_zip<U>(
+        self,
+        f: ...
+    ) -> (U, PromiseCommands<'w, 's, 'a, InnerResponse, (), ModifiersClosed>) {
+
+    }
+
+    pub fn cancel_on_err(self) -> PromiseCommands<'w, 's, 'a, InnerResponse, (), ModifiersClosed> {
+
+    }
+}
+
+impl<'w, 's, 'a, InnerResponse: 'static + Send + Sync, Streams, L, C> PromiseCommands<'w, 's, 'a, Option<InnerResponse>> {
+    pub fn fork_some(
+        self,
+        f: ...
+    ) -> PromiseCommands<'w, 's, 'a, InnerResponse, (), ModifiersClosed> {
+
+    }
+
+    pub fn fork_some_zip<U>(
+        self,
+        f: ...
+    ) -> (U, PromiseCommands<'w, 's, 'a, InnerResponse, (), ModifiersClosed>) {
+
+    }
+
+    pub fn cancel_on_none(self) -> PromiseCommands<'w, 's, 'a, InnerResponse, (), ModifiersClosed> {
+
     }
 }
 
