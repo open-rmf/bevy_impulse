@@ -45,6 +45,16 @@ struct CancelTarget {
     source: Entity,
 }
 
+/// Apply this to a source entity to indicate that it should keep operating (not
+/// be canceled) even if its target(s) drop.
+#[derive(Component)]
+pub(crate) struct DetachDependency;
+
+/// Apply this to a source entity to indicate that cancellation cascades should
+/// not propagate past it.
+#[derive(Component)]
+pub(crate) struct SeverCancelCascade;
+
 #[derive(Component)]
 struct CancelSignalStorage<T>(T);
 
@@ -94,10 +104,20 @@ impl<Signal: 'static + Send + Sync> Operation for Cancel<Signal> {
     }
 }
 
+/// Find the highest link on the chain that is not detached and trigger a cancel
+/// starting from there.
+///
+/// Do not trigger any cancellation if the target belongs to an inert chain, i.e.
+/// part of a cancellation branch or an unused branch. In that case, just dispose
+/// of the branch.
+pub(crate) fn cancel_chain_upwards(target: Entity, world: &mut World, roster: &mut OperationRoster) {
+
+}
+
 /// Cancel a request from this link in a service chain downwards. This will
 /// trigger any on_cancel reactions that are associated with the canceled link
 /// in the chain and all other links in the chain that come after it.
-pub(crate) fn cancel_link(source: Entity, world: &mut World, roster: &mut OperationRoster) {
+pub(crate) fn cancel_from_link(source: Entity, world: &mut World, roster: &mut OperationRoster) {
     let mut source_queue: SmallVec<[Entity; 16]> = SmallVec::new();
     source_queue.push(source);
 

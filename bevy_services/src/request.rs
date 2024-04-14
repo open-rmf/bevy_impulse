@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    PromiseCommands, UnusedTarget, InputBundle, Stream, Provider,
+    Chain, UnusedTarget, InputBundle, Stream, Provider, ModifiersUnset,
 };
 
 use bevy::{
@@ -39,9 +39,9 @@ pub trait RequestExt<'w, 's> {
     /// Call this with [`Commands`] to request a service
     fn request<'a, P: Provider>(
         &'a mut self,
-        provider: P,
         request: P::Request,
-    ) -> PromiseCommands<'w, 's, 'a, P::Response, P::Streams, ()>
+        provider: P,
+    ) -> Chain<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
@@ -51,9 +51,9 @@ pub trait RequestExt<'w, 's> {
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
     fn request<'a, P: Provider>(
         &'a mut self,
-        provider: P,
         request: P::Request,
-    ) -> PromiseCommands<'w, 's, 'a, P::Response, P::Streams, ()>
+        provider: P,
+    ) -> Chain<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
@@ -63,7 +63,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let target = self.spawn(UnusedTarget).id();
         provider.provide(source, target, self);
 
-        PromiseCommands::new(source, target, self)
+        Chain::new(source, target, self)
     }
 }
 

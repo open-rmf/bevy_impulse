@@ -15,8 +15,14 @@
  *
 */
 
+pub mod chain;
+pub use chain::*;
+
 pub mod channel;
 pub use channel::*;
+
+pub mod dangling;
+pub use dangling::*;
 
 pub mod discovery;
 pub use discovery::*;
@@ -47,6 +53,9 @@ pub use service::*;
 
 pub mod stream;
 pub use stream::*;
+
+#[cfg(test)]
+pub(crate) mod sample;
 
 pub(crate) mod private;
 

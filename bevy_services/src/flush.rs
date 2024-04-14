@@ -15,14 +15,18 @@
  *
 */
 
-use bevy::prelude::{Entity, World, QueryState, Added, RemovedComponents};
+use bevy::{
+    prelude::{Entity, World, Query, QueryState, Added, RemovedComponents, With},
+    ecs::system::SystemState,
+};
 
 use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    TargetStorage, DroppedPromiseQueue,
-    operate, dispose_cancellation_chain, cancel_service, cancel_link,
+    TargetStorage, DroppedPromiseQueue, UnusedTarget,
+    operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
+    cancel_chain_upwards,
 };
 
 #[allow(private_interfaces)]
@@ -34,10 +38,6 @@ pub fn flush_services(
     mut removed_links: RemovedComponents<TargetStorage>,
 ) {
     let mut roster = OperationRoster::new();
-
-    How can we safely implement cancelling for removed links? We should cancel
-    when it's a link in a chain that is being processed, but not when it is a link
-    in an untriggered cancellation chain.
 
     // Get the receiver for async task commands
     let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
@@ -87,9 +87,26 @@ pub fn flush_services(
         f(e, world, &mut roster);
     }
 
+    let mut unused_targets_state: SystemState<Query<Entity, With<UnusedTarget>>> =
+        SystemState::new(world);
+    let mut unused_targets: SmallVec<[_; 8]> = unused_targets_state.get(world).iter().collect();
+    for target in unused_targets.drain(..) {
+        cancel_chain_upwards(target, world, &mut roster)
+    }
+
+    unused_targets.extend(
+        world
+            .get_resource_or_insert_with(|| DroppedPromiseQueue::new())
+            .receiver
+            .try_iter()
+    );
+    for target in unused_targets.drain(..) {
+        cancel_chain_upwards(target, world, &mut roster)
+    }
+
     while !roster.is_empty() {
         while let Some(e) = roster.cancel.pop_front() {
-            cancel_link(e, world, &mut roster);
+            cancel_from_link(e, world, &mut roster);
         }
 
         for e in roster.dispose.drain(..) {

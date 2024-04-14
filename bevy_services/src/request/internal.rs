@@ -23,11 +23,11 @@ use bevy::ecs::system::EntityCommands;
 
 /// This trait is used to put a label onto a request. After using
 /// [`bevy::prelude::Commands`]`::request`, you can apply a label using the
-/// [`crate::PromiseCommands`] that you receive:
+/// [`crate::Chain`] that you receive:
 ///
 /// ```text
 /// commands
-///     .request(provider, request_data)
+///     .request(request_data, provider)
 ///     .label(my_label) // This takes in an impl ApplyLabel
 ///     .detach();
 /// ```

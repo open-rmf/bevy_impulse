@@ -38,11 +38,11 @@ impl<Response: 'static + Send + Sync> Terminate<Response> {
 #[derive(Resource)]
 pub(crate) struct DroppedPromiseQueue {
     sender: CbSender<Entity>,
-    receiver: CbReceiver<Entity>,
+    pub(crate) receiver: CbReceiver<Entity>,
 }
 
 impl DroppedPromiseQueue {
-    fn new() -> DroppedPromiseQueue {
+    pub(crate) fn new() -> DroppedPromiseQueue {
         let (sender, receiver) = unbounded();
         DroppedPromiseQueue { sender, receiver }
     }
