@@ -24,10 +24,16 @@ use bevy::{
 
 use std::collections::VecDeque;
 
-use arrayvec::ArrayVec;
+use smallvec::SmallVec;
 
 mod fork_clone;
 pub(crate) use fork_clone::*;
+
+mod fork_unzip;
+pub(crate) use fork_unzip::*;
+
+mod noop;
+pub(crate) use noop::*;
 
 mod operate_handler;
 pub(crate) use operate_handler::*;
@@ -54,7 +60,7 @@ pub(crate) struct TargetStorage(pub(crate) Entity);
 
 /// Keep track of the targets for a fork in a service chain
 #[derive(Component)]
-pub(crate) struct ForkStorage(pub(crate) [Entity; 2]);
+pub struct ForkStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 #[derive(SystemParam)]
 pub(crate) struct NextServiceLink<'w, 's> {
@@ -67,7 +73,7 @@ impl<'w, 's> NextServiceLink<'w, 's> {
         if let Ok(target) = self.single_target.get(entity) {
             return NextServiceLinkIter::Target(Some(target.0));
         } else if let Ok(fork) = self.fork_targets.get(entity) {
-            return NextServiceLinkIter::Fork(ArrayVec::from_iter(fork.0.iter().cloned()));
+            return NextServiceLinkIter::Fork(fork.0.clone());
         }
 
         return NextServiceLinkIter::Target(None);
@@ -76,7 +82,7 @@ impl<'w, 's> NextServiceLink<'w, 's> {
 
 enum NextServiceLinkIter {
     Target(Option<Entity>),
-    Fork(ArrayVec<Entity, 2>),
+    Fork(SmallVec<[Entity; 8]>),
 }
 
 impl Iterator for NextServiceLinkIter {
@@ -88,7 +94,7 @@ impl Iterator for NextServiceLinkIter {
                 return target.take();
             }
             NextServiceLinkIter::Fork(fork) => {
-                return fork.pop_at(0);
+                return fork.pop();
             }
         }
     }

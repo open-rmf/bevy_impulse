@@ -18,3 +18,13 @@
 pub fn add((a, b): (f64, f64)) -> f64 {
     a + b
 }
+
+pub struct WaitRequest<Value> {
+    pub duration: std::time::Duration,
+    pub value: Value
+}
+
+pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
+    std::thread::sleep(request.duration);
+    request.value
+}

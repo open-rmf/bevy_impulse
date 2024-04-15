@@ -21,11 +21,18 @@ use crate::{
     UnusedTarget, Terminate, PerformOperation,
     ForkClone, Chosen, ApplyLabel, Stream, Provider,
     AsMap, IntoBlockingMap, IntoAsyncMap, Cancel,
-    DetachDependency, SeverCancelCascade, Promise,
-    Dangling,
+    DetachDependency, SeverCancelCascade, Promise, Noop,
 };
 
 use bevy::prelude::{Entity, Commands};
+
+use smallvec::SmallVec;
+
+pub mod dangling;
+pub use dangling::*;
+
+pub mod unzip;
+pub use unzip::*;
 
 /// After submitting a service request, use [`Chain`] to describe how
 /// the response should be handled. At a minimum, for the response to be
@@ -188,9 +195,12 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// Apply a one-time callback whose input is the Response of the current
-    /// Chain. The output of the map will be the Response of the
-    /// returned Chain.
-    pub fn map_blocking<U, F>(
+    /// Chain. The output of the map will be the Response of the returned Chain.
+    ///
+    /// This takes in a regular blocking function rather than an async function,
+    /// so while the function is executing, it will block all systems from
+    /// running, similar to how [`Commands`] are flushed.
+    pub fn map_block<U, F>(
         self,
         f: F,
     ) -> Chain<'w, 's, 'a, U, (), ModifiersUnset>
@@ -228,7 +238,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn fork_clone(
         self,
         f: impl FnOnce(Chain<'w, 's, '_, Response, (), ModifiersClosed>),
-    ) -> Chain<'w, 's, 'a, Response, (), ModifiersClosed>
+    ) -> OutputChain<'w, 's, 'a, Response>
     where
         Response: Clone,
     {
@@ -236,15 +246,15 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
             self.source,
             self.target,
             self.commands
-        ).fork_clone_zip(f).1.resume(self.commands)
+        ).fork_clone_zip(f).0.resume(self.commands)
     }
 
     /// Same as [`Chain::fork`], but the return value of the forking
     /// function will be zipped with the second fork.
     pub fn fork_clone_zip<U>(
         self,
-        f: impl FnOnce(Chain<'w, 's, '_, Response, (), ModifiersClosed>) -> U,
-    ) -> (U, Dangling<Response, ()>)
+        f: impl FnOnce(OutputChain<'w, 's, '_, Response>) -> U,
+    ) -> (Dangling<Response>, U)
     where
         Response: Clone,
     {
@@ -254,11 +264,63 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
 
         self.commands.add(PerformOperation::new(
             source,
-            ForkClone::<Response>::new([left_target, right_target]),
+            ForkClone::<Response>::new(
+                SmallVec::from_iter([left_target, right_target])
+            ),
         ));
 
         let u = f(Chain::new(self.target, left_target, self.commands));
-        (u, Dangling::new(self.target, right_target))
+        (Dangling::new(self.target, right_target), u)
+    }
+
+    /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
+    /// `unzip` allows you to convert it into a tuple of chains:
+    /// `(Dangling<A>, Dangling<B>, Dangling<C>, ...)`.
+    ///
+    /// You can also consider using `fork_unzip` to continue building each
+    /// chain in the tuple independently by providing a builder function for
+    /// each element of the tuple.
+    pub fn unzip(self) -> Response::Unzipped
+    where
+        Response: Unzippable,
+    {
+        Response::unzip_chain(self.target, self.commands)
+    }
+
+    /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
+    /// `fork_unzip` allows you to split it into multiple chains and apply a
+    /// separate builder function to each chain. You will be passed back the
+    /// zipped output of all the builder functions.
+    pub fn fork_unzip<Builders>(self, builders: Builders) -> Builders::Output
+    where
+        Builders: Unzipper<Response>
+    {
+        builders.fork_unzip(self.target, self.commands)
+    }
+
+    // TODO(@mxgrey): Take a value now to zip it into the chain later. Also
+    // provide a zip_build, or maybe call it pull / pull_zip, which takes a
+    // value AND a builder whose result gets zipped into the chain.
+    // pub fn zip<Value>(self, value: Value) -> Chain<(Response, Value)> {
+    //
+    // }
+
+    /// Add a [no-op][1] to the current end of the chain.
+    ///
+    /// As the name suggests, a no-op will not actually do anything, but it adds
+    /// a new link (entity) into the chain which resets link modifiers. That
+    /// lets you add a new label or an additional cancel behavior into the chain,
+    /// but cuts off access to any remaining streams in the parent link.
+    ///
+    /// [1]: https://en.wikipedia.org/wiki/NOP_(code)
+    pub fn noop(self) -> Chain<'w, 's, 'a, Response, (), ModifiersUnset> {
+        let source = self.target;
+        let target = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(PerformOperation::new(
+            source, Noop::<Response>::new(target))
+        );
+        Chain::new(source, target, self.commands)
     }
 }
 
@@ -309,7 +371,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, C> Chain<'w, 's, 'a, 
         self,
         label: impl ApplyLabel,
     ) -> Chain<'w, 's, 'a, Response, Streams, Labeled<C>> {
-        label.apply(&mut self.commands.entity(self.target));
+        label.apply(&mut self.commands.entity(self.source));
         Chain::new(self.source, self.target, self.commands)
     }
 }
@@ -381,6 +443,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, M> Chain<'w, 's, 'a, 
     }
 }
 
+/// This is a convenience alias for a [`Chain`] produced after some outcome is
+/// determined, such as a race, join, or fork.
+pub type OutputChain<'w, 's, 'a, Response> = Chain<'w, 's, 'a, Response, (), ModifiersClosed>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,21 +461,69 @@ mod tests {
         let mut world = World::new();
         let mut command_queue = CommandQueue::default();
         let mut commands = Commands::new(&mut command_queue, &world);
-        commands
+        let _promise = commands
             .request((2.0, 3.0), add.into_blocking_map())
             .fork_clone_zip(
                 |chain| {
                     chain
-                    .map_blocking(|a| (a, 5.0))
-                    .map_blocking(add)
+                    .map_block(|a| (a, 5.0))
+                    .map_block(add)
                     .dangle()
                 }
             )
-            .join(&mut commands)
-            .map_blocking(add)
-            .detach();
+            .race(
+                &mut commands,
+                (
+                    |chain: OutputChain<f64>| {
+                        chain
+                        .map_block(|a| (a, -2.0))
+                        .map_block(add)
+                        .dangle()
+                    },
+                    |chain: OutputChain<f64>| {
+                        chain
+                        .dangle()
+                    }
+                ),
+            )
+            .bundle()
+            .race(&mut commands)
+            .take();
 
         command_queue.apply(&mut world);
         dbg!(world.entities().len());
+    }
+
+    #[test]
+    fn test_unzip() {
+        let mut world = World::new();
+        let mut command_queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut command_queue, &world);
+
+        let promise = commands
+            .request((2.0, 3.0), add.into_blocking_map())
+            .map_block(|v| (v, 2.0*v))
+            .fork_unzip((
+                |chain: OutputChain<f64>| {
+                    chain
+                    .map_block(|v| (v, -v))
+                    .map_block(add)
+                    .dangle()
+                },
+                |chain: OutputChain<f64>| {
+                    chain
+                    .map_block(|value|
+                        WaitRequest{
+                            duration: std::time::Duration::from_secs_f64(0.01),
+                            value,
+                        }
+                    )
+                    .map_async(wait)
+                    .dangle()
+                }
+            ))
+            .bundle()
+            .race(&mut commands)
+            .take();
     }
 }

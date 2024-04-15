@@ -19,13 +19,15 @@ use bevy::prelude::{Entity, World};
 
 use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster, ForkStorage, SourceStorage};
 
+use smallvec::SmallVec;
+
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
-    targets: [Entity; 2],
+    targets: SmallVec<[Entity; 8]>,
     _ignore: std::marker::PhantomData<Response>,
 }
 
 impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {
-    pub(crate) fn new(targets: [Entity; 2]) -> Self {
+    pub(crate) fn new(targets: SmallVec<[Entity; 8]>) -> Self {
         Self { targets, _ignore: Default::default() }
     }
 }
@@ -42,7 +44,6 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
             }
         }
         world.entity_mut(entity).insert(ForkStorage(self.targets));
-
     }
 
     fn execute(
@@ -53,18 +54,25 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let InputStorage::<T>(input) = source_mut.take().ok_or(())?;
         let ForkStorage(targets) = source_mut.take().ok_or(())?;
-        if let Some(mut target_mut) = world.get_entity_mut(targets[0]) {
-            target_mut.insert(InputBundle::new(input.clone()));
-            roster.queue(targets[0]);
-        } else {
-            roster.cancel(targets[0]);
+
+        let mut send_value = |value: T, target: Entity| {
+            if let Some(mut target_mut) = world.get_entity_mut(target) {
+                target_mut.insert(InputBundle::new(value));
+                roster.queue(target);
+            } else {
+                roster.cancel(target);
+            }
+        };
+
+        // Distributing the values like this is a bit convoluted, but it ensures
+        // that we are not producing any more clones than what is strictly
+        // necessary. This may be valuable if cloning the value is expensive.
+        for target in targets[..targets.len()-1].iter() {
+            send_value(input.clone(), *target);
         }
 
-        if let Some(mut target_mut) = world.get_entity_mut(targets[1]) {
-            target_mut.insert(InputBundle::new(input));
-            roster.queue(targets[1]);
-        } else {
-            roster.cancel(targets[1]);
+        if let Some(last_target) = targets.last() {
+            send_value(input, *last_target);
         }
 
         Ok(OperationStatus::Finished)

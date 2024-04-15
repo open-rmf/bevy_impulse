@@ -21,9 +21,6 @@ pub use chain::*;
 pub mod channel;
 pub use channel::*;
 
-pub mod dangling;
-pub use dangling::*;
-
 pub mod discovery;
 pub use discovery::*;
 
@@ -92,7 +89,7 @@ use bevy::prelude::{Entity, In};
 /// struct Precision(i32);
 ///
 /// fn rounding_service(
-///     In(BlockingService{request, provider}): InBlockingService<f64>,
+///     In(BlockingService{request, provider, ..}): InBlockingService<f64>,
 ///     service_precision: Query<&Precision>,
 ///     global_precision: Res<Precision>,
 /// ) -> f64 {
