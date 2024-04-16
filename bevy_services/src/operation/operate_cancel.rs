@@ -23,9 +23,12 @@ use bevy::{
 use smallvec::SmallVec;
 
 use crate::{
-    TargetStorage, ForkStorage, Operation, InputBundle, OperationStatus,
-    OperationRoster, NextServiceLink,
+    SingleTargetStorage, ForkTargetStorage, Cancelled, Operation, InputBundle,
+    OperationStatus, OperationRoster, NextServiceLink, Cancel, CancellationCause,
+    Cancellation,
 };
+
+use std::sync::Arc;
 
 /// This component is held by request target entities which have an associated
 /// cancel target (on_cancel was applied to its position in the service chain).
@@ -53,24 +56,24 @@ pub(crate) struct DetachDependency;
 /// Apply this to a source entity to indicate that cancellation cascades should
 /// not propagate past it.
 #[derive(Component)]
-pub(crate) struct SeverCancelCascade;
+pub(crate) struct DisposeOnCancel;
 
 #[derive(Component)]
 struct CancelSignalStorage<T>(T);
 
-pub(crate) struct Cancel<Signal: 'static + Send + Sync> {
+pub(crate) struct OperateCancel<Signal: 'static + Send + Sync> {
     cancel_source: Entity,
     signal_target: Entity,
     signal: Signal,
 }
 
-impl<Signal: 'static + Send + Sync> Cancel<Signal> {
+impl<Signal: 'static + Send + Sync> OperateCancel<Signal> {
     pub(crate) fn new(cancel_source: Entity, signal_target: Entity, signal: Signal) -> Self {
         Self { cancel_source, signal_target, signal }
     }
 }
 
-impl<Signal: 'static + Send + Sync> Operation for Cancel<Signal> {
+impl<Signal: 'static + Send + Sync> Operation for OperateCancel<Signal> {
     fn set_parameters(
         self,
         entity: Entity,
@@ -79,7 +82,7 @@ impl<Signal: 'static + Send + Sync> Operation for Cancel<Signal> {
         world.entity_mut(entity).insert((
             CancelTarget{ source: self.cancel_source },
             CancelSignalStorage(self.signal),
-            TargetStorage(self.signal_target),
+            SingleTargetStorage(self.signal_target),
         ));
         world.entity_mut(self.cancel_source)
             .insert(CancelSource{ target: entity });
@@ -92,12 +95,15 @@ impl<Signal: 'static + Send + Sync> Operation for Cancel<Signal> {
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let CancelSignalStorage::<Signal>(signal) = source_mut.take().ok_or(())?;
-        let TargetStorage(target) = source_mut.take().ok_or(())?;
+        let CancellationCauseStorage(cause) = source_mut.take().ok_or(())?;
+        let SingleTargetStorage(target) = source_mut.take().ok_or(())?;
         if let Some(mut target_mut) = world.get_entity_mut(target) {
-            target_mut.insert(InputBundle::new(signal));
+            target_mut.insert(InputBundle::new(
+                Cancelled{ signal, cancellation: Cancellation { cause } }
+            ));
             roster.queue(target);
         } else {
-            roster.cancel(target);
+            roster.cancel(Cancel::broken(target));
         }
 
         Ok(OperationStatus::Finished)
@@ -110,26 +116,39 @@ impl<Signal: 'static + Send + Sync> Operation for Cancel<Signal> {
 /// Do not trigger any cancellation if the target belongs to an inert chain, i.e.
 /// part of a cancellation branch or an unused branch. In that case, just dispose
 /// of the branch.
-pub(crate) fn cancel_chain_upwards(target: Entity, world: &mut World, roster: &mut OperationRoster) {
+pub(crate) fn cancel_chain_upwards(
+    target: Cancel,
+    world: &mut World,
+    roster: &mut OperationRoster
+) {
 
 }
 
 /// Cancel a request from this link in a service chain downwards. This will
 /// trigger any on_cancel reactions that are associated with the canceled link
 /// in the chain and all other links in the chain that come after it.
-pub(crate) fn cancel_from_link(source: Entity, world: &mut World, roster: &mut OperationRoster) {
-    let mut source_queue: SmallVec<[Entity; 16]> = SmallVec::new();
+pub(crate) fn cancel_from_link(
+    source: Cancel,
+    world: &mut World,
+    roster: &mut OperationRoster
+) {
+    let mut source_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
     source_queue.push(source);
 
-    while let Some(source) = source_queue.pop() {
+    while let Some(Cancel { apply_to: source, cause }) = source_queue.pop() {
         if let Some(cancel_target) = get_cancel_target(source, world) {
-            roster.queue(cancel_target);
+            if let Some(mut cancel_target_mut) = world.get_entity_mut(cancel_target) {
+                cancel_target_mut.insert(CancellationCauseStorage(Arc::clone(&cause)));
+                roster.queue(cancel_target);
+            } else {
+                roster.cancel(Cancel::broken(cancel_target));
+            }
         }
 
         let mut next_link_state: SystemState<NextServiceLink> = SystemState::new(world);
         let next_link = next_link_state.get(world);
         for next in next_link.iter(source) {
-            source_queue.push(next);
+            source_queue.push(Cancel { apply_to: next, cause: Arc::clone(&cause) });
         }
         world.despawn(source);
     }
@@ -200,3 +219,6 @@ fn get_cancel_target(source: Entity, world: &mut World) -> Option<Entity> {
         return None;
     }
 }
+
+#[derive(Component)]
+struct CancellationCauseStorage(Arc<CancellationCause>);

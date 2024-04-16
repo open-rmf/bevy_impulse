@@ -17,8 +17,8 @@
 
 use crate::{
     AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
-    InputBundle, InnerChannel, ChannelQueue, RequestLabelId, TargetStorage, OperationRoster, BlockingQueue,
-    Stream, ServiceBuilder, ChooseAsyncServiceDelivery,
+    InputBundle, InnerChannel, ChannelQueue, RequestLabelId, SingleTargetStorage, OperationRoster, BlockingQueue,
+    Stream, ServiceBuilder, ChooseAsyncServiceDelivery, Cancel,
     service::builder::{SerialChosen, ParallelChosen},
     private,
 };
@@ -123,19 +123,19 @@ where
         } else {
             // The source entity does not exist which implies the request has been canceled.
             // We no longer need to deliver on it.
-            roster.cancel(source);
+            roster.cancel(Cancel::broken(source));
             return;
         };
 
         let Some(mut provider_mut) = world.get_entity_mut(provider) else {
             // The async service has been despawned, so we should treat the request as canceled.
-            roster.cancel(source);
+            roster.cancel(Cancel::service_unavailable(source, provider));
             return;
         };
 
         let Some(mut delivery) = provider_mut.get_mut::<Delivery>() else {
             // The async service's Delivery component has been removed so we should treat the request as canceled.
-            roster.cancel(source);
+            roster.cancel(Cancel::service_unavailable(source, provider));
             return
         };
 
@@ -146,11 +146,11 @@ where
                 blocking.map(|label| BlockingQueue { provider, source, label, serve_next })
             }
             DeliveryUpdate::Queued { canceled, stop } => {
-                if let Some(source) = stop {
-                    roster.cancel(source);
+                if let Some(cancelled_source) = stop {
+                    roster.cancel(Cancel::supplanted(cancelled_source, source));
                 }
-                for source in canceled {
-                    roster.cancel(source);
+                for cancelled_source in canceled {
+                    roster.cancel(Cancel::supplanted(cancelled_source, source));
                 }
                 return;
             }
@@ -178,13 +178,13 @@ where
                     service
                 } else {
                     // The provider has had its service removed, so we treat this request as canceled.
-                    roster.cancel(source);
+                    roster.cancel(Cancel::service_unavailable(source, provider));
                     return;
                 }
             }
         } else {
             // If the provider has been despawned then we treat this request as canceled.
-            roster.cancel(source);
+            roster.cancel(Cancel::service_unavailable(source, provider));
             return;
         };
 
@@ -255,19 +255,19 @@ where
 
         let source = next_blocking.source;
         let Some(mut source_mut) = world.get_entity_mut(source) else {
-            roster.cancel(source);
+            roster.cancel(Cancel::broken(source));
             unblock = next_blocking;
             continue;
         };
 
-        let Some(target) = source_mut.take::<TargetStorage>() else {
-            roster.cancel(source);
+        let Some(target) = source_mut.take::<SingleTargetStorage>() else {
+            roster.cancel(Cancel::broken(source));
             unblock = next_blocking;
             continue;
         };
 
         let Some(InputStorage(request)) = source_mut.take::<InputStorage<Request>>() else {
-            roster.cancel(source);
+            roster.cancel(Cancel::broken(source));
             unblock = next_blocking;
             continue;
         };
@@ -395,11 +395,11 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
     roster: &mut OperationRoster,
 ) {
     let Some(mut source_mut) = world.get_entity_mut(source) else {
-        roster.cancel(source);
+        roster.cancel(Cancel::broken(source));
         return;
     };
     let Some(mut task) = source_mut.take::<TaskStorage<Response>>().map(|t| t.0) else {
-        roster.cancel(source);
+        roster.cancel(Cancel::broken(source));
         return;
     };
 
@@ -420,8 +420,8 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
         Poll::Ready(result) => {
             // Task has finished
             let mut source_mut = world.entity_mut(source);
-            let Some(target) = source_mut.take::<TargetStorage>() else {
-                roster.cancel(source);
+            let Some(target) = source_mut.take::<SingleTargetStorage>() else {
+                roster.cancel(Cancel::broken(source));
                 return;
             };
             let target = target.0;
@@ -492,7 +492,7 @@ enum DeliveryUpdate {
     /// The new request has been placed in the queue
     Queued {
         /// Queued requests that have been canceled
-        canceled: SmallVec<[Entity; 3]>,
+        canceled: SmallVec<[Entity; 8]>,
         /// An actively running task that has been canceled
         stop: Option<Entity>,
     }

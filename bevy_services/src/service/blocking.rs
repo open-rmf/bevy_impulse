@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest, InputStorage,
-    InputBundle, ServiceBundle,
+    BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest,
+    InputStorage,InputBundle, ServiceBundle, Cancel,
     service::builder::BlockingChosen,
     private,
 };
@@ -99,13 +99,13 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
                     service
                 } else {
                     // The provider has had its service removed, so we treat this request as canceled.
-                    roster.cancel(source);
+                    roster.cancel(Cancel::service_unavailable(source, provider));
                     return;
                 }
             }
         } else {
             // If the provider has been despawned then we treat this request as canceled.
-            roster.cancel(source);
+            roster.cancel(Cancel::service_unavailable(source, provider));
             return;
         };
 
@@ -132,7 +132,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
             target_mut.insert(InputBundle::new(response));
         } else {
             // The target is no longer available for a delivery
-            roster.cancel(target);
+            roster.cancel(Cancel::broken(target));
         }
     }
 }

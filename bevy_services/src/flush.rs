@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    TargetStorage, DroppedPromiseQueue, UnusedTarget,
+    Cancel, DroppedPromiseQueue, UnusedTarget,
     operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
     cancel_chain_upwards,
 };
@@ -35,7 +35,6 @@ pub fn flush_services(
     mut poll_task_query: QueryState<(Entity, &PollTask), Added<PollTask>>,
     mut input_ready_query: QueryState<Entity, Added<InputReady>>,
     mut removed_services: RemovedComponents<ServiceHook>,
-    mut removed_links: RemovedComponents<TargetStorage>,
 ) {
     let mut roster = OperationRoster::new();
 
@@ -80,7 +79,7 @@ pub fn flush_services(
     // Poll any tasks that have asked to be woken
     for e in wakeables {
         let Some(f) = world.get::<PollTask>(e).map(|x| x.0) else {
-            roster.cancel(e);
+            roster.cancel(Cancel::broken(e));
             continue;
         };
 
@@ -91,7 +90,7 @@ pub fn flush_services(
         SystemState::new(world);
     let mut unused_targets: SmallVec<[_; 8]> = unused_targets_state.get(world).iter().collect();
     for target in unused_targets.drain(..) {
-        cancel_chain_upwards(target, world, &mut roster)
+        cancel_chain_upwards(Cancel::unused_target(target), world, &mut roster)
     }
 
     unused_targets.extend(
@@ -101,7 +100,7 @@ pub fn flush_services(
             .try_iter()
     );
     for target in unused_targets.drain(..) {
-        cancel_chain_upwards(target, world, &mut roster)
+        cancel_chain_upwards(Cancel::dropped(target), world, &mut roster)
     }
 
     while !roster.is_empty() {

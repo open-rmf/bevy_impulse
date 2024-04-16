@@ -18,8 +18,8 @@
 use crate::{
     BlockingMap, AsyncMap, Operation,
     OperationRoster, OperationStatus, ChannelQueue, InnerChannel,
-    TargetStorage, InputStorage, InputBundle, Stream, TaskBundle,
-    CallBlockingMap, CallAsyncMap, SourceStorage,
+    SingleTargetStorage, InputStorage, InputBundle, Stream, TaskBundle,
+    CallBlockingMap, CallAsyncMap, SingleSourceStorage,
 };
 
 use bevy::{
@@ -37,7 +37,7 @@ where
     Response: 'static + Send + Sync,
 {
     storage: BlockingMapStorage<F, Request, Response>,
-    target: TargetStorage,
+    target: SingleTargetStorage,
 }
 
 impl<F, Request, Response> OperateBlockingMap<F, Request, Response>
@@ -52,7 +52,7 @@ where
                 f,
                 _ignore: Default::default(),
             },
-            target: TargetStorage(target),
+            target: SingleTargetStorage(target),
         }
     }
 }
@@ -75,7 +75,7 @@ where
         world: &mut World,
     ) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
-            target_mut.insert(SourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(entity));
         }
         world.entity_mut(entity).insert(self);
     }
@@ -86,7 +86,7 @@ where
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<TargetStorage>().ok_or(())?.0;
+        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
         let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.0;
         let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().ok_or(())?.f;
         let mut target_mut = world.get_entity_mut(target).ok_or(())?;
@@ -107,7 +107,7 @@ where
     Streams: Stream,
 {
     storage: AsyncMapStorage<F, Request, Task, Streams>,
-    target: TargetStorage,
+    target: SingleTargetStorage,
 }
 
 impl<F, Request, Task, Streams> OperateAsyncMap<F, Request, Task, Streams>
@@ -123,7 +123,7 @@ where
                 f,
                 _ignore: Default::default(),
             },
-            target: TargetStorage(target),
+            target: SingleTargetStorage(target),
         }
     }
 }
@@ -157,7 +157,7 @@ where
     ) -> Result<OperationStatus, ()> {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<TargetStorage>().ok_or(())?.0;
+        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
         let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.0;
         let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().ok_or(())?.f;
 

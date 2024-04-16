@@ -18,7 +18,7 @@
 use bevy::prelude::{Entity, World};
 
 use crate::{
-    Operation, SourceStorage, TargetStorage, InputStorage, InputBundle,
+    Operation, SingleSourceStorage, SingleTargetStorage, InputStorage, InputBundle,
     OperationStatus,
 };
 
@@ -40,9 +40,9 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
         world: &mut World,
     ) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(entity));
         }
-        world.entity_mut(entity).insert(TargetStorage(self.target));
+        world.entity_mut(entity).insert(SingleTargetStorage(self.target));
     }
 
     fn execute(
@@ -51,7 +51,7 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
         roster: &mut crate::OperationRoster,
     ) -> Result<crate::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<TargetStorage>().ok_or(())?.0;
+        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
         let value = source_mut.take::<InputStorage<T>>().ok_or(())?.0;
         let mut target_mut = world.get_entity_mut(target).ok_or(())?;
         target_mut.insert(InputBundle::new(value));

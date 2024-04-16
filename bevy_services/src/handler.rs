@@ -18,7 +18,7 @@
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
     OperationRoster, Stream, InputStorage, InputBundle, TaskBundle, Provider,
-    PerformOperation, OperateHandler,
+    PerformOperation, OperateHandler, Cancel,
     private,
 };
 
@@ -80,7 +80,7 @@ pub struct HandleRequest<'a> {
 impl<'a> HandleRequest<'a> {
     fn get_request<Request: 'static + Send + Sync>(&mut self) -> Option<Request> {
         let Some(mut source_mut) = self.world.get_entity_mut(self.source) else {
-            self.roster.cancel(self.source);
+            self.roster.cancel(Cancel::broken(self.source));
             return None;
         };
 
@@ -89,7 +89,7 @@ impl<'a> HandleRequest<'a> {
 
     fn give_response<Response: 'static + Send + Sync>(&mut self, response: Response) {
         let Some(mut target_mut) = self.world.get_entity_mut(self.target) else {
-            self.roster.cancel(self.target);
+            self.roster.cancel(Cancel::broken(self.target));
             return;
         };
 
@@ -101,7 +101,7 @@ impl<'a> HandleRequest<'a> {
         Task::Output: Send + Sync,
     {
         let Some(mut source_mut) = self.world.get_entity_mut(self.source) else {
-            self.roster.cancel(self.source);
+            self.roster.cancel(Cancel::broken(self.source));
             return;
         };
 

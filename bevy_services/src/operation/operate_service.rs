@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    Operation, TargetStorage, Service, OperationRoster, ServiceRequest,
-    SourceStorage, OperationStatus, dispatch_service,
+    Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
+    SingleSourceStorage, OperationStatus, dispatch_service, Cancel,
 };
 
 use bevy::{
@@ -45,11 +45,11 @@ impl OperateService {
 impl Operation for OperateService {
     fn set_parameters(self, entity: Entity, world: &mut World) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(entity));
         }
         world.entity_mut(entity).insert((
             ProviderStorage(self.provider),
-            TargetStorage(self.target),
+            SingleTargetStorage(self.target),
         ));
     }
 
@@ -59,7 +59,7 @@ impl Operation for OperateService {
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let source_ref = world.get_entity(source).ok_or(())?;
-        let target = source_ref.get::<TargetStorage>().ok_or(())?.0;
+        let target = source_ref.get::<SingleTargetStorage>().ok_or(())?.0;
         let provider = source_ref.get::<ProviderStorage>().ok_or(())?.0;
 
         dispatch_service(ServiceRequest { provider, source, target, world, roster });
@@ -71,7 +71,7 @@ impl Operation for OperateService {
 struct ProviderStorage(Entity);
 
 pub(crate) fn cancel_service(
-    canceled_provider: Entity,
+    cancelled_provider: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
 ) {
@@ -79,8 +79,8 @@ pub(crate) fn cancel_service(
         SystemState::new(world);
     let providers = providers_state.get(world);
     for (target, ProviderStorage(provider)) in &providers {
-        if *provider == canceled_provider {
-            roster.cancel(target);
+        if *provider == cancelled_provider {
+            roster.cancel(Cancel::service_unavailable(target, cancelled_provider));
         }
     }
 }

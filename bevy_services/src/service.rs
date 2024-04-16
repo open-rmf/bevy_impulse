@@ -15,7 +15,9 @@
  *
 */
 
-use crate::{OperationRoster, Stream, PerformOperation, OperateService, Provider};
+use crate::{
+    OperationRoster, Stream, PerformOperation, OperateService, Provider, Cancel
+};
 
 use bevy::{
     prelude::{Entity, App, Commands, World, Component, Bundle, Resource},
@@ -116,12 +118,12 @@ impl<'a> ServiceRequest<'a> {
     pub fn from_source<B: Component>(&mut self) -> Option<B> {
         if let Some(mut source_mut) = self.world.get_entity_mut(self.source) {
             let Some(request) = source_mut.take::<B>() else {
-                self.roster.cancel(self.source);
+                self.roster.cancel(Cancel::broken(self.source));
                 return None;
             };
             Some(request)
         } else {
-            self.roster.cancel(self.source);
+            self.roster.cancel(Cancel::broken(self.source));
             return None;
         }
     }
@@ -308,12 +310,12 @@ pub(crate) fn dispatch_service(request: ServiceRequest) {
     while let Some(pending) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
         let PendingServiceRequest { provider, source, .. } = pending;
         let Some(provider_ref) = world.get_entity(provider) else {
-            roster.cancel(source);
+            roster.cancel(Cancel::service_unavailable(source, provider));
             continue;
         };
 
         let Some(hook) = provider_ref.get::<ServiceHook>() else {
-            roster.cancel(source);
+            roster.cancel(Cancel::service_unavailable(source, provider));
             continue;
         };
 

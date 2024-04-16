@@ -15,7 +15,7 @@
  *
 */
 
-use crate::RequestLabelId;
+use crate::{RequestLabelId, Cancel};
 
 use bevy::{
     prelude::{Entity, World, Component, Query},
@@ -35,6 +35,9 @@ pub(crate) use fork_unzip::*;
 mod noop;
 pub(crate) use noop::*;
 
+mod operate_cancel;
+pub(crate) use operate_cancel::*;
+
 mod operate_handler;
 pub(crate) use operate_handler::*;
 
@@ -47,25 +50,27 @@ pub(crate) use operate_service::*;
 mod terminate;
 pub(crate) use terminate::*;
 
-mod cancel;
-pub(crate) use cancel::*;
-
 /// Keep track of the source for a link in a service chain
 #[derive(Component)]
-pub(crate) struct SourceStorage(pub(crate) Entity);
+pub(crate) struct SingleSourceStorage(pub(crate) Entity);
+
+/// Keep track of the sources that funnel into this link of the service chain.
+/// This is for links that draw from multiple sources simultaneously, such as
+/// join and race.
+pub(crate) struct FunnelSourceStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 /// Keep track of the target for a link in a service chain
 #[derive(Component)]
-pub(crate) struct TargetStorage(pub(crate) Entity);
+pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 
 /// Keep track of the targets for a fork in a service chain
 #[derive(Component)]
-pub struct ForkStorage(pub(crate) SmallVec<[Entity; 8]>);
+pub struct ForkTargetStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 #[derive(SystemParam)]
 pub(crate) struct NextServiceLink<'w, 's> {
-    single_target: Query<'w, 's, &'static TargetStorage>,
-    fork_targets: Query<'w, 's, &'static ForkStorage>,
+    single_target: Query<'w, 's, &'static SingleTargetStorage>,
+    fork_targets: Query<'w, 's, &'static ForkTargetStorage>,
 }
 
 impl<'w, 's> NextServiceLink<'w, 's> {
@@ -80,7 +85,7 @@ impl<'w, 's> NextServiceLink<'w, 's> {
     }
 }
 
-enum NextServiceLinkIter {
+pub(crate) enum NextServiceLinkIter {
     Target(Option<Entity>),
     Fork(SmallVec<[Entity; 8]>),
 }
@@ -108,7 +113,7 @@ pub struct OperationRoster {
     /// Operation sources that should be triggered
     pub(crate) operate: VecDeque<Entity>,
     /// Operation sources that should be canceled
-    pub(crate) cancel: VecDeque<Entity>,
+    pub(crate) cancel: VecDeque<Cancel>,
     /// Async services that should pull their next item
     pub(crate) unblock: VecDeque<BlockingQueue>,
     /// Remove these entities as they are no longer needed
@@ -124,7 +129,7 @@ impl OperationRoster {
         self.operate.push_back(source);
     }
 
-    pub fn cancel(&mut self, source: Entity) {
+    pub fn cancel(&mut self, source: Cancel) {
         self.cancel.push_back(source);
     }
 
@@ -209,7 +214,7 @@ struct Operate(fn(Entity, &mut World, &mut OperationRoster));
 
 pub(crate) fn operate(entity: Entity, world: &mut World, roster: &mut OperationRoster) {
     let Some(operator) = world.get::<Operate>(entity) else {
-        roster.cancel(entity);
+        roster.cancel(Cancel::broken(entity));
         return;
     };
     let operator = operator.0;
@@ -231,11 +236,11 @@ fn perform_operation<Op: Operation>(
             } else {
                 // The source is no longer available even though it was queued.
                 // We should cancel the job right away.
-                roster.cancel(source);
+                roster.cancel(Cancel::broken(source));
             }
         }
         Err(()) => {
-            roster.cancel(source);
+            roster.cancel(Cancel::broken(source));
         }
     }
 }

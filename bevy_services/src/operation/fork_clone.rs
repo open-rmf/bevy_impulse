@@ -17,7 +17,10 @@
 
 use bevy::prelude::{Entity, World};
 
-use crate::{InputStorage, InputBundle, Operation, OperationStatus, OperationRoster, ForkStorage, SourceStorage};
+use crate::{
+    InputStorage, InputBundle, Operation, OperationStatus, OperationRoster,
+    ForkTargetStorage, SingleSourceStorage, Cancel,
+};
 
 use smallvec::SmallVec;
 
@@ -40,10 +43,10 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     ) {
         for target in &self.targets {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert(SourceStorage(entity));
+                target_mut.insert(SingleSourceStorage(entity));
             }
         }
-        world.entity_mut(entity).insert(ForkStorage(self.targets));
+        world.entity_mut(entity).insert(ForkTargetStorage(self.targets));
     }
 
     fn execute(
@@ -53,14 +56,14 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     ) -> Result<super::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let InputStorage::<T>(input) = source_mut.take().ok_or(())?;
-        let ForkStorage(targets) = source_mut.take().ok_or(())?;
+        let ForkTargetStorage(targets) = source_mut.take().ok_or(())?;
 
         let mut send_value = |value: T, target: Entity| {
             if let Some(mut target_mut) = world.get_entity_mut(target) {
                 target_mut.insert(InputBundle::new(value));
                 roster.queue(target);
             } else {
-                roster.cancel(target);
+                roster.cancel(Cancel::broken(target));
             }
         };
 

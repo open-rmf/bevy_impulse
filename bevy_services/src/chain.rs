@@ -20,8 +20,9 @@ use std::future::Future;
 use crate::{
     UnusedTarget, Terminate, PerformOperation,
     ForkClone, Chosen, ApplyLabel, Stream, Provider,
-    AsMap, IntoBlockingMap, IntoAsyncMap, Cancel,
-    DetachDependency, SeverCancelCascade, Promise, Noop,
+    AsMap, IntoBlockingMap, IntoAsyncMap, OperateCancel,
+    DetachDependency, DisposeOnCancel, Promise, Noop,
+    Cancelled,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -149,16 +150,20 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// If any ancestor links in this chain get canceled, the cancellation cascade
-    /// will be stopped at this link, so no child links from this one will have
+    /// will be stopped at this link and the remainder of the chain will be
+    /// disposed instead of cancelled, so no child links from this one will have
     /// their cancellation branches triggered from a cancellation that happens
     /// before this link. Any cancellation behavior assigned to this link will
     /// still apply.
     ///
+    /// Any cancellation that happens after this link will cascade down as
+    /// normal until it reaches the next instance of `dispose_on_cancel`.
+    ///
     /// If a non-detached descendant of this link gets dropped, the ancestors of
-    /// this link will still be canceled. To prevent a dropped descendant from
-    /// canceling its ancestors, use [`Self::detach_and_chain`].
-    pub fn sever_cancel_cascade(self) -> Chain<'w, 's, 'a, Response, (), ModifiersClosed> {
-        self.commands.entity(self.source).insert(SeverCancelCascade);
+    /// this link will still be cancelled as usual. To prevent a dropped
+    /// descendant from cancelling its ancestors, use [`Self::detach_and_chain`].
+    pub fn dispose_on_cancel(self) -> Chain<'w, 's, 'a, Response, (), ModifiersClosed> {
+        self.commands.entity(self.source).insert(DisposeOnCancel);
         Chain::new(self.source, self.target, self.commands)
     }
 
@@ -243,9 +248,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         Response: Clone,
     {
         Chain::<'w, 's, '_, Response, (), ModifiersClosed>::new(
-            self.source,
-            self.target,
-            self.commands
+            self.source, self.target, self.commands,
         ).fork_clone_zip(f).0.resume(self.commands)
     }
 
@@ -296,6 +299,17 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         Builders: Unzipper<Response>
     {
         builders.fork_unzip(self.target, self.commands)
+    }
+
+    /// If the chain's response implements the [`Future`] trait, applying
+    /// `.flatten()` to the chain will yield the output of that Future as the
+    /// chain's response.
+    pub fn flatten(self) -> Chain<'w, 's, 'a, Response::Output, (), ModifiersUnset>
+    where
+        Response: Future,
+        Response::Output: 'static + Send + Sync,
+    {
+        self.map_async(|r| async { r.await })
     }
 
     // TODO(@mxgrey): Take a value now to zip it into the chain later. Also
@@ -364,6 +378,14 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
 //     }
 // }
 
+impl<'w, 's, 'a, Signal: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, 'a, Cancelled<Signal>, Streams, Modifiers<L, C>> {
+    /// Get only the inner signal of the [`Cancelled`] struct, discarding
+    /// information about why the cancellation happened.
+    pub fn cancellation_signal(self) -> Chain<'w, 's, 'a, Signal, (), ModifiersUnset> {
+        self.map_block(|c| c.signal)
+    }
+}
+
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, C> Chain<'w, 's, 'a, Response, Streams, NotLabeled<C>> {
     /// Apply a label to the request. For more information about request labels
     /// see [`crate::LabelBuilder`].
@@ -382,9 +404,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
     pub fn on_cancel<Signal: 'static + Send + Sync>(
         self,
         signal: Signal,
-        f: impl FnOnce(Chain<'w, 's, '_, Signal, (), ModifiersClosed>),
-    ) -> Chain<'w, 's, 'a, Response, Streams, WithOnCancel<L>> {
-        self.on_cancel_zip(signal, f).1
+        f: impl FnOnce(Chain<'w, 's, '_, Cancelled<Signal>, (), ModifiersClosed>),
+    ) -> Chain<'w, 's, 'a, Response, Streams, ModifiersClosed> {
+        Chain::<'w, 's, '_, Response, Streams, NoOnCancel<L>>::new(
+            self.source, self.target, self.commands,
+        ).on_cancel_zip(signal, f).0.resume(self.commands)
     }
 
     /// Trigger a specific [`Provider`] in the event that the request gets canceled
@@ -396,10 +420,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
         self,
         signal: Signal,
         provider: P,
-    ) -> Chain<'w, 's, 'a, Response, Streams, WithOnCancel<L>>
+    ) -> Chain<'w, 's, 'a, Response, Streams, ModifiersClosed>
     where
         Signal: 'static + Send + Sync,
-        P: Provider<Request = Signal, Response = (), Streams = ()>,
+        P: Provider<Request = Cancelled<Signal>, Response = (), Streams = ()>,
     {
         self.on_cancel(signal, |cmds| { cmds.then(provider).detach(); })
     }
@@ -410,17 +434,17 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
     pub fn on_cancel_zip<Signal: 'static + Send + Sync, U>(
         self,
         signal: Signal,
-        f: impl FnOnce(Chain<'w, 's, '_, Signal, (), ModifiersClosed>) -> U,
-    ) -> (U, Chain<'w, 's, 'a, Response, Streams, WithOnCancel<L>>) {
+        f: impl FnOnce(Chain<'w, 's, '_, Cancelled<Signal>, (), ModifiersClosed>) -> U,
+    ) -> (Dangling<Response, Streams>, U) {
         let cancel_target = self.commands.spawn(UnusedTarget).id();
         let signal_target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(PerformOperation::new(
             cancel_target,
-            Cancel::new(self.source, signal_target, signal),
+            OperateCancel::new(self.source, signal_target, signal),
         ));
 
         let u = f(Chain::new(cancel_target, signal_target, self.commands));
-        (u, Chain::new(self.source, self.target, self.commands))
+        (Dangling::new(self.source, self.target), u)
     }
 }
 

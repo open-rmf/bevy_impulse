@@ -18,7 +18,7 @@
 use bevy::prelude::{Entity, World};
 
 use crate::{
-    ForkStorage, Operation, Unzippable, SourceStorage, InputStorage, InputBundle,
+    ForkTargetStorage, Operation, Unzippable, SingleSourceStorage, InputStorage, InputBundle,
     OperationStatus,
 };
 
@@ -43,10 +43,10 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
     ) {
         for target in &self.targets {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert(SourceStorage(entity));
+                target_mut.insert(SingleSourceStorage(entity));
             }
         }
-        world.entity_mut(entity).insert(ForkStorage(self.targets));
+        world.entity_mut(entity).insert(ForkTargetStorage(self.targets));
     }
 
     fn execute(
@@ -56,7 +56,7 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
     ) -> Result<crate::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let values = source_mut.take::<InputStorage<T>>().ok_or(())?.0;
-        let targets = source_mut.take::<ForkStorage>().ok_or(())?;
+        let targets = source_mut.take::<ForkTargetStorage>().ok_or(())?;
         values.distribute_values(&targets, world, roster);
         Ok(OperationStatus::Finished)
     }

@@ -20,7 +20,7 @@ use bevy::prelude::{Entity, Commands, World};
 use smallvec::SmallVec;
 
 use crate::{
-    Dangling, UnusedTarget, ForkStorage, OperationRoster, InputBundle, ForkUnzip,
+    Dangling, UnusedTarget, ForkTargetStorage, OperationRoster, InputBundle, ForkUnzip,
     PerformOperation, OutputChain, Chain,
 };
 
@@ -33,7 +33,7 @@ pub trait Unzippable {
 
     fn distribute_values(
         self,
-        targets: &ForkStorage,
+        targets: &ForkTargetStorage,
         world: &mut World,
         roster: &mut OperationRoster,
     );
@@ -65,7 +65,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 
     fn distribute_values(
         self,
-        targets: &ForkStorage,
+        targets: &ForkTargetStorage,
         world: &mut World,
         roster: &mut OperationRoster,
     ) {
@@ -82,7 +82,8 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 }
 
 /// A trait for constructs that are able to perform a forking unzip of an
-/// unzippable response type.
+/// unzippable chain. An unzippable chain is one whose response type contains a
+/// tuple.
 pub trait Unzipper<Z> {
     type Output;
     fn fork_unzip(self, source: Entity, commands: &mut Commands) -> Self::Output;
