@@ -22,7 +22,7 @@ use crate::{
     ForkClone, Chosen, ApplyLabel, Stream, Provider,
     AsMap, IntoBlockingMap, IntoAsyncMap, OperateCancel,
     DetachDependency, DisposeOnCancel, Promise, Noop,
-    Cancelled,
+    Cancelled, ForkTargetStorage, Branching, make_result_branching,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -31,6 +31,9 @@ use smallvec::SmallVec;
 
 pub mod dangling;
 pub use dangling::*;
+
+pub mod fork_clone_builder;
+pub use fork_clone_builder::*;
 
 pub mod unzip;
 pub use unzip::*;
@@ -233,47 +236,79 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
 
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different service chains: one
-    /// determined by the `f` callback provided to this function and the other
-    /// determined by the [`Chain`] that gets returned by this function.
+    /// determined by the `build` callback provided to this function and the
+    /// other determined by the [`Chain`] that gets returned by this function.
     ///
     /// This can only be applied when the Response can be cloned.
     ///
     /// You cannot hook into streams or apply a label after using this function,
     /// so perform those operations before calling this.
+    ///
+    /// See also [`Self::fork_clone_zip`]
     pub fn fork_clone(
         self,
-        f: impl FnOnce(Chain<'w, 's, '_, Response, (), ModifiersClosed>),
+        build: impl FnOnce(OutputChain<Response>),
     ) -> OutputChain<'w, 's, 'a, Response>
     where
         Response: Clone,
     {
         Chain::<'w, 's, '_, Response, (), ModifiersClosed>::new(
             self.source, self.target, self.commands,
-        ).fork_clone_zip(f).0.resume(self.commands)
+        ).fork_clone_zip((
+            |chain: OutputChain<Response>| chain.dangle(),
+            build
+        )).0.resume(self.commands)
     }
 
-    /// Same as [`Chain::fork`], but the return value of the forking
-    /// function will be zipped with the second fork.
-    pub fn fork_clone_zip<U>(
+    /// When the response is delivered, we will make clones of it and
+    /// simultaneously pass that clone along mutliple service chains, each one
+    /// determined by a different element of the tuple that gets passed in as
+    /// a builder.
+    ///
+    /// The outputs of the individual chain builders will be zipped into one
+    /// output by this function. If all of the builders output [`Dangling`] then
+    /// you can easily continue chaining more operations like `join` and `race`
+    /// from the [`ZippedChains`] trait.
+    pub fn fork_clone_zip<Builder: ForkCloneBuilder<Response>>(
         self,
-        f: impl FnOnce(OutputChain<'w, 's, '_, Response>) -> U,
-    ) -> (Dangling<Response>, U)
+        builder: Builder,
+    ) -> Builder::Outputs
+    where
+        Response: Clone,
+    {
+        builder.build_fork_clone(self.target, self.commands)
+    }
+
+    /// Similar to [`Chain::fork_clone_zip`], except you provide only one
+    /// builder function and indicate a number of forks to produce. Each fork
+    /// will be produced using the same builder, and the output of this method
+    /// will be the bundled output of each build.
+    ///
+    /// If your function outputs [`Dangling`] then you can easily continue
+    /// chaining more operations like `join` and `race` from the [`BundledChains`]
+    /// trait.
+    pub fn fork_clone_bundle<const N: usize, U>(
+        self,
+        mut builder: impl FnMut(OutputChain<Response>) -> U,
+    ) -> [U; N]
     where
         Response: Clone,
     {
         let source = self.target;
-        let left_target = self.commands.spawn(UnusedTarget).id();
-        let right_target = self.commands.spawn(UnusedTarget).id();
+        let targets: [Entity; N] = core::array::from_fn(
+            |_| self.commands.spawn(UnusedTarget).id()
+        );
 
         self.commands.add(PerformOperation::new(
             source,
-            ForkClone::<Response>::new(
-                SmallVec::from_iter([left_target, right_target])
-            ),
+            ForkClone::<Response>::new(ForkTargetStorage::from_iter(targets)),
         ));
 
-        let u = f(Chain::new(self.target, left_target, self.commands));
-        (Dangling::new(self.target, right_target), u)
+        let output = targets.map(
+            |target| builder(OutputChain::new(source, target, self.commands))
+        );
+
+        output
     }
 
     /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
@@ -338,25 +373,57 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 }
 
-// impl<'w, 's, 'a, InnerResponse: 'static + Send + Sync, Streams, Err, M> Chain<'w, 's, 'a, Result<InnerResponse, Err>, Streams, M> {
-//     pub fn fork_ok(
-//         self,
-//         f: ...
-//     ) -> Chain<'w, 's, 'a, InnerResponse, (), ModifiersClosed> {
+impl<'w, 's, 'a, T, E, Streams, M> Chain<'w, 's, 'a, Result<T, E>, Streams, M>
+where
+    T: 'static + Send + Sync,
+    E: 'static + Send + Sync,
+{
+    /// Build a chain that activates if the response is an [`Err`]. If the
+    /// response is [`Ok`] then the built branch will be disposed.
+    ///
+    /// This function returns a chain that will be activated if the result was
+    /// [`Ok`] so you can continue building your response to the [`Ok`] case.
+    pub fn branch_for_err(
+        self,
+        build_err: impl FnOnce(OutputChain<E>)
+    ) -> Chain<'w, 's, 'a, T, (), ModifiersClosed> {
+        Chain::<'w, 's, '_, Result<T, E>, Streams, M>::new(
+            self.source, self.target, self.commands,
+        ).branch_result_zip(
+            |chain| chain.dangle(),
+            build_err
+        ).0.resume(self.commands)
+    }
 
-//     }
+    /// Build two branching chains, one for the case where the response is [`Ok`]
+    /// and one if the response is [`Err`]. Whichever chain does not get activated
+    /// will be disposed. The outputs of both builder functions will be zipped
+    /// as the return value of this function.
+    pub fn branch_result_zip<U, V>(
+        self,
+        build_ok: impl FnOnce(OutputChain<T>) -> U,
+        build_err: impl FnOnce(OutputChain<E>) -> V,
+    ) -> (U, V) {
+        let source = self.target;
+        let ok_target = self.commands.spawn(UnusedTarget).id();
+        let err_target = self.commands.spawn(UnusedTarget).id();
 
-//     pub fn fork_ok_zip<U>(
-//         self,
-//         f: ...
-//     ) -> (U, Chain<'w, 's, 'a, InnerResponse, (), ModifiersClosed>) {
+        self.commands.add(PerformOperation::new(
+            source,
+            make_result_branching::<T, E>(
+                ForkTargetStorage::from_iter([ok_target, err_target])
+            ),
+        ));
 
-//     }
+        let u = build_ok(Chain::new(self.target, ok_target, self.commands));
+        let v = build_err(Chain::new(self.target, err_target, self.commands));
+        (u, v)
+    }
 
-//     pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, InnerResponse, (), ModifiersClosed> {
+    // pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, T, (), ModifiersUnset> {
 
-//     }
-// }
+    // }
+}
 
 // impl<'w, 's, 'a, InnerResponse: 'static + Send + Sync, Streams, M> Chain<'w, 's, 'a, Option<InnerResponse>, Streams, M> {
 //     pub fn fork_some(
@@ -487,14 +554,15 @@ mod tests {
         let mut commands = Commands::new(&mut command_queue, &world);
         let _promise = commands
             .request((2.0, 3.0), add.into_blocking_map())
-            .fork_clone_zip(
-                |chain| {
+            .fork_clone_zip((
+                |chain: OutputChain<f64>| chain.dangle(),
+                |chain: OutputChain<f64>| {
                     chain
                     .map_block(|a| (a, 5.0))
                     .map_block(add)
                     .dangle()
                 }
-            )
+            ))
             .race(
                 &mut commands,
                 (

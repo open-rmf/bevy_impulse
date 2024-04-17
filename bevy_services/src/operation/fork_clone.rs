@@ -22,15 +22,13 @@ use crate::{
     ForkTargetStorage, SingleSourceStorage, Cancel,
 };
 
-use smallvec::SmallVec;
-
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
-    targets: SmallVec<[Entity; 8]>,
+    targets: ForkTargetStorage,
     _ignore: std::marker::PhantomData<Response>,
 }
 
 impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {
-    pub(crate) fn new(targets: SmallVec<[Entity; 8]>) -> Self {
+    pub(crate) fn new(targets: ForkTargetStorage) -> Self {
         Self { targets, _ignore: Default::default() }
     }
 }
@@ -41,19 +39,19 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         entity: Entity,
         world: &mut World,
     ) {
-        for target in &self.targets {
+        for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
                 target_mut.insert(SingleSourceStorage(entity));
             }
         }
-        world.entity_mut(entity).insert(ForkTargetStorage(self.targets));
+        world.entity_mut(entity).insert(self.targets);
     }
 
     fn execute(
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<super::OperationStatus, ()> {
+    ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let InputStorage::<T>(input) = source_mut.take().ok_or(())?;
         let ForkTargetStorage(targets) = source_mut.take().ok_or(())?;
@@ -68,8 +66,9 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         };
 
         // Distributing the values like this is a bit convoluted, but it ensures
-        // that we are not producing any more clones than what is strictly
-        // necessary. This may be valuable if cloning the value is expensive.
+        // that we are not producing any more clones of the input than what is
+        // strictly necessary. This may be valuable if cloning the value is
+        // expensive.
         for target in targets[..targets.len()-1].iter() {
             send_value(input.clone(), *target);
         }

@@ -26,6 +26,9 @@ use std::collections::VecDeque;
 
 use smallvec::SmallVec;
 
+mod branching;
+pub(crate) use branching::*;
+
 mod fork_clone;
 pub(crate) use fork_clone::*;
 
@@ -66,6 +69,12 @@ pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 /// Keep track of the targets for a fork in a service chain
 #[derive(Component)]
 pub struct ForkTargetStorage(pub(crate) SmallVec<[Entity; 8]>);
+
+impl ForkTargetStorage {
+    pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
+        Self(SmallVec::from_iter(iter))
+    }
+}
 
 #[derive(SystemParam)]
 pub(crate) struct NextServiceLink<'w, 's> {

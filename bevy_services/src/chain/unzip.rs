@@ -20,8 +20,8 @@ use bevy::prelude::{Entity, Commands, World};
 use smallvec::SmallVec;
 
 use crate::{
-    Dangling, UnusedTarget, ForkTargetStorage, OperationRoster, InputBundle, ForkUnzip,
-    PerformOperation, OutputChain, Chain,
+    Dangling, UnusedTarget, ForkTargetStorage, OperationRoster, InputBundle,
+    ForkUnzip, PerformOperation, OutputChain,
 };
 
 /// A trait for response types that can be unzipped
