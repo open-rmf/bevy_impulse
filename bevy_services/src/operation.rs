@@ -54,23 +54,28 @@ mod terminate;
 pub(crate) use terminate::*;
 
 /// Keep track of the source for a link in a service chain
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub(crate) struct SingleSourceStorage(pub(crate) Entity);
 
 /// Keep track of the sources that funnel into this link of the service chain.
 /// This is for links that draw from multiple sources simultaneously, such as
 /// join and race.
+#[derive(Component, Clone)]
 pub(crate) struct FunnelSourceStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 /// Keep track of the target for a link in a service chain
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 
 /// Keep track of the targets for a fork in a service chain
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct ForkTargetStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 impl ForkTargetStorage {
+    pub fn new() -> Self {
+        Self(SmallVec::new())
+    }
+
     pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
         Self(SmallVec::from_iter(iter))
     }

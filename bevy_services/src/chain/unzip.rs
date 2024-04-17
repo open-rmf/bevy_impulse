@@ -84,12 +84,12 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 /// A trait for constructs that are able to perform a forking unzip of an
 /// unzippable chain. An unzippable chain is one whose response type contains a
 /// tuple.
-pub trait Unzipper<Z> {
+pub trait UnzipBuilder<Z> {
     type Output;
-    fn fork_unzip(self, source: Entity, commands: &mut Commands) -> Self::Output;
+    fn unzip_build(self, source: Entity, commands: &mut Commands) -> Self::Output;
 }
 
-impl<A, Fa, Ua, B, Fb, Ub> Unzipper<(A, B)> for (Fa, Fb)
+impl<A, Fa, Ua, B, Fb, Ub> UnzipBuilder<(A, B)> for (Fa, Fb)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
@@ -97,7 +97,7 @@ where
     Fb: FnOnce(OutputChain<B>) -> Ub,
 {
     type Output = (Ua, Ub);
-    fn fork_unzip(self, source: Entity, commands: &mut Commands) -> Self::Output {
+    fn unzip_build(self, source: Entity, commands: &mut Commands) -> Self::Output {
         let dangling = <(A, B)>::unzip_chain(source, commands);
         let u_a = (self.0)(dangling.0.resume(commands));
         let u_b = (self.1)(dangling.1.resume(commands));

@@ -311,11 +311,41 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         output
     }
 
+    /// Same as [`Chain::fork_clone_bundle`] but you can create a number of
+    /// forks determined at runtime instead of compile time.
+    ///
+    /// This function still takes a constant integer argument which can be
+    /// thought of as a size hint that would allow the operation to avoid some
+    /// heap allocations if it is greater than or equal to the number of forks
+    /// that are actually produced. This value should be kept somewhat modest,
+    /// like 8 - 16, to avoid excessively large stack frames.
+    pub fn fork_clone_bundle_vec<const N: usize, U>(
+        self,
+        number_forks: usize,
+        mut builder: impl FnMut(OutputChain<Response>) -> U,
+    ) -> SmallVec<[U; N]>
+    where
+        Response: Clone,
+    {
+        let source = self.target;
+        let mut targets = ForkTargetStorage::new();
+        targets.0.reserve(number_forks);
+
+        self.commands.add(PerformOperation::new(
+            source,
+            ForkClone::<Response>::new(targets.clone())
+        ));
+
+        targets.0.into_iter().map(
+            |target| builder(OutputChain::new(source, target, self.commands))
+        ).collect()
+    }
+
     /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
     /// `unzip` allows you to convert it into a tuple of chains:
     /// `(Dangling<A>, Dangling<B>, Dangling<C>, ...)`.
     ///
-    /// You can also consider using `fork_unzip` to continue building each
+    /// You can also consider using `unzip_build` to continue building each
     /// chain in the tuple independently by providing a builder function for
     /// each element of the tuple.
     pub fn unzip(self) -> Response::Unzipped
@@ -326,14 +356,14 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
-    /// `fork_unzip` allows you to split it into multiple chains and apply a
+    /// `unzip_build` allows you to split it into multiple chains and apply a
     /// separate builder function to each chain. You will be passed back the
     /// zipped output of all the builder functions.
-    pub fn fork_unzip<Builders>(self, builders: Builders) -> Builders::Output
+    pub fn unzip_build<Builders>(self, builders: Builders) -> Builders::Output
     where
-        Builders: Unzipper<Response>
+        Builders: UnzipBuilder<Response>
     {
-        builders.fork_unzip(self.target, self.commands)
+        builders.unzip_build(self.target, self.commands)
     }
 
     /// If the chain's response implements the [`Future`] trait, applying
@@ -595,7 +625,7 @@ mod tests {
         let promise = commands
             .request((2.0, 3.0), add.into_blocking_map())
             .map_block(|v| (v, 2.0*v))
-            .fork_unzip((
+            .unzip_build((
                 |chain: OutputChain<f64>| {
                     chain
                     .map_block(|v| (v, -v))
