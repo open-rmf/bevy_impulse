@@ -70,6 +70,9 @@ pub enum CancellationCause {
     /// detected.
     BrokenLink(Entity),
 
+    /// A link in the chain filtered out a response.
+    Filtered(Entity),
+
     /// A join was cancelled due to one of these scenarios:
     /// * At least one of its inputs was cancelled
     /// * At least one of its inputs was delivered but one or more of the inputs
@@ -176,5 +179,9 @@ impl Cancel {
     /// Create a dropped target cancel operation
     pub fn dropped(target: Entity) -> Self {
         Self::new(target, CancellationCause::TargetDropped(target))
+    }
+
+    pub fn filtered(source: Entity) -> Self {
+        Self::new(source, CancellationCause::Filtered(source))
     }
 }

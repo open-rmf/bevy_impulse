@@ -19,7 +19,7 @@ use bevy::prelude::{World, Component, Entity};
 
 use crate::{
     Operation, OperationStatus, OperationRoster, SingleTargetStorage,
-    SingleSourceStorage, InputStorage, InputBundle,
+    SingleSourceStorage, InputStorage, InputBundle, Cancel,
 };
 
 pub struct CancelFilter<Input, Output, F> {
@@ -86,7 +86,12 @@ where
         let CancelFilterStorage::<F>(filter) = source_mut.take().ok_or(())?;
 
         // This is where we cancel if the filter function does not return anything.
-        let output = filter(input).ok_or(())?;
+        let Some(output) = filter(input) else {
+            roster.cancel(Cancel::filtered(source));
+            // We've queued up a cancellation of this link, so we don't want any
+            // automatic cleanup to happen.
+            return Ok(OperationStatus::Disregard);
+        };
 
         // At this point we have the correct type to deliver to the target, so
         // we proceed with doing that.

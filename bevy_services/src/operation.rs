@@ -184,6 +184,8 @@ pub(crate) enum OperationStatus {
     /// be needed for a service that has been queued. The service will be
     /// responsible for despawning the entity when it is no longer needed.
     Queued{ provider: Entity },
+    /// Disregard the status of the operation. It will clean itself up.
+    Disregard,
 }
 
 /// This component indicates that a source entity has been queued for a service
@@ -255,6 +257,9 @@ fn perform_operation<Op: Operation>(
                 // We should cancel the job right away.
                 roster.cancel(Cancel::broken(source));
             }
+        }
+        Ok(OperationStatus::Disregard) => {
+            // Do nothing
         }
         Err(()) => {
             roster.cancel(Cancel::broken(source));
