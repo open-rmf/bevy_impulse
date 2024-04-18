@@ -38,6 +38,16 @@ pub(crate) fn make_result_branching<T, E>(
     }
 }
 
+pub(crate) fn make_option_branching<T>(
+    targets: ForkTargetStorage
+) -> Branching<Option<T>, (T, ()), fn(Option<T>, &mut (Option<T>, Option<()>))> {
+    Branching {
+        activator: branch_option,
+        targets,
+        _ignore: Default::default(),
+    }
+}
+
 #[derive(Component)]
 struct BranchingActivatorStorage<F: 'static + Send + Sync>(F);
 
@@ -141,5 +151,15 @@ fn branch_result<T, E>(
     match input {
         Ok(value) => activation.0 = Some(value),
         Err(err) => activation.1 = Some(err),
+    }
+}
+
+fn branch_option<T>(
+    input: Option<T>,
+    activation: &mut (Option<T>, Option<()>),
+) {
+    match input {
+        Some(value) => activation.0 = Some(value),
+        None => activation.1 = Some(()),
     }
 }

@@ -1,0 +1,99 @@
+/*
+ * Copyright (C) 2024 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
+use bevy::prelude::{World, Component, Entity};
+
+use crate::{
+    Operation, OperationStatus, OperationRoster, SingleTargetStorage,
+    SingleSourceStorage, InputStorage, InputBundle,
+};
+
+pub struct CancelFilter<Input, Output, F> {
+    filter: F,
+    target: Entity,
+    _ignore: std::marker::PhantomData<(Input, Output)>,
+}
+
+fn identity<Value>(value: Value) -> Value {
+    value
+}
+
+pub(crate) fn make_cancel_filter_on_none<T>(target: Entity) -> CancelFilter<Option<T>, T, fn(Option<T>) -> Option<T>> {
+    CancelFilter {
+        filter: identity::<Option<T>>,
+        target,
+        _ignore: Default::default()
+    }
+}
+
+pub(crate) fn make_cancel_filter_on_err<T, E>(target: Entity) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> Option<T>> {
+    CancelFilter {
+        filter: err_to_none::<T, E>,
+        target,
+        _ignore: Default::default(),
+    }
+}
+
+fn err_to_none<T, E>(value: Result<T, E>) -> Option<T> {
+    value.ok()
+}
+
+#[derive(Component)]
+struct CancelFilterStorage<F: 'static + Send + Sync>(F);
+
+impl<Input, Output, F> Operation for CancelFilter<Input, Output, F>
+where
+    Input: 'static + Send + Sync,
+    Output: 'static + Send + Sync,
+    F: FnOnce(Input) -> Option<Output> + 'static + Send + Sync,
+{
+    fn set_parameters(
+        self,
+        entity: Entity,
+        world: &mut World,
+    ) {
+        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
+            target_mut.insert(SingleSourceStorage(entity));
+        }
+        world.entity_mut(entity).insert((
+            SingleTargetStorage(self.target),
+            CancelFilterStorage(self.filter),
+        ));
+    }
+
+    fn execute(
+        source: Entity,
+        world: &mut bevy::prelude::World,
+        roster: &mut OperationRoster,
+    ) -> Result<OperationStatus, ()> {
+        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+        let input = source_mut.take::<InputStorage<Input>>().ok_or(())?.0;
+        let target = source_mut.take::<SingleTargetStorage>().ok_or(())?.0;
+        let CancelFilterStorage::<F>(filter) = source_mut.take().ok_or(())?;
+
+        // This is where we cancel if the filter function does not return anything.
+        let output = filter(input).ok_or(())?;
+
+        // At this point we have the correct type to deliver to the target, so
+        // we proceed with doing that.
+        let mut target_mut = world.get_entity_mut(target).ok_or(())?;
+        target_mut.insert(InputBundle::new(output));
+        roster.queue(target);
+
+        Ok(OperationStatus::Finished)
+    }
+}

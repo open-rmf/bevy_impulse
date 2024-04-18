@@ -130,6 +130,9 @@ impl<Streams> ChannelTrait for Channel<Streams> {
     }
 }
 
+// FIXME TODO(@mxgrey): Redesign this so that users pass in a FnOnce with
+// temporary access to a Commands struct which then gets sent off at the end of
+// the FnOnce.
 impl<Streams> ChannelTrait for BatchChannel<Streams> {
     fn push<C: Command>(&self, command: C) {
         let mut batch = self.batch.borrow_mut();
