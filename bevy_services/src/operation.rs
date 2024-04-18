@@ -15,14 +15,17 @@
  *
 */
 
-use crate::{RequestLabelId, Cancel};
+use crate::{RequestLabelId, Cancel, CancellationCause};
 
 use bevy::{
     prelude::{Entity, World, Component, Query},
     ecs::system::{Command, SystemParam},
 };
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+};
 
 use smallvec::SmallVec;
 
@@ -72,7 +75,31 @@ pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 
 /// Keep track of the targets for a fork in a service chain
 #[derive(Component, Clone)]
-pub struct ForkTargetStorage(pub(crate) SmallVec<[Entity; 8]>);
+pub struct ForkTargetStorage(pub(crate) SmallVec<[TargetCandidate; 8]>);
+
+#[derive(Clone)]
+pub enum TargetCandidate {
+    Active(Entity),
+    Cancelled(Arc<CancellationCause>),
+}
+
+impl TargetCandidate {
+    pub(crate) fn unwrap_active(&self) -> Entity {
+        match self {
+            Self::Active(entity) => *entity,
+            Self::Cancelled(_) => {
+                panic!("Unwrapped a TargetCandidate that was cancelled.");
+            }
+        }
+    }
+
+    pub fn active(&self) -> Option<Entity> {
+        match self {
+            Self::Active(entity) => Some(*entity),
+            Self::Cancelled(_) => None,
+        }
+    }
+}
 
 impl ForkTargetStorage {
     pub fn new() -> Self {
@@ -80,7 +107,9 @@ impl ForkTargetStorage {
     }
 
     pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
-        Self(SmallVec::from_iter(iter))
+        Self(SmallVec::from_iter(
+            iter.into_iter().map(|e| TargetCandidate::Active(e))
+        ))
     }
 }
 
@@ -95,7 +124,9 @@ impl<'w, 's> NextServiceLink<'w, 's> {
         if let Ok(target) = self.single_target.get(entity) {
             return NextServiceLinkIter::Target(Some(target.0));
         } else if let Ok(fork) = self.fork_targets.get(entity) {
-            return NextServiceLinkIter::Fork(fork.0.clone());
+            return NextServiceLinkIter::Fork(SmallVec::from_iter(
+                fork.0.iter().filter_map(|e| e.active())
+            ));
         }
 
         return NextServiceLinkIter::Target(None);

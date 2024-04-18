@@ -69,14 +69,18 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         world: &mut World,
         roster: &mut OperationRoster,
     ) {
-        if let Some(mut t_mut) = world.get_entity_mut((targets.0)[0]) {
-            t_mut.insert(InputBundle::new(self.0));
-            roster.queue((targets.0)[0]);
+        if let Some(target) = (targets.0)[0].active() {
+            if let Some(mut t_mut) = world.get_entity_mut(target) {
+                t_mut.insert(InputBundle::new(self.0));
+                roster.queue(target);
+            }
         }
 
-        if let Some(mut t_mut) = world.get_entity_mut((targets.0)[1]) {
-            t_mut.insert(InputBundle::new(self.1));
-            roster.queue((targets.0)[1]);
+        if let Some(target) = (targets.0)[1].active() {
+            if let Some(mut t_mut) = world.get_entity_mut(target) {
+                t_mut.insert(InputBundle::new(self.1));
+                roster.queue(target);
+            }
         }
     }
 }

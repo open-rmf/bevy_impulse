@@ -62,8 +62,8 @@ where
         entity: Entity,
         world: &mut World,
     ) {
-        for target in &self.targets.0 {
-            if let Some(mut target_mut) = world.get_entity_mut(*target) {
+        for target in self.targets.0.iter().filter_map(|e| e.active()) {
+            if let Some(mut target_mut) = world.get_entity_mut(target) {
                 target_mut.insert(SingleSourceStorage(entity));
             }
         }
@@ -122,22 +122,24 @@ where
         world: &'a mut World,
         roster: &'a mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
-        let target_a = targets.0.get(0).ok_or(())?;
-        if let Some(a) = a {
-            let mut target_a_mut = world.get_entity_mut(*target_a).ok_or(())?;
-            target_a_mut.insert(InputBundle::new(a));
-            roster.queue(*target_a);
-        } else {
-            roster.dispose(*target_a);
+        if let Some(target_a) = targets.0.get(0).ok_or(())?.active() {
+            if let Some(a) = a {
+                let mut target_a_mut = world.get_entity_mut(target_a).ok_or(())?;
+                target_a_mut.insert(InputBundle::new(a));
+                roster.queue(target_a);
+            } else {
+                roster.dispose(target_a);
+            }
         }
 
-        let target_b = targets.0.get(1).ok_or(())?;
-        if let Some(b) = b {
-            let mut target_b_mut = world.get_entity_mut(*target_b).ok_or(())?;
-            target_b_mut.insert(InputBundle::new(b));
-            roster.queue(*target_b);
-        } else {
-            roster.dispose(*target_b);
+        if let Some(target_b) = targets.0.get(1).ok_or(())?.active() {
+            if let Some(b) = b {
+                let mut target_b_mut = world.get_entity_mut(target_b).ok_or(())?;
+                target_b_mut.insert(InputBundle::new(b));
+                roster.queue(target_b);
+            } else {
+                roster.dispose(target_b);
+            }
         }
 
         Ok(OperationStatus::Finished)

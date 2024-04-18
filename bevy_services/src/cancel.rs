@@ -73,6 +73,9 @@ pub enum CancellationCause {
     /// A link in the chain filtered out a response.
     Filtered(Entity),
 
+    /// All the branches of a fork were cancelled.
+    ForkCancelled(ForkCancelled),
+
     /// A join was cancelled due to one of these scenarios:
     /// * At least one of its inputs was cancelled
     /// * At least one of its inputs was delivered but one or more of the inputs
@@ -104,8 +107,17 @@ impl From<Supplanted> for CancellationCause {
     }
 }
 
+/// A description of why a fork was cancelled.
+#[derive(Debug, Clone)]
+pub struct ForkCancelled {
+    /// The source link of the fork
+    pub fork: Entity,
+    /// The cancellation cause of each downstream branch of a fork.
+    pub cancelled: Vec<Arc<CancellationCause>>,
+}
+
 /// A description of why a join was cancelled.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JoinCancelled {
     /// The source link of the join
     pub join: Entity,
@@ -117,7 +129,7 @@ pub struct JoinCancelled {
     /// THe inputs of the join which were disposed
     pub disposals: Vec<Entity>,
     /// The inputs of the join which were cancelled
-    pub cancellations: Vec<CancellationCause>,
+    pub cancellations: Vec<Arc<CancellationCause>>,
 }
 
 impl From<JoinCancelled> for CancellationCause {
@@ -127,14 +139,14 @@ impl From<JoinCancelled> for CancellationCause {
 }
 
 /// A description of why a race was cancelled.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RaceCancelled {
     /// The source link of the race
     pub race: Entity,
     /// The inputs of the race that were disposed
     pub disposals: Vec<Entity>,
     /// The inputs of the race that were cancelled
-    pub cancellations: Vec<CancellationCause>,
+    pub cancellations: Vec<Arc<CancellationCause>>,
 }
 
 impl From<RaceCancelled> for CancellationCause {

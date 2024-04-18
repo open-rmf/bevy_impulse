@@ -39,8 +39,8 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         entity: Entity,
         world: &mut World,
     ) {
-        for target in &self.targets.0 {
-            if let Some(mut target_mut) = world.get_entity_mut(*target) {
+        for target in self.targets.0.iter().filter_map(|e| e.active()) {
+            if let Some(mut target_mut) = world.get_entity_mut(target) {
                 target_mut.insert(SingleSourceStorage(entity));
             }
         }
@@ -69,12 +69,12 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         // that we are not producing any more clones of the input than what is
         // strictly necessary. This may be valuable if cloning the value is
         // expensive.
-        for target in targets[..targets.len()-1].iter() {
-            send_value(input.clone(), *target);
+        for target in targets[..targets.len()-1].iter().filter_map(|e| e.active()) {
+            send_value(input.clone(), target);
         }
 
-        if let Some(last_target) = targets.last() {
-            send_value(input, *last_target);
+        if let Some(last_target) = targets.last().map(|e| e.active()).flatten() {
+            send_value(input, last_target);
         }
 
         Ok(OperationStatus::Finished)

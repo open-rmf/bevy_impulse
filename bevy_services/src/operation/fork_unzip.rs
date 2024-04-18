@@ -46,7 +46,7 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
                 target_mut.insert(SingleSourceStorage(entity));
             }
         }
-        world.entity_mut(entity).insert(ForkTargetStorage(self.targets));
+        world.entity_mut(entity).insert(ForkTargetStorage::from_iter(self.targets));
     }
 
     fn execute(

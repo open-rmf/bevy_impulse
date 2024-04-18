@@ -26,7 +26,7 @@ use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget,
     operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
-    cancel_chain_upwards,
+    propagate_dependency_loss_upwards,
 };
 
 #[allow(private_interfaces)]
@@ -90,7 +90,7 @@ pub fn flush_services(
         SystemState::new(world);
     let mut unused_targets: SmallVec<[_; 8]> = unused_targets_state.get(world).iter().collect();
     for target in unused_targets.drain(..) {
-        cancel_chain_upwards(Cancel::unused_target(target), world, &mut roster)
+        propagate_dependency_loss_upwards(Cancel::unused_target(target), world, &mut roster)
     }
 
     unused_targets.extend(
@@ -100,7 +100,7 @@ pub fn flush_services(
             .try_iter()
     );
     for target in unused_targets.drain(..) {
-        cancel_chain_upwards(Cancel::dropped(target), world, &mut roster)
+        propagate_dependency_loss_upwards(Cancel::dropped(target), world, &mut roster)
     }
 
     while !roster.is_empty() {

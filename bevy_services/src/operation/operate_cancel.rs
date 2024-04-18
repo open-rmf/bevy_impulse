@@ -116,7 +116,7 @@ impl<Signal: 'static + Send + Sync> Operation for OperateCancel<Signal> {
 /// Do not trigger any cancellation if the target belongs to an inert chain, i.e.
 /// part of a cancellation branch or an unused branch. In that case, just dispose
 /// of the branch.
-pub(crate) fn cancel_chain_upwards(
+pub(crate) fn propagate_dependency_loss_upwards(
     target: Cancel,
     world: &mut World,
     roster: &mut OperationRoster

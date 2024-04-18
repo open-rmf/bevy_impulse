@@ -370,7 +370,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         ));
 
         targets.0.into_iter().map(
-            |target| builder(OutputChain::new(source, target, self.commands))
+            |target| builder(OutputChain::new(source, target.unwrap_active(), self.commands))
         ).collect()
     }
 
