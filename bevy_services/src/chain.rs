@@ -116,7 +116,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// Take the promise so you can reference it later. The service request
     /// will continue to be fulfilled even if you drop the [`Promise`].
     ///
-    /// This is effectively equivalent to running both [`Self::detach`] and [`Self::take`].
+    /// This is effectively equivalent to running both [`Chain::detach`] and
+    /// [`Chain::take`].
     pub fn detach_and_take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
         self.commands.add(PerformOperation::new(
@@ -132,7 +133,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ///
     /// If the ancestor links get canceled, the cancellation cascade will still
     /// continue past this link. To prevent that from happening, use
-    /// [`Self::sever_cancel_cascade`].
+    /// [`Chain::sever_cancel_cascade`].
     pub fn detach_and_chain(self) -> Chain<'w, 's, 'a, Response, Streams, ModifiersClosed> {
         self.commands.entity(self.source).insert(DetachDependency);
         Chain::new(self.source, self.target, self.commands)
@@ -156,7 +157,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
 
     /// If any ancestor links in this chain get canceled, the cancellation cascade
     /// will be stopped at this link and the remainder of the chain will be
-    /// disposed instead of cancelled, so no child links from this one will have
+    /// disposed instead of cancelled. No child links from this one will have
     /// their cancellation branches triggered from a cancellation that happens
     /// before this link. Any cancellation behavior assigned to this link will
     /// still apply.
@@ -166,16 +167,15 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ///
     /// If a non-detached descendant of this link gets dropped, the ancestors of
     /// this link will still be cancelled as usual. To prevent a dropped
-    /// descendant from cancelling its ancestors, use [`Self::detach_and_chain`].
+    /// descendant from cancelling its ancestors, use [`Chain::detach_and_chain`].
     pub fn dispose_on_cancel(self) -> Chain<'w, 's, 'a, Response, (), ModifiersClosed> {
         self.commands.entity(self.source).insert(DisposeOnCancel);
         Chain::new(self.source, self.target, self.commands)
     }
 
-    /// Use the response of the service as a new service request as soon as the
-    /// response is delivered. If you apply a label or hook into streams after
-    /// calling this function, then those will be applied to this new service
-    /// request.
+    /// Use the response in the chain as a new request as soon as the response
+    /// is delivered. If you apply a label or hook into streams after calling
+    /// this function, then those will be applied to this new request.
     pub fn then<P: Provider<Request = Response>>(
         self,
         provider: P,
@@ -210,12 +210,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// This takes in a regular blocking function rather than an async function,
     /// so while the function is executing, it will block all systems from
     /// running, similar to how [`Commands`] are flushed.
-    pub fn map_block<U, F>(
+    pub fn map_block<U>(
         self,
-        f: F,
+        f: impl FnOnce(Response) -> U + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, U, (), ModifiersUnset>
     where
-        F: FnOnce(Response) -> U + 'static + Send + Sync,
         U: 'static + Send + Sync,
     {
         self.then(f.into_blocking_map())
@@ -224,12 +223,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// Apply a one-time callback whose output is a Future that will be run in
     /// the [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool). The
     /// output of the Future will be the Response of the returned Chain.
-    pub fn map_async<Task, F>(
+    pub fn map_async<Task>(
         self,
-        f: F,
+        f: impl FnOnce(Response) -> Task + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, Task::Output, (), ModifiersUnset>
     where
-        F: FnOnce(Response) -> Task + 'static + Send + Sync,
         Task: Future + 'static + Send + Sync,
         Task::Output: 'static + Send + Sync,
     {
@@ -237,7 +235,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
-    /// If the filter provider returns [`None`] then a cancellation is triggered.
+    /// If the filter returns [`None`] then a cancellation is triggered.
     /// Otherwise the chain continues with the value given inside [`Some`].
     ///
     /// This is conceptually similar to [`Iterator::filter_map`]. You can also
@@ -277,12 +275,9 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// determined by the `build` callback provided to this function and the
     /// other determined by the [`Chain`] that gets returned by this function.
     ///
-    /// This can only be applied when the Response can be cloned.
+    /// This can only be applied when `Response` can be cloned.
     ///
-    /// You cannot hook into streams or apply a label after using this function,
-    /// so perform those operations before calling this.
-    ///
-    /// See also [`Self::fork_clone_zip`]
+    /// See also [`Chain::fork_clone_zip`]
     pub fn fork_clone(
         self,
         build: impl FnOnce(OutputChain<Response>),
@@ -453,8 +448,9 @@ where
     /// This function returns a chain that will be activated if the result was
     /// [`Ok`] so you can continue building your response to the [`Ok`] case.
     ///
-    /// You should make sure to `detach` the chain inside this builder or else it
-    /// will be disposed on the first flush, even if an [`Err`] value arrives.
+    /// You should make sure to [`detach`](Chain::detach) the chain inside your
+    /// builder or else it will be disposed during the first flush, even if an
+    /// [`Err`] value arrives.
     pub fn branch_for_err(
         self,
         build_err: impl FnOnce(OutputChain<E>),
@@ -534,8 +530,9 @@ where
     /// This function returns a chain that will be activated if the result was
     /// [`Some`] so you can continue building your response to the [`Some`] case.
     ///
-    /// You should make sure to `detach` the chain inside this builder or else it
-    /// will be disposed on the first flush, even if a [`None`] value arrives.
+    /// You should make sure to [`detach`](Chain::detach) the chain inside this
+    /// builder or else it will be disposed during the first flush, even if a
+    /// [`None`] value arrives.
     pub fn branch_for_none(
         self,
         build_none: impl FnOnce(OutputChain<()>),
