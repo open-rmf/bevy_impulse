@@ -370,7 +370,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         ));
 
         targets.0.into_iter().map(
-            |target| builder(OutputChain::new(source, target.unwrap_active(), self.commands))
+            |target| builder(OutputChain::new(source, target, self.commands))
         ).collect()
     }
 
@@ -410,12 +410,113 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         self.map_async(|r| async { r.await })
     }
 
-    // TODO(@mxgrey): Take a value now to zip it into the chain later. Also
-    // provide a zip_build, or maybe call it pull / pull_zip, which takes a
-    // value AND a builder whose result gets zipped into the chain.
-    // pub fn zip<Value>(self, value: Value) -> Chain<(Response, Value)> {
-    //
-    // }
+    /// "Pull" means that another chain will be activated when the execution of
+    /// the current chain delivers the response for this link.
+    ///
+    /// `pull_one` lets you build one chain that will be activated when the
+    /// current link in the chain receives its response. The builder function
+    /// must be self-contained, so you are advised to use [`Chain::detach`] when
+    /// you are finished building it.
+    ///
+    /// The return value of `pull_one` will be the original chain that was being
+    /// built.
+    ///
+    /// * `value` - an initial value to provide for the pulled chain that will
+    /// be triggered by the pull.
+    /// * `builder` - a function that builds the pulled chain.
+    pub fn pull_one<InitialValue>(
+        self,
+        value: InitialValue,
+        builder: impl FnOnce(OutputChain<InitialValue>)
+    ) -> OutputChain<'w, 's, 'a, Response>
+    where
+        InitialValue: 'static + Send + Sync
+    {
+        Chain::<'w, 's, '_, Response, (), ModifiersClosed>::new(
+            self.source, self.target, self.commands,
+        ).pull_one_zip(value, builder).0.resume(self.commands)
+    }
+
+    /// "Pull" means that another chain will be activated when the execution of
+    /// the current chain delivers the response for this link.
+    ///
+    /// `pull_one_zip` is the same as [`Chain::pull_one`] except that the output
+    /// of the builder function will be zipped with a [`Dangling`] of the original
+    /// chain and provided as the return value of this function.
+    ///
+    /// * `value` - an initial value to provide for the pulled chain that will
+    /// be triggered by the pull.
+    /// * `builder` - a function that builds the pulled chain.
+    pub fn pull_one_zip<InitialValue, U>(
+        self,
+        value: InitialValue,
+        builder: impl FnOnce(OutputChain<InitialValue>) -> U,
+    ) -> (Dangling<Response>, U)
+    where
+        InitialValue: 'static + Send + Sync,
+    {
+        self
+        .pull_zip(
+            (value,),
+            (
+                |chain: OutputChain<Response>| chain.dangle(),
+                builder
+            )
+        )
+    }
+
+    /// "Pull" means that other chains will be activated when the execution of
+    /// the current chain delivers the response for this link.
+    ///
+    /// `pull_zip` takes in a tuple of initial values and a tuple of builders.
+    /// The tuple of builders needs to have one more element on the front, which
+    /// continues building the original chain.
+    ///
+    /// * `values` - a tuple `(a, b, c, ...)`` of initial values to provide to
+    /// the new chains that are being built.
+    ///
+    /// * `builder` - a tuple of functions `(f, f_a, f_b, f_c, ...)` whose first
+    /// element continues building the original chain that `pull_zip` is being
+    /// called on, and the remaining elements build each element of the `values`
+    /// tuple.
+    ///
+    /// ```
+    /// use bevy::prelude::{World, Commands, CommandQueue};
+    /// use bevy_services::{*, samples::*};
+    ///
+    /// let world = World::new();
+    /// let mut command_queue = CommandQueue::default();
+    /// let mut commands = Commands::new(&mut command_queue, &world);
+    ///
+    /// let promise = commands
+    ///     .request("thanks".to_owned(), to_uppercase.into_blocking_map())
+    ///     .pull_zip(
+    ///         (-2.0, [0xF0, 0x9F, 0x90, 0x9F]),
+    ///         (
+    ///             |chain: OutputChain<String>| chain.dangle(),
+    ///             |chain: OutputChain<f64>| chain.map_block(double).map_block(negative).dangle(),
+    ///             |chain: OutputChain<[u8; 4]>| chain.map_block(string_from_utf8).dangle(),
+    ///         )
+    ///     )
+    ///     .join()
+    ///     .bundle()
+    ///     .map_block(|string_bundle| string_bundle.join(" "))
+    ///     .take();
+    /// ```
+    pub fn pull_zip<InitialValues, Builders>(
+        self,
+        values: InitialValues,
+        builders: Builders,
+    ) -> Builders::Output
+    where
+        InitialValues: Unzippable + 'static + Send + Sync,
+        InitialValues::Prepended<Response>: 'static + Send + Sync,
+        Builders: UnzipBuilder<InitialValues::Prepended<Response>>,
+    {
+        self
+        .map_block(move |r| values.prepend(r))
+        .unzip_build(builders)
+    }
 
     /// Add a [no-op][1] to the current end of the chain.
     ///
@@ -454,7 +555,7 @@ where
     pub fn branch_for_err(
         self,
         build_err: impl FnOnce(OutputChain<E>),
-    ) -> Chain<'w, 's, 'a, T, (), ModifiersClosed> {
+    ) -> OutputChain<'w, 's, 'a, T> {
         Chain::<'w, 's, '_, Result<T, E>, Streams, M>::new(
             self.source, self.target, self.commands,
         ).branch_result_zip(
@@ -536,7 +637,7 @@ where
     pub fn branch_for_none(
         self,
         build_none: impl FnOnce(OutputChain<()>),
-    ) -> Chain<'w, 's, 'a, T, (), ModifiersClosed> {
+    ) -> OutputChain<'w, 's, 'a, T> {
         Chain::<'w, 's, '_, Option<T>, Streams, M>::new(
             self.source, self.target, self.commands,
         ).branch_option_zip(

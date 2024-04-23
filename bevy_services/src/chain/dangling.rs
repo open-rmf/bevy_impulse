@@ -66,16 +66,31 @@ pub trait ZippedChains {
     /// builder will be provided with a chain that will get triggered if its
     /// element won the race.
     ///
-    /// Any elements who lost the race will get their chain canceled. That
+    /// Any elements who lost the race will get their chain cancelled. That
     /// cancellation will cascade both up the dependency chain as well as down
-    /// the dependent chain. Use the detach and sever methods of [`Chain`] to
-    /// control the cascading according to your needs.
+    /// the dependent chain. Use the [`Chain::detach`] and [`Chain::dispose_on_cancel`]
+    /// methods of [`Chain`] to control the cascading according to your needs.
+    /// If a chain lost the race because it was disposed then the dependent chain
+    /// will also be disposed instead of cancelled.
     ///
     /// This function will return the zipped outputs of all the builder functions.
-    fn race<'w, 's, 'a, Builders: RaceBuilders<'w, 's, Self>>(
+    fn race<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
         commands: &'a mut Commands<'w, 's>,
-        builders: Builders
+        builders: Builders,
+    ) -> Builders::Output
+    where
+        Self: Sized;
+
+    /// Build the zipped chains, with a different builder for each chain.
+    ///
+    /// There will be no dependency or synchronization added between any of the
+    /// chains by using this function; it's simply an ergonomic way to continue
+    /// building chains after they have been zipped together.
+    fn build<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+        self,
+        commands: &'a mut Commands<'w, 's>,
+        builders: Builders,
     ) -> Builders::Output
     where
         Self: Sized;
@@ -98,7 +113,7 @@ where
         Chain::new(source, target, commands)
     }
 
-    fn race<'w, 's, 'a, Builders: RaceBuilders<'w, 's, Self>>(
+    fn race<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
         commands: &'a mut Commands<'w, 's>,
         builders: Builders
@@ -106,19 +121,32 @@ where
     where
         Self: Sized
     {
-        builders.apply_race_builders(self, commands)
+        // FIXME TODO(@mxgrey): Actually implement something here. This is just
+        // a placeholder to test the API for now.
+        builders.apply_zipped_builders(self, commands)
+    }
+
+    fn build<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+        self,
+        commands: &'a mut Commands<'w, 's>,
+        builders: Builders,
+    ) -> Builders::Output
+    where
+        Self: Sized
+    {
+        builders.apply_zipped_builders(self, commands)
     }
 }
 
 /// This trait determines what kinds of constructs are able to able to be used
 /// by the [`ZippedChains`] trait to handle the outcome of a race between elements
 /// in a zipped chain.
-pub trait RaceBuilders<'w, 's, Z> {
+pub trait ZippedBuilders<'w, 's, Z> {
     type Output;
-    fn apply_race_builders<'a>(self, zip: Z, commands: &'a mut Commands<'w, 's>) -> Self::Output;
+    fn apply_zipped_builders<'a>(self, zip: Z, commands: &'a mut Commands<'w, 's>) -> Self::Output;
 }
 
-impl<'w, 's, A, StreamsA, Fa, Ua, B, StreamsB, Fb, Ub> RaceBuilders<'w, 's, (Dangling<A, StreamsA>, Dangling<B, StreamsB>)> for (Fa, Fb)
+impl<'w, 's, A, StreamsA, Fa, Ua, B, StreamsB, Fb, Ub> ZippedBuilders<'w, 's, (Dangling<A, StreamsA>, Dangling<B, StreamsB>)> for (Fa, Fb)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
@@ -126,7 +154,7 @@ where
     Fb: FnOnce(OutputChain<'w, 's, '_, B>) -> Ub,
 {
     type Output = (Ua, Ub);
-    fn apply_race_builders<'a>(
+    fn apply_zipped_builders<'a>(
         self,
         (dangle_a, dangle_b): (Dangling<A, StreamsA>, Dangling<B, StreamsB>),
         commands: &'a mut Commands<'w, 's>

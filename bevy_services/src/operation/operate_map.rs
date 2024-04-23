@@ -87,7 +87,7 @@ where
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.0;
+        let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.take();
         let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().ok_or(())?.f;
         let mut target_mut = world.get_entity_mut(target).ok_or(())?;
 
@@ -158,7 +158,7 @@ where
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.0;
+        let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.take();
         let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().ok_or(())?.f;
 
         let channel = InnerChannel::new(source, sender);

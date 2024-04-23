@@ -84,7 +84,7 @@ impl<'a> HandleRequest<'a> {
             return None;
         };
 
-        source_mut.take::<InputStorage<Request>>().map(|s| s.0)
+        source_mut.take::<InputStorage<Request>>().map(|s| s.take())
     }
 
     fn give_response<Response: 'static + Send + Sync>(&mut self, response: Response) {

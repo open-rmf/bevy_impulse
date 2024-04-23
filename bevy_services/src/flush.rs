@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    Cancel, DroppedPromiseQueue, UnusedTarget,
+    Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage,
     operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
     propagate_dependency_loss_upwards,
 };
@@ -90,7 +90,7 @@ pub fn flush_services(
         SystemState::new(world);
     let mut unused_targets: SmallVec<[_; 8]> = unused_targets_state.get(world).iter().collect();
     for target in unused_targets.drain(..) {
-        propagate_dependency_loss_upwards(Cancel::unused_target(target), world, &mut roster)
+        roster.drop_dependency(Cancel::unused_target(target));
     }
 
     unused_targets.extend(
@@ -100,16 +100,24 @@ pub fn flush_services(
             .try_iter()
     );
     for target in unused_targets.drain(..) {
-        propagate_dependency_loss_upwards(Cancel::dropped(target), world, &mut roster)
+        roster.drop_dependency(Cancel::dropped(target))
     }
 
     while !roster.is_empty() {
+        while let Some(source) = roster.drop_dependency.pop() {
+            propagate_dependency_loss_upwards(source, world, &mut roster)
+        }
+
         while let Some(e) = roster.cancel.pop_front() {
             cancel_from_link(e, world, &mut roster);
         }
 
         for e in roster.dispose.drain(..) {
             dispose_link(e, world);
+        }
+
+        for e in roster.dispose_chain.drain(..) {
+            dispose_chain(e, world);
         }
 
         while let Some(unblock) = roster.unblock.pop_front() {
@@ -123,8 +131,18 @@ pub fn flush_services(
     }
 }
 
+fn dispose_chain(source: Entity, world: &mut World) {
+
+}
+
 /// Dispose a link in the chain that is no longer needed.
 fn dispose_link(source: Entity, world: &mut World) {
     dispose_cancellation_chain(source, world);
+
+    if let Some(funnel_sources) = world.get::<FunnelSourceStorage>(source) {
+        for e in funnel_sources.0.clone() {
+            world.despawn(e);
+        }
+    }
     world.despawn(source);
 }

@@ -48,7 +48,7 @@ use std::collections::VecDeque;
 pub(crate) struct InputReady;
 
 #[derive(Component)]
-pub(crate) struct InputStorage<Input>(pub(crate) Input);
+pub(crate) struct InputStorage<Input>(Input);
 
 impl<Input> InputStorage<Input> {
     pub(crate) fn take(self) -> Input {

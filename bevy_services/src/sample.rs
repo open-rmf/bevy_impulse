@@ -15,8 +15,38 @@
  *
 */
 
+pub fn double(value: f64) -> f64 {
+    2.0*value
+}
+
+pub fn opposite(value: f64) -> f64 {
+    -value
+}
+
 pub fn add((a, b): (f64, f64)) -> f64 {
     a + b
+}
+
+pub fn sum<Values: IntoIterator<Item = f64>>(values: Values) -> f64 {
+    values.into_iter().fold(0.0, |a, b| a + b)
+}
+
+pub fn repeat_string((times, value): (usize, String)) -> String {
+    value.repeat(times)
+}
+
+pub fn concat<Values: IntoIterator<Item = String>>(values: Values) -> String {
+    values.into_iter().fold(String::new(), |b, s| b + &s)
+}
+
+pub fn string_from_utf8<Values: IntoIterator<Item = u8>>(
+    values: Values
+) -> Result<String, std::string::FromUtf8Error> {
+    String::from_utf8(values.into_iter().collect())
+}
+
+pub fn to_uppercase(value: String) -> String {
+    value.to_uppercase()
 }
 
 pub struct WaitRequest<Value> {

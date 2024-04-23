@@ -157,9 +157,10 @@ where
         };
 
         let mut cmd = ServiceRequest { provider, source, target, world, roster };
-        let Some(InputStorage(request)) = cmd.from_source::<InputStorage<Request>>() else {
+        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
             return;
         };
+        let request = request.take();
 
         let ServiceRequest { provider, source, target: _, world, roster } = cmd;
 
@@ -266,11 +267,12 @@ where
             continue;
         };
 
-        let Some(InputStorage(request)) = source_mut.take::<InputStorage<Request>>() else {
+        let Some(request) = source_mut.take::<InputStorage<Request>>() else {
             roster.cancel(Cancel::broken(source));
             unblock = next_blocking;
             continue;
         };
+        let request = request.take();
 
         let mut service = world.get_entity_mut(provider)
             .unwrap()

@@ -56,6 +56,9 @@ pub(crate) use operate_map::*;
 mod operate_service;
 pub(crate) use operate_service::*;
 
+mod race;
+pub(crate) use race::*;
+
 mod terminate;
 pub(crate) use terminate::*;
 
@@ -63,11 +66,84 @@ pub(crate) use terminate::*;
 #[derive(Component, Clone, Copy)]
 pub(crate) struct SingleSourceStorage(pub(crate) Entity);
 
+/// Keep track of the status of one input into a funnel (e.g. `join` or `race`)
+#[derive(Component, Debug, Clone)]
+pub enum FunnelInputStatus {
+    /// The input is ready to be consumed
+    Ready,
+    /// The input is not ready yet but might be ready later
+    Pending,
+    /// The input has been cancelled so it will never be ready
+    Cancelled(Arc<CancellationCause>),
+    /// The input has been disposed so it will never be ready
+    Disposed,
+    /// The input could not be delivered and this fact has been handled.
+    Closed,
+}
+
+impl FunnelInputStatus {
+    fn ready(&mut self) {
+        if self.is_closed() {
+            return;
+        }
+        *self = Self::Ready;
+    }
+
+    fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    fn cancel(&mut self, cause: Arc<CancellationCause>) {
+        if self.is_closed() {
+            return;
+        }
+        *self = Self::Cancelled(cause);
+    }
+
+    fn cancelled(&self) -> Option<Arc<CancellationCause>> {
+        match self {
+            Self::Cancelled(cause) => Some(Arc::clone(cause)),
+            _ => None,
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled(_))
+    }
+
+    fn dispose(&mut self) {
+        if self.is_closed() {
+            return;
+        }
+        *self = Self::Disposed;
+    }
+
+    fn is_disposed(&self) -> bool {
+        matches!(self, Self::Disposed)
+    }
+
+    fn undeliverable(&self) -> bool {
+        self.is_cancelled() || self.is_disposed()
+    }
+
+    fn close(&mut self) {
+        *self = Self::Closed;
+    }
+
+    fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
+}
+
 /// Keep track of the sources that funnel into this link of the service chain.
 /// This is for links that draw from multiple sources simultaneously, such as
 /// join and race.
 #[derive(Component, Clone)]
-pub(crate) struct FunnelSourceStorage(pub(crate) SmallVec<[Entity; 8]>);
+pub struct FunnelSourceStorage(pub SmallVec<[Entity; 8]>);
 
 /// Keep track of the target for a link in a service chain
 #[derive(Component, Clone, Copy)]
@@ -75,29 +151,43 @@ pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 
 /// Keep track of the targets for a fork in a service chain
 #[derive(Component, Clone)]
-pub struct ForkTargetStorage(pub(crate) SmallVec<[TargetCandidate; 8]>);
+pub struct ForkTargetStorage(pub SmallVec<[Entity; 8]>);
 
-#[derive(Clone)]
-pub enum TargetCandidate {
-    Active(Entity),
-    Cancelled(Arc<CancellationCause>),
+#[derive(Component)]
+pub enum ForkTargetStatus {
+    /// The target is able to receive an input
+    Active,
+    /// The target has been dropped and is no longer needed
+    Dropped(Arc<CancellationCause>),
+    /// The target has been dropped and this fact has been processed
+    Closed,
 }
 
-impl TargetCandidate {
-    pub(crate) fn unwrap_active(&self) -> Entity {
+impl ForkTargetStatus {
+    pub fn active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn dropped(&self) -> Option<Arc<CancellationCause>> {
         match self {
-            Self::Active(entity) => *entity,
-            Self::Cancelled(_) => {
-                panic!("Unwrapped a TargetCandidate that was cancelled.");
-            }
+            Self::Dropped(cause) => Some(Arc::clone(cause)),
+            _ => None,
         }
     }
 
-    pub fn active(&self) -> Option<Entity> {
-        match self {
-            Self::Active(entity) => Some(*entity),
-            Self::Cancelled(_) => None,
+    pub fn drop_dependency(&mut self, cause: Arc<CancellationCause>) {
+        if self.closed() {
+            return;
         }
+        *self = Self::Dropped(cause);
+    }
+
+    pub fn closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
+
+    pub fn close(&mut self) {
+        *self = Self::Closed;
     }
 }
 
@@ -107,9 +197,7 @@ impl ForkTargetStorage {
     }
 
     pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
-        Self(SmallVec::from_iter(
-            iter.into_iter().map(|e| TargetCandidate::Active(e))
-        ))
+        Self(SmallVec::from_iter(iter))
     }
 }
 
@@ -124,9 +212,7 @@ impl<'w, 's> NextServiceLink<'w, 's> {
         if let Ok(target) = self.single_target.get(entity) {
             return NextServiceLinkIter::Target(Some(target.0));
         } else if let Ok(fork) = self.fork_targets.get(entity) {
-            return NextServiceLinkIter::Fork(SmallVec::from_iter(
-                fork.0.iter().filter_map(|e| e.active())
-            ));
+            return NextServiceLinkIter::Fork(fork.0.clone());
         }
 
         return NextServiceLinkIter::Target(None);
@@ -166,6 +252,10 @@ pub struct OperationRoster {
     pub(crate) unblock: VecDeque<BlockingQueue>,
     /// Remove these entities as they are no longer needed
     pub(crate) dispose: Vec<Entity>,
+    /// Remove the whole chain from this point on because it is no longer needed
+    pub(crate) dispose_chain: Vec<Entity>,
+    /// Indicate that there is no longer a need for this chain
+    pub(crate) drop_dependency: Vec<Cancel>,
 }
 
 impl OperationRoster {
@@ -189,6 +279,14 @@ impl OperationRoster {
         self.dispose.push(entity);
     }
 
+    pub fn dispose_chain(&mut self, entity: Entity) {
+        self.dispose_chain.push(entity);
+    }
+
+    pub fn drop_dependency(&mut self, source: Cancel) {
+        self.drop_dependency.push(source);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.operate.is_empty() && self.cancel.is_empty()
         && self.unblock.is_empty() && self.dispose.is_empty()
@@ -207,8 +305,8 @@ pub(crate) struct BlockingQueue {
     pub(crate) serve_next: fn(BlockingQueue, &mut World, &mut OperationRoster),
 }
 
-
-pub(crate) enum OperationStatus {
+#[derive(PartialEq, Eq)]
+pub enum OperationStatus {
     /// The source entity is no longer needed so it should be despawned.
     Finished,
     /// Do not despawn the source entity of this operation yet because it will

@@ -52,7 +52,7 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
     ) -> Result<crate::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        let value = source_mut.take::<InputStorage<T>>().ok_or(())?.0;
+        let value = source_mut.take::<InputStorage<T>>().ok_or(())?.take();
         let mut target_mut = world.get_entity_mut(target).ok_or(())?;
         target_mut.insert(InputBundle::new(value));
         roster.queue(target);

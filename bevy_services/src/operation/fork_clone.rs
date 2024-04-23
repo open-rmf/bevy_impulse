@@ -19,8 +19,13 @@ use bevy::prelude::{Entity, World};
 
 use crate::{
     InputStorage, InputBundle, Operation, OperationStatus, OperationRoster,
-    ForkTargetStorage, SingleSourceStorage, Cancel,
+    ForkTargetStorage, ForkTargetStatus, SingleSourceStorage, Cancel,
+    CancellationCause,
 };
+
+use smallvec::SmallVec;
+
+use std::sync::Arc;
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
     targets: ForkTargetStorage,
@@ -39,9 +44,12 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         entity: Entity,
         world: &mut World,
     ) {
-        for target in self.targets.0.iter().filter_map(|e| e.active()) {
-            if let Some(mut target_mut) = world.get_entity_mut(target) {
-                target_mut.insert(SingleSourceStorage(entity));
+        for target in &self.targets.0 {
+            if let Some(mut target_mut) = world.get_entity_mut(*target) {
+                target_mut.insert((
+                    SingleSourceStorage(entity),
+                    ForkTargetStatus::Active,
+                ));
             }
         }
         world.entity_mut(entity).insert(self.targets);
@@ -53,11 +61,15 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let InputStorage::<T>(input) = source_mut.take().ok_or(())?;
+        let Some(input) = source_mut.take::<InputStorage<T>>() else {
+            return inspect_fork_targets(source, world, roster);
+        };
+        let input = input.take();
         let ForkTargetStorage(targets) = source_mut.take().ok_or(())?;
 
         let mut send_value = |value: T, target: Entity| {
             if let Some(mut target_mut) = world.get_entity_mut(target) {
+
                 target_mut.insert(InputBundle::new(value));
                 roster.queue(target);
             } else {
@@ -69,14 +81,48 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         // that we are not producing any more clones of the input than what is
         // strictly necessary. This may be valuable if cloning the value is
         // expensive.
-        for target in targets[..targets.len()-1].iter().filter_map(|e| e.active()) {
-            send_value(input.clone(), target);
+        for target in targets[..targets.len()-1].iter() {
+            send_value(input.clone(), *target);
         }
 
-        if let Some(last_target) = targets.last().map(|e| e.active()).flatten() {
-            send_value(input, last_target);
+        if let Some(last_target) = targets.last() {
+            send_value(input, *last_target);
         }
 
         Ok(OperationStatus::Finished)
     }
+}
+
+pub fn inspect_fork_targets(
+    source: Entity,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) -> Result<OperationStatus, ()> {
+    let ForkTargetStorage(targets) = world.get(source).ok_or(())?;
+
+    let mut cancel_fork = true;
+    let mut cancelled: SmallVec<[Arc<CancellationCause>; 16]> = SmallVec::new();
+    for target in targets {
+        let status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
+        match status {
+            ForkTargetStatus::Active => {
+                cancel_fork = false;
+                break;
+            }
+            ForkTargetStatus::Dropped(cause) => {
+                cancelled.push(Arc::clone(&cause));
+            }
+            ForkTargetStatus::Closed => {
+                unreachable!("Regular forks are not supposed to close the target status");
+            }
+        }
+    }
+
+    if cancel_fork {
+        // After we drop the dependency, this chain will be cleaned up as it
+        // gets cancelled.
+        roster.drop_dependency(Cancel::fork(source, cancelled));
+    }
+
+    Ok(OperationStatus::Disregard)
 }

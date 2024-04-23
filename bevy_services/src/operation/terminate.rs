@@ -75,7 +75,7 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         if let Some(sender) = source_mut.take::<SenderStorage<T>>() {
-            let InputStorage(input) = source_mut.take::<InputStorage<T>>().ok_or(())?;
+            let input = source_mut.take::<InputStorage<T>>().ok_or(())?.take();
             sender.0.send(input).ok();
         }
 

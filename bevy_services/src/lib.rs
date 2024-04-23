@@ -54,8 +54,7 @@ pub use service::*;
 pub mod stream;
 pub use stream::*;
 
-#[cfg(test)]
-pub(crate) mod sample;
+pub mod sample;
 
 pub(crate) mod private;
 

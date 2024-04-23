@@ -18,19 +18,17 @@
 use bevy::prelude::{Entity, World};
 
 use crate::{
-    ForkTargetStorage, Operation, Unzippable, SingleSourceStorage, InputStorage, InputBundle,
-    OperationStatus,
+    ForkTargetStorage, Operation, Unzippable, SingleSourceStorage, InputStorage,
+    OperationStatus, ForkTargetStatus, inspect_fork_targets,
 };
 
-use smallvec::SmallVec;
-
 pub(crate) struct ForkUnzip<T> {
-    targets: SmallVec<[Entity; 8]>,
+    targets: ForkTargetStorage,
     _ignore: std::marker::PhantomData<T>,
 }
 
 impl<T> ForkUnzip<T> {
-    pub(crate) fn new(targets: SmallVec<[Entity; 8]>) -> Self {
+    pub(crate) fn new(targets: ForkTargetStorage) -> Self {
         Self { targets, _ignore: Default::default() }
     }
 }
@@ -41,12 +39,15 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
         entity: Entity,
         world: &mut World,
     ) {
-        for target in &self.targets {
+        for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert(SingleSourceStorage(entity));
+                target_mut.insert((
+                    SingleSourceStorage(entity),
+                    ForkTargetStatus::Active,
+                ));
             }
         }
-        world.entity_mut(entity).insert(ForkTargetStorage::from_iter(self.targets));
+        world.entity_mut(entity).insert(self.targets);
     }
 
     fn execute(
@@ -55,9 +56,11 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
         roster: &mut crate::OperationRoster,
     ) -> Result<crate::OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let values = source_mut.take::<InputStorage<T>>().ok_or(())?.0;
+        let Some(values) = source_mut.take::<InputStorage<T>>() else {
+            return inspect_fork_targets(source, world, roster);
+        };
+        let values = values.take();
         let targets = source_mut.take::<ForkTargetStorage>().ok_or(())?;
-        values.distribute_values(&targets, world, roster);
-        Ok(OperationStatus::Finished)
+        values.distribute_values(&targets, world, roster)
     }
 }

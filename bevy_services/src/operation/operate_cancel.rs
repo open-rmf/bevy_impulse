@@ -23,9 +23,9 @@ use bevy::{
 use smallvec::SmallVec;
 
 use crate::{
-    SingleTargetStorage, ForkTargetStorage, Cancelled, Operation, InputBundle,
+    SingleTargetStorage, Cancelled, Operation, InputBundle,
     OperationStatus, OperationRoster, NextServiceLink, Cancel, CancellationCause,
-    Cancellation,
+    Cancellation, FunnelInputStatus,
 };
 
 use std::sync::Arc;
@@ -121,21 +121,28 @@ pub(crate) fn propagate_dependency_loss_upwards(
     world: &mut World,
     roster: &mut OperationRoster
 ) {
+    let mut target_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
+    target_queue.push(target);
 
+    while let Some(Cancel { apply_to: target, cause }) = target_queue.pop() {
+
+    }
 }
 
 /// Cancel a request from this link in a service chain downwards. This will
 /// trigger any on_cancel reactions that are associated with the canceled link
 /// in the chain and all other links in the chain that come after it.
 pub(crate) fn cancel_from_link(
-    source: Cancel,
+    initial_source: Cancel,
     world: &mut World,
-    roster: &mut OperationRoster
+    roster: &mut OperationRoster,
 ) {
-    let mut source_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
-    source_queue.push(source);
+    let mut downstream_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
+    downstream_queue.push(initial_source);
 
-    while let Some(Cancel { apply_to: source, cause }) = source_queue.pop() {
+    let mut modify_funnel_input_status: SmallVec<[Cancel; 16]> = SmallVec::new();
+
+    while let Some(Cancel { apply_to: source, cause }) = downstream_queue.pop() {
         if let Some(cancel_target) = get_cancel_target(source, world) {
             if let Some(mut cancel_target_mut) = world.get_entity_mut(cancel_target) {
                 cancel_target_mut.insert(CancellationCauseStorage(Arc::clone(&cause)));
@@ -145,12 +152,41 @@ pub(crate) fn cancel_from_link(
             }
         }
 
-        let mut next_link_state: SystemState<NextServiceLink> = SystemState::new(world);
-        let next_link = next_link_state.get(world);
-        for next in next_link.iter(source) {
-            source_queue.push(Cancel { apply_to: next, cause: Arc::clone(&cause) });
+        let mut state: SystemState<(
+            NextServiceLink,
+            Query<&FunnelInputStatus>
+        )> = SystemState::new(world);
+        let (next_link, funnel_input) = state.get(world);
+
+        if let Ok(funnel_input) = funnel_input.get(source) {
+            modify_funnel_input_status.push(Cancel { apply_to: source, cause: Arc::clone(&cause) });
+        } else {
+            for next in next_link.iter(source) {
+                downstream_queue.push(Cancel { apply_to: next, cause: Arc::clone(&cause) });
+            }
+            world.despawn(source);
         }
-        world.despawn(source);
+    }
+
+    // For any cancelled sources that are funnel inputs, we should change their
+    // status and then alert their target to evaluate.
+    for Cancel { apply_to, cause } in modify_funnel_input_status {
+        let Some(mut input_mut) = world.get_entity_mut(apply_to) else {
+            continue;
+        };
+
+        if let Some(mut status) = input_mut.get_mut::<FunnelInputStatus>() {
+            *status = FunnelInputStatus::Cancelled(cause);
+
+            if let Some(target) = input_mut.get::<SingleTargetStorage>() {
+                // Wake up the funnel to process this change in status
+                roster.queue(target.0);
+            } else {
+                world.despawn(apply_to);
+            }
+        } else {
+            world.despawn(apply_to);
+        }
     }
 }
 

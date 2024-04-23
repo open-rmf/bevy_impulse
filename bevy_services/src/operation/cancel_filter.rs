@@ -81,7 +81,7 @@ where
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let input = source_mut.take::<InputStorage<Input>>().ok_or(())?.0;
+        let input = source_mut.take::<InputStorage<Input>>().ok_or(())?.take();
         let target = source_mut.take::<SingleTargetStorage>().ok_or(())?.0;
         let CancelFilterStorage::<F>(filter) = source_mut.take().ok_or(())?;
 

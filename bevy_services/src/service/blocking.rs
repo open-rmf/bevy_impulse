@@ -77,9 +77,10 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
     type Request = Request;
     type Response = Response;
     fn serve(mut cmd: ServiceRequest) {
-        let Some(InputStorage(request)) = cmd.from_source::<InputStorage<Request>>() else {
+        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
             return;
         };
+        let request = request.take();
 
         let ServiceRequest { provider, source, target, world, roster } = cmd;
 

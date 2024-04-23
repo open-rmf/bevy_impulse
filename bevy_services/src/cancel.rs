@@ -19,6 +19,8 @@ use bevy::prelude::Entity;
 
 use std::sync::Arc;
 
+use crate::FunnelInputStatus;
+
 /// Response type that gets sent when a cancellation occurs.
 #[derive(Debug)]
 pub struct Cancelled<Signal> {
@@ -91,6 +93,9 @@ pub enum CancellationCause {
     /// Note that if all of the inputs for a race are disposed instead of
     /// cancelled, then the race will be disposed and not cancelled.
     RaceCancelled(RaceCancelled),
+
+    /// The chain lost a race so it is being cancelled.
+    RaceLost(RaceLost),
 }
 
 #[derive(Debug)]
@@ -121,15 +126,8 @@ pub struct ForkCancelled {
 pub struct JoinCancelled {
     /// The source link of the join
     pub join: Entity,
-    /// The inputs of the join which were delivered
-    pub delivered: Vec<Entity>,
-    /// The inputs of the join which were waiting for a delivery (not delivered,
-    /// not cancelled, and not disposed)
-    pub pending: Vec<Entity>,
-    /// THe inputs of the join which were disposed
-    pub disposals: Vec<Entity>,
-    /// The inputs of the join which were cancelled
-    pub cancellations: Vec<Arc<CancellationCause>>,
+    /// The statuses for the inputs of the join.
+    pub input_statuses: Vec<(Entity, FunnelInputStatus)>,
 }
 
 impl From<JoinCancelled> for CancellationCause {
@@ -143,15 +141,30 @@ impl From<JoinCancelled> for CancellationCause {
 pub struct RaceCancelled {
     /// The source link of the race
     pub race: Entity,
-    /// The inputs of the race that were disposed
-    pub disposals: Vec<Entity>,
-    /// The inputs of the race that were cancelled
-    pub cancellations: Vec<Arc<CancellationCause>>,
+    /// The statuses of the inputs for this race.
+    pub input_statuses: Vec<(Entity, FunnelInputStatus)>,
 }
 
 impl From<RaceCancelled> for CancellationCause {
     fn from(value: RaceCancelled) -> Self {
         CancellationCause::RaceCancelled(value)
+    }
+}
+
+/// A description of the input status while losing a race.
+#[derive(Debug, Clone)]
+pub struct RaceLost {
+    /// The source link of the race.
+    pub race: Entity,
+    /// The input entity for the race.
+    pub input: Entity,
+    /// The status of the losing input entity.
+    pub status: FunnelInputStatus,
+}
+
+impl From<RaceLost> for CancellationCause {
+    fn from(value: RaceLost) -> Self {
+        CancellationCause::RaceLost(value)
     }
 }
 
@@ -193,7 +206,14 @@ impl Cancel {
         Self::new(target, CancellationCause::TargetDropped(target))
     }
 
+    /// Create a filtered cancel operation
     pub fn filtered(source: Entity) -> Self {
         Self::new(source, CancellationCause::Filtered(source))
+    }
+
+    pub fn fork(source: Entity, cancelled: impl IntoIterator<Item=Arc<CancellationCause>>) -> Self {
+        Self::new(source, CancellationCause::ForkCancelled(
+            ForkCancelled { fork: source, cancelled: cancelled.into_iter().collect() }
+        ))
     }
 }
