@@ -30,6 +30,12 @@ pub(crate) struct RaceInput<T> {
     _ignore: std::marker::PhantomData<T>,
 }
 
+impl<T> RaceInput<T> {
+    pub(crate) fn new(target: Entity) -> Self {
+        Self { target, _ignore: Default::default() }
+    }
+}
+
 impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
     fn set_parameters(
         self,
@@ -68,6 +74,15 @@ pub(crate) struct ZipRace<Values> {
     _ignore: std::marker::PhantomData<Values>,
 }
 
+impl<Values> ZipRace<Values> {
+    pub(crate) fn new(
+        sources: FunnelSourceStorage,
+        targets: ForkTargetStorage
+    ) -> Self {
+        Self { sources, targets, _ignore: Default::default() }
+    }
+}
+
 impl<Values: Unzippable> Operation for ZipRace<Values> {
     fn set_parameters(
         self,
@@ -102,6 +117,15 @@ pub(crate) struct BundleRace<T> {
     sources: FunnelSourceStorage,
     target: Entity,
     _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> BundleRace<T> {
+    pub(crate) fn new(
+        sources: FunnelSourceStorage,
+        target: Entity,
+    ) -> Self {
+        Self { sources, target, _ignore: Default::default() }
+    }
 }
 
 impl<T: 'static + Send + Sync> Operation for BundleRace<T> {

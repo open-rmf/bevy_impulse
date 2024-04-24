@@ -15,7 +15,11 @@
  *
 */
 
-use crate::{Chain, OutputChain, ModifiersClosed, ModifiersUnset, UnusedTarget};
+use crate::{
+    Chain, OutputChain, ModifiersClosed, ModifiersUnset, UnusedTarget,
+    FunnelSourceStorage, RaceInput, ZipRace, BundleRace, JoinInput, ZipJoin,
+    BundleJoin, PerformOperation, ForkTargetStorage,
+};
 
 use bevy::prelude::{Entity, Commands};
 
@@ -106,11 +110,22 @@ where
         self,
         commands: &'a mut Commands<'w, 's>
     ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse> {
-        // FIXME TODO(@mxgrey): Actually implement something here. This is just
-        // a placeholder to test the API for now.
-        let source = commands.spawn(()).id();
+        let input_a = self.0.target;
+        let input_b = self.1.target;
+        let joiner = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        Chain::new(source, target, commands)
+
+        commands.add(PerformOperation::new(input_a, JoinInput::<A>::new(joiner)));
+        commands.add(PerformOperation::new(input_b, JoinInput::<B>::new(joiner)));
+        commands.add(PerformOperation::new(
+            joiner,
+            ZipJoin::<Self::JoinedResponse>::new(
+                FunnelSourceStorage::from_iter([input_a, input_b]),
+                target,
+            )
+        ));
+
+        Chain::new(joiner, target, commands)
     }
 
     fn race<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
@@ -121,9 +136,29 @@ where
     where
         Self: Sized
     {
-        // FIXME TODO(@mxgrey): Actually implement something here. This is just
-        // a placeholder to test the API for now.
-        builders.apply_zipped_builders(self, commands)
+        let input_a = self.0.target;
+        let input_b = self.1.target;
+        let racer = commands.spawn(()).id();
+        let target_a = commands.spawn(UnusedTarget).id();
+        let target_b = commands.spawn(UnusedTarget).id();
+
+        commands.add(PerformOperation::new(input_a, RaceInput::<A>::new(racer)));
+        commands.add(PerformOperation::new(input_b, RaceInput::<B>::new(racer)));
+        commands.add(PerformOperation::new(
+            racer,
+            ZipRace::<Self::JoinedResponse>::new(
+                FunnelSourceStorage::from_iter([input_a, input_b]),
+                ForkTargetStorage::from_iter([target_a, target_b]),
+            ),
+        ));
+
+        builders.apply_zipped_builders(
+            (
+                Dangling::new(racer, target_a),
+                Dangling::new(racer, target_b),
+            ),
+            commands
+        )
     }
 
     fn build<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
@@ -139,8 +174,8 @@ where
 }
 
 /// This trait determines what kinds of constructs are able to able to be used
-/// by the [`ZippedChains`] trait to handle the outcome of a race between elements
-/// in a zipped chain.
+/// by the [`ZippedChains`] trait to individually build chains that have been
+/// zipped together.
 pub trait ZippedBuilders<'w, 's, Z> {
     type Output;
     fn apply_zipped_builders<'a>(self, zip: Z, commands: &'a mut Commands<'w, 's>) -> Self::Output;
@@ -160,9 +195,6 @@ where
         commands: &'a mut Commands<'w, 's>
     ) -> Self::Output {
         let (f_a, f_b) = self;
-        // FIXME TODO(@mxgrey): Funnel the dangles into a single target and then fan
-        // them out again to their individual handlers. The current implementation
-        // is a temporary short-cut for proof of concept.
         let u_a = (f_a)(Chain::new(dangle_a.source, dangle_a.target, commands));
         let u_b = (f_b)(Chain::new(dangle_b.source, dangle_b.target, commands));
         (u_a, u_b)
@@ -216,22 +248,54 @@ pub trait BundledChains {
 impl<Response, Streams, T> BundledChains for T
 where
     Response: 'static + Send + Sync,
-    T: IntoIterator<Item=Dangling<Response, Streams>>
+    T: IntoIterator<Item=Dangling<Response, Streams>>,
 {
     type Response = Response;
     fn join<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
     ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset> {
-        // FIXME TODO(@mxgrey): Funnel the dangling chains into one target
-        Chain::new(commands.spawn(()).id(), commands.spawn(()).id(), commands)
+        let inputs = FunnelSourceStorage::from_iter(
+            self.into_iter().map(|dangle| dangle.target)
+        );
+        let joiner = commands.spawn(()).id();
+        for input in &inputs.0 {
+            commands.add(PerformOperation::new(
+                *input,
+                JoinInput::<Response>::new(joiner),
+            ));
+        }
+
+        let target = commands.spawn(UnusedTarget).id();
+        commands.add(PerformOperation::new(
+            joiner,
+            BundleJoin::<Response>::new(inputs, target),
+        ));
+
+        Chain::new(joiner, target, commands)
     }
 
     fn race<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
     ) -> Chain<'w, 's, 'a, Self::Response, (), ModifiersUnset> {
-        // FIXME TODO(@mxgrey): Funnal the races into one target
-        Chain::new(commands.spawn(()).id(), commands.spawn(()).id(), commands)
+        let inputs = FunnelSourceStorage::from_iter(
+            self.into_iter().map(|dangle| dangle.target)
+        );
+        let racer = commands.spawn(()).id();
+        for input in &inputs.0 {
+            commands.add(PerformOperation::new(
+                *input,
+                RaceInput::<Response>::new(racer),
+            ));
+        }
+
+        let target = commands.spawn(UnusedTarget).id();
+        commands.add(PerformOperation::new(
+            racer,
+            BundleRace::<Response>::new(inputs, target),
+        ));
+
+        Chain::new(racer, target, commands)
     }
 }

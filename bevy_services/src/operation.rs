@@ -148,6 +148,16 @@ impl FunnelInputStatus {
 #[derive(Component, Clone)]
 pub struct FunnelSourceStorage(pub SmallVec<[Entity; 8]>);
 
+impl FunnelSourceStorage {
+    pub fn new() -> Self {
+        Self(SmallVec::new())
+    }
+
+    pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
+        Self(SmallVec::from_iter(iter))
+    }
+}
+
 /// Keep track of the target for a link in a service chain
 #[derive(Component, Clone, Copy)]
 pub(crate) struct SingleTargetStorage(pub(crate) Entity);
