@@ -41,6 +41,9 @@ pub(crate) use fork_clone::*;
 mod fork_unzip;
 pub(crate) use fork_unzip::*;
 
+mod join;
+pub(crate) use join::*;
+
 mod noop;
 pub(crate) use noop::*;
 

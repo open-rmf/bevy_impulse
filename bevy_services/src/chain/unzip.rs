@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 use crate::{
     Dangling, UnusedTarget, ForkTargetStorage, OperationRoster, InputBundle,
     ForkUnzip, PerformOperation, OutputChain, FunnelSourceStorage, OperationStatus,
-    InputStorage,
+    InputStorage, SingleTargetStorage,
 };
 
 /// A trait for response types that can be unzipped
@@ -43,8 +43,7 @@ pub trait Unzippable {
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
 
     fn join_values(
-        sources: &FunnelSourceStorage,
-        target: Entity,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()>;
@@ -95,14 +94,17 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     }
 
     fn join_values(
-        sources: &FunnelSourceStorage,
-        target: Entity,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
-        let source_0 = *sources.0.get(0).ok_or(())?;
+        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
+        let target = world.get::<SingleTargetStorage>(source).ok_or(())?.0;
+
+        let input_0 = *inputs.0.get(0).ok_or(())?;
+
         let v_0 = world
-            .get_entity_mut(source_0).ok_or(())?
+            .get_entity_mut(input_0).ok_or(())?
             .take::<InputStorage<A>>().ok_or(())?.take();
 
         world
@@ -185,19 +187,22 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     }
 
     fn join_values(
-        sources: &FunnelSourceStorage,
-        target: Entity,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
-        let source_0 = *sources.0.get(0).ok_or(())?;
+        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
+        let target = world.get::<SingleTargetStorage>(source).ok_or(())?.0;
+
+        let input_0 = *inputs.0.get(0).ok_or(())?;
+        let input_1 = *inputs.0.get(1).ok_or(())?;
+
         let v_0 = world
-            .get_entity_mut(source_0).ok_or(())?
+            .get_entity_mut(input_0).ok_or(())?
             .take::<InputStorage<A>>().ok_or(())?.take();
 
-        let source_1 = *sources.0.get(1).ok_or(())?;
         let v_1 = world
-            .get_entity_mut(source_1).ok_or(())?
+            .get_entity_mut(input_1).ok_or(())?
             .take::<InputStorage<B>>().ok_or(())?.take();
 
         world

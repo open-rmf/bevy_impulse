@@ -189,6 +189,9 @@ impl<Response: 'static + Send + Sync, StreamA, StreamB> ZippedChainsToBundle for
     }
 }
 
+/// A type alias to ensure a consistent SmallVec type across the whole implementation
+pub type JoinedBundle<T> = SmallVec<[T; 8]>;
+
 /// This trait is for [`Dangling`] [`Chains`](Chain) that are bundled into an
 /// [`IntoIterator`] type. This implies that the chains must all share the same
 /// Response type. Streams and modifiers are ignored.
@@ -200,7 +203,7 @@ pub trait BundledChains {
     fn join<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, SmallVec<[Self::Response; 8]>, (), ModifiersUnset>;
+    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset>;
 
     /// Race the bundle elements against each other, producing a [`Chain`] whose
     /// response is the value of the first chain in the bundle to arrive.
@@ -219,7 +222,7 @@ where
     fn join<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, SmallVec<[Self::Response; 8]>, (), ModifiersUnset> {
+    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset> {
         // FIXME TODO(@mxgrey): Funnel the dangling chains into one target
         Chain::new(commands.spawn(()).id(), commands.spawn(()).id(), commands)
     }

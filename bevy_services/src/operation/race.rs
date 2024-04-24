@@ -30,37 +30,6 @@ pub(crate) struct RaceInput<T> {
     _ignore: std::marker::PhantomData<T>,
 }
 
-#[derive(Component)]
-enum RaceWinner {
-    Pending,
-    Ready(Entity),
-    Closed,
-}
-
-impl RaceWinner {
-    fn is_pending(&self) -> bool {
-        matches!(self, Self::Pending)
-    }
-
-    fn propose(&mut self, winner: Entity) {
-        if self.is_pending() {
-            *self = Self::Ready(winner);
-        }
-    }
-
-    fn take_ready(&mut self) -> Option<Entity> {
-        match self {
-            Self::Ready(input) => {
-                let result = Some(*input);
-                *self = Self::Closed;
-                result
-            }
-            _ => None,
-        }
-    }
-}
-
-
 impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
     fn set_parameters(
         self,
@@ -87,6 +56,8 @@ impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
         world.get_mut::<RaceWinner>(target).ok_or(())?.propose(source);
         roster.queue(target);
 
+        // We can't let this link be cleaned up automatically. Its cleanup needs
+        // to be handled by the race that it belongs to.
         Ok(OperationStatus::Disregard)
     }
 }
@@ -114,6 +85,7 @@ impl<Values: Unzippable> Operation for ZipRace<Values> {
         world.entity_mut(entity).insert((
             self.sources,
             self.targets,
+            RaceWinner::Pending,
         ));
     }
 
@@ -144,6 +116,7 @@ impl<T: 'static + Send + Sync> Operation for BundleRace<T> {
         world.entity_mut(entity).insert((
             self.sources,
             SingleTargetStorage(self.target),
+            RaceWinner::Pending,
         ));
     }
 
@@ -288,4 +261,34 @@ fn deliver_bundle_race_winner<T: 'static + Send + Sync>(
     world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
     roster.queue(target);
     Ok(OperationStatus::Finished)
+}
+
+#[derive(Component)]
+enum RaceWinner {
+    Pending,
+    Ready(Entity),
+    Closed,
+}
+
+impl RaceWinner {
+    fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    fn propose(&mut self, winner: Entity) {
+        if self.is_pending() {
+            *self = Self::Ready(winner);
+        }
+    }
+
+    fn take_ready(&mut self) -> Option<Entity> {
+        match self {
+            Self::Ready(input) => {
+                let result = Some(*input);
+                *self = Self::Closed;
+                result
+            }
+            _ => None,
+        }
+    }
 }
