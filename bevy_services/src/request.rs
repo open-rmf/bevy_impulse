@@ -68,7 +68,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
 }
 
 /// By default when a service provider receives a new request with the same
-/// label as an earlier request, the earlier request will be canceled,
+/// label as an earlier request, the earlier request will be cancelled,
 /// whether it is already being executed or whether it is sitting in a
 /// queue. If the earlier request was already delivered then the labeling
 /// has no effect.
@@ -78,7 +78,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
 /// - `.queue()` asks for the request to be queued up to run after all
 ///   other requests with this same label have been fulfilled and not cancel
 ///   any of them.
-/// - `.ensure()` asks for this request to not be canceled even if another
+/// - `.ensure()` asks for this request to not be cancelled even if another
 ///   request comes in with the same label. The new request will instead be
 ///   queued after this one.
 ///
@@ -122,7 +122,7 @@ impl<E> LabelBuilder<(), E> {
     ///
     /// The default behavior, if you do **not** trigger this method, is for this
     /// new labeled request to supplant all prior requests that share the same
-    /// label, sending them to the canceled state (unless the prior request was
+    /// label, sending them to the cancelled state (unless the prior request was
     /// marked with [`ensure()`]).
     ///
     /// This modifer can only be applied to a labeled request because it does
@@ -142,7 +142,7 @@ impl<Q> LabelBuilder<Q, ()> {
     /// same label arrives.
     ///
     /// Ordinarily a new labeled request would supplant all earlier requests
-    /// with the same label, sending them into the canceled state. But any
+    /// with the same label, sending them into the cancelled state. But any
     /// of those requests that are "ensured" will remain queued and finish
     /// executing, one at a time.
     ///

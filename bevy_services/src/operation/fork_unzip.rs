@@ -19,7 +19,7 @@ use bevy::prelude::{Entity, World};
 
 use crate::{
     ForkTargetStorage, Operation, Unzippable, SingleSourceStorage, InputStorage,
-    OperationStatus, ForkTargetStatus, inspect_fork_targets,
+    ForkTargetStatus, inspect_fork_targets,
 };
 
 pub(crate) struct ForkUnzip<T> {

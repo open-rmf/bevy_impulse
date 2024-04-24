@@ -90,7 +90,7 @@ where
             roster.cancel(Cancel::filtered(source));
             // We've queued up a cancellation of this link, so we don't want any
             // automatic cleanup to happen.
-            return Ok(OperationStatus::Disregard);
+            return Ok(OperationStatus::Unfinished);
         };
 
         // At this point we have the correct type to deliver to the target, so

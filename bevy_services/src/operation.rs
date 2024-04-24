@@ -215,37 +215,37 @@ impl ForkTargetStorage {
 }
 
 #[derive(SystemParam)]
-pub(crate) struct NextServiceLink<'w, 's> {
+pub(crate) struct NextOperationLink<'w, 's> {
     single_target: Query<'w, 's, &'static SingleTargetStorage>,
     fork_targets: Query<'w, 's, &'static ForkTargetStorage>,
 }
 
-impl<'w, 's> NextServiceLink<'w, 's> {
-    pub(crate) fn iter(&self, entity: Entity) -> NextServiceLinkIter {
+impl<'w, 's> NextOperationLink<'w, 's> {
+    pub(crate) fn iter(&self, entity: Entity) -> NextOperationLinkIter {
         if let Ok(target) = self.single_target.get(entity) {
-            return NextServiceLinkIter::Target(Some(target.0));
+            return NextOperationLinkIter::Target(Some(target.0));
         } else if let Ok(fork) = self.fork_targets.get(entity) {
-            return NextServiceLinkIter::Fork(fork.0.clone());
+            return NextOperationLinkIter::Fork(fork.0.clone());
         }
 
-        return NextServiceLinkIter::Target(None);
+        return NextOperationLinkIter::Target(None);
     }
 }
 
-pub(crate) enum NextServiceLinkIter {
+pub(crate) enum NextOperationLinkIter {
     Target(Option<Entity>),
     Fork(SmallVec<[Entity; 8]>),
 }
 
-impl Iterator for NextServiceLinkIter {
+impl Iterator for NextOperationLinkIter {
     type Item = Entity;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            NextServiceLinkIter::Target(target) => {
+            NextOperationLinkIter::Target(target) => {
                 return target.take();
             }
-            NextServiceLinkIter::Fork(fork) => {
+            NextOperationLinkIter::Fork(fork) => {
                 return fork.pop();
             }
         }
@@ -259,7 +259,7 @@ pub(crate) struct UnusedTarget;
 pub struct OperationRoster {
     /// Operation sources that should be triggered
     pub(crate) operate: VecDeque<Entity>,
-    /// Operation sources that should be canceled
+    /// Operation sources that should be cancelled
     pub(crate) cancel: VecDeque<Cancel>,
     /// Async services that should pull their next item
     pub(crate) unblock: VecDeque<BlockingQueue>,
@@ -322,18 +322,9 @@ pub(crate) struct BlockingQueue {
 pub enum OperationStatus {
     /// The source entity is no longer needed so it should be despawned.
     Finished,
-    /// Do not despawn the source entity of this operation yet because it will
-    /// be needed for a service that has been queued. The service will be
-    /// responsible for despawning the entity when it is no longer needed.
-    Queued{ provider: Entity },
-    /// Disregard the status of the operation. It will clean itself up.
-    Disregard,
+    /// The operation is not finished yet, so do not do any automatic cleanup.
+    Unfinished,
 }
-
-/// This component indicates that a source entity has been queued for a service
-/// so it should not be despawned yet.
-#[derive(Component)]
-pub(crate) struct Queued(pub(crate) Entity);
 
 pub(crate) trait Operation {
     fn set_parameters(
@@ -391,16 +382,7 @@ fn perform_operation<Op: Operation>(
         Ok(OperationStatus::Finished) => {
             roster.dispose(source);
         }
-        Ok(OperationStatus::Queued{ provider }) => {
-            if let Some(mut source_mut) = world.get_entity_mut(source) {
-                source_mut.insert(Queued(provider));
-            } else {
-                // The source is no longer available even though it was queued.
-                // We should cancel the job right away.
-                roster.cancel(Cancel::broken(source));
-            }
-        }
-        Ok(OperationStatus::Disregard) => {
+        Ok(OperationStatus::Unfinished) => {
             // Do nothing
         }
         Err(()) => {

@@ -50,7 +50,7 @@ impl<T> Sender<T> {
         let Some(target) = self.target.upgrade() else {
             match result {
                 PromiseResult::Finished(value) => return Err(value),
-                PromiseResult::Canceled => return Ok(()),
+                PromiseResult::Cancelled => return Ok(()),
             }
         };
         let mut inner = match target.inner.lock() {
@@ -90,7 +90,7 @@ impl<T> Sender<T> {
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
         if !self.sent {
-            self.set(PromiseResult::Canceled).ok();
+            self.set(PromiseResult::Cancelled).ok();
         }
     }
 }
@@ -139,8 +139,8 @@ impl<T> Promise<T> {
                 *state = PromiseState::Available(response);
                 return false;
             }
-            Some(PromiseResult::Canceled) => {
-                *state = PromiseState::Canceled;
+            Some(PromiseResult::Cancelled) => {
+                *state = PromiseState::Cancelled;
                 return false;
             }
             None => {
@@ -152,7 +152,7 @@ impl<T> Promise<T> {
 
 pub(crate) enum PromiseResult<T> {
     Finished(T),
-    Canceled,
+    Cancelled,
 }
 
 pub(super) struct PromiseTargetInner<T> {

@@ -63,7 +63,7 @@ impl Operation for OperateService {
         let provider = source_ref.get::<ProviderStorage>().ok_or(())?.0;
 
         dispatch_service(ServiceRequest { provider, source, target, world, roster });
-        Ok(OperationStatus::Queued{ provider })
+        Ok(OperationStatus::Unfinished)
     }
 }
 
@@ -78,9 +78,9 @@ pub(crate) fn cancel_service(
     let mut providers_state: SystemState<Query<(Entity, &ProviderStorage)>> =
         SystemState::new(world);
     let providers = providers_state.get(world);
-    for (target, ProviderStorage(provider)) in &providers {
+    for (source, ProviderStorage(provider)) in &providers {
         if *provider == cancelled_provider {
-            roster.cancel(Cancel::service_unavailable(target, cancelled_provider));
+            roster.cancel(Cancel::service_unavailable(source, cancelled_provider));
         }
     }
 }

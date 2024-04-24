@@ -153,11 +153,10 @@ where
     fn execute(
         source: Entity,
         world: &mut World,
-        roster: &mut OperationRoster,
+        _roster: &mut OperationRoster,
     ) -> Result<OperationStatus, ()> {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
         let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.take();
         let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().ok_or(())?.f;
 
@@ -166,6 +165,6 @@ where
 
         let task = AsyncComputeTaskPool::get().spawn(map.call(AsyncMap { request, channel }));
         source_mut.insert(TaskBundle::new(task));
-        Ok(OperationStatus::Queued { provider: source })
+        Ok(OperationStatus::Unfinished)
     }
 }

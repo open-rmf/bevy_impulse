@@ -22,10 +22,10 @@ use crate::{
 };
 
 use bevy::{
-    prelude::{App, In},
+    prelude::App,
     ecs::{
         world::EntityMut,
-        system::{IntoSystem, Commands, EntityCommands}
+        system::{Commands, EntityCommands}
     }
 };
 

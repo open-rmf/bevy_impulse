@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 
 use crate::{
     SingleTargetStorage, Cancelled, Operation, InputBundle,
-    OperationStatus, OperationRoster, NextServiceLink, Cancel, CancellationCause,
+    OperationStatus, OperationRoster, NextOperationLink, Cancel, CancellationCause,
     Cancellation, FunnelInputStatus, ForkTargetStatus, SingleSourceStorage,
 };
 
@@ -49,7 +49,7 @@ struct CancelTarget {
 }
 
 /// Apply this to a source entity to indicate that it should keep operating (not
-/// be canceled) even if its target(s) drop.
+/// be cancelled) even if its target(s) drop.
 #[derive(Component)]
 pub(crate) struct DetachDependency;
 
@@ -153,7 +153,7 @@ pub(crate) fn propagate_dependency_loss_upwards(
 }
 
 /// Cancel a request from this link in a service chain downwards. This will
-/// trigger any on_cancel reactions that are associated with the canceled link
+/// trigger any on_cancel reactions that are associated with the cancelled link
 /// in the chain and all other links in the chain that come after it.
 ///
 /// If the cascade reaches a funnel input source then the cascade will change
@@ -178,7 +178,7 @@ pub(crate) fn cancel_from_link(
         }
 
         let mut state: SystemState<(
-            NextServiceLink,
+            NextOperationLink,
             Query<(&mut FunnelInputStatus, &SingleTargetStorage)>,
         )> = SystemState::new(world);
         let (next_link, mut funnel_input) = state.get_mut(world);

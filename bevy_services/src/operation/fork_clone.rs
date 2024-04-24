@@ -122,5 +122,5 @@ pub fn inspect_fork_targets(
         roster.drop_dependency(Cancel::fork(source, cancelled));
     }
 
-    Ok(OperationStatus::Disregard)
+    Ok(OperationStatus::Unfinished)
 }

@@ -65,12 +65,12 @@ pub trait BuildLabel: private::Sealed<()> {
 
 impl<T: RequestLabel> BuildLabel for T {
     /// Specify that the labeled request should queue itself instead of
-    /// canceling prior requests with the same label.
+    /// cancelling prior requests with the same label.
     fn queue(self) -> LabelBuilder<Chosen, ()> {
         LabelBuilder::new(self).queue()
     }
 
-    /// Specify that the labeled request should not allow itself to be canceled
+    /// Specify that the labeled request should not allow itself to be cancelled
     /// by later requests with the same label.
     fn ensure(self) -> LabelBuilder<(), Chosen> {
         LabelBuilder::new(self).ensure()

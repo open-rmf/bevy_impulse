@@ -22,7 +22,7 @@ use crate::{
     ForkClone, Chosen, ApplyLabel, Stream, Provider,
     AsMap, IntoBlockingMap, IntoAsyncMap, OperateCancel,
     DetachDependency, DisposeOnCancel, Promise, Noop,
-    Cancelled, ForkTargetStorage, Branching,
+    Cancelled, ForkTargetStorage,
     make_result_branching, make_cancel_filter_on_err,
     make_option_branching, make_cancel_filter_on_none,
 };
@@ -49,14 +49,14 @@ pub use unzip::*;
 ///   the service will continue running to completion and you will be able to
 ///   view the response (or take the response, but only once). If all clones of
 ///   the [`Promise`] are dropped before the service is delivered, it will
-///   be canceled.
+///   be cancelled.
 /// - `.detach_and_take()`: As long as the [`Promise`] or one of its clones is
 ///   alive, you will be able to view the response (or take the response, but
 ///   only once). The service will run to completion even if every clone of the
 ///   [`Promise`] is dropped.
 ///
 /// If you do not select one of the above then the service request will be
-/// canceled without ever attempting to run.
+/// cancelled without ever attempting to run.
 #[must_use]
 pub struct Chain<'w, 's, 'a, Response, Streams, M> {
     source: Entity,
@@ -101,7 +101,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
 
     /// Take a [`Promise`] so you can receive the final response in the chain later.
     /// If the [`Promise`] is dropped then the entire service chain will
-    /// automatically be canceled from whichever link in the chain has not been
+    /// automatically be cancelled from whichever link in the chain has not been
     /// completed yet, triggering every on_cancel branch from that link to the
     /// end of the chain.
     pub fn take(self) -> Promise<Response> {
@@ -131,7 +131,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// even if the remainder of this chain gets dropped. You can continue adding
     /// links as if this is one continuous chain.
     ///
-    /// If the ancestor links get canceled, the cancellation cascade will still
+    /// If the ancestor links get cancelled, the cancellation cascade will still
     /// continue past this link. To prevent that from happening, use
     /// [`Chain::sever_cancel_cascade`].
     pub fn detach_and_chain(self) -> Chain<'w, 's, 'a, Response, Streams, ModifiersClosed> {
@@ -143,7 +143,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// this chain later.
     ///
     /// Note that if you do not finish building the dangling chain before the
-    /// next flush, the chain will be canceled up to its closest
+    /// next flush, the chain will be cancelled up to its closest
     /// [`Chain::detach_and_chain`] link. You can use [`Chain::detach_and_dangle`]
     /// to obtain a [`Dangling`] while still ensuring that this chain will be executed.
     pub fn dangle(self) -> Dangling<Response, Streams> {
@@ -155,7 +155,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         self.detach_and_chain().dangle()
     }
 
-    /// If any ancestor links in this chain get canceled, the cancellation cascade
+    /// If any ancestor links in this chain get cancelled, the cancellation cascade
     /// will be stopped at this link and the remainder of the chain will be
     /// disposed instead of cancelled. No child links from this one will have
     /// their cancellation branches triggered from a cancellation that happens
@@ -712,7 +712,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, C> Chain<'w, 's, 'a, 
 
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, Response, Streams, NoOnCancel<L>> {
     /// Build a child chain of services that will be triggered if the request gets
-    /// canceled at the current point in the service chain.
+    /// cancelled at the current point in the service chain.
     pub fn on_cancel<Signal: 'static + Send + Sync>(
         self,
         signal: Signal,
@@ -723,7 +723,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
         ).on_cancel_zip(signal, f).0.resume(self.commands)
     }
 
-    /// Trigger a specific [`Provider`] in the event that the request gets canceled
+    /// Trigger a specific [`Provider`] in the event that the request gets cancelled
     /// at the current point in the service chain.
     ///
     /// This is a convenience wrapper around [`Chain::on_cancel`] for
@@ -786,10 +786,11 @@ pub type OutputChain<'w, 's, 'a, Response> = Chain<'w, 's, 'a, Response, (), Mod
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RequestExt, dangling::*, sample::*};
+    use crate::{RequestExt, sample::*, flush_impulses};
     use bevy::{
         prelude::{World, Commands},
-        ecs::system::CommandQueue,
+        ecs::system::{CommandQueue, IntoSystem, System},
+        tasks::{AsyncComputeTaskPool, TaskPool},
     };
 
     #[test]
@@ -833,17 +834,19 @@ mod tests {
 
     #[test]
     fn test_unzip() {
+        AsyncComputeTaskPool::init(|| TaskPool::new());
+
         let mut world = World::new();
         let mut command_queue = CommandQueue::default();
         let mut commands = Commands::new(&mut command_queue, &world);
 
-        let promise = commands
+        let mut promise = commands
             .request((2.0, 3.0), add.into_blocking_map())
             .map_block(|v| (v, 2.0*v))
             .unzip_build((
                 |chain: OutputChain<f64>| {
                     chain
-                    .map_block(|v| (v, -v))
+                    .map_block(|v| (v, 10.0))
                     .map_block(add)
                     .dangle()
                 },
@@ -862,5 +865,13 @@ mod tests {
             .bundle()
             .race(&mut commands)
             .take();
+
+        command_queue.apply(&mut world);
+        let mut flusher = Box::new(IntoSystem::into_system(flush_impulses));
+        flusher.initialize(&mut world);
+        flusher.run((), &mut world);
+        flusher.apply_deferred(&mut world);
+
+        assert_eq!(promise.peek().available().copied(), Some(15.0));
     }
 }

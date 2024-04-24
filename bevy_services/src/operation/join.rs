@@ -15,10 +15,7 @@
  *
 */
 
-use bevy::{
-    prelude::{Entity, World, Component, Query},
-    ecs::system::SystemState,
-};
+use bevy::prelude::{Entity, World, Component};
 
 use crate::{
     InputStorage, InputBundle, FunnelInputStatus, FunnelSourceStorage,
@@ -64,7 +61,7 @@ impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
 
         // We can't let this link be cleaned up automatically. Its cleanup needs
         // to be handled by the join that it belongs to.
-        Ok(OperationStatus::Disregard)
+        Ok(OperationStatus::Unfinished)
     }
 }
 
@@ -163,7 +160,7 @@ fn manage_join_delivery(
         JoinStatus::Closed => {
             // No action is needed if the join has already reached closed status.
             // This means it has already been asked to get cleaned up.
-            Ok(OperationStatus::Disregard)
+            Ok(OperationStatus::Unfinished)
         }
     }
 }
@@ -236,7 +233,7 @@ fn manage_pending_join(
         return Ok(OperationStatus::Finished);
     }
 
-    Ok(OperationStatus::Disregard)
+    Ok(OperationStatus::Unfinished)
 }
 
 fn manage_cancelled_join(
@@ -251,7 +248,7 @@ fn manage_cancelled_join(
         if input_status.is_pending() {
             // One of the inputs is still pending, so we should not take any
             // action yet.
-            return Ok(OperationStatus::Disregard);
+            return Ok(OperationStatus::Unfinished);
         }
     }
 

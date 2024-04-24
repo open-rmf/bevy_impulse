@@ -64,7 +64,7 @@ impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
 
         // We can't let this link be cleaned up automatically. Its cleanup needs
         // to be handled by the race that it belongs to.
-        Ok(OperationStatus::Disregard)
+        Ok(OperationStatus::Unfinished)
     }
 }
 
@@ -241,7 +241,7 @@ fn inspect_race_inputs(
     if dispose_race {
         return Ok(OperationStatus::Finished);
     } else {
-        return Ok(OperationStatus::Disregard);
+        return Ok(OperationStatus::Unfinished);
     }
 }
 
@@ -268,7 +268,7 @@ fn inspect_race_targets(
         }
     }
 
-    Ok(OperationStatus::Disregard)
+    Ok(OperationStatus::Unfinished)
 }
 
 fn deliver_bundle_race_winner<T: 'static + Send + Sync>(

@@ -99,13 +99,13 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
                     provider_mut.insert(BlockingServiceStorage::<Request, Response>(None));
                     service
                 } else {
-                    // The provider has had its service removed, so we treat this request as canceled.
+                    // The provider has had its service removed, so we treat this request as cancelled.
                     roster.cancel(Cancel::service_unavailable(source, provider));
                     return;
                 }
             }
         } else {
-            // If the provider has been despawned then we treat this request as canceled.
+            // If the provider has been despawned then we treat this request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
             return;
         };
@@ -126,7 +126,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
         } else {
             // Apparently the service was despawned by the service itself.
             // But we can still deliver the response to the target, so we will
-            // not consider this to be canceled.
+            // not consider this to be cancelled.
         }
 
         if let Some(mut target_mut) = world.get_entity_mut(target) {

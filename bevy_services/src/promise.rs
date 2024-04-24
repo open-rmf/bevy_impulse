@@ -36,8 +36,8 @@ impl<T> Promise<T> {
     ///
     /// To borrow a view of the most current state at the cost of synchronizing
     /// you can use [`peek`].
-    pub fn sneak_peek(&self) -> PromiseState<&T> {
-        self.state.as_ref()
+    pub fn sneak_peek(&self) -> &PromiseState<T> {
+        &self.state
     }
 
     /// View the state of the promise. If a response is available, you will
@@ -46,9 +46,9 @@ impl<T> Promise<T> {
     /// This requires a mutable reference to the promise because it may try to
     /// update the current state if needed. To peek at that last known state
     /// without trying to synchronize you can use [`sneak_peek()`].
-    pub fn peek(&mut self) -> PromiseState<&T> {
+    pub fn peek(&mut self) -> &PromiseState<T> {
         self.update();
-        self.state.as_ref()
+        &self.state
     }
 
     /// Try to take the response of the promise. If the response is available,
@@ -139,8 +139,8 @@ impl<T> Promise<T> {
                         Some(PromiseResult::Finished(response)) => {
                             self.state = PromiseState::Available(response);
                         }
-                        Some(PromiseResult::Canceled) => {
-                            self.state = PromiseState::Canceled;
+                        Some(PromiseResult::Cancelled) => {
+                            self.state = PromiseState::Cancelled;
                         }
                         None => {
                             // Do nothing
@@ -150,8 +150,8 @@ impl<T> Promise<T> {
                 Err(_) => {
                     // If the mutex is poisoned, that has to mean the sender
                     // crashed while trying to send the value, so we should
-                    // treat it as canceled.
-                    self.state = PromiseState::Canceled;
+                    // treat it as cancelled.
+                    self.state = PromiseState::Cancelled;
                 }
             }
         }
@@ -162,7 +162,7 @@ impl<T> Drop for Promise<T> {
     fn drop(&mut self) {
         if self.state.is_pending() {
             // We never received the result from the sender so we will trigger
-            // the cancelation.
+            // the cancellation.
             let f = match self.target.inner.lock() {
                 Ok(mut guard) => guard.on_promise_drop.take(),
                 Err(_) => None,
@@ -195,13 +195,14 @@ impl<T: Unpin> Future for Promise<T> {
 }
 
 /// The state of a promise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromiseState<T> {
     /// The promise received its result and can be seen in this state.
     Available(T),
     /// The promise is still pending, so you need to keep waiting for the state.
     Pending,
-    /// The promise has been canceled and will never receive a response.
-    Canceled,
+    /// The promise has been cancelled and will never receive a response.
+    Cancelled,
     /// The promise was delivered and has been taken. It will never be available
     /// to take again.
     Taken,
@@ -212,8 +213,15 @@ impl<T> PromiseState<T> {
         match self {
             Self::Available(value) => PromiseState::Available(value),
             Self::Pending => PromiseState::Pending,
-            Self::Canceled => PromiseState::Canceled,
+            Self::Cancelled => PromiseState::Cancelled,
             Self::Taken => PromiseState::Taken,
+        }
+    }
+
+    pub fn available(&self) -> Option<&T> {
+        match self {
+            Self::Available(value) => Some(value),
+            _ => None,
         }
     }
 
@@ -225,8 +233,8 @@ impl<T> PromiseState<T> {
         matches!(self, Self::Pending)
     }
 
-    pub fn is_canceled(&self) -> bool {
-        matches!(self, Self::Canceled)
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
     }
 
     pub fn is_taken(&self) -> bool {
@@ -241,8 +249,8 @@ impl<T> PromiseState<T> {
             Self::Pending => {
                 Self::Pending
             }
-            Self::Canceled => {
-                Self::Canceled
+            Self::Cancelled => {
+                Self::Cancelled
             }
             Self::Taken => {
                 Self::Taken

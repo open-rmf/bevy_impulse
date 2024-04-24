@@ -19,14 +19,7 @@ use crate::{
     OperationRoster, Stream, PerformOperation, OperateService, Provider, Cancel
 };
 
-use bevy::{
-    prelude::{Entity, App, Commands, World, Component, Bundle, Resource},
-    ecs::{
-        world::EntityMut,
-        system::EntityCommands,
-    },
-    tasks::Task as BevyTask,
-};
+use bevy::prelude::{Entity, App, Commands, World, Component, Bundle, Resource};
 
 mod async_srv;
 pub use async_srv::*;
@@ -41,6 +34,8 @@ mod traits;
 pub use traits::*;
 
 use std::collections::VecDeque;
+
+use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
 /// Marker trait to indicate when an input is ready without knowing the type of
 /// input.
@@ -141,7 +136,56 @@ impl<Request, Response> Default for ServiceMarker<Request, Response> {
 }
 
 #[derive(Component)]
-pub(crate) struct ServiceHook(fn(ServiceRequest));
+pub(crate) struct ServiceHook {
+    pub(crate) callback: fn(ServiceRequest),
+    pub(crate) lifecycle: Option<ServiceLifecycle>,
+}
+
+impl ServiceHook {
+    pub(crate) fn new(callback: fn(ServiceRequest)) -> Self {
+        Self { callback, lifecycle: None }
+    }
+}
+
+/// Keeps track of when a service entity gets despawned so we know to cancel
+/// any pending requests
+pub(crate) struct ServiceLifecycle {
+    /// The entity that this is attached to
+    entity: Entity,
+    /// Used to send the signal that the service has despawned
+    sender: CbSender<Entity>,
+}
+
+impl ServiceLifecycle {
+    pub(crate) fn new(entity: Entity, sender: CbSender<Entity>) -> Self {
+        Self { entity, sender }
+    }
+}
+
+impl Drop for ServiceLifecycle {
+    fn drop(&mut self) {
+        self.sender.send(self.entity).ok();
+    }
+}
+
+#[derive(Resource, Clone)]
+pub(crate) struct ServiceLifecycleQueue {
+    pub(crate) sender: CbSender<Entity>,
+    pub(crate) receiver: CbReceiver<Entity>,
+}
+
+impl ServiceLifecycleQueue {
+    pub(crate) fn new() -> Self {
+        let (sender, receiver) = unbounded();
+        Self { sender, receiver }
+    }
+}
+
+impl Default for ServiceLifecycleQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Bundle)]
 pub(crate) struct ServiceBundle<Srv: ServiceTrait + 'static + Send + Sync> {
@@ -152,7 +196,7 @@ pub(crate) struct ServiceBundle<Srv: ServiceTrait + 'static + Send + Sync> {
 impl<Srv: ServiceTrait + 'static + Send + Sync> ServiceBundle<Srv> {
     fn new() -> Self {
         Self {
-            hook: ServiceHook(service_hook::<Srv>),
+            hook: ServiceHook::new(service_hook::<Srv>),
             marker: Default::default(),
         }
     }
@@ -319,7 +363,7 @@ pub(crate) fn dispatch_service(request: ServiceRequest) {
             continue;
         };
 
-        (hook.0)(pending.activate(world, roster));
+        (hook.callback)(pending.activate(world, roster));
     }
     world.resource_mut::<ServiceQueue>().is_delivering = false;
 }
@@ -337,7 +381,7 @@ impl<Request, Response, Streams> Provider for Service<Request, Response, Streams
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BlockingService, InBlockingService, AsyncService, InAsyncService, Channel};
+    use crate::{BlockingService, InBlockingService, AsyncService, InAsyncService};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,

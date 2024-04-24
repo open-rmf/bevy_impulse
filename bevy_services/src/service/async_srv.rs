@@ -121,20 +121,20 @@ where
         let instructions = if let Some(mut source_mut) = world.get_entity_mut(source) {
             source_mut.take::<DeliveryInstructions>()
         } else {
-            // The source entity does not exist which implies the request has been canceled.
+            // The source entity does not exist which implies the request has been cancelled.
             // We no longer need to deliver on it.
             roster.cancel(Cancel::broken(source));
             return;
         };
 
         let Some(mut provider_mut) = world.get_entity_mut(provider) else {
-            // The async service has been despawned, so we should treat the request as canceled.
+            // The async service has been despawned, so we should treat the request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
             return;
         };
 
         let Some(mut delivery) = provider_mut.get_mut::<Delivery>() else {
-            // The async service's Delivery component has been removed so we should treat the request as canceled.
+            // The async service's Delivery component has been removed so we should treat the request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
             return
         };
@@ -145,11 +145,11 @@ where
                 let serve_next = serve_next_async_request::<Request, Streams, Task>;
                 blocking.map(|label| BlockingQueue { provider, source, label, serve_next })
             }
-            DeliveryUpdate::Queued { canceled, stop } => {
+            DeliveryUpdate::Queued { cancelled, stop } => {
                 if let Some(cancelled_source) = stop {
                     roster.cancel(Cancel::supplanted(cancelled_source, source));
                 }
-                for cancelled_source in canceled {
+                for cancelled_source in cancelled {
                     roster.cancel(Cancel::supplanted(cancelled_source, source));
                 }
                 return;
@@ -178,13 +178,13 @@ where
                     provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
                     service
                 } else {
-                    // The provider has had its service removed, so we treat this request as canceled.
+                    // The provider has had its service removed, so we treat this request as cancelled.
                     roster.cancel(Cancel::service_unavailable(source, provider));
                     return;
                 }
             }
         } else {
-            // If the provider has been despawned then we treat this request as canceled.
+            // If the provider has been despawned then we treat this request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
             return;
         };
@@ -261,12 +261,6 @@ where
             continue;
         };
 
-        let Some(target) = source_mut.take::<SingleTargetStorage>() else {
-            roster.cancel(Cancel::broken(source));
-            unblock = next_blocking;
-            continue;
-        };
-
         let Some(request) = source_mut.take::<InputStorage<Request>>() else {
             roster.cancel(Cancel::broken(source));
             unblock = next_blocking;
@@ -296,7 +290,7 @@ where
         if let Some(mut source_mut) = world.get_entity_mut(source) {
             source_mut.insert((TaskBundle::new(task), next_blocking));
         } else {
-            // The request canceled itself while running the service so we should
+            // The request cancelled itself while running the service so we should
             // move on to the next request.
             unblock = next_blocking;
             continue;
@@ -388,9 +382,6 @@ impl<Response: 'static + Send + Sync> TaskBundle<Response> {
     }
 }
 
-/// Ok(true): Task has finished
-/// Ok(false): Task is still running
-/// Err(()): Task is canceled
 pub(crate) fn poll_task<Response: 'static + Send + Sync>(
     source: Entity,
     world: &mut World,
@@ -493,9 +484,9 @@ enum DeliveryUpdate {
     Immediate { blocking: Option<Option<RequestLabelId>> },
     /// The new request has been placed in the queue
     Queued {
-        /// Queued requests that have been canceled
-        canceled: SmallVec<[Entity; 8]>,
-        /// An actively running task that has been canceled
+        /// Queued requests that have been cancelled
+        cancelled: SmallVec<[Entity; 8]>,
+        /// An actively running task that has been cancelled
         stop: Option<Entity>,
     }
 }
@@ -555,12 +546,12 @@ fn insert_serial_order(
     let Some(incoming_instructions) = order.instructions else {
         serial.queue.push_back(order);
         return DeliveryUpdate::Queued {
-            canceled: SmallVec::new(),
+            cancelled: SmallVec::new(),
             stop: None,
         };
     };
 
-    let mut canceled = SmallVec::new();
+    let mut cancelled = SmallVec::new();
     let mut stop = None;
 
     let should_discard = |prior_instructions: &DeliveryInstructions| {
@@ -572,7 +563,7 @@ fn insert_serial_order(
         serial.queue.retain(|e| {
             let discard = e.instructions.as_ref().is_some_and(should_discard);
             if discard {
-                canceled.push(e.source);
+                cancelled.push(e.source);
             }
 
             !discard
@@ -585,7 +576,7 @@ fn insert_serial_order(
 
     serial.queue.push_back(order);
 
-    DeliveryUpdate::Queued { canceled, stop }
+    DeliveryUpdate::Queued { cancelled, stop }
 }
 
 /// Take any system that was not decalred as a service and transform it into a

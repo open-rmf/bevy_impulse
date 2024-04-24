@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Entity, World, Query, QueryState, Added, RemovedComponents, With},
+    prelude::{Entity, World, Query, QueryState, Added, With},
     ecs::system::SystemState,
 };
 
@@ -25,19 +25,32 @@ use smallvec::SmallVec;
 use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage, FunnelInputStatus,
-    SingleTargetStorage, ForkTargetStorage, NextServiceLink,
+    SingleTargetStorage, NextOperationLink, ServiceLifecycle, ServiceLifecycleQueue,
     operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
     propagate_dependency_loss_upwards,
 };
 
 #[allow(private_interfaces)]
-pub fn flush_services(
+pub fn flush_impulses(
     world: &mut World,
-    mut poll_task_query: QueryState<(Entity, &PollTask), Added<PollTask>>,
-    mut input_ready_query: QueryState<Entity, Added<InputReady>>,
-    mut removed_services: RemovedComponents<ServiceHook>,
+    poll_task_query: &mut QueryState<(Entity, &PollTask), Added<PollTask>>,
+    input_ready_query: &mut QueryState<Entity, Added<InputReady>>,
+    new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
     let mut roster = OperationRoster::new();
+
+    world.get_resource_or_insert_with(|| ServiceLifecycleQueue::new());
+    world.resource_scope::<ServiceLifecycleQueue, ()>(|world, lifecycles| {
+        // Clean up the dangling requests of any services that have been despawned.
+        for removed_service in lifecycles.receiver.try_iter() {
+            cancel_service(removed_service, world, &mut roster)
+        }
+
+        // Add a lifecycle tracker to any new services that might have shown up
+        for (e, mut hook) in new_service_query.iter_mut(world) {
+            hook.lifecycle = Some(ServiceLifecycle::new(e, lifecycles.sender.clone()));
+        }
+    });
 
     // Get the receiver for async task commands
     let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
@@ -45,11 +58,6 @@ pub fn flush_services(
     // Apply all the commands that have been received
     while let Ok(mut command_queue) = async_receiver.try_recv() {
         command_queue.apply(world);
-    }
-
-    // Clean up the dangling requests of any services that have been despawned.
-    for removed_service in removed_services.iter() {
-        cancel_service(removed_service, world, &mut roster);
     }
 
     // Collect pollable tasks. These need to be collected before we can use them
@@ -165,7 +173,7 @@ fn dispose_chain_from(
         roster.dispose(source);
 
         // Iterate through the targets of the link and add them to the queue
-        let mut next_link_state: SystemState<NextServiceLink> = SystemState::new(world);
+        let mut next_link_state: SystemState<NextOperationLink> = SystemState::new(world);
         let next_link = next_link_state.get(world);
         for next in next_link.iter(source) {
             source_queue.push(next);

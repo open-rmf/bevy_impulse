@@ -73,7 +73,7 @@ where
                     // The handler implementation is not available, so queue up
                     // this request.
                     inner.queue.push_back(PendingHandleRequest { source, target });
-                    return Ok(OperationStatus::Queued{ provider: source })
+                    return Ok(OperationStatus::Unfinished)
                 }
             }
         };
