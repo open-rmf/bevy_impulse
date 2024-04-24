@@ -20,12 +20,7 @@ use bevy::prelude::{Entity, World};
 use crate::{
     InputStorage, InputBundle, Operation, OperationStatus, OperationRoster,
     ForkTargetStorage, ForkTargetStatus, SingleSourceStorage, Cancel,
-    CancellationCause,
 };
-
-use smallvec::SmallVec;
-
-use std::sync::Arc;
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
     targets: ForkTargetStorage,
@@ -101,24 +96,27 @@ pub fn inspect_fork_targets(
     let ForkTargetStorage(targets) = world.get(source).ok_or(())?;
 
     let mut cancel_fork = true;
-    let mut cancelled: SmallVec<[Arc<CancellationCause>; 16]> = SmallVec::new();
+    let mut fork_closed = true;
     for target in targets {
-        let status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
-        match status {
-            ForkTargetStatus::Active => {
-                cancel_fork = false;
-                break;
-            }
-            ForkTargetStatus::Dropped(cause) => {
-                cancelled.push(Arc::clone(&cause));
-            }
-            ForkTargetStatus::Closed => {
-                unreachable!("Regular forks are not supposed to close the target status");
-            }
+        let target_status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
+        if target_status.is_active() {
+            cancel_fork = false;
+        }
+
+        if !target_status.is_closed() {
+            fork_closed = false;
         }
     }
 
-    if cancel_fork {
+    if cancel_fork && !fork_closed {
+        // We should propagate the dependency drop upwards by gathering up the
+        // drop causes of its dependents.
+        let mut cancelled = Vec::new();
+        for target in targets {
+            let status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
+            cancelled.push(status.dropped().ok_or(())?);
+        }
+
         // After we drop the dependency, this chain will be cleaned up as it
         // gets cancelled.
         roster.drop_dependency(Cancel::fork(source, cancelled));

@@ -85,59 +85,59 @@ pub enum FunnelInputStatus {
 }
 
 impl FunnelInputStatus {
-    fn ready(&mut self) {
+    pub fn ready(&mut self) {
         if self.is_closed() {
             return;
         }
         *self = Self::Ready;
     }
 
-    fn is_ready(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         matches!(self, Self::Ready)
     }
 
-    fn is_pending(&self) -> bool {
+    pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending)
     }
 
-    fn cancel(&mut self, cause: Arc<CancellationCause>) {
+    pub fn cancel(&mut self, cause: Arc<CancellationCause>) {
         if self.is_closed() {
             return;
         }
         *self = Self::Cancelled(cause);
     }
 
-    fn cancelled(&self) -> Option<Arc<CancellationCause>> {
+    pub fn cancelled(&self) -> Option<Arc<CancellationCause>> {
         match self {
             Self::Cancelled(cause) => Some(Arc::clone(cause)),
             _ => None,
         }
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled(_))
     }
 
-    fn dispose(&mut self) {
+    pub fn dispose(&mut self) {
         if self.is_closed() {
             return;
         }
         *self = Self::Disposed;
     }
 
-    fn is_disposed(&self) -> bool {
+    pub fn is_disposed(&self) -> bool {
         matches!(self, Self::Disposed)
     }
 
-    fn undeliverable(&self) -> bool {
+    pub fn undeliverable(&self) -> bool {
         self.is_cancelled() || self.is_disposed()
     }
 
-    fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::Closed;
     }
 
-    fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed)
     }
 }
@@ -177,7 +177,7 @@ pub enum ForkTargetStatus {
 }
 
 impl ForkTargetStatus {
-    pub fn active(&self) -> bool {
+    pub fn is_active(&self) -> bool {
         matches!(self, Self::Active)
     }
 
@@ -189,13 +189,13 @@ impl ForkTargetStatus {
     }
 
     pub fn drop_dependency(&mut self, cause: Arc<CancellationCause>) {
-        if self.closed() {
+        if self.is_closed() {
             return;
         }
         *self = Self::Dropped(cause);
     }
 
-    pub fn closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed)
     }
 
@@ -266,7 +266,7 @@ pub struct OperationRoster {
     /// Remove these entities as they are no longer needed
     pub(crate) dispose: Vec<Entity>,
     /// Remove the whole chain from this point on because it is no longer needed
-    pub(crate) dispose_chain: Vec<Entity>,
+    pub(crate) dispose_chain_from: Vec<Entity>,
     /// Indicate that there is no longer a need for this chain
     pub(crate) drop_dependency: Vec<Cancel>,
 }
@@ -292,8 +292,8 @@ impl OperationRoster {
         self.dispose.push(entity);
     }
 
-    pub fn dispose_chain(&mut self, entity: Entity) {
-        self.dispose_chain.push(entity);
+    pub fn dispose_chain_from(&mut self, entity: Entity) {
+        self.dispose_chain_from.push(entity);
     }
 
     pub fn drop_dependency(&mut self, source: Cancel) {

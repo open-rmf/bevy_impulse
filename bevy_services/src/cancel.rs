@@ -212,9 +212,9 @@ impl Cancel {
     }
 
     /// A fork was cancelled because all of its dependents were dropped.
-    pub fn fork(source: Entity, cancelled: impl IntoIterator<Item=Arc<CancellationCause>>) -> Self {
+    pub fn fork(source: Entity, cancelled: Vec<Arc<CancellationCause>>) -> Self {
         Self::new(source, CancellationCause::ForkCancelled(
-            ForkCancelled { fork: source, cancelled: cancelled.into_iter().collect() }
+            ForkCancelled { fork: source, cancelled }
         ))
     }
 

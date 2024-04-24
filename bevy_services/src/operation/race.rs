@@ -203,7 +203,7 @@ fn inspect_race_inputs(
                 roster.cancel(Cancel { apply_to: *target, cause });
                 close_input.push(*input);
             } else if input_status.is_disposed() {
-                roster.dispose_chain(*target);
+                roster.dispose_chain_from(*target);
                 close_input.push(*input);
             }
         }

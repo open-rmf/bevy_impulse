@@ -134,7 +134,7 @@ where
             target_a_mut.insert(InputBundle::new(a));
             roster.queue(target_a);
         } else {
-            roster.dispose_chain(target_a);
+            roster.dispose_chain_from(target_a);
         }
 
         let target_b = *targets.0.get(1).ok_or(())?;
@@ -143,7 +143,7 @@ where
             target_b_mut.insert(InputBundle::new(b));
             roster.queue(target_b);
         } else {
-            roster.dispose_chain(target_b);
+            roster.dispose_chain_from(target_b);
         }
 
         Ok(OperationStatus::Finished)

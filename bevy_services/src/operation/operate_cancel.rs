@@ -25,7 +25,7 @@ use smallvec::SmallVec;
 use crate::{
     SingleTargetStorage, Cancelled, Operation, InputBundle,
     OperationStatus, OperationRoster, NextServiceLink, Cancel, CancellationCause,
-    Cancellation, FunnelInputStatus,
+    Cancellation, FunnelInputStatus, ForkTargetStatus, SingleSourceStorage,
 };
 
 use std::sync::Arc;
@@ -124,14 +124,41 @@ pub(crate) fn propagate_dependency_loss_upwards(
     let mut target_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
     target_queue.push(target);
 
-    while let Some(Cancel { apply_to: target, cause }) = target_queue.pop() {
+    let mut state: SystemState<(
+        Query<(&SingleSourceStorage, Option<&mut ForkTargetStatus>)>,
+        Query<Entity>,
+    )> = SystemState::new(world);
+    let (mut source_query, existence_query) = state.get_mut(world);
 
+    while let Some(Cancel { apply_to, cause }) = target_queue.pop() {
+        if let Ok((source, target_status)) = source_query.get_mut(apply_to) {
+            // Check that the source exists. If the source has already been
+            // disposed of, then we should begin the cancellation here instead
+            // of crawling up any further.
+            if existence_query.contains(source.0) {
+                if let Some(mut target_status) = target_status {
+                    target_status.drop_dependency(cause);
+                    roster.queue(source.0);
+                } else {
+                    target_queue.push(Cancel { apply_to: source.0, cause });
+                }
+                continue;
+            }
+        }
+
+        // There is nothing further to crawl up, so we begin triggering the
+        // cancellation from here.
+        roster.cancel(Cancel { apply_to, cause });
     }
 }
 
 /// Cancel a request from this link in a service chain downwards. This will
 /// trigger any on_cancel reactions that are associated with the canceled link
 /// in the chain and all other links in the chain that come after it.
+///
+/// If the cascade reaches a funnel input source then the cascade will change
+/// the input's status to Cancelled and trigger the funnel to process it instead
+/// of continuing like normal.
 pub(crate) fn cancel_from_link(
     initial_source: Cancel,
     world: &mut World,
@@ -139,8 +166,6 @@ pub(crate) fn cancel_from_link(
 ) {
     let mut downstream_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
     downstream_queue.push(initial_source);
-
-    let mut modify_funnel_input_status: SmallVec<[Cancel; 16]> = SmallVec::new();
 
     while let Some(Cancel { apply_to: source, cause }) = downstream_queue.pop() {
         if let Some(cancel_target) = get_cancel_target(source, world) {
@@ -154,12 +179,16 @@ pub(crate) fn cancel_from_link(
 
         let mut state: SystemState<(
             NextServiceLink,
-            Query<&FunnelInputStatus>
+            Query<(&mut FunnelInputStatus, &SingleTargetStorage)>,
         )> = SystemState::new(world);
-        let (next_link, funnel_input) = state.get(world);
+        let (next_link, mut funnel_input) = state.get_mut(world);
 
-        if let Ok(funnel_input) = funnel_input.get(source) {
-            modify_funnel_input_status.push(Cancel { apply_to: source, cause: Arc::clone(&cause) });
+        if let Ok((mut input_status, target)) = funnel_input.get_mut(source) {
+            // This link is a funnel input source. We should stop propagating here
+            // and instead mark its status as cancelled, and trigger its funnel
+            // to respond to it.
+            input_status.cancel(Arc::clone(&cause));
+            roster.queue(target.0);
         } else {
             for next in next_link.iter(source) {
                 downstream_queue.push(Cancel { apply_to: next, cause: Arc::clone(&cause) });
@@ -167,64 +196,15 @@ pub(crate) fn cancel_from_link(
             world.despawn(source);
         }
     }
-
-    // For any cancelled sources that are funnel inputs, we should change their
-    // status and then alert their target to evaluate.
-    for Cancel { apply_to, cause } in modify_funnel_input_status {
-        let Some(mut input_mut) = world.get_entity_mut(apply_to) else {
-            continue;
-        };
-
-        if let Some(mut status) = input_mut.get_mut::<FunnelInputStatus>() {
-            *status = FunnelInputStatus::Cancelled(cause);
-
-            if let Some(target) = input_mut.get::<SingleTargetStorage>() {
-                // Wake up the funnel to process this change in status
-                roster.queue(target.0);
-            } else {
-                world.despawn(apply_to);
-            }
-        } else {
-            world.despawn(apply_to);
-        }
-    }
 }
 
-pub(crate) fn dispose_cancellation_chain(source: Entity, world: &mut World) {
-    let mut source_queue: SmallVec<[Entity; 16]> = SmallVec::new();
-    source_queue.push(source);
-
-    while let Some(source) = source_queue.pop() {
-        // We should find whether this entity has a cancel chain, and despawn that
-        // whole chain if it exists. We do not want to trigger any cancellation
-        // behavior, merely despawn so that we aren't leaking entities that will
-        // never get used.
-        let Some(cancel_target) = get_cancel_target(source, world) else {
-            continue;
-        };
-
-        // Go down the cancel chain, adding its descendants to the queue of sources
-        // to dispose of, in case any descendants along the chain may also have
-        // cancellation branches. We will also dispose of the descendants while
-        // we do this.
-        let mut next_link_state: SystemState<NextServiceLink> = SystemState::new(world);
-        let next_link = next_link_state.get(world);
-
-        let mut cancellation_tree: SmallVec<[Entity; 16]> = SmallVec::new();
-        let mut despawn_queue: SmallVec<[Entity; 16]> = SmallVec::new();
-        cancellation_tree.push(cancel_target);
-        while let Some(e) = cancellation_tree.pop() {
-            for next in next_link.iter(e) {
-                cancellation_tree.push(next);
-                source_queue.push(next);
-            }
-
-            despawn_queue.push(e);
-        }
-
-        for e in despawn_queue {
-            world.despawn(e);
-        }
+pub(crate) fn dispose_cancellation_chain(
+    source: Entity,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
+    if let Some(cancel_target) = get_cancel_target(source, world) {
+        roster.dispose_chain_from(cancel_target);
     }
 }
 
