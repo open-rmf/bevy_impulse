@@ -31,7 +31,35 @@ pub(crate) struct RaceInput<T> {
 }
 
 #[derive(Component)]
-struct RaceWinner(Option<Entity>);
+enum RaceWinner {
+    Pending,
+    Ready(Entity),
+    Closed,
+}
+
+impl RaceWinner {
+    fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    fn propose(&mut self, winner: Entity) {
+        if self.is_pending() {
+            *self = Self::Ready(winner);
+        }
+    }
+
+    fn take_ready(&mut self) -> Option<Entity> {
+        match self {
+            Self::Ready(input) => {
+                let result = Some(*input);
+                *self = Self::Closed;
+                result
+            }
+            _ => None,
+        }
+    }
+}
+
 
 impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
     fn set_parameters(
@@ -54,14 +82,10 @@ impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
     ) -> Result<OperationStatus, ()> {
         let mut source_mut = world.get_entity_mut(source).ok_or(())?;
         source_mut.get_mut::<FunnelInputStatus>().ok_or(())?.ready();
-        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
 
-        let mut target_mut = world.get_entity_mut(target).ok_or(())?;
-        let mut winner = target_mut.get_mut::<RaceWinner>().ok_or(())?;
-        if winner.0.is_none() {
-            winner.0 = Some(source);
-            roster.queue(target);
-        }
+        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
+        world.get_mut::<RaceWinner>(target).ok_or(())?.propose(source);
+        roster.queue(target);
 
         Ok(OperationStatus::Disregard)
     }
@@ -138,18 +162,26 @@ fn manage_race_delivery(
     roster: &mut OperationRoster,
     deliver: fn(Entity, Entity, &mut World, &mut OperationRoster) -> Result<OperationStatus, ()>,
 ) -> Result<OperationStatus, ()> {
-    let source_ref = world.get_entity(source).ok_or(())?;
-    let Some(winner) = source_ref.get::<RaceWinner>().ok_or(())?.0 else {
-        // There's no winner for the race, so let's see if we are in a situation
-        // that needs attention.
-        if inspect_race_inputs(source, world, roster)? == OperationStatus::Finished {
-            return Ok(OperationStatus::Finished);
+    if let Some(winner) = world.get_mut::<RaceWinner>(source).ok_or(())?.take_ready() {
+        deliver(source, winner, world, roster)?;
+        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
+        for input in &inputs.0 {
+            let input_status = world.get::<FunnelInputStatus>(*input).ok_or(())?;
+            if input_status.is_pending() {
+                roster.drop_dependency(Cancel::race_lost(source, *input, input_status.clone()));
+            }
         }
+    }
 
-        return inspect_race_targets(source, world, roster);
-    };
+    inspect_race_targets(source, world, roster)?;
 
-    deliver(source, winner, world, roster)
+    // Note that we need to keep the race link alive for as long as any input
+    // source still has a Pending status. Otherwise we will break the chain in
+    // ways that could lead to errors. Unlike most Operations, we expect execute
+    // to be called on a race many times (each time that there is a change to at
+    // least one input source). Each time execute is called, we inspect the
+    // sources until we identify that everything can be closed down.
+    inspect_race_inputs(source, world, roster)
 }
 
 fn inspect_race_inputs(
@@ -168,7 +200,7 @@ fn inspect_race_inputs(
 
         for (input, target) in inputs.0.iter().zip(fork_targets.0.iter()) {
             let input_status = world.get::<FunnelInputStatus>(*input).ok_or(())?;
-            if !input_status.undeliverable() {
+            if input_status.is_pending() {
                 dispose_race = false;
             } else if let Some(cause) = input_status.cancelled() {
                 roster.cancel(Cancel { apply_to: *target, cause });

@@ -158,7 +158,7 @@ pub struct RaceLost {
     pub race: Entity,
     /// The input entity for the race.
     pub input: Entity,
-    /// The status of the losing input entity.
+    /// The status of the losing input entity at the time that it lost.
     pub status: FunnelInputStatus,
 }
 
@@ -211,9 +211,15 @@ impl Cancel {
         Self::new(source, CancellationCause::Filtered(source))
     }
 
+    /// A fork was cancelled because all of its dependents were dropped.
     pub fn fork(source: Entity, cancelled: impl IntoIterator<Item=Arc<CancellationCause>>) -> Self {
         Self::new(source, CancellationCause::ForkCancelled(
             ForkCancelled { fork: source, cancelled: cancelled.into_iter().collect() }
         ))
+    }
+
+    /// The chain lost a race so it gets cancelled.
+    pub fn race_lost(race: Entity, input: Entity, status: FunnelInputStatus) -> Self {
+        Self::new(input, CancellationCause::RaceLost(RaceLost { race, input, status }))
     }
 }
