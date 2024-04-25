@@ -206,6 +206,7 @@ where
 
         if let Some(mut source_mut) = world.get_entity_mut(source) {
             source_mut.insert(TaskBundle::new(task));
+            roster.poll(source);
             if let Some(blocking) = blocking {
                 source_mut.insert(blocking);
             }
@@ -291,6 +292,7 @@ where
 
         if let Some(mut source_mut) = world.get_entity_mut(source) {
             source_mut.insert((TaskBundle::new(task), next_blocking));
+            roster.poll(source);
         } else {
             // The request cancelled itself while running the service so we should
             // move on to the next request.

@@ -231,7 +231,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
             return Ok(OperationStatus::Finished);
         }
 
-        if *inputs.0.get(0).or_broken()? == winner {
+        if *inputs.0.get(1).or_broken()? == winner {
             let target = *targets.0.get(1).or_broken()?;
             let input = world
                 .get_entity_mut(winner).or_broken()?

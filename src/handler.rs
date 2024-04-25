@@ -109,6 +109,7 @@ impl<'a> HandleRequest<'a> {
 
         let task = AsyncComputeTaskPool::get().spawn(task);
         source_mut.insert(TaskBundle::new(task));
+        self.roster.poll(self.source);
     }
 
     fn get_channel<Streams: Stream>(&mut self) -> Channel<Streams> {

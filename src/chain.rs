@@ -482,16 +482,27 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ///
     /// ```
     /// use bevy_impulse::{*, testing::*};
-    /// let mut context = TestContext::new();
+    /// let mut context = TestingContext::new();
     /// let mut promise = context.build(|commands| {
     ///     commands
     ///     .request("thanks".to_owned(), to_uppercase.into_blocking_map())
     ///     .pull_zip(
     ///         (4.0, [0xF0, 0x9F, 0x90, 0x9F]),
     ///         (
-    ///             |chain: OutputChain<String>| chain.dangle(),
-    ///             |chain: OutputChain<f64>| chain.map_block(|value| value.to_string()).dangle(),
-    ///             |chain: OutputChain<[u8; 4]>| chain.map_block(string_from_utf8).cancel_on_err().dangle(),
+    ///             |chain: OutputChain<String>| {
+    ///                 chain.dangle()
+    ///             },
+    ///             |chain: OutputChain<f64>| {
+    ///                 chain
+    ///                 .map_block(|value| value.to_string())
+    ///                 .dangle()
+    ///             },
+    ///             |chain: OutputChain<[u8; 4]>| {
+    ///                 chain
+    ///                 .map_block(string_from_utf8)
+    ///                 .cancel_on_err()
+    ///                 .dangle()
+    ///             },
     ///         )
     ///     )
     ///     .bundle()
@@ -500,8 +511,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ///     .take()
     /// });
     ///
-    /// context.flush_while_pending(&mut promise);
-    /// dbg!(promise.peek());
+    /// context.run_while_pending(&mut promise);
+    /// assert_eq!(
+    ///     promise.peek().available().map(|v| v.as_str()),
+    ///     Some("THANKS 4 🐟"),
+    /// );
     /// ```
     pub fn pull_zip<InitialValues, Builders>(
         self,
@@ -786,55 +800,93 @@ pub type OutputChain<'w, 's, 'a, Response> = Chain<'w, 's, 'a, Response, (), Mod
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RequestExt, testing::*, flush_impulses};
-    use bevy::{
-        prelude::{World, Commands},
-        ecs::system::{CommandQueue, IntoSystem, System},
-        tasks::{AsyncComputeTaskPool, TaskPool},
-    };
+    use crate::{*, testing::*};
+    use std::time::Duration;
 
     #[test]
-    fn test_fork_clone() {
-        let mut world = World::new();
-        let mut command_queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut command_queue, &world);
-        let _promise = commands
+    fn test_async_map() {
+        let mut context = TestingContext::new();
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(
+                WaitRequest {
+                    duration: Duration::from_secs_f64(0.001),
+                    value: "hello".to_owned(),
+                },
+                wait.into_async_map(),
+            )
+            .take()
+        });
+
+        context.run_with_conditions(
+            &mut promise,
+            FlushConditions::new()
+            .with_timeout(Duration::from_secs_f64(5.0)),
+        );
+
+        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+    }
+
+    #[test]
+    fn test_race_zip() {
+        let mut context = TestingContext::new();
+
+        let mut promise = context.build(|commands| {
+            commands
             .request((2.0, 3.0), add.into_blocking_map())
             .fork_clone_zip((
-                |chain: OutputChain<f64>| chain.dangle(),
                 |chain: OutputChain<f64>| {
                     chain
-                    .map_block(|a| (a, 5.0))
+                    .map_block(|value|
+                        WaitRequest {
+                            duration: std::time::Duration::from_secs_f64(value),
+                            value,
+                        }
+                    )
+                    .map_async(wait)
+                    .dangle() // 5.0
+                },
+                |chain: OutputChain<f64>| {
+                    chain
+                    .map_block(|a| (a, a))
                     .map_block(add)
-                    .dangle()
+                    .dangle() // 10.0
                 }
             ))
             .race_zip(
-                &mut commands,
+                commands,
                 (
                     |chain: OutputChain<f64>| {
                         chain
-                        .map_block(|a| (a, -2.0))
+                        .map_block(|a| (a, a))
                         .map_block(add)
-                        .dangle()
+                        .dangle() // 10.0
                     },
                     |chain: OutputChain<f64>| {
                         chain
-                        .dangle()
+                        .map_block(|a| (a, a))
+                        .map_block(add)
+                        .dangle() // 20.0
                     }
                 ),
             )
             .bundle()
-            .race_bundle(&mut commands)
-            .take();
+            .race_bundle(commands)
+            .take()
+        });
 
-        command_queue.apply(&mut world);
-        dbg!(world.entities().len());
+        context.run_with_conditions(
+            &mut promise,
+            FlushConditions::new()
+            .with_update_count(5),
+        );
+        assert_eq!(promise.peek().available().copied(), Some(20.0));
     }
 
     #[test]
     fn test_unzip() {
-        let mut context = TestContext::new();
+        let mut context = TestingContext::new();
 
         let mut promise = context.build(|commands| {
             commands
@@ -864,32 +916,7 @@ mod tests {
             .take()
         });
 
-        context.flush_while_pending(&mut promise);
+        context.run_while_pending(&mut promise);
         assert_eq!(promise.peek().available().copied(), Some(15.0));
-    }
-
-    #[test]
-    fn test_pull_zip() {
-        let mut context = TestContext::new();
-        let mut promise = context.build(|commands| {
-            commands
-            .request("thanks".to_owned(), to_uppercase.into_blocking_map())
-            .pull_zip(
-                (4.0, [0xF0, 0x9F, 0x90, 0x9F]),
-                (
-                    |chain: OutputChain<String>| chain.dangle(),
-                    |chain: OutputChain<f64>| chain.map_block(|value| value.to_string()).dangle(),
-                    |chain: OutputChain<[u8; 4]>| chain.map_block(string_from_utf8).cancel_on_err().dangle(),
-                )
-            )
-            .bundle()
-            .join_bundle(commands)
-            // .take()
-            .map_block(|string_bundle| string_bundle.join(" "))
-            .take()
-        });
-
-        context.flush_while_pending(&mut promise);
-        dbg!(promise.peek());
     }
 }

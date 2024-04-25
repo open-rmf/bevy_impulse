@@ -16,44 +16,43 @@
 */
 
 use bevy::{
-    prelude::{World, Commands},
-    ecs::system::{CommandQueue, BoxedSystem, IntoSystem, System},
-    tasks::{AsyncComputeTaskPool, TaskPool},
+    prelude::{Commands, App, Update, MinimalPlugins},
+    ecs::system::CommandQueue,
 };
 
 use crate::{Promise, flush_impulses};
 
-pub struct TestContext {
-    pub world: World,
-    flusher: BoxedSystem,
+pub struct TestingContext {
+    pub app: App,
 }
 
-impl TestContext {
+impl TestingContext {
     pub fn new() -> Self {
-        AsyncComputeTaskPool::init(|| TaskPool::new());
-        let mut world = World::new();
-        let mut flusher = Box::new(IntoSystem::into_system(flush_impulses));
-        flusher.initialize(&mut world);
+        let mut app = App::new();
+        app
+            .add_plugins(MinimalPlugins)
+            .add_systems(Update, flush_impulses);
 
-        TestContext { world, flusher }
+        app.update();
+        TestingContext { app }
     }
 
     pub fn build<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
         let mut command_queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut command_queue, &self.world);
+        let mut commands = Commands::new(&mut command_queue, &self.app.world);
         let u = f(&mut commands);
-        command_queue.apply(&mut self.world);
+        command_queue.apply(&mut self.app.world);
         u
     }
 
-    pub fn flush_while_pending<T>(
+    pub fn run_while_pending<T>(
         &mut self,
         promise: &mut Promise<T>,
     ) {
-        self.flush_with_conditions(promise, FlushConditions::new());
+        self.run_with_conditions(promise, FlushConditions::new());
     }
 
-    pub fn flush_with_conditions<T>(
+    pub fn run_with_conditions<T>(
         &mut self,
         promise: &mut Promise<T>,
         conditions: FlushConditions,
@@ -62,20 +61,22 @@ impl TestContext {
         let mut count = 0;
         while promise.peek().is_pending() {
             if let Some(timeout) = conditions.timeout {
-                if timeout < std::time::Instant::now() - t_initial {
+                let elapsed = std::time::Instant::now() - t_initial;
+                if timeout < elapsed {
+                    println!("Exceeded timeout of {timeout:?}: {elapsed:?}");
                     return false;
                 }
             }
 
-            if let Some(count_limit) = conditions.flush_count {
+            if let Some(count_limit) = conditions.update_count {
                 count += 1;
                 if count_limit < count {
+                    println!("Exceeded count limit of {count_limit}: {count}");
                     return false;
                 }
             }
 
-            self.flusher.run((), &mut self.world);
-            self.flusher.apply_deferred(&mut self.world);
+            self.app.update();
         }
 
         return true;
@@ -85,7 +86,7 @@ impl TestContext {
 #[derive(Default, Clone)]
 pub struct FlushConditions {
     pub timeout: Option<std::time::Duration>,
-    pub flush_count: Option<usize>,
+    pub update_count: Option<usize>,
 }
 
 impl FlushConditions {
@@ -98,8 +99,8 @@ impl FlushConditions {
         self
     }
 
-    pub fn with_flush_count(mut self, count: usize) -> Self {
-        self.flush_count = Some(count);
+    pub fn with_update_count(mut self, count: usize) -> Self {
+        self.update_count = Some(count);
         self
     }
 }
@@ -143,7 +144,19 @@ pub struct WaitRequest<Value> {
     pub value: Value
 }
 
+/// This function is used to force certain branches to lose races in tests or
+/// validate async execution with delays.
+#[cfg(test)]
 pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
-    std::thread::sleep(request.duration);
+    use async_std::future;
+    let never = future::pending::<()>();
+    let _ = future::timeout(request.duration, never);
     request.value
+}
+
+pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl FnOnce(T) -> T {
+    move |value| {
+        println!("{header}: {value:?}");
+        value
+    }
 }

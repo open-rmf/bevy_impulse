@@ -154,7 +154,7 @@ where
     fn execute(
         source: Entity,
         world: &mut World,
-        _roster: &mut OperationRoster,
+        roster: &mut OperationRoster,
     ) -> OperationResult {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
@@ -166,6 +166,7 @@ where
 
         let task = AsyncComputeTaskPool::get().spawn(map.call(AsyncMap { request, channel }));
         source_mut.insert(TaskBundle::new(task));
+        roster.poll(source);
         Ok(OperationStatus::Unfinished)
     }
 }

@@ -268,6 +268,8 @@ pub struct OperationRoster {
     pub(crate) dispose_chain_from: Vec<Entity>,
     /// Indicate that there is no longer a need for this chain
     pub(crate) drop_dependency: Vec<Cancel>,
+    /// Indicate async tasks that should be polled
+    pub(crate) poll: Vec<Entity>,
 }
 
 impl OperationRoster {
@@ -299,9 +301,15 @@ impl OperationRoster {
         self.drop_dependency.push(source);
     }
 
+    pub fn poll(&mut self, source: Entity) {
+        self.poll.push(source);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.operate.is_empty() && self.cancel.is_empty()
         && self.unblock.is_empty() && self.dispose.is_empty()
+        && self.dispose_chain_from.is_empty() && self.drop_dependency.is_empty()
+        && self.poll.is_empty()
     }
 }
 

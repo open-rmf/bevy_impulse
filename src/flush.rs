@@ -22,8 +22,6 @@ use bevy::{
 
 use smallvec::SmallVec;
 
-use backtrace::Backtrace;
-
 use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage, FunnelInputStatus,
@@ -35,7 +33,6 @@ use crate::{
 #[allow(private_interfaces)]
 pub fn flush_impulses(
     world: &mut World,
-    poll_task_query: &mut QueryState<(Entity, &PollTask), Added<PollTask>>,
     input_ready_query: &mut QueryState<Entity, Added<InputReady>>,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
@@ -62,39 +59,18 @@ pub fn flush_impulses(
         command_queue.apply(world);
     }
 
-    // Collect pollable tasks. These need to be collected before we can use them
-    // because we need to borrow the world while iterating but also need the world
-    // to be mutable while polling.
-    let pollables: SmallVec<[_; 8]> = poll_task_query
-        .iter(world)
-        .map(|(e, f)| (e, f.0))
-        .collect();
-
-    // Poll any new tasks to get them hooked into the async task channel
-    for (e, f) in pollables {
-        f(e, world, &mut roster);
-    }
-
     // Queue any operations whose inputs are ready
     for e in input_ready_query.iter(world) {
         roster.queue(e);
     }
 
     // Collect any tasks that are ready to be woken
-    let wakeables: SmallVec<[_; 8]> = world
+    for wakeable in world
         .get_resource_or_insert_with(|| WakeQueue::new())
         .receiver
         .try_iter()
-        .collect();
-
-    // Poll any tasks that have asked to be woken
-    for e in wakeables {
-        let Some(f) = world.get::<PollTask>(e).map(|x| x.0) else {
-            roster.cancel(Cancel::broken_here(e));
-            continue;
-        };
-
-        f(e, world, &mut roster);
+    {
+        roster.poll(wakeable);
     }
 
     let mut unused_targets_state: SystemState<Query<Entity, With<UnusedTarget>>> =
@@ -128,12 +104,23 @@ pub fn flush_impulses(
             }
         }
 
+        // Dispose of anything that is no longer needed
         while let Some(e) = roster.dispose.pop() {
             dispose_link(e, world, &mut roster);
         }
 
         while let Some(e) = roster.dispose_chain_from.pop() {
             dispose_chain_from(e, world, &mut roster);
+        }
+
+        // Poll any tasks that have asked to be woken
+        while let Some(e) = roster.poll.pop() {
+            let Some(f) = world.get::<PollTask>(e).map(|x| x.0) else {
+                roster.cancel(Cancel::broken_here(e));
+                continue;
+            };
+
+            f(e, world, &mut roster);
         }
 
         while let Some(unblock) = roster.unblock.pop_front() {
