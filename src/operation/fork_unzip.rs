@@ -19,7 +19,7 @@ use bevy::prelude::{Entity, World};
 
 use crate::{
     ForkTargetStorage, Operation, Unzippable, SingleSourceStorage, InputStorage,
-    ForkTargetStatus, inspect_fork_targets,
+    OperationResult, OrBroken, ForkTargetStatus, inspect_fork_targets,
 };
 
 pub(crate) struct ForkUnzip<T> {
@@ -54,13 +54,13 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
         source: Entity,
         world: &mut World,
         roster: &mut crate::OperationRoster,
-    ) -> Result<crate::OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Some(values) = source_mut.take::<InputStorage<T>>() else {
             return inspect_fork_targets(source, world, roster);
         };
         let values = values.take();
-        let targets = source_mut.take::<ForkTargetStorage>().ok_or(())?;
+        let targets = source_mut.take::<ForkTargetStorage>().or_broken()?;
         values.distribute_values(&targets, world, roster)
     }
 }

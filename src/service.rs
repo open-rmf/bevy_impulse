@@ -113,12 +113,12 @@ impl<'a> ServiceRequest<'a> {
     pub fn from_source<B: Component>(&mut self) -> Option<B> {
         if let Some(mut source_mut) = self.world.get_entity_mut(self.source) {
             let Some(request) = source_mut.take::<B>() else {
-                self.roster.cancel(Cancel::broken(self.source));
+                self.roster.cancel(Cancel::broken_here(self.source));
                 return None;
             };
             Some(request)
         } else {
-            self.roster.cancel(Cancel::broken(self.source));
+            self.roster.cancel(Cancel::broken_here(self.source));
             return None;
         }
     }

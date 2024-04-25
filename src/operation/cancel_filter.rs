@@ -19,7 +19,8 @@ use bevy::prelude::{World, Component, Entity};
 
 use crate::{
     Operation, OperationStatus, OperationRoster, SingleTargetStorage,
-    SingleSourceStorage, InputStorage, InputBundle, Cancel,
+    SingleSourceStorage, InputStorage, InputBundle, Cancel, OperationResult,
+    OrBroken,
 };
 
 pub struct CancelFilter<Input, Output, F> {
@@ -79,11 +80,11 @@ where
         source: Entity,
         world: &mut bevy::prelude::World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let input = source_mut.take::<InputStorage<Input>>().ok_or(())?.take();
-        let target = source_mut.take::<SingleTargetStorage>().ok_or(())?.0;
-        let CancelFilterStorage::<F>(filter) = source_mut.take().ok_or(())?;
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let input = source_mut.take::<InputStorage<Input>>().or_broken()?.take();
+        let target = source_mut.take::<SingleTargetStorage>().or_broken()?.0;
+        let CancelFilterStorage::<F>(filter) = source_mut.take().or_broken()?;
 
         // This is where we cancel if the filter function does not return anything.
         let Some(output) = filter(input) else {
@@ -95,7 +96,7 @@ where
 
         // At this point we have the correct type to deliver to the target, so
         // we proceed with doing that.
-        let mut target_mut = world.get_entity_mut(target).ok_or(())?;
+        let mut target_mut = world.get_entity_mut(target).or_broken()?;
         target_mut.insert(InputBundle::new(output));
         roster.queue(target);
 

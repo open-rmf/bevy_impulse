@@ -22,6 +22,8 @@ use bevy::{
 
 use smallvec::SmallVec;
 
+use backtrace::Backtrace;
+
 use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage, FunnelInputStatus,
@@ -88,7 +90,7 @@ pub fn flush_impulses(
     // Poll any tasks that have asked to be woken
     for e in wakeables {
         let Some(f) = world.get::<PollTask>(e).map(|x| x.0) else {
-            roster.cancel(Cancel::broken(e));
+            roster.cancel(Cancel::broken_here(e));
             continue;
         };
 

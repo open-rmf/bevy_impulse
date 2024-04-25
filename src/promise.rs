@@ -20,6 +20,8 @@ use std::{
     future::Future, task::{Context, Poll}, pin::Pin
 };
 
+use crate::Cancellation;
+
 pub(crate) mod private;
 use private::*;
 
@@ -136,11 +138,14 @@ impl<T> Promise<T> {
             match self.target.inner.lock() {
                 Ok(mut guard) => {
                     match guard.result.take() {
-                        Some(PromiseResult::Finished(response)) => {
+                        Some(PromiseResult::Available(response)) => {
                             self.state = PromiseState::Available(response);
                         }
-                        Some(PromiseResult::Cancelled) => {
-                            self.state = PromiseState::Cancelled;
+                        Some(PromiseResult::Cancelled(cause)) => {
+                            self.state = PromiseState::Cancelled(cause);
+                        }
+                        Some(PromiseResult::Disposed) => {
+                            self.state = PromiseState::Disposed;
                         }
                         None => {
                             // Do nothing
@@ -151,7 +156,7 @@ impl<T> Promise<T> {
                     // If the mutex is poisoned, that has to mean the sender
                     // crashed while trying to send the value, so we should
                     // treat it as cancelled.
-                    self.state = PromiseState::Cancelled;
+                    self.state = PromiseState::Disposed;
                 }
             }
         }
@@ -195,14 +200,16 @@ impl<T: Unpin> Future for Promise<T> {
 }
 
 /// The state of a promise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum PromiseState<T> {
     /// The promise received its result and can be seen in this state.
     Available(T),
     /// The promise is still pending, so you need to keep waiting for the state.
     Pending,
     /// The promise has been cancelled and will never receive a response.
-    Cancelled,
+    Cancelled(Cancellation),
+    /// The sender was disposed of, so the promise will never receive a response.
+    Disposed,
     /// The promise was delivered and has been taken. It will never be available
     /// to take again.
     Taken,
@@ -213,7 +220,8 @@ impl<T> PromiseState<T> {
         match self {
             Self::Available(value) => PromiseState::Available(value),
             Self::Pending => PromiseState::Pending,
-            Self::Cancelled => PromiseState::Cancelled,
+            Self::Cancelled(cancellation) => PromiseState::Cancelled(cancellation.clone()),
+            Self::Disposed => PromiseState::Disposed,
             Self::Taken => PromiseState::Taken,
         }
     }
@@ -234,7 +242,7 @@ impl<T> PromiseState<T> {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled)
+        matches!(self, Self::Disposed)
     }
 
     pub fn is_taken(&self) -> bool {
@@ -249,8 +257,11 @@ impl<T> PromiseState<T> {
             Self::Pending => {
                 Self::Pending
             }
-            Self::Cancelled => {
-                Self::Cancelled
+            Self::Cancelled(cancellation) => {
+                Self::Cancelled(cancellation.clone())
+            }
+            Self::Disposed => {
+                Self::Disposed
             }
             Self::Taken => {
                 Self::Taken

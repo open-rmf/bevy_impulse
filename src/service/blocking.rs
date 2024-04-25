@@ -133,7 +133,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
             target_mut.insert(InputBundle::new(response));
         } else {
             // The target is no longer available for a delivery
-            roster.cancel(Cancel::broken(target));
+            roster.cancel(Cancel::broken_here(target));
         }
     }
 }

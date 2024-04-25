@@ -28,6 +28,8 @@ use bevy::{
     tasks::AsyncComputeTaskPool,
 };
 
+use backtrace::Backtrace;
+
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -80,7 +82,7 @@ pub struct HandleRequest<'a> {
 impl<'a> HandleRequest<'a> {
     fn get_request<Request: 'static + Send + Sync>(&mut self) -> Option<Request> {
         let Some(mut source_mut) = self.world.get_entity_mut(self.source) else {
-            self.roster.cancel(Cancel::broken(self.source));
+            self.roster.cancel(Cancel::broken_here(self.source));
             return None;
         };
 
@@ -89,7 +91,7 @@ impl<'a> HandleRequest<'a> {
 
     fn give_response<Response: 'static + Send + Sync>(&mut self, response: Response) {
         let Some(mut target_mut) = self.world.get_entity_mut(self.target) else {
-            self.roster.cancel(Cancel::broken(self.target));
+            self.roster.cancel(Cancel::broken_here(self.target));
             return;
         };
 
@@ -101,7 +103,7 @@ impl<'a> HandleRequest<'a> {
         Task::Output: Send + Sync,
     {
         let Some(mut source_mut) = self.world.get_entity_mut(self.source) else {
-            self.roster.cancel(Cancel::broken(self.source));
+            self.roster.cancel(Cancel::broken_here(self.source));
             return;
         };
 

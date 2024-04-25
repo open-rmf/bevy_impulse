@@ -15,7 +15,11 @@
  *
 */
 
-use crate::{Operation, InputStorage, OperationStatus, OperationRoster, promise::private::Sender};
+use crate::{
+    Operation, InputStorage, OperationStatus, OperationResult, OperationRoster,
+    CancellationBehavior, Cancellation, OrBroken,
+    promise::private::Sender,
+};
 
 use bevy::prelude::{Entity, Component, World, Resource};
 
@@ -57,14 +61,17 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
                 );
 
                 let dropped_promise_sender = dropped_promise_queue.sender.clone();
-                sender.on_cancel(move || {
+                sender.on_promise_drop(move || {
                     dropped_promise_sender.send(entity).expect(
                         "DroppedPromiseQueue resource has been removed unexpectedly"
                     );
                 });
             }
 
-            world.entity_mut(entity).insert(SenderStorage(sender));
+            world.entity_mut(entity).insert((
+                SenderStorage(sender),
+                CancellationBehavior { hook: cancel_termination::<T> },
+            ));
         }
     }
 
@@ -72,13 +79,27 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
         source: Entity,
         world: &mut World,
         _: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
         if let Some(sender) = source_mut.take::<SenderStorage<T>>() {
-            let input = source_mut.take::<InputStorage<T>>().ok_or(())?.take();
+            let input = source_mut.take::<InputStorage<T>>().or_broken()?.take();
             sender.0.send(input).ok();
         }
 
         Ok(OperationStatus::Finished)
+    }
+}
+
+fn cancel_termination<T: 'static + Send + Sync>(
+    cause: &Cancellation,
+    source: Entity,
+    world: &mut World,
+    _roster: &mut OperationRoster,
+) {
+    let Some(mut source_mut) = world.get_entity_mut(source) else {
+        return;
+    };
+    if let Some(mut sender) = source_mut.take::<SenderStorage<T>>() {
+        sender.0.cancel(cause.clone()).ok();
     }
 }

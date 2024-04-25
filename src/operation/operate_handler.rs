@@ -17,7 +17,7 @@
 
 use crate::{
     Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
-    OperationStatus, Stream, SingleSourceStorage,
+    OperationStatus, Stream, SingleSourceStorage, OperationResult, OrBroken,
 };
 
 use bevy::prelude::{Entity, Component};
@@ -60,13 +60,14 @@ where
         source: Entity,
         world: &mut bevy::prelude::World,
         roster: &mut crate::OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        let handler = source_mut.get_mut::<HandlerStorage<Request, Response, Streams>>().ok_or(())?.handler.clone();
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+        let handler = source_mut.get_mut::<HandlerStorage<Request, Response, Streams>>()
+            .or_broken()?.handler.clone();
 
         let mut handler_impl = {
-            let mut inner = handler.inner.lock().map_err(|_| ())?;
+            let mut inner = handler.inner.lock().or_broken()?;
             match inner.handler.take() {
                 Some(handler_impl) => handler_impl,
                 None => {

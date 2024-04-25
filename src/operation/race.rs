@@ -21,6 +21,7 @@ use crate::{
     InputStorage, InputBundle, FunnelInputStatus, FunnelSourceStorage,
     SingleTargetStorage, Operation, OperationStatus, OperationRoster, Unzippable,
     ForkTargetStorage, SingleSourceStorage, Cancel, RaceCancelled, ForkTargetStatus,
+    OrBroken, OperationResult, OperationError,
 };
 
 use smallvec::SmallVec;
@@ -54,12 +55,12 @@ impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        source_mut.get_mut::<FunnelInputStatus>().ok_or(())?.ready();
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        source_mut.get_mut::<FunnelInputStatus>().or_broken()?.ready();
 
-        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        world.get_mut::<RaceWinner>(target).ok_or(())?.propose(source);
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+        world.get_mut::<RaceWinner>(target).or_broken()?.propose(source);
         roster.queue(target);
 
         // We can't let this link be cleaned up automatically. Its cleanup needs
@@ -108,7 +109,7 @@ impl<Values: Unzippable> Operation for ZipRace<Values> {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
+    ) -> OperationResult {
         manage_race_delivery(source, world, roster, Values::race_values)
     }
 }
@@ -148,7 +149,7 @@ impl<T: 'static + Send + Sync> Operation for BundleRace<T> {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
+    ) -> OperationResult {
         manage_race_delivery(source, world, roster, deliver_bundle_race_winner::<T>)
     }
 }
@@ -157,13 +158,13 @@ fn manage_race_delivery(
     source: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
-    deliver: fn(Entity, Entity, &mut World, &mut OperationRoster) -> Result<OperationStatus, ()>,
-) -> Result<OperationStatus, ()> {
-    if let Some(winner) = world.get_mut::<RaceWinner>(source).ok_or(())?.take_ready() {
+    deliver: fn(Entity, Entity, &mut World, &mut OperationRoster) -> OperationResult,
+) -> OperationResult {
+    if let Some(winner) = world.get_mut::<RaceWinner>(source).or_broken()?.take_ready() {
         deliver(source, winner, world, roster)?;
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
         for input in &inputs.0 {
-            let input_status = world.get::<FunnelInputStatus>(*input).ok_or(())?;
+            let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
             if input_status.is_pending() {
                 roster.drop_dependency(Cancel::race_lost(source, *input, input_status.clone()));
             }
@@ -185,9 +186,9 @@ fn inspect_race_inputs(
     source: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
-) -> Result<OperationStatus, ()> {
+) -> OperationResult {
     let source_ref = world.entity(source);
-    let inputs = source_ref.get::<FunnelSourceStorage>().ok_or(())?;
+    let inputs = source_ref.get::<FunnelSourceStorage>().or_broken()?;
 
     let mut dispose_race = true;
     if let Some(fork_targets) = source_ref.get::<ForkTargetStorage>() {
@@ -196,7 +197,7 @@ fn inspect_race_inputs(
         let mut close_input: SmallVec<[Entity; 16]> = SmallVec::new();
 
         for (input, target) in inputs.0.iter().zip(fork_targets.0.iter()) {
-            let input_status = world.get::<FunnelInputStatus>(*input).ok_or(())?;
+            let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
             if input_status.is_pending() {
                 dispose_race = false;
             } else if let Some(cause) = input_status.cancelled() {
@@ -209,7 +210,7 @@ fn inspect_race_inputs(
         }
 
         for e in close_input {
-            world.get_mut::<FunnelInputStatus>(e).ok_or(())?.close();
+            world.get_mut::<FunnelInputStatus>(e).or_broken()?.close();
         }
 
     } else if let Some(single_target) = source_ref.get::<SingleTargetStorage>() {
@@ -217,7 +218,7 @@ fn inspect_race_inputs(
         // target if they are.
         let mut input_statuses: SmallVec<[(Entity, FunnelInputStatus); 16]> = SmallVec::new();
         for candidate in &inputs.0 {
-            let status = world.get::<FunnelInputStatus>(*candidate).ok_or(())?;
+            let status = world.get::<FunnelInputStatus>(*candidate).or_broken()?;
             if !status.undeliverable() {
                 dispose_race = false;
                 break;
@@ -235,7 +236,7 @@ fn inspect_race_inputs(
             ));
         }
     } else {
-        return Err(());
+        return Err(OperationError::here());
     }
 
     if dispose_race {
@@ -249,14 +250,14 @@ fn inspect_race_targets(
     source: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
-) -> Result<OperationStatus, ()> {
+) -> OperationResult {
     let source_ref = world.entity(source);
     if let Some(fork_targets) = source_ref.get::<ForkTargetStorage>() {
         // Check whether any targets have dropped, and propagate that upwards
-        let inputs = source_ref.get::<FunnelSourceStorage>().ok_or(())?;
+        let inputs = source_ref.get::<FunnelSourceStorage>().or_broken()?;
         let mut close_target: SmallVec<[Entity; 16]> = SmallVec::new();
         for (input, target) in inputs.0.iter().zip(fork_targets.0.iter()) {
-            let target_status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
+            let target_status = world.get::<ForkTargetStatus>(*target).or_broken()?;
             if let Some(cause) = target_status.dropped() {
                 roster.drop_dependency(Cancel { apply_to: *input, cause });
                 close_target.push(*target);
@@ -264,7 +265,7 @@ fn inspect_race_targets(
         }
 
         for e in close_target {
-            world.get_mut::<ForkTargetStatus>(e).ok_or(())?.close();
+            world.get_mut::<ForkTargetStatus>(e).or_broken()?.close();
         }
     }
 
@@ -276,13 +277,13 @@ fn deliver_bundle_race_winner<T: 'static + Send + Sync>(
     winner: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
-) -> Result<OperationStatus, ()> {
-    let target = world.get::<SingleTargetStorage>(source).ok_or(())?.0;
+) -> OperationResult {
+    let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
     let input = world
-        .get_entity_mut(winner).ok_or(())?
-        .take::<InputStorage<T>>().ok_or(())?.take();
+        .get_entity_mut(winner).or_broken()?
+        .take::<InputStorage<T>>().or_broken()?.take();
 
-    world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+    world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
     roster.queue(target);
     Ok(OperationStatus::Finished)
 }

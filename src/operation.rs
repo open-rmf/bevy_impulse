@@ -15,17 +15,16 @@
  *
 */
 
-use crate::{RequestLabelId, Cancel, CancellationCause};
+use crate::{RequestLabelId, Cancel, Cancellation};
 
 use bevy::{
     prelude::{Entity, World, Component, Query},
     ecs::system::{Command, SystemParam},
 };
 
-use std::{
-    collections::VecDeque,
-    sync::Arc,
-};
+use backtrace::Backtrace;
+
+use std::collections::VecDeque;
 
 use smallvec::SmallVec;
 
@@ -77,7 +76,7 @@ pub enum FunnelInputStatus {
     /// The input is not ready yet but might be ready later
     Pending,
     /// The input has been cancelled so it will never be ready
-    Cancelled(Arc<CancellationCause>),
+    Cancelled(Cancellation),
     /// The input has been disposed so it will never be ready
     Disposed,
     /// The input could not be delivered and this fact has been handled.
@@ -100,16 +99,16 @@ impl FunnelInputStatus {
         matches!(self, Self::Pending)
     }
 
-    pub fn cancel(&mut self, cause: Arc<CancellationCause>) {
+    pub fn cancel(&mut self, cause: Cancellation) {
         if self.is_closed() {
             return;
         }
         *self = Self::Cancelled(cause);
     }
 
-    pub fn cancelled(&self) -> Option<Arc<CancellationCause>> {
+    pub fn cancelled(&self) -> Option<Cancellation> {
         match self {
-            Self::Cancelled(cause) => Some(Arc::clone(cause)),
+            Self::Cancelled(cause) => Some(cause.clone()),
             _ => None,
         }
     }
@@ -171,7 +170,7 @@ pub enum ForkTargetStatus {
     /// The target is able to receive an input
     Active,
     /// The target has been dropped and is no longer needed
-    Dropped(Arc<CancellationCause>),
+    Dropped(Cancellation),
     /// The target has been dropped and this fact has been processed
     Closed,
 }
@@ -181,14 +180,14 @@ impl ForkTargetStatus {
         matches!(self, Self::Active)
     }
 
-    pub fn dropped(&self) -> Option<Arc<CancellationCause>> {
+    pub fn dropped(&self) -> Option<Cancellation> {
         match self {
-            Self::Dropped(cause) => Some(Arc::clone(cause)),
+            Self::Dropped(cause) => Some(cause.clone()),
             _ => None,
         }
     }
 
-    pub fn drop_dependency(&mut self, cause: Arc<CancellationCause>) {
+    pub fn drop_dependency(&mut self, cause: Cancellation) {
         if self.is_closed() {
             return;
         }
@@ -326,18 +325,70 @@ pub enum OperationStatus {
     Unfinished,
 }
 
-pub(crate) trait Operation {
+pub struct OperationError {
+    pub backtrace: Option<Backtrace>,
+}
+
+impl OperationError {
+    pub fn here() -> Self {
+        OperationError { backtrace: Some(Backtrace::new()) }
+    }
+}
+
+pub type OperationResult = Result<OperationStatus, OperationError>;
+
+/// Trait that defines a single operation within a chain.
+pub trait Operation {
+    /// Set the initial parameters for your operation. This gets called while
+    /// the chain is being built.
     fn set_parameters(
         self,
         entity: Entity,
         world: &mut World,
     );
 
+    /// Execute this operation. This gets triggered when a new InputStorage
+    /// component is added to `source` or when another operation puts `source`
+    /// into the [`OperationRoster::queue`].
     fn execute(
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()>;
+    ) -> OperationResult;
+}
+
+pub trait OrBroken: Sized {
+    type Value;
+
+    /// If the value is not available then we will have an operation error.
+    /// This includes a backtrace of the stack to help with debugging.
+    fn or_broken(self) -> Result<Self::Value, OperationError> {
+        self.or_broken_impl(Some(Backtrace::new()))
+    }
+
+    /// If the value is not available then we will have an operation error.
+    /// This does not include a backtrace, which makes it suitable for codebases
+    /// that need to be kept hidden.
+    fn or_broken_hide(self) -> Result<Self::Value, OperationError> {
+        self.or_broken_impl(None)
+    }
+
+    /// This is what should be implemented by structs that provide this trait.
+    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<Self::Value, OperationError>;
+}
+
+impl<T, E> OrBroken for Result<T, E> {
+    type Value = T;
+    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
+        self.map_err(|_| OperationError { backtrace })
+    }
+}
+
+impl<T> OrBroken for Option<T> {
+    type Value = T;
+    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
+        self.ok_or_else(|| OperationError { backtrace })
+    }
 }
 
 pub(crate) struct PerformOperation<Op: Operation> {
@@ -364,9 +415,16 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
 #[derive(Component)]
 struct Operate(fn(Entity, &mut World, &mut OperationRoster));
 
+/// Insert this as a component on the source of any operation that needs to have
+/// special handling for cancellation. So far this is only used by [`Terminate`].
+#[derive(Component, Clone, Copy)]
+pub struct CancellationBehavior {
+    pub hook: fn(&Cancellation, Entity, &mut World, &mut OperationRoster),
+}
+
 pub(crate) fn operate(entity: Entity, world: &mut World, roster: &mut OperationRoster) {
     let Some(operator) = world.get::<Operate>(entity) else {
-        roster.cancel(Cancel::broken(entity));
+        roster.cancel(Cancel::broken_here(entity));
         return;
     };
     let operator = operator.0;
@@ -385,8 +443,8 @@ fn perform_operation<Op: Operation>(
         Ok(OperationStatus::Unfinished) => {
             // Do nothing
         }
-        Err(()) => {
-            roster.cancel(Cancel::broken(source));
+        Err(error) => {
+            roster.cancel(Cancel::broken(source, error.backtrace));
         }
     }
 }

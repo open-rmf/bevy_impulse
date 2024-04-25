@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{Promise, PromiseState};
+use crate::{Promise, PromiseState, Cancellation};
 
 use std::{
     task::Waker, any::Any,
@@ -40,18 +40,21 @@ impl<T> Sender<T> {
         Self { target, sent: false }
     }
 
-    pub(crate) fn send(mut self, value: T) -> Result<(), T> {
-        let result = self.set(PromiseResult::Finished(value));
+    pub(crate) fn send(mut self, value: T) -> Result<(), PromiseResult<T>> {
+        let result = self.set(PromiseResult::Available(value));
         self.sent = true;
         result
     }
 
-    pub(crate) fn set(&mut self, result: PromiseResult<T>) -> Result<(), T> {
+    pub(crate) fn cancel(mut self, cause: Cancellation) -> Result<(), PromiseResult<T>> {
+        let result = self.set(PromiseResult::Cancelled(cause));
+        self.sent = true;
+        result
+    }
+
+    pub(crate) fn set(&mut self, result: PromiseResult<T>) -> Result<(), PromiseResult<T>> {
         let Some(target) = self.target.upgrade() else {
-            match result {
-                PromiseResult::Finished(value) => return Err(value),
-                PromiseResult::Cancelled => return Ok(()),
-            }
+            return Err(result);
         };
         let mut inner = match target.inner.lock() {
             Ok(inner) => inner,
@@ -65,7 +68,7 @@ impl<T> Sender<T> {
         Ok(())
     }
 
-    pub(crate) fn on_cancel(&mut self, f: impl FnOnce() + 'static + Send) {
+    pub(crate) fn on_promise_drop(&mut self, f: impl FnOnce() + 'static + Send) {
         match self.target.upgrade() {
             Some(target) => {
                 let mut guard = match target.inner.lock() {
@@ -90,7 +93,7 @@ impl<T> Sender<T> {
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
         if !self.sent {
-            self.set(PromiseResult::Cancelled).ok();
+            self.set(PromiseResult::Disposed).ok();
         }
     }
 }
@@ -135,12 +138,16 @@ impl<T> Promise<T> {
         result: &mut Option<PromiseResult<T>>,
     ) -> bool {
         match result.take() {
-            Some(PromiseResult::Finished(response)) => {
+            Some(PromiseResult::Available(response)) => {
                 *state = PromiseState::Available(response);
                 return false;
             }
-            Some(PromiseResult::Cancelled) => {
-                *state = PromiseState::Cancelled;
+            Some(PromiseResult::Cancelled(cause)) => {
+                *state = PromiseState::Cancelled(cause);
+                return false;
+            }
+            Some(PromiseResult::Disposed) => {
+                *state = PromiseState::Disposed;
                 return false;
             }
             None => {
@@ -151,8 +158,9 @@ impl<T> Promise<T> {
 }
 
 pub(crate) enum PromiseResult<T> {
-    Finished(T),
-    Cancelled,
+    Available(T),
+    Cancelled(Cancellation),
+    Disposed,
 }
 
 pub(super) struct PromiseTargetInner<T> {

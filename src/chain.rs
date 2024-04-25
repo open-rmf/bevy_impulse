@@ -481,17 +481,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// tuple.
     ///
     /// ```
-    /// use bevy::{
-    ///     prelude::{World, Commands},
-    ///     ecs::system::CommandQueue,
-    /// };
-    /// use bevy_impulse::{*, sample::*};
-    ///
-    /// let world = World::new();
-    /// let mut command_queue = CommandQueue::default();
-    /// let mut commands = Commands::new(&mut command_queue, &world);
-    ///
-    /// let promise = commands
+    /// use bevy_impulse::{*, testing::*};
+    /// let mut context = TestContext::new();
+    /// let mut promise = context.build(|commands| {
+    ///     commands
     ///     .request("thanks".to_owned(), to_uppercase.into_blocking_map())
     ///     .pull_zip(
     ///         (4.0, [0xF0, 0x9F, 0x90, 0x9F]),
@@ -502,9 +495,13 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ///         )
     ///     )
     ///     .bundle()
-    ///     .join_bundle(&mut commands)
+    ///     .join_bundle(commands)
     ///     .map_block(|string_bundle| string_bundle.join(" "))
-    ///     .take();
+    ///     .take()
+    /// });
+    ///
+    /// context.flush_while_pending(&mut promise);
+    /// dbg!(promise.peek());
     /// ```
     pub fn pull_zip<InitialValues, Builders>(
         self,
@@ -789,7 +786,7 @@ pub type OutputChain<'w, 's, 'a, Response> = Chain<'w, 's, 'a, Response, (), Mod
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RequestExt, sample::*, flush_impulses};
+    use crate::{RequestExt, testing::*, flush_impulses};
     use bevy::{
         prelude::{World, Commands},
         ecs::system::{CommandQueue, IntoSystem, System},
@@ -837,13 +834,10 @@ mod tests {
 
     #[test]
     fn test_unzip() {
-        AsyncComputeTaskPool::init(|| TaskPool::new());
+        let mut context = TestContext::new();
 
-        let mut world = World::new();
-        let mut command_queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut command_queue, &world);
-
-        let mut promise = commands
+        let mut promise = context.build(|commands| {
+            commands
             .request((2.0, 3.0), add.into_blocking_map())
             .map_block(|v| (v, 2.0*v))
             .unzip_build((
@@ -866,15 +860,36 @@ mod tests {
                 }
             ))
             .bundle()
-            .race_bundle(&mut commands)
-            .take();
+            .race_bundle(commands)
+            .take()
+        });
 
-        command_queue.apply(&mut world);
-        let mut flusher = Box::new(IntoSystem::into_system(flush_impulses));
-        flusher.initialize(&mut world);
-        flusher.run((), &mut world);
-        flusher.apply_deferred(&mut world);
-
+        context.flush_while_pending(&mut promise);
         assert_eq!(promise.peek().available().copied(), Some(15.0));
+    }
+
+    #[test]
+    fn test_pull_zip() {
+        let mut context = TestContext::new();
+        let mut promise = context.build(|commands| {
+            commands
+            .request("thanks".to_owned(), to_uppercase.into_blocking_map())
+            .pull_zip(
+                (4.0, [0xF0, 0x9F, 0x90, 0x9F]),
+                (
+                    |chain: OutputChain<String>| chain.dangle(),
+                    |chain: OutputChain<f64>| chain.map_block(|value| value.to_string()).dangle(),
+                    |chain: OutputChain<[u8; 4]>| chain.map_block(string_from_utf8).cancel_on_err().dangle(),
+                )
+            )
+            .bundle()
+            .join_bundle(commands)
+            // .take()
+            .map_block(|string_bundle| string_bundle.join(" "))
+            .take()
+        });
+
+        context.flush_while_pending(&mut promise);
+        dbg!(promise.peek());
     }
 }

@@ -18,6 +18,7 @@
 use crate::{
     Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
     SingleSourceStorage, OperationStatus, dispatch_service, Cancel,
+    OperationResult, OrBroken,
 };
 
 use bevy::{
@@ -57,10 +58,10 @@ impl Operation for OperateService {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let source_ref = world.get_entity(source).ok_or(())?;
-        let target = source_ref.get::<SingleTargetStorage>().ok_or(())?.0;
-        let provider = source_ref.get::<ProviderStorage>().ok_or(())?.0;
+    ) -> OperationResult {
+        let source_ref = world.get_entity(source).or_broken()?;
+        let target = source_ref.get::<SingleTargetStorage>().or_broken()?.0;
+        let provider = source_ref.get::<ProviderStorage>().or_broken()?.0;
 
         dispatch_service(ServiceRequest { provider, source, target, world, roster });
         Ok(OperationStatus::Unfinished)

@@ -19,7 +19,7 @@ use bevy::prelude::{Entity, World};
 
 use crate::{
     Operation, SingleSourceStorage, SingleTargetStorage, InputStorage, InputBundle,
-    OperationStatus,
+    OperationStatus, OperationResult, OrBroken,
 };
 
 pub(crate) struct Noop<T> {
@@ -49,11 +49,11 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
         source: Entity,
         world: &mut World,
         roster: &mut crate::OperationRoster,
-    ) -> Result<crate::OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        let value = source_mut.take::<InputStorage<T>>().ok_or(())?.take();
-        let mut target_mut = world.get_entity_mut(target).ok_or(())?;
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+        let value = source_mut.take::<InputStorage<T>>().or_broken()?.take();
+        let mut target_mut = world.get_entity_mut(target).or_broken()?;
         target_mut.insert(InputBundle::new(value));
         roster.queue(target);
         Ok(OperationStatus::Finished)

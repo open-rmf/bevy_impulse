@@ -32,6 +32,8 @@ use bevy::{
     }
 };
 
+use backtrace::Backtrace;
+
 use std::{
     task::Poll,
     future::Future,
@@ -123,7 +125,7 @@ where
         } else {
             // The source entity does not exist which implies the request has been cancelled.
             // We no longer need to deliver on it.
-            roster.cancel(Cancel::broken(source));
+            roster.cancel(Cancel::broken_here(source));
             return;
         };
 
@@ -256,13 +258,13 @@ where
 
         let source = next_blocking.source;
         let Some(mut source_mut) = world.get_entity_mut(source) else {
-            roster.cancel(Cancel::broken(source));
+            roster.cancel(Cancel::broken_here(source));
             unblock = next_blocking;
             continue;
         };
 
         let Some(request) = source_mut.take::<InputStorage<Request>>() else {
-            roster.cancel(Cancel::broken(source));
+            roster.cancel(Cancel::broken_here(source));
             unblock = next_blocking;
             continue;
         };
@@ -388,11 +390,11 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
     roster: &mut OperationRoster,
 ) {
     let Some(mut source_mut) = world.get_entity_mut(source) else {
-        roster.cancel(Cancel::broken(source));
+        roster.cancel(Cancel::broken_here(source));
         return;
     };
     let Some(mut task) = source_mut.take::<TaskStorage<Response>>().map(|t| t.0) else {
-        roster.cancel(Cancel::broken(source));
+        roster.cancel(Cancel::broken_here(source));
         return;
     };
 
@@ -414,7 +416,7 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
             // Task has finished
             let mut source_mut = world.entity_mut(source);
             let Some(target) = source_mut.take::<SingleTargetStorage>() else {
-                roster.cancel(Cancel::broken(source));
+                roster.cancel(Cancel::broken_here(source));
                 return;
             };
             let target = target.0;

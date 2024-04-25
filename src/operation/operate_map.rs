@@ -19,7 +19,8 @@ use crate::{
     BlockingMap, AsyncMap, Operation,
     OperationRoster, OperationStatus, ChannelQueue, InnerChannel,
     SingleTargetStorage, InputStorage, InputBundle, Stream, TaskBundle,
-    CallBlockingMap, CallAsyncMap, SingleSourceStorage,
+    CallBlockingMap, CallAsyncMap, SingleSourceStorage, OperationResult,
+    OrBroken,
 };
 
 use bevy::{
@@ -84,12 +85,12 @@ where
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let target = source_mut.get::<SingleTargetStorage>().ok_or(())?.0;
-        let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.take();
-        let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().ok_or(())?.f;
-        let mut target_mut = world.get_entity_mut(target).ok_or(())?;
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+        let request = source_mut.take::<InputStorage<Request>>().or_broken()?.take();
+        let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().or_broken()?.f;
+        let mut target_mut = world.get_entity_mut(target).or_broken()?;
 
         let response = map.call(BlockingMap { request });
         target_mut.insert(InputBundle::new(response));
@@ -154,11 +155,11 @@ where
         source: Entity,
         world: &mut World,
         _roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
+    ) -> OperationResult {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
-        let request = source_mut.take::<InputStorage<Request>>().ok_or(())?.take();
-        let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().ok_or(())?.f;
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let request = source_mut.take::<InputStorage<Request>>().or_broken()?.take();
+        let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?.f;
 
         let channel = InnerChannel::new(source, sender);
         let channel = channel.into_specific();

@@ -17,6 +17,8 @@
 
 use bevy::prelude::Entity;
 
+use backtrace::Backtrace;
+
 use std::sync::Arc;
 
 use crate::FunnelInputStatus;
@@ -29,9 +31,15 @@ pub struct Cancelled<Signal> {
 }
 
 /// Information about the cancellation that occurred.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cancellation {
     pub cause: Arc<CancellationCause>,
+}
+
+impl Cancellation {
+    pub fn from_cause(cause: CancellationCause) -> Self {
+        Self { cause: Arc::new(cause) }
+    }
 }
 
 /// Get an explanation for why a cancellation occurred. In most cases the
@@ -70,7 +78,7 @@ pub enum CancellationCause {
     ///
     /// The entity provided in the variant is the link where the breakage was
     /// detected.
-    BrokenLink(Entity),
+    BrokenLink(BrokenLink),
 
     /// A link in the chain filtered out a response.
     Filtered(Entity),
@@ -98,6 +106,18 @@ pub enum CancellationCause {
     RaceLost(RaceLost),
 }
 
+#[derive(Debug, Clone)]
+pub struct BrokenLink {
+    pub source: Entity,
+    pub backtrace: Option<Backtrace>,
+}
+
+impl From<BrokenLink> for CancellationCause {
+    fn from(value: BrokenLink) -> Self {
+        CancellationCause::BrokenLink(value)
+    }
+}
+
 #[derive(Debug)]
 pub struct Supplanted {
     /// Entity of the link in the chain that was supplanted
@@ -118,7 +138,7 @@ pub struct ForkCancelled {
     /// The source link of the fork
     pub fork: Entity,
     /// The cancellation cause of each downstream branch of a fork.
-    pub cancelled: Vec<Arc<CancellationCause>>,
+    pub cancelled: Vec<Cancellation>,
 }
 
 /// A description of why a join was cancelled.
@@ -172,18 +192,24 @@ impl From<RaceLost> for CancellationCause {
 /// a link needs to be cancelled.
 pub struct Cancel {
     pub apply_to: Entity,
-    pub cause: Arc<CancellationCause>,
+    pub cause: Cancellation,
 }
 
 impl Cancel {
     /// Create a new [`Cancel`] operation
     pub fn new(apply_to: Entity, cause: CancellationCause) -> Self {
-        Self { apply_to, cause: Arc::new(cause) }
+        Self { apply_to, cause: Cancellation::from_cause(cause) }
     }
 
     /// Create a broken link cancel operation
-    pub fn broken(from: Entity) -> Self {
-        Self::new(from, CancellationCause::BrokenLink(from))
+    pub fn broken(source: Entity, backtrace: Option<Backtrace>) -> Self {
+        Self::new(source, BrokenLink { source, backtrace }.into())
+    }
+
+    /// Create a broken link cancel operation with a backtrace for this current
+    /// location.
+    pub fn broken_here(source: Entity) -> Self {
+        Self::broken(source, Some(Backtrace::new()))
     }
 
     /// Create an unavailable service cancel operation
@@ -212,7 +238,7 @@ impl Cancel {
     }
 
     /// A fork was cancelled because all of its dependents were dropped.
-    pub fn fork(source: Entity, cancelled: Vec<Arc<CancellationCause>>) -> Self {
+    pub fn fork(source: Entity, cancelled: Vec<Cancellation>) -> Self {
         Self::new(source, CancellationCause::ForkCancelled(
             ForkCancelled { fork: source, cancelled }
         ))

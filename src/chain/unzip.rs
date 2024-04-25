@@ -21,8 +21,8 @@ use smallvec::SmallVec;
 
 use crate::{
     Dangling, UnusedTarget, ForkTargetStorage, OperationRoster, InputBundle,
-    ForkUnzip, PerformOperation, OutputChain, FunnelSourceStorage, OperationStatus,
-    InputStorage, SingleTargetStorage,
+    ForkUnzip, PerformOperation, OutputChain, FunnelSourceStorage, OperationResult,
+    InputStorage, SingleTargetStorage, OperationStatus, OrBroken, OperationError,
 };
 
 /// A trait for response types that can be unzipped
@@ -37,7 +37,7 @@ pub trait Unzippable {
         targets: &ForkTargetStorage,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()>;
+    ) -> OperationResult;
 
     type Prepended<T>;
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
@@ -46,14 +46,14 @@ pub trait Unzippable {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()>;
+    ) -> OperationResult;
 
     fn race_values(
         source: Entity,
         winner: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()>;
+    ) -> OperationResult;
 }
 
 impl<A: 'static + Send + Sync> Unzippable for (A,) {
@@ -79,7 +79,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         targets: &ForkTargetStorage,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
+    ) -> OperationResult {
         let target = (targets.0)[0];
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.0));
@@ -97,18 +97,18 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
-        let target = world.get::<SingleTargetStorage>(source).ok_or(())?.0;
+    ) -> OperationResult {
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
-        let input_0 = *inputs.0.get(0).ok_or(())?;
+        let input_0 = *inputs.0.get(0).or_broken()?;
 
         let v_0 = world
-            .get_entity_mut(input_0).ok_or(())?
-            .take::<InputStorage<A>>().ok_or(())?.take();
+            .get_entity_mut(input_0).or_broken()?
+            .take::<InputStorage<A>>().or_broken()?.take();
 
         world
-            .get_entity_mut(target).ok_or(())?
+            .get_entity_mut(target).or_broken()?
             .insert(InputBundle::new(v_0));
         roster.queue(target);
         Ok(OperationStatus::Finished)
@@ -119,16 +119,16 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         winner: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
-        let targets = world.get::<ForkTargetStorage>(source).ok_or(())?;
+    ) -> OperationResult {
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
 
-        let target = *targets.0.get(0).ok_or(())?;
+        let target = *targets.0.get(0).or_broken()?;
         if target == winner {
             let input = world
-                .get_entity_mut(*inputs.0.get(0).ok_or(())?).ok_or(())?
-                .take::<InputStorage<A>>().ok_or(())?.take();
-            world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+                .get_entity_mut(*inputs.0.get(0).or_broken()?).or_broken()?
+                .take::<InputStorage<A>>().or_broken()?.take();
+            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
             roster.queue(target);
         }
 
@@ -165,14 +165,14 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         targets: &ForkTargetStorage,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let target = *targets.0.get(0).ok_or(())?;
+    ) -> OperationResult {
+        let target = *targets.0.get(0).or_broken()?;
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.0));
             roster.queue(target);
         }
 
-        let target = *targets.0.get(1).ok_or(())?;
+        let target = *targets.0.get(1).or_broken()?;
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.1));
             roster.queue(target);
@@ -190,23 +190,23 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
-        let target = world.get::<SingleTargetStorage>(source).ok_or(())?.0;
+    ) -> OperationResult {
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
-        let input_0 = *inputs.0.get(0).ok_or(())?;
-        let input_1 = *inputs.0.get(1).ok_or(())?;
+        let input_0 = *inputs.0.get(0).or_broken()?;
+        let input_1 = *inputs.0.get(1).or_broken()?;
 
         let v_0 = world
-            .get_entity_mut(input_0).ok_or(())?
-            .take::<InputStorage<A>>().ok_or(())?.take();
+            .get_entity_mut(input_0).or_broken()?
+            .take::<InputStorage<A>>().or_broken()?.take();
 
         let v_1 = world
-            .get_entity_mut(input_1).ok_or(())?
-            .take::<InputStorage<B>>().ok_or(())?.take();
+            .get_entity_mut(input_1).or_broken()?
+            .take::<InputStorage<B>>().or_broken()?.take();
 
         world
-            .get_entity_mut(target).ok_or(())?
+            .get_entity_mut(target).or_broken()?
             .insert(InputBundle::new((v_0, v_1)));
         roster.queue(target);
         Ok(OperationStatus::Finished)
@@ -217,31 +217,31 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         winner: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
-        let targets = world.get::<ForkTargetStorage>(source).ok_or(())?;
+    ) -> OperationResult {
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
 
-        if *inputs.0.get(0).ok_or(())? == winner {
-            let target = *targets.0.get(0).ok_or(())?;
+        if *inputs.0.get(0).or_broken()? == winner {
+            let target = *targets.0.get(0).or_broken()?;
             let input = world
-                .get_entity_mut(winner).ok_or(())?
-                .take::<InputStorage<A>>().ok_or(())?.take();
-            world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+                .get_entity_mut(winner).or_broken()?
+                .take::<InputStorage<A>>().or_broken()?.take();
+            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
             roster.queue(target);
             return Ok(OperationStatus::Finished);
         }
 
-        if *inputs.0.get(0).ok_or(())? == winner {
-            let target = *targets.0.get(1).ok_or(())?;
+        if *inputs.0.get(0).or_broken()? == winner {
+            let target = *targets.0.get(1).or_broken()?;
             let input = world
-                .get_entity_mut(winner).ok_or(())?
-                .take::<InputStorage<A>>().ok_or(())?.take();
-            world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+                .get_entity_mut(winner).or_broken()?
+                .take::<InputStorage<A>>().or_broken()?.take();
+            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
             roster.queue(target);
             return Ok(OperationStatus::Finished);
         }
 
-        Err(())
+        Err(OperationError::here())
     }
 }
 
@@ -281,20 +281,20 @@ where
         targets: &ForkTargetStorage,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let target = *targets.0.get(0).ok_or(())?;
+    ) -> OperationResult {
+        let target = *targets.0.get(0).or_broken()?;
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.0));
             roster.queue(target);
         }
 
-        let target = *targets.0.get(1).ok_or(())?;
+        let target = *targets.0.get(1).or_broken()?;
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.1));
             roster.queue(target);
         }
 
-        let target = *targets.0.get(2).ok_or(())?;
+        let target = *targets.0.get(2).or_broken()?;
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.2));
             roster.queue(target);
@@ -312,28 +312,28 @@ where
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
-        let target = world.get::<SingleTargetStorage>(source).ok_or(())?.0;
+    ) -> OperationResult {
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
-        let input_0 = *inputs.0.get(0).ok_or(())?;
-        let input_1 = *inputs.0.get(1).ok_or(())?;
-        let input_2 = *inputs.0.get(2).ok_or(())?;
+        let input_0 = *inputs.0.get(0).or_broken()?;
+        let input_1 = *inputs.0.get(1).or_broken()?;
+        let input_2 = *inputs.0.get(2).or_broken()?;
 
         let v_0 = world
-            .get_entity_mut(input_0).ok_or(())?
-            .take::<InputStorage<A>>().ok_or(())?.take();
+            .get_entity_mut(input_0).or_broken()?
+            .take::<InputStorage<A>>().or_broken()?.take();
 
         let v_1 = world
-            .get_entity_mut(input_1).ok_or(())?
-            .take::<InputStorage<B>>().ok_or(())?.take();
+            .get_entity_mut(input_1).or_broken()?
+            .take::<InputStorage<B>>().or_broken()?.take();
 
         let v_2 = world
-            .get_entity_mut(input_2).ok_or(())?
-            .take::<InputStorage<C>>().ok_or(())?.take();
+            .get_entity_mut(input_2).or_broken()?
+            .take::<InputStorage<C>>().or_broken()?.take();
 
         world
-            .get_entity_mut(target).ok_or(())?
+            .get_entity_mut(target).or_broken()?
             .insert(InputBundle::new((v_0, v_1, v_2)));
         roster.queue(target);
         Ok(OperationStatus::Finished)
@@ -344,41 +344,41 @@ where
         winner: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let inputs = world.get::<FunnelSourceStorage>(source).ok_or(())?;
-        let targets = world.get::<ForkTargetStorage>(source).ok_or(())?;
+    ) -> OperationResult {
+        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
 
-        if *inputs.0.get(0).ok_or(())? == winner {
-            let target = *targets.0.get(0).ok_or(())?;
+        if *inputs.0.get(0).or_broken()? == winner {
+            let target = *targets.0.get(0).or_broken()?;
             let input = world
-                .get_entity_mut(winner).ok_or(())?
-                .take::<InputStorage<A>>().ok_or(())?.take();
-            world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+                .get_entity_mut(winner).or_broken()?
+                .take::<InputStorage<A>>().or_broken()?.take();
+            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
             roster.queue(target);
             return Ok(OperationStatus::Finished);
         }
 
-        if *inputs.0.get(1).ok_or(())? == winner {
-            let target = *targets.0.get(1).ok_or(())?;
+        if *inputs.0.get(1).or_broken()? == winner {
+            let target = *targets.0.get(1).or_broken()?;
             let input = world
-                .get_entity_mut(winner).ok_or(())?
-                .take::<InputStorage<A>>().ok_or(())?.take();
-            world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+                .get_entity_mut(winner).or_broken()?
+                .take::<InputStorage<A>>().or_broken()?.take();
+            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
             roster.queue(target);
             return Ok(OperationStatus::Finished);
         }
 
-        if *inputs.0.get(2).ok_or(())? == winner {
-            let target = *targets.0.get(2).ok_or(())?;
+        if *inputs.0.get(2).or_broken()? == winner {
+            let target = *targets.0.get(2).or_broken()?;
             let input = world
-                .get_entity_mut(winner).ok_or(())?
-                .take::<InputStorage<A>>().ok_or(())?.take();
-            world.get_entity_mut(target).ok_or(())?.insert(InputBundle::new(input));
+                .get_entity_mut(winner).or_broken()?
+                .take::<InputStorage<A>>().or_broken()?.take();
+            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
             roster.queue(target);
             return Ok(OperationStatus::Finished);
         }
 
-        Err(())
+        Err(OperationError::here())
     }
 }
 

@@ -20,6 +20,7 @@ use bevy::prelude::{Entity, World};
 use crate::{
     InputStorage, InputBundle, Operation, OperationStatus, OperationRoster,
     ForkTargetStorage, ForkTargetStatus, SingleSourceStorage, Cancel,
+    OperationResult, OrBroken,
 };
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
@@ -54,13 +55,13 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> Result<OperationStatus, ()> {
-        let mut source_mut = world.get_entity_mut(source).ok_or(())?;
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Some(input) = source_mut.take::<InputStorage<T>>() else {
             return inspect_fork_targets(source, world, roster);
         };
         let input = input.take();
-        let ForkTargetStorage(targets) = source_mut.take().ok_or(())?;
+        let ForkTargetStorage(targets) = source_mut.take().or_broken()?;
 
         let mut send_value = |value: T, target: Entity| {
             if let Some(mut target_mut) = world.get_entity_mut(target) {
@@ -68,7 +69,7 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
                 target_mut.insert(InputBundle::new(value));
                 roster.queue(target);
             } else {
-                roster.cancel(Cancel::broken(target));
+                roster.cancel(Cancel::broken_here(target));
             }
         };
 
@@ -92,13 +93,13 @@ pub fn inspect_fork_targets(
     source: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
-) -> Result<OperationStatus, ()> {
-    let ForkTargetStorage(targets) = world.get(source).ok_or(())?;
+) -> OperationResult {
+    let ForkTargetStorage(targets) = world.get(source).or_broken()?;
 
     let mut cancel_fork = true;
     let mut fork_closed = true;
     for target in targets {
-        let target_status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
+        let target_status = world.get::<ForkTargetStatus>(*target).or_broken()?;
         if target_status.is_active() {
             cancel_fork = false;
         }
@@ -113,8 +114,8 @@ pub fn inspect_fork_targets(
         // drop causes of its dependents.
         let mut cancelled = Vec::new();
         for target in targets {
-            let status = world.get::<ForkTargetStatus>(*target).ok_or(())?;
-            cancelled.push(status.dropped().ok_or(())?);
+            let status = world.get::<ForkTargetStatus>(*target).or_broken()?;
+            cancelled.push(status.dropped().or_broken()?);
         }
 
         // After we drop the dependency, this chain will be cleaned up as it

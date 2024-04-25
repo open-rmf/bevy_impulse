@@ -54,7 +54,7 @@ pub use service::*;
 pub mod stream;
 pub use stream::*;
 
-pub mod sample;
+pub mod testing;
 
 pub(crate) mod private;
 
