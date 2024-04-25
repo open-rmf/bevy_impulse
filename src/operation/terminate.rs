@@ -99,7 +99,7 @@ fn cancel_termination<T: 'static + Send + Sync>(
     let Some(mut source_mut) = world.get_entity_mut(source) else {
         return;
     };
-    if let Some(mut sender) = source_mut.take::<SenderStorage<T>>() {
+    if let Some(sender) = source_mut.take::<SenderStorage<T>>() {
         sender.0.cancel(cause.clone()).ok();
     }
 }

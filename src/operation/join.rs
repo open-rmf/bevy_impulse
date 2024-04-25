@@ -290,7 +290,7 @@ fn deliver_bundle_join<T: 'static + Send + Sync>(
     for input in inputs {
         let value = world
             .get_entity_mut(input).or_broken()?
-            .take::<InputStorage<T>>().or_broken()?;
+            .take::<InputStorage<T>>().or_broken()?.take();
         response.push(value);
     }
 
