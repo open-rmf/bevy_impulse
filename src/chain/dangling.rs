@@ -61,7 +61,7 @@ pub trait ZippedChains {
 
     /// Join the zipped chains, producing a single chain whose response is the
     /// zip of the responses of all the chains.
-    fn join<'w, 's, 'a>(
+    fn join_zip<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>
     ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse>;
@@ -78,7 +78,7 @@ pub trait ZippedChains {
     /// will also be disposed instead of cancelled.
     ///
     /// This function will return the zipped outputs of all the builder functions.
-    fn race<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn race_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
         commands: &'a mut Commands<'w, 's>,
         builders: Builders,
@@ -91,7 +91,7 @@ pub trait ZippedChains {
     /// There will be no dependency or synchronization added between any of the
     /// chains by using this function; it's simply an ergonomic way to continue
     /// building chains after they have been zipped together.
-    fn build<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
         commands: &'a mut Commands<'w, 's>,
         builders: Builders,
@@ -106,7 +106,7 @@ where
     B: 'static + Send + Sync,
 {
     type JoinedResponse = (A, B);
-    fn join<'w, 's, 'a>(
+    fn join_zip<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>
     ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse> {
@@ -128,7 +128,7 @@ where
         Chain::new(joiner, target, commands)
     }
 
-    fn race<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn race_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
         commands: &'a mut Commands<'w, 's>,
         builders: Builders
@@ -161,7 +161,91 @@ where
         )
     }
 
-    fn build<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+        self,
+        commands: &'a mut Commands<'w, 's>,
+        builders: Builders,
+    ) -> Builders::Output
+    where
+        Self: Sized
+    {
+        builders.apply_zipped_builders(self, commands)
+    }
+}
+
+impl<A, StreamsA, B, StreamsB, C, StreamsC> ZippedChains for (
+    Dangling<A, StreamsA>,
+    Dangling<B, StreamsB>,
+    Dangling<C, StreamsC>,
+)
+where
+    A: 'static + Send + Sync,
+    B: 'static + Send + Sync,
+    C: 'static + Send + Sync,
+{
+    type JoinedResponse = (A, B, C);
+    fn join_zip<'w, 's, 'a>(
+        self,
+        commands: &'a mut Commands<'w, 's>
+    ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse> {
+        let input_a = self.0.target;
+        let input_b = self.1.target;
+        let input_c = self.2.target;
+        let joiner = commands.spawn(()).id();
+        let target = commands.spawn(UnusedTarget).id();
+
+        commands.add(PerformOperation::new(input_a, JoinInput::<A>::new(joiner)));
+        commands.add(PerformOperation::new(input_b, JoinInput::<B>::new(joiner)));
+        commands.add(PerformOperation::new(input_c, JoinInput::<C>::new(joiner)));
+        commands.add(PerformOperation::new(
+            joiner,
+            ZipJoin::<Self::JoinedResponse>::new(
+                FunnelSourceStorage::from_iter([input_a, input_b, input_c]),
+                target,
+            )
+        ));
+
+        Chain::new(joiner, target, commands)
+    }
+
+    fn race_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+        self,
+        commands: &'a mut Commands<'w, 's>,
+        builders: Builders,
+    ) -> Builders::Output
+    where
+        Self: Sized
+    {
+        let input_a = self.0.target;
+        let input_b = self.1.target;
+        let input_c = self.2.target;
+        let racer = commands.spawn(()).id();
+        let target_a = commands.spawn(UnusedTarget).id();
+        let target_b = commands.spawn(UnusedTarget).id();
+        let target_c = commands.spawn(UnusedTarget).id();
+
+        commands.add(PerformOperation::new(input_a, RaceInput::<A>::new(racer)));
+        commands.add(PerformOperation::new(input_b, RaceInput::<B>::new(racer)));
+        commands.add(PerformOperation::new(input_c, RaceInput::<C>::new(racer)));
+        commands.add(PerformOperation::new(
+            racer,
+            ZipRace::<Self::JoinedResponse>::new(
+                FunnelSourceStorage::from_iter([input_a, input_b, input_c]),
+                ForkTargetStorage::from_iter([target_a, target_b, target_c]),
+            ),
+        ));
+
+        builders.apply_zipped_builders(
+            (
+                Dangling::new(racer, target_a),
+                Dangling::new(racer, target_b),
+                Dangling::new(racer, target_c),
+            ),
+            commands
+        )
+    }
+
+    fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
         commands: &'a mut Commands<'w, 's>,
         builders: Builders,
@@ -221,6 +305,25 @@ impl<Response: 'static + Send + Sync, StreamA, StreamB> ZippedChainsToBundle for
     }
 }
 
+impl<Response, StreamsA, StreamsB, StreamsC> ZippedChainsToBundle for (
+    Dangling<Response, StreamsA>,
+    Dangling<Response, StreamsB>,
+    Dangling<Response, StreamsC>,
+)
+where
+    Response: 'static + Send + Sync,
+{
+    type Response = Response;
+    type Bundle = [Dangling<Response>; 3];
+    fn bundle(self) -> Self::Bundle {
+        [
+            Dangling::new(self.0.source, self.0.target),
+            Dangling::new(self.1.source, self.1.target),
+            Dangling::new(self.2.source, self.2.target),
+        ]
+    }
+}
+
 /// A type alias to ensure a consistent SmallVec type across the whole implementation
 pub type JoinedBundle<T> = SmallVec<[T; 8]>;
 
@@ -232,14 +335,14 @@ pub trait BundledChains {
 
     /// Join the bundle into one [`Chain`] whose response is the combined
     /// responses of all the chains.
-    fn join<'w, 's, 'a>(
+    fn join_bundle<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
     ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset>;
 
     /// Race the bundle elements against each other, producing a [`Chain`] whose
     /// response is the value of the first chain in the bundle to arrive.
-    fn race<'w, 's, 'a>(
+    fn race_bundle<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
     ) -> Chain<'w, 's, 'a, Self::Response, (), ModifiersUnset>;
@@ -251,7 +354,7 @@ where
     T: IntoIterator<Item=Dangling<Response, Streams>>,
 {
     type Response = Response;
-    fn join<'w, 's, 'a>(
+    fn join_bundle<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
     ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset> {
@@ -275,7 +378,7 @@ where
         Chain::new(joiner, target, commands)
     }
 
-    fn race<'w, 's, 'a>(
+    fn race_bundle<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
     ) -> Chain<'w, 's, 'a, Self::Response, (), ModifiersUnset> {

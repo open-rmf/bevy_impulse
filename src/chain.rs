@@ -481,8 +481,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// tuple.
     ///
     /// ```
-    /// use bevy::prelude::{World, Commands, CommandQueue};
-    /// use bevy_services::{*, samples::*};
+    /// use bevy::{
+    ///     prelude::{World, Commands},
+    ///     ecs::system::CommandQueue,
+    /// };
+    /// use bevy_impulse::{*, sample::*};
     ///
     /// let world = World::new();
     /// let mut command_queue = CommandQueue::default();
@@ -491,15 +494,15 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// let promise = commands
     ///     .request("thanks".to_owned(), to_uppercase.into_blocking_map())
     ///     .pull_zip(
-    ///         (-2.0, [0xF0, 0x9F, 0x90, 0x9F]),
+    ///         (4.0, [0xF0, 0x9F, 0x90, 0x9F]),
     ///         (
     ///             |chain: OutputChain<String>| chain.dangle(),
-    ///             |chain: OutputChain<f64>| chain.map_block(double).map_block(negative).dangle(),
-    ///             |chain: OutputChain<[u8; 4]>| chain.map_block(string_from_utf8).dangle(),
+    ///             |chain: OutputChain<f64>| chain.map_block(|value| value.to_string()).dangle(),
+    ///             |chain: OutputChain<[u8; 4]>| chain.map_block(string_from_utf8).cancel_on_err().dangle(),
     ///         )
     ///     )
-    ///     .join()
     ///     .bundle()
+    ///     .join_bundle(&mut commands)
     ///     .map_block(|string_bundle| string_bundle.join(" "))
     ///     .take();
     /// ```
@@ -809,7 +812,7 @@ mod tests {
                     .dangle()
                 }
             ))
-            .race(
+            .race_zip(
                 &mut commands,
                 (
                     |chain: OutputChain<f64>| {
@@ -825,7 +828,7 @@ mod tests {
                 ),
             )
             .bundle()
-            .race(&mut commands)
+            .race_bundle(&mut commands)
             .take();
 
         command_queue.apply(&mut world);
@@ -863,7 +866,7 @@ mod tests {
                 }
             ))
             .bundle()
-            .race(&mut commands)
+            .race_bundle(&mut commands)
             .take();
 
         command_queue.apply(&mut world);

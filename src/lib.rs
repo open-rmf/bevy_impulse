@@ -65,7 +65,7 @@ use bevy::prelude::{Entity, In};
 ///
 /// ```
 /// use bevy::prelude::*;
-/// use bevy_services::*;
+/// use bevy_impulse::*;
 ///
 /// #[derive(Component, Resource)]
 /// struct Precision(i32);
@@ -85,7 +85,7 @@ use bevy::prelude::{Entity, In};
 ///
 /// ```
 /// use bevy::prelude::*;
-/// use bevy_services::*;
+/// use bevy_impulse::*;
 ///
 /// #[derive(Component, Resource)]
 /// struct Precision(i32);
