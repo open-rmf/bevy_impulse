@@ -17,13 +17,15 @@
 
 use crate::{
     Chain, OutputChain, UnusedTarget, InputBundle, Stream, Provider,
-    ModifiersUnset, PerformOperation, Noop,
+    ModifiersUnset, PerformOperation, Noop, IntoAsyncMap,
 };
 
 use bevy::{
     prelude::Commands,
     utils::define_label,
 };
+
+use std::future::Future;
 
 mod internal;
 pub use internal::{ApplyLabel, BuildLabel};
@@ -71,6 +73,15 @@ pub trait RequestExt<'w, 's> {
         &'a mut self,
         value: T,
     ) -> OutputChain<'w, 's, 'a, T>;
+
+    /// Call this on [`Commands`] to begin building an impulse chain from a [`Future`]
+    /// whose [`Future::Output`] will be the first item provided in the chain.
+    fn serve<'a, T: 'static + Send + Sync + Future>(
+        &'a mut self,
+        future: T,
+    ) -> OutputChain<'w, 's, 'a, T::Output>
+    where
+        T::Output: 'static + Send + Sync;
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
@@ -103,6 +114,20 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         ));
         Chain::new(source, target, self)
     }
+
+    fn serve<'a, T: 'static + Send + Sync + Future>(
+        &'a mut self,
+        future: T,
+    ) -> OutputChain<'w, 's, 'a, T::Output>
+    where
+        T::Output: 'static + Send + Sync,
+    {
+        self.request(future, async_server.into_async_map()).output()
+    }
+}
+
+async fn async_server<T: Future>(value: T) -> T::Output {
+    value.await
 }
 
 /// By default when a service provider receives a new request with the same
@@ -217,5 +242,28 @@ mod tests {
             FlushConditions::new().with_update_count(2),
         );
         assert!(promise.peek().is_available());
+    }
+
+    #[test]
+    fn simple_serve() {
+        use async_std::future;
+        use std::time::Duration;
+
+        let mut context = TestingContext::minimal_plugins();
+        let mut promise = context.build(|commands| {
+            let future = async {
+                let never = future::pending::<()>();
+                let _ = future::timeout(Duration::from_secs_f32(0.01), never);
+                "hello"
+            };
+
+            commands.serve(future).take()
+        });
+
+        context.run_with_conditions(
+            &mut promise,
+            FlushConditions::new().with_timeout(Duration::from_secs_f32(5.0)),
+        );
+        assert_eq!(promise.peek().available().copied(), Some("hello"));
     }
 }

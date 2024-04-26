@@ -549,6 +549,19 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         ));
         Chain::new(source, target, self.commands)
     }
+
+    pub fn source(&self) -> Entity {
+        self.source
+    }
+
+    pub fn target(&self) -> Entity {
+        self.target
+    }
+
+    /// Convert any [`Chain`] into an [`OutputChain`]
+    pub fn output(self) -> OutputChain<'w, 's, 'a, Response> {
+        Chain::new(self.source, self.target, self.commands)
+    }
 }
 
 impl<'w, 's, 'a, T, E, Streams, M> Chain<'w, 's, 'a, Result<T, E>, Streams, M>
