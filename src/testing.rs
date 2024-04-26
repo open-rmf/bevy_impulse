@@ -15,8 +15,12 @@
  *
 */
 
-use bevy::{
-    prelude::{Commands, App, Update, MinimalPlugins},
+pub use bevy::{
+    prelude::{
+        Commands, App, Update, MinimalPlugins, DefaultPlugins, PbrBundle, Vec3,
+        In, Entity, Assets, Mesh, ResMut, Transform,
+    },
+    render::mesh::shape::Cube,
     ecs::system::CommandQueue,
 };
 
@@ -27,13 +31,37 @@ pub struct TestingContext {
 }
 
 impl TestingContext {
-    pub fn new() -> Self {
+    /// Make a testing context with the minimum plugins needed for bevy_impulse
+    /// to work properly.
+    pub fn minimal_plugins() -> Self {
         let mut app = App::new();
         app
             .add_plugins(MinimalPlugins)
             .add_systems(Update, flush_impulses);
 
-        app.update();
+        TestingContext { app }
+    }
+
+    /// Make a testing context that is headless but has some additional plugins
+    /// for use cases that have hierarchy (parents/children), assets, and geometry.
+    pub fn headless_plugins() -> Self {
+        use bevy::{
+            asset::AssetPlugin,
+            transform::TransformPlugin,
+            hierarchy::HierarchyPlugin,
+            render::mesh::MeshPlugin,
+        };
+        let mut app = App::new();
+        app
+            .add_plugins(MinimalPlugins)
+            .add_plugins((
+                AssetPlugin::default(),
+                TransformPlugin::default(),
+                HierarchyPlugin::default(),
+                MeshPlugin,
+            ))
+            .add_systems(Update, flush_impulses);
+
         TestingContext { app }
     }
 
@@ -103,6 +131,34 @@ impl FlushConditions {
         self.update_count = Some(count);
         self
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct InvalidValue(pub f32);
+
+pub struct SpawnCube {
+    pub position: Vec3,
+    pub size: f32,
+}
+
+/// Spawns a cube according to a [`SpawnCube`] request. Returns the entity of
+/// the new cube.
+pub fn spawn_cube(
+    In(request): In<SpawnCube>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+) -> Result<Entity, InvalidValue> {
+    if request.size <= 0.0 {
+        return Err(InvalidValue(request.size));
+    }
+
+    let entity = commands.spawn(PbrBundle {
+        mesh: meshes.add(Cube::new(request.size).into()),
+        transform: Transform::from_translation(request.position),
+        ..Default::default()
+    }).id();
+
+    Ok(entity)
 }
 
 pub fn double(value: f64) -> f64 {

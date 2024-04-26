@@ -16,7 +16,8 @@
 */
 
 use crate::{
-    Chain, UnusedTarget, InputBundle, Stream, Provider, ModifiersUnset,
+    Chain, OutputChain, UnusedTarget, InputBundle, Stream, Provider,
+    ModifiersUnset, PerformOperation, Noop,
 };
 
 use bevy::{
@@ -36,7 +37,24 @@ define_label!(
 );
 
 pub trait RequestExt<'w, 's> {
-    /// Call this with [`Commands`] to request a service
+    /// Call this on [`Commands`] to begin building a impulse chain by submitting
+    /// a request to a provider.
+    ///
+    /// ```
+    /// use bevy_impulse::{*, testing::*};
+    /// let mut context = TestingContext::headless_plugins();
+    /// let mut promise = context.build(|commands| {
+    ///    let request = SpawnCube { position: Vec3::ZERO, size: 0.1 };
+    ///    let service = commands.spawn_service(spawn_cube.into_blocking_service());
+    ///
+    ///    commands
+    ///        .request(request, service)
+    ///     .take()
+    /// });
+    ///
+    /// context.run_while_pending(&mut promise);
+    /// assert!(promise.peek().is_available());
+    /// ```
     fn request<'a, P: Provider>(
         &'a mut self,
         request: P::Request,
@@ -46,6 +64,13 @@ pub trait RequestExt<'w, 's> {
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: Stream;
+
+    /// Call this on [`Commands`] to begin building an impulse chain from a value
+    /// without calling any provider.
+    fn provide<'a, T: 'static + Send + Sync>(
+        &'a mut self,
+        value: T,
+    ) -> OutputChain<'w, 's, 'a, T>;
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
@@ -63,6 +88,19 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let target = self.spawn(UnusedTarget).id();
         provider.provide(source, target, self);
 
+        Chain::new(source, target, self)
+    }
+
+    fn provide<'a, T: 'static + Send + Sync>(
+        &'a mut self,
+        value: T,
+    ) -> OutputChain<'w, 's, 'a, T> {
+        let source = self.spawn(InputBundle::new(value)).id();
+        let target = self.spawn(UnusedTarget).id();
+
+        self.add(PerformOperation::new(
+            source, Noop::<T>::new(target),
+        ));
         Chain::new(source, target, self)
     }
 }
@@ -155,5 +193,29 @@ impl<Q> LabelBuilder<Q, ()> {
             ensure: true,
             _ignore: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn simple_spawn() {
+        let mut context = TestingContext::headless_plugins();
+        let mut promise = context.build(|commands| {
+            let request = SpawnCube { position: Vec3::ZERO, size: 0.1 };
+            let service = commands.spawn_service(spawn_cube.into_blocking_service());
+
+            commands
+                .request(request, service)
+                .take()
+        });
+
+        context.run_with_conditions(
+            &mut promise,
+            FlushConditions::new().with_update_count(2),
+        );
+        assert!(promise.peek().is_available());
     }
 }

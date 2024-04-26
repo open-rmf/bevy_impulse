@@ -233,7 +233,7 @@ impl<T> PromiseState<T> {
         }
     }
 
-    pub fn is_received(&self) -> bool {
+    pub fn is_available(&self) -> bool {
         matches!(self, Self::Available(_))
     }
 

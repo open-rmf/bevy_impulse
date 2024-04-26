@@ -482,7 +482,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ///
     /// ```
     /// use bevy_impulse::{*, testing::*};
-    /// let mut context = TestingContext::new();
+    /// let mut context = TestingContext::minimal_plugins();
     /// let mut promise = context.build(|commands| {
     ///     commands
     ///     .request("thanks".to_owned(), to_uppercase.into_blocking_map())
@@ -545,8 +545,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         let target = self.commands.spawn(UnusedTarget).id();
 
         self.commands.add(PerformOperation::new(
-            source, Noop::<Response>::new(target))
-        );
+            source, Noop::<Response>::new(target),
+        ));
         Chain::new(source, target, self.commands)
     }
 }
@@ -805,7 +805,7 @@ mod tests {
 
     #[test]
     fn test_async_map() {
-        let mut context = TestingContext::new();
+        let mut context = TestingContext::minimal_plugins();
 
         let mut promise = context.build(|commands| {
             commands
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_race_zip() {
-        let mut context = TestingContext::new();
+        let mut context = TestingContext::minimal_plugins();
 
         let mut promise = context.build(|commands| {
             commands
@@ -886,7 +886,7 @@ mod tests {
 
     #[test]
     fn test_unzip() {
-        let mut context = TestingContext::new();
+        let mut context = TestingContext::minimal_plugins();
 
         let mut promise = context.build(|commands| {
             commands

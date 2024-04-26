@@ -131,6 +131,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
 
         if let Some(mut target_mut) = world.get_entity_mut(target) {
             target_mut.insert(InputBundle::new(response));
+            roster.queue(target);
         } else {
             // The target is no longer available for a delivery
             roster.cancel(Cancel::broken_here(target));
