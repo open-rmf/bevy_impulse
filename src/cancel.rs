@@ -190,6 +190,7 @@ impl From<RaceLost> for CancellationCause {
 
 /// Passed into the [`OperationRoster`](crate::OperationRoster) to indicate when
 /// a link needs to be cancelled.
+#[derive(Debug, Clone)]
 pub struct Cancel {
     pub apply_to: Entity,
     pub cause: Cancellation,

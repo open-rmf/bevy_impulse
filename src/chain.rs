@@ -627,6 +627,21 @@ where
     /// of the [`Err`] variant. If you want to divert the execution flow during
     /// an [`Err`] result but still want to access the `E` data, then you can
     /// use `Chain::branch_for_err` or `Chain::branch_result_zip` instead.
+    ///
+    /// ```
+    /// use bevy_impulse::{*, testing::*};
+    /// let mut context = TestingContext::minimal_plugins();
+    /// let mut promise = context.build(|commands| {
+    ///     commands
+    ///     .provide("hello")
+    ///     .map_block(produce_err)
+    ///     .cancel_on_err()
+    ///     .take()
+    /// });
+    ///
+    /// context.run_while_pending(&mut promise);
+    /// assert!(promise.peek().is_cancelled());
+    /// ```
     pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, T, (), ModifiersUnset> {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();

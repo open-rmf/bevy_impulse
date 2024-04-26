@@ -60,7 +60,6 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
             return inspect_fork_targets(source, world, roster);
         };
         let values = values.take();
-        let targets = source_mut.take::<ForkTargetStorage>().or_broken()?;
-        values.distribute_values(&targets, world, roster)
+        values.distribute_values(source, world, roster)
     }
 }

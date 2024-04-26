@@ -417,7 +417,7 @@ pub(crate) fn poll_task<Response: 'static + Send + Sync>(
         Poll::Ready(result) => {
             // Task has finished
             let mut source_mut = world.entity_mut(source);
-            let Some(target) = source_mut.take::<SingleTargetStorage>() else {
+            let Some(target) = source_mut.get::<SingleTargetStorage>() else {
                 roster.cancel(Cancel::broken_here(source));
                 return;
             };

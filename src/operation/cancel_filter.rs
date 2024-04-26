@@ -83,7 +83,7 @@ where
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let input = source_mut.take::<InputStorage<Input>>().or_broken()?.take();
-        let target = source_mut.take::<SingleTargetStorage>().or_broken()?.0;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let CancelFilterStorage::<F>(filter) = source_mut.take().or_broken()?;
 
         // This is where we cancel if the filter function does not return anything.

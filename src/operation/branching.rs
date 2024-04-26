@@ -87,13 +87,12 @@ where
             return inspect_fork_targets(source, world, roster);
         };
         let input = input.take();
-        let targets = source_mut.take::<ForkTargetStorage>().or_broken()?;
         let BranchingActivatorStorage::<F>(activator) = source_mut.take().or_broken()?;
 
         let mut activation = Outputs::new_activation();
         activator(input, &mut activation);
 
-        Outputs::activate(activation, source, targets, world, roster)
+        Outputs::activate(activation, source, world, roster)
     }
 }
 
@@ -105,7 +104,6 @@ pub trait Branchable {
     fn activate<'a>(
         activation: Self::Activation,
         source: Entity,
-        targets: ForkTargetStorage,
         world: &'a mut World,
         roster: &'a mut OperationRoster,
     ) -> OperationResult;
@@ -124,12 +122,14 @@ where
 
     fn activate<'a>(
         (a, b): Self::Activation,
-        _source: Entity,
-        targets: ForkTargetStorage,
+        source: Entity,
         world: &'a mut World,
         roster: &'a mut OperationRoster,
     ) -> OperationResult {
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target_a = *targets.0.get(0).or_broken()?;
+        let target_b = *targets.0.get(1).or_broken()?;
+
         if let Some(a) = a {
             let mut target_a_mut = world.get_entity_mut(target_a).or_broken()?;
             target_a_mut.insert(InputBundle::new(a));
@@ -138,7 +138,6 @@ where
             roster.dispose_chain_from(target_a);
         }
 
-        let target_b = *targets.0.get(1).or_broken()?;
         if let Some(b) = b {
             let mut target_b_mut = world.get_entity_mut(target_b).or_broken()?;
             target_b_mut.insert(InputBundle::new(b));

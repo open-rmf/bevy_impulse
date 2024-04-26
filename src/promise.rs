@@ -242,6 +242,17 @@ impl<T> PromiseState<T> {
     }
 
     pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled(_))
+    }
+
+    pub fn cancellation(&self) -> Option<&Cancellation> {
+        match self {
+            Self::Cancelled(cause) => Some(cause),
+            _ => None,
+        }
+    }
+
+    pub fn is_disposed(&self) -> bool {
         matches!(self, Self::Disposed)
     }
 

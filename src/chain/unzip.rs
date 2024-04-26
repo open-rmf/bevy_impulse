@@ -34,7 +34,7 @@ pub trait Unzippable {
 
     fn distribute_values(
         self,
-        targets: &ForkTargetStorage,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult;
@@ -76,10 +76,11 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
     fn distribute_values(
         self,
-        targets: &ForkTargetStorage,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target = (targets.0)[0];
         if let Some(mut t_mut) = world.get_entity_mut(target) {
             t_mut.insert(InputBundle::new(self.0));
@@ -162,20 +163,22 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 
     fn distribute_values(
         self,
-        targets: &ForkTargetStorage,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        let target = *targets.0.get(0).or_broken()?;
-        if let Some(mut t_mut) = world.get_entity_mut(target) {
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
+        let target_0 = *targets.0.get(0).or_broken()?;
+        let target_1 = *targets.0.get(1).or_broken()?;
+
+        if let Some(mut t_mut) = world.get_entity_mut(target_0) {
             t_mut.insert(InputBundle::new(self.0));
-            roster.queue(target);
+            roster.queue(target_0);
         }
 
-        let target = *targets.0.get(1).or_broken()?;
-        if let Some(mut t_mut) = world.get_entity_mut(target) {
+        if let Some(mut t_mut) = world.get_entity_mut(target_1) {
             t_mut.insert(InputBundle::new(self.1));
-            roster.queue(target);
+            roster.queue(target_1);
         }
 
         Ok(OperationStatus::Finished)
@@ -278,26 +281,28 @@ where
 
     fn distribute_values(
         self,
-        targets: &ForkTargetStorage,
+        source: Entity,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        let target = *targets.0.get(0).or_broken()?;
-        if let Some(mut t_mut) = world.get_entity_mut(target) {
+        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
+        let target_0 = *targets.0.get(0).or_broken()?;
+        let target_1 = *targets.0.get(1).or_broken()?;
+        let target_2 = *targets.0.get(2).or_broken()?;
+
+        if let Some(mut t_mut) = world.get_entity_mut(target_0) {
             t_mut.insert(InputBundle::new(self.0));
-            roster.queue(target);
+            roster.queue(target_0);
         }
 
-        let target = *targets.0.get(1).or_broken()?;
-        if let Some(mut t_mut) = world.get_entity_mut(target) {
+        if let Some(mut t_mut) = world.get_entity_mut(target_1) {
             t_mut.insert(InputBundle::new(self.1));
-            roster.queue(target);
+            roster.queue(target_1);
         }
 
-        let target = *targets.0.get(2).or_broken()?;
-        if let Some(mut t_mut) = world.get_entity_mut(target) {
+        if let Some(mut t_mut) = world.get_entity_mut(target_2) {
             t_mut.insert(InputBundle::new(self.2));
-            roster.queue(target);
+            roster.queue(target_2);
         }
 
         Ok(OperationStatus::Finished)

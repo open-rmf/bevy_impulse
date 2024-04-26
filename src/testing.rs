@@ -210,9 +210,17 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
     request.value
 }
 
+/// Use this to add a blocking map to the chain that simply prints a debug
+/// message and then passes the data along.
 pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl FnOnce(T) -> T {
     move |value| {
         println!("{header}: {value:?}");
         value
     }
+}
+
+/// Use this to add a blocking map to the chain that simply produces an error.
+/// Used for testing special operations for the [`Result`] type.
+pub fn produce_err<T>(_: T) -> Result<T, ()> {
+    Err(())
 }
