@@ -180,6 +180,13 @@ pub(crate) fn cancel_from_link(
             (behavior.hook)(&cause, source, world, roster);
         }
 
+        if world.get::<DisposeOnCancel>(source).is_some() {
+            // Do not cascade the cancellation down from here. The user has
+            // asked for this to be disposed instead of cancelled.
+            roster.dispose_chain_from(source);
+            continue;
+        }
+
         let mut state: SystemState<(
             NextOperationLink,
             Query<(&mut FunnelInputStatus, &SingleTargetStorage)>,

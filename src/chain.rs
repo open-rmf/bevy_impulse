@@ -168,6 +168,22 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// If a non-detached descendant of this link gets dropped, the ancestors of
     /// this link will still be cancelled as usual. To prevent a dropped
     /// descendant from cancelling its ancestors, use [`Chain::detach_and_chain`].
+    ///
+    /// ```
+    /// use bevy_impulse::{*, testing::*};
+    /// let mut context = TestingContext::minimal_plugins();
+    /// let mut promise = context.build(|commands| {
+    ///     commands
+    ///     .provide("hello")
+    ///     .map_block(produce_err)
+    ///     .cancel_on_err()
+    ///     .dispose_on_cancel()
+    ///     .take()
+    /// });
+    ///
+    /// context.run_while_pending(&mut promise);
+    /// assert!(promise.peek().is_disposed());
+    /// ```
     pub fn dispose_on_cancel(self) -> Chain<'w, 's, 'a, Response, (), ModifiersClosed> {
         self.commands.entity(self.source).insert(DisposeOnCancel);
         Chain::new(self.source, self.target, self.commands)
@@ -946,5 +962,38 @@ mod tests {
 
         context.run_while_pending(&mut promise);
         assert_eq!(promise.peek().available().copied(), Some(15.0));
+    }
+
+    #[test]
+    fn test_dispose_on_cancel() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let mut promise = context.build(|commands| {
+            commands
+            .provide("hello")
+            .map_block(produce_err)
+            .cancel_on_err()
+            .dispose_on_cancel()
+            .take()
+        });
+
+        context.run_while_pending(&mut promise);
+        assert!(promise.peek().is_disposed());
+
+        // If we flip the order of cancel_on_err and dispose_on_cancel then the
+        // outcome should be a cancellation instead of a disposal, because the
+        // disposal was requested for a part of the chain that did not get
+        // cancelled.
+        let mut promise = context.build(|commands| {
+            commands
+            .provide("hello")
+            .map_block(produce_err)
+            .dispose_on_cancel()
+            .cancel_on_err()
+            .take()
+        });
+
+        context.run_while_pending(&mut promise);
+        assert!(promise.peek().is_cancelled());
     }
 }
