@@ -64,7 +64,7 @@ pub(crate) use race::*;
 mod terminate;
 pub(crate) use terminate::*;
 
-/// Keep track of the source for a link in a service chain
+/// Keep track of the source for a link in a impulse chain
 #[derive(Component, Clone, Copy)]
 pub(crate) struct SingleSourceStorage(pub(crate) Entity);
 
@@ -141,7 +141,7 @@ impl FunnelInputStatus {
     }
 }
 
-/// Keep track of the sources that funnel into this link of the service chain.
+/// Keep track of the sources that funnel into this link of the impulse chain.
 /// This is for links that draw from multiple sources simultaneously, such as
 /// join and race.
 #[derive(Component, Clone)]
@@ -157,11 +157,11 @@ impl FunnelSourceStorage {
     }
 }
 
-/// Keep track of the target for a link in a service chain
+/// Keep track of the target for a link in a impulse chain
 #[derive(Component, Clone, Copy)]
 pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 
-/// Keep track of the targets for a fork in a service chain
+/// Keep track of the targets for a fork in a impulse chain
 #[derive(Component, Clone)]
 pub struct ForkTargetStorage(pub SmallVec<[Entity; 8]>);
 

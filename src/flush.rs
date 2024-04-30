@@ -55,8 +55,8 @@ pub fn flush_impulses(
     let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
 
     // Apply all the commands that have been received
-    while let Ok(mut command_queue) = async_receiver.try_recv() {
-        command_queue.apply(world);
+    while let Ok(mut item) = async_receiver.try_recv() {
+        (item)(world);
     }
 
     // Queue any operations whose inputs are ready

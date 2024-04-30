@@ -22,9 +22,7 @@ use bevy::{
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-use crate::Stream;
-
-use std::cell::RefCell;
+use crate::{Stream, Provider, Promise};
 
 #[derive(Clone)]
 pub struct Channel<Streams = ()> {
@@ -33,58 +31,33 @@ pub struct Channel<Streams = ()> {
 }
 
 impl<Streams> Channel<Streams> {
-    pub fn batch(&self) -> BatchChannel<Streams> {
-        BatchChannel {
-            inner: self.inner.clone(),
-            batch: RefCell::new(BatchQueue::new()),
-            _ignore: Default::default(),
-        }
+    pub fn push<C: Command>(&self, command: C) {
+        let mut queue = CommandQueue::default();
+        queue.push(command);
+        self.push_batch(queue);
     }
-}
 
-pub struct BatchChannel<Streams> {
-    inner: InnerChannel,
-    batch: RefCell<BatchQueue>,
-    _ignore: std::marker::PhantomData<Streams>,
-}
-
-impl<Streams> BatchChannel<Streams> {
-    pub fn flush(&self) {
-        let mut batch = self.batch.borrow_mut();
-        if !batch.empty {
-            self.inner.sender.send(
-                std::mem::replace(&mut batch.queue, CommandQueue::default())
-            ).expect("ChannelQueue resource was removed or replaced. This should never happen.");
-        }
-        batch.empty = true;
+    pub fn push_batch(&self, mut queue: CommandQueue) {
+        self.inner.sender.send(Box::new(
+            move |world: &mut World| {
+                queue.apply(world);
+            }
+        )).ok();
     }
-}
 
-impl<Streams> Drop for BatchChannel<Streams> {
-    fn drop(&mut self) {
-        self.flush();
-    }
-}
+    // pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response> {
 
-struct BatchQueue {
-    queue: CommandQueue,
-    empty: bool,
-}
-
-impl BatchQueue {
-    fn new() -> Self {
-        Self { queue: CommandQueue::default(), empty: true }
-    }
+    // }
 }
 
 #[derive(Clone)]
 pub(crate) struct InnerChannel {
     source: Entity,
-    sender: CbSender<CommandQueue>,
+    sender: CbSender<ChannelItem>,
 }
 
 impl InnerChannel {
-    pub(crate) fn new(source: Entity, sender: CbSender<CommandQueue>) -> Self {
+    pub(crate) fn new(source: Entity, sender: CbSender<ChannelItem>) -> Self {
         InnerChannel { source, sender }
     }
 
@@ -93,10 +66,12 @@ impl InnerChannel {
     }
 }
 
+type ChannelItem = Box<dyn FnOnce(&mut World) + Send>;
+
 #[derive(Resource)]
 pub(crate) struct ChannelQueue {
-    pub(crate) sender: CbSender<CommandQueue>,
-    pub(crate) receiver: CbReceiver<CommandQueue>,
+    pub(crate) sender: CbSender<ChannelItem>,
+    pub(crate) receiver: CbReceiver<ChannelItem>,
 }
 
 impl ChannelQueue {
@@ -112,52 +87,20 @@ impl Default for ChannelQueue {
     }
 }
 
-pub trait ChannelTrait {
-    fn push<C: Command>(&self, command: C);
-    fn source(&self) -> Entity;
-}
 
-impl<Streams> ChannelTrait for Channel<Streams> {
-    fn push<C: Command>(&self, command: C) {
-        let mut queue = CommandQueue::default();
-        queue.push(command);
-        self.inner.sender.send(queue)
-            .expect("ChannelQueue resource was removed or replaced. This should never happen.");
-    }
+// pub struct StreamChannel<'a, T> {
+//     channel: &'a C,
+//     _ignore: std::marker::PhantomData<T>,
+// }
 
-    fn source(&self) -> Entity {
-        self.inner.source
-    }
-}
-
-// FIXME TODO(@mxgrey): Redesign this so that users pass in a FnOnce with
-// temporary access to a Commands struct which then gets sent off at the end of
-// the FnOnce.
-impl<Streams> ChannelTrait for BatchChannel<Streams> {
-    fn push<C: Command>(&self, command: C) {
-        let mut batch = self.batch.borrow_mut();
-        batch.empty = false;
-        batch.queue.push(command);
-    }
-
-    fn source(&self) -> Entity {
-        self.inner.source
-    }
-}
-
-pub struct StreamChannel<'a, C: ChannelTrait, T> {
-    channel: &'a C,
-    _ignore: std::marker::PhantomData<T>,
-}
-
-impl<'a, C: ChannelTrait, T: Stream> StreamChannel<'a, C, T> {
-    pub fn send(&self, data: T) {
-        self.channel.push(StreamCommand {
-            source: self.channel.source(),
-            data,
-        });
-    }
-}
+// impl<'a, C: ChannelTrait, T: Stream> StreamChannel<'a, C, T> {
+//     pub fn send(&self, data: T) {
+//         self.channel.push(StreamCommand {
+//             source: self.channel.source(),
+//             data,
+//         });
+//     }
+// }
 
 struct StreamCommand<T> {
     source: Entity,

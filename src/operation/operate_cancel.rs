@@ -30,7 +30,7 @@ use crate::{
 };
 
 /// This component is held by request target entities which have an associated
-/// cancel target (on_cancel was applied to its position in the service chain).
+/// cancel target (on_cancel was applied to its position in the impulse chain).
 ///
 /// This means that if the entity with this component experiences a cancel event,
 /// we should insert an InputStorage(()) component into its target.
@@ -151,7 +151,7 @@ pub(crate) fn propagate_dependency_loss_upwards(
     }
 }
 
-/// Cancel a request from this link in a service chain downwards. This will
+/// Cancel a request from this link in a impulse chain downwards. This will
 /// trigger any on_cancel reactions that are associated with the cancelled link
 /// in the chain and all other links in the chain that come after it.
 ///

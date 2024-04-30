@@ -104,6 +104,9 @@ pub enum CancellationCause {
 
     /// The chain lost a race so it is being cancelled.
     RaceLost(RaceLost),
+
+    /// The chain was cancelled because a mutex was poisoned.
+    PoisonedMutex,
 }
 
 #[derive(Debug, Clone)]

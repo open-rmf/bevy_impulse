@@ -17,10 +17,11 @@
 
 use std::{
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
-    future::Future, task::{Context, Poll}, pin::Pin
+    future::Future, task::{Context, Poll}, pin::Pin,
+    any::Any,
 };
 
-use crate::Cancellation;
+use crate::{Cancellation, CancellationCause};
 
 pub(crate) mod private;
 use private::*;
@@ -28,8 +29,13 @@ use private::*;
 /// A promise expects to receive a value in the future.
 #[must_use]
 pub struct Promise<T> {
+    /// Cache of latest known state for this Promise.
     state: PromiseState<T>,
+    /// State that gets shared with the [`Sender`]`
     target: Arc<PromiseTarget<T>>,
+    /// Used to preserve livelihood for the dependencies of this promise.
+    /// Currently only used for implementing [`Promise::flatten`].
+    dependencies: Vec<Box<dyn Any + Send + Sync>>,
 }
 
 impl<T> Promise<T> {
@@ -137,29 +143,23 @@ impl<T> Promise<T> {
         if self.state.is_pending() {
             match self.target.inner.lock() {
                 Ok(mut guard) => {
-                    match guard.result.take() {
-                        Some(PromiseResult::Available(response)) => {
-                            self.state = PromiseState::Available(response);
-                        }
-                        Some(PromiseResult::Cancelled(cause)) => {
-                            self.state = PromiseState::Cancelled(cause);
-                        }
-                        Some(PromiseResult::Disposed) => {
-                            self.state = PromiseState::Disposed;
-                        }
-                        None => {
-                            // Do nothing
-                        }
-                    }
+                    self.state.update(guard.result.take());
                 }
                 Err(_) => {
                     // If the mutex is poisoned, that has to mean the sender
                     // crashed while trying to send the value, so we should
                     // treat it as cancelled.
-                    self.state = PromiseState::Disposed;
+                    self.state = PromiseState::make_poisoned();
                 }
             }
         }
+    }
+}
+
+impl<T: 'static + Send + Sync> Promise<Promise<T>> {
+    /// Reduce a nested promise into a single flat end-to-end promise.
+    pub fn flatten(self) -> Promise<T> {
+        self.impl_flatten()
     }
 }
 
@@ -281,6 +281,65 @@ impl<T> PromiseState<T> {
 
         std::mem::replace(self, next_value)
     }
+
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> PromiseState<U> {
+        match self {
+            Self::Available(x) => {
+                PromiseState::Available(f(x))
+            }
+            Self::Pending => {
+                PromiseState::Pending
+            }
+            Self::Cancelled(cause) => {
+                PromiseState::Cancelled(cause)
+            }
+            Self::Disposed => {
+                PromiseState::Disposed
+            }
+            Self::Taken => {
+                PromiseState::Taken
+            }
+        }
+    }
+
+    pub fn then<U>(self, f: impl FnOnce(T) -> PromiseState<U>) -> PromiseState<U> {
+        self.map(f).flatten()
+    }
+
+    fn update(&mut self, result: Option<PromiseResult<T>>) {
+        match result {
+            Some(PromiseResult::Available(response)) => {
+                *self = PromiseState::Available(response);
+            }
+            Some(PromiseResult::Cancelled(cause)) => {
+                *self = PromiseState::Cancelled(cause);
+            }
+            Some(PromiseResult::Disposed) => {
+                *self = PromiseState::Disposed;
+            }
+            None => {
+                // Do nothing
+            }
+        }
+    }
+
+    fn make_poisoned() -> Self {
+        Self::Cancelled(
+            Cancellation::from_cause(CancellationCause::PoisonedMutex)
+        )
+    }
+}
+
+impl<T> PromiseState<PromiseState<T>> {
+    pub fn flatten(self) -> PromiseState<T> {
+        match self {
+            Self::Available(x) => x,
+            Self::Pending => PromiseState::Pending,
+            Self::Cancelled(cause) => PromiseState::Cancelled(cause),
+            Self::Disposed => PromiseState::Disposed,
+            Self::Taken => PromiseState::Taken,
+        }
+    }
 }
 
 pub struct Interrupter {
@@ -361,5 +420,211 @@ impl Interrupter {
 impl Default for Interrupter {
     fn default() -> Self {
         Interrupter::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn test_promise_flatten() {
+        // Flatten, Outer, Inner
+        {
+            let (mut flat_promise, outer_sender) = {
+                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                (outer_promise.flatten(), outer_sender)
+            };
+
+            let (inner_promise, inner_sender) = Promise::<&str>::new();
+            assert!(outer_sender.send(inner_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Flatten, Inner, Outer
+        {
+            let (mut flat_promise, outer_sender) = {
+                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                (outer_promise.flatten(), outer_sender)
+            };
+
+            let (inner_promise, inner_sender) = Promise::<&str>::new();
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(outer_sender.send(inner_promise).is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Outer, Flatten, Inner
+        {
+            let (mut flat_promise, inner_sender) = {
+                let (mut outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                assert!(outer_promise.peek().is_pending());
+
+                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                assert!(outer_sender.send(inner_promise).is_ok());
+                (outer_promise.flatten(), inner_sender)
+            };
+
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Inner, Flatten, Outer
+        {
+            let (mut flat_promise, outer_sender, inner_promise) = {
+                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+
+                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                assert!(inner_sender.send("hello").is_ok());
+                (outer_promise.flatten(), outer_sender, inner_promise)
+            };
+
+            assert!(flat_promise.peek().is_pending());
+            assert!(outer_sender.send(inner_promise).is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Outer, Inner, Flatten
+        {
+            let mut flat_promise = {
+                let (mut outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                assert!(outer_promise.peek().is_pending());
+
+                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                assert!(outer_sender.send(inner_promise).is_ok());
+                assert!(inner_sender.send("hello").is_ok());
+                assert!(outer_promise.peek().is_available());
+                outer_promise.flatten()
+            };
+
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Inner, Outer, Flatten
+        {
+            let mut flat_promise = {
+                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                assert!(inner_sender.send("hello").is_ok());
+                assert!(outer_sender.send(inner_promise).is_ok());
+                outer_promise.flatten()
+            };
+
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+    }
+
+    use super::Sender;
+    struct DoubleFlattenPairs {
+        outer_promise: Promise<Promise<Promise<&'static str>>>,
+        outer_sender: Sender<Promise<Promise<&'static str>>>,
+        mid_promise: Promise<Promise<&'static str>>,
+        mid_sender: Sender<Promise<&'static str>>,
+        inner_promise: Promise<&'static str>,
+        inner_sender: Sender<&'static str>,
+    }
+
+    impl DoubleFlattenPairs {
+        fn new() -> DoubleFlattenPairs {
+            let (outer_promise, outer_sender) = Promise::new();
+            let (mid_promise, mid_sender) = Promise::new();
+            let (inner_promise, inner_sender) = Promise::new();
+            Self { outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender }
+        }
+    }
+
+    #[test]
+    fn test_promise_double_flatten() {
+        // Flatten, Flatten, Outer, Mid, Inner
+        {
+            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let mut flat_promise = outer_promise.flatten().flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(outer_sender.send(mid_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(mid_sender.send(inner_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Flatten, Outer, Flatten, Mid, Inner
+        {
+            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let mut flat_promise = outer_promise.flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(outer_sender.send(mid_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            let mut flat_promise = flat_promise.flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(mid_sender.send(inner_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Outer, Flatten, Flatten, Mid, Inner
+        {
+            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            assert!(outer_sender.send(mid_promise).is_ok());
+            let mut flat_promise = outer_promise.flatten().flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(mid_sender.send(inner_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Outer, Mid, Flatten, Flatten, Inner
+        {
+            let DoubleFlattenPairs{ mut outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            assert!(outer_sender.send(mid_promise).is_ok());
+            assert!(outer_promise.peek().is_available());
+            assert!(mid_sender.send(inner_promise).is_ok());
+            let mut flat_promise = outer_promise.flatten().flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Outer, Mid, Inner, Flatten, Flatten
+        {
+            let DoubleFlattenPairs{ mut outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            assert!(outer_sender.send(mid_promise).is_ok());
+            assert!(outer_promise.peek().is_available());
+            assert!(mid_sender.send(inner_promise).is_ok());
+            assert!(inner_sender.send("hello").is_ok());
+            let mut flat_promise = outer_promise.flatten().flatten();
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Mid, Flatten, Flatten, Inner, Outer
+        {
+            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            assert!(mid_sender.send(inner_promise).is_ok());
+            let mut flat_promise = outer_promise.flatten().flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(inner_sender.send("hello").is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(outer_sender.send(mid_promise).is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
+
+        // Inner, Flatten, Flatten, Outer, Mid
+        {
+            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            assert!(inner_sender.send("hello").is_ok());
+            let mut flat_promise = outer_promise.flatten().flatten();
+            assert!(flat_promise.peek().is_pending());
+            assert!(outer_sender.send(mid_promise).is_ok());
+            assert!(flat_promise.peek().is_pending());
+            assert!(mid_sender.send(inner_promise).is_ok());
+            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+        }
     }
 }

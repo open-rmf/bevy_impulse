@@ -67,31 +67,9 @@ pub struct Chain<'w, 's, 'a, Response, Streams, M> {
     modifiers: std::marker::PhantomData<M>,
 }
 
-pub struct Modifiers<IsLabeled, HasOnCancel> {
-    _ignore: std::marker::PhantomData<(IsLabeled, HasOnCancel)>,
-}
-
-/// No request modifiers have been set.
-pub type ModifiersUnset = Modifiers<(), ()>;
-
-/// The request is unlabeled but may have other modifiers.
-pub type NotLabeled<C> = Modifiers<(), C>;
-
-/// The request is labeled and may have other modifiers.
-pub type Labeled<C> = Modifiers<Chosen, C>;
-
-/// The request does not have an on_cancel behavior set and may have other modifiers.
-pub type NoOnCancel<L> = Modifiers<L, ()>;
-
-/// The request has an on_cancel behavior set and may have other modifiers.
-pub type WithOnCancel<L> = Modifiers<L, Chosen>;
-
-/// All possible request modifiers have been chosen or can no longer be set.
-pub type ModifiersClosed = Modifiers<Chosen, Chosen>;
-
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, 'a, Response, Streams, Modifiers<L, C>> {
-    /// Have the service chain run until it is finished without holding onto any
-    /// [`Promise`].
+    /// Have the impulse chain run until it is finished without holding onto any
+    /// [`Promise`]. The final output will be automatically disposed.
     pub fn detach(self) {
         self.commands.add(PerformOperation::new(
             self.target,
@@ -100,7 +78,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// Take a [`Promise`] so you can receive the final response in the chain later.
-    /// If the [`Promise`] is dropped then the entire service chain will
+    /// If the [`Promise`] is dropped then the entire impulse chain will
     /// automatically be cancelled from whichever link in the chain has not been
     /// completed yet, triggering every on_cancel branch from that link to the
     /// end of the chain.
@@ -117,7 +95,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// will continue to be fulfilled even if you drop the [`Promise`].
     ///
     /// This is effectively equivalent to running both [`Chain::detach`] and
-    /// [`Chain::take`].
+    /// [`Chain::take`] together.
     pub fn detach_and_take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
         self.commands.add(PerformOperation::new(
@@ -127,7 +105,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         promise
     }
 
-    /// Have the ancestor links in the service chain run until they are finished,
+    /// Have the ancestor links in the impulse chain run until they are finished,
     /// even if the remainder of this chain gets dropped. You can continue adding
     /// links as if this is one continuous chain.
     ///
@@ -287,7 +265,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// When the response is delivered, we will make a clone of it and
-    /// simultaneously pass that clone along two different service chains: one
+    /// simultaneously pass that clone along two different impulse chains: one
     /// determined by the `build` callback provided to this function and the
     /// other determined by the [`Chain`] that gets returned by this function.
     ///
@@ -310,7 +288,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// When the response is delivered, we will make clones of it and
-    /// simultaneously pass that clone along mutliple service chains, each one
+    /// simultaneously pass that clone along mutliple impulse chains, each one
     /// determined by a different element of the tuple that gets passed in as
     /// a builder.
     ///
@@ -770,7 +748,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, C> Chain<'w, 's, 'a, 
 
 impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, Response, Streams, NoOnCancel<L>> {
     /// Build a child chain of services that will be triggered if the request gets
-    /// cancelled at the current point in the service chain.
+    /// cancelled at the current point in the impulse chain.
     pub fn on_cancel<Signal: 'static + Send + Sync>(
         self,
         signal: Signal,
@@ -782,7 +760,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
     }
 
     /// Trigger a specific [`Provider`] in the event that the request gets cancelled
-    /// at the current point in the service chain.
+    /// at the current point in the impulse chain.
     ///
     /// This is a convenience wrapper around [`Chain::on_cancel`] for
     /// cases where only a single provider needs to be triggered
@@ -840,6 +818,28 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, M> Chain<'w, 's, 'a, 
 /// This is a convenience alias for a [`Chain`] produced after some outcome is
 /// determined, such as a race, join, or fork.
 pub type OutputChain<'w, 's, 'a, Response> = Chain<'w, 's, 'a, Response, (), ModifiersClosed>;
+
+pub struct Modifiers<IsLabeled, HasOnCancel> {
+    _ignore: std::marker::PhantomData<(IsLabeled, HasOnCancel)>,
+}
+
+/// No request modifiers have been set.
+pub type ModifiersUnset = Modifiers<(), ()>;
+
+/// The request is unlabeled but may have other modifiers.
+pub type NotLabeled<C> = Modifiers<(), C>;
+
+/// The request is labeled and may have other modifiers.
+pub type Labeled<C> = Modifiers<Chosen, C>;
+
+/// The request does not have an on_cancel behavior set and may have other modifiers.
+pub type NoOnCancel<L> = Modifiers<L, ()>;
+
+/// The request has an on_cancel behavior set and may have other modifiers.
+pub type WithOnCancel<L> = Modifiers<L, Chosen>;
+
+/// All possible request modifiers have been chosen or can no longer be set.
+pub type ModifiersClosed = Modifiers<Chosen, Chosen>;
 
 #[cfg(test)]
 mod tests {
