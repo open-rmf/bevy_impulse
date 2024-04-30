@@ -18,13 +18,13 @@
 pub use bevy::{
     prelude::{
         Commands, App, Update, MinimalPlugins, DefaultPlugins, PbrBundle, Vec3,
-        In, Entity, Assets, Mesh, ResMut, Transform,
+        In, Entity, Assets, Mesh, ResMut, Transform, Component, Query,
     },
     render::mesh::shape::Cube,
     ecs::system::CommandQueue,
 };
 
-use crate::{Promise, flush_impulses};
+use crate::{Promise, Service, InAsyncService, InBlockingService, flush_impulses};
 
 pub struct TestingContext {
     pub app: App,
@@ -223,4 +223,58 @@ pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl FnOnce(T) -> T {
 /// Used for testing special operations for the [`Result`] type.
 pub fn produce_err<T>(_: T) -> Result<T, ()> {
     Err(())
+}
+
+pub struct RepeatRequest {
+    pub service: Service<(), (), ()>,
+    pub count: usize,
+}
+
+#[derive(Component)]
+pub struct Salutation(pub Box<str>);
+
+#[derive(Component)]
+pub struct Name(pub Box<str>);
+
+#[derive(Component)]
+pub struct RunCount(pub usize);
+
+pub fn say_hello(
+    In(input): InBlockingService<()>,
+    salutation_query: Query<Option<&Salutation>>,
+    name_query: Query<Option<&Name>>,
+    mut run_count: Query<Option<&mut RunCount>>,
+) {
+    let salutation = salutation_query.get(input.provider)
+        .ok()
+        .flatten()
+        .map(|x| &*x.0)
+        .unwrap_or("Hello, ");
+
+    let name = name_query.get(input.provider)
+        .ok()
+        .flatten()
+        .map(|x| &*x.0)
+        .unwrap_or("world");
+
+    println!("{salutation}{name}");
+
+    if let Ok(Some(mut count)) = run_count.get_mut(input.provider) {
+        count.0 += 1;
+    }
+}
+
+pub fn repeat_service(
+    In(input): InAsyncService<RepeatRequest>,
+    mut run_count: Query<Option<&mut RunCount>>,
+) -> impl std::future::Future<Output=()> + 'static + Send + Sync {
+    if let Ok(Some(mut count)) = run_count.get_mut(input.provider) {
+        count.0 += 1;
+    }
+
+    async move {
+        for _ in 0..input.request.count {
+            input.channel.query((), input.request.service).await;
+        }
+    }
 }

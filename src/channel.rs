@@ -17,12 +17,12 @@
 
 use bevy::{
     prelude::{Entity, Resource, World},
-    ecs::system::{Command, CommandQueue}
+    ecs::system::{Command, CommandQueue, Commands},
 };
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-use crate::{Stream, Provider, Promise};
+use crate::{Stream, Provider, Promise, RequestExt};
 
 #[derive(Clone)]
 pub struct Channel<Streams = ()> {
@@ -45,9 +45,36 @@ impl<Streams> Channel<Streams> {
         )).ok();
     }
 
-    // pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response> {
+    pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response>
+    where
+        P::Request: 'static + Send + Sync,
+        P::Response: 'static + Send + Sync,
+        P::Streams: 'static + Stream,
+        P: 'static + Send,
+    {
+        self.build(move |commands| {
+            commands.request(request, provider).take()
+        }).flatten()
+    }
 
-    // }
+    pub fn build<F, U>(&self, f: F) -> Promise<U>
+    where
+        F: FnOnce(&mut Commands) -> U + 'static + Send,
+        U: 'static + Send,
+    {
+        let (promise, sender) = Promise::new();
+        self.inner.sender.send(Box::new(
+            move |world: &mut World| {
+                let mut command_queue = CommandQueue::default();
+                let mut commands = Commands::new(&mut command_queue, world);
+                let u = f(&mut commands);
+                command_queue.apply(world);
+                let _ = sender.send(u);
+            }
+        )).ok();
+
+        promise
+    }
 }
 
 #[derive(Clone)]
@@ -87,21 +114,6 @@ impl Default for ChannelQueue {
     }
 }
 
-
-// pub struct StreamChannel<'a, T> {
-//     channel: &'a C,
-//     _ignore: std::marker::PhantomData<T>,
-// }
-
-// impl<'a, C: ChannelTrait, T: Stream> StreamChannel<'a, C, T> {
-//     pub fn send(&self, data: T) {
-//         self.channel.push(StreamCommand {
-//             source: self.channel.source(),
-//             data,
-//         });
-//     }
-// }
-
 struct StreamCommand<T> {
     source: Entity,
     data: T,
@@ -113,5 +125,53 @@ impl<T: Stream> Command for StreamCommand<T> {
             return;
         };
 
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+    use bevy::ecs::system::EntityCommands;
+
+    #[test]
+    fn test_channel_request() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let (hello, repeat) = context.build(|commands| {
+            let hello = commands.spawn_service(
+                say_hello
+                .with(|entity_cmds: &mut EntityCommands| {
+                    entity_cmds.insert((
+                        Salutation("Guten tag, ".into()),
+                        Name("tester".into()),
+                        RunCount(0),
+                    ));
+                })
+            );
+            let repeat = commands.spawn_service(
+                repeat_service
+                .with(|entity_cmds: &mut EntityCommands| {
+                    entity_cmds.insert(RunCount(0));
+                })
+            );
+            (hello, repeat)
+        });
+
+        for _ in 0..5 {
+            let mut promise = context.build(|commands| {
+                commands.request(
+                    RepeatRequest { service: hello, count: 5 },
+                    repeat,
+                ).take()
+            });
+            context.run_while_pending(&mut promise);
+            assert!(promise.peek().is_available());
+        }
+
+        let count = context.app.world.get::<RunCount>(hello.get()).unwrap().0;
+        assert_eq!(count, 25);
+
+        let count = context.app.world.get::<RunCount>(repeat.get()).unwrap().0;
+        assert_eq!(count, 5);
     }
 }

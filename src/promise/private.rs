@@ -18,7 +18,7 @@
 use crate::{Promise, PromiseState, Cancellation, CancellationCause};
 
 use std::{
-    task::Waker, any::Any,
+    task::Waker,
     sync::{
         Arc, Weak, Mutex, MutexGuard, Condvar, atomic::{AtomicBool, Ordering}
     },
@@ -27,12 +27,6 @@ use std::{
 pub(crate) struct Sender<Response> {
     target: Weak<PromiseTarget<Response>>,
     sent: bool,
-}
-
-/// Tracks whether there is any expectation for the Sender to deliver on its
-/// promise (i.e. whether the promise still has a target) without any generics.
-pub(crate) struct Expectation {
-    target: Weak<dyn Any + Send + Sync + 'static>,
 }
 
 impl<T> Sender<T> {
@@ -84,13 +78,6 @@ impl<T> Sender<T> {
             }
             None => f(),
         }
-    }
-
-    pub(crate) fn expectation(&self) -> Expectation
-    where
-        T: Send + 'static
-    {
-        Expectation { target: self.target.clone() }
     }
 }
 
