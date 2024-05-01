@@ -16,15 +16,14 @@
 */
 
 use crate::{
-    BlockingMap, AsyncMap, Operation,
-    OperationRoster, OperationStatus, ChannelQueue, InnerChannel,
+    BlockingMap, AsyncMap, Operation, OperationStatus, ChannelQueue, InnerChannel,
     SingleTargetStorage, InputStorage, InputBundle, Stream, TaskBundle,
     CallBlockingMap, CallAsyncMap, SingleSourceStorage, OperationResult,
-    OrBroken,
+    OrBroken, OperationSetup, OperationRequest,
 };
 
 use bevy::{
-    prelude::{World, Component, Entity, Bundle},
+    prelude::{Component, Entity, Bundle},
     tasks::AsyncComputeTaskPool,
 };
 
@@ -70,21 +69,15 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
-            target_mut.insert(SingleSourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(source));
         }
-        world.entity_mut(entity).insert(self);
+        world.entity_mut(source).insert(self);
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
@@ -143,18 +136,12 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: Stream,
 {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
-        world.entity_mut(entity).insert(self);
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+        world.entity_mut(source).insert(self);
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;

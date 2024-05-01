@@ -20,7 +20,7 @@ use bevy::prelude::{Component, World, Entity};
 use crate::{
     Operation, OperationStatus, OperationRoster, ForkTargetStorage, InputStorage,
     SingleSourceStorage, InputBundle, ForkTargetStatus, inspect_fork_targets,
-    OperationResult, OrBroken,
+    OperationResult, OrBroken, OperationRequest, OperationSetup,
 };
 
 pub struct Branching<Input, Outputs, F> {
@@ -58,29 +58,23 @@ where
     Outputs: Branchable,
     F: FnOnce(Input, &mut Outputs::Activation) + 'static + Send + Sync,
 {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
                 target_mut.insert((
-                    SingleSourceStorage(entity),
+                    SingleSourceStorage(source),
                     ForkTargetStatus::Active,
                 ));
             }
         }
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             self.targets,
             BranchingActivatorStorage(self.activator),
         ));
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Some(input) = source_mut.take::<InputStorage<Input>>() else {

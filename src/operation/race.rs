@@ -21,7 +21,7 @@ use crate::{
     InputStorage, InputBundle, FunnelInputStatus, FunnelSourceStorage,
     SingleTargetStorage, Operation, OperationStatus, OperationRoster, Unzippable,
     ForkTargetStorage, SingleSourceStorage, Cancel, RaceCancelled, ForkTargetStatus,
-    OrBroken, OperationResult, OperationError,
+    OrBroken, OperationResult, OperationError, OperationRequest, OperationSetup,
 };
 
 use smallvec::SmallVec;
@@ -38,23 +38,17 @@ impl<T> RaceInput<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for RaceInput<T> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         // NOTE: The target will be informed aobut its source by the ZipRace or
         // BundleRace operation.
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             SingleTargetStorage(self.target),
             FunnelInputStatus::Pending,
         ));
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         source_mut.get_mut::<FunnelInputStatus>().or_broken()?.ready();
@@ -85,32 +79,24 @@ impl<Values> ZipRace<Values> {
 }
 
 impl<Values: Unzippable> Operation for ZipRace<Values> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
                 target_mut.insert((
-                    SingleSourceStorage(entity),
+                    SingleSourceStorage(source),
                     ForkTargetStatus::Active,
                 ));
             }
         }
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             self.sources,
             self.targets,
             RaceWinner::Pending,
         ));
     }
 
-    fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        manage_race_delivery(source, world, roster, Values::race_values)
+    fn execute(request: OperationRequest) -> OperationResult {
+        manage_race_delivery(request, Values::race_values)
     }
 }
 
@@ -130,48 +116,38 @@ impl<T> BundleRace<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for BundleRace<T> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(source));
         }
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             self.sources,
             SingleTargetStorage(self.target),
             RaceWinner::Pending,
         ));
     }
 
-    fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        manage_race_delivery(source, world, roster, deliver_bundle_race_winner::<T>)
+    fn execute(request: OperationRequest) -> OperationResult {
+        manage_race_delivery(request, deliver_bundle_race_winner::<T>)
     }
 }
 
 fn manage_race_delivery(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    mut request: OperationRequest,
     deliver: fn(Entity, Entity, &mut World, &mut OperationRoster) -> OperationResult,
 ) -> OperationResult {
-    if let Some(winner) = world.get_mut::<RaceWinner>(source).or_broken()?.take_ready() {
-        deliver(source, winner, world, roster)?;
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+    if let Some(winner) = request.world.get_mut::<RaceWinner>(request.source).or_broken()?.take_ready() {
+        deliver(request.source, winner, request.world, request.roster)?;
+        let inputs = request.world.get::<FunnelSourceStorage>(request.source).or_broken()?;
         for input in &inputs.0 {
-            let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
+            let input_status = request.world.get::<FunnelInputStatus>(*input).or_broken()?;
             if input_status.is_pending() {
-                roster.drop_dependency(Cancel::race_lost(source, *input, input_status.clone()));
+                request.roster.drop_dependency(Cancel::race_lost(request.source, *input, input_status.clone()));
             }
         }
     }
 
-    inspect_race_targets(source, world, roster)?;
+    inspect_race_targets(&mut request)?;
 
     // Note that we need to keep the race link alive for as long as any input
     // source still has a Pending status. Otherwise we will break the chain in
@@ -179,13 +155,11 @@ fn manage_race_delivery(
     // to be called on a race many times (each time that there is a change to at
     // least one input source). Each time execute is called, we inspect the
     // sources until we identify that everything can be closed down.
-    inspect_race_inputs(source, world, roster)
+    inspect_race_inputs(request)
 }
 
 fn inspect_race_inputs(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    OperationRequest { source, requester, world, roster }: OperationRequest
 ) -> OperationResult {
     let source_ref = world.entity(source);
     let inputs = source_ref.get::<FunnelSourceStorage>().or_broken()?;
@@ -247,11 +221,9 @@ fn inspect_race_inputs(
 }
 
 fn inspect_race_targets(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    OperationRequest { source, world, roster, .. }: &mut OperationRequest
 ) -> OperationResult {
-    let source_ref = world.entity(source);
+    let source_ref = world.entity(*source);
     if let Some(fork_targets) = source_ref.get::<ForkTargetStorage>() {
         // Check whether any targets have dropped, and propagate that upwards
         let inputs = source_ref.get::<FunnelSourceStorage>().or_broken()?;

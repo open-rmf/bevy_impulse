@@ -17,7 +17,7 @@
 
 use crate::{
     Operation, InputStorage, OperationStatus, OperationResult, OperationRoster,
-    CancellationBehavior, Cancellation, OrBroken,
+    CancellationBehavior, Cancellation, OrBroken, OperationSetup, OperationRequest,
     promise::private::Sender,
 };
 
@@ -53,7 +53,7 @@ impl DroppedPromiseQueue {
 }
 
 impl<T: 'static + Send + Sync> Operation for Terminate<T> {
-    fn set_parameters(self, entity: Entity, world: &mut World) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut sender) = self.sender {
             if !self.detached {
                 let dropped_promise_queue = world.get_resource_or_insert_with(
@@ -62,13 +62,13 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
 
                 let dropped_promise_sender = dropped_promise_queue.sender.clone();
                 sender.on_promise_drop(move || {
-                    dropped_promise_sender.send(entity).expect(
+                    dropped_promise_sender.send(source).expect(
                         "DroppedPromiseQueue resource has been removed unexpectedly"
                     );
                 });
             }
 
-            world.entity_mut(entity).insert((
+            world.entity_mut(source).insert((
                 SenderStorage(sender),
                 CancellationBehavior { hook: cancel_termination::<T> },
             ));
@@ -76,9 +76,7 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        _: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         if let Some(sender) = source_mut.take::<SenderStorage<T>>() {

@@ -345,24 +345,58 @@ impl OperationError {
 
 pub type OperationResult = Result<OperationStatus, OperationError>;
 
+pub struct OperationSetup<'a> {
+    source: Entity,
+    world: &'a mut World,
+}
+
+pub struct OperationRequest<'a> {
+    pub source: Entity,
+    pub requester: Entity,
+    pub world: &'a mut World,
+    pub roster: &'a mut OperationRoster,
+}
+
+impl<'a> OperationRequest<'a> {
+    pub fn pend(self) -> PendingOperationRequest {
+        PendingOperationRequest {
+            source: self.source,
+            requester: self.requester
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PendingOperationRequest {
+    pub source: Entity,
+    pub requester: Entity,
+}
+
+impl PendingOperationRequest {
+    pub fn activate<'a>(
+        self,
+        world: &'a mut World,
+        roster: &'a mut OperationRoster,
+    ) -> OperationRequest<'a> {
+        OperationRequest {
+            source: self.source,
+            requester: self.requester,
+            world,
+            roster
+        }
+    }
+}
+
 /// Trait that defines a single operation within a chain.
 pub trait Operation {
     /// Set the initial parameters for your operation. This gets called while
     /// the chain is being built.
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    );
+    fn setup(self, info: OperationSetup<'_>);
 
     /// Execute this operation. This gets triggered when a new InputStorage
     /// component is added to `source` or when another operation puts `source`
     /// into the [`OperationRoster::queue`].
-    fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult;
+    fn execute(request: OperationRequest<'_>) -> OperationResult;
 }
 
 pub trait OrBroken: Sized {
@@ -412,7 +446,7 @@ impl<Op: Operation> PerformOperation<Op> {
 
 impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
     fn apply(self, world: &mut World) {
-        self.operation.set_parameters(self.source, world);
+        self.operation.setup(OperationSetup { source: self.source, world });
         let mut provider_mut = world.entity_mut(self.source);
         provider_mut
             .insert(Operate(perform_operation::<Op>))
@@ -421,7 +455,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
 }
 
 #[derive(Component)]
-struct Operate(fn(Entity, &mut World, &mut OperationRoster));
+struct Operate(fn(OperationRequest));
 
 /// Insert this as a component on the source of any operation that needs to have
 /// special handling for cancellation. So far this is only used by [`Terminate`].
@@ -430,21 +464,19 @@ pub struct CancellationBehavior {
     pub hook: fn(&Cancellation, Entity, &mut World, &mut OperationRoster),
 }
 
-pub(crate) fn operate(entity: Entity, world: &mut World, roster: &mut OperationRoster) {
-    let Some(operator) = world.get::<Operate>(entity) else {
-        roster.cancel(Cancel::broken_here(entity));
+pub(crate) fn operate(request: OperationRequest) {
+    let Some(operator) = request.world.get::<Operate>(request.source) else {
+        request.roster.cancel(Cancel::broken_here(request.source));
         return;
     };
     let operator = operator.0;
-    operator(entity, world, roster);
+    operator(request);
 }
 
 fn perform_operation<Op: Operation>(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    OperationRequest { source, requester, world, roster }: OperationRequest
 ) {
-    match Op::execute(source, world, roster) {
+    match Op::execute(OperationRequest { source, requester, world, roster }) {
         Ok(OperationStatus::Finished) => {
             roster.dispose(source);
         }

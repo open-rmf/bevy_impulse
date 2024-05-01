@@ -21,7 +21,7 @@ use crate::{
     InputStorage, InputBundle, FunnelInputStatus, FunnelSourceStorage,
     SingleTargetStorage, Operation, OperationStatus, OperationRoster, Unzippable,
     SingleSourceStorage, Cancel, Cancellation, JoinCancelled, JoinedBundle,
-    CancellationCause, OperationResult, OrBroken,
+    CancellationCause, OperationResult, OrBroken, OperationRequest, OperationSetup,
 };
 
 pub(crate) struct JoinInput<T> {
@@ -36,21 +36,15 @@ impl<T> JoinInput<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
-        world.entity_mut(entity).insert((
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+        world.entity_mut(source).insert((
             SingleTargetStorage(self.target),
             FunnelInputStatus::Pending,
         ));
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         source_mut.get_mut::<FunnelInputStatus>().or_broken()?.ready();
@@ -80,28 +74,20 @@ impl<Values> ZipJoin<Values> {
 }
 
 impl<Values: Unzippable> Operation for ZipJoin<Values> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(source));
         }
 
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             self.sources,
             SingleTargetStorage(self.target),
             JoinStatus::Pending,
         ));
     }
 
-    fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        manage_join_delivery(source, world, roster, Values::join_values)
+    fn execute(request: OperationRequest) -> OperationResult {
+        manage_join_delivery(request, Values::join_values)
     }
 }
 
@@ -118,43 +104,39 @@ impl<T> BundleJoin<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(source));
         }
 
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             self.sources,
             SingleTargetStorage(self.target),
             JoinStatus::Pending,
         ));
     }
 
-    fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        manage_join_delivery(source, world, roster, deliver_bundle_join::<T>)
+    fn execute(request: OperationRequest) -> OperationResult {
+        manage_join_delivery(request, deliver_bundle_join::<T>)
     }
 }
 
 fn manage_join_delivery(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    OperationRequest { source, requester, world, roster }: OperationRequest,
     deliver: fn(Entity, &mut World, &mut OperationRoster) -> OperationResult,
 ) -> OperationResult {
-    match world.get::<JoinStatus>(source).or_broken()? {
+    match world.get::<JoinStatus>(source).or_broken()?.clone() {
         JoinStatus::Pending => {
-            manage_pending_join(source, world, roster, deliver)
+            manage_pending_join(
+                OperationRequest { source, requester, world, roster },
+                deliver
+            )
         }
         JoinStatus::Cancelled(cause) => {
-            manage_cancelled_join(source, world, roster, cause.clone())
+            manage_cancelled_join(
+                OperationRequest { source, requester, world, roster },
+                cause.clone()
+            )
         }
         JoinStatus::Closed => {
             // No action is needed if the join has already reached closed status.
@@ -165,9 +147,7 @@ fn manage_join_delivery(
 }
 
 fn manage_pending_join(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    OperationRequest { source, world, roster, .. }: OperationRequest,
     deliver: fn(Entity, &mut World, &mut OperationRoster) -> OperationResult,
 ) -> OperationResult {
     let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
@@ -236,9 +216,7 @@ fn manage_pending_join(
 }
 
 fn manage_cancelled_join(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
+    OperationRequest { source, world, roster, .. }: OperationRequest,
     cause: Cancellation,
 ) -> OperationResult {
     let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
@@ -258,7 +236,7 @@ fn manage_cancelled_join(
     return Ok(OperationStatus::Finished);
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 enum JoinStatus {
     Pending,
     Cancelled(Cancellation),

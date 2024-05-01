@@ -26,6 +26,7 @@ use crate::{
     ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage, FunnelInputStatus,
     SingleTargetStorage, NextOperationLink, ServiceLifecycle, ServiceLifecycleQueue,
+    OperationRequest,
     operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
     propagate_dependency_loss_upwards,
 };
@@ -128,8 +129,10 @@ pub fn flush_impulses(
             serve_next(unblock, world, &mut roster);
         }
 
-        while let Some(e) = roster.operate.pop_front() {
-            operate(e, world, &mut roster);
+        while let Some(source) = roster.operate.pop_front() {
+            operate(OperationRequest {
+                source, requester: source, world, roster: &mut roster
+            });
         }
     }
 }

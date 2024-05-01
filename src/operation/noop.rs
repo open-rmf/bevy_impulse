@@ -15,11 +15,11 @@
  *
 */
 
-use bevy::prelude::{Entity, World};
+use bevy::prelude::Entity;
 
 use crate::{
     Operation, SingleSourceStorage, SingleTargetStorage, InputStorage, InputBundle,
-    OperationStatus, OperationResult, OrBroken,
+    OperationStatus, OperationResult, OrBroken, OperationSetup, OperationRequest,
 };
 
 pub(crate) struct Noop<T> {
@@ -34,21 +34,15 @@ impl<T> Noop<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for Noop<T> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(source));
         }
-        world.entity_mut(entity).insert(SingleTargetStorage(self.target));
+        world.entity_mut(source).insert(SingleTargetStorage(self.target));
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut crate::OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;

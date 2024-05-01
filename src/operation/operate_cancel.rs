@@ -26,7 +26,7 @@ use crate::{
     SingleTargetStorage, Cancelled, Operation, InputBundle,
     OperationStatus, OperationRoster, NextOperationLink, Cancel,
     Cancellation, FunnelInputStatus, ForkTargetStatus, SingleSourceStorage,
-    CancellationBehavior, OperationResult, OrBroken,
+    CancellationBehavior, OperationResult, OrBroken, OperationSetup, OperationRequest,
 };
 
 /// This component is held by request target entities which have an associated
@@ -73,24 +73,18 @@ impl<Signal: 'static + Send + Sync> OperateCancel<Signal> {
 }
 
 impl<Signal: 'static + Send + Sync> Operation for OperateCancel<Signal> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
-        world.entity_mut(entity).insert((
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+        world.entity_mut(source).insert((
             CancelTarget{ source: self.cancel_source },
             CancelSignalStorage(self.signal),
             SingleTargetStorage(self.signal_target),
         ));
         world.entity_mut(self.cancel_source)
-            .insert(CancelSource{ target: entity });
+            .insert(CancelSource{ target: source });
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let CancelSignalStorage::<Signal>(signal) = source_mut.take().or_broken()?;

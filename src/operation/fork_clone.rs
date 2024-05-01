@@ -20,7 +20,7 @@ use bevy::prelude::{Entity, World};
 use crate::{
     InputStorage, InputBundle, Operation, OperationStatus, OperationRoster,
     ForkTargetStorage, ForkTargetStatus, SingleSourceStorage, Cancel,
-    OperationResult, OrBroken,
+    OperationResult, OrBroken, OperationRequest, OperationSetup,
 };
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
@@ -35,26 +35,20 @@ impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {
 }
 
 impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
                 target_mut.insert((
-                    SingleSourceStorage(entity),
+                    SingleSourceStorage(source),
                     ForkTargetStatus::Active,
                 ));
             }
         }
-        world.entity_mut(entity).insert(self.targets);
+        world.entity_mut(source).insert(self.targets);
     }
 
     fn execute(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Some(input) = source_mut.take::<InputStorage<T>>() else {

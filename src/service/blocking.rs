@@ -17,7 +17,7 @@
 
 use crate::{
     BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest,
-    InputStorage,InputBundle, ServiceBundle, Cancel,
+    InputStorage,InputBundle, ServiceBundle, Cancel, OperationRequest,
     service::builder::BlockingChosen,
     private,
 };
@@ -82,7 +82,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
         };
         let request = request.take();
 
-        let ServiceRequest { provider, source, target, world, roster } = cmd;
+        let ServiceRequest { provider, target, operation: OperationRequest { source, requester, world, roster } } = cmd;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {

@@ -18,7 +18,7 @@
 use crate::{
     AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
     InputBundle, InnerChannel, ChannelQueue, RequestLabelId, SingleTargetStorage, OperationRoster, BlockingQueue,
-    Stream, ServiceBuilder, ChooseAsyncServiceDelivery, Cancel,
+    Stream, ServiceBuilder, ChooseAsyncServiceDelivery, Cancel, OperationRequest,
     service::builder::{SerialChosen, ParallelChosen},
     private,
 };
@@ -118,7 +118,7 @@ where
     type Request = Request;
     type Response = Task::Output;
     fn serve(cmd: ServiceRequest) {
-        let ServiceRequest { provider, source, target, world, roster } = cmd;
+        let ServiceRequest { provider, target, operation: OperationRequest { source, requester, world, roster } } = cmd;
 
         let instructions = if let Some(mut source_mut) = world.get_entity_mut(source) {
             source_mut.take::<DeliveryInstructions>()
@@ -158,13 +158,19 @@ where
             }
         };
 
-        let mut cmd = ServiceRequest { provider, source, target, world, roster };
+        let mut cmd = ServiceRequest {
+            provider, target,
+            operation: OperationRequest { source, requester, world, roster }
+        };
         let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
             return;
         };
         let request = request.take();
 
-        let ServiceRequest { provider, source, target: _, world, roster } = cmd;
+        let ServiceRequest {
+            provider, target,
+            operation: OperationRequest { source, requester, world, roster }
+        } = cmd;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {

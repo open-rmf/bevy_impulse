@@ -20,7 +20,7 @@ use bevy::prelude::{World, Component, Entity};
 use crate::{
     Operation, OperationStatus, OperationRoster, SingleTargetStorage,
     SingleSourceStorage, InputStorage, InputBundle, Cancel, OperationResult,
-    OrBroken,
+    OrBroken, OperationRequest, OperationSetup,
 };
 
 pub struct CancelFilter<Input, Output, F> {
@@ -62,24 +62,18 @@ where
     Output: 'static + Send + Sync,
     F: FnOnce(Input) -> Option<Output> + 'static + Send + Sync,
 {
-    fn set_parameters(
-        self,
-        entity: Entity,
-        world: &mut World,
-    ) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(entity));
+            target_mut.insert(SingleSourceStorage(source));
         }
-        world.entity_mut(entity).insert((
+        world.entity_mut(source).insert((
             SingleTargetStorage(self.target),
             CancelFilterStorage(self.filter),
         ));
     }
 
     fn execute(
-        source: Entity,
-        world: &mut bevy::prelude::World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, requester, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let input = source_mut.take::<InputStorage<Input>>().or_broken()?.take();

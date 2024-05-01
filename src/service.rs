@@ -16,7 +16,8 @@
 */
 
 use crate::{
-    OperationRoster, Stream, PerformOperation, OperateService, Provider, Cancel
+    OperationRoster, Stream, PerformOperation, OperateService, Provider, Cancel,
+    OperationRequest, PendingOperationRequest,
 };
 
 use bevy::prelude::{Entity, App, Commands, World, Component, Bundle, Resource};
@@ -66,22 +67,16 @@ impl<Input: 'static + Send + Sync> InputBundle<Input> {
 pub struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
     pub(crate) provider: Entity,
-    /// The entity that holds the request's [`InputStorage`].
-    pub(crate) source: Entity,
-    /// The entity where the response should be placed as [`InputStorage`].
     pub(crate) target: Entity,
-    /// The world that the service must operate on
-    pub(crate) world: &'a mut World,
-    /// The operation roster which lets the service queue up more operations to immediately perform
-    pub(crate) roster: &'a mut OperationRoster,
+    pub(crate) operation: OperationRequest<'a>,
 }
 
 impl<'a> ServiceRequest<'a> {
-    fn pend(&self) -> PendingServiceRequest {
+    fn pend(self) -> PendingServiceRequest {
         PendingServiceRequest {
             provider: self.provider,
-            source: self.source,
             target: self.target,
+            operation: self.operation.pend(),
         }
     }
 }
@@ -89,8 +84,8 @@ impl<'a> ServiceRequest<'a> {
 #[derive(Clone, Copy)]
 pub struct PendingServiceRequest {
     pub provider: Entity,
-    pub source: Entity,
     pub target: Entity,
+    pub operation: PendingOperationRequest,
 }
 
 impl PendingServiceRequest {
@@ -101,24 +96,22 @@ impl PendingServiceRequest {
     ) -> ServiceRequest<'a> {
         ServiceRequest {
             provider: self.provider,
-            source: self.source,
             target: self.target,
-            world,
-            roster,
+            operation: self.operation.activate(world, roster),
         }
     }
 }
 
 impl<'a> ServiceRequest<'a> {
     pub fn from_source<B: Component>(&mut self) -> Option<B> {
-        if let Some(mut source_mut) = self.world.get_entity_mut(self.source) {
+        if let Some(mut source_mut) = self.operation.world.get_entity_mut(self.operation.source) {
             let Some(request) = source_mut.take::<B>() else {
-                self.roster.cancel(Cancel::broken_here(self.source));
+                self.operation.roster.cancel(Cancel::broken_here(self.operation.source));
                 return None;
             };
             Some(request)
         } else {
-            self.roster.cancel(Cancel::broken_here(self.source));
+            self.operation.roster.cancel(Cancel::broken_here(self.operation.source));
             return None;
         }
     }
@@ -336,9 +329,16 @@ impl ServiceQueue {
     }
 }
 
-pub(crate) fn dispatch_service(request: ServiceRequest) {
-    let pending = request.pend();
-    let mut service_queue = request.world.get_resource_or_insert_with(|| ServiceQueue::new());
+pub(crate) fn dispatch_service(
+    ServiceRequest {
+        provider,
+        target,
+        operation: OperationRequest { source, requester, world, roster } }: ServiceRequest,
+) {
+    let pending = PendingServiceRequest {
+        provider, target, operation: PendingOperationRequest { source, requester }
+    };
+    let mut service_queue = world.get_resource_or_insert_with(|| ServiceQueue::new());
     service_queue.queue.push_back(pending);
     if service_queue.is_delivering {
         // Services are already being delivered, so to keep things simple we
@@ -350,9 +350,8 @@ pub(crate) fn dispatch_service(request: ServiceRequest) {
 
     service_queue.is_delivering = true;
 
-    let ServiceRequest { world, roster, .. } = request;
     while let Some(pending) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
-        let PendingServiceRequest { provider, source, .. } = pending;
+        let PendingServiceRequest { provider, operation: PendingOperationRequest { source, .. }, .. } = pending;
         let Some(provider_ref) = world.get_entity(provider) else {
             roster.cancel(Cancel::service_unavailable(source, provider));
             continue;
