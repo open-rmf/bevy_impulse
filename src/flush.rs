@@ -129,7 +129,7 @@ pub fn flush_impulses(
             serve_next(unblock, world, &mut roster);
         }
 
-        while let Some(source) = roster.operate.pop_front() {
+        while let Some(source) = roster.queue.pop_front() {
             operate(OperationRequest {
                 source, requester: source, world, roster: &mut roster
             });

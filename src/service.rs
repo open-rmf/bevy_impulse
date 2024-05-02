@@ -38,32 +38,6 @@ use std::collections::VecDeque;
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-/// Marker trait to indicate when an input is ready without knowing the type of
-/// input.
-#[derive(Component)]
-pub(crate) struct InputReady;
-
-#[derive(Component)]
-pub(crate) struct InputStorage<Input>(Input);
-
-impl<Input> InputStorage<Input> {
-    pub(crate) fn take(self) -> Input {
-        self.0
-    }
-}
-
-#[derive(Bundle)]
-pub(crate) struct InputBundle<Input: 'static + Send + Sync> {
-    value: InputStorage<Input>,
-    ready: InputReady,
-}
-
-impl<Input: 'static + Send + Sync> InputBundle<Input> {
-    pub(crate) fn new(value: Input) -> Self {
-        Self { value: InputStorage(value), ready: InputReady }
-    }
-}
-
 pub struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
     pub(crate) provider: Entity,

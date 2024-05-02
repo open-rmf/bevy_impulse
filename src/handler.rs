@@ -17,8 +17,9 @@
 
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, Stream, InputStorage, InputBundle, TaskBundle, Provider,
-    PerformOperation, OperateHandler, Cancel,
+    OperationRoster, Stream, Input, TaskBundle, Provider,
+    PerformOperation, OperateHandler, Cancel, ManageInput, OperationError,
+    OrBroken,
     private,
 };
 
@@ -27,8 +28,6 @@ use bevy::{
     ecs::system::{IntoSystem, BoxedSystem},
     tasks::AsyncComputeTaskPool,
 };
-
-use backtrace::Backtrace;
 
 use std::{
     collections::VecDeque,
@@ -80,36 +79,39 @@ pub struct HandleRequest<'a> {
 }
 
 impl<'a> HandleRequest<'a> {
-    fn get_request<Request: 'static + Send + Sync>(&mut self) -> Option<Request> {
-        let Some(mut source_mut) = self.world.get_entity_mut(self.source) else {
-            self.roster.cancel(Cancel::broken_here(self.source));
-            return None;
-        };
-
-        source_mut.take::<InputStorage<Request>>().map(|s| s.take())
+    fn get_request<Request: 'static + Send + Sync>(
+        &mut self
+    ) -> Result<Input<Request>, OperationError> {
+        self.world
+            .get_entity_mut(self.source).or_broken()?
+            .take_input()
     }
 
-    fn give_response<Response: 'static + Send + Sync>(&mut self, response: Response) {
-        let Some(mut target_mut) = self.world.get_entity_mut(self.target) else {
-            self.roster.cancel(Cancel::broken_here(self.target));
-            return;
-        };
-
-        target_mut.insert(InputBundle::new(response));
+    fn give_response<Response: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+        response: Response,
+    ) -> Result<(), OperationError> {
+        self.world
+            .get_entity_mut(self.target).or_broken()?
+            .give_input(requester, response, self.roster)?;
+        Ok(())
     }
 
-    fn give_task<Task: Future + 'static + Send>(&mut self, task: Task)
+    fn give_task<Task: Future + 'static + Send>(
+        &mut self,
+        task: Task
+    ) -> Result<(), OperationError>
     where
         Task::Output: Send + Sync,
     {
-        let Some(mut source_mut) = self.world.get_entity_mut(self.source) else {
-            self.roster.cancel(Cancel::broken_here(self.source));
-            return;
-        };
+        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
 
         let task = AsyncComputeTaskPool::get().spawn(task);
+        /*  */
         source_mut.insert(TaskBundle::new(task));
         self.roster.poll(self.source);
+        Ok(())
     }
 
     fn get_channel<Streams: Stream>(&mut self) -> Channel<Streams> {
@@ -140,7 +142,7 @@ impl PendingHandleRequest {
 }
 
 pub trait HandlerTrait<Request, Response, Streams> {
-    fn handle(&mut self, request: HandleRequest);
+    fn handle(&mut self, request: HandleRequest) -> Result<(), OperationError>;
 }
 
 pub struct BlockingHandlerMarker<M>(std::marker::PhantomData<M>);
@@ -155,10 +157,8 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    fn handle(&mut self, mut input: HandleRequest) {
-        let Some(request) = input.get_request() else {
-            return;
-        };
+    fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
+        let Input { requester, data: request } = input.get_request()?;
 
         if !self.initialized {
             self.system.initialize(&mut input.world);
@@ -167,7 +167,8 @@ where
         let response = self.system.run(BlockingHandler { request }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_response(response);
+        input.give_response(requester, response);
+        Ok(())
     }
 }
 
@@ -185,10 +186,8 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: Stream,
 {
-    fn handle(&mut self, mut input: HandleRequest) {
-        let Some(request) = input.get_request() else {
-            return;
-        };
+    fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
+        let Input { requester, data: request } = input.get_request()?;
 
         let channel = input.get_channel();
 
@@ -199,7 +198,7 @@ where
         let task = self.system.run(AsyncHandler { request, channel }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_task(task);
+        input.give_task(task)
     }
 }
 

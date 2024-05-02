@@ -58,6 +58,9 @@ pub(crate) use operate_map::*;
 mod operate_service;
 pub(crate) use operate_service::*;
 
+mod operate_task;
+pub(crate) use operate_task::*;
+
 mod race;
 pub(crate) use race::*;
 
@@ -257,19 +260,17 @@ pub(crate) struct UnusedTarget;
 #[derive(Default)]
 pub struct OperationRoster {
     /// Operation sources that should be triggered
-    pub(crate) operate: VecDeque<Entity>,
+    pub(crate) queue: VecDeque<Entity>,
     /// Operation sources that should be cancelled
     pub(crate) cancel: VecDeque<Cancel>,
     /// Async services that should pull their next item
-    pub(crate) unblock: VecDeque<BlockingQueue>,
+    pub(crate) unblock: VecDeque<Blocker>,
     /// Remove these entities as they are no longer needed
     pub(crate) dispose: Vec<Entity>,
     /// Remove the whole chain from this point on because it is no longer needed
     pub(crate) dispose_chain_from: Vec<Entity>,
     /// Indicate that there is no longer a need for this chain
     pub(crate) drop_dependency: Vec<Cancel>,
-    /// Indicate async tasks that should be polled
-    pub(crate) poll: Vec<Entity>,
 }
 
 impl OperationRoster {
@@ -278,14 +279,14 @@ impl OperationRoster {
     }
 
     pub fn queue(&mut self, source: Entity) {
-        self.operate.push_back(source);
+        self.queue.push_back(source);
     }
 
     pub fn cancel(&mut self, source: Cancel) {
         self.cancel.push_back(source);
     }
 
-    pub(crate) fn unblock(&mut self, provider: BlockingQueue) {
+    pub(crate) fn unblock(&mut self, provider: Blocker) {
         self.unblock.push_back(provider);
     }
 
@@ -301,20 +302,14 @@ impl OperationRoster {
         self.drop_dependency.push(source);
     }
 
-    pub fn poll(&mut self, source: Entity) {
-        self.poll.push(source);
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.operate.is_empty() && self.cancel.is_empty()
+        self.queue.is_empty() && self.cancel.is_empty()
         && self.unblock.is_empty() && self.dispose.is_empty()
         && self.dispose_chain_from.is_empty() && self.drop_dependency.is_empty()
-        && self.poll.is_empty()
     }
 }
 
-#[derive(Component)]
-pub(crate) struct BlockingQueue {
+pub(crate) struct Blocker {
     /// The provider that is being blocked
     pub(crate) provider: Entity,
     /// The source that is doing the blocking
@@ -322,8 +317,11 @@ pub(crate) struct BlockingQueue {
     /// The label of the queue that is being blocked
     pub(crate) label: Option<RequestLabelId>,
     /// Function pointer to call when this is no longer blocking
-    pub(crate) serve_next: fn(BlockingQueue, &mut World, &mut OperationRoster),
+    pub(crate) serve_next: fn(Blocker, &mut World, &mut OperationRoster),
 }
+
+#[derive(Component)]
+pub(crate) struct BlockerStorage(pub(crate) Option<Blocker>);
 
 #[derive(PartialEq, Eq)]
 pub enum OperationStatus {
@@ -346,13 +344,12 @@ impl OperationError {
 pub type OperationResult = Result<OperationStatus, OperationError>;
 
 pub struct OperationSetup<'a> {
-    source: Entity,
-    world: &'a mut World,
+    pub(crate) source: Entity,
+    pub(crate) world: &'a mut World,
 }
 
 pub struct OperationRequest<'a> {
     pub source: Entity,
-    pub requester: Entity,
     pub world: &'a mut World,
     pub roster: &'a mut OperationRoster,
 }
@@ -361,7 +358,6 @@ impl<'a> OperationRequest<'a> {
     pub fn pend(self) -> PendingOperationRequest {
         PendingOperationRequest {
             source: self.source,
-            requester: self.requester
         }
     }
 }
@@ -369,7 +365,6 @@ impl<'a> OperationRequest<'a> {
 #[derive(Clone, Copy)]
 pub struct PendingOperationRequest {
     pub source: Entity,
-    pub requester: Entity,
 }
 
 impl PendingOperationRequest {
@@ -380,7 +375,6 @@ impl PendingOperationRequest {
     ) -> OperationRequest<'a> {
         OperationRequest {
             source: self.source,
-            requester: self.requester,
             world,
             roster
         }
@@ -391,12 +385,12 @@ impl PendingOperationRequest {
 pub trait Operation {
     /// Set the initial parameters for your operation. This gets called while
     /// the chain is being built.
-    fn setup(self, info: OperationSetup<'_>);
+    fn setup(self, info: OperationSetup);
 
     /// Execute this operation. This gets triggered when a new InputStorage
     /// component is added to `source` or when another operation puts `source`
     /// into the [`OperationRoster::queue`].
-    fn execute(request: OperationRequest<'_>) -> OperationResult;
+    fn execute(request: OperationRequest) -> OperationResult;
 }
 
 pub trait OrBroken: Sized {
@@ -449,13 +443,13 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
         self.operation.setup(OperationSetup { source: self.source, world });
         let mut provider_mut = world.entity_mut(self.source);
         provider_mut
-            .insert(Operate(perform_operation::<Op>))
+            .insert(OperationStorage(perform_operation::<Op>))
             .remove::<UnusedTarget>();
     }
 }
 
 #[derive(Component)]
-struct Operate(fn(OperationRequest));
+struct OperationStorage(fn(OperationRequest));
 
 /// Insert this as a component on the source of any operation that needs to have
 /// special handling for cancellation. So far this is only used by [`Terminate`].
@@ -465,7 +459,7 @@ pub struct CancellationBehavior {
 }
 
 pub(crate) fn operate(request: OperationRequest) {
-    let Some(operator) = request.world.get::<Operate>(request.source) else {
+    let Some(operator) = request.world.get::<OperationStorage>(request.source) else {
         request.roster.cancel(Cancel::broken_here(request.source));
         return;
     };
@@ -474,9 +468,9 @@ pub(crate) fn operate(request: OperationRequest) {
 }
 
 fn perform_operation<Op: Operation>(
-    OperationRequest { source, requester, world, roster }: OperationRequest
+    OperationRequest { source, world, roster }: OperationRequest
 ) {
-    match Op::execute(OperationRequest { source, requester, world, roster }) {
+    match Op::execute(OperationRequest { source, world, roster }) {
         Ok(OperationStatus::Finished) => {
             roster.dispose(source);
         }

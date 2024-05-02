@@ -16,36 +16,28 @@
 */
 
 use crate::{
-    AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest, InputStorage,
-    InputBundle, InnerChannel, ChannelQueue, RequestLabelId, SingleTargetStorage, OperationRoster, BlockingQueue,
+    AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
+    InnerChannel, ChannelQueue, RequestLabelId, OperationRoster, Blocker,
     Stream, ServiceBuilder, ChooseAsyncServiceDelivery, Cancel, OperationRequest,
+    OperationError, OrBroken, ManageInput, Input, OperateTask, Operation,
+    OperationSetup, SingleTargetStorage,
     service::builder::{SerialChosen, ParallelChosen},
     private,
 };
 
 use bevy::{
-    prelude::{Component, In, Entity, World, Resource, Bundle},
-    tasks::{AsyncComputeTaskPool, Task as BevyTask},
+    prelude::{Component, In, Entity, World},
+    tasks::AsyncComputeTaskPool,
     ecs::{
         world::EntityMut,
         system::{IntoSystem, BoxedSystem, EntityCommands},
     }
 };
 
-use backtrace::Backtrace;
-
 use std::{
-    task::Poll,
     future::Future,
-    pin::Pin,
-    task::Context,
-    sync::Arc,
     collections::{VecDeque, HashMap},
 };
-
-use futures::task::{waker_ref, ArcWake};
-
-use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
 use smallvec::SmallVec;
 
@@ -117,35 +109,29 @@ where
 {
     type Request = Request;
     type Response = Task::Output;
-    fn serve(cmd: ServiceRequest) {
-        let ServiceRequest { provider, target, operation: OperationRequest { source, requester, world, roster } } = cmd;
+    fn serve(cmd: ServiceRequest) -> Result<(), OperationError> {
+        let ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } } = cmd;
 
-        let instructions = if let Some(mut source_mut) = world.get_entity_mut(source) {
-            source_mut.take::<DeliveryInstructions>()
-        } else {
-            // The source entity does not exist which implies the request has been cancelled.
-            // We no longer need to deliver on it.
-            roster.cancel(Cancel::broken_here(source));
-            return;
-        };
+        let instructions = world.get_entity_mut(source).or_broken()?
+            .take::<DeliveryInstructions>();
 
         let Some(mut provider_mut) = world.get_entity_mut(provider) else {
             // The async service has been despawned, so we should treat the request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
-            return;
+            return Ok(());
         };
 
         let Some(mut delivery) = provider_mut.get_mut::<Delivery>() else {
             // The async service's Delivery component has been removed so we should treat the request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
-            return
+            return Ok(());
         };
 
         let update = insert_new_order(delivery.as_mut(), DeliveryOrder { source, instructions });
-        let blocking = match update {
+        let blocker = match update {
             DeliveryUpdate::Immediate { blocking } => {
                 let serve_next = serve_next_async_request::<Request, Streams, Task>;
-                blocking.map(|label| BlockingQueue { provider, source, label, serve_next })
+                blocking.map(|label| Blocker { provider, source, label, serve_next })
             }
             DeliveryUpdate::Queued { cancelled, stop } => {
                 if let Some(cancelled_source) = stop {
@@ -154,23 +140,11 @@ where
                 for cancelled_source in cancelled {
                     roster.cancel(Cancel::supplanted(cancelled_source, source));
                 }
-                return;
+                return Ok(());
             }
         };
 
-        let mut cmd = ServiceRequest {
-            provider, target,
-            operation: OperationRequest { source, requester, world, roster }
-        };
-        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
-            return;
-        };
-        let request = request.take();
-
-        let ServiceRequest {
-            provider, target,
-            operation: OperationRequest { source, requester, world, roster }
-        } = cmd;
+        let Input { requester, data: request } = world.get_entity_mut(source).or_broken()?.take_input::<Request>()?;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
@@ -188,13 +162,13 @@ where
                 } else {
                     // The provider has had its service removed, so we treat this request as cancelled.
                     roster.cancel(Cancel::service_unavailable(source, provider));
-                    return;
+                    return Ok(());
                 }
             }
         } else {
             // If the provider has been despawned then we treat this request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
-            return;
+            return Ok(());
         };
 
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
@@ -210,18 +184,16 @@ where
 
         let task = AsyncComputeTaskPool::get().spawn(job);
 
-        if let Some(mut source_mut) = world.get_entity_mut(source) {
-            source_mut.insert(TaskBundle::new(task));
-            roster.poll(source);
-            if let Some(blocking) = blocking {
-                source_mut.insert(blocking);
-            }
-        }
+        let mut task_source = world.spawn(()).id();
+        let operate_task = OperateTask::new(requester, target, task, blocker);
+        operate_task.setup(OperationSetup { source: task_source, world });
+        roster.queue(task_source);
+        Ok(())
     }
 }
 
 pub(crate) fn serve_next_async_request<Request, Streams, Task>(
-    mut unblock: BlockingQueue,
+    mut unblock: Blocker,
     world: &mut World,
     roster: &mut OperationRoster,
 )
@@ -232,7 +204,7 @@ where
     Streams: Stream,
 {
     loop {
-        let BlockingQueue { provider, source: finished_source, label, .. } = unblock;
+        let Blocker { provider, source: finished_source, label, .. } = unblock;
         let Some(mut provider_mut) = world.get_entity_mut(provider) else {
             return;
         };
@@ -258,24 +230,23 @@ where
             }
         };
 
-        let Some(next_blocking) = next_blocking else {
+        let Some(next_blocker) = next_blocking else {
             // Nothing left to unblock
             return;
         };
 
-        let source = next_blocking.source;
+        let source = next_blocker.source;
         let Some(mut source_mut) = world.get_entity_mut(source) else {
             roster.cancel(Cancel::broken_here(source));
-            unblock = next_blocking;
+            unblock = next_blocker;
             continue;
         };
 
-        let Some(request) = source_mut.take::<InputStorage<Request>>() else {
+        let Ok(Input { requester, data: request }) = source_mut.take_input::<Request>() else {
             roster.cancel(Cancel::broken_here(source));
-            unblock = next_blocking;
+            unblock = next_blocker;
             continue;
         };
-        let request = request.take();
 
         let mut service = world.get_entity_mut(provider)
             .unwrap()
@@ -297,12 +268,18 @@ where
         let task = AsyncComputeTaskPool::get().spawn(job);
 
         if let Some(mut source_mut) = world.get_entity_mut(source) {
-            source_mut.insert((TaskBundle::new(task), next_blocking));
-            roster.poll(source);
+            let Some(target) = source_mut.get::<SingleTargetStorage>() else {
+                unblock = next_blocker;
+                continue;
+            };
+            let mut task_source = world.spawn(()).id();
+            let operate_task = OperateTask::new(requester, target.0, task, Some(next_blocker));
+            operate_task.setup(OperationSetup { source: task_source, world });
+            roster.queue(task_source);
         } else {
             // The request cancelled itself while running the service so we should
             // move on to the next request.
-            unblock = next_blocking;
+            unblock = next_blocker;
             continue;
         }
 
@@ -316,7 +293,7 @@ fn pop_next_delivery<Request, Streams, Task>(
     provider: Entity,
     finished_source: Entity,
     serial: &mut SerialDelivery
-) -> Option<BlockingQueue>
+) -> Option<Blocker>
 where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
@@ -332,7 +309,7 @@ where
     let Some(next) = serial.queue.pop_front() else {
         return None;
     };
-    let block = BlockingQueue {
+    let block = Blocker {
         provider,
         source: next.source,
         label: next.instructions.as_ref().map(|x| x.label.clone()),
@@ -340,112 +317,6 @@ where
     };
     serial.delivering = Some(next);
     return Some(block);
-}
-
-struct JobWaker {
-    sender: CbSender<Entity>,
-    entity: Entity,
-}
-
-impl ArcWake for JobWaker {
-    fn wake_by_ref(arc_self: &Arc<Self>) {
-        arc_self.sender.send(arc_self.entity).ok();
-    }
-}
-
-#[derive(Component)]
-struct JobWakerStorage(Arc<JobWaker>);
-
-#[derive(Resource)]
-pub(crate) struct WakeQueue {
-    sender: CbSender<Entity>,
-    pub(crate) receiver: CbReceiver<Entity>,
-}
-
-impl WakeQueue {
-    pub(crate) fn new() -> WakeQueue {
-        let (sender, receiver) = unbounded();
-        WakeQueue { sender, receiver }
-    }
-}
-
-#[derive(Component)]
-struct TaskStorage<Response>(BevyTask<Response>);
-
-#[derive(Component)]
-pub(crate) struct PollTask(pub(crate) fn(Entity, &mut World, &mut OperationRoster));
-
-#[derive(Bundle)]
-pub(crate) struct TaskBundle<Response: 'static + Send + Sync> {
-    task: TaskStorage<Response>,
-    poll: PollTask,
-}
-
-impl<Response: 'static + Send + Sync> TaskBundle<Response> {
-    pub(crate) fn new(
-        task: BevyTask<Response>,
-    ) -> TaskBundle<Response> {
-        TaskBundle {
-            task: TaskStorage(task),
-            poll: PollTask(poll_task::<Response>),
-        }
-    }
-}
-
-pub(crate) fn poll_task<Response: 'static + Send + Sync>(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
-) {
-    let Some(mut source_mut) = world.get_entity_mut(source) else {
-        roster.cancel(Cancel::broken_here(source));
-        return;
-    };
-    let Some(mut task) = source_mut.take::<TaskStorage<Response>>().map(|t| t.0) else {
-        roster.cancel(Cancel::broken_here(source));
-        return;
-    };
-
-    let waker = if let Some(waker) = source_mut.take::<JobWakerStorage>() {
-        waker.0.clone()
-    } else {
-        let wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
-        let waker = Arc::new(JobWaker {
-            sender: wake_queue.sender.clone(),
-            entity: source,
-        });
-        waker
-    };
-
-    match Pin::new(&mut task).poll(
-        &mut Context::from_waker(&waker_ref(&waker))
-    ) {
-        Poll::Ready(result) => {
-            // Task has finished
-            let mut source_mut = world.entity_mut(source);
-            let Some(target) = source_mut.get::<SingleTargetStorage>() else {
-                roster.cancel(Cancel::broken_here(source));
-                return;
-            };
-            let target = target.0;
-
-            if let Some(unblock) = source_mut.take::<BlockingQueue>() {
-                roster.unblock(unblock);
-            }
-
-            world.entity_mut(target).insert(InputBundle::new(result));
-            roster.queue(target);
-            roster.dispose(source);
-            return;
-        }
-        Poll::Pending => {
-            // Task is still running
-            world.entity_mut(source).insert((
-                TaskStorage(task),
-                JobWakerStorage(waker),
-            ));
-        }
-    }
 }
 
 #[derive(Component, Clone, Copy)]
