@@ -16,9 +16,9 @@
 */
 
 use crate::{
-    ForkTargetStorage, Operation, Unzippable, SingleSourceStorage,
-    OperationResult, ForkTargetStatus, OperationRequest, OperationSetup,
-    OperationCleanup,
+    ForkTargetStorage, Operation, Unzippable, SingleInputStorage,
+    OperationResult, OperationRequest, OperationSetup,
+    OperationCleanup, OperationReachability, ReachabilityResult, InputBundle,
 };
 
 pub(crate) struct ForkUnzip<T> {
@@ -36,13 +36,13 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert((
-                    SingleSourceStorage(source),
-                    ForkTargetStatus::Active,
-                ));
+                target_mut.insert(SingleInputStorage::new(source));
             }
         }
-        world.entity_mut(source).insert(self.targets);
+        world.entity_mut(source).insert((
+            InputBundle::<T>::new(),
+            self.targets,
+        ));
     }
 
     fn execute(request: OperationRequest) -> OperationResult {
@@ -52,5 +52,13 @@ impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<T>()?;
         clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        SingleInputStorage::is_reachable(reachability)
     }
 }

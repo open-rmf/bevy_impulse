@@ -17,12 +17,12 @@
 
 use bevy::{
     prelude::{Entity, Component, DetectChangesMut},
-    ecs::world::EntityMut,
+    ecs::world::{EntityMut, EntityRef}
 };
 
 use smallvec::SmallVec;
 
-use crate::{OperationRoster, OperationError, OrBroken};
+use crate::{OperationRoster, OperationError, OrBroken, SingleTargetStorage};
 
 use std::collections::HashMap;
 
@@ -44,7 +44,7 @@ pub struct Input<T> {
 /// This component is inserted on the source entity of the operation and will
 /// queue up inputs that have arrived for the source.
 #[derive(Component)]
-pub struct InputStorage<T> {
+pub(crate) struct InputStorage<T> {
     // Items will be inserted into this queue from the front, so we pop off the
     // back to get the oldest items out.
     // TODO(@mxgrey): Consider if it's worth implementing a Deque on top of
@@ -56,6 +56,12 @@ impl<T> InputStorage<T> {
     pub fn new() -> Self {
         Self { reverse_queue: Default::default() }
     }
+
+    pub fn contains_requester(&self, requester: Entity) -> bool {
+        self.reverse_queue.iter()
+        .find(|input| input.requester == requester)
+        .is_some()
+    }
 }
 
 impl<T> Default for InputStorage<T> {
@@ -63,7 +69,6 @@ impl<T> Default for InputStorage<T> {
         Self::new()
     }
 }
-
 
 #[derive(Component)]
 pub struct InputBundle<T> {
@@ -92,18 +97,10 @@ pub trait ManageInput {
         &mut self
     ) -> Result<Input<T>, OperationError>;
 
-    fn into_buffer<T: 'static + Send + Sync>(
+    fn transfer_to_buffer<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
-        target: Entity,
-        data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError>;
-
-    fn buffer_ready<T: 'static + Send + Sync>(
-        &self,
-        requester: Entity,
-    ) -> Result<bool, OperationError>;
 
     fn from_buffer<T: 'static + Send + Sync>(
         &mut self,
@@ -121,6 +118,18 @@ pub trait ManageInput {
         &mut self,
         requester: Entity,
     );
+}
+
+pub trait InspectInput {
+    fn buffer_ready<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError>;
+
+    fn has_input<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError>;
 }
 
 impl<'w> ManageInput for EntityMut<'w> {
@@ -144,13 +153,12 @@ impl<'w> ManageInput for EntityMut<'w> {
         storage.reverse_queue.pop().or_not_ready()
     }
 
-    fn into_buffer<T: 'static + Send + Sync>(
+    fn transfer_to_buffer<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
-        target: Entity,
-        data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
+        let target = self.get::<SingleTargetStorage>().or_broken()?.0;
+        let Input { requester, data } = self.take_input::<T>()?;
         let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
         let reverse_queue = buffer.reverse_queues.entry(requester).or_default();
         match buffer.settings.policy {
@@ -181,14 +189,6 @@ impl<'w> ManageInput for EntityMut<'w> {
         Ok(())
     }
 
-    fn buffer_ready<T: 'static + Send + Sync>(
-        &self,
-        requester: Entity,
-    ) -> Result<bool, OperationError> {
-        let buffer = self.get::<Buffer<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&requester).is_some_and(|q| !q.is_empty()))
-    }
-
     fn try_from_buffer<T: 'static + Send + Sync>(
         &mut self,
         requester: Entity,
@@ -211,6 +211,42 @@ impl<'w> ManageInput for EntityMut<'w> {
         if let Some(mut buffer) = self.get_mut::<Buffer<T>>() {
             buffer.reverse_queues.remove(&requester);
         };
+    }
+}
+
+impl<'a> InspectInput for EntityMut<'a> {
+    fn buffer_ready<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError> {
+        let buffer = self.get::<Buffer<T>>().or_broken()?;
+        Ok(buffer.reverse_queues.get(&requester).is_some_and(|q| !q.is_empty()))
+    }
+
+    fn has_input<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError> {
+        let inputs = self.get::<InputStorage<T>>().or_broken()?;
+        Ok(inputs.contains_requester(requester))
+    }
+}
+
+impl<'a> InspectInput for EntityRef<'a> {
+    fn buffer_ready<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError> {
+        let buffer = self.get::<Buffer<T>>().or_broken()?;
+        Ok(buffer.reverse_queues.get(&requester).is_some_and(|q| !q.is_empty()))
+    }
+
+    fn has_input<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError> {
+        let inputs = self.get::<InputStorage<T>>().or_broken()?;
+        Ok(inputs.contains_requester(requester))
     }
 }
 

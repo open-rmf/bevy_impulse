@@ -17,9 +17,9 @@
 
 use crate::{
     Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
-    SingleSourceStorage, dispatch_service, Cancel, OperationCleanup,
+    SingleInputStorage, dispatch_service, Cancel, OperationCleanup,
     OperationResult, OrBroken, OperationSetup, OperationRequest,
-    ActiveTasksStorage,
+    ActiveTasksStorage, OperationReachability, ReachabilityResult,
 };
 
 use bevy::{
@@ -49,7 +49,7 @@ impl<Request: 'static + Send + Sync> OperateService<Request> {
 impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
             ProviderStorage(self.provider),
@@ -70,6 +70,16 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
         ActiveTasksStorage::cleanup(clean)
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<Request>()? {
+            return Ok(true);
+        }
+        if ActiveTasksStorage::contains_requester(reachability)? {
+            return Ok(true);
+        }
+        SingleInputStorage::is_reachable(reachability)
     }
 }
 

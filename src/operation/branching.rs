@@ -18,10 +18,9 @@
 use bevy::prelude::{Component, World, Entity};
 
 use crate::{
-    Operation, OperationRoster, ForkTargetStorage, SingleSourceStorage,
-    ForkTargetStatus, inspect_fork_targets,
+    Operation, OperationRoster, ForkTargetStorage, SingleInputStorage,
     OperationResult, OrBroken, OperationRequest, OperationSetup, OperationCleanup,
-    ManageInput, Input,
+    ManageInput, Input, OperationReachability, ReachabilityResult, InputBundle,
 };
 
 pub struct Branching<Input, Outputs, F> {
@@ -62,14 +61,12 @@ where
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert((
-                    SingleSourceStorage(source),
-                    ForkTargetStatus::Active,
-                ));
+                target_mut.insert(SingleInputStorage::new(source));
             }
         }
         world.entity_mut(source).insert((
             self.targets,
+            InputBundle::<InputT>::new(),
             BranchingActivatorStorage(self.activator),
         ));
     }
@@ -78,9 +75,7 @@ where
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Ok(Input { requester, data: input }) = source_mut.take_input::<InputT>() else {
-            return inspect_fork_targets(source, world, roster);
-        };
+        let Input { requester, data: input } = source_mut.take_input::<InputT>()?;
         let BranchingActivatorStorage::<F>(activator) = source_mut.take().or_broken()?;
 
         let mut activation = Outputs::new_activation();
@@ -92,6 +87,14 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<InputT>()?;
         clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<InputT>()? {
+            return Ok(true);
+        }
+
+        SingleInputStorage::is_reachable(reachability)
     }
 }
 

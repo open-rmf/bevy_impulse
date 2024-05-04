@@ -38,6 +38,7 @@ use crate::{
     SingleTargetStorage, OperationRoster, Blocker, ManageInput, Scope,
     OperationSetup, OperationRequest, OperationResult, Operation, Cleanup,
     OrBroken, BlockerStorage, OperationCleanup, ChannelQueue, cleanup_operation,
+    OperationReachability, ReachabilityResult,
 };
 
 struct JobWaker {
@@ -217,6 +218,13 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
 
         Ok(())
     }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        let requester = reachability.world
+            .get_entity(reachability.source).or_broken()?
+            .get::<TaskRequesterStorage>().or_broken()?.0;
+        Ok(requester == reachability.requester)
+    }
 }
 
 #[derive(Component, Default)]
@@ -256,5 +264,14 @@ impl ActiveTasksStorage {
         }
 
         Ok(())
+    }
+
+    pub fn contains_requester(r: OperationReachability) -> ReachabilityResult {
+        let active_tasks = &r.world.get_entity(r.source).or_broken()?
+            .get::<Self>().or_broken()?.list;
+
+        Ok(active_tasks.iter().find(
+            |task| task.requester == r.requester
+        ).is_some())
     }
 }

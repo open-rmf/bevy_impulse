@@ -18,8 +18,9 @@
 use bevy::prelude::Entity;
 
 use crate::{
-    Operation, SingleSourceStorage, SingleTargetStorage, Input, ManageInput,
+    Operation, SingleInputStorage, SingleTargetStorage, Input, ManageInput,
     OperationResult, OrBroken, OperationSetup, OperationRequest, OperationCleanup,
+    OperationReachability, ReachabilityResult,
 };
 
 pub(crate) struct Noop<T> {
@@ -36,7 +37,7 @@ impl<T> Noop<T> {
 impl<T: 'static + Send + Sync> Operation for Noop<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert(SingleTargetStorage(self.target));
     }
@@ -55,5 +56,13 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<T>()?;
         clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        SingleInputStorage::is_reachable(reachability)
     }
 }

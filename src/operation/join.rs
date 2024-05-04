@@ -15,14 +15,17 @@
  *
 */
 
-use bevy::prelude::{Entity, Component};
+use bevy::prelude::Entity;
 
 use crate::{
-    Input, ManageInput, FunnelInputStatus, FunnelSourceStorage,
+    Input, ManageInput, InspectInput, InputBundle, FunnelInputStorage,
     SingleTargetStorage, Operation, Unzippable,
-    SingleSourceStorage, Cancel, Cancellation, JoinCancelled, JoinedBundle,
-    CancellationCause, OperationResult, OrBroken, OperationRequest, OperationSetup,
+    SingleInputStorage, Cancel, JoinedBundle, JoinStatus, JoinStatusResult,
+    OperationResult, OrBroken, OperationRequest, OperationSetup,
+    OperationCleanup, OperationReachability, ReachabilityResult,
 };
+
+use std::collections::HashMap;
 
 pub(crate) struct JoinInput<T> {
     target: Entity,
@@ -37,36 +40,41 @@ impl<T> JoinInput<T> {
 
 impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        world.entity_mut(source).insert((
-            SingleTargetStorage(self.target),
-            FunnelInputStatus::Pending,
-        ));
+        world.entity_mut(source).insert(SingleTargetStorage(self.target));
     }
 
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        source_mut.get_mut::<FunnelInputStatus>().or_broken()?.ready();
-
-        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        roster.queue(target);
-
-        // We can't let this link be cleaned up automatically. Its cleanup needs
-        // to be handled by the join that it belongs to.
+        let mut source_mut = world
+            .get_entity_mut(source).or_broken()?
+            .transfer_to_buffer::<T>(roster);
         Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<T>()?;
+        clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        SingleInputStorage::is_reachable(reachability)
     }
 }
 
 pub(crate) struct ZipJoin<Values> {
-    sources: FunnelSourceStorage,
+    sources: FunnelInputStorage,
     target: Entity,
     _ignore: std::marker::PhantomData<Values>,
 }
 
 impl<Values> ZipJoin<Values> {
     pub(crate) fn new(
-        sources: FunnelSourceStorage,
+        sources: FunnelInputStorage,
         target: Entity,
     ) -> Self {
         Self { sources, target, _ignore: Default::default() }
@@ -76,29 +84,46 @@ impl<Values> ZipJoin<Values> {
 impl<Values: Unzippable> Operation for ZipJoin<Values> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
 
         world.entity_mut(source).insert((
             self.sources,
+            InputBundle::<()>::new(),
             SingleTargetStorage(self.target),
-            JoinStatus::Pending,
         ));
     }
 
     fn execute(request: OperationRequest) -> OperationResult {
-        manage_join_delivery(request, Values::join_values)
+        manage_join_delivery(request, Values::join_status, Values::join_values)
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<()>()?;
+        clean.notify_cleaned()
+    }
+
+    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        let inputs = r.world.get_entity(r.source).or_broken()?
+            .get::<FunnelInputStorage>().or_broken()?;
+        for input in &inputs.0 {
+            if !r.check_upstream(*input)? {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 }
 
 pub(crate) struct BundleJoin<T> {
-    sources: FunnelSourceStorage,
+    sources: FunnelInputStorage,
     target: Entity,
     _ignore: std::marker::PhantomData<T>,
 }
 
 impl<T> BundleJoin<T> {
-    pub(crate) fn new(sources: FunnelSourceStorage, target: Entity) -> Self {
+    pub(crate) fn new(sources: FunnelInputStorage, target: Entity) -> Self {
         Self { sources, target, _ignore: Default::default() }
     }
 }
@@ -106,153 +131,90 @@ impl<T> BundleJoin<T> {
 impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
 
         world.entity_mut(source).insert((
             self.sources,
+            InputBundle::<()>::new(),
             SingleTargetStorage(self.target),
-            JoinStatus::Pending,
         ));
     }
 
     fn execute(request: OperationRequest) -> OperationResult {
-        manage_join_delivery(request, deliver_bundle_join::<T>)
+        manage_join_delivery(request, status_bundle_join::<T>, deliver_bundle_join::<T>)
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<()>()?;
+        clean.notify_cleaned()
+    }
+
+    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        let inputs = r.world.get_entity(r.source).or_broken()?
+            .get::<FunnelInputStorage>().or_broken()?;
+        for input in &inputs.0 {
+            if !r.check_upstream(*input)? {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 }
 
 fn manage_join_delivery(
-    OperationRequest { source, world, roster }: OperationRequest,
+    mut request: OperationRequest,
+    reachable: fn(Entity, OperationReachability) -> JoinStatusResult,
     deliver: fn(Entity, OperationRequest) -> OperationResult,
 ) -> OperationResult {
-    match world.get::<JoinStatus>(source).or_broken()?.clone() {
+    let Input { requester, .. } = request.world
+        .get_entity_mut(request.source).or_broken()?
+        .take_input::<()>()?;
+
+    let mut visited = HashMap::new();
+    match reachable(requester, OperationReachability::new(
+        requester, request.source, request.world, &mut visited
+    ))? {
         JoinStatus::Pending => {
-            manage_pending_join(
-                OperationRequest { source, world, roster },
-                deliver,
-            )
+            // Simply return
         }
-        JoinStatus::Cancelled(cause) => {
-            manage_cancelled_join(
-                OperationRequest { source, world, roster },
-                cause.clone()
-            )
+        JoinStatus::Ready => {
+            deliver(requester, request)?
         }
-        JoinStatus::Closed => {
-            // No action is needed if the join has already reached closed status.
-            // This means it has already been asked to get cleaned up.
-            Ok(())
+        JoinStatus::Unreachable(unreachable) => {
+            request.roster.cancel(Cancel::join(request.source, unreachable));
         }
-    }
-}
-
-fn manage_pending_join(
-    OperationRequest { source, world, roster, .. }: OperationRequest,
-    deliver: fn(Entity, OperationRequest) -> OperationResult,
-) -> OperationResult {
-    let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
-
-    let mut cancel_join = false;
-    let mut deliver_join = true;
-    for input in &inputs.0 {
-        let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
-        if !input_status.is_ready() {
-            deliver_join = false;
-        }
-        if input_status.undeliverable() {
-            cancel_join = true;
-            break;
-        }
-    }
-
-    if cancel_join {
-        let mut input_statuses = Vec::new();
-        let mut any_pending = false;
-        for input in &inputs.0 {
-            let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
-            if input_status.is_pending() {
-                any_pending = true;
-            }
-
-            input_statuses.push((*input, input_status.clone()));
-        }
-
-        let cause = Cancellation::from_cause(CancellationCause::JoinCancelled(
-            JoinCancelled { join: source, input_statuses }
-        ));
-
-        if any_pending {
-            // Some of the input sources are still pending, so we should wait
-            // until those have caught up before propagating the cancel to the
-            // target. Cancellation behaviors are meant to always be triggered
-            // in order of their location along the chain.
-            let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
-            for input in &inputs.0 {
-                let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
-                if input_status.is_pending() {
-                    roster.drop_dependency(
-                        Cancel { apply_to: *input, cause: cause.clone() }
-                    );
-                }
-            }
-
-            world.get_mut::<JoinStatus>(source).or_broken()?.cancel(cause);
-        } else {
-            // None of the input sources are pending, so we are ready to cancel
-            // the target and dispose of the join.
-            let apply_to = world.get::<SingleTargetStorage>(source).or_broken()?.0;
-            roster.cancel(Cancel { apply_to, cause });
-
-            world.get_mut::<JoinStatus>(source).or_broken()?.close();
-            return Ok(());
-        }
-    } else if deliver_join {
-        deliver(source, world, roster)?;
-        world.get_mut::<JoinStatus>(source).or_broken()?.close();
-        return Ok(());
     }
 
     Ok(())
 }
 
-fn manage_cancelled_join(
-    OperationRequest { source, world, roster, .. }: OperationRequest,
-    cause: Cancellation,
-) -> OperationResult {
-    let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+fn status_bundle_join<T: 'static + Send + Sync>(
+    requester: Entity,
+    mut reachability: OperationReachability,
+) -> JoinStatusResult {
+    let source = reachability.source();
+    let requester = reachability.requester();
+    let world = reachability.world();
+    let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
+    let mut unreachable: Vec<Entity> = Vec::new();
+    let mut status = JoinStatus::Ready;
+
     for input in &inputs.0 {
-        let input_status = world.get::<FunnelInputStatus>(*input).or_broken()?;
-        if input_status.is_pending() {
-            // One of the inputs is still pending, so we should not take any
-            // action yet.
-            return Ok(());
+        if !world.get_entity(*input).or_broken()?.buffer_ready::<T>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(*input)? {
+                unreachable.push(*input);
+            }
         }
     }
 
-    // None of the inputs are pending so we can close down this join
-    let apply_to = world.get::<SingleTargetStorage>(source).or_broken()?.0;
-    roster.cancel(Cancel { apply_to, cause });
-    world.get_mut::<JoinStatus>(source).or_broken()?.close();
-    return Ok(());
-}
-
-#[derive(Component, Clone)]
-enum JoinStatus {
-    Pending,
-    Cancelled(Cancellation),
-    Closed,
-}
-
-impl JoinStatus {
-    fn cancel(&mut self, cause: Cancellation) {
-        if matches!(self, Self::Pending) {
-            *self = Self::Cancelled(cause);
-        }
+    if !unreachable.is_empty() {
+        return Ok(JoinStatus::Unreachable(unreachable));
     }
 
-    fn close(&mut self) {
-        *self = Self::Closed;
-    }
+    Ok(status)
 }
 
 fn deliver_bundle_join<T: 'static + Send + Sync>(
@@ -262,7 +224,7 @@ fn deliver_bundle_join<T: 'static + Send + Sync>(
     let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
     // Consider ways to avoid cloning here. Maybe InputStorage should have an
     // Option inside to take from it via a Query<&mut InputStorage<T>>.
-    let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?.0.clone();
+    let inputs = world.get::<FunnelInputStorage>(source).or_broken()?.0.clone();
     let mut response = JoinedBundle::new();
     for input in inputs {
         let value = world

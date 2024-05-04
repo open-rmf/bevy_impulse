@@ -17,6 +17,7 @@
 
 use crate::{
     RequestLabelId, Cancel, Cancellation, Scope, ScopeContents, ManageInput,
+    InspectInput,
 };
 
 use bevy::{
@@ -26,7 +27,7 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap, hash_map::Entry};
 
 use smallvec::SmallVec;
 
@@ -63,86 +64,31 @@ pub(crate) use operate_service::*;
 mod operate_task;
 pub(crate) use operate_task::*;
 
-mod race;
-pub(crate) use race::*;
-
 mod terminate;
 pub(crate) use terminate::*;
 
-/// Keep track of the source for a link in a impulse chain
-#[derive(Component, Clone, Copy)]
-pub(crate) struct SingleSourceStorage(pub(crate) Entity);
+/// This component is given to nodes that get triggered each time any single
+/// input is provided to them. There may be multiple nodes that can feed into
+/// this node, but this node gets triggered any time any one of them provides
+/// an input.
+#[derive(Component, Clone)]
+pub struct SingleInputStorage(SmallVec<[Entity; 8]>);
 
-/// Keep track of the status of one input into a funnel (e.g. `join` or `race`)
-#[derive(Component, Debug, Clone)]
-pub enum FunnelInputStatus {
-    /// The input is ready to be consumed
-    Ready,
-    /// The input is not ready yet but might be ready later
-    Pending,
-    /// The input has been cancelled so it will never be ready
-    Cancelled(Cancellation),
-    /// The input has been disposed so it will never be ready
-    Disposed,
-    /// The input could not be delivered and this fact has been handled.
-    Closed,
-}
+impl SingleInputStorage {
+    pub fn new(input: Entity) -> Self {
+        Self(SmallVec::from_iter([input]))
+    }
 
-impl FunnelInputStatus {
-    pub fn ready(&mut self) {
-        if self.is_closed() {
-            return;
+    pub fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        let inputs = r.world.get_entity(r.source).or_broken()?
+            .get::<Self>().or_broken()?;
+        for input in &inputs.0 {
+            if r.check_upstream(*input)? {
+                return Ok(true);
+            }
         }
-        *self = Self::Ready;
-    }
 
-    pub fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready)
-    }
-
-    pub fn is_pending(&self) -> bool {
-        matches!(self, Self::Pending)
-    }
-
-    pub fn cancel(&mut self, cause: Cancellation) {
-        if self.is_closed() {
-            return;
-        }
-        *self = Self::Cancelled(cause);
-    }
-
-    pub fn cancelled(&self) -> Option<Cancellation> {
-        match self {
-            Self::Cancelled(cause) => Some(cause.clone()),
-            _ => None,
-        }
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled(_))
-    }
-
-    pub fn dispose(&mut self) {
-        if self.is_closed() {
-            return;
-        }
-        *self = Self::Disposed;
-    }
-
-    pub fn is_disposed(&self) -> bool {
-        matches!(self, Self::Disposed)
-    }
-
-    pub fn undeliverable(&self) -> bool {
-        self.is_cancelled() || self.is_disposed()
-    }
-
-    pub fn close(&mut self) {
-        *self = Self::Closed;
-    }
-
-    pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed)
+        Ok(false)
     }
 }
 
@@ -150,9 +96,9 @@ impl FunnelInputStatus {
 /// This is for links that draw from multiple sources simultaneously, such as
 /// join and race.
 #[derive(Component, Clone)]
-pub struct FunnelSourceStorage(pub SmallVec<[Entity; 8]>);
+pub struct FunnelInputStorage(pub SmallVec<[Entity; 8]>);
 
-impl FunnelSourceStorage {
+impl FunnelInputStorage {
     pub fn new() -> Self {
         Self(SmallVec::new())
     }
@@ -169,44 +115,6 @@ pub(crate) struct SingleTargetStorage(pub(crate) Entity);
 /// Keep track of the targets for a fork in a impulse chain
 #[derive(Component, Clone)]
 pub struct ForkTargetStorage(pub SmallVec<[Entity; 8]>);
-
-#[derive(Component)]
-pub enum ForkTargetStatus {
-    /// The target is able to receive an input
-    Active,
-    /// The target has been dropped and is no longer needed
-    Dropped(Cancellation),
-    /// The target has been dropped and this fact has been processed
-    Closed,
-}
-
-impl ForkTargetStatus {
-    pub fn is_active(&self) -> bool {
-        matches!(self, Self::Active)
-    }
-
-    pub fn dropped(&self) -> Option<Cancellation> {
-        match self {
-            Self::Dropped(cause) => Some(cause.clone()),
-            _ => None,
-        }
-    }
-
-    pub fn drop_dependency(&mut self, cause: Cancellation) {
-        if self.is_closed() {
-            return;
-        }
-        *self = Self::Dropped(cause);
-    }
-
-    pub fn is_closed(&self) -> bool {
-        matches!(self, Self::Closed)
-    }
-
-    pub fn close(&mut self) {
-        *self = Self::Closed;
-    }
-}
 
 impl ForkTargetStorage {
     pub fn new() -> Self {
@@ -350,6 +258,7 @@ impl OperationError {
 }
 
 pub type OperationResult = Result<(), OperationError>;
+pub type ReachabilityResult = Result<bool, OperationError>;
 
 pub struct OperationSetup<'a> {
     pub(crate) source: Entity,
@@ -399,6 +308,83 @@ impl<'a> OperationCleanup<'a> {
     }
 }
 
+pub struct OperationReachability<'a> {
+    source: Entity,
+    requester: Entity,
+    world: &'a World,
+    visited: &'a mut HashMap<Entity, bool>,
+}
+
+impl<'a> OperationReachability<'a> {
+
+    pub fn new(
+        requester: Entity,
+        source: Entity,
+        world: &'a World,
+        visited: &'a mut HashMap<Entity, bool>,
+    ) -> OperationReachability<'a> {
+        Self { requester, source, world, visited }
+    }
+
+    pub fn check(
+        requester: Entity,
+        source: Entity,
+        world: &'a World
+    ) -> ReachabilityResult {
+        let mut visited = HashMap::new();
+        let mut reachability = Self { source, requester, world, visited: &mut visited };
+        reachability.check_upstream(source)
+    }
+
+    pub fn check_upstream(&mut self, source: Entity) -> ReachabilityResult {
+        match self.visited.entry(source) {
+            Entry::Occupied(occupied) => {
+                // We have looped back to this node, so whatever value we
+                // currently have for it is what we should return.
+                return Ok(*occupied.get());
+            }
+            Entry::Vacant(vacant) => {
+                // We assume that the node is not reachable unless proven
+                // otherwise.
+                vacant.insert(false);
+            }
+        }
+
+        let reachabiility = self.world.get_entity(source).or_broken()?
+            .get::<OperationReachabiilityStorage>().or_broken()?.0;
+
+        let is_reachable = reachabiility(OperationReachability {
+            source,
+            requester: self.requester,
+            world: self.world,
+            visited: self.visited
+        })?;
+
+        if is_reachable {
+            self.visited.insert(source, is_reachable);
+        }
+
+        Ok(is_reachable)
+    }
+
+    pub fn has_input<T: 'static + Send + Sync>(&self) -> ReachabilityResult {
+        self.world.get_entity(self.source).or_broken()?
+            .has_input::<T>(self.requester)
+    }
+
+    pub fn source(&self) -> Entity {
+        self.source
+    }
+
+    pub fn requester(&self) -> Entity {
+        self.requester
+    }
+
+    pub fn world(&self) -> &World {
+        self.world
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct PendingOperationRequest {
     pub source: Entity,
@@ -429,7 +415,18 @@ pub trait Operation {
     /// into the [`OperationRoster::queue`].
     fn execute(request: OperationRequest) -> OperationResult;
 
+    /// A request has reached its termination, so this operation needs to clean
+    /// up any residual data for it.
     fn cleanup(clean: OperationCleanup) -> OperationResult;
+
+    /// Return whether this operation can be reached. Being reachable means there
+    /// is some sequence of operations that could lead to this one being triggered
+    /// for a given requester, or this operation is currently active for the
+    /// given requester.
+    ///
+    /// This is primarily used to determine if a Join has stalled out or if
+    /// a request will never be able to terminate.
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult;
 }
 
 pub trait OrBroken: Sized {
@@ -495,8 +492,11 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
         self.operation.setup(OperationSetup { source: self.source, world });
         let mut provider_mut = world.entity_mut(self.source);
         provider_mut
-            .insert(OperationExecuteStorage(perform_operation::<Op>))
-            .remove::<UnusedTarget>();
+            .insert((
+                OperationExecuteStorage(perform_operation::<Op>),
+                OperationCleanupStorage(Op::cleanup),
+                OperationReachabiilityStorage(Op::is_reachable),
+            ));
     }
 }
 
@@ -504,7 +504,12 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
 struct OperationExecuteStorage(fn(OperationRequest));
 
 #[derive(Component)]
-struct OperationCleanupStorage(fn(OperationCleanup));
+struct OperationCleanupStorage(fn(OperationCleanup) -> OperationResult);
+
+#[derive(Component)]
+struct OperationReachabiilityStorage(
+    fn(OperationReachability) -> ReachabilityResult
+);
 
 /// Insert this as a component on the source of any operation that needs to have
 /// special handling for cancellation. So far this is only used by [`Terminate`].
@@ -527,7 +532,7 @@ pub fn cleanup_operation(clean: OperationCleanup) {
         return;
     };
     let cleanup = cleanup.0;
-    cleanup(clean)
+    let _ = cleanup(clean);
 }
 
 fn perform_operation<Op: Operation>(

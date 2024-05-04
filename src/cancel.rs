@@ -21,8 +21,6 @@ use backtrace::Backtrace;
 
 use std::sync::Arc;
 
-use crate::FunnelInputStatus;
-
 /// Response type that gets sent when a cancellation occurs.
 #[derive(Debug)]
 pub struct Cancelled<Signal> {
@@ -86,24 +84,8 @@ pub enum CancellationCause {
     /// All the branches of a fork were cancelled.
     ForkCancelled(ForkCancelled),
 
-    /// A join was cancelled due to one of these scenarios:
-    /// * At least one of its inputs was cancelled
-    /// * At least one of its inputs was delivered but one or more of the inputs
-    ///   were cancelled or disposed.
-    ///
-    /// Note that if all inputs for the join are disposed instead of cancelled,
-    /// then the join will disposed and not cancelled.
-    JoinCancelled(JoinCancelled),
-
-    /// A race was cancelled because all of its inputs were either cancelled or
-    /// disposed, with at least one of them being a cancel.
-    ///
-    /// Note that if all of the inputs for a race are disposed instead of
-    /// cancelled, then the race will be disposed and not cancelled.
-    RaceCancelled(RaceCancelled),
-
-    /// The chain lost a race so it is being cancelled.
-    RaceLost(RaceLost),
+    /// A join was halted because one or more of its inputs became unreachable.
+    JoinHalted(JoinHalted),
 
     /// The chain was cancelled because a mutex was poisoned.
     PoisonedMutex,
@@ -146,48 +128,16 @@ pub struct ForkCancelled {
 
 /// A description of why a join was cancelled.
 #[derive(Debug, Clone)]
-pub struct JoinCancelled {
-    /// The source link of the join
+pub struct JoinHalted {
+    /// The source node of the join
     pub join: Entity,
-    /// The statuses for the inputs of the join.
-    pub input_statuses: Vec<(Entity, FunnelInputStatus)>,
+    /// The unreachable input nodes
+    pub unreachable: Vec<Entity>,
 }
 
-impl From<JoinCancelled> for CancellationCause {
-    fn from(value: JoinCancelled) -> Self {
-        CancellationCause::JoinCancelled(value)
-    }
-}
-
-/// A description of why a race was cancelled.
-#[derive(Debug, Clone)]
-pub struct RaceCancelled {
-    /// The source link of the race
-    pub race: Entity,
-    /// The statuses of the inputs for this race.
-    pub input_statuses: Vec<(Entity, FunnelInputStatus)>,
-}
-
-impl From<RaceCancelled> for CancellationCause {
-    fn from(value: RaceCancelled) -> Self {
-        CancellationCause::RaceCancelled(value)
-    }
-}
-
-/// A description of the input status while losing a race.
-#[derive(Debug, Clone)]
-pub struct RaceLost {
-    /// The source link of the race.
-    pub race: Entity,
-    /// The input entity for the race.
-    pub input: Entity,
-    /// The status of the losing input entity at the time that it lost.
-    pub status: FunnelInputStatus,
-}
-
-impl From<RaceLost> for CancellationCause {
-    fn from(value: RaceLost) -> Self {
-        CancellationCause::RaceLost(value)
+impl From<JoinHalted> for CancellationCause {
+    fn from(value: JoinHalted) -> Self {
+        CancellationCause::JoinHalted(value)
     }
 }
 
@@ -241,15 +191,7 @@ impl Cancel {
         Self::new(source, CancellationCause::Filtered(source))
     }
 
-    /// A fork was cancelled because all of its dependents were dropped.
-    pub fn fork(source: Entity, cancelled: Vec<Cancellation>) -> Self {
-        Self::new(source, CancellationCause::ForkCancelled(
-            ForkCancelled { fork: source, cancelled }
-        ))
-    }
-
-    /// The chain lost a race so it gets cancelled.
-    pub fn race_lost(race: Entity, input: Entity, status: FunnelInputStatus) -> Self {
-        Self::new(input, CancellationCause::RaceLost(RaceLost { race, input, status }))
+    pub fn join(join: Entity, unreachable: Vec<Entity>) -> Self {
+        Self::new(join, CancellationCause::JoinHalted(JoinHalted { join, unreachable }))
     }
 }

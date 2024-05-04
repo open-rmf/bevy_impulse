@@ -25,7 +25,7 @@ use smallvec::SmallVec;
 use crate::{
     SingleTargetStorage, Cancelled, Operation, InputBundle,
     OperationStatus, OperationRoster, NextOperationLink, Cancel,
-    Cancellation, FunnelInputStatus, ForkTargetStatus, SingleSourceStorage,
+    Cancellation, FunnelInputStatus, ForkTargetStatus, SingleInputStorage,
     CancellationBehavior, OperationResult, OrBroken, OperationSetup, OperationRequest,
 };
 
@@ -118,7 +118,7 @@ pub(crate) fn propagate_dependency_loss_upwards(
     target_queue.push(target);
 
     let mut state: SystemState<(
-        Query<(&SingleSourceStorage, Option<&mut ForkTargetStatus>)>,
+        Query<(&SingleInputStorage, Option<&mut ForkTargetStatus>)>,
         Query<Entity>,
     )> = SystemState::new(world);
     let (mut source_query, existence_query) = state.get_mut(world);

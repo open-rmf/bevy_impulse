@@ -18,9 +18,10 @@
 use bevy::prelude::{Component, Entity};
 
 use crate::{
-    Operation, SingleTargetStorage,
-    SingleSourceStorage, Input, ManageInput, Cancel, OperationResult,
+    Operation, SingleTargetStorage, InputBundle,
+    SingleInputStorage, Input, ManageInput, Cancel, OperationResult,
     OrBroken, OperationRequest, OperationSetup, OperationCleanup,
+    OperationReachability, ReachabilityResult,
 };
 
 pub struct CancelFilter<InputT, Output, F> {
@@ -64,9 +65,10 @@ where
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
+            InputBundle::<InputT>::new(),
             SingleTargetStorage(self.target),
             CancelFilterStorage(self.filter),
         ));
@@ -100,5 +102,13 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<InputT>()?;
         clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<InputT>()? {
+            return Ok(true);
+        }
+
+        SingleInputStorage::is_reachable(reachability)
     }
 }

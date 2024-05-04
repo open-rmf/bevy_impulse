@@ -15,13 +15,13 @@
  *
 */
 
-use bevy::prelude::{Entity, World};
+use bevy::prelude::Entity;
 
 use crate::{
-    Input, ManageInput, Operation, OperationRoster,
-    ForkTargetStorage, ForkTargetStatus, SingleSourceStorage, Cancel,
+    Input, ManageInput, Operation, InputBundle,
+    ForkTargetStorage, SingleInputStorage,
     OperationResult, OrBroken, OperationRequest, OperationSetup, OperationError,
-    OperationCleanup,
+    OperationCleanup, OperationReachability, ReachabilityResult,
 };
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
@@ -39,22 +39,20 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
             if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert((
-                    SingleSourceStorage(source),
-                    ForkTargetStatus::Active,
-                ));
+                target_mut.insert(SingleInputStorage::new(source));
             }
         }
-        world.entity_mut(source).insert(self.targets);
+        world.entity_mut(source).insert((
+            InputBundle::<T>::new(),
+            self.targets,
+        ));
     }
 
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Ok(Input { requester, data: input }) = source_mut.take_input::<T>() else {
-            return inspect_fork_targets(source, world, roster);
-        };
+        let Input { requester, data: input } = source_mut.take_input::<T>()?;
         let ForkTargetStorage(targets) = source_mut.take().or_broken()?;
 
         let mut send_value = |value: T, target: Entity| -> Result<(), OperationError> {
@@ -82,41 +80,12 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         clean.cleanup_inputs::<T>();
         clean.notify_cleaned()
     }
-}
 
-pub fn inspect_fork_targets(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
-) -> OperationResult {
-    let ForkTargetStorage(targets) = world.get(source).or_broken()?;
-
-    let mut cancel_fork = true;
-    let mut fork_closed = true;
-    for target in targets {
-        let target_status = world.get::<ForkTargetStatus>(*target).or_broken()?;
-        if target_status.is_active() {
-            cancel_fork = false;
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<T>()? {
+            return Ok(true);
         }
 
-        if !target_status.is_closed() {
-            fork_closed = false;
-        }
+        SingleInputStorage::is_reachable(reachability)
     }
-
-    if cancel_fork && !fork_closed {
-        // We should propagate the dependency drop upwards by gathering up the
-        // drop causes of its dependents.
-        let mut cancelled = Vec::new();
-        for target in targets {
-            let status = world.get::<ForkTargetStatus>(*target).or_broken()?;
-            cancelled.push(status.dropped().or_broken()?);
-        }
-
-        // After we drop the dependency, this chain will be cleaned up as it
-        // gets cancelled.
-        roster.drop_dependency(Cancel::fork(source, cancelled));
-    }
-
-    Ok(())
 }

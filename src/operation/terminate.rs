@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Operation, InputStorage, OperationStatus, OperationResult, OperationRoster,
+    Operation, Input, ManageInput, OperationResult, OperationRoster,
     CancellationBehavior, Cancellation, OrBroken, OperationSetup, OperationRequest,
     promise::private::Sender,
 };
@@ -76,11 +76,11 @@ impl<T: 'static + Send + Sync> Operation for Terminate<T> {
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         if let Some(sender) = source_mut.take::<SenderStorage<T>>() {
-            let input = source_mut.take::<InputStorage<T>>().or_broken()?.take();
+            let input = source_mut.take_input::<T>()?;
             sender.0.send(input).ok();
         }
 

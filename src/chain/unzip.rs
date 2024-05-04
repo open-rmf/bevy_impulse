@@ -21,8 +21,9 @@ use smallvec::SmallVec;
 
 use crate::{
     Dangling, UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
-    ForkUnzip, PerformOperation, OutputChain, FunnelSourceStorage, OperationResult,
-    SingleTargetStorage, OrBroken,
+    ForkUnzip, PerformOperation, OutputChain, FunnelInputStorage, OperationResult,
+    SingleTargetStorage, OrBroken, OperationReachability,
+    OperationError, InspectInput,
 };
 
 /// A trait for response types that can be unzipped
@@ -37,11 +38,29 @@ pub trait Unzippable {
     type Prepended<T>;
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
 
+    fn join_status(
+        requester: Entity,
+        reachability: OperationReachability,
+    ) -> JoinStatusResult;
+
     fn join_values(
         requester: Entity,
-        request: OperationRequest
+        request: OperationRequest,
     ) -> OperationResult;
 }
+
+/// What is the current status of a Join node
+pub enum JoinStatus {
+    /// The join is pending on some more inputs that are able to arrive
+    Pending,
+    /// The join is ready to be triggered
+    Ready,
+    /// The join can never be triggered because one or more of its inputs will
+    /// never make it.
+    Unreachable(Vec<Entity>),
+}
+
+pub type JoinStatusResult = Result<JoinStatus, OperationError>;
 
 impl<A: 'static + Send + Sync> Unzippable for (A,) {
     type Unzipped = Dangling<A>;
@@ -81,11 +100,38 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         (value, self.0)
     }
 
+    fn join_status(
+        requester: Entity,
+        mut reachability: OperationReachability,
+    ) -> JoinStatusResult {
+        let source = reachability.source();
+        let requester = reachability.requester();
+        let world = reachability.world();
+        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
+        let mut unreachable: Vec<Entity> = Vec::new();
+        let mut status = JoinStatus::Ready;
+
+        let input_0 = *inputs.0.get(0).or_broken()?;
+
+        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(input_0)? {
+                unreachable.push(input_0);
+            }
+        }
+
+        if !unreachable.is_empty() {
+            return Ok(JoinStatus::Unreachable(unreachable));
+        }
+
+        Ok(status)
+    }
+
     fn join_values(
         requester: Entity,
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
         let input_0 = *inputs.0.get(0).or_broken()?;
@@ -152,11 +198,46 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         (value, self.0, self.1)
     }
 
+    fn join_status(
+        requester: Entity,
+        mut reachability: OperationReachability,
+    ) -> JoinStatusResult {
+        let source = reachability.source();
+        let requester = reachability.requester();
+        let world = reachability.world();
+        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
+        let mut unreachable: Vec<Entity> = Vec::new();
+        let mut status = JoinStatus::Ready;
+
+        let input_0 = *inputs.0.get(0).or_broken()?;
+        let input_1 = *inputs.0.get(1).or_broken()?;
+
+        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(input_0)? {
+                unreachable.push(input_0);
+            }
+        }
+
+        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(input_1)? {
+                unreachable.push(input_1);
+            }
+        }
+
+        if !unreachable.is_empty() {
+            return Ok(JoinStatus::Unreachable(unreachable));
+        }
+
+        Ok(status)
+    }
+
     fn join_values(
         requester: Entity,
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
         let input_0 = *inputs.0.get(0).or_broken()?;
@@ -241,11 +322,54 @@ where
         (value, self.0, self.1, self.2)
     }
 
+    fn join_status(
+        requester: Entity,
+        mut reachability: OperationReachability,
+    ) -> JoinStatusResult {
+        let source = reachability.source();
+        let requester = reachability.requester();
+        let world = reachability.world();
+        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
+        let mut unreachable: Vec<Entity> = Vec::new();
+        let mut status = JoinStatus::Ready;
+
+        let input_0 = *inputs.0.get(0).or_broken()?;
+        let input_1 = *inputs.0.get(1).or_broken()?;
+        let input_2 = *inputs.0.get(2).or_broken()?;
+
+        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(input_0)? {
+                unreachable.push(input_0);
+            }
+        }
+
+        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(input_1)? {
+                unreachable.push(input_1);
+            }
+        }
+
+        if !world.get_entity(input_2).or_broken()?.buffer_ready::<C>(requester)? {
+            status = JoinStatus::Pending;
+            if !reachability.check_upstream(input_2)? {
+                unreachable.push(input_2);
+            }
+        }
+
+        if !unreachable.is_empty() {
+            return Ok(JoinStatus::Unreachable(unreachable));
+        }
+
+        Ok(status)
+    }
+
     fn join_values(
         requester: Entity,
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
+        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
         let input_0 = *inputs.0.get(0).or_broken()?;

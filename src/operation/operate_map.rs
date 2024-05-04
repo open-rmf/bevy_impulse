@@ -18,8 +18,9 @@
 use crate::{
     BlockingMap, AsyncMap, Operation, ChannelQueue, InnerChannel,
     SingleTargetStorage, Stream, Input, ManageInput, OperationCleanup,
-    CallBlockingMap, CallAsyncMap, SingleSourceStorage, OperationResult,
+    CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
+    OperationReachability, ReachabilityResult,
 };
 
 use bevy::{
@@ -71,7 +72,7 @@ where
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert(self);
     }
@@ -93,6 +94,13 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
         clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<Request>()? {
+            return Ok(true);
+        }
+        SingleInputStorage::is_reachable(reachability)
     }
 }
 
@@ -170,5 +178,16 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
         ActiveTasksStorage::cleanup(clean)
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+
+        if reachability.has_input::<Request>()? {
+            return Ok(true);
+        }
+        if ActiveTasksStorage::contains_requester(reachability)? {
+            return Ok(true);
+        }
+        SingleInputStorage::is_reachable(reachability)
     }
 }

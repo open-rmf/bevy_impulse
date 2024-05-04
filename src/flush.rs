@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage, FunnelInputStatus,
+    Cancel, DroppedPromiseQueue, UnusedTarget, FunnelInputStorage, FunnelInputStatus,
     SingleTargetStorage, NextOperationLink, ServiceLifecycle, ServiceLifecycleQueue,
     OperationRequest,
     execute_operation, dispose_cancellation_chain, cancel_service, cancel_from_link,
@@ -57,7 +57,7 @@ pub fn flush_impulses(
 
     // Apply all the commands that have been received
     while let Ok(mut item) = async_receiver.try_recv() {
-        (item)(world);
+        (item)(world, &mut roster);
     }
 
     // Queue any operations whose inputs are ready
@@ -169,7 +169,7 @@ fn dispose_link(
 ) {
     dispose_cancellation_chain(source, world, roster);
 
-    if let Some(funnel_sources) = world.get::<FunnelSourceStorage>(source) {
+    if let Some(funnel_sources) = world.get::<FunnelInputStorage>(source) {
         // If the link is a funnel (join or race) then we should also dispose of
         // its input entities when we dispose of it.
         for e in funnel_sources.0.clone() {

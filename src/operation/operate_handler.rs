@@ -17,8 +17,9 @@
 
 use crate::{
     Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
-    Stream, SingleSourceStorage, OperationResult, OrBroken,
+    Stream, SingleInputStorage, OperationResult, OrBroken,
     OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
+    OperationReachability, ReachabilityResult,
 };
 
 use bevy::prelude::{Entity, Component};
@@ -45,7 +46,7 @@ where
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleSourceStorage(source));
+            target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
             HandlerStorage { handler: self.handler },
@@ -103,6 +104,16 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
         ActiveTasksStorage::cleanup(clean)
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        if reachability.has_input::<Request>()? {
+            return Ok(true);
+        }
+        if ActiveTasksStorage::contains_requester(reachability)? {
+            return Ok(true);
+        }
+        SingleInputStorage::is_reachable(reachability)
     }
 }
 
