@@ -17,8 +17,8 @@
 
 use crate::{
     Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
-    OperationStatus, Stream, SingleSourceStorage, OperationResult, OrBroken,
-    OperationSetup, OperationRequest,
+    Stream, SingleSourceStorage, OperationResult, OrBroken,
+    OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
 };
 
 use bevy::prelude::{Entity, Component};
@@ -50,11 +50,12 @@ where
         world.entity_mut(source).insert((
             HandlerStorage { handler: self.handler },
             SingleTargetStorage(self.target),
+            ActiveTasksStorage::default(),
         ));
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
@@ -69,7 +70,7 @@ where
                     // The handler implementation is not available, so queue up
                     // this request.
                     inner.queue.push_back(PendingHandleRequest { source, target });
-                    return Ok(OperationStatus::Unfinished)
+                    return Ok(());
                 }
             }
         };
@@ -84,7 +85,7 @@ where
                 Ok(inner) => inner,
                 Err(_) => {
                     // TODO(@mxgrey): Is there a better way to handle this?
-                    return Ok(OperationStatus::Finished);
+                    return Ok(());
                 }
             };
 
@@ -96,7 +97,12 @@ where
             }
         }
 
-        Ok(OperationStatus::Finished)
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<Request>()?;
+        ActiveTasksStorage::cleanup(clean)
     }
 }
 

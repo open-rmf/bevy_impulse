@@ -18,9 +18,10 @@
 use bevy::prelude::{Component, World, Entity};
 
 use crate::{
-    Operation, OperationStatus, OperationRoster, ForkTargetStorage, InputStorage,
-    SingleSourceStorage, InputBundle, ForkTargetStatus, inspect_fork_targets,
-    OperationResult, OrBroken, OperationRequest, OperationSetup,
+    Operation, OperationRoster, ForkTargetStorage, SingleSourceStorage,
+    ForkTargetStatus, inspect_fork_targets,
+    OperationResult, OrBroken, OperationRequest, OperationSetup, OperationCleanup,
+    ManageInput, Input,
 };
 
 pub struct Branching<Input, Outputs, F> {
@@ -52,11 +53,11 @@ pub(crate) fn make_option_branching<T>(
 #[derive(Component)]
 struct BranchingActivatorStorage<F: 'static + Send + Sync>(F);
 
-impl<Input, Outputs, F> Operation for Branching<Input, Outputs, F>
+impl<InputT, Outputs, F> Operation for Branching<InputT, Outputs, F>
 where
-    Input: 'static + Send + Sync,
+    InputT: 'static + Send + Sync,
     Outputs: Branchable,
-    F: FnOnce(Input, &mut Outputs::Activation) + 'static + Send + Sync,
+    F: FnOnce(InputT, &mut Outputs::Activation) + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         for target in &self.targets.0 {
@@ -74,19 +75,23 @@ where
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Some(input) = source_mut.take::<InputStorage<Input>>() else {
+        let Ok(Input { requester, data: input }) = source_mut.take_input::<InputT>() else {
             return inspect_fork_targets(source, world, roster);
         };
-        let input = input.take();
         let BranchingActivatorStorage::<F>(activator) = source_mut.take().or_broken()?;
 
         let mut activation = Outputs::new_activation();
         activator(input, &mut activation);
 
-        Outputs::activate(activation, source, world, roster)
+        Outputs::activate(requester, activation, source, world, roster)
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<InputT>()?;
+        clean.notify_cleaned()
     }
 }
 
@@ -96,6 +101,7 @@ pub trait Branchable {
     fn new_activation() -> Self::Activation;
 
     fn activate<'a>(
+        requester: Entity,
         activation: Self::Activation,
         source: Entity,
         world: &'a mut World,
@@ -115,6 +121,7 @@ where
     }
 
     fn activate<'a>(
+        requester: Entity,
         (a, b): Self::Activation,
         source: Entity,
         world: &'a mut World,
@@ -126,21 +133,19 @@ where
 
         if let Some(a) = a {
             let mut target_a_mut = world.get_entity_mut(target_a).or_broken()?;
-            target_a_mut.insert(InputBundle::new(a));
-            roster.queue(target_a);
+            target_a_mut.give_input(requester, a, roster)?;
         } else {
             roster.dispose_chain_from(target_a);
         }
 
         if let Some(b) = b {
             let mut target_b_mut = world.get_entity_mut(target_b).or_broken()?;
-            target_b_mut.insert(InputBundle::new(b));
-            roster.queue(target_b);
+            target_b_mut.give_input(requester, b, roster)?;
         } else {
             roster.dispose_chain_from(target_b);
         }
 
-        Ok(OperationStatus::Finished)
+        Ok(())
     }
 }
 

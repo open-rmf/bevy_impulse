@@ -15,14 +15,14 @@
  *
 */
 
-use bevy::prelude::{Entity, Commands, World};
+use bevy::prelude::{Entity, Commands};
 
 use smallvec::SmallVec;
 
 use crate::{
-    Dangling, UnusedTarget, ForkTargetStorage, OperationRoster, InputBundle,
+    Dangling, UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
     ForkUnzip, PerformOperation, OutputChain, FunnelSourceStorage, OperationResult,
-    InputStorage, SingleTargetStorage, OperationStatus, OrBroken, OperationError,
+    SingleTargetStorage, OrBroken,
 };
 
 /// A trait for response types that can be unzipped
@@ -32,27 +32,14 @@ pub trait Unzippable {
 
     fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]>;
 
-    fn distribute_values(
-        self,
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult;
+    fn distribute_values(request: OperationRequest) -> OperationResult;
 
     type Prepended<T>;
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
 
     fn join_values(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult;
-
-    fn race_values(
-        source: Entity,
-        winner: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        requester: Entity,
+        request: OperationRequest
     ) -> OperationResult;
 }
 
@@ -75,18 +62,18 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     }
 
     fn distribute_values(
-        self,
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
+        let Input { requester, data: inputs } = world
+            .get_entity_mut(source).or_broken()?
+            .take_input::<Self>()?;
+
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target = (targets.0)[0];
         if let Some(mut t_mut) = world.get_entity_mut(target) {
-            t_mut.insert(InputBundle::new(self.0));
-            roster.queue(target);
+            t_mut.give_input(requester, inputs.0, roster);
         }
-        Ok(OperationStatus::Finished)
+        Ok(())
     }
 
     type Prepended<T> = (T, A);
@@ -95,45 +82,22 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     }
 
     fn join_values(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        requester: Entity,
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
 
         let input_0 = *inputs.0.get(0).or_broken()?;
 
-        let v_0 = world
+        let v_0  = world
             .get_entity_mut(input_0).or_broken()?
-            .take::<InputStorage<A>>().or_broken()?.take();
+            .from_buffer::<A>(requester)?;
 
         world
             .get_entity_mut(target).or_broken()?
-            .insert(InputBundle::new(v_0));
-        roster.queue(target);
-        Ok(OperationStatus::Finished)
-    }
-
-    fn race_values(
-        source: Entity,
-        winner: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
-        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
-
-        let target = *targets.0.get(0).or_broken()?;
-        if target == winner {
-            let input = world
-                .get_entity_mut(*inputs.0.get(0).or_broken()?).or_broken()?
-                .take::<InputStorage<A>>().or_broken()?.take();
-            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
-            roster.queue(target);
-        }
-
-        Ok(OperationStatus::Finished)
+            .give_input(requester, v_0, roster)?;
+        Ok(())
     }
 }
 
@@ -162,26 +126,25 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     }
 
     fn distribute_values(
-        self,
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
+        let Input { requester, data: inputs } = world
+            .get_entity_mut(source).or_broken()?
+            .take_input::<Self>()?;
+
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target_0 = *targets.0.get(0).or_broken()?;
         let target_1 = *targets.0.get(1).or_broken()?;
 
         if let Some(mut t_mut) = world.get_entity_mut(target_0) {
-            t_mut.insert(InputBundle::new(self.0));
-            roster.queue(target_0);
+            t_mut.give_input(requester, inputs.0, roster)?;
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.insert(InputBundle::new(self.1));
-            roster.queue(target_1);
+            t_mut.give_input(requester, inputs.1, roster);
         }
 
-        Ok(OperationStatus::Finished)
+        Ok(())
     }
 
     type Prepended<T> = (T, A, B);
@@ -190,9 +153,8 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     }
 
     fn join_values(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        requester: Entity,
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
@@ -202,49 +164,17 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 
         let v_0 = world
             .get_entity_mut(input_0).or_broken()?
-            .take::<InputStorage<A>>().or_broken()?.take();
+            .from_buffer::<A>(requester)?;
 
         let v_1 = world
             .get_entity_mut(input_1).or_broken()?
-            .take::<InputStorage<B>>().or_broken()?.take();
+            .from_buffer::<B>(requester)?;
 
         world
             .get_entity_mut(target).or_broken()?
-            .insert(InputBundle::new((v_0, v_1)));
+            .give_input(requester, (v_0, v_1), roster);
         roster.queue(target);
-        Ok(OperationStatus::Finished)
-    }
-
-    fn race_values(
-        source: Entity,
-        winner: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
-        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
-
-        if *inputs.0.get(0).or_broken()? == winner {
-            let target = *targets.0.get(0).or_broken()?;
-            let input = world
-                .get_entity_mut(winner).or_broken()?
-                .take::<InputStorage<A>>().or_broken()?.take();
-            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
-            roster.queue(target);
-            return Ok(OperationStatus::Finished);
-        }
-
-        if *inputs.0.get(1).or_broken()? == winner {
-            let target = *targets.0.get(1).or_broken()?;
-            let input = world
-                .get_entity_mut(winner).or_broken()?
-                .take::<InputStorage<A>>().or_broken()?.take();
-            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
-            roster.queue(target);
-            return Ok(OperationStatus::Finished);
-        }
-
-        Err(OperationError::here())
+        Ok(())
     }
 }
 
@@ -280,32 +210,30 @@ where
     }
 
     fn distribute_values(
-        self,
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
+        let Input { requester, data: inputs } = world
+            .get_entity_mut(source).or_broken()?
+            .take_input::<Self>()?;
+
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target_0 = *targets.0.get(0).or_broken()?;
         let target_1 = *targets.0.get(1).or_broken()?;
         let target_2 = *targets.0.get(2).or_broken()?;
 
         if let Some(mut t_mut) = world.get_entity_mut(target_0) {
-            t_mut.insert(InputBundle::new(self.0));
-            roster.queue(target_0);
+            t_mut.give_input(requester, inputs.0, roster)?;
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.insert(InputBundle::new(self.1));
-            roster.queue(target_1);
+            t_mut.give_input(requester, inputs.1, roster)?;
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_2) {
-            t_mut.insert(InputBundle::new(self.2));
-            roster.queue(target_2);
+            t_mut.give_input(requester, inputs.2, roster)?;
         }
 
-        Ok(OperationStatus::Finished)
+        Ok(())
     }
 
     type Prepended<T> = (T, A, B, C);
@@ -314,9 +242,8 @@ where
     }
 
     fn join_values(
-        source: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
+        requester: Entity,
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
@@ -327,63 +254,21 @@ where
 
         let v_0 = world
             .get_entity_mut(input_0).or_broken()?
-            .take::<InputStorage<A>>().or_broken()?.take();
+            .from_buffer::<A>(requester)?;
 
         let v_1 = world
             .get_entity_mut(input_1).or_broken()?
-            .take::<InputStorage<B>>().or_broken()?.take();
+            .from_buffer::<B>(requester)?;
 
         let v_2 = world
             .get_entity_mut(input_2).or_broken()?
-            .take::<InputStorage<C>>().or_broken()?.take();
+            .from_buffer::<C>(requester)?;
 
         world
             .get_entity_mut(target).or_broken()?
-            .insert(InputBundle::new((v_0, v_1, v_2)));
+            .give_input(requester, (v_0, v_1, v_2), roster);
         roster.queue(target);
-        Ok(OperationStatus::Finished)
-    }
-
-    fn race_values(
-        source: Entity,
-        winner: Entity,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        let inputs = world.get::<FunnelSourceStorage>(source).or_broken()?;
-        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
-
-        if *inputs.0.get(0).or_broken()? == winner {
-            let target = *targets.0.get(0).or_broken()?;
-            let input = world
-                .get_entity_mut(winner).or_broken()?
-                .take::<InputStorage<A>>().or_broken()?.take();
-            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
-            roster.queue(target);
-            return Ok(OperationStatus::Finished);
-        }
-
-        if *inputs.0.get(1).or_broken()? == winner {
-            let target = *targets.0.get(1).or_broken()?;
-            let input = world
-                .get_entity_mut(winner).or_broken()?
-                .take::<InputStorage<A>>().or_broken()?.take();
-            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
-            roster.queue(target);
-            return Ok(OperationStatus::Finished);
-        }
-
-        if *inputs.0.get(2).or_broken()? == winner {
-            let target = *targets.0.get(2).or_broken()?;
-            let input = world
-                .get_entity_mut(winner).or_broken()?
-                .take::<InputStorage<A>>().or_broken()?.take();
-            world.get_entity_mut(target).or_broken()?.insert(InputBundle::new(input));
-            roster.queue(target);
-            return Ok(OperationStatus::Finished);
-        }
-
-        Err(OperationError::here())
+        Ok(())
     }
 }
 

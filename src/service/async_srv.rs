@@ -184,9 +184,9 @@ where
 
         let task = AsyncComputeTaskPool::get().spawn(job);
 
-        let mut task_source = world.spawn(()).id();
-        let operate_task = OperateTask::new(requester, target, task, blocker);
-        operate_task.setup(OperationSetup { source: task_source, world });
+        let task_source = world.spawn(()).id();
+        OperateTask::new(requester, source, target, task, blocker)
+            .setup(OperationSetup { source: task_source, world });
         roster.queue(task_source);
         Ok(())
     }
@@ -273,7 +273,7 @@ where
                 continue;
             };
             let mut task_source = world.spawn(()).id();
-            let operate_task = OperateTask::new(requester, target.0, task, Some(next_blocker));
+            let operate_task = OperateTask::new(requester, source, target.0, task, Some(next_blocker));
             operate_task.setup(OperationSetup { source: task_source, world });
             roster.queue(task_source);
         } else {

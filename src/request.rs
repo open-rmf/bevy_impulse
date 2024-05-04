@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Chain, OutputChain, UnusedTarget, InputBundle, Stream, Provider,
+    OutputChain, UnusedTarget, InputBundle, Stream, Provider,
     ModifiersUnset, PerformOperation, Noop, IntoAsyncMap,
 };
 
@@ -61,7 +61,7 @@ pub trait RequestExt<'w, 's> {
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Chain<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
+    ) -> Segment<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
@@ -89,7 +89,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Chain<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
+    ) -> Segment<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
@@ -99,7 +99,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let target = self.spawn(UnusedTarget).id();
         provider.provide(source, target, self);
 
-        Chain::new(source, target, self)
+        Segment::new(source, target, self)
     }
 
     fn provide<'a, T: 'static + Send + Sync>(
@@ -112,7 +112,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         self.add(PerformOperation::new(
             source, Noop::<T>::new(target),
         ));
-        Chain::new(source, target, self)
+        Segment::new(source, target, self)
     }
 
     fn serve<'a, T: 'static + Send + Sync + Future>(

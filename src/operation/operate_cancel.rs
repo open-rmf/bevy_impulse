@@ -84,7 +84,7 @@ impl<Signal: 'static + Send + Sync> Operation for OperateCancel<Signal> {
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let CancelSignalStorage::<Signal>(signal) = source_mut.take().or_broken()?;

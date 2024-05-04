@@ -15,18 +15,18 @@
  *
 */
 
-use bevy::prelude::{World, Component, Entity};
+use bevy::prelude::{Component, Entity};
 
 use crate::{
-    Operation, OperationStatus, OperationRoster, SingleTargetStorage,
-    SingleSourceStorage, InputStorage, InputBundle, Cancel, OperationResult,
-    OrBroken, OperationRequest, OperationSetup,
+    Operation, SingleTargetStorage,
+    SingleSourceStorage, Input, ManageInput, Cancel, OperationResult,
+    OrBroken, OperationRequest, OperationSetup, OperationCleanup,
 };
 
-pub struct CancelFilter<Input, Output, F> {
+pub struct CancelFilter<InputT, Output, F> {
     filter: F,
     target: Entity,
-    _ignore: std::marker::PhantomData<(Input, Output)>,
+    _ignore: std::marker::PhantomData<(InputT, Output)>,
 }
 
 fn identity<Value>(value: Value) -> Value {
@@ -56,11 +56,11 @@ fn err_to_none<T, E>(value: Result<T, E>) -> Option<T> {
 #[derive(Component)]
 struct CancelFilterStorage<F: 'static + Send + Sync>(F);
 
-impl<Input, Output, F> Operation for CancelFilter<Input, Output, F>
+impl<InputT, Output, F> Operation for CancelFilter<InputT, Output, F>
 where
-    Input: 'static + Send + Sync,
+    InputT: 'static + Send + Sync,
     Output: 'static + Send + Sync,
-    F: FnOnce(Input) -> Option<Output> + 'static + Send + Sync,
+    F: FnOnce(InputT) -> Option<Output> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
@@ -73,10 +73,10 @@ where
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let input = source_mut.take::<InputStorage<Input>>().or_broken()?.take();
+        let Input { requester, data: input } = source_mut.take_input::<InputT>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let CancelFilterStorage::<F>(filter) = source_mut.take().or_broken()?;
 
@@ -85,15 +85,20 @@ where
             roster.cancel(Cancel::filtered(source));
             // We've queued up a cancellation of this link, so we don't want any
             // automatic cleanup to happen.
-            return Ok(OperationStatus::Unfinished);
+            return Ok(());
         };
 
         // At this point we have the correct type to deliver to the target, so
         // we proceed with doing that.
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
-        target_mut.insert(InputBundle::new(output));
+        target_mut.give_input(requester, output, roster);
         roster.queue(target);
 
-        Ok(OperationStatus::Finished)
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<InputT>()?;
+        clean.notify_cleaned()
     }
 }

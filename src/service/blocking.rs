@@ -17,7 +17,8 @@
 
 use crate::{
     BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest,
-    InputStorage,InputBundle, ServiceBundle, Cancel, OperationRequest,
+    Input, ManageInput, ServiceBundle, Cancel, OperationRequest, OperationError,
+    OrBroken,
     service::builder::BlockingChosen,
     private,
 };
@@ -76,13 +77,12 @@ where
 impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTrait for BlockingServiceStorage<Request, Response> {
     type Request = Request;
     type Response = Response;
-    fn serve(mut cmd: ServiceRequest) {
-        let Some(request) = cmd.from_source::<InputStorage<Request>>() else {
-            return;
-        };
-        let request = request.take();
-
-        let ServiceRequest { provider, target, operation: OperationRequest { source, requester, world, roster } } = cmd;
+    fn serve(
+        ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } }: ServiceRequest
+    ) -> Result<(), OperationError> {
+        let Input { requester, data: request } = world
+            .get_entity_mut(source).or_broken()?
+            .take_input::<Request>()?;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {
@@ -101,13 +101,13 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
                 } else {
                     // The provider has had its service removed, so we treat this request as cancelled.
                     roster.cancel(Cancel::service_unavailable(source, provider));
-                    return;
+                    return Ok(());
                 }
             }
         } else {
             // If the provider has been despawned then we treat this request as cancelled.
             roster.cancel(Cancel::service_unavailable(source, provider));
-            return;
+            return Ok(());
         };
 
         roster.dispose(source);
@@ -116,26 +116,22 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
         service.apply_deferred(world);
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() else {
-                // The service storage has been removed for some reason. We will
-                // treat this as the service itself being removed. But we can still
-                // complete this service request.
-                return;
-            };
-            storage.0 = Some(service);
+            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {
+                storage.0 = Some(service);
+            } else {
+                // The service storage has been removed for some reason. We
+                // will treat this as the service itself being removed. But we can
+                // still complete this service request.
+            }
         } else {
             // Apparently the service was despawned by the service itself.
             // But we can still deliver the response to the target, so we will
             // not consider this to be cancelled.
         }
 
-        if let Some(mut target_mut) = world.get_entity_mut(target) {
-            target_mut.insert(InputBundle::new(response));
-            roster.queue(target);
-        } else {
-            // The target is no longer available for a delivery
-            roster.cancel(Cancel::broken_here(target));
-        }
+        world.get_entity_mut(target).or_broken()?
+            .give_input(requester, response, roster);
+        Ok(())
     }
 }
 

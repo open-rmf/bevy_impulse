@@ -24,6 +24,8 @@ use smallvec::SmallVec;
 
 use crate::{OperationRoster, OperationError, OrBroken};
 
+use std::collections::HashMap;
+
 /// Marker trait to indicate when an input is ready without knowing the type of
 /// input.
 #[derive(Component, Default)]
@@ -31,14 +33,23 @@ pub(crate) struct InputReady {
     requesters: SmallVec<[Entity; 16]>,
 }
 
+/// Typical container for input data accompanied by its requester information.
+/// This defines the elements of [`InputStorage`].
 pub struct Input<T> {
     pub requester: Entity,
     pub data: T,
 }
 
+/// General purpose input storage used by most [operations](crate::Operation).
+/// This component is inserted on the source entity of the operation and will
+/// queue up inputs that have arrived for the source.
 #[derive(Component)]
 pub struct InputStorage<T> {
-    pub reverse_queue: SmallVec<[Input<T>; 16]>,
+    // Items will be inserted into this queue from the front, so we pop off the
+    // back to get the oldest items out.
+    // TODO(@mxgrey): Consider if it's worth implementing a Deque on top of
+    // the SmallVec data structure.
+    reverse_queue: SmallVec<[Input<T>; 16]>,
 }
 
 impl<T> InputStorage<T> {
@@ -52,6 +63,7 @@ impl<T> Default for InputStorage<T> {
         Self::new()
     }
 }
+
 
 #[derive(Component)]
 pub struct InputBundle<T> {
@@ -76,7 +88,39 @@ pub trait ManageInput {
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError>;
 
-    fn take_input<T: 'static + Send + Sync>(&mut self) -> Result<Input<T>, OperationError>;
+    fn take_input<T: 'static + Send + Sync>(
+        &mut self
+    ) -> Result<Input<T>, OperationError>;
+
+    fn into_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+        target: Entity,
+        data: T,
+        roster: &mut OperationRoster,
+    ) -> Result<(), OperationError>;
+
+    fn buffer_ready<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError>;
+
+    fn from_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity
+    ) -> Result<T, OperationError> {
+        self.try_from_buffer(requester).and_then(|r| r.or_not_ready())
+    }
+
+    fn try_from_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+    ) -> Result<Option<T>, OperationError>;
+
+    fn cleanup_inputs<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+    );
 }
 
 impl<'w> ManageInput for EntityMut<'w> {
@@ -97,6 +141,109 @@ impl<'w> ManageInput for EntityMut<'w> {
     fn take_input<T: 'static + Send + Sync>(&mut self) -> Result<Input<T>, OperationError> {
         let source = self.id();
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        storage.reverse_queue.pop().or_broken()
+        storage.reverse_queue.pop().or_not_ready()
+    }
+
+    fn into_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+        target: Entity,
+        data: T,
+        roster: &mut OperationRoster,
+    ) -> Result<(), OperationError> {
+        let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
+        let reverse_queue = buffer.reverse_queues.entry(requester).or_default();
+        match buffer.settings.policy {
+            BufferPolicy::KeepFirst(n) => {
+                while n > 0 && reverse_queue.len() > n {
+                    // This shouldn't happen, but we'll handle it anyway.
+                    reverse_queue.remove(0);
+                }
+
+                if reverse_queue.len() == n {
+                    // We're at the limit for inputs in this queue so just skip
+                    return Ok(());
+                }
+            }
+            BufferPolicy::KeepLast(n) => {
+                while n > 0 && reverse_queue.len() >= n {
+                    reverse_queue.pop();
+                }
+            }
+            BufferPolicy::KeepAll => {
+                // Do nothing
+            }
+        }
+
+        reverse_queue.insert(0, data);
+        roster.queue(target);
+
+        Ok(())
+    }
+
+    fn buffer_ready<T: 'static + Send + Sync>(
+        &self,
+        requester: Entity,
+    ) -> Result<bool, OperationError> {
+        let buffer = self.get::<Buffer<T>>().or_broken()?;
+        Ok(buffer.reverse_queues.get(&requester).is_some_and(|q| !q.is_empty()))
+    }
+
+    fn try_from_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+    ) -> Result<Option<T>, OperationError> {
+        let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
+        let reverse_queue = buffer.reverse_queues.entry(requester).or_default();
+        Ok(reverse_queue.pop())
+    }
+
+    fn cleanup_inputs<T: 'static + Send + Sync>(
+        &mut self,
+        requester: Entity,
+    ) {
+        if let Some(mut inputs) = self.get_mut::<InputStorage<T>>() {
+            inputs.reverse_queue.retain(
+                |Input { requester: r, .. }| *r != requester
+            );
+        }
+
+        if let Some(mut buffer) = self.get_mut::<Buffer<T>>() {
+            buffer.reverse_queues.remove(&requester);
+        };
+    }
+}
+
+pub struct InputCommand<T> {
+    target: Entity,
+    requester: Entity,
+    data: T,
+}
+
+#[derive(Component)]
+pub(crate) struct Buffer<T> {
+    /// Settings that determine how this buffer will behave.
+    settings: BufferSettings,
+    /// Map from requester ID to a queue of data that has arrived for it. This
+    /// is used by nodes that feed into joiner nodes to store input so that it's
+    /// readily available when needed.
+    reverse_queues: HashMap<Entity, SmallVec<[T; 16]>>,
+}
+
+#[derive(Default, Clone)]
+pub struct BufferSettings {
+    policy: BufferPolicy,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BufferPolicy {
+    KeepLast(usize),
+    KeepFirst(usize),
+    KeepAll,
+}
+
+impl Default for BufferPolicy {
+    fn default() -> Self {
+        Self::KeepLast(1)
     }
 }

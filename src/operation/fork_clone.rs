@@ -18,9 +18,10 @@
 use bevy::prelude::{Entity, World};
 
 use crate::{
-    InputStorage, InputBundle, Operation, OperationStatus, OperationRoster,
+    Input, ManageInput, Operation, OperationRoster,
     ForkTargetStorage, ForkTargetStatus, SingleSourceStorage, Cancel,
-    OperationResult, OrBroken, OperationRequest, OperationSetup,
+    OperationResult, OrBroken, OperationRequest, OperationSetup, OperationError,
+    OperationCleanup,
 };
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
@@ -48,23 +49,18 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Some(input) = source_mut.take::<InputStorage<T>>() else {
+        let Ok(Input { requester, data: input }) = source_mut.take_input::<T>() else {
             return inspect_fork_targets(source, world, roster);
         };
-        let input = input.take();
         let ForkTargetStorage(targets) = source_mut.take().or_broken()?;
 
-        let mut send_value = |value: T, target: Entity| {
-            if let Some(mut target_mut) = world.get_entity_mut(target) {
-
-                target_mut.insert(InputBundle::new(value));
-                roster.queue(target);
-            } else {
-                roster.cancel(Cancel::broken_here(target));
-            }
+        let mut send_value = |value: T, target: Entity| -> Result<(), OperationError> {
+            world
+            .get_entity_mut(target).or_broken()?
+            .give_input(requester, value, roster)
         };
 
         // Distributing the values like this is a bit convoluted, but it ensures
@@ -72,14 +68,19 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         // strictly necessary. This may be valuable if cloning the value is
         // expensive.
         for target in targets[..targets.len()-1].iter() {
-            send_value(input.clone(), *target);
+            send_value(input.clone(), *target)?;
         }
 
         if let Some(last_target) = targets.last() {
-            send_value(input, *last_target);
+            send_value(input, *last_target)?;
         }
 
-        Ok(OperationStatus::Finished)
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<T>();
+        clean.notify_cleaned()
     }
 }
 
@@ -117,5 +118,5 @@ pub fn inspect_fork_targets(
         roster.drop_dependency(Cancel::fork(source, cancelled));
     }
 
-    Ok(OperationStatus::Unfinished)
+    Ok(())
 }

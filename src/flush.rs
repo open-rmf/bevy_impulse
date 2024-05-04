@@ -23,11 +23,11 @@ use bevy::{
 use smallvec::SmallVec;
 
 use crate::{
-    ChannelQueue, PollTask, WakeQueue, OperationRoster, ServiceHook, InputReady,
+    ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget, FunnelSourceStorage, FunnelInputStatus,
     SingleTargetStorage, NextOperationLink, ServiceLifecycle, ServiceLifecycleQueue,
     OperationRequest,
-    operate, dispose_cancellation_chain, cancel_service, cancel_from_link,
+    execute_operation, dispose_cancellation_chain, cancel_service, cancel_from_link,
     propagate_dependency_loss_upwards,
 };
 
@@ -71,7 +71,7 @@ pub fn flush_impulses(
         .receiver
         .try_iter()
     {
-        roster.poll(wakeable);
+        roster.queue(wakeable);
     }
 
     let mut unused_targets_state: SystemState<Query<Entity, With<UnusedTarget>>> =
@@ -114,25 +114,13 @@ pub fn flush_impulses(
             dispose_chain_from(e, world, &mut roster);
         }
 
-        // Poll any tasks that have asked to be woken
-        while let Some(e) = roster.poll.pop() {
-            let Some(f) = world.get::<PollTask>(e).map(|x| x.0) else {
-                roster.cancel(Cancel::broken_here(e));
-                continue;
-            };
-
-            f(e, world, &mut roster);
-        }
-
         while let Some(unblock) = roster.unblock.pop_front() {
             let serve_next = unblock.serve_next;
             serve_next(unblock, world, &mut roster);
         }
 
         while let Some(source) = roster.queue.pop_front() {
-            operate(OperationRequest {
-                source, requester: source, world, roster: &mut roster
-            });
+            execute_operation(OperationRequest { source, world, roster: &mut roster });
         }
     }
 }

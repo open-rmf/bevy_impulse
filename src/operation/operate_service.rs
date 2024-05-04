@@ -17,8 +17,9 @@
 
 use crate::{
     Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
-    SingleSourceStorage, OperationStatus, dispatch_service, Cancel,
+    SingleSourceStorage, dispatch_service, Cancel, OperationCleanup,
     OperationResult, OrBroken, OperationSetup, OperationRequest,
+    ActiveTasksStorage,
 };
 
 use bevy::{
@@ -26,24 +27,26 @@ use bevy::{
     ecs::system::SystemState,
 };
 
-pub(crate) struct OperateService {
+pub(crate) struct OperateService<Request> {
     provider: Entity,
     target: Entity,
+    _ignore: std::marker::PhantomData<Request>,
 }
 
-impl OperateService {
-    pub(crate) fn new<Request, Response, Streams>(
+impl<Request: 'static + Send + Sync> OperateService<Request> {
+    pub(crate) fn new<Response, Streams>(
         provider: Service<Request, Response, Streams>,
         target: Entity,
     ) -> Self {
         Self {
             provider: provider.get(),
             target,
+            _ignore: Default::default(),
         }
     }
 }
 
-impl Operation for OperateService {
+impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
             target_mut.insert(SingleSourceStorage(source));
@@ -51,6 +54,7 @@ impl Operation for OperateService {
         world.entity_mut(source).insert((
             ProviderStorage(self.provider),
             SingleTargetStorage(self.target),
+            ActiveTasksStorage::default(),
         ));
     }
 
@@ -60,7 +64,12 @@ impl Operation for OperateService {
         let provider = source_ref.get::<ProviderStorage>().or_broken()?.0;
 
         dispatch_service(ServiceRequest { provider, target, operation });
-        Ok(OperationStatus::Unfinished)
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<Request>()?;
+        ActiveTasksStorage::cleanup(clean)
     }
 }
 

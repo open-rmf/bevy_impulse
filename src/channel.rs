@@ -22,7 +22,7 @@ use bevy::{
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-use crate::{Stream, Provider, Promise, RequestExt};
+use crate::{Stream, Provider, Promise, RequestExt, OperationRoster};
 
 #[derive(Clone)]
 pub struct Channel<Streams = ()> {
@@ -39,7 +39,7 @@ impl<Streams> Channel<Streams> {
 
     pub fn push_batch(&self, mut queue: CommandQueue) {
         self.inner.sender.send(Box::new(
-            move |world: &mut World| {
+            move |world: &mut World, _: &mut OperationRoster| {
                 queue.apply(world);
             }
         )).ok();
@@ -64,7 +64,7 @@ impl<Streams> Channel<Streams> {
     {
         let (promise, sender) = Promise::new();
         self.inner.sender.send(Box::new(
-            move |world: &mut World| {
+            move |world: &mut World, _: &mut OperationRoster| {
                 let mut command_queue = CommandQueue::default();
                 let mut commands = Commands::new(&mut command_queue, world);
                 let u = f(&mut commands);
@@ -93,7 +93,7 @@ impl InnerChannel {
     }
 }
 
-type ChannelItem = Box<dyn FnOnce(&mut World) + Send>;
+type ChannelItem = Box<dyn FnOnce(&mut World, &mut OperationRoster) + Send>;
 
 #[derive(Resource)]
 pub(crate) struct ChannelQueue {

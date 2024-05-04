@@ -18,8 +18,8 @@
 use bevy::prelude::Entity;
 
 use crate::{
-    Operation, SingleSourceStorage, SingleTargetStorage, InputStorage, InputBundle,
-    OperationStatus, OperationResult, OrBroken, OperationSetup, OperationRequest,
+    Operation, SingleSourceStorage, SingleTargetStorage, Input, ManageInput,
+    OperationResult, OrBroken, OperationSetup, OperationRequest, OperationCleanup,
 };
 
 pub(crate) struct Noop<T> {
@@ -42,14 +42,18 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let value = source_mut.take::<InputStorage<T>>().or_broken()?.take();
+        let Input { requester, data: value } = source_mut.take_input::<T>()?;
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
-        target_mut.insert(InputBundle::new(value));
-        roster.queue(target);
-        Ok(OperationStatus::Finished)
+        target_mut.give_input(requester, value, roster);
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<T>()?;
+        clean.notify_cleaned()
     }
 }

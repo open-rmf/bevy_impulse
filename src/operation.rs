@@ -15,7 +15,9 @@
  *
 */
 
-use crate::{RequestLabelId, Cancel, Cancellation};
+use crate::{
+    RequestLabelId, Cancel, Cancellation, Scope, ScopeContents, ManageInput,
+};
 
 use bevy::{
     prelude::{Entity, World, Component, Query},
@@ -271,6 +273,8 @@ pub struct OperationRoster {
     pub(crate) dispose_chain_from: Vec<Entity>,
     /// Indicate that there is no longer a need for this chain
     pub(crate) drop_dependency: Vec<Cancel>,
+    /// Tell a scope to attempt cleanup
+    pub(crate) cleanup_scope: Vec<Cleanup>,
 }
 
 impl OperationRoster {
@@ -302,11 +306,22 @@ impl OperationRoster {
         self.drop_dependency.push(source);
     }
 
+    pub fn cleanup_scope(&mut self, cleanup: Cleanup) {
+        self.cleanup_scope.push(cleanup);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty() && self.cancel.is_empty()
         && self.unblock.is_empty() && self.dispose.is_empty()
         && self.dispose_chain_from.is_empty() && self.drop_dependency.is_empty()
+        && self.cleanup_scope.is_empty()
     }
+}
+
+/// Notify the scope manager that the request may be finished with cleanup
+pub struct Cleanup {
+    scope: Entity,
+    requester: Entity,
 }
 
 pub(crate) struct Blocker {
@@ -323,25 +338,18 @@ pub(crate) struct Blocker {
 #[derive(Component)]
 pub(crate) struct BlockerStorage(pub(crate) Option<Blocker>);
 
-#[derive(PartialEq, Eq)]
-pub enum OperationStatus {
-    /// The source entity is no longer needed so it should be despawned.
-    Finished,
-    /// The operation is not finished yet, so do not do any automatic cleanup.
-    Unfinished,
-}
-
-pub struct OperationError {
-    pub backtrace: Option<Backtrace>,
+pub enum OperationError {
+    Broken(Option<Backtrace>),
+    NotReady,
 }
 
 impl OperationError {
-    pub fn here() -> Self {
-        OperationError { backtrace: Some(Backtrace::new()) }
+    pub fn broken_here() -> Self {
+        OperationError::Broken(Some(Backtrace::new()))
     }
 }
 
-pub type OperationResult = Result<OperationStatus, OperationError>;
+pub type OperationResult = Result<(), OperationError>;
 
 pub struct OperationSetup<'a> {
     pub(crate) source: Entity,
@@ -359,6 +367,35 @@ impl<'a> OperationRequest<'a> {
         PendingOperationRequest {
             source: self.source,
         }
+    }
+}
+
+pub struct OperationCleanup<'a> {
+    pub source: Entity,
+    pub requester: Entity,
+    pub world: &'a mut World,
+    pub roster: &'a mut OperationRoster,
+}
+
+impl<'a> OperationCleanup<'a> {
+
+    fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
+        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
+        source_mut.cleanup_inputs::<T>(self.requester);
+        Ok(())
+    }
+
+    fn notify_cleaned(&mut self) -> OperationResult {
+        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
+        let scope = source_mut.get::<Scope>().or_broken()?.get();
+        let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
+        let mut scope_contents = scope_mut.get_mut::<ScopeContents>().or_broken()?;
+        if scope_contents.notify_cleanup(self.requester, self.source) {
+            self.roster.cleanup_scope(
+                Cleanup { scope, requester: self.requester }
+            );
+        }
+        Ok(())
     }
 }
 
@@ -391,20 +428,27 @@ pub trait Operation {
     /// component is added to `source` or when another operation puts `source`
     /// into the [`OperationRoster::queue`].
     fn execute(request: OperationRequest) -> OperationResult;
+
+    fn cleanup(clean: OperationCleanup) -> OperationResult;
 }
 
 pub trait OrBroken: Sized {
     type Value;
 
-    /// If the value is not available then we will have an operation error.
-    /// This includes a backtrace of the stack to help with debugging.
+    /// If the value is not available then we will have an operation error of
+    /// not ready. This will not lead to a cancellation but instead indicates
+    /// that the operation was not ready to perform yet.
+    fn or_not_ready(self) -> Result<Self::Value, OperationError>;
+
+    /// If the value is not available then we will have an operation error of
+    /// broken. This includes a backtrace of the stack to help with debugging.
     fn or_broken(self) -> Result<Self::Value, OperationError> {
         self.or_broken_impl(Some(Backtrace::new()))
     }
 
-    /// If the value is not available then we will have an operation error.
-    /// This does not include a backtrace, which makes it suitable for codebases
-    /// that need to be kept hidden.
+    /// If the value is not available then we will have an operation error of
+    /// broken. This does not include a backtrace, which makes it suitable for
+    /// codebases that need to be kept hidden.
     fn or_broken_hide(self) -> Result<Self::Value, OperationError> {
         self.or_broken_impl(None)
     }
@@ -415,15 +459,23 @@ pub trait OrBroken: Sized {
 
 impl<T, E> OrBroken for Result<T, E> {
     type Value = T;
+    fn or_not_ready(self) -> Result<Self::Value, OperationError> {
+        self.map_err(|_| OperationError::NotReady)
+    }
+
     fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
-        self.map_err(|_| OperationError { backtrace })
+        self.map_err(|_| OperationError::Broken(backtrace))
     }
 }
 
 impl<T> OrBroken for Option<T> {
     type Value = T;
+    fn or_not_ready(self) -> Result<Self::Value, OperationError> {
+        self.ok_or_else(|| OperationError::NotReady)
+    }
+
     fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
-        self.ok_or_else(|| OperationError { backtrace })
+        self.ok_or_else(|| OperationError::Broken(backtrace))
     }
 }
 
@@ -443,13 +495,16 @@ impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
         self.operation.setup(OperationSetup { source: self.source, world });
         let mut provider_mut = world.entity_mut(self.source);
         provider_mut
-            .insert(OperationStorage(perform_operation::<Op>))
+            .insert(OperationExecuteStorage(perform_operation::<Op>))
             .remove::<UnusedTarget>();
     }
 }
 
 #[derive(Component)]
-struct OperationStorage(fn(OperationRequest));
+struct OperationExecuteStorage(fn(OperationRequest));
+
+#[derive(Component)]
+struct OperationCleanupStorage(fn(OperationCleanup));
 
 /// Insert this as a component on the source of any operation that needs to have
 /// special handling for cancellation. So far this is only used by [`Terminate`].
@@ -458,8 +513,8 @@ pub struct CancellationBehavior {
     pub hook: fn(&Cancellation, Entity, &mut World, &mut OperationRoster),
 }
 
-pub(crate) fn operate(request: OperationRequest) {
-    let Some(operator) = request.world.get::<OperationStorage>(request.source) else {
+pub fn execute_operation(request: OperationRequest) {
+    let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
         request.roster.cancel(Cancel::broken_here(request.source));
         return;
     };
@@ -467,18 +522,26 @@ pub(crate) fn operate(request: OperationRequest) {
     operator(request);
 }
 
+pub fn cleanup_operation(clean: OperationCleanup) {
+    let Some(cleanup) = clean.world.get::<OperationCleanupStorage>(clean.source) else {
+        return;
+    };
+    let cleanup = cleanup.0;
+    cleanup(clean)
+}
+
 fn perform_operation<Op: Operation>(
     OperationRequest { source, world, roster }: OperationRequest
 ) {
     match Op::execute(OperationRequest { source, world, roster }) {
-        Ok(OperationStatus::Finished) => {
-            roster.dispose(source);
-        }
-        Ok(OperationStatus::Unfinished) => {
+        Ok(()) => {
             // Do nothing
         }
-        Err(error) => {
-            roster.cancel(Cancel::broken(source, error.backtrace));
+        Err(OperationError::Broken(backtrace)) => {
+            roster.cancel(Cancel::broken(source, backtrace));
+        }
+        Err(OperationError::NotReady) => {
+            // Do nothing
         }
     }
 }

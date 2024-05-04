@@ -16,10 +16,10 @@
 */
 
 use crate::{
-    BlockingMap, AsyncMap, Operation, OperationStatus, ChannelQueue, InnerChannel,
-    SingleTargetStorage, InputStorage, InputBundle, Stream, TaskBundle,
+    BlockingMap, AsyncMap, Operation, ChannelQueue, InnerChannel,
+    SingleTargetStorage, Stream, Input, ManageInput, OperationCleanup,
     CallBlockingMap, CallAsyncMap, SingleSourceStorage, OperationResult,
-    OrBroken, OperationSetup, OperationRequest,
+    OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
 };
 
 use bevy::{
@@ -77,18 +77,22 @@ where
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let request = source_mut.take::<InputStorage<Request>>().or_broken()?.take();
+        let Input { requester, data: request } = source_mut.take_input::<Request>()?;
         let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().or_broken()?.f;
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
 
         let response = map.call(BlockingMap { request });
-        target_mut.insert(InputBundle::new(response));
-        roster.queue(target);
-        Ok(OperationStatus::Finished)
+        target_mut.give_input(requester, response, roster)?;
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<Request>()?;
+        clean.notify_cleaned()
     }
 }
 
@@ -137,23 +141,34 @@ where
     Streams: Stream,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        world.entity_mut(source).insert(self);
+        world.entity_mut(source).insert((
+            self, ActiveTasksStorage::default(),
+        ));
     }
 
     fn execute(
-        OperationRequest { source, requester, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let request = source_mut.take::<InputStorage<Request>>().or_broken()?.take();
+        let Input { requester, data: request } = source_mut.take_input::<Request>()?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?.f;
 
         let channel = InnerChannel::new(source, sender);
         let channel = channel.into_specific();
 
         let task = AsyncComputeTaskPool::get().spawn(map.call(AsyncMap { request, channel }));
-        source_mut.insert(TaskBundle::new(task));
-        roster.poll(source);
-        Ok(OperationStatus::Unfinished)
+
+        let task_source = world.spawn(()).id();
+        OperateTask::new(requester, source, target, task, None)
+            .setup(OperationSetup { source: task_source, world });
+        roster.queue(task_source);
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<Request>()?;
+        ActiveTasksStorage::cleanup(clean)
     }
 }

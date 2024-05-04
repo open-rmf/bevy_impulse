@@ -17,7 +17,7 @@
 
 use bevy::{
     prelude::{Component, Entity, World, Resource, Bundle},
-    tasks::Task as BevyTask,
+    tasks::{Task as BevyTask, AsyncComputeTaskPool},
 };
 
 use std::{
@@ -32,10 +32,12 @@ use futures::task::{waker_ref, ArcWake};
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
+use smallvec::SmallVec;
+
 use crate::{
-    SingleTargetStorage, OperationRoster, Blocker, ManageInput,
-    OperationSetup, OperationRequest, OperationResult, OperationStatus, Operation,
-    OrBroken, BlockerStorage,
+    SingleTargetStorage, OperationRoster, Blocker, ManageInput, Scope,
+    OperationSetup, OperationRequest, OperationResult, Operation, Cleanup,
+    OrBroken, BlockerStorage, OperationCleanup, ChannelQueue, cleanup_operation,
 };
 
 struct JobWaker {
@@ -72,11 +74,15 @@ struct TaskStorage<Response>(BevyTask<Response>);
 struct TaskRequesterStorage(Entity);
 
 #[derive(Component)]
+struct TaskOwnerStorage(Entity);
+
+#[derive(Component)]
 pub(crate) struct PollTask(pub(crate) fn(Entity, &mut World, &mut OperationRoster));
 
 #[derive(Bundle)]
 pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
     requester: TaskRequesterStorage,
+    owner: TaskOwnerStorage,
     target: SingleTargetStorage,
     task: TaskStorage<Response>,
     blocker: BlockerStorage,
@@ -85,12 +91,14 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
 impl<Response: 'static + Send + Sync> OperateTask<Response> {
     pub(crate) fn new(
         requester: Entity,
+        owner: Entity,
         target: Entity,
         task: BevyTask<Response>,
         blocker: Option<Blocker>,
     ) -> Self {
         Self {
             requester: TaskRequesterStorage(requester),
+            owner: TaskOwnerStorage(owner),
             target: SingleTargetStorage(target),
             task: TaskStorage(task),
             blocker: BlockerStorage(blocker),
@@ -106,7 +114,16 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
             entity: source,
         });
 
-        world.entity_mut(source).insert((self, JobWakerStorage(waker)));
+        let mut source_mut = world.entity_mut(source);
+        source_mut.insert((self, JobWakerStorage(waker)));
+
+        let Some(mut owner_mut) = world.get_entity_mut(self.owner.0) else {
+            return;
+        };
+        let Some(mut tasks) = owner_mut.get_mut::<ActiveTasksStorage>() else {
+            return;
+        };
+        tasks.list.push(ActiveTask { id: source, requester: self.requester.0 });
     }
 
     fn execute(
@@ -141,7 +158,6 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
 
                 world.entity_mut(target).give_input(requester, result, roster);
                 world.despawn(source);
-                return Ok(OperationStatus::Finished);
             }
             Poll::Pending => {
                 // Task is still running
@@ -149,8 +165,96 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                     TaskStorage(task),
                     JobWakerStorage(waker),
                 ));
-                return Ok(OperationStatus::Unfinished);
             }
         }
+
+        Ok(())
+    }
+
+    fn cleanup(clean: OperationCleanup) -> OperationResult {
+        let requester = clean.requester;
+        let source = clean.source;
+        let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
+        let owner = source_mut.get::<TaskOwnerStorage>().or_broken()?.0;
+        let task = source_mut.take::<TaskStorage<Response>>().or_broken()?.0;
+        let sender = clean.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        AsyncComputeTaskPool::get().spawn(async move {
+            task.cancel().await;
+            sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+                let Some(mut owner_mut) = world.get_entity_mut(owner) else {
+                    world.despawn(source);
+                    return;
+                };
+
+                let Some(mut active_tasks) = owner_mut.get_mut::<ActiveTasksStorage>() else {
+                    world.despawn(source);
+                    return;
+                };
+
+                let mut cleanup_ready = true;
+                active_tasks.list.retain(|ActiveTask { id, requester: r }| {
+                    if *id == source {
+                        return false;
+                    }
+
+                    if *r == requester {
+                        // The owner has another active task related to this
+                        // requester so its cleanup is not finished yet.
+                        cleanup_ready = false;
+                    }
+                    true
+                });
+
+                if cleanup_ready {
+                    OperationCleanup { source: owner, requester, world, roster }
+                        .notify_cleaned();
+                }
+
+                world.despawn(source);
+            }));
+        }).detach();
+
+
+        Ok(())
+    }
+}
+
+#[derive(Component, Default)]
+pub struct ActiveTasksStorage {
+    pub list: SmallVec<[ActiveTask; 16]>,
+}
+
+pub struct ActiveTask {
+    id: Entity,
+    requester: Entity,
+}
+
+impl ActiveTasksStorage {
+    pub fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        let source_ref = clean.world.get_entity(clean.source).or_broken()?;
+        let active_tasks = source_ref.get::<Self>().or_broken()?;
+        let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
+        let mut cleanup_ready = true;
+        for ActiveTask { id, requester } in &active_tasks.list {
+            if *requester == clean.requester {
+                to_cleanup.push(*id);
+                cleanup_ready = false;
+            }
+        }
+
+        for task_id in to_cleanup {
+            cleanup_operation(OperationCleanup {
+                source: task_id,
+                requester: clean.requester,
+                world: clean.world,
+                roster: clean.roster
+            });
+        }
+
+        if cleanup_ready {
+            clean.notify_cleaned();
+        }
+
+        Ok(())
     }
 }

@@ -57,6 +57,9 @@ pub use service::*;
 pub mod stream;
 pub use stream::*;
 
+pub mod workflow;
+pub use workflow::*;
+
 pub mod testing;
 
 pub(crate) mod private;

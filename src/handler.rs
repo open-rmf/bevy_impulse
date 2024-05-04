@@ -17,9 +17,9 @@
 
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, Stream, Input, TaskBundle, Provider,
-    PerformOperation, OperateHandler, Cancel, ManageInput, OperationError,
-    OrBroken,
+    OperationRoster, Stream, Input, Provider,
+    PerformOperation, OperateHandler, ManageInput, OperationError,
+    OrBroken, OperateTask, Operation, OperationSetup,
     private,
 };
 
@@ -100,7 +100,8 @@ impl<'a> HandleRequest<'a> {
 
     fn give_task<Task: Future + 'static + Send>(
         &mut self,
-        task: Task
+        requester: Entity,
+        task: Task,
     ) -> Result<(), OperationError>
     where
         Task::Output: Send + Sync,
@@ -108,9 +109,11 @@ impl<'a> HandleRequest<'a> {
         let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
 
         let task = AsyncComputeTaskPool::get().spawn(task);
-        /*  */
-        source_mut.insert(TaskBundle::new(task));
-        self.roster.poll(self.source);
+
+        let mut task_source = self.world.spawn(()).id();
+        let operate_task = OperateTask::new(requester, self.source, self.target, task, None);
+        operate_task.setup(OperationSetup { source: task_source, world: self.world });
+        self.roster.queue(task_source);
         Ok(())
     }
 
@@ -198,7 +201,7 @@ where
         let task = self.system.run(AsyncHandler { request, channel }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_task(task)
+        input.give_task(requester, task)
     }
 }
 
@@ -208,13 +211,13 @@ struct CallbackHandler<F: 'static + Send> {
 
 impl<Request, Response, Streams, F> HandlerTrait<Request, Response, Streams> for CallbackHandler<F>
 where
-    F: FnMut(HandleRequest) + 'static + Send,
+    F: FnMut(HandleRequest) -> Result<(), OperationError> + 'static + Send,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: 'static + Send + Sync,
 {
-    fn handle(&mut self, request: HandleRequest) {
-        (self.callback)(request);
+    fn handle(&mut self, request: HandleRequest) -> Result<(), OperationError> {
+        (self.callback)(request)
     }
 }
 
@@ -284,11 +287,9 @@ where
 
     fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: HandleRequest| {
-            let Some(request) = input.get_request::<Self::Request>() else {
-                return;
-            };
+            let Input { requester, data: request } = input.get_request::<Self::Request>()?;
             let response = (self)(BlockingHandler { request });
-            input.give_response(response);
+            input.give_response(requester, response)
         };
         Handler::new(CallbackHandler { callback })
     }
@@ -310,12 +311,10 @@ where
 
     fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: HandleRequest| {
-            let Some(request) = input.get_request::<Self::Request>() else {
-                return;
-            };
+            let Input { requester, data: request } = input.get_request::<Self::Request>()?;
             let channel = input.get_channel();
             let task = (self)(AsyncHandler { request, channel });
-            input.give_task(task);
+            input.give_task(requester, task)
         };
         Handler::new(CallbackHandler { callback })
     }

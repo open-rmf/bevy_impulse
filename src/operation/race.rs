@@ -210,7 +210,7 @@ fn inspect_race_inputs(
             ));
         }
     } else {
-        return Err(OperationError::here());
+        return Err(OperationError::broken_here());
     }
 
     if dispose_race {

@@ -76,21 +76,6 @@ impl PendingServiceRequest {
     }
 }
 
-impl<'a> ServiceRequest<'a> {
-    pub fn from_source<B: Component>(&mut self) -> Option<B> {
-        if let Some(mut source_mut) = self.operation.world.get_entity_mut(self.operation.source) {
-            let Some(request) = source_mut.take::<B>() else {
-                self.operation.roster.cancel(Cancel::broken_here(self.operation.source));
-                return None;
-            };
-            Some(request)
-        } else {
-            self.operation.roster.cancel(Cancel::broken_here(self.operation.source));
-            return None;
-        }
-    }
-}
-
 #[derive(Component)]
 pub(crate) struct ServiceMarker<Request, Response> {
     _ignore: std::marker::PhantomData<(Request, Response)>,
@@ -307,10 +292,10 @@ pub(crate) fn dispatch_service(
     ServiceRequest {
         provider,
         target,
-        operation: OperationRequest { source, requester, world, roster } }: ServiceRequest,
+        operation: OperationRequest { source, world, roster } }: ServiceRequest,
 ) {
     let pending = PendingServiceRequest {
-        provider, target, operation: PendingOperationRequest { source, requester }
+        provider, target, operation: PendingOperationRequest { source }
     };
     let mut service_queue = world.get_resource_or_insert_with(|| ServiceQueue::new());
     service_queue.queue.push_back(pending);
@@ -341,7 +326,10 @@ pub(crate) fn dispatch_service(
     world.resource_mut::<ServiceQueue>().is_delivering = false;
 }
 
-impl<Request, Response, Streams> Provider for Service<Request, Response, Streams> {
+impl<Request, Response, Streams> Provider for Service<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+{
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
