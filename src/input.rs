@@ -26,17 +26,14 @@ use crate::{OperationRoster, OperationError, OrBroken, SingleTargetStorage};
 
 use std::collections::HashMap;
 
-/// Marker trait to indicate when an input is ready without knowing the type of
-/// input.
+/// Marker trait to indicate when an input is ready.
 #[derive(Component, Default)]
-pub(crate) struct InputReady {
-    requesters: SmallVec<[Entity; 16]>,
-}
+pub(crate) struct InputReady;
 
-/// Typical container for input data accompanied by its requester information.
+/// Typical container for input data accompanied by its session information.
 /// This defines the elements of [`InputStorage`].
 pub struct Input<T> {
-    pub requester: Entity,
+    pub session: Entity,
     pub data: T,
 }
 
@@ -57,9 +54,9 @@ impl<T> InputStorage<T> {
         Self { reverse_queue: Default::default() }
     }
 
-    pub fn contains_requester(&self, requester: Entity) -> bool {
+    pub fn contains_session(&self, session: Entity) -> bool {
         self.reverse_queue.iter()
-        .find(|input| input.requester == requester)
+        .find(|input| input.session == session)
         .is_some()
     }
 }
@@ -88,7 +85,7 @@ impl<T> InputBundle<T> {
 pub trait ManageInput {
     fn give_input<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError>;
@@ -104,44 +101,44 @@ pub trait ManageInput {
 
     fn from_buffer<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity
+        session: Entity
     ) -> Result<T, OperationError> {
-        self.try_from_buffer(requester).and_then(|r| r.or_not_ready())
+        self.try_from_buffer(session).and_then(|r| r.or_not_ready())
     }
 
     fn try_from_buffer<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<Option<T>, OperationError>;
 
     fn cleanup_inputs<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
     );
 }
 
 pub trait InspectInput {
     fn buffer_ready<T: 'static + Send + Sync>(
         &self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<bool, OperationError>;
 
     fn has_input<T: 'static + Send + Sync>(
         &self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<bool, OperationError>;
 }
 
 impl<'w> ManageInput for EntityMut<'w> {
     fn give_input<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
         let source = self.id();
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        storage.reverse_queue.push(Input { requester, data });
+        storage.reverse_queue.push(Input { session, data });
         self.get_mut::<InputReady>().or_broken()?.set_changed();
         roster.queue(source);
         Ok(())
@@ -158,9 +155,9 @@ impl<'w> ManageInput for EntityMut<'w> {
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
         let target = self.get::<SingleTargetStorage>().or_broken()?.0;
-        let Input { requester, data } = self.take_input::<T>()?;
+        let Input { session, data } = self.take_input::<T>()?;
         let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
-        let reverse_queue = buffer.reverse_queues.entry(requester).or_default();
+        let reverse_queue = buffer.reverse_queues.entry(session).or_default();
         match buffer.settings.policy {
             BufferPolicy::KeepFirst(n) => {
                 while n > 0 && reverse_queue.len() > n {
@@ -191,25 +188,25 @@ impl<'w> ManageInput for EntityMut<'w> {
 
     fn try_from_buffer<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<Option<T>, OperationError> {
         let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
-        let reverse_queue = buffer.reverse_queues.entry(requester).or_default();
+        let reverse_queue = buffer.reverse_queues.entry(session).or_default();
         Ok(reverse_queue.pop())
     }
 
     fn cleanup_inputs<T: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
     ) {
         if let Some(mut inputs) = self.get_mut::<InputStorage<T>>() {
             inputs.reverse_queue.retain(
-                |Input { requester: r, .. }| *r != requester
+                |Input { session: r, .. }| *r != session
             );
         }
 
         if let Some(mut buffer) = self.get_mut::<Buffer<T>>() {
-            buffer.reverse_queues.remove(&requester);
+            buffer.reverse_queues.remove(&session);
         };
     }
 }
@@ -217,42 +214,42 @@ impl<'w> ManageInput for EntityMut<'w> {
 impl<'a> InspectInput for EntityMut<'a> {
     fn buffer_ready<T: 'static + Send + Sync>(
         &self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<bool, OperationError> {
         let buffer = self.get::<Buffer<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&requester).is_some_and(|q| !q.is_empty()))
+        Ok(buffer.reverse_queues.get(&session).is_some_and(|q| !q.is_empty()))
     }
 
     fn has_input<T: 'static + Send + Sync>(
         &self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
-        Ok(inputs.contains_requester(requester))
+        Ok(inputs.contains_session(session))
     }
 }
 
 impl<'a> InspectInput for EntityRef<'a> {
     fn buffer_ready<T: 'static + Send + Sync>(
         &self,
-        requester: Entity,
+        session: Entity,
     ) -> Result<bool, OperationError> {
         let buffer = self.get::<Buffer<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&requester).is_some_and(|q| !q.is_empty()))
+        Ok(buffer.reverse_queues.get(&session).is_some_and(|q| !q.is_empty()))
     }
 
     fn has_input<T: 'static + Send + Sync>(
         &self,
-        requester: Entity,
+        sessiion: Entity,
     ) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
-        Ok(inputs.contains_requester(requester))
+        Ok(inputs.contains_session(sessiion))
     }
 }
 
 pub struct InputCommand<T> {
     target: Entity,
-    requester: Entity,
+    session: Entity,
     data: T,
 }
 
@@ -260,7 +257,7 @@ pub struct InputCommand<T> {
 pub(crate) struct Buffer<T> {
     /// Settings that determine how this buffer will behave.
     settings: BufferSettings,
-    /// Map from requester ID to a queue of data that has arrived for it. This
+    /// Map from session ID to a queue of data that has arrived for it. This
     /// is used by nodes that feed into joiner nodes to store input so that it's
     /// readily available when needed.
     reverse_queues: HashMap<Entity, SmallVec<[T; 16]>>,

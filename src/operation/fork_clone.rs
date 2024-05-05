@@ -52,13 +52,13 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { requester, data: input } = source_mut.take_input::<T>()?;
+        let Input { session, data: input } = source_mut.take_input::<T>()?;
         let ForkTargetStorage(targets) = source_mut.take().or_broken()?;
 
         let mut send_value = |value: T, target: Entity| -> Result<(), OperationError> {
             world
             .get_entity_mut(target).or_broken()?
-            .give_input(requester, value, roster)
+            .give_input(session, value, roster)
         };
 
         // Distributing the values like this is a bit convoluted, but it ensures

@@ -144,7 +144,7 @@ where
             }
         };
 
-        let Input { requester, data: request } = world.get_entity_mut(source).or_broken()?.take_input::<Request>()?;
+        let Input { session, data: request } = world.get_entity_mut(source).or_broken()?.take_input::<Request>()?;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
@@ -185,7 +185,7 @@ where
         let task = AsyncComputeTaskPool::get().spawn(job);
 
         let task_source = world.spawn(()).id();
-        OperateTask::new(requester, source, target, task, blocker)
+        OperateTask::new(session, source, target, task, blocker)
             .setup(OperationSetup { source: task_source, world });
         roster.queue(task_source);
         Ok(())
@@ -242,7 +242,7 @@ where
             continue;
         };
 
-        let Ok(Input { requester, data: request }) = source_mut.take_input::<Request>() else {
+        let Ok(Input { session, data: request }) = source_mut.take_input::<Request>() else {
             roster.cancel(Cancel::broken_here(source));
             unblock = next_blocker;
             continue;
@@ -273,7 +273,7 @@ where
                 continue;
             };
             let mut task_source = world.spawn(()).id();
-            let operate_task = OperateTask::new(requester, source, target.0, task, Some(next_blocker));
+            let operate_task = OperateTask::new(session, source, target.0, task, Some(next_blocker));
             operate_task.setup(OperationSetup { source: task_source, world });
             roster.queue(task_source);
         } else {

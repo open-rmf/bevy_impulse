@@ -39,12 +39,11 @@ pub trait Unzippable {
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
 
     fn join_status(
-        requester: Entity,
         reachability: OperationReachability,
     ) -> JoinStatusResult;
 
     fn join_values(
-        requester: Entity,
+        session: Entity,
         request: OperationRequest,
     ) -> OperationResult;
 }
@@ -83,14 +82,14 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     fn distribute_values(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
-        let Input { requester, data: inputs } = world
+        let Input { session, data: inputs } = world
             .get_entity_mut(source).or_broken()?
             .take_input::<Self>()?;
 
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target = (targets.0)[0];
         if let Some(mut t_mut) = world.get_entity_mut(target) {
-            t_mut.give_input(requester, inputs.0, roster);
+            t_mut.give_input(session, inputs.0, roster);
         }
         Ok(())
     }
@@ -101,11 +100,10 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     }
 
     fn join_status(
-        requester: Entity,
         mut reachability: OperationReachability,
     ) -> JoinStatusResult {
         let source = reachability.source();
-        let requester = reachability.requester();
+        let session = reachability.session();
         let world = reachability.world();
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
         let mut unreachable: Vec<Entity> = Vec::new();
@@ -113,7 +111,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
         let input_0 = *inputs.0.get(0).or_broken()?;
 
-        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(requester)? {
+        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_0)? {
                 unreachable.push(input_0);
@@ -128,7 +126,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     }
 
     fn join_values(
-        requester: Entity,
+        session: Entity,
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
@@ -138,11 +136,11 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
         let v_0  = world
             .get_entity_mut(input_0).or_broken()?
-            .from_buffer::<A>(requester)?;
+            .from_buffer::<A>(session)?;
 
         world
             .get_entity_mut(target).or_broken()?
-            .give_input(requester, v_0, roster)?;
+            .give_input(session, v_0, roster)?;
         Ok(())
     }
 }
@@ -174,7 +172,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     fn distribute_values(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let Input { requester, data: inputs } = world
+        let Input { session, data: inputs } = world
             .get_entity_mut(source).or_broken()?
             .take_input::<Self>()?;
 
@@ -183,11 +181,11 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         let target_1 = *targets.0.get(1).or_broken()?;
 
         if let Some(mut t_mut) = world.get_entity_mut(target_0) {
-            t_mut.give_input(requester, inputs.0, roster)?;
+            t_mut.give_input(session, inputs.0, roster)?;
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.give_input(requester, inputs.1, roster);
+            t_mut.give_input(session, inputs.1, roster);
         }
 
         Ok(())
@@ -199,11 +197,10 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     }
 
     fn join_status(
-        requester: Entity,
         mut reachability: OperationReachability,
     ) -> JoinStatusResult {
         let source = reachability.source();
-        let requester = reachability.requester();
+        let session = reachability.session();
         let world = reachability.world();
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
         let mut unreachable: Vec<Entity> = Vec::new();
@@ -212,14 +209,14 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         let input_0 = *inputs.0.get(0).or_broken()?;
         let input_1 = *inputs.0.get(1).or_broken()?;
 
-        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(requester)? {
+        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_0)? {
                 unreachable.push(input_0);
             }
         }
 
-        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(requester)? {
+        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_1)? {
                 unreachable.push(input_1);
@@ -234,7 +231,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     }
 
     fn join_values(
-        requester: Entity,
+        session: Entity,
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
@@ -245,15 +242,15 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 
         let v_0 = world
             .get_entity_mut(input_0).or_broken()?
-            .from_buffer::<A>(requester)?;
+            .from_buffer::<A>(session)?;
 
         let v_1 = world
             .get_entity_mut(input_1).or_broken()?
-            .from_buffer::<B>(requester)?;
+            .from_buffer::<B>(session)?;
 
         world
             .get_entity_mut(target).or_broken()?
-            .give_input(requester, (v_0, v_1), roster);
+            .give_input(session, (v_0, v_1), roster);
         roster.queue(target);
         Ok(())
     }
@@ -293,7 +290,7 @@ where
     fn distribute_values(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let Input { requester, data: inputs } = world
+        let Input { session, data: inputs } = world
             .get_entity_mut(source).or_broken()?
             .take_input::<Self>()?;
 
@@ -303,15 +300,15 @@ where
         let target_2 = *targets.0.get(2).or_broken()?;
 
         if let Some(mut t_mut) = world.get_entity_mut(target_0) {
-            t_mut.give_input(requester, inputs.0, roster)?;
+            t_mut.give_input(session, inputs.0, roster)?;
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.give_input(requester, inputs.1, roster)?;
+            t_mut.give_input(session, inputs.1, roster)?;
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_2) {
-            t_mut.give_input(requester, inputs.2, roster)?;
+            t_mut.give_input(session, inputs.2, roster)?;
         }
 
         Ok(())
@@ -323,11 +320,10 @@ where
     }
 
     fn join_status(
-        requester: Entity,
         mut reachability: OperationReachability,
     ) -> JoinStatusResult {
         let source = reachability.source();
-        let requester = reachability.requester();
+        let session = reachability.session();
         let world = reachability.world();
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
         let mut unreachable: Vec<Entity> = Vec::new();
@@ -337,21 +333,21 @@ where
         let input_1 = *inputs.0.get(1).or_broken()?;
         let input_2 = *inputs.0.get(2).or_broken()?;
 
-        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(requester)? {
+        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_0)? {
                 unreachable.push(input_0);
             }
         }
 
-        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(requester)? {
+        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_1)? {
                 unreachable.push(input_1);
             }
         }
 
-        if !world.get_entity(input_2).or_broken()?.buffer_ready::<C>(requester)? {
+        if !world.get_entity(input_2).or_broken()?.buffer_ready::<C>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_2)? {
                 unreachable.push(input_2);
@@ -366,7 +362,7 @@ where
     }
 
     fn join_values(
-        requester: Entity,
+        session: Entity,
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
@@ -378,19 +374,19 @@ where
 
         let v_0 = world
             .get_entity_mut(input_0).or_broken()?
-            .from_buffer::<A>(requester)?;
+            .from_buffer::<A>(session)?;
 
         let v_1 = world
             .get_entity_mut(input_1).or_broken()?
-            .from_buffer::<B>(requester)?;
+            .from_buffer::<B>(session)?;
 
         let v_2 = world
             .get_entity_mut(input_2).or_broken()?
-            .from_buffer::<C>(requester)?;
+            .from_buffer::<C>(session)?;
 
         world
             .get_entity_mut(target).or_broken()?
-            .give_input(requester, (v_0, v_1, v_2), roster);
+            .give_input(session, (v_0, v_1, v_2), roster);
         roster.queue(target);
         Ok(())
     }

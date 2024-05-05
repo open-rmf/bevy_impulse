@@ -75,13 +75,13 @@ where
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { requester, data: input } = source_mut.take_input::<InputT>()?;
+        let Input { session, data: input } = source_mut.take_input::<InputT>()?;
         let BranchingActivatorStorage::<F>(activator) = source_mut.take().or_broken()?;
 
         let mut activation = Outputs::new_activation();
         activator(input, &mut activation);
 
-        Outputs::activate(requester, activation, source, world, roster)
+        Outputs::activate(session, activation, source, world, roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
@@ -104,7 +104,7 @@ pub trait Branchable {
     fn new_activation() -> Self::Activation;
 
     fn activate<'a>(
-        requester: Entity,
+        session: Entity,
         activation: Self::Activation,
         source: Entity,
         world: &'a mut World,
@@ -124,7 +124,7 @@ where
     }
 
     fn activate<'a>(
-        requester: Entity,
+        session: Entity,
         (a, b): Self::Activation,
         source: Entity,
         world: &'a mut World,
@@ -136,14 +136,14 @@ where
 
         if let Some(a) = a {
             let mut target_a_mut = world.get_entity_mut(target_a).or_broken()?;
-            target_a_mut.give_input(requester, a, roster)?;
+            target_a_mut.give_input(session, a, roster)?;
         } else {
             roster.dispose_chain_from(target_a);
         }
 
         if let Some(b) = b {
             let mut target_b_mut = world.get_entity_mut(target_b).or_broken()?;
-            target_b_mut.give_input(requester, b, roster)?;
+            target_b_mut.give_input(session, b, roster)?;
         } else {
             roster.dispose_chain_from(target_b);
         }

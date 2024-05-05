@@ -82,12 +82,12 @@ where
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let Input { requester, data: request } = source_mut.take_input::<Request>()?;
+        let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().or_broken()?.f;
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
 
         let response = map.call(BlockingMap { request });
-        target_mut.give_input(requester, response, roster)?;
+        target_mut.give_input(session, response, roster)?;
         Ok(())
     }
 
@@ -159,7 +159,7 @@ where
     ) -> OperationResult {
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { requester, data: request } = source_mut.take_input::<Request>()?;
+        let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?.f;
 
@@ -169,7 +169,7 @@ where
         let task = AsyncComputeTaskPool::get().spawn(map.call(AsyncMap { request, channel }));
 
         let task_source = world.spawn(()).id();
-        OperateTask::new(requester, source, target, task, None)
+        OperateTask::new(session, source, target, task, None)
             .setup(OperationSetup { source: task_source, world });
         roster.queue(task_source);
         Ok(())
@@ -181,11 +181,10 @@ where
     }
 
     fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
-
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_requester(reachability)? {
+        if ActiveTasksStorage::contains_session(reachability)? {
             return Ok(true);
         }
         SingleInputStorage::is_reachable(reachability)

@@ -165,22 +165,22 @@ impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
 
 fn manage_join_delivery(
     mut request: OperationRequest,
-    reachable: fn(Entity, OperationReachability) -> JoinStatusResult,
+    reachable: fn(OperationReachability) -> JoinStatusResult,
     deliver: fn(Entity, OperationRequest) -> OperationResult,
 ) -> OperationResult {
-    let Input { requester, .. } = request.world
+    let Input { session, .. } = request.world
         .get_entity_mut(request.source).or_broken()?
         .take_input::<()>()?;
 
     let mut visited = HashMap::new();
-    match reachable(requester, OperationReachability::new(
-        requester, request.source, request.world, &mut visited
+    match reachable(OperationReachability::new(
+        session, request.source, request.world, &mut visited,
     ))? {
         JoinStatus::Pending => {
             // Simply return
         }
         JoinStatus::Ready => {
-            deliver(requester, request)?
+            deliver(session, request)?
         }
         JoinStatus::Unreachable(unreachable) => {
             request.roster.cancel(Cancel::join(request.source, unreachable));
@@ -191,18 +191,17 @@ fn manage_join_delivery(
 }
 
 fn status_bundle_join<T: 'static + Send + Sync>(
-    requester: Entity,
     mut reachability: OperationReachability,
 ) -> JoinStatusResult {
     let source = reachability.source();
-    let requester = reachability.requester();
+    let session = reachability.session();
     let world = reachability.world();
     let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
     let mut unreachable: Vec<Entity> = Vec::new();
     let mut status = JoinStatus::Ready;
 
     for input in &inputs.0 {
-        if !world.get_entity(*input).or_broken()?.buffer_ready::<T>(requester)? {
+        if !world.get_entity(*input).or_broken()?.buffer_ready::<T>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(*input)? {
                 unreachable.push(*input);
@@ -218,7 +217,7 @@ fn status_bundle_join<T: 'static + Send + Sync>(
 }
 
 fn deliver_bundle_join<T: 'static + Send + Sync>(
-    requester: Entity,
+    session: Entity,
     OperationRequest { source, world, roster }: OperationRequest,
 ) -> OperationResult {
     let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
@@ -229,13 +228,13 @@ fn deliver_bundle_join<T: 'static + Send + Sync>(
     for input in inputs {
         let value = world
             .get_entity_mut(input).or_broken()?
-            .from_buffer::<T>(requester)?;
+            .from_buffer::<T>(session)?;
         response.push(value);
     }
 
     world
         .get_entity_mut(target).or_broken()?
-        .give_input(requester, response, roster);
+        .give_input(session, response, roster);
 
     Ok(())
 }

@@ -89,18 +89,18 @@ impl<'a> HandleRequest<'a> {
 
     fn give_response<Response: 'static + Send + Sync>(
         &mut self,
-        requester: Entity,
+        session: Entity,
         response: Response,
     ) -> Result<(), OperationError> {
         self.world
             .get_entity_mut(self.target).or_broken()?
-            .give_input(requester, response, self.roster)?;
+            .give_input(session, response, self.roster)?;
         Ok(())
     }
 
     fn give_task<Task: Future + 'static + Send>(
         &mut self,
-        requester: Entity,
+        session: Entity,
         task: Task,
     ) -> Result<(), OperationError>
     where
@@ -111,7 +111,7 @@ impl<'a> HandleRequest<'a> {
         let task = AsyncComputeTaskPool::get().spawn(task);
 
         let mut task_source = self.world.spawn(()).id();
-        let operate_task = OperateTask::new(requester, self.source, self.target, task, None);
+        let operate_task = OperateTask::new(session, self.source, self.target, task, None);
         operate_task.setup(OperationSetup { source: task_source, world: self.world });
         self.roster.queue(task_source);
         Ok(())
@@ -161,7 +161,7 @@ where
     Response: 'static + Send + Sync,
 {
     fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
-        let Input { requester, data: request } = input.get_request()?;
+        let Input { session, data: request } = input.get_request()?;
 
         if !self.initialized {
             self.system.initialize(&mut input.world);
@@ -170,7 +170,7 @@ where
         let response = self.system.run(BlockingHandler { request }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_response(requester, response);
+        input.give_response(session, response);
         Ok(())
     }
 }
@@ -190,7 +190,7 @@ where
     Streams: Stream,
 {
     fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
-        let Input { requester, data: request } = input.get_request()?;
+        let Input { session, data: request } = input.get_request()?;
 
         let channel = input.get_channel();
 
@@ -201,7 +201,7 @@ where
         let task = self.system.run(AsyncHandler { request, channel }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_task(requester, task)
+        input.give_task(session, task)
     }
 }
 
@@ -287,9 +287,9 @@ where
 
     fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: HandleRequest| {
-            let Input { requester, data: request } = input.get_request::<Self::Request>()?;
+            let Input { session, data: request } = input.get_request::<Self::Request>()?;
             let response = (self)(BlockingHandler { request });
-            input.give_response(requester, response)
+            input.give_response(session, response)
         };
         Handler::new(CallbackHandler { callback })
     }
@@ -311,10 +311,10 @@ where
 
     fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: HandleRequest| {
-            let Input { requester, data: request } = input.get_request::<Self::Request>()?;
+            let Input { session, data: request } = input.get_request::<Self::Request>()?;
             let channel = input.get_channel();
             let task = (self)(AsyncHandler { request, channel });
-            input.give_task(requester, task)
+            input.give_task(session, task)
         };
         Handler::new(CallbackHandler { callback })
     }

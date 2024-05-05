@@ -229,7 +229,7 @@ impl OperationRoster {
 /// Notify the scope manager that the request may be finished with cleanup
 pub struct Cleanup {
     scope: Entity,
-    requester: Entity,
+    session: Entity,
 }
 
 pub(crate) struct Blocker {
@@ -281,7 +281,7 @@ impl<'a> OperationRequest<'a> {
 
 pub struct OperationCleanup<'a> {
     pub source: Entity,
-    pub requester: Entity,
+    pub session: Entity,
     pub world: &'a mut World,
     pub roster: &'a mut OperationRoster,
 }
@@ -290,7 +290,7 @@ impl<'a> OperationCleanup<'a> {
 
     fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
         let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
-        source_mut.cleanup_inputs::<T>(self.requester);
+        source_mut.cleanup_inputs::<T>(self.session);
         Ok(())
     }
 
@@ -299,9 +299,9 @@ impl<'a> OperationCleanup<'a> {
         let scope = source_mut.get::<Scope>().or_broken()?.get();
         let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
         let mut scope_contents = scope_mut.get_mut::<ScopeContents>().or_broken()?;
-        if scope_contents.notify_cleanup(self.requester, self.source) {
+        if scope_contents.notify_cleanup(self.session, self.source) {
             self.roster.cleanup_scope(
-                Cleanup { scope, requester: self.requester }
+                Cleanup { scope, session: self.session }
             );
         }
         Ok(())
@@ -310,7 +310,7 @@ impl<'a> OperationCleanup<'a> {
 
 pub struct OperationReachability<'a> {
     source: Entity,
-    requester: Entity,
+    session: Entity,
     world: &'a World,
     visited: &'a mut HashMap<Entity, bool>,
 }
@@ -318,21 +318,21 @@ pub struct OperationReachability<'a> {
 impl<'a> OperationReachability<'a> {
 
     pub fn new(
-        requester: Entity,
+        session: Entity,
         source: Entity,
         world: &'a World,
         visited: &'a mut HashMap<Entity, bool>,
     ) -> OperationReachability<'a> {
-        Self { requester, source, world, visited }
+        Self { session, source, world, visited }
     }
 
     pub fn check(
-        requester: Entity,
+        session: Entity,
         source: Entity,
         world: &'a World
     ) -> ReachabilityResult {
         let mut visited = HashMap::new();
-        let mut reachability = Self { source, requester, world, visited: &mut visited };
+        let mut reachability = Self { source, session, world, visited: &mut visited };
         reachability.check_upstream(source)
     }
 
@@ -355,7 +355,7 @@ impl<'a> OperationReachability<'a> {
 
         let is_reachable = reachabiility(OperationReachability {
             source,
-            requester: self.requester,
+            session: self.session,
             world: self.world,
             visited: self.visited
         })?;
@@ -369,15 +369,15 @@ impl<'a> OperationReachability<'a> {
 
     pub fn has_input<T: 'static + Send + Sync>(&self) -> ReachabilityResult {
         self.world.get_entity(self.source).or_broken()?
-            .has_input::<T>(self.requester)
+            .has_input::<T>(self.session)
     }
 
     pub fn source(&self) -> Entity {
         self.source
     }
 
-    pub fn requester(&self) -> Entity {
-        self.requester
+    pub fn session(&self) -> Entity {
+        self.session
     }
 
     pub fn world(&self) -> &World {
@@ -421,8 +421,8 @@ pub trait Operation {
 
     /// Return whether this operation can be reached. Being reachable means there
     /// is some sequence of operations that could lead to this one being triggered
-    /// for a given requester, or this operation is currently active for the
-    /// given requester.
+    /// for a given session, or this operation is currently active for the
+    /// given session.
     ///
     /// This is primarily used to determine if a Join has stalled out or if
     /// a request will never be able to terminate.

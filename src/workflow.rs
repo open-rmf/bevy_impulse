@@ -49,8 +49,8 @@ impl ScopeContents {
         }
     }
 
-    pub fn notify_cleanup(&mut self, requester: Entity, node: Entity) -> bool {
-        let mut cleanup = self.cleanup.entry(requester).or_default();
+    pub fn notify_cleanup(&mut self, session: Entity, node: Entity) -> bool {
+        let mut cleanup = self.cleanup.entry(session).or_default();
         if let Err(index) = cleanup.binary_search(&node) {
             cleanup.insert(index, node);
         }

@@ -80,7 +80,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
     fn serve(
         ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } }: ServiceRequest
     ) -> Result<(), OperationError> {
-        let Input { requester, data: request } = world
+        let Input { session, data: request } = world
             .get_entity_mut(source).or_broken()?
             .take_input::<Request>()?;
 
@@ -130,7 +130,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
         }
 
         world.get_entity_mut(target).or_broken()?
-            .give_input(requester, response, roster);
+            .give_input(session, response, roster);
         Ok(())
     }
 }

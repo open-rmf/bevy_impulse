@@ -72,7 +72,7 @@ impl WakeQueue {
 struct TaskStorage<Response>(BevyTask<Response>);
 
 #[derive(Component)]
-struct TaskRequesterStorage(Entity);
+struct TaskSessionStorage(Entity);
 
 #[derive(Component)]
 struct TaskOwnerStorage(Entity);
@@ -82,7 +82,7 @@ pub(crate) struct PollTask(pub(crate) fn(Entity, &mut World, &mut OperationRoste
 
 #[derive(Bundle)]
 pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
-    requester: TaskRequesterStorage,
+    session: TaskSessionStorage,
     owner: TaskOwnerStorage,
     target: SingleTargetStorage,
     task: TaskStorage<Response>,
@@ -91,14 +91,14 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
 
 impl<Response: 'static + Send + Sync> OperateTask<Response> {
     pub(crate) fn new(
-        requester: Entity,
+        session: Entity,
         owner: Entity,
         target: Entity,
         task: BevyTask<Response>,
         blocker: Option<Blocker>,
     ) -> Self {
         Self {
-            requester: TaskRequesterStorage(requester),
+            session: TaskSessionStorage(session),
             owner: TaskOwnerStorage(owner),
             target: SingleTargetStorage(target),
             task: TaskStorage(task),
@@ -124,7 +124,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let Some(mut tasks) = owner_mut.get_mut::<ActiveTasksStorage>() else {
             return;
         };
-        tasks.list.push(ActiveTask { id: source, requester: self.requester.0 });
+        tasks.list.push(ActiveTask { id: source, session: self.session.0 });
     }
 
     fn execute(
@@ -151,13 +151,13 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                 // Task has finished
                 let mut source_mut = world.entity_mut(source);
                 let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-                let requester = source_mut.get::<TaskRequesterStorage>().or_broken()?.0;
+                let session = source_mut.get::<TaskSessionStorage>().or_broken()?.0;
                 let unblock = source_mut.take::<BlockerStorage>().or_broken()?;
                 if let Some(unblock) = unblock.0 {
                     roster.unblock(unblock);
                 }
 
-                world.entity_mut(target).give_input(requester, result, roster);
+                world.entity_mut(target).give_input(session, result, roster);
                 world.despawn(source);
             }
             Poll::Pending => {
@@ -173,7 +173,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
     }
 
     fn cleanup(clean: OperationCleanup) -> OperationResult {
-        let requester = clean.requester;
+        let session = clean.session;
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
         let owner = source_mut.get::<TaskOwnerStorage>().or_broken()?.0;
@@ -193,21 +193,21 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                 };
 
                 let mut cleanup_ready = true;
-                active_tasks.list.retain(|ActiveTask { id, requester: r }| {
+                active_tasks.list.retain(|ActiveTask { id, session: r }| {
                     if *id == source {
                         return false;
                     }
 
-                    if *r == requester {
+                    if *r == session {
                         // The owner has another active task related to this
-                        // requester so its cleanup is not finished yet.
+                        // session so its cleanup is not finished yet.
                         cleanup_ready = false;
                     }
                     true
                 });
 
                 if cleanup_ready {
-                    OperationCleanup { source: owner, requester, world, roster }
+                    OperationCleanup { source: owner, session, world, roster }
                         .notify_cleaned();
                 }
 
@@ -220,10 +220,10 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
     }
 
     fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
-        let requester = reachability.world
+        let session = reachability.world
             .get_entity(reachability.source).or_broken()?
-            .get::<TaskRequesterStorage>().or_broken()?.0;
-        Ok(requester == reachability.requester)
+            .get::<TaskSessionStorage>().or_broken()?.0;
+        Ok(session == reachability.session)
     }
 }
 
@@ -234,7 +234,7 @@ pub struct ActiveTasksStorage {
 
 pub struct ActiveTask {
     id: Entity,
-    requester: Entity,
+    session: Entity,
 }
 
 impl ActiveTasksStorage {
@@ -243,8 +243,8 @@ impl ActiveTasksStorage {
         let active_tasks = source_ref.get::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
-        for ActiveTask { id, requester } in &active_tasks.list {
-            if *requester == clean.requester {
+        for ActiveTask { id, session } in &active_tasks.list {
+            if *session == clean.session {
                 to_cleanup.push(*id);
                 cleanup_ready = false;
             }
@@ -253,7 +253,7 @@ impl ActiveTasksStorage {
         for task_id in to_cleanup {
             cleanup_operation(OperationCleanup {
                 source: task_id,
-                requester: clean.requester,
+                session: clean.session,
                 world: clean.world,
                 roster: clean.roster
             });
@@ -266,12 +266,12 @@ impl ActiveTasksStorage {
         Ok(())
     }
 
-    pub fn contains_requester(r: OperationReachability) -> ReachabilityResult {
+    pub fn contains_session(r: OperationReachability) -> ReachabilityResult {
         let active_tasks = &r.world.get_entity(r.source).or_broken()?
             .get::<Self>().or_broken()?.list;
 
         Ok(active_tasks.iter().find(
-            |task| task.requester == r.requester
+            |task| task.session == r.session
         ).is_some())
     }
 }

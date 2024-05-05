@@ -110,7 +110,7 @@ where
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_requester(reachability)? {
+        if ActiveTasksStorage::contains_session(reachability)? {
             return Ok(true);
         }
         SingleInputStorage::is_reachable(reachability)
