@@ -20,7 +20,7 @@ use crate::{
     SingleTargetStorage, Stream, Input, ManageInput, OperationCleanup,
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
-    OperationReachability, ReachabilityResult,
+    OperationReachability, ReachabilityResult, InputBundle,
 };
 
 use bevy::{
@@ -74,7 +74,10 @@ where
         if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
             target_mut.insert(SingleInputStorage::new(source));
         }
-        world.entity_mut(source).insert(self);
+        world.entity_mut(source).insert((
+            self,
+            InputBundle::<Request>::new(),
+        ));
     }
 
     fn execute(
@@ -149,8 +152,13 @@ where
     Streams: Stream,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
+        if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
+            target_mut.insert(SingleInputStorage::new(source));
+        }
         world.entity_mut(source).insert((
-            self, ActiveTasksStorage::default(),
+            self,
+            ActiveTasksStorage::default(),
+            InputBundle::<Request>::new(),
         ));
     }
 

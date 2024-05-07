@@ -27,6 +27,9 @@ pub use channel::*;
 pub mod discovery;
 pub use discovery::*;
 
+pub mod disposal;
+pub use disposal::*;
+
 pub mod flush;
 pub use flush::*;
 

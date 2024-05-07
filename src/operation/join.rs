@@ -40,7 +40,10 @@ impl<T> JoinInput<T> {
 
 impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        world.entity_mut(source).insert(SingleTargetStorage(self.target));
+        world.entity_mut(source).insert((
+            InputBundle::<T>::new(),
+            SingleTargetStorage(self.target)),
+        );
     }
 
     fn execute(

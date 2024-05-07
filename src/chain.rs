@@ -18,7 +18,7 @@
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, Terminate, PerformOperation,
+    UnusedTarget, Receive, PerformOperation,
     ForkClone, Chosen, ApplyLabel, Stream, Provider,
     AsMap, IntoBlockingMap, IntoAsyncMap, OperateCancel,
     DetachDependency, DisposeOnCancel, Promise, Noop,
@@ -73,7 +73,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn detach(self) {
         self.commands.add(PerformOperation::new(
             self.target,
-            Terminate::<Response>::new(None, true),
+            Receive::<Response>::new(None, true),
         ));
     }
 
@@ -86,7 +86,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         let (promise, sender) = Promise::new();
         self.commands.add(PerformOperation::new(
             self.target,
-            Terminate::new(Some(sender), false),
+            Receive::new(Some(sender), false),
         ));
         promise
     }
@@ -100,7 +100,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         let (promise, sender) = Promise::new();
         self.commands.add(PerformOperation::new(
             self.target,
-            Terminate::new(Some(sender), true),
+            Receive::new(Some(sender), true),
         ));
         promise
     }

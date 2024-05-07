@@ -23,9 +23,9 @@ use std::collections::HashMap;
 
 /// The scope that the workflow node exists inside of.
 #[derive(Component)]
-pub struct Scope(Entity);
+pub struct ScopeStorage(Entity);
 
-impl Scope {
+impl ScopeStorage {
     pub fn get(&self) -> Entity {
         self.0
     }
@@ -49,12 +49,16 @@ impl ScopeContents {
         }
     }
 
-    pub fn notify_cleanup(&mut self, session: Entity, node: Entity) -> bool {
+    pub fn register_cleanup_of_node(&mut self, session: Entity, node: Entity) -> bool {
         let mut cleanup = self.cleanup.entry(session).or_default();
         if let Err(index) = cleanup.binary_search(&node) {
             cleanup.insert(index, node);
         }
 
         self.nodes == *cleanup
+    }
+
+    pub fn nodes(&self) -> &SmallVec<[Entity; 16]> {
+        &self.nodes
     }
 }

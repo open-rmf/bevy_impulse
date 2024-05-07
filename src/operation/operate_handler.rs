@@ -17,7 +17,7 @@
 
 use crate::{
     Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
-    Stream, SingleInputStorage, OperationResult, OrBroken,
+    Stream, SingleInputStorage, OperationResult, OrBroken, InputBundle,
     OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
     OperationReachability, ReachabilityResult,
 };
@@ -49,6 +49,7 @@ where
             target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
+            InputBundle::<Request>::new(),
             HandlerStorage { handler: self.handler },
             SingleTargetStorage(self.target),
             ActiveTasksStorage::default(),

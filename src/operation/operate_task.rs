@@ -35,9 +35,9 @@ use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 use smallvec::SmallVec;
 
 use crate::{
-    SingleTargetStorage, OperationRoster, Blocker, ManageInput, Scope,
-    OperationSetup, OperationRequest, OperationResult, Operation, Cleanup,
-    OrBroken, BlockerStorage, OperationCleanup, ChannelQueue, cleanup_operation,
+    SingleTargetStorage, OperationRoster, Blocker, ManageInput,
+    OperationSetup, OperationRequest, OperationResult, Operation,
+    OrBroken, BlockerStorage, OperationCleanup, ChannelQueue,
     OperationReachability, ReachabilityResult,
 };
 
@@ -124,7 +124,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let Some(mut tasks) = owner_mut.get_mut::<ActiveTasksStorage>() else {
             return;
         };
-        tasks.list.push(ActiveTask { id: source, session: self.session.0 });
+        tasks.list.push(ActiveTask { task_id: source, session: self.session.0 });
     }
 
     fn execute(
@@ -193,7 +193,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                 };
 
                 let mut cleanup_ready = true;
-                active_tasks.list.retain(|ActiveTask { id, session: r }| {
+                active_tasks.list.retain(|ActiveTask { task_id: id, session: r }| {
                     if *id == source {
                         return false;
                     }
@@ -233,7 +233,7 @@ pub struct ActiveTasksStorage {
 }
 
 pub struct ActiveTask {
-    id: Entity,
+    task_id: Entity,
     session: Entity,
 }
 
@@ -243,7 +243,7 @@ impl ActiveTasksStorage {
         let active_tasks = source_ref.get::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
-        for ActiveTask { id, session } in &active_tasks.list {
+        for ActiveTask { task_id: id, session } in &active_tasks.list {
             if *session == clean.session {
                 to_cleanup.push(*id);
                 cleanup_ready = false;
@@ -251,12 +251,7 @@ impl ActiveTasksStorage {
         }
 
         for task_id in to_cleanup {
-            cleanup_operation(OperationCleanup {
-                source: task_id,
-                session: clean.session,
-                world: clean.world,
-                roster: clean.roster
-            });
+            clean.for_node(task_id).clean();
         }
 
         if cleanup_ready {

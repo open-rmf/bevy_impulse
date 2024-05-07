@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    RequestLabelId, Cancel, Cancellation, Scope, ScopeContents, ManageInput,
+    RequestLabelId, Cancel, Cancellation, ScopeStorage, ScopeContents, ManageInput,
     InspectInput,
 };
 
@@ -58,11 +58,17 @@ pub(crate) use operate_handler::*;
 mod operate_map;
 pub(crate) use operate_map::*;
 
+mod operate_scope;
+pub(crate) use operate_scope::*;
+
 mod operate_service;
 pub(crate) use operate_service::*;
 
 mod operate_task;
 pub(crate) use operate_task::*;
+
+mod receive;
+pub(crate) use receive::*;
 
 mod terminate;
 pub(crate) use terminate::*;
@@ -80,8 +86,9 @@ impl SingleInputStorage {
     }
 
     pub fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        let inputs = r.world.get_entity(r.source).or_broken()?
-            .get::<Self>().or_broken()?;
+        let Some(inputs) = r.world.get_entity(r.source).or_broken()?.get::<Self>() else {
+            return Ok(false);
+        };
         for input in &inputs.0 {
             if r.check_upstream(*input)? {
                 return Ok(true);
@@ -182,7 +189,7 @@ pub struct OperationRoster {
     /// Indicate that there is no longer a need for this chain
     pub(crate) drop_dependency: Vec<Cancel>,
     /// Tell a scope to attempt cleanup
-    pub(crate) cleanup_scope: Vec<Cleanup>,
+    pub(crate) cleanup_finished: Vec<CleanupFinished>,
 }
 
 impl OperationRoster {
@@ -214,22 +221,31 @@ impl OperationRoster {
         self.drop_dependency.push(source);
     }
 
-    pub fn cleanup_scope(&mut self, cleanup: Cleanup) {
-        self.cleanup_scope.push(cleanup);
+    pub fn cleanup_finished(&mut self, cleanup: CleanupFinished) {
+        self.cleanup_finished.push(cleanup);
     }
 
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty() && self.cancel.is_empty()
         && self.unblock.is_empty() && self.dispose.is_empty()
         && self.dispose_chain_from.is_empty() && self.drop_dependency.is_empty()
-        && self.cleanup_scope.is_empty()
+        && self.cleanup_finished.is_empty()
     }
 }
 
 /// Notify the scope manager that the request may be finished with cleanup
-pub struct Cleanup {
+pub struct CleanupFinished {
     scope: Entity,
     session: Entity,
+}
+
+impl CleanupFinished {
+    pub(crate) fn trigger(self, world: &mut World, roster: &mut OperationRoster) {
+        let Some(FinalizeScopeCleanup(f)) = world.get::<FinalizeScopeCleanup>(self.scope).copied() else {
+            return;
+        };
+        (f)(OperationCleanup { source: self.scope, session: self.session, world, roster });
+    }
 }
 
 pub(crate) struct Blocker {
@@ -288,6 +304,37 @@ pub struct OperationCleanup<'a> {
 
 impl<'a> OperationCleanup<'a> {
 
+    fn clean(&mut self) {
+        let Some(cleanup) = self.world.get::<OperationCleanupStorage>(self.source) else {
+            return;
+        };
+        let cleanup = cleanup.0;
+        let _ = cleanup(OperationCleanup {
+            source: self.source,
+            session: self.session,
+            world: self.world,
+            roster: self.roster
+        });
+    }
+
+    fn for_session(&mut self, other_session: Entity) -> OperationCleanup {
+        Self {
+            source: self.source,
+            session: other_session,
+            world: self.world,
+            roster: self.roster,
+        }
+    }
+
+    fn for_node(&mut self, other_source: Entity) -> OperationCleanup {
+        Self {
+            source: other_source,
+            session: self.session,
+            world: self.world,
+            roster: self.roster,
+        }
+    }
+
     fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
         let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
         source_mut.cleanup_inputs::<T>(self.session);
@@ -296,12 +343,12 @@ impl<'a> OperationCleanup<'a> {
 
     fn notify_cleaned(&mut self) -> OperationResult {
         let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
-        let scope = source_mut.get::<Scope>().or_broken()?.get();
+        let scope = source_mut.get::<ScopeStorage>().or_not_ready()?.get();
         let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
         let mut scope_contents = scope_mut.get_mut::<ScopeContents>().or_broken()?;
-        if scope_contents.notify_cleanup(self.session, self.source) {
-            self.roster.cleanup_scope(
-                Cleanup { scope, session: self.session }
+        if scope_contents.register_cleanup_of_node(self.session, self.source) {
+            self.roster.cleanup_finished(
+                CleanupFinished { scope, session: self.session }
             );
         }
         Ok(())
@@ -525,14 +572,6 @@ pub fn execute_operation(request: OperationRequest) {
     };
     let operator = operator.0;
     operator(request);
-}
-
-pub fn cleanup_operation(clean: OperationCleanup) {
-    let Some(cleanup) = clean.world.get::<OperationCleanupStorage>(clean.source) else {
-        return;
-    };
-    let cleanup = cleanup.0;
-    let _ = cleanup(clean);
 }
 
 fn perform_operation<Op: Operation>(

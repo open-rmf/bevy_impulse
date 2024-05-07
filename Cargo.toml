@@ -13,6 +13,7 @@ smallvec = "*"
 crossbeam = "*"
 futures = "0.3"
 backtrace = "0.3"
+anyhow = "*"
 
 [dev-dependencies]
 async-std = { version = "*" }

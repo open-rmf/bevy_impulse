@@ -24,11 +24,9 @@ use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    Cancel, DroppedPromiseQueue, UnusedTarget, FunnelInputStorage, FunnelInputStatus,
-    SingleTargetStorage, NextOperationLink, ServiceLifecycle, ServiceLifecycleQueue,
+    Cancel, DroppedPromiseQueue, UnusedTarget, ServiceLifecycle, ServiceLifecycleQueue,
     OperationRequest,
-    execute_operation, dispose_cancellation_chain, cancel_service, cancel_from_link,
-    propagate_dependency_loss_upwards,
+    execute_operation, cancel_service,
 };
 
 #[allow(private_interfaces)]
@@ -92,89 +90,21 @@ pub fn flush_impulses(
     }
 
     while !roster.is_empty() {
-        // The dependency and cancellation processing must happen together,
-        // without any disposal happening in between, or else cancellation
-        // cascades could get lost prematurely.
-        {
-            while let Some(source) = roster.drop_dependency.pop() {
-                propagate_dependency_loss_upwards(source, world, &mut roster)
-            }
-
-            while let Some(e) = roster.cancel.pop_front() {
-                cancel_from_link(e, world, &mut roster);
-            }
-        }
-
-        // Dispose of anything that is no longer needed
-        while let Some(e) = roster.dispose.pop() {
-            dispose_link(e, world, &mut roster);
-        }
-
-        while let Some(e) = roster.dispose_chain_from.pop() {
-            dispose_chain_from(e, world, &mut roster);
-        }
-
         while let Some(unblock) = roster.unblock.pop_front() {
             let serve_next = unblock.serve_next;
             serve_next(unblock, world, &mut roster);
+
+            while let Some(cleanup) = roster.cleanup_finished.pop() {
+                cleanup.trigger(world, &mut roster);
+            }
         }
 
         while let Some(source) = roster.queue.pop_front() {
             execute_operation(OperationRequest { source, world, roster: &mut roster });
-        }
-    }
-}
 
-/// Dispose a chain from the given link downwards
-fn dispose_chain_from(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
-) {
-    let mut source_queue: SmallVec<[Entity; 16]> = SmallVec::new();
-    source_queue.push(source);
-
-    while let Some(source) = source_queue.pop() {
-        let Some(mut source_mut) = world.get_entity_mut(source) else {
-            continue;
-        };
-
-        if let Some(mut input_status) = source_mut.get_mut::<FunnelInputStatus>() {
-            // If this is a funnel input source then we should not keep propagating
-            // the disposal directly. Instead we mark the input status as disposed
-            // and trigger the funnel to wake up.
-            input_status.dispose();
-            if let Some(funnel) = world.get::<SingleTargetStorage>(source) {
-                roster.queue(funnel.0);
+            while let Some(cleanup) = roster.cleanup_finished.pop() {
+                cleanup.trigger(world, &mut roster);
             }
-            continue;
-        }
-
-        roster.dispose(source);
-
-        // Iterate through the targets of the link and add them to the queue
-        let mut next_link_state: SystemState<NextOperationLink> = SystemState::new(world);
-        let next_link = next_link_state.get(world);
-        for next in next_link.iter(source) {
-            source_queue.push(next);
         }
     }
-}
-
-/// Dispose a link in the chain that is no longer needed.
-fn dispose_link(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
-) {
-    dispose_cancellation_chain(source, world, roster);
-
-    if let Some(funnel_sources) = world.get::<FunnelInputStorage>(source) {
-        // If the link is a funnel (join or race) then we should also dispose of
-        // its input entities when we dispose of it.
-        for e in funnel_sources.0.clone() {
-            world.despawn(e);
-        }
-    }
-    world.despawn(source);
 }

@@ -20,7 +20,7 @@ use bevy::prelude::Entity;
 use crate::{
     Operation, SingleInputStorage, SingleTargetStorage, Input, ManageInput,
     OperationResult, OrBroken, OperationSetup, OperationRequest, OperationCleanup,
-    OperationReachability, ReachabilityResult,
+    OperationReachability, ReachabilityResult, InputBundle,
 };
 
 pub(crate) struct Noop<T> {
@@ -39,7 +39,10 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
         if let Some(mut target_mut) = world.get_entity_mut(self.target) {
             target_mut.insert(SingleInputStorage::new(source));
         }
-        world.entity_mut(source).insert(SingleTargetStorage(self.target));
+        world.entity_mut(source).insert((
+            InputBundle::<T>::new(),
+            SingleTargetStorage(self.target)),
+        );
     }
 
     fn execute(

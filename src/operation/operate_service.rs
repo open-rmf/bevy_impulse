@@ -20,6 +20,7 @@ use crate::{
     SingleInputStorage, dispatch_service, Cancel, OperationCleanup,
     OperationResult, OrBroken, OperationSetup, OperationRequest,
     ActiveTasksStorage, OperationReachability, ReachabilityResult,
+    InputBundle,
 };
 
 use bevy::{
@@ -52,6 +53,7 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
             target_mut.insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
+            InputBundle::<Request>::new(),
             ProviderStorage(self.provider),
             SingleTargetStorage(self.target),
             ActiveTasksStorage::default(),
