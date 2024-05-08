@@ -70,14 +70,15 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target.0).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
             self,
             InputBundle::<Request>::new(),
         ));
+        Ok(())
     }
 
     fn execute(
@@ -151,15 +152,16 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: Stream,
 {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target.0) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target.0).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
             self,
             ActiveTasksStorage::default(),
             InputBundle::<Request>::new(),
         ));
+        Ok(())
     }
 
     fn execute(

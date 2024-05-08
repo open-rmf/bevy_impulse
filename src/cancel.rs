@@ -21,7 +21,7 @@ use backtrace::Backtrace;
 
 use std::sync::Arc;
 
-use crate::Unreachability;
+use crate::{Unreachability, Filtered};
 
 /// Response type that gets sent when a cancellation occurs.
 #[derive(Debug)]
@@ -42,6 +42,12 @@ impl Cancellation {
     }
 }
 
+impl<T: Into<CancellationCause>> From<T> for Cancellation {
+    fn from(value: T) -> Self {
+        Cancellation { cause: Arc::new(value.into()) }
+    }
+}
+
 /// Get an explanation for why a cancellation occurred.
 #[derive(Debug)]
 pub enum CancellationCause {
@@ -51,6 +57,9 @@ pub enum CancellationCause {
     /// There are no terminating nodes for the workflow that can be reached
     /// anymore.
     Unreachable(Unreachability),
+
+    /// A filtering node has triggered a cancellation.
+    Filtered(Filtered),
 
     /// A node in the workflow was broken, for example despawned or missing a
     /// component. This type of cancellation indicates that you are modifying
@@ -80,14 +89,14 @@ impl From<BrokenLink> for CancellationCause {
 /// a link needs to be cancelled.
 #[derive(Debug, Clone)]
 pub struct Cancel {
-    pub apply_to: Entity,
+    pub scope: Entity,
     pub cause: Cancellation,
 }
 
 impl Cancel {
     /// Create a new [`Cancel`] operation
-    pub fn new(apply_to: Entity, cause: CancellationCause) -> Self {
-        Self { apply_to, cause: Cancellation::from_cause(cause) }
+    pub fn new(scope: Entity, cause: CancellationCause) -> Self {
+        Self { scope, cause: Cancellation::from_cause(cause) }
     }
 
     /// Create a broken link cancel operation
@@ -104,5 +113,11 @@ impl Cancel {
     /// Create a dropped target cancel operation
     pub fn dropped(target: Entity) -> Self {
         Self::new(target, CancellationCause::TargetDropped(target))
+    }
+}
+
+impl From<Unreachability> for CancellationCause {
+    fn from(value: Unreachability) -> Self {
+        CancellationCause::Unreachable(value)
     }
 }

@@ -154,7 +154,6 @@ impl<'w> ManageInput for EntityMut<'w> {
         &mut self,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        let target = self.get::<SingleTargetStorage>().or_broken()?.0;
         let Input { session, data } = self.take_input::<T>()?;
         let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
         let reverse_queue = buffer.reverse_queues.entry(session).or_default();
@@ -181,7 +180,12 @@ impl<'w> ManageInput for EntityMut<'w> {
         }
 
         reverse_queue.insert(0, data);
-        roster.queue(target);
+
+        // CancelInputBuffer does not have a target, it is pull-only, so we
+        // should not queue an operation for it.
+        if let Some(target) = self.get::<SingleTargetStorage>() {
+            roster.queue(target.0);
+        }
 
         Ok(())
     }
@@ -240,10 +244,10 @@ impl<'a> InspectInput for EntityRef<'a> {
 
     fn has_input<T: 'static + Send + Sync>(
         &self,
-        sessiion: Entity,
+        session: Entity,
     ) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
-        Ok(inputs.contains_session(sessiion))
+        Ok(inputs.contains_session(session))
     }
 }
 
@@ -254,13 +258,19 @@ pub struct InputCommand<T> {
 }
 
 #[derive(Component)]
-pub(crate) struct Buffer<T> {
+pub struct Buffer<T> {
     /// Settings that determine how this buffer will behave.
     settings: BufferSettings,
     /// Map from session ID to a queue of data that has arrived for it. This
     /// is used by nodes that feed into joiner nodes to store input so that it's
     /// readily available when needed.
     reverse_queues: HashMap<Entity, SmallVec<[T; 16]>>,
+}
+
+impl<T> Buffer<T> {
+    pub fn new(settings: BufferSettings) -> Self {
+        Self { settings, reverse_queues: Default::default() }
+    }
 }
 
 #[derive(Default, Clone)]

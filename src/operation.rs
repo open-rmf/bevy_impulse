@@ -183,9 +183,7 @@ pub struct OperationRoster {
     /// Async services that should pull their next item
     pub(crate) unblock: VecDeque<Blocker>,
     /// Remove these entities as they are no longer needed
-    pub(crate) dispose: Vec<Entity>,
-    /// Remove the whole chain from this point on because it is no longer needed
-    pub(crate) dispose_chain_from: Vec<Entity>,
+    pub(crate) disposed: Vec<DisposalNotice>,
     /// Indicate that there is no longer a need for this chain
     pub(crate) drop_dependency: Vec<Cancel>,
     /// Tell a scope to attempt cleanup
@@ -209,12 +207,8 @@ impl OperationRoster {
         self.unblock.push_back(provider);
     }
 
-    pub fn dispose(&mut self, entity: Entity) {
-        self.dispose.push(entity);
-    }
-
-    pub fn dispose_chain_from(&mut self, entity: Entity) {
-        self.dispose_chain_from.push(entity);
+    pub fn disposed(&mut self, scope: Entity, session: Entity) {
+        self.disposed.push(DisposalNotice { scope, session });
     }
 
     pub fn drop_dependency(&mut self, source: Cancel) {
@@ -227,10 +221,16 @@ impl OperationRoster {
 
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty() && self.cancel.is_empty()
-        && self.unblock.is_empty() && self.dispose.is_empty()
-        && self.dispose_chain_from.is_empty() && self.drop_dependency.is_empty()
-        && self.cleanup_finished.is_empty()
+        && self.unblock.is_empty() && self.disposed.is_empty()
+        && self.drop_dependency.is_empty() && self.cleanup_finished.is_empty()
     }
+}
+
+/// Notify the scope manager that a disposal took place. This will prompt the
+/// scope to check whether it's still possible to terminate.
+struct DisposalNotice {
+    scope: Entity,
+    session: Entity,
 }
 
 /// Notify the scope manager that the request may be finished with cleanup
@@ -455,7 +455,7 @@ impl PendingOperationRequest {
 pub trait Operation {
     /// Set the initial parameters for your operation. This gets called while
     /// the chain is being built.
-    fn setup(self, info: OperationSetup);
+    fn setup(self, info: OperationSetup) -> OperationResult;
 
     /// Execute this operation. This gets triggered when a new InputStorage
     /// component is added to `source` or when another operation puts `source`
@@ -557,13 +557,6 @@ struct OperationCleanupStorage(fn(OperationCleanup) -> OperationResult);
 struct OperationReachabiilityStorage(
     fn(OperationReachability) -> ReachabilityResult
 );
-
-/// Insert this as a component on the source of any operation that needs to have
-/// special handling for cancellation. So far this is only used by [`Terminate`].
-#[derive(Component, Clone, Copy)]
-pub struct CancellationBehavior {
-    pub hook: fn(&Cancellation, Entity, &mut World, &mut OperationRoster),
-}
 
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {

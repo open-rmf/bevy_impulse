@@ -15,12 +15,18 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy::{
+    prelude::{Entity, Component},
+    ecs::world::{EntityMut, EntityRef},
+};
 
 use std::sync::Arc;
 
+use std::collections::HashMap;
 
-#[derive(Debug)]
+use crate::{OperationRoster, OperationResult, ScopeStorage, OrBroken};
+
+#[derive(Debug, Clone)]
 pub struct Disposal {
     pub cause: Arc<DisposalCause>,
 }
@@ -40,13 +46,13 @@ pub enum DisposalCause {
     Supplanted(Supplanted),
 
     /// A node filtered out a response.
-    Filtered(DisposalFilter),
+    Filtered(Filtered),
 
     /// A node disposed of one of its output branches.
     Branching(DisposedBranch),
 
     /// A join was halted because one or more of its inputs became unreachable.
-    JoinUnreachable(JoinUnreachable),
+    JoinImpossible(JoinImpossible),
 
     /// A [`Service`](crate::Service) provider needed by the chain was despawned
     /// or had a critical component removed. The entity provided in the variant
@@ -89,21 +95,21 @@ impl From<Supplanted> for DisposalCause {
 
 /// A variant of [`DisposalCause`]
 #[derive(Debug)]
-pub struct DisposalFilter {
+pub struct Filtered {
     /// ID of the node that did the filtering
     pub filtered_at_node: Entity,
     /// Optionally, a reason given for why the filtering happened.
     pub reason: Option<anyhow::Error>,
 }
 
-impl DisposalFilter {
+impl Filtered {
     pub fn new(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
         Self { filtered_at_node, reason }
     }
 }
 
-impl From<DisposalFilter> for DisposalCause {
-    fn from(value: DisposalFilter) -> Self {
+impl From<Filtered> for DisposalCause {
+    fn from(value: Filtered) -> Self {
         Self::Filtered(value)
     }
 }
@@ -127,16 +133,16 @@ impl From<DisposedBranch> for DisposalCause {
 
 /// A variant of [`DisposalCause`]
 #[derive(Debug, Clone)]
-pub struct JoinUnreachable {
+pub struct JoinImpossible {
     /// The source node of the join
     pub join: Entity,
     /// The unreachable input nodes
     pub unreachable: Vec<Entity>,
 }
 
-impl From<JoinUnreachable> for DisposalCause {
-    fn from(value: JoinUnreachable) -> Self {
-        DisposalCause::JoinUnreachable(value)
+impl From<JoinImpossible> for DisposalCause {
+    fn from(value: JoinImpossible) -> Self {
+        DisposalCause::JoinImpossible(value)
     }
 }
 
@@ -179,8 +185,82 @@ pub struct Unreachability {
     pub disposals: Vec<Disposal>,
 }
 
+impl Unreachability {
+    pub fn new(scope: Entity, session: Entity, disposals: Vec<Disposal>) -> Self {
+        Self { scope, session, disposals }
+    }
+}
+
 impl From<Unreachability> for DisposalCause {
     fn from(value: Unreachability) -> Self {
         Self::Scope(value)
     }
+}
+
+pub trait ManageDisposals {
+    fn add_disposal(
+        &mut self,
+        session: Entity,
+        disposal: Disposal,
+        roster: &mut OperationRoster,
+    ) -> OperationResult;
+
+    fn clear_disposals(&mut self, session: Entity);
+}
+
+pub trait InspectDisposals {
+    fn get_disposals(&self, session: Entity) -> Option<&Vec<Disposal>>;
+}
+
+impl<'w> ManageDisposals for EntityMut<'w> {
+    fn add_disposal(
+        &mut self,
+        session: Entity,
+        disposal: Disposal,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        if let Some(mut storage) = self.get_mut::<DisposalStorage>() {
+            storage.disposals.entry(session).or_default().push(disposal);
+        } else {
+            let mut storage = DisposalStorage::default();
+            storage.disposals.entry(session).or_default().push(disposal);
+            self.insert(storage);
+        }
+
+        let scope = self.get::<ScopeStorage>().or_broken()?.get();
+        roster.disposed(scope, session);
+        Ok(())
+    }
+
+    fn clear_disposals(&mut self, session: Entity) {
+        if let Some(mut storage) = self.get_mut::<DisposalStorage>() {
+            storage.disposals.remove(&session);
+        }
+    }
+}
+
+impl<'w> InspectDisposals for EntityMut<'w> {
+    fn get_disposals(&self, session: Entity) -> Option<&Vec<Disposal>> {
+        if let Some(storage) = self.get::<DisposalStorage>() {
+            return storage.disposals.get(&session);
+        }
+
+        None
+    }
+}
+
+impl<'w> InspectDisposals for EntityRef<'w> {
+    fn get_disposals(&self, session: Entity) -> Option<&Vec<Disposal>> {
+        if let Some(storage) = self.get::<DisposalStorage>() {
+            return storage.disposals.get(&session);
+        }
+
+        None
+    }
+}
+
+#[derive(Component, Default)]
+struct DisposalStorage {
+    /// A map from a session to all the disposals that occurred for the session
+    disposals: HashMap<Entity, Vec<Disposal>>,
 }

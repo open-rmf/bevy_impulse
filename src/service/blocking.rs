@@ -110,7 +110,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
             return Ok(());
         };
 
-        roster.dispose(source);
+        roster.disposed(source);
 
         let response = service.run(BlockingService { request, provider }, world);
         service.apply_deferred(world);

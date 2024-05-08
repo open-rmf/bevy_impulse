@@ -35,14 +35,15 @@ impl<T> Noop<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for Noop<T> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
-            SingleTargetStorage(self.target)),
-        );
+            SingleTargetStorage(self.target),
+        ));
+        Ok(())
     }
 
     fn execute(

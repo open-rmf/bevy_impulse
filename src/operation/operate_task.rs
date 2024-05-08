@@ -108,7 +108,7 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
 }
 
 impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         let wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
         let waker = Arc::new(JobWaker {
             sender: wake_queue.sender.clone(),
@@ -118,13 +118,10 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let mut source_mut = world.entity_mut(source);
         source_mut.insert((self, JobWakerStorage(waker)));
 
-        let Some(mut owner_mut) = world.get_entity_mut(self.owner.0) else {
-            return;
-        };
-        let Some(mut tasks) = owner_mut.get_mut::<ActiveTasksStorage>() else {
-            return;
-        };
+        let mut owner_mut = world.get_entity_mut(self.owner.0).or_broken()?;
+        let mut tasks = owner_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
         tasks.list.push(ActiveTask { task_id: source, session: self.session.0 });
+        Ok(())
     }
 
     fn execute(

@@ -48,16 +48,17 @@ impl<Request: 'static + Send + Sync> OperateService<Request> {
 }
 
 impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
             InputBundle::<Request>::new(),
             ProviderStorage(self.provider),
             SingleTargetStorage(self.target),
             ActiveTasksStorage::default(),
         ));
+        Ok(())
     }
 
     fn execute(operation: OperationRequest) -> OperationResult {

@@ -39,11 +39,12 @@ impl<T> JoinInput<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
             SingleTargetStorage(self.target)),
         );
+        Ok(())
     }
 
     fn execute(
@@ -85,16 +86,16 @@ impl<Values> ZipJoin<Values> {
 }
 
 impl<Values: Unzippable> Operation for ZipJoin<Values> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
             self.sources,
             InputBundle::<()>::new(),
             SingleTargetStorage(self.target),
         ));
+        Ok(())
     }
 
     fn execute(request: OperationRequest) -> OperationResult {
@@ -132,16 +133,16 @@ impl<T> BundleJoin<T> {
 }
 
 impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
             self.sources,
             InputBundle::<()>::new(),
             SingleTargetStorage(self.target),
         ));
+        Ok(())
     }
 
     fn execute(request: OperationRequest) -> OperationResult {

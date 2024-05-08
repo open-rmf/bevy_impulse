@@ -16,229 +16,240 @@
 */
 
 use bevy::{
-    prelude::{Entity, World, Component, Query},
-    ecs::system::SystemState,
+    prelude::{Entity, Component},
 };
 
 use smallvec::SmallVec;
 
+use std::collections::HashMap;
+
 use crate::{
     SingleTargetStorage, Cancelled, Operation, InputBundle,
-    OperationStatus, OperationRoster, NextOperationLink, Cancel,
-    Cancellation, FunnelInputStatus, ForkTargetStatus, SingleInputStorage,
-    CancellationBehavior, OperationResult, OrBroken, OperationSetup, OperationRequest,
+    OperationRoster, NextOperationLink, Cancel, BufferSettings,
+    Cancellation, Unreachability, SingleInputStorage, OperationReachability,
+    ReachabilityResult, Buffer, ManageInput, OperationCleanup,
+    OperationResult, OrBroken, OperationSetup, OperationRequest,
+    Input, BeginCancelStorage, FinishCancelStorage, execute_operation,
 };
 
-/// This component is held by request target entities which have an associated
-/// cancel target (on_cancel was applied to its position in the impulse chain).
-///
-/// This means that if the entity with this component experiences a cancel event,
-/// we should insert an InputStorage(()) component into its target.
-#[derive(Component)]
-struct CancelSource {
-    /// The target that should be triggered with an InputStorage(()) when a
-    /// cancellation event happens.
-    target: Entity
+pub(crate) struct CancelledSession {
+    parent_session: Entity,
+    status: CancelStatus,
 }
 
-/// This component is applied to
-#[derive(Component)]
-struct CancelTarget {
-    source: Entity,
-}
-
-/// Apply this to a source entity to indicate that it should keep operating (not
-/// be cancelled) even if its target(s) drop.
-#[derive(Component)]
-pub(crate) struct DetachDependency;
-
-/// Apply this to a source entity to indicate that cancellation cascades should
-/// not propagate past it.
-#[derive(Component)]
-pub(crate) struct DisposeOnCancel;
-
-#[derive(Component)]
-struct CancelSignalStorage<T>(T);
-
-pub(crate) struct OperateCancel<Signal: 'static + Send + Sync> {
-    cancel_source: Entity,
-    signal_target: Entity,
-    signal: Signal,
-}
-
-impl<Signal: 'static + Send + Sync> OperateCancel<Signal> {
-    pub(crate) fn new(cancel_source: Entity, signal_target: Entity, signal: Signal) -> Self {
-        Self { cancel_source, signal_target, signal }
+impl CancelledSession {
+    pub(crate) fn new(
+        parent_session: Entity,
+        status: CancelStatus,
+    ) -> Self {
+        Self { parent_session, status }
     }
 }
 
-impl<Signal: 'static + Send + Sync> Operation for OperateCancel<Signal> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+pub(crate) enum CancelStatus {
+    Cleanup,
+    Cancelled(Cancellation),
+    Unreachable(Unreachability),
+}
+
+pub(crate) struct CancelInputBuffer<T> {
+    settings: BufferSettings,
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> Operation for CancelInputBuffer<T>
+where
+    T: 'static + Send + Sync,
+{
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.entity_mut(source).insert(Buffer::<T>::new(self.settings));
+        Ok(())
+    }
+
+    fn execute(
+        OperationRequest { source, world, roster }: OperationRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        source_mut.transfer_to_buffer::<T>(roster)
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<T>();
+        clean.notify_cleaned()
+    }
+
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        reachability.has_input::<T>()
+        // If this node is active then there is nothing upstream of it, so no
+        // need to crawl further up than this.
+    }
+}
+
+pub(crate) struct BeginCancel<T> {
+    from_scope: Entity,
+    buffer: Entity,
+    target: Entity,
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> Operation for BeginCancel<T>
+where
+    T: 'static + Send + Sync,
+{
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
-            CancelTarget{ source: self.cancel_source },
-            CancelSignalStorage(self.signal),
-            SingleTargetStorage(self.signal_target),
+            CancelInputBufferStorage(self.buffer),
+            SingleTargetStorage(self.target),
+            CancelFromScope(self.from_scope),
+            InputBundle::<()>::new(),
         ));
-        world.entity_mut(self.cancel_source)
-            .insert(CancelSource{ target: source });
+
+        world.get_entity_mut(self.from_scope).or_broken()?
+            .get_mut::<BeginCancelStorage>().or_broken()?.0
+            .push(source);
+
+        Ok(())
+    }
+
+    fn execute(
+        OperationRequest { source, world, roster }: OperationRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session: scoped_session, .. } = source_mut.take_input::<()>()?;
+        let input = source_mut.get::<CancelInputBufferStorage>().or_broken()?.0;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+        let from_scope = source_mut.get::<CancelFromScope>().or_broken()?.0;
+        let finish_cancel = world.get::<FinishCancelStorage>(from_scope).or_broken()?.0;
+
+        while let Some(data) = world.get_entity_mut(input)
+            .or_broken()?
+            .try_from_buffer::<T>(scoped_session)?
+        {
+            let cancellation_session = world.spawn(()).id();
+            world.get_entity_mut(target).or_broken()?
+                .give_input(cancellation_session, data, roster);
+
+            world.get_entity_mut(finish_cancel).or_broken()?
+                .get_mut::<AwaitingCancelStorage>().or_broken()?
+                .map.get_mut(&scoped_session).or_broken()?
+                .cancellation_sessions.push(cancellation_session);
+        }
+
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<()>();
+        clean.notify_cleaned()
+    }
+
+    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        if r.has_input::<()>()? {
+            return Ok(true);
+        }
+
+        let input = r.world().get::<CancelInputBufferStorage>(r.source()).or_broken()?.0;
+        r.check_upstream(input)
+    }
+}
+
+pub(crate) struct EnterCancel {
+    from_scope: Entity,
+}
+
+impl Operation for EnterCancel {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(source).or_broken()?.insert((
+            CancelFromScope(self.from_scope),
+        ));
+        Ok(())
     }
 
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let CancelSignalStorage::<Signal>(signal) = source_mut.take().or_broken()?;
-        let CancellationStorage(cause) = source_mut.take().or_broken()?;
-        let SingleTargetStorage(target) = source_mut.take().or_broken()?;
-        if let Some(mut target_mut) = world.get_entity_mut(target) {
-            target_mut.insert(InputBundle::new(
-                Cancelled{ signal, cancellation: cause }
-            ));
-            roster.queue(target);
-        } else {
-            roster.cancel(Cancel::broken_here(target));
+        let Input { session: scoped_session, data: cancelled } = source_mut.take_input::<CancelledSession>()?;
+        let from_scope = source_mut.get::<CancelFromScope>().or_broken()?.0;
+        let scope_ref = world.get_entity(from_scope).or_broken()?;
+
+        let finish_cancel = scope_ref.get::<FinishCancelStorage>().or_broken()?.0;
+        let begin_cancels = scope_ref.get::<BeginCancelStorage>().or_broken()?.0.clone();
+
+        let mut finish_cancel_mut = world.get_entity_mut(finish_cancel).or_broken()?;
+        finish_cancel_mut
+            .get_mut::<AwaitingCancelStorage>().or_broken()?
+            .map.insert(scoped_session, AwaitingCancel::new(cancelled));
+        finish_cancel_mut.give_input(scoped_session, CheckAwaitingSession, roster)?;
+
+        for begin in begin_cancels {
+            // We execute the begin nodes immediately so that they can load up the
+            // finish_cancel node with all their cancellation behavior IDs before
+            // the finish_cancel node gets executed.
+            world.get_entity_mut(begin).or_broken()?.give_input(session, (), roster)?;
+            execute_operation(OperationRequest { source: begin, world, roster });
         }
 
-        Ok(OperationStatus::Finished)
+        Ok(())
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+
     }
 }
 
-/// Find the highest link on the chain that is not detached and trigger a cancel
-/// starting from there.
-///
-/// Do not trigger any cancellation if the target belongs to an inert chain, i.e.
-/// part of a cancellation branch or an unused branch. In that case, just dispose
-/// of the branch.
-pub(crate) fn propagate_dependency_loss_upwards(
-    target: Cancel,
-    world: &mut World,
-    roster: &mut OperationRoster
-) {
-    let mut target_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
-    target_queue.push(target);
-
-    let mut state: SystemState<(
-        Query<(&SingleInputStorage, Option<&mut ForkTargetStatus>)>,
-        Query<Entity>,
-    )> = SystemState::new(world);
-    let (mut source_query, existence_query) = state.get_mut(world);
-
-    while let Some(Cancel { apply_to, cause }) = target_queue.pop() {
-        if let Ok((source, target_status)) = source_query.get_mut(apply_to) {
-            // Check that the source exists. If the source has already been
-            // disposed of, then we should begin the cancellation here instead
-            // of crawling up any further.
-            if existence_query.contains(source.0) {
-                if let Some(mut target_status) = target_status {
-                    target_status.drop_dependency(cause);
-                    roster.queue(source.0);
-                } else {
-                    target_queue.push(Cancel { apply_to: source.0, cause });
-                }
-                continue;
-            }
-        }
-
-        // There is nothing further to crawl up, so we begin triggering the
-        // cancellation from here.
-        roster.cancel(Cancel { apply_to, cause });
-    }
+pub(crate) struct CancelFinished {
+    from_scope: Entity,
 }
 
-/// Cancel a request from this link in a impulse chain downwards. This will
-/// trigger any on_cancel reactions that are associated with the cancelled link
-/// in the chain and all other links in the chain that come after it.
-///
-/// If the cascade reaches a funnel input source then the cascade will change
-/// the input's status to Cancelled and trigger the funnel to process it instead
-/// of continuing like normal.
-pub(crate) fn cancel_from_link(
-    initial_source: Cancel,
-    world: &mut World,
-    roster: &mut OperationRoster,
-) {
-    let mut downstream_queue: SmallVec<[Cancel; 16]> = SmallVec::new();
-    downstream_queue.push(initial_source);
-
-    while let Some(Cancel { apply_to: source, cause }) = downstream_queue.pop() {
-        if let Some(cancel_target) = get_cancel_target(source, world) {
-            if let Some(mut cancel_target_mut) = world.get_entity_mut(cancel_target) {
-                cancel_target_mut.insert(CancellationStorage(cause.clone()));
-                roster.queue(cancel_target);
-            } else {
-                roster.cancel(Cancel::broken_here(cancel_target));
-            }
-        }
-
-        if let Some(behavior) = world.get::<CancellationBehavior>(source).copied() {
-            (behavior.hook)(&cause, source, world, roster);
-        }
-
-        if world.get::<DisposeOnCancel>(source).is_some() {
-            // Do not cascade the cancellation down from here. The user has
-            // asked for this to be disposed instead of cancelled.
-            roster.dispose_chain_from(source);
-            continue;
-        }
-
-        let mut state: SystemState<(
-            NextOperationLink,
-            Query<(&mut FunnelInputStatus, &SingleTargetStorage)>,
-        )> = SystemState::new(world);
-        let (next_link, mut funnel_input) = state.get_mut(world);
-
-        if let Ok((mut input_status, target)) = funnel_input.get_mut(source) {
-            // This link is a funnel input source. We should stop propagating here
-            // and instead mark its status as cancelled, and trigger its funnel
-            // to respond to it.
-            input_status.cancel(cause.clone());
-            roster.queue(target.0);
-        } else {
-            for next in next_link.iter(source) {
-                downstream_queue.push(Cancel { apply_to: next, cause: cause.clone() });
-            }
-            world.despawn(source);
-        }
+impl Operation for CancelFinished {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        // world.get_entity_mut(entity)
+        world.entity_mut(source).insert((
+            CancelFromScope(self.from_scope),
+            InputBundle::<()>::new(),
+            InputBundle::<CheckAwaitingSession>::new(),
+            AwaitingCancelStorage::default(),
+        ));
+        Ok(())
     }
-}
 
-pub(crate) fn dispose_cancellation_chain(
-    source: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
-) {
-    if let Some(cancel_target) = get_cancel_target(source, world) {
-        roster.dispose_chain_from(cancel_target);
-    }
-}
-
-fn get_cancel_target(source: Entity, world: &mut World) -> Option<Entity> {
-    if let Some(source_ref) = world.get_entity(source) {
-        let Some(cancel_source) = source_ref.get::<CancelSource>() else {
-            // This source does not have a cancel component, so we do
-            // not need to dispose of any cancellation chain for it.
-            return None;
-        };
-
-        return Some(cancel_source.target);
-    } else {
-        // The entity has been despawned prematurely, so we should look
-        // through all existing CancelTarget components and find any whose
-        // source matches this one, and then dispose of them.
-        let mut all_cancel_targets_state: SystemState<Query<(Entity, &CancelTarget)>> =
-            SystemState::new(world);
-        let all_cancel_targets = all_cancel_targets_state.get(world);
-        for (e, cancel_target) in &all_cancel_targets {
-            if cancel_target.source == source {
-                return Some(e);
-            }
-        }
-
-        // There is no cancel target associated with this source, so we
-        // do not need to dispose of any cancellation chain for it.
-        return None;
+    fn execute(
+        OperationRequest { source, world, roster }: OperationRequest
+    ) -> OperationResult {
+        // 1. Get CheckAwaitingSession input and see if its cancellation_sessions
+        //    are empty.
+        // 2. Get () input and deduct its session from whichever awaiting session
+        //    it belongs to.
+        // 3. Check cancellation input and deduct its session from whichever
+        //    awaiting session it belongs to.
     }
 }
 
 #[derive(Component)]
-struct CancellationStorage(Cancellation);
+struct CancelInputBufferStorage(Entity);
+
+#[derive(Component)]
+struct CancelFromScope(Entity);
+
+#[derive(Component, Default)]
+struct AwaitingCancelStorage {
+    /// Key: Scoped Session
+    map: HashMap<Entity, AwaitingCancel>,
+}
+
+struct AwaitingCancel {
+    cancelled: CancelledSession,
+    cancellation_sessions: SmallVec<[Entity; 8]>,
+}
+
+impl AwaitingCancel {
+    fn new(cancelled: CancelledSession) -> Self {
+        Self { cancelled, cancellation_sessions: Default::default() }
+    }
+}
+
+struct CheckAwaitingSession;

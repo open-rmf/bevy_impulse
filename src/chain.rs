@@ -20,7 +20,7 @@ use std::future::Future;
 use crate::{
     UnusedTarget, Receive, PerformOperation,
     ForkClone, Chosen, ApplyLabel, Stream, Provider,
-    AsMap, IntoBlockingMap, IntoAsyncMap, OperateCancel,
+    AsMap, IntoBlockingMap, IntoAsyncMap, EnterCancel,
     DetachDependency, DisposeOnCancel, Promise, Noop,
     Cancelled, ForkTargetStorage,
     make_result_branching, make_cancel_filter_on_err,
@@ -788,7 +788,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
         let signal_target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(PerformOperation::new(
             cancel_target,
-            OperateCancel::new(self.source, signal_target, signal),
+            EnterCancel::new(self.source, signal_target, signal),
         ));
 
         let u = f(Chain::new(cancel_target, signal_target, self.commands));

@@ -30,16 +30,13 @@ impl<T> Operation for Terminate<T>
 where
     T: 'static + Send + Sync,
 {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         let mut source_mut = world.entity_mut(source);
         source_mut.insert(InputBundle::<T>::new());
-        let Some(scope) = source_mut.get::<ScopeStorage>() else {
-            return;
-        };
-        let Some(mut terminals) = world.get_mut::<TerminalStorage>(scope.get()) else {
-            return;
-        };
+        let scope = source_mut.get::<ScopeStorage>().or_broken()?;
+        let mut terminals = world.get_mut::<TerminalStorage>(scope.get()).or_broken()?;
         terminals.0.push(source);
+        Ok(())
     }
 
     fn execute(

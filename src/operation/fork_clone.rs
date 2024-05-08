@@ -36,16 +36,16 @@ impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {
 }
 
 impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
-            if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert(SingleInputStorage::new(source));
-            }
+            world.get_entity_mut(*target).or_broken()?
+                .insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
             self.targets,
         ));
+        Ok(())
     }
 
     fn execute(

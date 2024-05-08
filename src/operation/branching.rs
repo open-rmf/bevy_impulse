@@ -58,17 +58,17 @@ where
     Outputs: Branchable,
     F: FnOnce(InputT, &mut Outputs::Activation) + 'static + Send + Sync,
 {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
-            if let Some(mut target_mut) = world.get_entity_mut(*target) {
-                target_mut.insert(SingleInputStorage::new(source));
-            }
+            world.get_entity_mut(*target).or_broken()?
+                .insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
             self.targets,
             InputBundle::<InputT>::new(),
             BranchingActivatorStorage(self.activator),
         ));
+        Ok(())
     }
 
     fn execute(
