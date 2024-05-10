@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use crate::{
     Disposal, Filtered, OperationError, ScopeStorage, OrBroken,
-    OperationCleanup, OperationResult, SingleTargetStorage, OperationRoster,
+    OperationResult, SingleTargetStorage, OperationRoster,
 };
 
 /// Information about the cancellation that occurred.
@@ -99,7 +99,7 @@ pub(crate) struct Cancel {
     /// The target of the cancellation
     pub(crate) target: Entity,
     /// The session which is being cancelled for the target
-    pub(crate) session: Entity,
+    pub(crate) session: Option<Entity>,
     /// Information about why a cancellation is happening
     pub(crate) cancellation: Cancellation,
 }
@@ -125,17 +125,9 @@ impl Cancel {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> Result<(), CancelFailure> {
-        if let Some(cancel) = world.get::<OperationCancel>(self.target) {
+        if let Some(cancel) = world.get::<OperationCancelStorage>(self.target) {
             let cancel = cancel.0;
-            (cancel)(
-                OperationCleanup {
-                    source: self.target,
-                    session: self.session,
-                    world,
-                    roster
-                },
-                self.cancellation,
-            );
+            (cancel)(OperationCancel { cancel: self, world, roster });
         } else {
             return Err(CancelFailure::new(
                 OperationError::Broken(Some(Backtrace::new())),
@@ -191,6 +183,12 @@ pub trait ManageCancellation {
         roster: &mut OperationRoster,
     );
 
+    fn emit_broken(
+        &mut self,
+        backtrace: Option<Backtrace>,
+        roster: &mut OperationRoster,
+    );
+
     fn try_receive_cancel(&mut self) -> Result<Option<CancelSignal>, OperationError>;
 }
 
@@ -201,7 +199,25 @@ impl<'w> ManageCancellation for EntityMut<'w> {
         cancellation: Cancellation,
         roster: &mut OperationRoster,
     ) {
-        if let Err(failure) = try_emit_cancel(self, session, cancellation, roster) {
+        if let Err(failure) = try_emit_cancel(self, Some(session), cancellation, roster) {
+            // We were unable to emit the cancel according to the normal
+            // procedure. We should move this into the unhandled errors resource
+            // so that it does not get lost.
+            self.world_scope(move |world| {
+                world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .cancellations.push(failure);
+            });
+        }
+    }
+
+    fn emit_broken(
+        &mut self,
+        backtrace: Option<Backtrace>,
+        roster: &mut OperationRoster,
+    ) {
+        let cause = Broken { node: self.id(), backtrace };
+        if let Err(failure) = try_emit_cancel(self, None, cause.into(), roster) {
             // We were unable to emit the cancel according to the normal
             // procedure. We should move this into the unhandled errors resource
             // so that it does not get lost.
@@ -221,7 +237,7 @@ impl<'w> ManageCancellation for EntityMut<'w> {
 
 fn try_emit_cancel(
     source_mut: &mut EntityMut,
-    session: Entity,
+    session: Option<Entity>,
     cancellation: Cancellation,
     roster: &mut OperationRoster,
 ) -> Result<(), CancelFailure> {
@@ -233,14 +249,14 @@ fn try_emit_cancel(
         roster.cancel(Cancel { source, target: scope, session, cancellation });
     } else if let Some(target) = source_mut.get::<SingleTargetStorage>() {
         let target = target.get();
-        roster.cancel(Cancel { source, target, session, cancellation });
+        roster.cancel(Cancel { source, target, session: Some(session), cancellation });
     } else {
         return Err(CancelFailure::new(
             OperationError::Broken(Some(Backtrace::new())),
             Cancel {
                 source,
                 target: source,
-                session,
+                session: Some(session),
                 cancellation,
             }
         ));
@@ -268,19 +284,26 @@ impl CancelFailure {
 #[derive(Resource, Default)]
 pub struct UnhandledErrors {
     pub cancellations: Vec<CancelFailure>,
+    pub operations: Vec<OperationError>,
+}
+
+pub struct OperationCancel<'a> {
+    pub cancel: Cancel,
+    pub world: &'a mut World,
+    pub roster: &'a mut OperationRoster,
 }
 
 #[derive(Component)]
-struct OperationCancel(fn(OperationCleanup, Cancellation) -> OperationResult);
+struct OperationCancelStorage(fn(OperationCancel) -> OperationResult);
 
 #[derive(Bundle)]
 pub struct CancellableBundle {
     storage: CancelSignalStorage,
-    cancel: OperationCancel,
+    cancel: OperationCancelStorage,
 }
 
 impl CancellableBundle {
-    pub fn new(cancel: fn(OperationCleanup, Cancellation) -> OperationResult) -> Self {
-        CancellableBundle { storage: Default::default(), cancel: OperationCancel(cancel) }
+    pub fn new(cancel: fn(OperationCancel) -> OperationResult) -> Self {
+        CancellableBundle { storage: Default::default(), cancel: OperationCancelStorage(cancel) }
     }
 }

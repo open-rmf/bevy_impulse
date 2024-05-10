@@ -16,7 +16,8 @@
 */
 
 use crate::{
-    RequestLabelId, Cancel, ManageInput, InspectInput,
+    RequestLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
+    CancelFailure, Broken, ManageCancellation,
 };
 
 use bevy::{
@@ -315,29 +316,16 @@ impl<'a> OperationCleanup<'a> {
             return;
         };
         let cleanup = cleanup.0;
-        let _ = cleanup(OperationCleanup {
+        if let Err(error) = cleanup(OperationCleanup {
             source: self.source,
             session: self.session,
             world: self.world,
             roster: self.roster
-        });
-    }
-
-    fn for_session(&mut self, other_session: Entity) -> OperationCleanup {
-        Self {
-            source: self.source,
-            session: other_session,
-            world: self.world,
-            roster: self.roster,
-        }
-    }
-
-    fn for_node(&mut self, other_source: Entity) -> OperationCleanup {
-        Self {
-            source: other_source,
-            session: self.session,
-            world: self.world,
-            roster: self.roster,
+        }) {
+            self.world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .operations
+                .push(error);
         }
     }
 
@@ -566,7 +554,7 @@ struct OperationReachabiilityStorage(
 
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
-        request.roster.cancel(Cancel::broken_here(request.source));
+
         return;
     };
     let operator = operator.0;
@@ -580,11 +568,26 @@ fn perform_operation<Op: Operation>(
         Ok(()) => {
             // Do nothing
         }
-        Err(OperationError::Broken(backtrace)) => {
-            roster.cancel(Cancel::broken(source, backtrace));
-        }
         Err(OperationError::NotReady) => {
             // Do nothing
+        }
+        Err(OperationError::Broken(backtrace)) => {
+            if let Some(mut source_mut) = world.get_entity_mut(source) {
+                source_mut.emit_broken(backtrace, roster);
+            } else {
+                world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .cancellations
+                .push(CancelFailure {
+                    error: OperationError::Broken(Some(Backtrace::new())),
+                    cancel: Cancel {
+                        source,
+                        target: source,
+                        session: None,
+                        cancellation: Broken { node: source, backtrace }.into(),
+                    }
+                })
+            }
         }
     }
 }

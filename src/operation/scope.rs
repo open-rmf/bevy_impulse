@@ -21,7 +21,7 @@ use crate::{
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
     BufferSettings, Buffer, CancellableBundle, OperationRoster, ManageCancellation,
-    OperationError,
+    OperationError, OperationCancel, Cancel, UnhandledErrors,
 };
 
 use backtrace::Backtrace;
@@ -156,14 +156,16 @@ where
         )
     }
 
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        let mut source_mut = clean.world.get_entity_mut(clean.source).or_broken()?;
+    fn cleanup(
+        OperationCleanup { source, session, world, roster }: OperationCleanup
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let pairs: SmallVec<[_; 16]> = source_mut
             .get_mut::<ScopedSessionStorage>()
             .or_broken()?
             .0
             .iter_mut()
-            .filter(|pair| pair.parent_session == clean.session)
+            .filter(|pair| pair.parent_session == session)
             .filter_map(|p| {
                 if p.status.to_cleanup() {
                     Some(p.scoped_session)
@@ -176,22 +178,20 @@ where
         if pairs.is_empty() {
             // We have no record of the mentioned session in this scope, so it
             // is already clean.
-            return clean.notify_cleaned();
+            return OperationCleanup { source, session, world, roster }.notify_cleaned();
         };
 
         for scoped_session in pairs {
-            let source_ref = clean.world.get_entity(clean.source).or_broken()?;
+            let source_ref = world.get_entity(source).or_broken()?;
             let staging_node = source_ref.get::<FinishedStagingStorage>().or_broken()?.0;
-
             let nodes = source_ref.get::<ScopeContents>().or_broken()?.nodes().clone();
-            let mut session_clean = clean.for_session(scoped_session);
             for node in nodes {
-                session_clean.for_node(node).clean();
+                OperationCleanup { source: node, session: scoped_session, world, roster }.clean();
             }
 
             // OperateScope::cleanup gets called when the entire scope is being cancelled
             // so we need to clear out the staging node as well.
-            session_clean.for_node(staging_node).clean();
+            OperationCleanup { source: staging_node, session: scoped_session, world, roster }.clean();
         }
 
         Ok(())
@@ -244,21 +244,72 @@ where
     Streams: Stream,
     Response: 'static + Send + Sync,
 {
-
     fn receive_cancel(
-        clean: OperationCleanup,
-        cause: Cancellation,
+        OperationCancel {
+            cancel: Cancel { source: _origin, target: source, session, cancellation },
+            world,
+            roster
+        }: OperationCancel,
     ) -> OperationResult {
-        let scoped_session = clean.session;
-        let mut source_mut = clean.world.get_entity_mut(clean.source).or_broken()?;
-        let mut sessions = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
-        let pair = sessions.0
-            .iter_mut()
-            .find(|pair| pair.scoped_session == scoped_session)
-            .or_not_ready()?;
+        if let Some(session) = session {
+            // We only need to cancel one specific session
+            return Self::cancel_one(session, source, cancellation, world, roster);
+        }
 
-        if pair.status.to_cancelled(cause) {
-            cleanup_entire_scope(clean)?;
+        // We need to cancel all sessions. This is usually because a workflow
+        // is fundamentally broken.
+        let all_scoped_sessions: SmallVec<[Entity; 16]> = world.get::<ScopedSessionStorage>(source)
+            .or_broken()?.0
+            .iter()
+            .map(|p| p.scoped_session)
+            .collect();
+
+        for scoped_session in all_scoped_sessions {
+            if let Err(error) = Self::cancel_one(
+                scoped_session, source, cancellation.clone(), world, roster
+            ) {
+                world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .operations.push(error);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn cancel_one(
+        session: Entity,
+        source: Entity,
+        cancellation: Cancellation,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        let source_ref = world.get_entity(source).or_broken()?;
+        let sessions = source_ref.get::<ScopedSessionStorage>().or_broken()?;
+
+        // The cancelled session could be a scoped session or it could be a
+        // parent session (e.g. because the target was dropped). We won't be
+        // able to tell without checking against both.
+        let scoped_sessions: SmallVec<[Entity; 16]> = sessions.0
+            .iter()
+            .filter(|pair| pair.scoped_session == session || pair.parent_session == session)
+            .map(|p| p.scoped_session)
+            .collect();
+
+        for scoped_session in scoped_sessions {
+            let mut sessions = world.get_mut::<ScopedSessionStorage>(source).or_broken()?;
+            let Some(pair) = sessions.0
+                .iter_mut()
+                .find(|pair| pair.scoped_session == scoped_session) else
+            {
+                continue;
+            };
+
+            if pair.status.to_cancelled(cancellation.clone()) {
+                cleanup_entire_scope(OperationCleanup {
+                    source, session: scoped_session, world, roster,
+                })?;
+            }
         }
 
         Ok(())
@@ -419,10 +470,12 @@ pub struct FinishedStaging<T> {
     _ignore: std::marker::PhantomData<T>,
 }
 
-fn cleanup_entire_scope(mut clean: OperationCleanup) -> OperationResult {
-    let nodes = clean.world.get::<ScopeContents>(clean.source).or_broken()?.nodes().clone();
+fn cleanup_entire_scope(
+    OperationCleanup { source, session, world, roster }: OperationCleanup
+) -> OperationResult {
+    let nodes = world.get::<ScopeContents>(source).or_broken()?.nodes().clone();
     for node in nodes {
-        clean.for_node(node).clean();
+        OperationCleanup { source: node, session, world, roster }.clean();
     }
     Ok(())
 }
@@ -743,12 +796,44 @@ impl Operation for FinishCancel {
 
 impl FinishCancel {
     fn receive_cancel(
-        OperationCleanup { source, session: cancellation_session, world, roster }: OperationCleanup,
-        cancellation: Cancellation,
+        OperationCancel {
+            cancel: Cancel { source: _origin, target: source, session, cancellation },
+            world,
+            roster
+        }: OperationCancel,
     ) -> OperationResult {
-        Self::deduct_finished_cancellation(
-            source, cancellation_session, world, roster, Some(cancellation)
-        )
+        if let Some(cancellation_session) = session {
+            // We just need to cancel a specific cancellation session. The
+            // cancellation signal for a FinishCancel always comes from a child
+            // cancellation session, never from an outside source.
+            return Self::deduct_finished_cancellation(
+                source, cancellation_session, world, roster, Some(cancellation),
+            );
+        }
+
+        // All cancellation sessions need to be wiped out. This usually implies
+        // that some workflow has broken entities.
+        let cancellation_sessions: SmallVec<[Entity; 16]> = world
+            .get::<AwaitingCancelStorage>(source).or_broken()?.0
+            .iter()
+            .flat_map(|a| a.cancellation_sessions.iter())
+            .copied()
+            .collect();
+
+        for cancellation_session in cancellation_sessions {
+            // TODO(@mxgrey): Should we try to cancel the cancellation workflow?
+            // This is a pretty extreme edge case so it would be tricky to wind
+            // this down correctly.
+            if let Err(error) = Self::deduct_finished_cancellation(
+                source, cancellation_session, world, roster, Some(cancellation.clone())
+            ) {
+                world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .operations.push(error);
+            }
+        }
+
+        Ok(())
     }
 
     fn deduct_finished_cancellation(

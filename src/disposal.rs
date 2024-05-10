@@ -177,7 +177,7 @@ impl From<PoisonedMutexDisposal> for DisposalCause {
     }
 }
 
-pub trait ManageDisposals {
+pub trait ManageDisposal {
     fn push_disposal(
         &mut self,
         session: Entity,
@@ -192,7 +192,7 @@ pub trait InspectDisposals {
     fn get_disposals(&self, session: Entity) -> Option<&Vec<Disposal>>;
 }
 
-impl<'w> ManageDisposals for EntityMut<'w> {
+impl<'w> ManageDisposal for EntityMut<'w> {
     fn push_disposal(
         &mut self,
         session: Entity,

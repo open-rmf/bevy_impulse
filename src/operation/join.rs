@@ -20,9 +20,10 @@ use bevy::prelude::Entity;
 use crate::{
     Input, ManageInput, InspectInput, InputBundle, FunnelInputStorage,
     SingleTargetStorage, Operation, Unzippable,
-    SingleInputStorage, Cancel, JoinedBundle, JoinStatus, JoinStatusResult,
+    SingleInputStorage, JoinedBundle, JoinStatus, JoinStatusResult,
     OperationResult, OrBroken, OperationRequest, OperationSetup,
     OperationCleanup, OperationReachability, ReachabilityResult,
+    ManageDisposal, JoinImpossible,
 };
 
 use std::collections::HashMap;
@@ -42,7 +43,7 @@ impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
-            SingleTargetStorage(self.target)),
+            SingleTargetStorage::new(self.target)),
         );
         Ok(())
     }
@@ -50,10 +51,9 @@ impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let mut source_mut = world
-            .get_entity_mut(source).or_broken()?
-            .transfer_to_buffer::<T>(roster);
-        Ok(())
+        world
+        .get_entity_mut(source).or_broken()?
+        .transfer_to_buffer::<T>(roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
@@ -93,7 +93,7 @@ impl<Values: Unzippable> Operation for ZipJoin<Values> {
         world.entity_mut(source).insert((
             self.sources,
             InputBundle::<()>::new(),
-            SingleTargetStorage(self.target),
+            SingleTargetStorage::new(self.target),
         ));
         Ok(())
     }
@@ -140,7 +140,7 @@ impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
         world.entity_mut(source).insert((
             self.sources,
             InputBundle::<()>::new(),
-            SingleTargetStorage(self.target),
+            SingleTargetStorage::new(self.target),
         ));
         Ok(())
     }
@@ -168,7 +168,7 @@ impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
 }
 
 fn manage_join_delivery(
-    mut request: OperationRequest,
+    request: OperationRequest,
     reachable: fn(OperationReachability) -> JoinStatusResult,
     deliver: fn(Entity, OperationRequest) -> OperationResult,
 ) -> OperationResult {
@@ -187,7 +187,14 @@ fn manage_join_delivery(
             deliver(session, request)?
         }
         JoinStatus::Unreachable(unreachable) => {
-            request.roster.cancel(Cancel::join(request.source, unreachable));
+            // request.roster.cancel(Cancel::join(request.source, unreachable));
+            // request.roster.disposed()
+            request.world.get_entity_mut(request.source).or_broken()?
+                .push_disposal(
+                    session,
+                    JoinImpossible { join: request.source, unreachable }.into(),
+                    request.roster,
+                );
         }
     }
 
