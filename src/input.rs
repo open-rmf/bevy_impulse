@@ -16,13 +16,15 @@
 */
 
 use bevy::{
-    prelude::{Entity, Component, DetectChangesMut},
+    prelude::{Entity, Component},
     ecs::world::{EntityMut, EntityRef}
 };
 
 use smallvec::SmallVec;
 
-use crate::{OperationRoster, OperationError, OrBroken, SingleTargetStorage};
+use crate::{
+    OperationRoster, OperationError, OrBroken, SingleTargetStorage,
+};
 
 use std::collections::HashMap;
 
@@ -90,9 +92,26 @@ pub trait ManageInput {
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError>;
 
+    /// Give an input to this node without flagging it in the roster. This
+    /// should not generally be used. It's only for special cases where we know
+    /// the node will be manually run after giving this input. It's marked
+    /// unsafe to bring attention to this requirement.
+    unsafe fn sneak_input<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+        data: T,
+    ) -> Result<(), OperationError>;
+
+    /// Get an input that is ready to be taken, or else produce an error.
     fn take_input<T: 'static + Send + Sync>(
         &mut self
     ) -> Result<Input<T>, OperationError>;
+
+    /// Try to take an input if one is ready. If no input is ready this will
+    /// return Ok(None). It only returns an error if the node is broken.
+    fn try_take_input<T: 'static + Send + Sync>(
+        &mut self
+    ) -> Result<Option<Input<T>>, OperationError>;
 
     fn transfer_to_buffer<T: 'static + Send + Sync>(
         &mut self,
@@ -136,18 +155,30 @@ impl<'w> ManageInput for EntityMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        let source = self.id();
+        unsafe { self.sneak_input(session, data); }
+        roster.queue(self.id());
+        Ok(())
+    }
+
+    unsafe fn sneak_input<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+        data: T,
+    ) -> Result<(), OperationError> {
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        storage.reverse_queue.push(Input { session, data });
-        self.get_mut::<InputReady>().or_broken()?.set_changed();
-        roster.queue(source);
+        storage.reverse_queue.insert(0, Input { session, data });
         Ok(())
     }
 
     fn take_input<T: 'static + Send + Sync>(&mut self) -> Result<Input<T>, OperationError> {
-        let source = self.id();
+        self.try_take_input()?.or_not_ready()
+    }
+
+    fn try_take_input<T: 'static + Send + Sync>(
+        &mut self
+    ) -> Result<Option<Input<T>>, OperationError> {
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        storage.reverse_queue.pop().or_not_ready()
+        Ok(storage.reverse_queue.pop())
     }
 
     fn transfer_to_buffer<T: 'static + Send + Sync>(
@@ -156,8 +187,9 @@ impl<'w> ManageInput for EntityMut<'w> {
     ) -> Result<(), OperationError> {
         let Input { session, data } = self.take_input::<T>()?;
         let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
+        let policy = buffer.settings.policy;
         let reverse_queue = buffer.reverse_queues.entry(session).or_default();
-        match buffer.settings.policy {
+        match policy {
             BufferPolicy::KeepFirst(n) => {
                 while n > 0 && reverse_queue.len() > n {
                     // This shouldn't happen, but we'll handle it anyway.
@@ -273,7 +305,7 @@ impl<T> Buffer<T> {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy)]
 pub struct BufferSettings {
     policy: BufferPolicy,
 }

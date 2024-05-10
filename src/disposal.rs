@@ -24,7 +24,10 @@ use std::sync::Arc;
 
 use std::collections::HashMap;
 
-use crate::{OperationRoster, OperationResult, ScopeStorage, OrBroken};
+use crate::{
+    OperationRoster, OperationResult, operation::ScopeStorage, OrBroken,
+    Cancellation,
+};
 
 #[derive(Debug, Clone)]
 pub struct Disposal {
@@ -62,8 +65,8 @@ pub enum DisposalCause {
     /// An output was disposed because a mutex was poisoned.
     PoisonedMutex(PoisonedMutexDisposal),
 
-    /// A scope became unreachable, causing its output to be disposed.
-    Scope(Unreachability),
+    /// A scope was cancelled so its output has been disposed.
+    Scope(Cancellation),
 }
 
 /// A variant of [`DisposalCause`]
@@ -132,7 +135,7 @@ impl From<DisposedBranch> for DisposalCause {
 }
 
 /// A variant of [`DisposalCause`]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JoinImpossible {
     /// The source node of the join
     pub join: Entity,
@@ -174,31 +177,8 @@ impl From<PoisonedMutexDisposal> for DisposalCause {
     }
 }
 
-/// A variant of [`DisposalCause`]
-#[derive(Debug)]
-pub struct Unreachability {
-    /// The ID of the scope whose termination became unreachable.
-    pub scope: Entity,
-    /// The ID of the session whose termination became unreachable.
-    pub session: Entity,
-    /// A list of the disposals that occurred for this session.
-    pub disposals: Vec<Disposal>,
-}
-
-impl Unreachability {
-    pub fn new(scope: Entity, session: Entity, disposals: Vec<Disposal>) -> Self {
-        Self { scope, session, disposals }
-    }
-}
-
-impl From<Unreachability> for DisposalCause {
-    fn from(value: Unreachability) -> Self {
-        Self::Scope(value)
-    }
-}
-
 pub trait ManageDisposals {
-    fn add_disposal(
+    fn push_disposal(
         &mut self,
         session: Entity,
         disposal: Disposal,
@@ -213,7 +193,7 @@ pub trait InspectDisposals {
 }
 
 impl<'w> ManageDisposals for EntityMut<'w> {
-    fn add_disposal(
+    fn push_disposal(
         &mut self,
         session: Entity,
         disposal: Disposal,

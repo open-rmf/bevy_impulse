@@ -97,6 +97,10 @@ pub fn flush_impulses(
             while let Some(cleanup) = roster.cleanup_finished.pop() {
                 cleanup.trigger(world, &mut roster);
             }
+
+            while let Some(cancel) = roster.cancel.pop_front() {
+                cancel.trigger(world, &mut roster);
+            }
         }
 
         while let Some(source) = roster.queue.pop_front() {
@@ -104,6 +108,10 @@ pub fn flush_impulses(
 
             while let Some(cleanup) = roster.cleanup_finished.pop() {
                 cleanup.trigger(world, &mut roster);
+            }
+
+            while let Some(cancel) = roster.cancel.pop_front() {
+                cancel.trigger(world, &mut roster);
             }
         }
     }

@@ -16,8 +16,7 @@
 */
 
 use crate::{
-    RequestLabelId, Cancel, Cancellation, ScopeStorage, ScopeContents, ManageInput,
-    InspectInput,
+    RequestLabelId, Cancel, ManageInput, InspectInput,
 };
 
 use bevy::{
@@ -49,17 +48,11 @@ pub(crate) use join::*;
 mod noop;
 pub(crate) use noop::*;
 
-mod operate_cancel;
-pub(crate) use operate_cancel::*;
-
 mod operate_handler;
 pub(crate) use operate_handler::*;
 
 mod operate_map;
 pub(crate) use operate_map::*;
-
-mod operate_scope;
-pub(crate) use operate_scope::*;
 
 mod operate_service;
 pub(crate) use operate_service::*;
@@ -69,6 +62,9 @@ pub(crate) use operate_task::*;
 
 mod receive;
 pub(crate) use receive::*;
+
+mod scope;
+pub use scope::*;
 
 mod terminate;
 pub(crate) use terminate::*;
@@ -117,7 +113,17 @@ impl FunnelInputStorage {
 
 /// Keep track of the target for a link in a impulse chain
 #[derive(Component, Clone, Copy)]
-pub(crate) struct SingleTargetStorage(pub(crate) Entity);
+pub struct SingleTargetStorage(Entity);
+
+impl SingleTargetStorage {
+    pub fn new(target: Entity) -> Self {
+        Self(target)
+    }
+
+    pub fn get(&self) -> Entity {
+        self.0
+    }
+}
 
 /// Keep track of the targets for a fork in a impulse chain
 #[derive(Component, Clone)]
@@ -342,7 +348,7 @@ impl<'a> OperationCleanup<'a> {
     }
 
     fn notify_cleaned(&mut self) -> OperationResult {
-        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
+        let source_mut = self.world.get_entity_mut(self.source).or_broken()?;
         let scope = source_mut.get::<ScopeStorage>().or_not_ready()?.get();
         let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
         let mut scope_contents = scope_mut.get_mut::<ScopeContents>().or_broken()?;

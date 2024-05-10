@@ -15,36 +15,41 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy::{
+    prelude::{Entity, Component, Bundle, Resource, World},
+    ecs::world::EntityMut,
+};
 
 use backtrace::Backtrace;
 
+use smallvec::SmallVec;
+
 use std::sync::Arc;
 
-use crate::{Unreachability, Filtered};
-
-/// Response type that gets sent when a cancellation occurs.
-#[derive(Debug)]
-pub struct Cancelled<Signal> {
-    pub signal: Signal,
-    pub cancellation: Cancellation,
-}
+use crate::{
+    Disposal, Filtered, OperationError, ScopeStorage, OrBroken,
+    OperationCleanup, OperationResult, SingleTargetStorage, OperationRoster,
+};
 
 /// Information about the cancellation that occurred.
 #[derive(Debug, Clone)]
 pub struct Cancellation {
+    /// The cause of a cancellation
     pub cause: Arc<CancellationCause>,
+    /// Cancellations that occurred within cancellation workflows that were
+    /// triggered by this cancellation.
+    pub while_cancelling: Vec<Cancellation>,
 }
 
 impl Cancellation {
     pub fn from_cause(cause: CancellationCause) -> Self {
-        Self { cause: Arc::new(cause) }
+        Self { cause: Arc::new(cause), while_cancelling: Default::default() }
     }
 }
 
 impl<T: Into<CancellationCause>> From<T> for Cancellation {
     fn from(value: T) -> Self {
-        Cancellation { cause: Arc::new(value.into()) }
+        Cancellation { cause: Arc::new(value.into()), while_cancelling: Default::default() }
     }
 }
 
@@ -70,54 +75,212 @@ pub enum CancellationCause {
     ///
     /// The entity provided in [`BrokenLink`] is the link where the breakage was
     /// detected.
-    BrokenLink(BrokenLink),
+    Broken(Broken),
 }
 
 #[derive(Debug, Clone)]
-pub struct BrokenLink {
+pub struct Broken {
     pub node: Entity,
     pub backtrace: Option<Backtrace>,
 }
 
-impl From<BrokenLink> for CancellationCause {
-    fn from(value: BrokenLink) -> Self {
-        CancellationCause::BrokenLink(value)
+impl From<Broken> for CancellationCause {
+    fn from(value: Broken) -> Self {
+        CancellationCause::Broken(value)
     }
 }
 
-/// Passed into the [`OperationRoster`](crate::OperationRoster) to indicate when
-/// a link needs to be cancelled.
+/// Passed into the [`OperationRoster`](crate::OperationRoster) to pass a cancel
+/// signal into the target.
 #[derive(Debug, Clone)]
-pub struct Cancel {
-    pub scope: Entity,
-    pub cause: Cancellation,
+pub(crate) struct Cancel {
+    /// The entity that triggered the cancellation
+    pub(crate) source: Entity,
+    /// The target of the cancellation
+    pub(crate) target: Entity,
+    /// The session which is being cancelled for the target
+    pub(crate) session: Entity,
+    /// Information about why a cancellation is happening
+    pub(crate) cancellation: Cancellation,
 }
 
 impl Cancel {
-    /// Create a new [`Cancel`] operation
-    pub fn new(scope: Entity, cause: CancellationCause) -> Self {
-        Self { scope, cause: Cancellation::from_cause(cause) }
+    pub(crate) fn trigger(
+        self,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) {
+        if let Err(failure) = self.try_trigger(world, roster) {
+            // We were unable to deliver the cancellation to the intended target.
+            // We should move this into the unhandled errors resource so that it
+            // does not get lost.
+            world
+            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .cancellations.push(failure);
+        }
     }
 
-    /// Create a broken link cancel operation
-    pub fn broken(source: Entity, backtrace: Option<Backtrace>) -> Self {
-        Self::new(source, BrokenLink { node: source, backtrace }.into())
-    }
+    fn try_trigger(
+        self,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> Result<(), CancelFailure> {
+        if let Some(cancel) = world.get::<OperationCancel>(self.target) {
+            let cancel = cancel.0;
+            (cancel)(
+                OperationCleanup {
+                    source: self.target,
+                    session: self.session,
+                    world,
+                    roster
+                },
+                self.cancellation,
+            );
+        } else {
+            return Err(CancelFailure::new(
+                OperationError::Broken(Some(Backtrace::new())),
+                self,
+            ));
+        }
 
-    /// Create a broken link cancel operation with a backtrace for this current
-    /// location.
-    pub fn broken_here(source: Entity) -> Self {
-        Self::broken(source, Some(Backtrace::new()))
+        Ok(())
     }
+}
 
-    /// Create a dropped target cancel operation
-    pub fn dropped(target: Entity) -> Self {
-        Self::new(target, CancellationCause::TargetDropped(target))
+/// A variant of [`CancellationCause`]
+#[derive(Debug)]
+pub struct Unreachability {
+    /// The ID of the scope whose termination became unreachable.
+    pub scope: Entity,
+    /// The ID of the session whose termination became unreachable.
+    pub session: Entity,
+    /// A list of the disposals that occurred for this session.
+    pub disposals: Vec<Disposal>,
+}
+
+impl Unreachability {
+    pub fn new(scope: Entity, session: Entity, disposals: Vec<Disposal>) -> Self {
+        Self { scope, session, disposals }
     }
 }
 
 impl From<Unreachability> for CancellationCause {
     fn from(value: Unreachability) -> Self {
         CancellationCause::Unreachable(value)
+    }
+}
+
+/// Signals that a cancellation has occurred. This can be read by receivers
+/// using [`try_take_cancel()`](ManageInput).
+pub struct CancelSignal {
+    pub session: Entity,
+    pub cancellation: Cancellation,
+}
+
+#[derive(Component, Default)]
+struct CancelSignalStorage {
+    reverse_queue: SmallVec<[CancelSignal; 8]>,
+}
+
+pub trait ManageCancellation {
+    /// Have this node emit a signal to cancel the current scope.
+    fn emit_cancel(
+        &mut self,
+        session: Entity,
+        cancellation: Cancellation,
+        roster: &mut OperationRoster,
+    );
+
+    fn try_receive_cancel(&mut self) -> Result<Option<CancelSignal>, OperationError>;
+}
+
+impl<'w> ManageCancellation for EntityMut<'w> {
+    fn emit_cancel(
+        &mut self,
+        session: Entity,
+        cancellation: Cancellation,
+        roster: &mut OperationRoster,
+    ) {
+        if let Err(failure) = try_emit_cancel(self, session, cancellation, roster) {
+            // We were unable to emit the cancel according to the normal
+            // procedure. We should move this into the unhandled errors resource
+            // so that it does not get lost.
+            self.world_scope(move |world| {
+                world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .cancellations.push(failure);
+            });
+        }
+    }
+
+    fn try_receive_cancel(&mut self) -> Result<Option<CancelSignal>, OperationError> {
+        let mut storage = self.get_mut::<CancelSignalStorage>().or_broken()?;
+        Ok(storage.reverse_queue.pop())
+    }
+}
+
+fn try_emit_cancel(
+    source_mut: &mut EntityMut,
+    session: Entity,
+    cancellation: Cancellation,
+    roster: &mut OperationRoster,
+) -> Result<(), CancelFailure> {
+    let source = source_mut.id();
+    if let Some(scope) = source_mut.get::<ScopeStorage>() {
+        // The cancellation is happening inside a scope, so we should cancel
+        // the scope
+        let scope = scope.get();
+        roster.cancel(Cancel { source, target: scope, session, cancellation });
+    } else if let Some(target) = source_mut.get::<SingleTargetStorage>() {
+        let target = target.get();
+        roster.cancel(Cancel { source, target, session, cancellation });
+    } else {
+        return Err(CancelFailure::new(
+            OperationError::Broken(Some(Backtrace::new())),
+            Cancel {
+                source,
+                target: source,
+                session,
+                cancellation,
+            }
+        ));
+    }
+
+    Ok(())
+}
+
+pub struct CancelFailure {
+    /// The error produced while the cancellation was happening
+    pub error: OperationError,
+    /// The cancellation that was being emitted
+    pub cancel: Cancel,
+}
+
+impl CancelFailure {
+    fn new(
+        error: OperationError,
+        cancel: Cancel,
+    ) -> Self {
+        Self { error, cancel }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct UnhandledErrors {
+    pub cancellations: Vec<CancelFailure>,
+}
+
+#[derive(Component)]
+struct OperationCancel(fn(OperationCleanup, Cancellation) -> OperationResult);
+
+#[derive(Bundle)]
+pub struct CancellableBundle {
+    storage: CancelSignalStorage,
+    cancel: OperationCancel,
+}
+
+impl CancellableBundle {
+    pub fn new(cancel: fn(OperationCleanup, Cancellation) -> OperationResult) -> Self {
+        CancellableBundle { storage: Default::default(), cancel: OperationCancel(cancel) }
     }
 }
