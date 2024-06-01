@@ -216,7 +216,7 @@ impl<'w> ManageInput for EntityMut<'w> {
         // CancelInputBuffer does not have a target, it is pull-only, so we
         // should not queue an operation for it.
         if let Some(target) = self.get::<SingleTargetStorage>() {
-            roster.queue(target.0);
+            roster.queue(target.get());
         }
 
         Ok(())

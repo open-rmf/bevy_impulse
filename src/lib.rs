@@ -65,8 +65,6 @@ pub use workflow::*;
 
 pub mod testing;
 
-pub(crate) mod private;
-
 use bevy::prelude::{Entity, In};
 
 /// Use BlockingService to indicate that your system is a blocking service and

@@ -38,7 +38,7 @@ use crate::{
     SingleTargetStorage, OperationRoster, Blocker, ManageInput,
     OperationSetup, OperationRequest, OperationResult, Operation,
     OrBroken, BlockerStorage, OperationCleanup, ChannelQueue,
-    OperationReachability, ReachabilityResult,
+    OperationReachability, ReachabilityResult, emit_disposal, Disposal,
 };
 
 struct JobWaker {
@@ -100,7 +100,7 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
         Self {
             session: TaskSessionStorage(session),
             owner: TaskOwnerStorage(owner),
-            target: SingleTargetStorage(target),
+            target: SingleTargetStorage::new(target),
             task: TaskStorage(task),
             blocker: BlockerStorage(blocker),
         }
@@ -116,11 +116,17 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         });
 
         let mut source_mut = world.entity_mut(source);
-        source_mut.insert((self, JobWakerStorage(waker)));
+        let owner = self.owner.0;
+        let session = self.session.0;
+        source_mut.insert((
+            self,
+            JobWakerStorage(waker),
+            StopTask(stop_task::<Response>),
+        ));
 
-        let mut owner_mut = world.get_entity_mut(self.owner.0).or_broken()?;
+        let mut owner_mut = world.get_entity_mut(owner).or_broken()?;
         let mut tasks = owner_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
-        tasks.list.push(ActiveTask { task_id: source, session: self.session.0 });
+        tasks.list.push(ActiveTask { task_id: source, session });
         Ok(())
     }
 
@@ -175,43 +181,41 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
         let owner = source_mut.get::<TaskOwnerStorage>().or_broken()?.0;
         let task = source_mut.take::<TaskStorage<Response>>().or_broken()?.0;
+        let unblock = source_mut.take::<BlockerStorage>().or_broken()?.0;
         let sender = clean.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         AsyncComputeTaskPool::get().spawn(async move {
             task.cancel().await;
             sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                let Some(mut owner_mut) = world.get_entity_mut(owner) else {
-                    world.despawn(source);
-                    return;
-                };
-
-                let Some(mut active_tasks) = owner_mut.get_mut::<ActiveTasksStorage>() else {
-                    world.despawn(source);
-                    return;
-                };
-
-                let mut cleanup_ready = true;
-                active_tasks.list.retain(|ActiveTask { task_id: id, session: r }| {
-                    if *id == source {
-                        return false;
-                    }
-
-                    if *r == session {
-                        // The owner has another active task related to this
-                        // session so its cleanup is not finished yet.
-                        cleanup_ready = false;
-                    }
-                    true
-                });
-
-                if cleanup_ready {
-                    OperationCleanup { source: owner, session, world, roster }
-                        .notify_cleaned();
+                if let Some(unblock) = unblock {
+                    roster.unblock(unblock);
                 }
+
+                if let Some(mut owner_mut) = world.get_entity_mut(owner) {
+                    if let Some(mut active_tasks) = owner_mut.get_mut::<ActiveTasksStorage>() {
+                        let mut cleanup_ready = true;
+                        active_tasks.list.retain(|ActiveTask { task_id: id, session: r }| {
+                            if *id == source {
+                                return false;
+                            }
+
+                            if *r == session {
+                                // The owner has another active task related to this
+                                // session so its cleanup is not finished yet.
+                                cleanup_ready = false;
+                            }
+                            true
+                        });
+
+                        if cleanup_ready {
+                            OperationCleanup { source: owner, session, world, roster }
+                                .notify_cleaned();
+                        }
+                    };
+                };
 
                 world.despawn(source);
             }));
         }).detach();
-
 
         Ok(())
     }
@@ -222,6 +226,42 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
             .get::<TaskSessionStorage>().or_broken()?.0;
         Ok(session == reachability.session)
     }
+}
+
+#[derive(Component, Clone, Copy)]
+pub(crate) struct StopTask(pub(crate) fn(OperationRequest, Disposal) -> OperationResult);
+
+fn stop_task<Response: 'static + Send + Sync>(
+    OperationRequest { source, world, .. }: OperationRequest,
+    disposal: Disposal,
+) -> OperationResult {
+    let mut source_mut = world.get_entity_mut(source).or_broken()?;
+    let owner = source_mut.get::<TaskOwnerStorage>().or_broken()?.0;
+    let session = source_mut.get::<TaskSessionStorage>().or_broken()?.0;
+    let task = source_mut.take::<TaskStorage<Response>>().or_broken()?.0;
+    let unblock = source_mut.take::<BlockerStorage>().or_broken()?.0;
+    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+    AsyncComputeTaskPool::get().spawn(async move {
+        task.cancel().await;
+        sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+            if let Some(unblock) = unblock {
+                roster.unblock(unblock);
+            }
+
+            if let Some(mut owner_mut) = world.get_entity_mut(owner) {
+                if let Some(mut active_tasks) = owner_mut.get_mut::<ActiveTasksStorage>() {
+                    active_tasks.list.retain(|ActiveTask { task_id: id, .. }| {
+                        *id != source
+                    });
+                }
+            }
+
+            world.despawn(source);
+            emit_disposal(owner, session, disposal, world, roster);
+        }));
+    }).detach();
+
+    Ok(())
 }
 
 #[derive(Component, Default)]
@@ -235,30 +275,31 @@ pub struct ActiveTask {
 }
 
 impl ActiveTasksStorage {
-    pub fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        let source_ref = clean.world.get_entity(clean.source).or_broken()?;
+    pub fn cleanup(mut cleaner: OperationCleanup) -> OperationResult {
+        let source_ref = cleaner.world.get_entity(cleaner.source).or_broken()?;
         let active_tasks = source_ref.get::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
         for ActiveTask { task_id: id, session } in &active_tasks.list {
-            if *session == clean.session {
+            if *session == cleaner.session {
                 to_cleanup.push(*id);
                 cleanup_ready = false;
             }
         }
 
         for task_id in to_cleanup {
-            clean.for_node(task_id).clean();
+            cleaner = cleaner.for_node(task_id);
+            cleaner.clean();
         }
 
         if cleanup_ready {
-            clean.notify_cleaned();
+            cleaner.notify_cleaned();
         }
 
         Ok(())
     }
 
-    pub fn contains_session(r: OperationReachability) -> ReachabilityResult {
+    pub fn contains_session(r: &OperationReachability) -> ReachabilityResult {
         let active_tasks = &r.world.get_entity(r.source).or_broken()?
             .get::<Self>().or_broken()?.list;
 

@@ -223,7 +223,7 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
                                         }
                                         Err(_) => {
                                             let _ = flat_sender.cancel(
-                                                Cancellation::from_cause(CancellationCause::PoisonedMutex)
+                                                Cancellation::from_cause(CancellationCause::PoisonedMutexInPromise)
                                             );
                                         }
                                     }
@@ -252,7 +252,7 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
             }
             Err(_) => {
                 PromiseState::Cancelled(
-                    Cancellation::from_cause(CancellationCause::PoisonedMutex)
+                    Cancellation::from_cause(CancellationCause::PoisonedMutexInPromise)
                 )
             }
         };

@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    LabelBuilder, DeliveryInstructions, RequestLabel, Chosen, private,
+    LabelBuilder, DeliveryInstructions, RequestLabel, Chosen,
 };
 
 use bevy::ecs::system::EntityCommands;
@@ -34,7 +34,7 @@ use bevy::ecs::system::EntityCommands;
 ///
 /// You can either pass in a [`RequestLabel`] struct directly or use
 /// [`LabelBuilder`] to assign it queue/ensure qualities.
-pub trait ApplyLabel: private::Sealed<()> {
+pub trait ApplyLabel {
     fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>);
 }
 
@@ -43,7 +43,6 @@ impl<T: RequestLabel> ApplyLabel for T {
         LabelBuilder::new(self).apply(commands)
     }
 }
-impl<T: RequestLabel> private::Sealed<()> for T { }
 
 impl<Q, E> ApplyLabel for LabelBuilder<Q, E> {
     fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>) {
@@ -54,11 +53,10 @@ impl<Q, E> ApplyLabel for LabelBuilder<Q, E> {
         });
     }
 }
-impl<Q, E> private::Sealed<()> for LabelBuilder<Q, E> { }
 
 /// This trait gives a convenient way to convert a label into a [`LabelBuilder`]
 /// which can add more specifications about how a labeled request should behave.
-pub trait BuildLabel: private::Sealed<()> {
+pub trait BuildLabel {
     fn queue(self) -> LabelBuilder<Chosen, ()>;
     fn ensure(self) -> LabelBuilder<(), Chosen>;
 }

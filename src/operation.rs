@@ -17,7 +17,7 @@
 
 use crate::{
     RequestLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
-    CancelFailure, Broken, ManageCancellation,
+    CancelFailure, Broken, ManageCancellation, ManageDisposal,
 };
 
 use bevy::{
@@ -67,9 +67,6 @@ pub(crate) use receive::*;
 mod scope;
 pub use scope::*;
 
-mod terminate;
-pub(crate) use terminate::*;
-
 /// This component is given to nodes that get triggered each time any single
 /// input is provided to them. There may be multiple nodes that can feed into
 /// this node, but this node gets triggered any time any one of them provides
@@ -82,7 +79,7 @@ impl SingleInputStorage {
         Self(SmallVec::from_iter([input]))
     }
 
-    pub fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+    pub fn is_reachable(r: &mut OperationReachability) -> ReachabilityResult {
         let Some(inputs) = r.world.get_entity(r.source).or_broken()?.get::<Self>() else {
             return Ok(false);
         };
@@ -260,6 +257,8 @@ pub(crate) struct Blocker {
     pub(crate) provider: Entity,
     /// The source that is doing the blocking
     pub(crate) source: Entity,
+    /// The session that is doing the blocking
+    pub(crate) session: Entity,
     /// The label of the queue that is being blocked
     pub(crate) label: Option<RequestLabelId>,
     /// Function pointer to call when this is no longer blocking
@@ -330,8 +329,16 @@ impl<'a> OperationCleanup<'a> {
     }
 
     fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
-        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
-        source_mut.cleanup_inputs::<T>(self.session);
+        self.world.get_entity_mut(self.source)
+            .or_broken()?
+            .cleanup_inputs::<T>(self.session);
+        Ok(())
+    }
+
+    fn cleanup_disposals(&mut self) -> OperationResult {
+        self.world.get_entity_mut(self.source)
+            .or_broken()?
+            .clear_disposals(self.session);
         Ok(())
     }
 
@@ -346,6 +353,10 @@ impl<'a> OperationCleanup<'a> {
             );
         }
         Ok(())
+    }
+
+    fn for_node(self, source: Entity) -> Self {
+        Self { source, ..self }
     }
 }
 
@@ -365,16 +376,6 @@ impl<'a> OperationReachability<'a> {
         visited: &'a mut HashMap<Entity, bool>,
     ) -> OperationReachability<'a> {
         Self { session, source, world, visited }
-    }
-
-    pub fn check(
-        session: Entity,
-        source: Entity,
-        world: &'a World
-    ) -> ReachabilityResult {
-        let mut visited = HashMap::new();
-        let mut reachability = Self { source, session, world, visited: &mut visited };
-        reachability.check_upstream(source)
     }
 
     pub fn check_upstream(&mut self, source: Entity) -> ReachabilityResult {
@@ -424,6 +425,16 @@ impl<'a> OperationReachability<'a> {
     pub fn world(&self) -> &World {
         self.world
     }
+}
+
+pub fn check_reachability<'a>(
+    session: Entity,
+    source: Entity,
+    world: &'a World,
+) -> ReachabilityResult {
+    let mut visited = HashMap::new();
+    let mut r = OperationReachability { source, session, world, visited: &mut visited };
+    r.check_upstream(source)
 }
 
 #[derive(Clone, Copy)]

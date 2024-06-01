@@ -20,7 +20,6 @@ use crate::{
     OperationRoster, Stream, Input, Provider,
     PerformOperation, OperateHandler, ManageInput, OperationError,
     OrBroken, OperateTask, Operation, OperationSetup,
-    private,
 };
 
 use bevy::{
@@ -106,14 +105,11 @@ impl<'a> HandleRequest<'a> {
     where
         Task::Output: Send + Sync,
     {
-        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
-
         let task = AsyncComputeTaskPool::get().spawn(task);
-
-        let mut task_source = self.world.spawn(()).id();
-        let operate_task = OperateTask::new(session, self.source, self.target, task, None);
-        operate_task.setup(OperationSetup { source: task_source, world: self.world });
-        self.roster.queue(task_source);
+        let task_id = self.world.spawn(()).id();
+        OperateTask::new(session, self.source, self.target, task, None)
+            .setup(OperationSetup { source: task_id, world: self.world });
+        self.roster.queue(task_id);
         Ok(())
     }
 
@@ -224,7 +220,7 @@ where
 pub struct BlockingCallbackMarker<M>(std::marker::PhantomData<M>);
 pub struct AsyncCallbackMarker<M>(std::marker::PhantomData<M>);
 
-pub trait AsHandler<M>: private::Sealed<M> {
+pub trait AsHandler<M> {
     type Request;
     type Response;
     type Streams;
@@ -249,9 +245,6 @@ where
     }
 }
 
-impl<Request, Response, M, Sys> private::Sealed<BlockingHandlerMarker<(Request, Response, M)>> for Sys { }
-
-
 impl<Request, Task, Streams, M, Sys> AsHandler<AsyncHandlerMarker<(Request, Task, Streams, M)>> for Sys
 where
     Sys: IntoSystem<AsyncHandler<Request, Streams>, Task, M>,
@@ -272,9 +265,6 @@ where
     }
 }
 
-impl<Request, Task, Streams, M, Sys> private::Sealed<AsyncHandlerMarker<(Request, Task, Streams, M)>> for Sys { }
-
-
 impl<Request, Response, F> AsHandler<BlockingCallbackMarker<(Request, Response)>> for F
 where
     F: FnMut(BlockingHandler<Request>) -> Response + 'static + Send,
@@ -294,8 +284,6 @@ where
         Handler::new(CallbackHandler { callback })
     }
 }
-
-impl<Request, Response, F> private::Sealed<BlockingCallbackMarker<(Request, Response)>> for F { }
 
 impl<Request, Task, Streams, F> AsHandler<AsyncCallbackMarker<(Request, Task, Streams)>> for F
 where
@@ -320,9 +308,7 @@ where
     }
 }
 
-impl<Request, Task, Streams, F> private::Sealed<AsyncCallbackMarker<(Request, Task, Streams)>> for F { }
-
-pub trait IntoBlockingHandler<M>: private::Sealed<M> {
+pub trait IntoBlockingHandler<M> {
     type Request;
     type Response;
     fn into_blocking_handler(self) -> Handler<Self::Request, Self::Response, ()>;
@@ -362,7 +348,7 @@ where
     }
 }
 
-pub trait IntoAsyncHandler<M>: private::Sealed<M> {
+pub trait IntoAsyncHandler<M> {
     type Request;
     type Response;
     fn into_async_handler(self) -> Handler<Self::Request, Self::Response, ()>;

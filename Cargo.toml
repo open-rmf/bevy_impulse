@@ -14,6 +14,7 @@ crossbeam = "*"
 futures = "0.3"
 backtrace = "0.3"
 anyhow = "*"
+thiserror = "*"
 
 [dev-dependencies]
 async-std = { version = "*" }

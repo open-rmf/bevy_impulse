@@ -16,17 +16,18 @@
 */
 
 use bevy::{
-    prelude::{Entity, Component},
+    prelude::{Entity, Component, World},
     ecs::world::{EntityMut, EntityRef},
 };
+
+use backtrace::Backtrace;
 
 use std::sync::Arc;
 
 use std::collections::HashMap;
 
 use crate::{
-    OperationRoster, OperationResult, operation::ScopeStorage, OrBroken,
-    Cancellation,
+    OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
 };
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,28 @@ pub struct Disposal {
 impl<T: Into<DisposalCause>> From<T> for Disposal {
     fn from(value: T) -> Self {
         Disposal { cause: Arc::new(value.into())}
+    }
+}
+
+impl Disposal {
+    pub fn service_unavailable(service: Entity, for_node: Entity) -> Disposal {
+        ServiceUnavailable { service, for_node }.into()
+    }
+
+    pub fn branching(
+        branched_at_node: Entity,
+        disposed_for_target: Entity,
+        reason: Option<anyhow::Error>,
+    ) -> Disposal {
+        DisposedBranch { branched_at_node, disposed_for_target, reason }.into()
+    }
+
+    pub fn supplanted(
+        supplanted_at_node: Entity,
+        supplanted_by_node: Entity,
+        supplanting_session: Entity,
+    ) -> Disposal {
+        Supplanted { supplanted_at_node, supplanted_by_node, supplanting_session }.into()
     }
 }
 
@@ -73,9 +96,9 @@ pub enum DisposalCause {
 #[derive(Debug)]
 pub struct Supplanted {
     /// ID of the node whose service request was supplanted
-    pub cancelled_at_node: Entity,
+    pub supplanted_at_node: Entity,
     /// ID of the node that did the supplanting
-    pub supplanting_node: Entity,
+    pub supplanted_by_node: Entity,
     /// ID of the session that did the supplanting
     pub supplanting_session: Entity,
 }
@@ -86,7 +109,7 @@ impl Supplanted {
         supplanting_node: Entity,
         supplanting_session: Entity,
     ) -> Self {
-        Self { cancelled_at_node, supplanting_node, supplanting_session }
+        Self { supplanted_at_node: cancelled_at_node, supplanted_by_node: supplanting_node, supplanting_session }
     }
 }
 
@@ -123,7 +146,7 @@ pub struct DisposedBranch {
     /// The node where the branching happened
     pub branched_at_node: Entity,
     /// The target node whose input was disposed
-    pub disposed_for_node: Entity,
+    pub disposed_for_target: Entity,
     /// Optionally, a reason given for the branching
     pub reason: Option<anyhow::Error>,
 }
@@ -178,12 +201,12 @@ impl From<PoisonedMutexDisposal> for DisposalCause {
 }
 
 pub trait ManageDisposal {
-    fn push_disposal(
+    fn emit_disposal(
         &mut self,
         session: Entity,
         disposal: Disposal,
         roster: &mut OperationRoster,
-    ) -> OperationResult;
+    );
 
     fn clear_disposals(&mut self, session: Entity);
 }
@@ -193,12 +216,26 @@ pub trait InspectDisposals {
 }
 
 impl<'w> ManageDisposal for EntityMut<'w> {
-    fn push_disposal(
+    fn emit_disposal(
         &mut self,
         session: Entity,
         disposal: Disposal,
         roster: &mut OperationRoster,
-    ) -> OperationResult {
+    ) {
+        let Some(scope) = self.get::<ScopeStorage>() else {
+            let broken_node = self.id();
+            self.world_scope(|world| {
+                world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .disposals
+                .push(DisposalFailure {
+                    disposal, broken_node, backtrace: Some(Backtrace::new())
+                });
+            });
+            return;
+        };
+        let scope = scope.get();
+
         if let Some(mut storage) = self.get_mut::<DisposalStorage>() {
             storage.disposals.entry(session).or_default().push(disposal);
         } else {
@@ -207,9 +244,7 @@ impl<'w> ManageDisposal for EntityMut<'w> {
             self.insert(storage);
         }
 
-        let scope = self.get::<ScopeStorage>().or_broken()?.get();
         roster.disposed(scope, session);
-        Ok(())
     }
 
     fn clear_disposals(&mut self, session: Entity) {
@@ -239,8 +274,41 @@ impl<'w> InspectDisposals for EntityRef<'w> {
     }
 }
 
+pub fn emit_disposal(
+    source: Entity,
+    session: Entity,
+    disposal: Disposal,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
+    if let Some(mut source_mut) = world.get_entity_mut(source) {
+        source_mut.emit_disposal(session, disposal, roster);
+    } else {
+        world
+        .get_resource_or_insert_with(|| UnhandledErrors::default())
+        .disposals
+        .push(DisposalFailure {
+            disposal,
+            broken_node: source,
+            backtrace: Some(Backtrace::new()),
+        });
+    }
+}
+
 #[derive(Component, Default)]
 struct DisposalStorage {
     /// A map from a session to all the disposals that occurred for the session
     disposals: HashMap<Entity, Vec<Disposal>>,
+}
+
+/// When it is impossible for some reason to perform a disposal, the incident
+/// will be logged in this resource. This may happen if a node somehow gets
+/// despawned while its service is attempting to dispose a request.
+pub struct DisposalFailure {
+    /// The disposal that was attempted
+    pub disposal: Disposal,
+    /// The node which was attempting to report the disposal
+    pub broken_node: Entity,
+    /// The backtrace indicating what led up to the failure
+    pub backtrace: Option<Backtrace>,
 }

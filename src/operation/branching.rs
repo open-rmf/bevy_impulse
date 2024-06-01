@@ -21,7 +21,10 @@ use crate::{
     Operation, OperationRoster, ForkTargetStorage, SingleInputStorage,
     OperationResult, OrBroken, OperationRequest, OperationSetup, OperationCleanup,
     ManageInput, Input, OperationReachability, ReachabilityResult, InputBundle,
+    Disposal, ManageDisposal,
 };
+
+use thiserror::Error as ThisError;
 
 pub struct Branching<Input, Outputs, F> {
     activator: F,
@@ -31,7 +34,7 @@ pub struct Branching<Input, Outputs, F> {
 
 pub(crate) fn make_result_branching<T, E>(
     targets: ForkTargetStorage
-) -> Branching<Result<T, E>, (T, E), fn(Result<T, E>, &mut (Option<T>, Option<E>))> {
+) -> Branching<Result<T, E>, (T, E), fn(Result<T, E>) -> (BranchResult<T>, BranchResult<E>)> {
     Branching {
         activator: branch_result,
         targets,
@@ -41,7 +44,7 @@ pub(crate) fn make_result_branching<T, E>(
 
 pub(crate) fn make_option_branching<T>(
     targets: ForkTargetStorage
-) -> Branching<Option<T>, (T, ()), fn(Option<T>, &mut (Option<T>, Option<()>))> {
+) -> Branching<Option<T>, (T, ()), fn(Option<T>) -> (BranchResult<T>, BranchResult<()>)> {
     Branching {
         activator: branch_option,
         targets,
@@ -56,7 +59,7 @@ impl<InputT, Outputs, F> Operation for Branching<InputT, Outputs, F>
 where
     InputT: 'static + Send + Sync,
     Outputs: Branchable,
-    F: FnOnce(InputT, &mut Outputs::Activation) + 'static + Send + Sync,
+    F: FnOnce(InputT) -> Outputs::Activation + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
@@ -78,30 +81,27 @@ where
         let Input { session, data: input } = source_mut.take_input::<InputT>()?;
         let BranchingActivatorStorage::<F>(activator) = source_mut.take().or_broken()?;
 
-        let mut activation = Outputs::new_activation();
-        activator(input, &mut activation);
-
+        let activation = activator(input);
         Outputs::activate(session, activation, source, world, roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<InputT>()?;
+        clean.cleanup_disposals()?;
         clean.notify_cleaned()
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<InputT>()? {
             return Ok(true);
         }
 
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
 pub trait Branchable {
     type Activation;
-
-    fn new_activation() -> Self::Activation;
 
     fn activate<'a>(
         session: Entity,
@@ -112,16 +112,14 @@ pub trait Branchable {
     ) -> OperationResult;
 }
 
+pub type BranchResult<T> = Result<T, Option<anyhow::Error>>;
+
 impl<A, B> Branchable for (A, B)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
 {
-    type Activation = (Option<A>, Option<B>);
-
-    fn new_activation() -> Self::Activation {
-        (None, None)
-    }
+    type Activation = (BranchResult<A>, BranchResult<B>);
 
     fn activate<'a>(
         session: Entity,
@@ -134,40 +132,54 @@ where
         let target_a = *targets.0.get(0).or_broken()?;
         let target_b = *targets.0.get(1).or_broken()?;
 
-        if let Some(a) = a {
-            let mut target_a_mut = world.get_entity_mut(target_a).or_broken()?;
-            target_a_mut.give_input(session, a, roster)?;
-        } else {
-            roster.dispose_chain_from(target_a);
+        let mut target_a_mut = world.get_entity_mut(target_a).or_broken()?;
+        match a {
+            Ok(a) => target_a_mut.give_input(session, a, roster)?,
+            Err(reason) => {
+                let disposal = Disposal::branching(source, target_a, reason);
+                target_a_mut.emit_disposal(session, disposal, roster);
+            }
         }
 
-        if let Some(b) = b {
-            let mut target_b_mut = world.get_entity_mut(target_b).or_broken()?;
-            target_b_mut.give_input(session, b, roster)?;
-        } else {
-            roster.dispose_chain_from(target_b);
+        let mut target_b_mut = world.get_entity_mut(target_b).or_broken()?;
+        match b {
+            Ok(b) => target_b_mut.give_input(session, b, roster)?,
+            Err(reason) => {
+                let disposal = Disposal::branching(source, target_b, reason);
+                target_b_mut.emit_disposal(session, disposal, roster);
+            }
         }
 
         Ok(())
     }
 }
 
-fn branch_result<T, E>(
-    input: Result<T, E>,
-    activation: &mut (Option<T>, Option<E>),
-) {
+#[derive(ThisError, Debug)]
+#[error("An Ok value was received, so the Err branch is being disposed")]
+pub struct OkInput;
+
+#[derive(ThisError, Debug)]
+#[error("An Err value was received, so the Ok branch is being disposed")]
+pub struct ErrInput;
+
+fn branch_result<T, E>(input: Result<T, E>) -> (BranchResult<T>, BranchResult<E>) {
     match input {
-        Ok(value) => activation.0 = Some(value),
-        Err(err) => activation.1 = Some(err),
+        Ok(value) => (Ok(value), Err(Some(OkInput.into()))),
+        Err(err) => (Err(Some(ErrInput.into())), Ok(err)),
     }
 }
 
-fn branch_option<T>(
-    input: Option<T>,
-    activation: &mut (Option<T>, Option<()>),
-) {
+#[derive(ThisError, Debug)]
+#[error("A Some value was received, so the None branch is being disposed")]
+pub struct SomeInput;
+
+#[derive(ThisError, Debug)]
+#[error("A None value was received, so the Some branch is being disposed")]
+pub struct NoneInput;
+
+fn branch_option<T>(input: Option<T>) -> (BranchResult<T>, BranchResult<()>) {
     match input {
-        Some(value) => activation.0 = Some(value),
-        None => activation.1 = Some(()),
+        Some(value) => (Ok(value), Err(Some(SomeInput.into()))),
+        None => (Err(Some(NoneInput.into())), Ok(())),
     }
 }

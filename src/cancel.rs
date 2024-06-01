@@ -27,7 +27,7 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 
 use crate::{
-    Disposal, Filtered, OperationError, ScopeStorage, OrBroken,
+    Disposal, DisposalFailure, Filtered, OperationError, ScopeStorage, OrBroken,
     OperationResult, SingleTargetStorage, OperationRoster,
 };
 
@@ -44,6 +44,10 @@ pub struct Cancellation {
 impl Cancellation {
     pub fn from_cause(cause: CancellationCause) -> Self {
         Self { cause: Arc::new(cause), while_cancelling: Default::default() }
+    }
+
+    pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
+        Filtered { filtered_at_node, reason }.into()
     }
 }
 
@@ -66,6 +70,12 @@ pub enum CancellationCause {
     /// A filtering node has triggered a cancellation.
     Filtered(Filtered),
 
+    /// A promise can never be delivered because the mutex inside of a [`Promise`][1]
+    /// was poisoned.
+    ///
+    /// [1]: crate::Promise
+    PoisonedMutexInPromise,
+
     /// A node in the workflow was broken, for example despawned or missing a
     /// component. This type of cancellation indicates that you are modifying
     /// the entities in a workflow in an unsupported way. If you believe that
@@ -76,6 +86,12 @@ pub enum CancellationCause {
     /// The entity provided in [`BrokenLink`] is the link where the breakage was
     /// detected.
     Broken(Broken),
+}
+
+impl From<Filtered> for CancellationCause {
+    fn from(value: Filtered) -> Self {
+        CancellationCause::Filtered(value)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -249,14 +265,14 @@ fn try_emit_cancel(
         roster.cancel(Cancel { source, target: scope, session, cancellation });
     } else if let Some(target) = source_mut.get::<SingleTargetStorage>() {
         let target = target.get();
-        roster.cancel(Cancel { source, target, session: Some(session), cancellation });
+        roster.cancel(Cancel { source, target, session, cancellation });
     } else {
         return Err(CancelFailure::new(
             OperationError::Broken(Some(Backtrace::new())),
             Cancel {
                 source,
                 target: source,
-                session: Some(session),
+                session,
                 cancellation,
             }
         ));
@@ -281,10 +297,14 @@ impl CancelFailure {
     }
 }
 
+// TODO(@mxgrey): Consider moving this into its own module since more than just
+// cancellation will use this resource.
 #[derive(Resource, Default)]
 pub struct UnhandledErrors {
     pub cancellations: Vec<CancelFailure>,
     pub operations: Vec<OperationError>,
+    pub disposals: Vec<DisposalFailure>,
+    pub stop_tasks: Vec<StopTaskFailure>,
 }
 
 pub struct OperationCancel<'a> {
@@ -306,4 +326,11 @@ impl CancellableBundle {
     pub fn new(cancel: fn(OperationCancel) -> OperationResult) -> Self {
         CancellableBundle { storage: Default::default(), cancel: OperationCancelStorage(cancel) }
     }
+}
+
+pub struct StopTaskFailure {
+    /// The task that was unable to be stopped
+    pub task: Entity,
+    /// The backtrace to indicate why it failed
+    pub backtrace: Option<Backtrace>,
 }

@@ -17,16 +17,21 @@
 
 use crate::{
     Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
-    SingleInputStorage, dispatch_service, Cancel, OperationCleanup,
+    SingleInputStorage, dispatch_service, OperationCleanup,
     OperationResult, OrBroken, OperationSetup, OperationRequest,
     ActiveTasksStorage, OperationReachability, ReachabilityResult,
-    InputBundle,
+    InputBundle, Input, ManageDisposal, Disposal, ManageInput, UnhandledErrors,
+    DisposalFailure,
 };
 
 use bevy::{
     prelude::{Component, Entity, World, Query},
     ecs::system::SystemState,
 };
+
+use smallvec::SmallVec;
+
+use backtrace::Backtrace;
 
 pub(crate) struct OperateService<Request> {
     provider: Entity,
@@ -55,8 +60,9 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
         world.entity_mut(source).insert((
             InputBundle::<Request>::new(),
             ProviderStorage(self.provider),
-            SingleTargetStorage(self.target),
+            SingleTargetStorage::new(self.target),
             ActiveTasksStorage::default(),
+            DisposeForUnavailableService(dispose_for_unavailable_service::<Request>),
         ));
         Ok(())
     }
@@ -72,34 +78,78 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
+        clean.cleanup_disposals()?;
         ActiveTasksStorage::cleanup(clean)
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_session(reachability)? {
+        if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
 #[derive(Component)]
-struct ProviderStorage(Entity);
+pub(crate) struct ProviderStorage(Entity);
 
-pub(crate) fn cancel_service(
-    cancelled_provider: Entity,
+pub(crate) fn dispose_for_despawned_service(
+    despawned_service: Entity,
     world: &mut World,
     roster: &mut OperationRoster,
 ) {
-    let mut providers_state: SystemState<Query<(Entity, &ProviderStorage)>> =
-        SystemState::new(world);
+    let mut providers_state: SystemState<Query<
+        (Entity, &ProviderStorage, Option<&DisposeForUnavailableService>)
+    >> = SystemState::new(world);
     let providers = providers_state.get(world);
-    for (source, ProviderStorage(provider)) in &providers {
-        if *provider == cancelled_provider {
-            roster.cancel(Cancel::service_unavailable(source, cancelled_provider));
+    let mut needs_disposal: SmallVec<[_; 16]> = SmallVec::new();
+    for (source, ProviderStorage(provider), disposer) in &providers {
+        if *provider == despawned_service {
+            needs_disposal.push((source, disposer.copied()));
         }
+    }
+
+    for (source, disposer) in needs_disposal {
+        if let Some(disposer) = disposer {
+            (disposer.0)(source, despawned_service, world, roster);
+        } else {
+            world
+            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .disposals
+            .push(DisposalFailure {
+                disposal: Disposal::service_unavailable(despawned_service, source),
+                broken_node: source,
+                backtrace: Some(Backtrace::new()),
+            });
+        }
+    }
+}
+
+#[derive(Component, Clone, Copy)]
+pub(crate) struct DisposeForUnavailableService(fn(Entity, Entity, &mut World, &mut OperationRoster));
+
+fn dispose_for_unavailable_service<T: 'static + Send + Sync>(
+    source: Entity,
+    service: Entity,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
+    let disposal = Disposal::service_unavailable(service, source);
+    if let Some(mut source_mut) = world.get_entity_mut(source) {
+        while let Ok(Input { session, .. }) = source_mut.take_input::<T>() {
+            source_mut.emit_disposal(session, disposal.clone(), roster);
+        }
+    } else {
+        world
+        .get_resource_or_insert_with(|| UnhandledErrors::default())
+        .disposals
+        .push(DisposalFailure {
+            disposal,
+            broken_node: source,
+            backtrace: Some(Backtrace::new()),
+        });
     }
 }

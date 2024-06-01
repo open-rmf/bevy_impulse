@@ -81,11 +81,11 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
         clean.notify_cleaned()
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<T>()? {
             return Ok(true);
         }
 
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }

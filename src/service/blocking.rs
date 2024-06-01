@@ -17,8 +17,8 @@
 
 use crate::{
     BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest,
-    Input, ManageInput, ServiceBundle, Cancel, OperationRequest, OperationError,
-    OrBroken,
+    Input, ManageInput, ServiceBundle, OperationRequest, OperationError,
+    OrBroken, dispose_for_despawned_service,
     service::builder::BlockingChosen,
     private,
 };
@@ -65,15 +65,6 @@ where
     }
 }
 
-impl<Request, Response, M, Sys> private::Sealed<Blocking<(Request, Response, M)>> for Sys
-where
-    Sys: IntoSystem<BlockingService<Request>, Response, M>,
-    Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync,
-{
-
-}
-
 impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTrait for BlockingServiceStorage<Request, Response> {
     type Request = Request;
     type Response = Response;
@@ -100,17 +91,15 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
                     service
                 } else {
                     // The provider has had its service removed, so we treat this request as cancelled.
-                    roster.cancel(Cancel::service_unavailable(source, provider));
+                    dispose_for_despawned_service(provider, world, roster);
                     return Ok(());
                 }
             }
         } else {
             // If the provider has been despawned then we treat this request as cancelled.
-            roster.cancel(Cancel::service_unavailable(source, provider));
+            dispose_for_despawned_service(provider, world, roster);
             return Ok(());
         };
-
-        roster.disposed(source);
 
         let response = service.run(BlockingService { request, provider }, world);
         service.apply_deferred(world);
@@ -140,7 +129,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
 pub struct AsBlockingService<Srv>(pub Srv);
 
 /// This trait allows any system to be converted into a blocking service.
-pub trait IntoBlockingService<M>: private::Sealed<M> {
+pub trait IntoBlockingService<M> {
     type Service;
     fn into_blocking_service(self) -> Self::Service;
 }
@@ -156,8 +145,6 @@ where
         AsBlockingService(self)
     }
 }
-
-impl<Request, Response, M, Sys> private::Sealed<AsBlockingService<(Request, Response, M)>> for Sys { }
 
 impl<Request, Response, M, Sys> IntoService<AsBlockingService<(Request, Response, M)>> for AsBlockingService<Sys>
 where

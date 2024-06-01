@@ -26,7 +26,7 @@ use crate::{
     ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
     Cancel, DroppedPromiseQueue, UnusedTarget, ServiceLifecycle, ServiceLifecycleQueue,
     OperationRequest,
-    execute_operation, cancel_service,
+    execute_operation, dispose_for_despawned_service,
 };
 
 #[allow(private_interfaces)]
@@ -41,7 +41,7 @@ pub fn flush_impulses(
     world.resource_scope::<ServiceLifecycleQueue, ()>(|world, lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.
         for removed_service in lifecycles.receiver.try_iter() {
-            cancel_service(removed_service, world, &mut roster)
+            dispose_for_despawned_service(removed_service, world, &mut roster)
         }
 
         // Add a lifecycle tracker to any new services that might have shown up

@@ -53,7 +53,7 @@ where
                 f,
                 _ignore: Default::default(),
             },
-            target: SingleTargetStorage(target),
+            target: SingleTargetStorage::new(target),
         }
     }
 }
@@ -100,11 +100,11 @@ where
         clean.notify_cleaned()
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
@@ -133,7 +133,7 @@ where
                 f,
                 _ignore: Default::default(),
             },
-            target: SingleTargetStorage(target),
+            target: SingleTargetStorage::new(target),
         }
     }
 }
@@ -190,13 +190,13 @@ where
         ActiveTasksStorage::cleanup(clean)
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_session(reachability)? {
+        if ActiveTasksStorage::contains_session(&mut reachability)? {
             return Ok(true);
         }
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }

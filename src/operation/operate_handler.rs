@@ -51,7 +51,7 @@ where
         world.entity_mut(source).insert((
             InputBundle::<Request>::new(),
             HandlerStorage { handler: self.handler },
-            SingleTargetStorage(self.target),
+            SingleTargetStorage::new(self.target),
             ActiveTasksStorage::default(),
         ));
         Ok(())
@@ -108,14 +108,14 @@ where
         ActiveTasksStorage::cleanup(clean)
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_session(reachability)? {
+        if ActiveTasksStorage::contains_session(&mut reachability)? {
             return Ok(true);
         }
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 

@@ -15,11 +15,7 @@
  *
 */
 
-use crate::{
-    Service, IntoService, Delivery,
-    stream::*,
-    private,
-};
+use crate::{Service, IntoService, Delivery, stream::*};
 
 use bevy::{
     prelude::App,
@@ -115,7 +111,7 @@ where
         let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         // entity_mut.insert(<<Srv as IntoService<M>>::Streams as IntoStreamBundle>::StreamOutBundle::default());
         entity_mut.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
-        self.deliver.apply_entity_mut(&mut entity_mut);
+        self.deliver.apply_entity_mut::<Srv::Request>(&mut entity_mut);
         self.with.apply(entity_mut);
         self.also.apply(app, provider);
     }
@@ -137,7 +133,7 @@ where
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
         entity_cmds.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
-        self.deliver.apply_entity_commands(&mut entity_cmds);
+        self.deliver.apply_entity_commands::<Srv::Request>(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider
     }
@@ -156,16 +152,7 @@ impl<M, Srv: IntoService<M>, Deliver, With, Also> IntoServiceBuilder<BuilderMark
     }
 }
 
-impl<M, Srv, Deliver, With, Also> private::Sealed<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also>
-where
-    Srv: IntoService<M>,
-{
-
-}
-
 pub struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
-
-impl<M, Sys> private::Sealed<IntoBuilderMarker<M>> for Sys { }
 
 impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Service = Srv;
@@ -199,16 +186,18 @@ where
 pub struct SerialChosen;
 
 impl DeliveryChoice for SerialChosen {
-    fn apply_entity_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
-        entity_mut.insert(Delivery::serial());
+    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
+        self, entity_mut: &mut EntityMut<'w>
+    ) {
+        entity_mut.insert(Delivery::<Request>::serial());
     }
 
-    fn apply_entity_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        entity_commands.insert(Delivery::serial());
+    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
+        self, entity_commands: &mut EntityCommands<'w, 's, 'a>
+    ) {
+        entity_commands.insert(Delivery::<Request>::serial());
     }
 }
-
-impl private::Sealed<()> for SerialChosen { }
 
 /// When this is used in the Deliver type parameter of AsyncServiceBuilder, the
 /// user has indicated that the service should be executed in parallel.
@@ -216,16 +205,18 @@ impl private::Sealed<()> for SerialChosen { }
 pub struct ParallelChosen;
 
 impl DeliveryChoice for ParallelChosen {
-    fn apply_entity_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
-        entity_mut.insert(Delivery::parallel());
+    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
+        self, entity_mut: &mut EntityMut<'w>
+    ) {
+        entity_mut.insert(Delivery::<Request>::parallel());
     }
 
-    fn apply_entity_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        entity_commands.insert(Delivery::parallel());
+    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
+        self, entity_commands: &mut EntityCommands<'w, 's, 'a>
+    ) {
+        entity_commands.insert(Delivery::<Request>::parallel());
     }
 }
-
-impl private::Sealed<()> for ParallelChosen { }
 
 /// When this is used in the Deliver type parameter of ServiceBuilder, the user
 /// has indicated that the service is blocking and therefore does not have a
@@ -234,26 +225,31 @@ impl private::Sealed<()> for ParallelChosen { }
 pub struct BlockingChosen;
 
 impl DeliveryChoice for BlockingChosen {
-    fn apply_entity_commands<'w, 's, 'a>(self, _: &mut EntityCommands<'w, 's, 'a>) {
+    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
+        self, _: &mut EntityCommands<'w, 's, 'a>
+    ) {
         // Do nothing
     }
-    fn apply_entity_mut<'w>(self, _: &mut EntityMut<'w>) {
+
+    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
+        self, _: &mut EntityMut<'w>
+    ) {
         // Do nothing
     }
 }
-
-impl private::Sealed<()> for BlockingChosen { }
 
 impl DeliveryChoice for () {
-    fn apply_entity_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        ParallelChosen.apply_entity_commands(entity_commands)
+    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
+        self, entity_commands: &mut EntityCommands<'w, 's, 'a>
+    ) {
+        ParallelChosen.apply_entity_commands::<Request>(entity_commands)
     }
-    fn apply_entity_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
-        ParallelChosen.apply_entity_mut(entity_mut)
+    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
+        self, entity_mut: &mut EntityMut<'w>
+    ) {
+        ParallelChosen.apply_entity_mut::<Request>(entity_mut)
     }
 }
-
-impl private::Sealed<()> for () { }
 
 impl<T: FnOnce(EntityMut)> WithEntityMut for T {
     fn apply<'w>(self, entity_mut: EntityMut<'w>) {

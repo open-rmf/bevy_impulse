@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    OperationRoster, Stream, PerformOperation, OperateService, Provider, Cancel,
-    OperationRequest, PendingOperationRequest,
+    OperationRoster, Stream, PerformOperation, OperateService, Provider,
+    OperationRequest, PendingOperationRequest, dispose_for_despawned_service,
 };
 
 use bevy::prelude::{Entity, App, Commands, World, Component, Bundle, Resource};
@@ -89,13 +89,13 @@ impl<Request, Response> Default for ServiceMarker<Request, Response> {
 
 #[derive(Component)]
 pub(crate) struct ServiceHook {
-    pub(crate) callback: fn(ServiceRequest),
+    pub(crate) trigger: fn(ServiceRequest),
     pub(crate) lifecycle: Option<ServiceLifecycle>,
 }
 
 impl ServiceHook {
     pub(crate) fn new(callback: fn(ServiceRequest)) -> Self {
-        Self { callback, lifecycle: None }
+        Self { trigger: callback, lifecycle: None }
     }
 }
 
@@ -292,7 +292,8 @@ pub(crate) fn dispatch_service(
     ServiceRequest {
         provider,
         target,
-        operation: OperationRequest { source, world, roster } }: ServiceRequest,
+        operation: OperationRequest { source, world, roster }
+    }: ServiceRequest,
 ) {
     let pending = PendingServiceRequest {
         provider, target, operation: PendingOperationRequest { source }
@@ -310,18 +311,14 @@ pub(crate) fn dispatch_service(
     service_queue.is_delivering = true;
 
     while let Some(pending) = world.resource_mut::<ServiceQueue>().queue.pop_back() {
-        let PendingServiceRequest { provider, operation: PendingOperationRequest { source, .. }, .. } = pending;
-        let Some(provider_ref) = world.get_entity(provider) else {
-            roster.cancel(Cancel::service_unavailable(source, provider));
+        let Some(hook) = world.get::<ServiceHook>(pending.provider) else {
+            // The service has become unavailable, so we should drain the source
+            // node of all its inputs, emitting disposals for all of them.
+            dispose_for_despawned_service(provider, world, roster);
             continue;
         };
 
-        let Some(hook) = provider_ref.get::<ServiceHook>() else {
-            roster.cancel(Cancel::service_unavailable(source, provider));
-            continue;
-        };
-
-        (hook.callback)(pending.activate(world, roster));
+        (hook.trigger)(pending.activate(world, roster));
     }
     world.resource_mut::<ServiceQueue>().is_delivering = false;
 }

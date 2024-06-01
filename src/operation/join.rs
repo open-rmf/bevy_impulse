@@ -61,12 +61,12 @@ impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
         clean.notify_cleaned()
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<T>()? {
             return Ok(true);
         }
 
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
@@ -190,7 +190,7 @@ fn manage_join_delivery(
             // request.roster.cancel(Cancel::join(request.source, unreachable));
             // request.roster.disposed()
             request.world.get_entity_mut(request.source).or_broken()?
-                .push_disposal(
+                .emit_disposal(
                     session,
                     JoinImpossible { join: request.source, unreachable }.into(),
                     request.roster,
@@ -206,16 +206,15 @@ fn status_bundle_join<T: 'static + Send + Sync>(
 ) -> JoinStatusResult {
     let source = reachability.source();
     let session = reachability.session();
-    let world = reachability.world();
-    let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
+    let inputs = reachability.world().get::<FunnelInputStorage>(source).or_broken()?.0.clone();
     let mut unreachable: Vec<Entity> = Vec::new();
     let mut status = JoinStatus::Ready;
 
-    for input in &inputs.0 {
-        if !world.get_entity(*input).or_broken()?.buffer_ready::<T>(session)? {
+    for input in inputs {
+        if !reachability.world().get_entity(input).or_broken()?.buffer_ready::<T>(session)? {
             status = JoinStatus::Pending;
-            if !reachability.check_upstream(*input)? {
-                unreachable.push(*input);
+            if !reachability.check_upstream(input)? {
+                unreachable.push(input);
             }
         }
     }

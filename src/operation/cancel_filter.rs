@@ -19,10 +19,14 @@ use bevy::prelude::{Component, Entity};
 
 use crate::{
     Operation, SingleTargetStorage, InputBundle,
-    SingleInputStorage, Input, ManageInput, Cancel, OperationResult,
+    SingleInputStorage, Input, ManageInput, OperationResult,
     OrBroken, OperationRequest, OperationSetup, OperationCleanup,
-    OperationReachability, ReachabilityResult,
+    OperationReachability, ReachabilityResult, ManageCancellation,
+    Cancellation,
 };
+
+use thiserror::Error as ThisError;
+use std::error::Error;
 
 pub struct CancelFilter<InputT, Output, F> {
     filter: F,
@@ -30,48 +34,83 @@ pub struct CancelFilter<InputT, Output, F> {
     _ignore: std::marker::PhantomData<(InputT, Output)>,
 }
 
-fn identity<Value>(value: Value) -> Value {
-    value
+#[derive(ThisError, Debug)]
+#[error("A scope was cancelled because an unacceptable None value was received")]
+pub struct FilteredNone;
+
+fn filter_none<Value>(value: Option<Value>) -> FilterResult<Value> {
+    value.ok_or_else(|| Some(FilteredNone.into()))
 }
 
-pub(crate) fn make_cancel_filter_on_none<T>(target: Entity) -> CancelFilter<Option<T>, T, fn(Option<T>) -> Option<T>> {
+pub(crate) fn make_cancel_filter_on_none<T>(target: Entity) -> CancelFilter<Option<T>, T, fn(Option<T>) -> FilterResult<T>> {
     CancelFilter {
-        filter: identity::<Option<T>>,
+        filter: filter_none::<T>,
         target,
         _ignore: Default::default()
     }
 }
 
-pub(crate) fn make_cancel_filter_on_err<T, E>(target: Entity) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> Option<T>> {
+pub(crate) fn make_cancel_filter_on_err<T, E: Error + 'static + Send + Sync>(
+    target: Entity,
+) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>> {
     CancelFilter {
-        filter: err_to_none::<T, E>,
+        filter: filter_err::<T, E>,
         target,
         _ignore: Default::default(),
     }
 }
 
-fn err_to_none<T, E>(value: Result<T, E>) -> Option<T> {
-    value.ok()
+pub(crate) fn make_cancel_quietly_filter_on_err<T, E>(
+    target: Entity,
+) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>> {
+    CancelFilter {
+        filter: quietly_filter_err,
+        target,
+        _ignore: Default::default()
+    }
+}
+
+#[derive(ThisError, Debug)]
+#[error("A scope was cancelled because an unacceptable Err value was received")]
+pub struct FilteredErr<E: Error + 'static + Send + Sync> {
+    #[source]
+    err: E,
+}
+
+fn filter_err<T, E: Error + 'static + Send + Sync>(value: Result<T, E>) -> FilterResult<T> {
+    value.map_err(|err| Some(FilteredErr { err }.into()))
+}
+
+#[derive(ThisError, Debug)]
+#[error("A scope was cancelled because an unacceptable Err value was received")]
+pub struct QuietlyFilteredErr;
+
+fn quietly_filter_err<T, E>(value: Result<T, E>) -> FilterResult<T> {
+    value.map_err(|_| Some(QuietlyFilteredErr.into()))
 }
 
 #[derive(Component)]
 struct CancelFilterStorage<F: 'static + Send + Sync>(F);
 
+pub type FilterResult<T> = Result<T, Option<anyhow::Error>>;
+
 impl<InputT, Output, F> Operation for CancelFilter<InputT, Output, F>
 where
     InputT: 'static + Send + Sync,
     Output: 'static + Send + Sync,
-    F: FnOnce(InputT) -> Option<Output> + 'static + Send + Sync,
+    F: FnOnce(InputT) -> FilterResult<Output> + 'static + Send + Sync,
 {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
-        if let Some(mut target_mut) = world.get_entity_mut(self.target) {
-            target_mut.insert(SingleInputStorage::new(source));
-        }
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
             InputBundle::<InputT>::new(),
-            SingleTargetStorage(self.target),
+            SingleTargetStorage::new(self.target),
             CancelFilterStorage(self.filter),
         ));
+
+        Ok(())
     }
 
     fn execute(
@@ -83,11 +122,15 @@ where
         let CancelFilterStorage::<F>(filter) = source_mut.take().or_broken()?;
 
         // This is where we cancel if the filter function does not return anything.
-        let Some(output) = filter(input) else {
-            roster.cancel(Cancel::filtered(source));
-            // We've queued up a cancellation of this link, so we don't want any
-            // automatic cleanup to happen.
-            return Ok(());
+        let output = match filter(input) {
+            Ok(output) => output,
+            Err(reason) => {
+                let cancellation = Cancellation::filtered(source, reason);
+                source_mut.emit_cancel(session, cancellation, roster);
+                // We've queued up a cancellation of this link, so we don't want any
+                // automatic cleanup to happen.
+                return Ok(());
+            }
         };
 
         // At this point we have the correct type to deliver to the target, so
@@ -104,11 +147,11 @@ where
         clean.notify_cleaned()
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<InputT>()? {
             return Ok(true);
         }
 
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }

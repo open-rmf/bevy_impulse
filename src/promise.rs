@@ -325,7 +325,7 @@ impl<T> PromiseState<T> {
 
     fn make_poisoned() -> Self {
         Self::Cancelled(
-            Cancellation::from_cause(CancellationCause::PoisonedMutex)
+            Cancellation::from_cause(CancellationCause::PoisonedMutexInPromise)
         )
     }
 }

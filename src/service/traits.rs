@@ -18,7 +18,6 @@
 use crate::{
     ServiceBuilder, Service, ServiceRequest, OperationError,
     service::builder::{SerialChosen, ParallelChosen},
-    private
 };
 
 use bevy::{
@@ -35,7 +34,7 @@ pub trait ServiceTrait {
     fn serve(request: ServiceRequest) -> Result<(), OperationError>;
 }
 
-pub trait IntoService<M>: private::Sealed<M> {
+pub trait IntoService<M> {
     type Request;
     type Response;
     type Streams;
@@ -47,7 +46,7 @@ pub trait IntoService<M>: private::Sealed<M> {
 
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
-pub trait IntoServiceBuilder<M>: private::Sealed<M> {
+pub trait IntoServiceBuilder<M> {
     type Service;
     type Deliver;
     type With;
@@ -57,7 +56,7 @@ pub trait IntoServiceBuilder<M>: private::Sealed<M> {
 
 /// This trait allows users to immediately begin building a service off of a suitable system
 /// without needing to explicitly create a builder.
-pub trait QuickServiceBuild<M>: private::Sealed<M> {
+pub trait QuickServiceBuild<M> {
     type Service;
     type Deliver;
     fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, ()>;
@@ -66,16 +65,20 @@ pub trait QuickServiceBuild<M>: private::Sealed<M> {
 
 /// This trait allows async service systems to be converted into a builder
 /// by specifying whether it should have serial or parallel service delivery.
-pub trait ChooseAsyncServiceDelivery<M>: private::Sealed<M> {
+pub trait ChooseAsyncServiceDelivery<M> {
     type Service;
     fn serial(self) -> ServiceBuilder<Self::Service, SerialChosen, (), ()>;
     fn parallel(self) -> ServiceBuilder<Self::Service, ParallelChosen, (), ()>;
 }
 
 /// This trait is used to set the delivery mode of a service.
-pub trait DeliveryChoice: private::Sealed<()> {
-    fn apply_entity_mut<'w>(self, entity_mut: &mut EntityMut<'w>);
-    fn apply_entity_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
+pub trait DeliveryChoice {
+    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
+        self, entity_mut: &mut EntityMut<'w>,
+    );
+    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
+        self, entity_commands: &mut EntityCommands<'w, 's, 'a>,
+    );
 }
 
 /// This trait is used to accept anything that can be executed on an EntityMut,

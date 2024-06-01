@@ -21,7 +21,7 @@ use crate::{
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
     BufferSettings, Buffer, CancellableBundle, OperationRoster, ManageCancellation,
-    OperationError, OperationCancel, Cancel, UnhandledErrors,
+    OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
 };
 
 use backtrace::Backtrace;
@@ -32,15 +32,25 @@ use smallvec::SmallVec;
 
 use std::collections::{HashMap, hash_map::Entry};
 
+#[derive(Component)]
+pub struct ParentSession(Entity);
+
+impl ParentSession {
+    pub fn get(&self) -> Entity {
+        self.0
+    }
+}
+
 struct OperateScope<Request, Streams, Response> {
     /// The first node that is inside of the scope
     enter_scope: Entity,
-    /// The staging area where results go when they're finished but are waiting
-    /// for the session to be cleaned up within the scope.
+    /// The final target of the nodes inside the scope. It receives the final
+    /// output to be produced by the scope. When this target is triggered, the
+    /// scope will begin its cleanup.
     ///
     /// Note that the finished staging node is a child node of the scope but it
     /// is not a node inside of the scoped contents.
-    finished_staging: Entity,
+    terminal: Entity,
     /// The target that the output of this scope should be fed to
     exit_scope: Entity,
     /// Cancellation finishes at this node
@@ -105,11 +115,11 @@ struct ScopedSessionStorage(SmallVec<[ScopedSession; 8]>);
 
 /// Store the terminating nodes for this scope
 #[derive(Component)]
-pub struct TerminalStorage(pub SmallVec<[Entity; 8]>);
+pub struct TerminalStorage(Entity);
 
 impl TerminalStorage {
-    pub fn new() -> Self {
-        TerminalStorage(SmallVec::new())
+    pub fn get(&self) -> Entity {
+        self.0
     }
 }
 
@@ -126,11 +136,11 @@ where
         world.entity_mut(source).insert((
             InputBundle::<Request>::new(),
             ScopeEntryStorage(self.enter_scope),
-            FinishedStagingStorage(self.finished_staging),
+            FinishedStagingStorage(self.terminal),
             ScopeContents::new(),
             SingleTargetStorage::new(self.exit_scope),
             ScopedSessionStorage::default(),
-            TerminalStorage::new(),
+            TerminalStorage(self.terminal),
             CancellableBundle::new(Self::receive_cancel),
             ValidateScopeReachability(Self::validate_scope_reachability),
             FinalizeScopeCleanup(Self::finalize_scope_cleanup),
@@ -144,13 +154,15 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
-        let scoped_session = world.spawn(()).id();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let enter_scope = source_mut.get::<ScopeEntryStorage>().or_broken()?.0;
         let Input { session: parent_session, data } = source_mut.take_input::<Request>()?;
-        source_mut.get_mut::<ScopedSessionStorage>().or_broken()?.0.push(
-            ScopedSession::ongoing(parent_session, scoped_session)
-        );
+        let scoped_session = world.spawn(ParentSession(parent_session)).id();
+
+        world.get_entity_mut(source).or_broken()?
+            .get_mut::<ScopedSessionStorage>()
+            .or_broken()?.0
+            .push(ScopedSession::ongoing(parent_session, scoped_session));
         world.get_entity_mut(enter_scope).or_broken()?.give_input(
             scoped_session, data, roster,
         )
@@ -197,7 +209,7 @@ where
         Ok(())
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
@@ -221,20 +233,13 @@ where
                 return Ok(true);
             }
 
-            let terminals = source_ref.get::<TerminalStorage>().or_broken()?;
-            if terminals.0.is_empty() {
-                // If there are no terminals then the end of this scope node
-                // will never be reachable.
-                return Ok(false);
-            }
-            for terminal in &terminals.0 {
-                if scoped_reachability.check_upstream(*terminal)? {
-                    return Ok(true);
-                }
+            let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
+            if scoped_reachability.check_upstream(terminal)? {
+                return Ok(true);
             }
         }
 
-        SingleInputStorage::is_reachable(reachability)
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
@@ -315,28 +320,18 @@ where
         Ok(())
     }
 
-    /// Check if any terminal nodes in the scope can be reached. If not, cancel
+    /// Check if the terminal node of the scope can be reached. If not, cancel
     /// the scope immediately.
     fn validate_scope_reachability(clean: OperationCleanup) -> OperationResult {
         let scoped_session = clean.session;
         let source_ref = clean.world.get_entity(clean.source).or_broken()?;
-        let terminals = source_ref.get::<TerminalStorage>().or_broken()?;
-        let mut visited = HashMap::new();
-        let mut reachability = OperationReachability::new(
-            scoped_session,
-            clean.source,
-            clean.world,
-            &mut visited,
-        );
-        for terminal in &terminals.0 {
-            if reachability.check_upstream(*terminal)? {
-                // A terminal node can still be reached, so we're done
-                return Ok(());
-            }
+        let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
+        if check_reachability(scoped_session, terminal, clean.world)? {
+            // The terminal node can still be reached, so we're done
+            return Ok(());
         }
 
-        // None of the terminal nodes can be reached so we should cancel this
-        // scope.
+        // The terminal node cannot be reached so we should cancel this scope.
         let nodes = clean.world.get::<ScopeContents>(clean.source).or_broken()?
             .nodes();
 
@@ -466,7 +461,7 @@ impl FinishedStagingStorage {
     }
 }
 
-pub struct FinishedStaging<T> {
+pub struct Terminate<T> {
     _ignore: std::marker::PhantomData<T>,
 }
 
@@ -480,7 +475,7 @@ fn cleanup_entire_scope(
     Ok(())
 }
 
-impl<T> Operation for FinishedStaging<T>
+impl<T> Operation for Terminate<T>
 where
     T: 'static + Send + Sync
 {
@@ -708,7 +703,7 @@ where
             .or_broken()?
             .try_from_buffer::<T>(scoped_session)?
         {
-            let cancellation_session = world.spawn(()).id();
+            let cancellation_session = world.spawn(ParentSession(scoped_session)).id();
             world.get_entity_mut(target).or_broken()?
                 .give_input(cancellation_session, data, roster);
 

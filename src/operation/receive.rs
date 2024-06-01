@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Operation, Input InputBundle, ManageInput, OperationResult, OperationRoster,
+    Operation, Input, InputBundle, ManageInput, OperationResult, OperationRoster,
     CancellationBehavior, Cancellation, OrBroken, OperationSetup, OperationRequest,
     promise::private::Sender,
 };
@@ -54,7 +54,7 @@ impl DroppedPromiseQueue {
 }
 
 impl<T: 'static + Send + Sync> Operation for Receive<T> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         if let Some(mut sender) = self.sender {
             if !self.detached {
                 let dropped_promise_queue = world.get_resource_or_insert_with(
@@ -75,6 +75,8 @@ impl<T: 'static + Send + Sync> Operation for Receive<T> {
                 CancellationBehavior { hook: cancel_termination::<T> },
             ));
         }
+
+        Ok(())
     }
 
     fn execute(
