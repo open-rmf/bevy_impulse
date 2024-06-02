@@ -294,7 +294,6 @@ where
         // The next delivery has begun so we can return
         return;
     }
-
 }
 
 fn pop_next_delivery<Request, Streams, Task>(

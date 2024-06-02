@@ -105,6 +105,7 @@ where
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
+        clean.cleanup_disposals()?;
         ActiveTasksStorage::cleanup(clean)
     }
 
@@ -112,7 +113,7 @@ where
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_session(&mut reachability)? {
+        if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
         SingleInputStorage::is_reachable(&mut reachability)

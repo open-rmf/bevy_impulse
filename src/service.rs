@@ -34,6 +34,9 @@ pub use builder::ServiceBuilder;
 mod traits;
 pub use traits::*;
 
+mod workflow;
+pub use workflow::*;
+
 use std::collections::VecDeque;
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};

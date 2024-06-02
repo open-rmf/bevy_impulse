@@ -20,7 +20,6 @@ use crate::{
     Input, ManageInput, ServiceBundle, OperationRequest, OperationError,
     OrBroken, dispose_for_despawned_service,
     service::builder::BlockingChosen,
-    private,
 };
 
 use bevy::{

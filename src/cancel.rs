@@ -179,7 +179,7 @@ impl From<Unreachability> for CancellationCause {
 }
 
 /// Signals that a cancellation has occurred. This can be read by receivers
-/// using [`try_take_cancel()`](ManageInput).
+/// using [`try_receive_cancel()`](ManageCancellation).
 pub struct CancelSignal {
     pub session: Entity,
     pub cancellation: Cancellation,
