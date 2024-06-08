@@ -65,10 +65,9 @@ impl Disposal {
 
 #[derive(Debug)]
 pub enum DisposalCause {
-    /// Async services with serial delivery will queue up requests to deliver
-    /// them one at a time. Depending on the label of the incoming requests, a
-    /// new request might supplant an earlier one, causing the earlier request
-    /// to be disposed.
+    /// Some services will queue up requests to deliver them one at a time.
+    /// Depending on the label of the incoming requests, a new request might
+    /// supplant an earlier one, causing the earlier request to be disposed.
     Supplanted(Supplanted),
 
     /// A node filtered out a response.

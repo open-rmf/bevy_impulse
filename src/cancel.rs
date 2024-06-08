@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use crate::{
     Disposal, DisposalFailure, Filtered, OperationError, ScopeStorage, OrBroken,
-    OperationResult, SingleTargetStorage, OperationRoster,
+    OperationResult, SingleTargetStorage, OperationRoster, Supplanted,
 };
 
 /// Information about the cancellation that occurred.
@@ -48,6 +48,14 @@ impl Cancellation {
 
     pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
         Filtered { filtered_at_node, reason }.into()
+    }
+
+    pub fn supplanted(
+        supplanted_at_node: Entity,
+        supplanted_by_node: Entity,
+        supplanting_session: Entity,
+    ) -> Self {
+        Supplanted { supplanted_at_node, supplanted_by_node, supplanting_session }.into()
     }
 }
 
@@ -70,6 +78,11 @@ pub enum CancellationCause {
     /// A filtering node has triggered a cancellation.
     Filtered(Filtered),
 
+    /// Some workflows will queue up requests to deliver them one at a time.
+    /// Depending on the label of the incoming requests, a new request might
+    /// supplant an earlier one, causing the earlier request to be cancelled.
+    Supplanted(Supplanted),
+
     /// A promise can never be delivered because the mutex inside of a [`Promise`][1]
     /// was poisoned.
     ///
@@ -91,6 +104,12 @@ pub enum CancellationCause {
 impl From<Filtered> for CancellationCause {
     fn from(value: Filtered) -> Self {
         CancellationCause::Filtered(value)
+    }
+}
+
+impl From<Supplanted> for CancellationCause {
+    fn from(value: Supplanted) -> Self {
+        CancellationCause::Supplanted(value)
     }
 }
 

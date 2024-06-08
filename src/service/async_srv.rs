@@ -17,16 +17,18 @@
 
 use crate::{
     AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
-    InnerChannel, ChannelQueue, RequestLabelId, OperationRoster, Blocker,
+    InnerChannel, ChannelQueue, OperationRoster, Blocker,
     Stream, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
     OperationError, OrBroken, ManageInput, Input, OperateTask, Operation,
     OperationSetup, SingleTargetStorage, dispose_for_despawned_service,
     service::builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
-    StopTask, UnhandledErrors, StopTaskFailure,
+    StopTask, UnhandledErrors, StopTaskFailure, Delivery, DeliveryInstructions,
+    Deliver, DeliveryOrder, DeliveryUpdate, insert_new_order, pop_next_delivery,
+    OperationResult,
 };
 
 use bevy::{
-    prelude::{Component, In, Entity, World},
+    prelude::{Component, In, World, Entity},
     tasks::AsyncComputeTaskPool,
     ecs::{
         world::EntityMut,
@@ -34,12 +36,7 @@ use bevy::{
     }
 };
 
-use std::{
-    future::Future,
-    collections::{VecDeque, HashMap},
-};
-
-use smallvec::SmallVec;
+use std::future::Future;
 
 pub trait IsAsyncService<M> { }
 
@@ -97,24 +94,22 @@ where
 {
     type Request = Request;
     type Response = Task::Output;
-    fn serve(cmd: ServiceRequest) -> Result<(), OperationError> {
-        let ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } } = cmd;
-
+    fn serve(
+        ServiceRequest {
+            provider,
+            target,
+            operation: OperationRequest { source, world, roster },
+        }: ServiceRequest,
+    ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let instructions = source_mut.get::<DeliveryInstructions>().cloned();
         let task_id = world.spawn(()).id();
 
-        let Some(mut provider_mut) = world.get_entity_mut(provider) else {
-            // The async service has been despawned, so we should treat the request as cancelled.
-            dispose_for_despawned_service(provider, world, roster);
-            return Ok(());
-        };
-
-        let Some(mut delivery) = provider_mut.get_mut::<Delivery<Request>>() else {
+        let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
             // The async service's Delivery component has been removed so we should treat the request as cancelled.
             dispose_for_despawned_service(provider, world, roster);
-            return Ok(());
+            return Err(OperationError::NotReady);
         };
 
         let update = insert_new_order::<Request>(
@@ -135,7 +130,7 @@ where
                     world.despawn(cancelled.task_id);
                 }
                 if let Some(stop) = stop {
-                    // This task is already running so we need to stop it at the
+                    // This task is already running and we need to stop it at the
                     // task source level
                     let result = world.get_entity(stop.task_id).or_broken()
                         .and_then(|task_ref| task_ref.get::<StopTask>().or_broken().copied())
@@ -162,57 +157,94 @@ where
                     }
                 }
 
+                // The request has been queued up and should be delivered later
                 return Ok(());
             }
         };
 
-        let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
-                storage.0.take().expect("Service is missing while attempting to serve")
-            } else {
-                if let Some(uninit) = provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>() {
-                    // We need to initialize the service
-                    let mut service = uninit.0;
-                    service.initialize(world);
-
-                    // Re-obtain the provider since we needed to mutably borrow the world a moment ago
-                    let mut provider_mut = world.entity_mut(provider);
-                    provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
-                    service
-                } else {
-                    // The provider has had its service removed, so we treat this request as cancelled.
-                    dispose_for_despawned_service(provider, world, roster);
-                    return Ok(());
-                }
+        serve_async_request::<Request, Streams, Task>(
+            request,
+            blocker,
+            session,
+            task_id,
+            ServiceRequest {
+                provider,
+                target,
+                operation: OperationRequest { source, world, roster },
             }
-        } else {
-            // If the provider has been despawned then we treat this request as cancelled.
-            dispose_for_despawned_service(provider, world, roster);
-            return Ok(());
-        };
-
-        let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let channel = InnerChannel::new(source, sender);
-        let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
-        service.apply_deferred(world);
-
-        if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            // The AsyncServiceStorage component must already exist because it was
-            // inserted earier within this function if it did not exist.
-            provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>().unwrap().0 = Some(service);
-        }
-
-        let task = AsyncComputeTaskPool::get().spawn(job);
-
-        OperateTask::new(session, source, target, task, blocker)
-            .setup(OperationSetup { source: task_id, world });
-        roster.queue(task_id);
-        Ok(())
+        )
     }
 }
 
-pub(crate) fn serve_next_async_request<Request, Streams, Task>(
-    mut unblock: Blocker,
+fn serve_async_request<Request, Streams, Task>(
+    request: Request,
+    blocker: Option<Blocker>,
+    session: Entity,
+    task_id: Entity,
+    cmd: ServiceRequest,
+) -> OperationResult
+where
+    Request: 'static + Send + Sync,
+    Task: Future + 'static + Send,
+    Task::Output: 'static + Send + Sync,
+    Streams: Stream,
+{
+    let ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } } = cmd;
+    let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+        if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
+            storage.0.take().expect("Async service is missing while attempting to serve")
+        } else {
+            if let Some(uninit) = provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>() {
+                // We need to initialize the service
+                let mut service = uninit.0;
+                service.initialize(world);
+
+                // Re-obtain the provider since we needed to mutably borrow the world a moment ago
+                let mut provider_mut = world.entity_mut(provider);
+                provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
+                service
+            } else {
+                // The provider has had its service removed, so we treat this request as cancelled.
+                dispose_for_despawned_service(provider, world, roster);
+                // We've already issued the disposal, but we need to return an
+                // error so that serve_next_async_request continues iterating.
+                return Err(OperationError::NotReady);
+            }
+        }
+    } else {
+        // If the provider has been despawned then we treat this request as cancelled.
+        dispose_for_despawned_service(provider, world, roster);
+        // We've already issued the disposal, but we need to return an
+        // error so that serve_next_async_request continues iterating.
+        return Err(OperationError::NotReady);
+    };
+
+    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+    let channel = InnerChannel::new(source, sender);
+    let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
+    service.apply_deferred(world);
+
+    if let Some(mut service_storage) = world.get_mut::<AsyncServiceStorage<Request, Streams, Task>>(provider) {
+        service_storage.0 = Some(service);
+    } else {
+        // We've already done everything we need to do with the service, but
+        // apparently the service erased itself. We will allow the task to keep
+        // running since there is nothing to prevent it from doing so.
+        //
+        // TODO(@mxgrey): Consider whether the removal of the service should
+        // imply that all the service's active tasks should be dropped?
+    }
+
+    let task = AsyncComputeTaskPool::get().spawn(job);
+
+    OperateTask::new(session, source, target, task, blocker)
+        .setup(OperationSetup { source: task_id, world });
+    roster.queue(task_id);
+    Ok(())
+}
+
+pub fn serve_next_async_request<Request, Streams, Task>(
+    unblock: Blocker,
     world: &mut World,
     roster: &mut OperationRoster,
 )
@@ -222,293 +254,44 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: Stream,
 {
+    let Blocker { provider, label, .. } = unblock;
     loop {
-        let Blocker { provider, source: finished_source, label, .. } = unblock;
-        let Some(mut provider_mut) = world.get_entity_mut(provider) else {
-            return;
-        };
-        let Some(mut delivery) = provider_mut.get_mut::<Delivery<Request>>() else {
+        let Some(Deliver { request, task_id, blocker }) = pop_next_delivery::<Request>(
+            provider, label, serve_next_async_request::<Request, Streams, Task>, world,
+        ) else {
+            // No more deliveries to pop, so we should return
             return;
         };
 
-        let next_delivery = match &mut *delivery {
-            Delivery::Serial(serial) => {
-                pop_next_delivery::<Request, Streams, Task>(provider, finished_source, serial)
-            }
-            Delivery::Parallel(parallel) => {
-                let label = label.expect(
-                    "A request in a parallel async service was blocking without a label. \
-                    Please report this to the bevy_impulse maintainers; this should not be possible."
-                );
-                let serial = parallel.labeled.get_mut(&label).expect(
-                    "A labeled request in a parallel async service finished but the queue \
-                    for its label has been erased. Please report this to the bevy_impulse \
-                    maintainers; this should not be possible."
-                );
-                pop_next_delivery::<Request, Streams, Task>(provider, finished_source, serial)
-            }
-        };
-
-        let Some(next_delivery) = next_delivery else {
-            // Nothing left to unblock
-            return;
-        };
-        let Deliver { request, task_id, blocker } = next_delivery;
         let session = blocker.session;
         let source = blocker.source;
 
-        let mut service = world.get_entity_mut(provider)
-            .unwrap()
-            .get_mut::<AsyncServiceStorage<Request, Streams, Task>>()
-            .unwrap()
-            .0
-            .take()
-            .unwrap();
+        let Some(target) = world.get::<SingleTargetStorage>(source) else {
+            // This will not be able to run, so we should move onto the next
+            // item in the queue.
+            continue;
+        };
+        let target = target.get();
 
-        let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let channel = InnerChannel::new(source, sender);
-        let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
-        service.apply_deferred(world);
-
-        if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>().unwrap().0 = Some(service);
-        }
-
-        let task = AsyncComputeTaskPool::get().spawn(job);
-
-        if let Some(source_mut) = world.get_entity(source) {
-            let Some(target) = source_mut.get::<SingleTargetStorage>() else {
-                unblock = blocker;
-                continue;
-            };
-            let operate_task = OperateTask::new(session, source, target.get(), task, Some(blocker));
-            operate_task.setup(OperationSetup { source: task_id, world });
-            roster.queue(task_id);
-        } else {
-            // The request cancelled itself while running the service so we should
-            // move on to the next request.
-            unblock = blocker;
+        if serve_async_request::<Request, Streams, Task>(
+            request,
+            Some(blocker),
+            session,
+            task_id,
+            ServiceRequest {
+                provider,
+                target,
+                operation: OperationRequest { source, world, roster }
+            },
+        ).is_err() {
+            // The service did not launch so we should move onto the next item
+            // in the queue.
             continue;
         }
 
         // The next delivery has begun so we can return
         return;
     }
-}
-
-fn pop_next_delivery<Request, Streams, Task>(
-    provider: Entity,
-    finished_source: Entity,
-    serial: &mut SerialDelivery<Request>,
-) -> Option<Deliver<Request>>
-where
-    Request: 'static + Send + Sync,
-    Task: Future + 'static + Send,
-    Task::Output: 'static + Send + Sync,
-    Streams: Stream,
-{
-    let current = serial.delivering.take().expect(
-        "Unblocking has been requested for an async service that is not currently \
-        executing a request. Please report this to the bevy_impulse maintainers; \
-        this should not be possible."
-    );
-    assert_eq!(current.source, finished_source);
-    let Some(DeliveryOrder { source, session, task_id, request, instructions }) = serial.queue.pop_front() else {
-        return None;
-    };
-    let blocker = Blocker {
-        provider,
-        source,
-        session,
-        label: instructions.as_ref().map(|x| x.label.clone()),
-        serve_next: serve_next_async_request::<Request, Streams, Task>,
-    };
-
-    serial.delivering = Some(ActiveDelivery { source, session, task_id, instructions });
-    return Some(Deliver { request, task_id, blocker });
-}
-
-struct Deliver<Request> {
-    request: Request,
-    task_id: Entity,
-    blocker: Blocker,
-}
-
-#[derive(Component, Clone, Copy)]
-pub(crate) struct DeliveryInstructions {
-    pub(crate) label: RequestLabelId,
-    pub(crate) queue: bool,
-    pub(crate) ensure: bool,
-}
-
-pub(crate) struct DeliveryOrder<Request> {
-    pub(crate) source: Entity,
-    pub(crate) session: Entity,
-    pub(crate) task_id: Entity,
-    pub(crate) request: Request,
-    pub(crate) instructions: Option<DeliveryInstructions>,
-}
-
-struct ActiveDelivery {
-    source: Entity,
-    session: Entity,
-    task_id: Entity,
-    instructions: Option<DeliveryInstructions>,
-}
-
-/// The delivery mode determines whether service requests are carried out one at
-/// a time (serial) or in parallel.
-#[derive(Component)]
-pub(crate) enum Delivery<Request> {
-    Serial(SerialDelivery<Request>),
-    Parallel(ParallelDelivery<Request>),
-}
-
-impl<Request> Delivery<Request> {
-    pub(crate) fn serial() -> Self {
-        Delivery::Serial(SerialDelivery::<Request>::default())
-    }
-
-    pub(crate) fn parallel() -> Self {
-        Delivery::Parallel(ParallelDelivery::<Request>::default())
-    }
-}
-
-pub(crate) struct SerialDelivery<Request> {
-    delivering: Option<ActiveDelivery>,
-    queue: VecDeque<DeliveryOrder<Request>>,
-}
-
-impl<Request> Default for SerialDelivery<Request> {
-    fn default() -> Self {
-        Self {
-            delivering: Default::default(),
-            queue: Default::default(),
-        }
-    }
-}
-
-pub(crate) struct ParallelDelivery<Request> {
-    labeled: HashMap<RequestLabelId, SerialDelivery<Request>>,
-}
-
-impl<Request> Default for ParallelDelivery<Request> {
-    fn default() -> Self {
-        Self { labeled: Default::default() }
-    }
-}
-
-enum DeliveryUpdate<Request> {
-    /// The new request should be delivered immediately
-    Immediate {
-        blocking: Option<Option<RequestLabelId>>,
-        request: Request,
-    },
-    /// The new request has been placed in the queue
-    Queued {
-        /// Queued requests that have been cancelled
-        cancelled: SmallVec<[DeliveryStoppage; 8]>,
-        /// An actively running task that has been cancelled
-        stop: Option<DeliveryStoppage>,
-        /// The label that the blocking is based on
-        label: Option<RequestLabelId>,
-    }
-}
-
-struct DeliveryStoppage {
-    source: Entity,
-    session: Entity,
-    task_id: Entity,
-}
-
-fn insert_new_order<Request>(
-    delivery: &mut Delivery<Request>,
-    order: DeliveryOrder<Request>,
-) -> DeliveryUpdate<Request> {
-    match delivery {
-        Delivery::Serial(serial) => {
-            insert_serial_order(serial, order)
-        }
-        Delivery::Parallel(parallel) => {
-            match &order.instructions {
-                Some(instructions) => {
-                    let label = instructions.label.clone();
-                    insert_serial_order(
-                        parallel.labeled.entry(label).or_default(),
-                        order,
-                    )
-                }
-                None => {
-                    DeliveryUpdate::Immediate { request: order.request, blocking: None }
-                }
-            }
-        }
-    }
-}
-
-fn insert_serial_order<Request>(
-    serial: &mut SerialDelivery<Request>,
-    order: DeliveryOrder<Request>,
-) -> DeliveryUpdate<Request> {
-    let Some(delivering) = &serial.delivering else {
-        // INVARIANT: If there is anything in the queue then it should have been
-        // moved into delivering when the last delivery was finished. If
-        // delivering is empty then the queue should be as well.
-        assert!(serial.queue.is_empty());
-        serial.delivering = Some(ActiveDelivery {
-            source: order.source,
-            session: order.session,
-            task_id: order.task_id,
-            instructions: order.instructions
-        });
-        let label = order.instructions.map(|i| i.label);
-        return DeliveryUpdate::Immediate { blocking: Some(label), request: order.request };
-    };
-
-    let Some(incoming_instructions) = order.instructions else {
-        serial.queue.push_back(order);
-        return DeliveryUpdate::Queued {
-            cancelled: SmallVec::new(),
-            stop: None,
-            label: None,
-        };
-    };
-
-    let mut cancelled = SmallVec::new();
-    let mut stop = None;
-
-    let should_discard = |prior_instructions: &DeliveryInstructions| {
-        prior_instructions.label == incoming_instructions.label
-        && !prior_instructions.ensure
-    };
-
-    if !incoming_instructions.queue {
-        serial.queue.retain(|e| {
-            let discard = e.instructions.as_ref().is_some_and(should_discard);
-            if discard {
-                cancelled.push(DeliveryStoppage {
-                    source: e.source,
-                    session: e.session,
-                    task_id: e.task_id,
-                });
-            }
-
-            !discard
-        });
-    }
-
-    if delivering.instructions.as_ref().is_some_and(should_discard) {
-        stop = Some(DeliveryStoppage {
-            source: delivering.source,
-            session: delivering.session,
-            task_id: delivering.task_id,
-        });
-    }
-
-    serial.queue.push_back(order);
-    let label = Some(incoming_instructions.label);
-
-    DeliveryUpdate::Queued { cancelled, stop, label }
 }
 
 /// Take any system that was not decalred as a service and transform it into a

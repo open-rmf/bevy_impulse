@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    ServiceBuilder, Service, ServiceRequest, OperationError,
+    ServiceBuilder, Service, ServiceRequest, OperationResult,
     service::builder::{SerialChosen, ParallelChosen},
 };
 
@@ -31,7 +31,7 @@ use bevy::{
 pub trait ServiceTrait {
     type Request: 'static + Send + Sync;
     type Response: 'static + Send + Sync;
-    fn serve(request: ServiceRequest) -> Result<(), OperationError>;
+    fn serve(request: ServiceRequest) -> OperationResult;
 }
 
 pub trait IntoService<M> {

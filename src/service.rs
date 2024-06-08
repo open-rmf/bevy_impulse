@@ -31,6 +31,9 @@ pub use blocking::*;
 mod builder;
 pub use builder::ServiceBuilder;
 
+pub(crate) mod delivery;
+pub(crate) use delivery::*;
+
 mod traits;
 pub use traits::*;
 

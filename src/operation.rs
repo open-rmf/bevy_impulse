@@ -310,7 +310,7 @@ pub struct OperationCleanup<'a> {
 
 impl<'a> OperationCleanup<'a> {
 
-    fn clean(&mut self) {
+    pub fn clean(&mut self) {
         let Some(cleanup) = self.world.get::<OperationCleanupStorage>(self.source) else {
             return;
         };
@@ -328,21 +328,21 @@ impl<'a> OperationCleanup<'a> {
         }
     }
 
-    fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
+    pub fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
         self.world.get_entity_mut(self.source)
             .or_broken()?
             .cleanup_inputs::<T>(self.session);
         Ok(())
     }
 
-    fn cleanup_disposals(&mut self) -> OperationResult {
+    pub fn cleanup_disposals(&mut self) -> OperationResult {
         self.world.get_entity_mut(self.source)
             .or_broken()?
             .clear_disposals(self.session);
         Ok(())
     }
 
-    fn notify_cleaned(&mut self) -> OperationResult {
+    pub fn notify_cleaned(&mut self) -> OperationResult {
         let source_mut = self.world.get_entity_mut(self.source).or_broken()?;
         let scope = source_mut.get::<ScopeStorage>().or_not_ready()?.get();
         let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
@@ -355,7 +355,7 @@ impl<'a> OperationCleanup<'a> {
         Ok(())
     }
 
-    fn for_node(self, source: Entity) -> Self {
+    pub fn for_node(self, source: Entity) -> Self {
         Self { source, ..self }
     }
 }

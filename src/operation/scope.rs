@@ -36,6 +36,10 @@ use std::collections::{HashMap, hash_map::Entry};
 pub struct ParentSession(Entity);
 
 impl ParentSession {
+    pub fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
     pub fn get(&self) -> Entity {
         self.0
     }
@@ -152,20 +156,25 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let enter_scope = source_mut.get::<ScopeEntryStorage>().or_broken()?.0;
-        let Input { session: parent_session, data } = source_mut.take_input::<Request>()?;
-        let scoped_session = world.spawn(ParentSession(parent_session)).id();
+        let input = world.get_entity_mut(source).or_broken()?
+            .take_input::<Request>()?;
 
-        world.get_entity_mut(source).or_broken()?
-            .get_mut::<ScopedSessionStorage>()
-            .or_broken()?.0
-            .push(ScopedSession::ongoing(parent_session, scoped_session));
-        world.get_entity_mut(enter_scope).or_broken()?.give_input(
-            scoped_session, data, roster,
-        )
+        let scoped_session = world.spawn(ParentSession(input.session)).id();
+        let result = begin_scope(
+            input,
+            scoped_session,
+            OperationRequest { source, world, roster },
+        );
+
+        if result.is_err() {
+            // We won't be executing this scope after all, so despawn the scoped
+            // session that we created.
+            world.despawn(scoped_session);
+        }
+
+        result
     }
 
     fn cleanup(
@@ -241,6 +250,29 @@ where
 
         SingleInputStorage::is_reachable(&mut reachability)
     }
+}
+
+pub(crate) fn begin_scope<Request>(
+    Input { session: parent_session, data }: Input<Request>,
+    scoped_session: Entity,
+    OperationRequest { source, world, roster }: OperationRequest,
+) -> OperationResult
+where
+    Request: 'static + Send + Sync,
+{
+    let mut source_mut = world.get_entity_mut(source).or_broken()?;
+    let enter_scope = source_mut.get::<ScopeEntryStorage>().or_broken()?.0;
+
+    source_mut
+        .get_mut::<ScopedSessionStorage>()
+        .or_broken()?.0
+        .push(ScopedSession::ongoing(parent_session, scoped_session));
+
+    world.get_entity_mut(enter_scope).or_broken()?.give_input(
+        scoped_session, data, roster,
+    )?;
+
+    Ok(())
 }
 
 impl<Request, Streams, Response> OperateScope<Request, Streams, Response>
