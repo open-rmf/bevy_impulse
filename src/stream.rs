@@ -15,18 +15,70 @@
  *
 */
 
-use bevy::prelude::{Component, Bundle, Entity, Commands};
+use bevy::prelude::{Component, Bundle, Entity, Commands, World};
 
-use crate::{InputSlot, Output, UnusedTarget};
+use crate::{
+    InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
+    AddOperation, OperationRoster, OperationResult, OrBroken, ManageInput,
+};
+
+pub struct StreamRequest<'a> {
+    pub source: Entity,
+    pub session: Entity,
+    pub target: Entity,
+    pub world: &'a mut World,
+    pub roster: &'a mut OperationRoster,
+}
 
 pub trait Stream: 'static + Send + Sync + Sized {
-    fn spawn_stream(scope: Entity, commands: &mut Commands) -> (
-        StreamTargetStorage<Self>, InputSlot<Self>,
+    fn send(
+        self,
+        StreamRequest { session, target, world, roster, .. }: StreamRequest
+    ) -> OperationResult {
+        world.get_entity_mut(target).or_broken()?.give_input(session, self, roster)
+    }
+
+    fn spawn_scope_stream(
+        scope: Entity,
+        commands: &mut Commands
+    ) -> (
+        StreamTargetStorage<Self>,
+        InputSlot<Self>,
+    ) {
+        let source = commands.spawn(UnusedTarget).id();
+        commands.add(AddOperation::new(source, RedirectScopeStream::<Self>::new()));
+        (
+            StreamTargetStorage::new(source),
+            InputSlot::new(scope, source),
+        )
+    }
+
+    fn spawn_workflow_stream(
+        scope: Entity,
+        commands: &mut Commands,
+    ) -> (
+        StreamTargetStorage<Self>,
+        InputSlot<Self>,
+    ) {
+        let source = commands.spawn(UnusedTarget).id();
+        commands.add(AddOperation::new(source, RedirectWorkflowStream::<Self>::new()));
+        (
+            StreamTargetStorage::new(source),
+            InputSlot::new(scope, source),
+        )
+    }
+
+    fn spawn_node_stream(
+        scope: Entity,
+        commands: &mut Commands,
+    ) -> (
+        StreamTargetStorage<Self>,
+        Output<Self>,
     ) {
         let target = commands.spawn(UnusedTarget).id();
         (
             StreamTargetStorage::new(target),
-            InputSlot::new(scope, target),
+            Output::new(scope, target),
         )
     }
 }
@@ -72,7 +124,15 @@ pub trait StreamPack: 'static + Send + Sync {
         Self::StreamInputPack,
     );
 
-    fn spawn_output_streams(scope: Entity, source: Entity) -> Self::StreamOutputPack;
+    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamInputPack,
+    );
+
+    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamOutputPack,
+    );
 }
 
 impl<T: Stream> StreamPack for T {
@@ -81,15 +141,25 @@ impl<T: Stream> StreamPack for T {
     type StreamInputPack = InputSlot<Self>;
     type StreamOutputPack = Output<Self>;
 
-    fn spawn_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::StreamInputPack,
     ) {
-        T::spawn_stream(scope, commands)
+        T::spawn_scope_stream(scope, commands)
     }
 
-    fn stream_outputs(scope: Entity, source: Entity) -> Self::StreamOutputPack {
-        InputSlot::new(scope, source)
+    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamInputPack,
+    ) {
+        T::spawn_workflow_stream(scope, commands)
+    }
+
+    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamOutputPack,
+    ) {
+        T::spawn_node_stream(scope, commands)
     }
 }
 
@@ -99,15 +169,25 @@ impl StreamPack for () {
     type StreamInputPack = ();
     type StreamOutputPack = ();
 
-    fn spawn_streams(_: Entity, _: &mut Commands) -> (
+    fn spawn_scope_streams(_: Entity, _: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::StreamInputPack,
     ) {
         ((), ())
     }
 
-    fn stream_outputs(_: Entity, _: Entity) -> Self::StreamOutputPack {
-        ()
+    fn spawn_workflow_streams(_: Entity, _: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamInputPack,
+    ) {
+        ((), ())
+    }
+
+    fn spawn_node_streams(_: Entity, _: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamOutputPack,
+    ) {
+        ((), ())
     }
 }
 
@@ -117,15 +197,25 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     type StreamInputPack = T1::StreamInputPack;
     type StreamOutputPack = T1::StreamOutputPack;
 
-    fn spawn_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::StreamInputPack,
     ) {
-        T1::spawn_streams(scope, commands)
+        T1::spawn_scope_streams(scope, commands)
     }
 
-    fn stream_outputs(scope: Entity, source: Entity) -> Self::StreamOutputPack {
-        T1::stream_outputs(scope, source)
+    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamInputPack,
+    ) {
+        T1::spawn_workflow_streams(scope, commands)
+    }
+
+    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamOutputPack,
+    ) {
+        T1::spawn_node_streams(scope, commands)
     }
 }
 
@@ -135,17 +225,31 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
     type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack);
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack);
 
-    fn spawn_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::StreamInputPack,
     ) {
-        let t1 = T1::spawn_streams(scope, commands);
-        let t2 = T2::spawn_streams(scope, commands);
+        let t1 = T1::spawn_scope_streams(scope, commands);
+        let t2 = T2::spawn_scope_streams(scope, commands);
         ((t1.0, t2.0), (t1.1, t2.1))
     }
 
-    fn stream_outputs(scope: Entity, source: Entity) -> Self::StreamOutputPack {
-        (T1::stream_outputs(scope, source), T2::stream_outputs(scope, source))
+    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamInputPack,
+    ) {
+        let t1 = T1::spawn_workflow_streams(scope, commands);
+        let t2 = T2::spawn_workflow_streams(scope, commands);
+        ((t1.0, t2.0), (t1.1, t2.1))
+    }
+
+    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamOutputPack,
+    ) {
+        let t1 = T1::spawn_node_streams(scope, commands);
+        let t2 = T2::spawn_node_streams(scope, commands);
+        ((t1.0, t2.0), (t1.1, t2.1))
     }
 }
 
@@ -155,21 +259,33 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
     type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack, T3::StreamInputPack);
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack, T3::StreamOutputPack);
 
-    fn spawn_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::StreamInputPack,
     ) {
-        let t1 = T1::spawn_streams(scope, commands);
-        let t2 = T2::spawn_streams(scope, commands);
-        let t3 = T3::spawn_streams(scope, commands);
+        let t1 = T1::spawn_scope_streams(scope, commands);
+        let t2 = T2::spawn_scope_streams(scope, commands);
+        let t3 = T3::spawn_scope_streams(scope, commands);
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 
-    fn stream_outputs(scope: Entity, source: Entity) -> Self::StreamOutputPack {
-        (
-            T1::stream_outputs(scope, source),
-            T2::stream_outputs(scope, source),
-            T3::stream_outputs(scope, source),
-        )
+    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamInputPack,
+    ) {
+        let t1 = T1::spawn_workflow_streams(scope, commands);
+        let t2 = T2::spawn_workflow_streams(scope, commands);
+        let t3 = T3::spawn_workflow_streams(scope, commands);
+        ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
+    }
+
+    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+        Self::StreamStorageBundle,
+        Self::StreamOutputPack,
+    ) {
+        let t1 = T1::spawn_node_streams(scope, commands);
+        let t2 = T2::spawn_node_streams(scope, commands);
+        let t3 = T3::spawn_node_streams(scope, commands);
+        ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 }

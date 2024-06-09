@@ -75,7 +75,7 @@ pub struct Scope<Request, Response, Streams: StreamPack> {
     /// The input slot(s) that receive data for the output streams of the scope.
     /// You can feed data into these input slots at any time during the execution
     /// of the workflow.
-    pub streams: Streams::StreamOutputPack,
+    pub streams: Streams::StreamInputPack,
 }
 
 /// Device used for building a workflow. Simply pass a mutable borrow of this
@@ -86,9 +86,9 @@ pub struct Scope<Request, Response, Streams: StreamPack> {
 /// way to trick the compiler into using a [`Builder`] in the wrong scope, but
 /// please open an issue with a minimal reproducible example if you find a way
 /// to make it panic.
-pub struct Builder<'w, 's> {
+pub struct Builder<'a, 'w, 's> {
     scope: Entity,
-    commands: Commands<'w, 's>,
+    commands: &'a mut Commands<'w, 's>,
 }
 
 /// Settings that describe some aspects of a workflow's behavior.
@@ -216,7 +216,10 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         ));
         self.add(AddOperation::new(terminal, Terminate::new()));
 
-        let (stream_storage, streams) = Streams::spawn_streams(scope_id, self);
+        let (
+            stream_storage,
+            streams
+        ) = Streams::spawn_scope_streams(scope_id, self);
         self.entity(scope_id).insert(stream_storage);
 
         let scope = Scope {

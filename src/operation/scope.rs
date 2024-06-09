@@ -22,7 +22,7 @@ use crate::{
     Cancellation, Unreachability, InspectDisposals, execute_operation,
     BufferSettings, Buffer, CancellableBundle, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
-    Blocker, Stream, StreamTargetStorage,
+    Blocker, Stream, StreamTargetStorage, StreamRequest,
 };
 
 use backtrace::Backtrace;
@@ -1046,11 +1046,17 @@ pub(crate) struct ExitTarget {
     pub(crate) blocker: Option<Blocker>,
 }
 
-pub(crate) struct RedirectStream<T: Stream> {
+pub(crate) struct RedirectScopeStream<T: Stream> {
     _ignore: std::marker::PhantomData<T>,
 }
 
-impl<T: Stream> Operation for RedirectStream<T> {
+impl<T: Stream> RedirectScopeStream<T> {
+    pub(crate) fn new() -> Self {
+        Self { _ignore: Default::default() }
+    }
+}
+
+impl<T: Stream> Operation for RedirectScopeStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert(
             InputBundle::<T>::new(),
@@ -1062,10 +1068,63 @@ impl<T: Stream> Operation for RedirectStream<T> {
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data } = source_mut.take_input::<T>()?;
+        let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
+        let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
+        let stream_target = world.get::<StreamTargetStorage<T>>(scope).or_broken()?.get();
+        let parent_session = world.get::<ParentSession>(scoped_session).or_broken()?.get();
+        data.send(StreamRequest {
+            source,
+            session: parent_session,
+            target: stream_target,
+            world,
+            roster
+        })
+    }
+
+    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        if r.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        let scope = r.world.get::<ScopeStorage>(r.source).or_broken()?.get();
+        r.check_upstream(scope)
+
+        // TODO(@mxgrey): Consider whether we can/should identify more
+        // specifically whether the current state of the scope would be able to
+        // reach this specific stream.
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<T>()
+    }
+}
+
+pub(crate) struct RedirectWorkflowStream<T: Stream> {
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T: Stream> RedirectWorkflowStream<T> {
+    pub(crate) fn new() -> Self {
+        Self { _ignore: Default::default() }
+    }
+}
+
+impl<T: Stream> Operation for RedirectWorkflowStream<T> {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.entity_mut(source).insert(
+            InputBundle::<T>::new(),
+        );
+        Ok(())
+    }
+
+    fn execute(
+        OperationRequest { source, world, roster }: OperationRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
         let exit = world.get::<ExitTargetStorage>(scope).or_broken()?
-            .map.get(&session)
+            .map.get(&scoped_session)
             // If the map does not have this session in it, that should simply
             // mean that the workflow has terminated, so we should discard this
             // stream data.
@@ -1078,9 +1137,13 @@ impl<T: Stream> Operation for RedirectStream<T> {
         let stream_target = world.get::<StreamTargetStorage<T>>(exit_source)
             .or_broken()?.get();
 
-        world.get_entity_mut(stream_target).or_broken()?.give_input(
-            parent_session, data, roster,
-        )
+        data.send(StreamRequest {
+            source,
+            session: parent_session,
+            target: stream_target,
+            world,
+            roster,
+        })
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
