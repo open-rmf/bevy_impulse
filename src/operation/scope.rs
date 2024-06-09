@@ -17,11 +17,12 @@
 
 use crate::{
     Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
-    OperationReachability, ReachabilityResult, OperationSetup, Stream,
+    OperationReachability, ReachabilityResult, OperationSetup, StreamPack,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
     BufferSettings, Buffer, CancellableBundle, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
+    Blocker, Stream, StreamTargetStorage,
 };
 
 use backtrace::Backtrace;
@@ -45,7 +46,7 @@ impl ParentSession {
     }
 }
 
-struct OperateScope<Request, Streams, Response> {
+pub(crate) struct OperateScope<Request, Response, Streams> {
     /// The first node that is inside of the scope
     enter_scope: Entity,
     /// The final target of the nodes inside the scope. It receives the final
@@ -56,10 +57,21 @@ struct OperateScope<Request, Streams, Response> {
     /// is not a node inside of the scoped contents.
     terminal: Entity,
     /// The target that the output of this scope should be fed to
-    exit_scope: Entity,
+    exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
     finish_cancel: Entity,
-    _ignore: std::marker::PhantomData<(Request, Streams, Response)>,
+    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+}
+
+impl<Request, Response, Streams> OperateScope<Request, Response, Streams> {
+    pub(crate) fn new(
+        enter_scope: Entity,
+        terminal: Entity,
+        exit_scope: Option<Entity>,
+        finish_cancel: Entity,
+    ) -> Self {
+        Self { enter_scope, terminal, exit_scope, finish_cancel, _ignore: Default::default() }
+    }
 }
 
 pub(crate) struct ScopedSession {
@@ -130,19 +142,17 @@ impl TerminalStorage {
 impl<Request, Streams, Response> Operation for OperateScope<Request, Streams, Response>
 where
     Request: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
     Response: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.exit_scope).or_broken()?
-            .insert(SingleInputStorage::new(source));
 
-        world.entity_mut(source).insert((
+        let mut source_mut = world.entity_mut(source);
+        source_mut.insert((
             InputBundle::<Request>::new(),
             ScopeEntryStorage(self.enter_scope),
             FinishedStagingStorage(self.terminal),
             ScopeContents::new(),
-            SingleTargetStorage::new(self.exit_scope),
             ScopedSessionStorage::default(),
             TerminalStorage(self.terminal),
             CancellableBundle::new(Self::receive_cancel),
@@ -151,6 +161,15 @@ where
             BeginCancelStorage::default(),
             FinishCancelStorage(self.finish_cancel),
         ));
+
+        if let Some(exit_scope) = self.exit_scope {
+            source_mut.insert(SingleTargetStorage::new(exit_scope));
+
+            world.get_entity_mut(exit_scope).or_broken()?
+                .insert(SingleInputStorage::new(source));
+        } else {
+            source_mut.insert(ExitTargetStorage::default());
+        }
 
         Ok(())
     }
@@ -278,7 +297,7 @@ where
 impl<Request, Streams, Response> OperateScope<Request, Streams, Response>
 where
     Request: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
     Response: 'static + Send + Sync,
 {
     fn receive_cancel(
@@ -398,8 +417,9 @@ where
     fn finalize_scope_cleanup(clean: OperationCleanup) -> OperationResult {
         let mut source_mut = clean.world.get_entity_mut(clean.source).or_broken()?;
         let mut pairs = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
+        let scoped_session = clean.session;
         let (index, _) = pairs.0.iter().enumerate().find(
-            |(_, pair)| pair.scoped_session == clean.session
+            |(_, pair)| pair.scoped_session == scoped_session
         ).or_not_ready()?;
         let pair = pairs.0.remove(index);
         let parent_session = pair.parent_session;
@@ -411,13 +431,27 @@ where
             }
             ScopedSessionStatus::Finished => {
                 let staging = source_mut.get::<FinishedStagingStorage>().or_broken()?.0;
-                let exit_scope = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+                let (target, blocker) = source_mut.get_mut::<ExitTargetStorage>()
+                    .and_then(|mut storage| storage.map.remove(&scoped_session))
+                    .map(|exit| (exit.target, exit.blocker))
+                    .or_else(|| {
+                        source_mut
+                        .get::<SingleTargetStorage>()
+                        .map(|target| (target.get(), None))
+                    })
+                    .or_broken()?;
+
                 let response = clean.world
                     .get_mut::<Staging<Response>>(staging).or_broken()?.0
                     .remove(&clean.session).or_broken()?;
-                clean.world.get_entity_mut(exit_scope).or_broken()?.give_input(
+                clean.world.get_entity_mut(target).or_broken()?.give_input(
                     pair.parent_session, response, clean.roster,
                 );
+
+                if let Some(blocker) = blocker {
+                    let serve_next = blocker.serve_next;
+                    serve_next(blocker, clean.world, clean.roster);
+                }
 
                 clean.world.despawn(clean.session);
             }
@@ -493,8 +527,14 @@ impl FinishedStagingStorage {
     }
 }
 
-pub struct Terminate<T> {
+pub(crate) struct Terminate<T> {
     _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> Terminate<T> {
+    pub(crate) fn new() -> Self {
+        Self { _ignore: Default::default() }
+    }
 }
 
 fn cleanup_entire_scope(
@@ -992,3 +1032,71 @@ impl AwaitingCancel {
 }
 
 struct CheckAwaitingSession;
+
+#[derive(Component, Default)]
+pub(crate) struct ExitTargetStorage {
+    /// Map from session value to the target
+    pub(crate) map: HashMap<Entity, ExitTarget>,
+}
+
+pub(crate) struct ExitTarget {
+    pub(crate) target: Entity,
+    pub(crate) source: Entity,
+    pub(crate) parent_session: Entity,
+    pub(crate) blocker: Option<Blocker>,
+}
+
+pub(crate) struct RedirectStream<T: Stream> {
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T: Stream> Operation for RedirectStream<T> {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.entity_mut(source).insert(
+            InputBundle::<T>::new(),
+        );
+        Ok(())
+    }
+
+    fn execute(
+        OperationRequest { source, world, roster }: OperationRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, data } = source_mut.take_input::<T>()?;
+        let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
+        let exit = world.get::<ExitTargetStorage>(scope).or_broken()?
+            .map.get(&session)
+            // If the map does not have this session in it, that should simply
+            // mean that the workflow has terminated, so we should discard this
+            // stream data.
+            //
+            // TODO(@mxgrey): Consider whether this should count as a disposal.
+            .or_not_ready()?;
+        let exit_source = exit.source;
+        let parent_session = exit.parent_session;
+
+        let stream_target = world.get::<StreamTargetStorage<T>>(exit_source)
+            .or_broken()?.get();
+
+        world.get_entity_mut(stream_target).or_broken()?.give_input(
+            parent_session, data, roster,
+        )
+    }
+
+    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        if r.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        let scope = r.world.get::<ScopeStorage>(r.source).or_broken()?.get();
+        r.check_upstream(scope)
+
+        // TODO(@mxgrey): Consider whether we can/should identify more
+        // specifically whether the current state of the scope would be able to
+        // reach this specific stream.
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        clean.cleanup_inputs::<T>()
+    }
+}

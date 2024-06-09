@@ -21,7 +21,7 @@ use smallvec::SmallVec;
 
 use crate::{
     Dangling, UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
-    ForkUnzip, PerformOperation, OutputChain, FunnelInputStorage, OperationResult,
+    ForkUnzip, AddOperation, OutputChain, FunnelInputStorage, OperationResult,
     SingleTargetStorage, OrBroken, OperationReachability,
     OperationError, InspectInput,
 };
@@ -68,7 +68,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
         let result = Dangling::new(source, targets[0]);
 
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(
             source,
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -155,7 +155,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
             Dangling::new(source, targets[1]),
         );
 
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(
             source,
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -272,7 +272,7 @@ where
             Dangling::new(source, targets[2]),
         );
 
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(
             source,
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));

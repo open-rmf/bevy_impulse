@@ -18,8 +18,8 @@
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, Receive, PerformOperation,
-    ForkClone, Chosen, ApplyLabel, Stream, Provider,
+    UnusedTarget, Receive, AddOperation,
+    ForkClone, Chosen, ApplyLabel, StreamPack, Provider,
     AsMap, IntoBlockingMap, IntoAsyncMap, EnterCancel,
     DetachDependency, DisposeOnCancel, Promise, Noop,
     Cancelled, ForkTargetStorage,
@@ -71,7 +71,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// Have the impulse chain run until it is finished without holding onto any
     /// [`Promise`]. The final output will be automatically disposed.
     pub fn detach(self) {
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             self.target,
             Receive::<Response>::new(None, true),
         ));
@@ -84,7 +84,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// end of the chain.
     pub fn take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             self.target,
             Receive::new(Some(sender), false),
         ));
@@ -98,7 +98,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     /// [`Chain::take`] together.
     pub fn detach_and_take(self) -> Promise<Response> {
         let (promise, sender) = Promise::new();
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             self.target,
             Receive::new(Some(sender), true),
         ));
@@ -176,7 +176,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     ) -> Chain<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
     where
         P::Response: 'static + Send + Sync,
-        P::Streams: Stream,
+        P::Streams: StreamPack,
     {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
@@ -193,7 +193,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     where
         F::MapType: Provider<Request=Response>,
         <F::MapType as Provider>::Response: 'static + Send + Sync,
-        <F::MapType as Provider>::Streams: Stream,
+        <F::MapType as Provider>::Streams: StreamPack,
     {
         self.then(f.as_map())
     }
@@ -243,7 +243,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         ThenResponse: 'static + Send + Sync,
         F: Provider<Request = Response, Response = Option<ThenResponse>>,
         F::Response: 'static + Send + Sync,
-        F::Streams: Stream,
+        F::Streams: StreamPack,
     {
         self.then(filter_provider).cancel_on_none()
     }
@@ -259,7 +259,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         ThenResponse: 'static + Send + Sync,
         F: Provider<Request = Response, Response = Option<ThenResponse>>,
         F::Response: 'static + Send + Sync,
-        F::Streams: Stream,
+        F::Streams: StreamPack,
     {
         self.cancellation_filter(filter_provider).dispose_on_cancel()
     }
@@ -326,7 +326,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
             |_| self.commands.spawn(UnusedTarget).id()
         );
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source,
             ForkClone::<Response>::new(ForkTargetStorage::from_iter(targets)),
         ));
@@ -358,7 +358,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         let mut targets = ForkTargetStorage::new();
         targets.0.reserve(number_forks);
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source,
             ForkClone::<Response>::new(targets.clone())
         ));
@@ -538,7 +538,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source, Noop::<Response>::new(target),
         ));
         Chain::new(source, target, self.commands)
@@ -601,7 +601,7 @@ where
         let target_ok = self.commands.spawn(UnusedTarget).id();
         let target_err = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source,
             make_result_branching::<T, E>(
                 ForkTargetStorage::from_iter([target_ok, target_err])
@@ -640,7 +640,7 @@ where
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source,
             make_cancel_filter_on_err::<T, E>(target),
         ));
@@ -698,7 +698,7 @@ where
         let target_some = self.commands.spawn(UnusedTarget).id();
         let target_none = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source,
             make_option_branching::<T>(
                 ForkTargetStorage::from_iter([target_some, target_none])
@@ -717,7 +717,7 @@ where
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             source,
             make_cancel_filter_on_none::<T>(target),
         ));
@@ -786,7 +786,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L> Chain<'w, 's, 'a, 
     ) -> (Dangling<Response, Streams>, U) {
         let cancel_target = self.commands.spawn(UnusedTarget).id();
         let signal_target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(PerformOperation::new(
+        self.commands.add(AddOperation::new(
             cancel_target,
             EnterCancel::new(self.source, signal_target, signal),
         ));

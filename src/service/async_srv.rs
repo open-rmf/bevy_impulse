@@ -18,7 +18,7 @@
 use crate::{
     AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
     InnerChannel, ChannelQueue, OperationRoster, Blocker,
-    Stream, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
+    StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
     OperationError, OrBroken, ManageInput, Input, OperateTask, Operation,
     OperationSetup, SingleTargetStorage, dispose_for_despawned_service,
     service::builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
@@ -52,7 +52,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -80,7 +80,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
 
 }
@@ -90,7 +90,7 @@ where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -187,7 +187,7 @@ where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     let ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } } = cmd;
     let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
@@ -252,7 +252,7 @@ where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     let Blocker { provider, label, .. } = unblock;
     loop {

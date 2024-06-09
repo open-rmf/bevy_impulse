@@ -18,7 +18,7 @@
 use crate::{
     Chain, OutputChain, ModifiersClosed, ModifiersUnset, UnusedTarget,
     FunnelInputStorage, JoinInput, ZipJoin,
-    BundleJoin, PerformOperation,
+    BundleJoin, AddOperation,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -95,9 +95,9 @@ where
         let joiner = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
 
-        commands.add(PerformOperation::new(input_a, JoinInput::<A>::new(joiner)));
-        commands.add(PerformOperation::new(input_b, JoinInput::<B>::new(joiner)));
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(input_a, JoinInput::<A>::new(joiner)));
+        commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
+        commands.add(AddOperation::new(
             joiner,
             ZipJoin::<Self::JoinedResponse>::new(
                 FunnelInputStorage::from_iter([input_a, input_b]),
@@ -141,10 +141,10 @@ where
         let joiner = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
 
-        commands.add(PerformOperation::new(input_a, JoinInput::<A>::new(joiner)));
-        commands.add(PerformOperation::new(input_b, JoinInput::<B>::new(joiner)));
-        commands.add(PerformOperation::new(input_c, JoinInput::<C>::new(joiner)));
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(input_a, JoinInput::<A>::new(joiner)));
+        commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
+        commands.add(AddOperation::new(input_c, JoinInput::<C>::new(joiner)));
+        commands.add(AddOperation::new(
             joiner,
             ZipJoin::<Self::JoinedResponse>::new(
                 FunnelInputStorage::from_iter([input_a, input_b, input_c]),
@@ -266,14 +266,14 @@ where
         );
         let joiner = commands.spawn(()).id();
         for input in &inputs.0 {
-            commands.add(PerformOperation::new(
+            commands.add(AddOperation::new(
                 *input,
                 JoinInput::<Response>::new(joiner),
             ));
         }
 
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(
             joiner,
             BundleJoin::<Response>::new(inputs, target),
         ));

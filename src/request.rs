@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    OutputChain, UnusedTarget, InputBundle, Stream, Provider,
-    ModifiersUnset, PerformOperation, Noop, IntoAsyncMap,
+    OutputChain, UnusedTarget, InputBundle, StreamPack, Provider,
+    ModifiersUnset, AddOperation, Noop, IntoAsyncMap,
 };
 
 use bevy::{
@@ -65,7 +65,7 @@ pub trait RequestExt<'w, 's> {
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
-        P::Streams: Stream;
+        P::Streams: StreamPack;
 
     /// Call this on [`Commands`] to begin building an impulse chain from a value
     /// without calling any provider.
@@ -93,7 +93,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
-        P::Streams: Stream,
+        P::Streams: StreamPack,
     {
         let source = self.spawn(InputBundle::new(request)).id();
         let target = self.spawn(UnusedTarget).id();
@@ -109,7 +109,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let source = self.spawn(InputBundle::new(value)).id();
         let target = self.spawn(UnusedTarget).id();
 
-        self.add(PerformOperation::new(
+        self.add(AddOperation::new(
             source, Noop::<T>::new(target),
         ));
         Segment::new(source, target, self)

@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    Provider, BlockingMap, AsyncMap, PerformOperation, OperateBlockingMap,
-    OperateAsyncMap, Stream,
+    Provider, BlockingMap, AsyncMap, AddOperation, OperateBlockingMap,
+    OperateAsyncMap, StreamPack,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -71,7 +71,7 @@ where
     type Streams = ();
 
     fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(PerformOperation::new(source, OperateBlockingMap::new(target, self.def)));
+        commands.add(AddOperation::new(source, OperateBlockingMap::new(target, self.def)));
     }
 }
 
@@ -127,7 +127,7 @@ where
     F: FnOnce(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     fn call(self, input: AsyncMap<Request, Streams>) -> Task {
         (self.0)(input)
@@ -142,7 +142,7 @@ where
     Task: Future + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type MapType = AsyncMapDef<MapDef<F>, Request, Task, Streams>;
     fn as_map(self) -> Self::MapType {
@@ -165,14 +165,14 @@ where
     Task: Future + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Task::Output;
     type Streams = Streams;
 
     fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(PerformOperation::new(source, OperateAsyncMap::new(target, self.def)));
+        commands.add(AddOperation::new(source, OperateAsyncMap::new(target, self.def)));
     }
 }
 

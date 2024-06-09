@@ -17,8 +17,8 @@
 
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, Stream, Input, Provider,
-    PerformOperation, OperateHandler, ManageInput, OperationError,
+    OperationRoster, StreamPack, Input, Provider,
+    AddOperation, OperateHandler, ManageInput, OperationError,
     OrBroken, OperateTask, Operation, OperationSetup,
 };
 
@@ -113,7 +113,7 @@ impl<'a> HandleRequest<'a> {
         Ok(())
     }
 
-    fn get_channel<Streams: Stream>(&mut self) -> Channel<Streams> {
+    fn get_channel<Streams: StreamPack>(&mut self) -> Channel<Streams> {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let channel = InnerChannel::new(self.source, sender);
         channel.into_specific()
@@ -183,7 +183,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
         let Input { session, data: request } = input.get_request()?;
@@ -251,7 +251,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -291,7 +291,7 @@ where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Task::Output;
@@ -394,13 +394,13 @@ impl<Request, Response, Streams> Provider for Handler<Request, Response, Streams
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
     type Streams = Streams;
 
     fn provide(self, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
-        commands.add(PerformOperation::new(source, OperateHandler::new(self, target)));
+        commands.add(AddOperation::new(source, OperateHandler::new(self, target)));
     }
 }

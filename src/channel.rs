@@ -22,7 +22,7 @@ use bevy::{
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-use crate::{Stream, Provider, Promise, RequestExt, OperationRoster};
+use crate::{StreamPack, Provider, Promise, RequestExt, OperationRoster};
 
 #[derive(Clone)]
 pub struct Channel<Streams = ()> {
@@ -49,7 +49,7 @@ impl<Streams> Channel<Streams> {
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
-        P::Streams: 'static + Stream,
+        P::Streams: 'static + StreamPack,
         P: 'static + Send,
     {
         self.build(move |commands| {
@@ -119,7 +119,7 @@ struct StreamCommand<T> {
     data: T,
 }
 
-impl<T: Stream> Command for StreamCommand<T> {
+impl<T: StreamPack> Command for StreamCommand<T> {
     fn apply(self, world: &mut World) {
         let Some(mut source_mut) = world.get_entity_mut(self.source) else {
             return;

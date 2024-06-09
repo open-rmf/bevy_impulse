@@ -17,7 +17,7 @@
 
 use crate::{
     BlockingMap, AsyncMap, Operation, ChannelQueue, InnerChannel,
-    SingleTargetStorage, Stream, Input, ManageInput, OperationCleanup,
+    SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
     OperationReachability, ReachabilityResult, InputBundle,
@@ -114,7 +114,7 @@ where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     storage: AsyncMapStorage<F, Request, Task, Streams>,
     target: SingleTargetStorage,
@@ -125,7 +125,7 @@ where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
@@ -150,7 +150,7 @@ where
     Task: Future + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.get_entity_mut(self.target.0).or_broken()?

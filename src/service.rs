@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    OperationRoster, Stream, PerformOperation, OperateService, Provider,
+    OperationRoster, StreamPack, AddOperation, OperateService, Provider,
     OperationRequest, PendingOperationRequest, dispose_for_despawned_service,
 };
 
@@ -219,7 +219,7 @@ pub trait SpawnServicesExt<'w, 's> {
         B::With: WithEntityCommands,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: Stream;
+        <B::Service as IntoService<M2>>::Streams: StreamPack;
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
@@ -237,7 +237,7 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
         B::With: WithEntityCommands,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: Stream,
+        <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
         builder.into_service_builder().spawn_service(self)
     }
@@ -259,7 +259,7 @@ pub trait AddServicesExt {
             >,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: Stream;
+        <B::Service as IntoService<M2>>::Streams: StreamPack;
 }
 
 impl AddServicesExt for App {
@@ -275,7 +275,7 @@ impl AddServicesExt for App {
             >,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: Stream
+        <B::Service as IntoService<M2>>::Streams: StreamPack
     {
         builder.into_service_builder().add_service(self);
         self
@@ -338,7 +338,7 @@ where
     type Streams = Streams;
 
     fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(PerformOperation::new(source, OperateService::new(self, target)));
+        commands.add(AddOperation::new(source, OperateService::new(self, target)));
     }
 }
 

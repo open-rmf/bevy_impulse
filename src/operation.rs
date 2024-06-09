@@ -528,18 +528,18 @@ impl<T> OrBroken for Option<T> {
     }
 }
 
-pub(crate) struct PerformOperation<Op: Operation> {
+pub(crate) struct AddOperation<Op: Operation> {
     source: Entity,
     operation: Op,
 }
 
-impl<Op: Operation> PerformOperation<Op> {
+impl<Op: Operation> AddOperation<Op> {
     pub(crate) fn new(source: Entity, operation: Op) -> Self {
         Self { source, operation }
     }
 }
 
-impl<Op: Operation + 'static + Sync + Send> Command for PerformOperation<Op> {
+impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
     fn apply(self, world: &mut World) {
         self.operation.setup(OperationSetup { source: self.source, world });
         let mut provider_mut = world.entity_mut(self.source);

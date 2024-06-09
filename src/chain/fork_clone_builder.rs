@@ -17,7 +17,7 @@
 
 use bevy::prelude::{Entity, Commands};
 
-use crate::{OutputChain, UnusedTarget, PerformOperation, ForkClone, ForkTargetStorage};
+use crate::{OutputChain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage};
 
 pub trait ForkCloneBuilder<Response> {
     type Outputs;
@@ -45,7 +45,7 @@ where
         let target_0 = commands.spawn(UnusedTarget).id();
         let target_1 = commands.spawn(UnusedTarget).id();
 
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(
             source,
             ForkClone::<R>::new(
                 ForkTargetStorage::from_iter([target_0, target_1])
@@ -76,7 +76,7 @@ where
         let target_1 = commands.spawn(UnusedTarget).id();
         let target_2 = commands.spawn(UnusedTarget).id();
 
-        commands.add(PerformOperation::new(
+        commands.add(AddOperation::new(
             source,
             ForkClone::<R>::new(
                 ForkTargetStorage::from_iter([target_0, target_1, target_2])

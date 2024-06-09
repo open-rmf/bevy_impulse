@@ -16,27 +16,22 @@
 */
 
 use crate::{
-    ServiceTrait, ServiceRequest, OperationRequest, OperationResult, Stream,
+    ServiceTrait, ServiceRequest, OperationRequest, OperationResult, StreamPack,
     OrBroken, Input, ManageInput, DeliveryInstructions, ParentSession,
     OperationError, Delivery, DeliveryOrder, DeliveryUpdate, Blocker,
     OperationRoster, Disposal, Cancellation, Cancel, Deliver, SingleTargetStorage,
-    Operation, OperationSetup, OperationCleanup, OperationReachability,
-    ReachabilityResult,
+    ExitTargetStorage, ExitTarget,
     begin_scope, dispose_for_despawned_service, insert_new_order, emit_disposal,
     pop_next_delivery,
 };
 
 use bevy::prelude::{Entity, World, Component};
 
-use std::collections::HashMap;
-
 #[derive(Component, Clone, Copy)]
 struct WorkflowStorage {
     /// The entity that stores the scope operation that encapsulates the entire
     /// workflow.
     scope: Entity,
-    /// The entity that will receive the output of the workflow
-    output: Entity,
 }
 
 struct WorkflowService<Request, Response, Streams> {
@@ -47,7 +42,7 @@ impl<Request, Response, Streams> ServiceTrait for WorkflowService<Request, Respo
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
@@ -97,7 +92,7 @@ fn serve_workflow_impl<Request, Response, Streams>(
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     let workflow = *world.get::<WorkflowStorage>(provider).or_broken()?;
     let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
@@ -156,10 +151,10 @@ where
     let input = Input { session: parent_session, data: request };
     begin_workflow::<Request>(
         input,
+        source,
         target,
         scoped_session,
         workflow.scope,
-        workflow.output,
         blocker,
         world,
         roster
@@ -168,10 +163,10 @@ where
 
 fn begin_workflow<Request>(
     input: Input<Request>,
+    source: Entity,
     target: Entity,
     scoped_session: Entity,
     scope: Entity,
-    output: Entity,
     blocker: Option<Blocker>,
     world: &mut World,
     roster: &mut OperationRoster,
@@ -179,8 +174,9 @@ fn begin_workflow<Request>(
 where
     Request: 'static + Send + Sync,
 {
-    let mut exit_target = world.get_mut::<ExitTargetStorage>(output).or_broken()?;
-    exit_target.map.insert(input.session, ExitTarget { target, blocker });
+    let mut exit_target = world.get_mut::<ExitTargetStorage>(scope).or_broken()?;
+    let parent_session = input.session;
+    exit_target.map.insert(scoped_session, ExitTarget { target, source, parent_session, blocker });
     begin_scope(input, scoped_session, OperationRequest { source: scope, world, roster })
 }
 
@@ -218,10 +214,10 @@ where
 
         if begin_workflow(
             Input { session: parent_session, data: request },
+            source,
             target,
             scoped_session,
             workflow.scope,
-            workflow.output,
             Some(blocker),
             world,
             roster,
@@ -238,69 +234,3 @@ where
         return;
     }
 }
-
-#[derive(Component, Default)]
-struct ExitTargetStorage {
-    /// Map from session value to the target
-    map: HashMap<Entity, ExitTarget>,
-}
-
-struct ExitTarget {
-    target: Entity,
-    blocker: Option<Blocker>,
-}
-
-struct OperateExitTarget<Response> {
-    exit_from_scope: Entity,
-    _ignore: std::marker::PhantomData<Response>,
-}
-
-impl<Response> Operation for OperateExitTarget<Response>
-where
-    Response: 'static + Send + Sync,
-{
-    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source)
-            .insert((
-                ExitFromScope(self.exit_from_scope),
-                ExitTargetStorage::default(),
-            ));
-        Ok(())
-    }
-
-    fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data } = source_mut.take_input::<Response>()?;
-        let mut target_storage = source_mut.get_mut::<ExitTargetStorage>().or_broken()?;
-        let exit = target_storage.map.remove(&session).or_broken()?;
-        if let Some(blocker) = exit.blocker {
-            // This session was blocking a service queue, so now we need to
-            // unblock it
-            let serve_next = blocker.serve_next;
-            serve_next(blocker, world, roster);
-        }
-        world.get_entity_mut(exit.target).or_broken()?.give_input(session, data, roster)
-    }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<Response>()?;
-        clean.world.get_mut::<ExitTargetStorage>(clean.source).or_broken()?
-            .map
-            .remove(&clean.session);
-        Ok(())
-    }
-
-    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        if r.has_input::<Response>()? {
-            return Ok(true);
-        }
-
-        let scope = r.world().get::<ExitFromScope>(r.source()).or_broken()?.0;
-        r.check_upstream(scope)
-    }
-}
-
-#[derive(Component)]
-struct ExitFromScope(Entity);

@@ -17,7 +17,7 @@
 
 use crate::{
     Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
-    Stream, SingleInputStorage, OperationResult, OrBroken, InputBundle,
+    StreamPack, SingleInputStorage, OperationResult, OrBroken, InputBundle,
     OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
     OperationReachability, ReachabilityResult,
 };
@@ -42,7 +42,7 @@ impl<Request, Response, Streams> Operation for OperateHandler<Request, Response,
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: Stream,
+    Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.get_entity_mut(self.target).or_broken()?

@@ -104,13 +104,12 @@ where
         Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
         Srv::Request: 'static + Send + Sync,
         Srv::Response: 'static + Send + Sync,
-        Srv::Streams: Stream,
+        Srv::Streams: StreamPack,
     {
         let mut entity_mut = app.world.spawn(());
         self.service.insert_service_mut(&mut entity_mut);
         let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
-        // entity_mut.insert(<<Srv as IntoService<M>>::Streams as IntoStreamBundle>::StreamOutBundle::default());
-        entity_mut.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
+        entity_mut.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
         self.deliver.apply_entity_mut::<Srv::Request>(&mut entity_mut);
         self.with.apply(entity_mut);
         self.also.apply(app, provider);
@@ -127,12 +126,12 @@ where
         With: WithEntityCommands,
         Srv::Request: 'static + Send + Sync,
         Srv::Response: 'static + Send + Sync,
-        Srv::Streams: Stream,
+        Srv::Streams: StreamPack,
     {
         let mut entity_cmds = commands.spawn(());
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
-        entity_cmds.insert(<Srv::Streams as Stream>::StreamOutBundle::default());
+        entity_cmds.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
         self.deliver.apply_entity_commands::<Srv::Request>(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider
