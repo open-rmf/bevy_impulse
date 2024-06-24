@@ -195,6 +195,7 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
     /// following:
     /// - App::add_*_service
     /// - Commands::spawn_*_service
+    /// - Commands::spawn_workflow
     /// - ServiceDiscovery::iter()
     fn new(entity: Entity) -> Self {
         Self { entity, _ignore: Default::default() }

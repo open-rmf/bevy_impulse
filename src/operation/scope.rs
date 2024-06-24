@@ -22,12 +22,13 @@ use crate::{
     Cancellation, Unreachability, InspectDisposals, execute_operation,
     BufferSettings, Buffer, CancellableBundle, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
-    Blocker, Stream, StreamTargetStorage, StreamRequest,
+    Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
+    ScopeSettings,
 };
 
 use backtrace::Backtrace;
 
-use bevy::prelude::{Component, Entity, World};
+use bevy::prelude::{Component, Entity, World, Commands};
 
 use smallvec::SmallVec;
 
@@ -46,6 +47,7 @@ impl ParentSession {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct OperateScope<Request, Response, Streams> {
     /// The first node that is inside of the scope
     enter_scope: Entity,
@@ -64,13 +66,12 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
 }
 
 impl<Request, Response, Streams> OperateScope<Request, Response, Streams> {
-    pub(crate) fn new(
-        enter_scope: Entity,
-        terminal: Entity,
-        exit_scope: Option<Entity>,
-        finish_cancel: Entity,
-    ) -> Self {
-        Self { enter_scope, terminal, exit_scope, finish_cancel, _ignore: Default::default() }
+    pub(crate) fn terminal(&self) -> Entity {
+        self.terminal
+    }
+
+    pub(crate) fn enter_scope(&self) -> Entity {
+        self.enter_scope
     }
 }
 
@@ -139,7 +140,7 @@ impl TerminalStorage {
     }
 }
 
-impl<Request, Streams, Response> Operation for OperateScope<Request, Streams, Response>
+impl<Request, Response, Streams> Operation for OperateScope<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Streams: StreamPack,
@@ -294,12 +295,37 @@ where
     Ok(())
 }
 
-impl<Request, Streams, Response> OperateScope<Request, Streams, Response>
+impl<Request, Response, Streams> OperateScope<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
-    Streams: StreamPack,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
+    pub(crate) fn new(
+        scope_id: Entity,
+        exit_scope: Option<Entity>,
+        settings: ScopeSettings,
+        commands: &mut Commands,
+    ) -> Self {
+        let enter_scope = commands.spawn(()).id();
+        let terminal = commands.spawn(()).id();
+        let finish_cancel = commands.spawn(()).id();
+        commands.add(AddOperation::new(
+            finish_cancel,
+            FinishCancel { from_scope: scope_id },
+        ));
+
+        let scope = OperateScope {
+            enter_scope,
+            terminal,
+            exit_scope,
+            finish_cancel,
+            _ignore: Default::default(),
+        };
+
+        scope
+    }
+
     fn receive_cancel(
         OperationCancel {
             cancel: Cancel { source: _origin, target: source, session, cancellation },
@@ -810,7 +836,6 @@ pub(crate) struct FinishCancel {
 
 impl Operation for FinishCancel {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        // world.get_entity_mut(entity)
         world.entity_mut(source).insert((
             CancelFromScope(self.from_scope),
             InputBundle::<()>::new(),

@@ -20,7 +20,7 @@ use crate::{
     OrBroken, Input, ManageInput, DeliveryInstructions, ParentSession,
     OperationError, Delivery, DeliveryOrder, DeliveryUpdate, Blocker,
     OperationRoster, Disposal, Cancellation, Cancel, Deliver, SingleTargetStorage,
-    ExitTargetStorage, ExitTarget,
+    ExitTargetStorage, ExitTarget, Service,
     begin_scope, dispose_for_despawned_service, insert_new_order, emit_disposal,
     pop_next_delivery,
 };
@@ -34,8 +34,14 @@ struct WorkflowStorage {
     scope: Entity,
 }
 
-struct WorkflowService<Request, Response, Streams> {
+pub(crate) struct WorkflowService<Request, Response, Streams> {
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+}
+
+impl<Request, Response, Streams> WorkflowService<Request, Response, Streams> {
+    pub(crate) fn cast(scope_id: Entity) -> Service<Request, Response, Streams> {
+        Service { entity: scope_id, _ignore: Default::default() }
+    }
 }
 
 impl<Request, Response, Streams> ServiceTrait for WorkflowService<Request, Response, Streams>

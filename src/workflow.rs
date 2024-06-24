@@ -22,7 +22,7 @@ use bevy::{
 
 use crate::{
     Service, InputSlot, Output, StreamPack, AddOperation, OperateScope,
-    Terminate,
+    Terminate, WorkflowService,
 };
 
 /// Trait to allow workflows to be spawned from a [`Commands`] or a [`World`].
@@ -138,7 +138,7 @@ impl WorkflowSettings {
 
     /// Transform the settings to be uninterruptible
     pub fn uninterruptible(mut self) -> Self {
-        self.scope.uninterruptible = true;
+        self.scope.set_uninterruptible(true);
         self
     }
 }
@@ -196,6 +196,7 @@ impl ScopeSettings {
     }
 }
 
+
 impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
     fn spawn_workflow<Request, Response, Streams>(
         &mut self,
@@ -208,13 +209,10 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         Streams: StreamPack,
     {
         let scope_id = self.spawn(()).id();
-        let enter_scope = self.spawn(()).id();
-        let terminal = self.spawn(()).id();
-        self.add(AddOperation::new(
-            scope_id,
-            OperateScope::new(enter_scope, terminal, None, self.spawn(()).id()),
-        ));
-        self.add(AddOperation::new(terminal, Terminate::new()));
+        let scope = OperateScope::<Request, Response, Streams>::new(
+            scope_id, None, settings.scope, self,
+        );
+        self.add(AddOperation::new(scope.terminal(), Terminate::<Response>::new()));
 
         let (
             stream_storage,
@@ -223,13 +221,15 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         self.entity(scope_id).insert(stream_storage);
 
         let scope = Scope {
-            input: Output::new(scope_id, enter_scope),
-            terminate: InputSlot::new(scope_id, terminal),
+            input: Output::new(scope_id, scope.enter_scope()),
+            terminate: InputSlot::new(scope_id, scope.terminal()),
             streams,
         };
 
-        let builder = Builder { scope: scope_id, commands: self };
+        let mut builder = Builder { scope: scope_id, commands: self };
         build(scope, &mut builder);
+
+        WorkflowService::<Request, Response, Streams>::cast(scope_id)
     }
 }
 
