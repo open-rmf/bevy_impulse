@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{Blocker, OperationRoster, RequestLabelId};
+use crate::{Blocker, OperationRoster, DeliveryInstructions, DeliveryLabelId};
 
 use bevy::prelude::{Entity, Component, World};
 
@@ -25,7 +25,7 @@ use std::collections::{VecDeque, HashMap};
 
 pub(crate) fn pop_next_delivery<Request>(
     provider: Entity,
-    label: Option<RequestLabelId>,
+    label: Option<DeliveryLabelId>,
     serve_next: fn(Blocker, &mut World, &mut OperationRoster),
     world: &mut World,
 ) -> Option<Deliver<Request>>
@@ -83,13 +83,6 @@ pub struct Deliver<Request> {
     pub blocker: Blocker,
 }
 
-#[derive(Component, Clone, Copy)]
-pub struct DeliveryInstructions {
-    pub(crate) label: RequestLabelId,
-    pub(crate) queue: bool,
-    pub(crate) ensure: bool,
-}
-
 pub(crate) struct DeliveryOrder<Request> {
     pub(crate) source: Entity,
     pub(crate) session: Entity,
@@ -142,7 +135,7 @@ impl<Request> Default for SerialDelivery<Request> {
 }
 
 pub struct ParallelDelivery<Request> {
-    pub labeled: HashMap<RequestLabelId, SerialDelivery<Request>>,
+    pub labeled: HashMap<DeliveryLabelId, SerialDelivery<Request>>,
 }
 
 impl<Request> Default for ParallelDelivery<Request> {
@@ -154,7 +147,7 @@ impl<Request> Default for ParallelDelivery<Request> {
 pub enum DeliveryUpdate<Request> {
     /// The new request should be delivered immediately
     Immediate {
-        blocking: Option<Option<RequestLabelId>>,
+        blocking: Option<Option<DeliveryLabelId>>,
         request: Request,
     },
     /// The new request has been placed in the queue
@@ -164,7 +157,7 @@ pub enum DeliveryUpdate<Request> {
         /// An actively running task that has been cancelled
         stop: Option<DeliveryStoppage>,
         /// The label that the blocking is based on
-        label: Option<RequestLabelId>,
+        label: Option<DeliveryLabelId>,
     }
 }
 
@@ -237,7 +230,7 @@ fn insert_serial_order<Request>(
         && !prior_instructions.ensure
     };
 
-    if !incoming_instructions.queue {
+    if incoming_instructions.preempt {
         serial.queue.retain(|e| {
             let discard = e.instructions.as_ref().is_some_and(should_discard);
             if discard {

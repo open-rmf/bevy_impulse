@@ -40,7 +40,7 @@ pub(crate) struct WorkflowService<Request, Response, Streams> {
 
 impl<Request, Response, Streams> WorkflowService<Request, Response, Streams> {
     pub(crate) fn cast(scope_id: Entity) -> Service<Request, Response, Streams> {
-        Service { entity: scope_id, _ignore: Default::default() }
+        Service::new(scope_id)
     }
 }
 

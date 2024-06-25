@@ -168,10 +168,10 @@ mod tests {
             assert!(promise.peek().is_available());
         }
 
-        let count = context.app.world.get::<RunCount>(hello.get()).unwrap().0;
+        let count = context.app.world.get::<RunCount>(hello.provider()).unwrap().0;
         assert_eq!(count, 25);
 
-        let count = context.app.world.get::<RunCount>(repeat.get()).unwrap().0;
+        let count = context.app.world.get::<RunCount>(repeat.provider()).unwrap().0;
         assert_eq!(count, 5);
     }
 }

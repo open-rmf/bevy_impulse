@@ -45,7 +45,7 @@ impl<Request: 'static + Send + Sync> OperateService<Request> {
         target: Entity,
     ) -> Self {
         Self {
-            provider: provider.get(),
+            provider: provider.provider(),
             target,
             _ignore: Default::default(),
         }

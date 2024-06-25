@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    LabelBuilder, DeliveryInstructions, RequestLabel, Chosen,
+    LabelBuilder, DeliveryInstructions, DeliveryLabel, Chosen,
 };
 
 use bevy::ecs::system::EntityCommands;
@@ -38,7 +38,7 @@ pub trait ApplyLabel {
     fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>);
 }
 
-impl<T: RequestLabel> ApplyLabel for T {
+impl<T: DeliveryLabel> ApplyLabel for T {
     fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>) {
         LabelBuilder::new(self).apply(commands)
     }
@@ -48,7 +48,7 @@ impl<Q, E> ApplyLabel for LabelBuilder<Q, E> {
     fn apply<'w, 's, 'a>(self, commands: &mut EntityCommands<'w, 's, 'a>) {
         commands.insert(DeliveryInstructions {
             label: self.label,
-            queue: self.queue,
+            preempt: self.queue,
             ensure: self.ensure,
         });
     }
@@ -61,7 +61,7 @@ pub trait BuildLabel {
     fn ensure(self) -> LabelBuilder<(), Chosen>;
 }
 
-impl<T: RequestLabel> BuildLabel for T {
+impl<T: DeliveryLabel> BuildLabel for T {
     /// Specify that the labeled request should queue itself instead of
     /// cancelling prior requests with the same label.
     fn queue(self) -> LabelBuilder<Chosen, ()> {

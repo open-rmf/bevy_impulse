@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    RequestLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
+    DeliveryLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
     CancelFailure, Broken, ManageCancellation, ManageDisposal,
 };
 
@@ -260,7 +260,7 @@ pub(crate) struct Blocker {
     /// The session that is doing the blocking
     pub(crate) session: Entity,
     /// The label of the queue that is being blocked
-    pub(crate) label: Option<RequestLabelId>,
+    pub(crate) label: Option<DeliveryLabelId>,
     /// Function pointer to call when this is no longer blocking
     pub(crate) serve_next: fn(Blocker, &mut World, &mut OperationRoster),
 }
