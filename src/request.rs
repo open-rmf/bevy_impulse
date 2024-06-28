@@ -17,10 +17,10 @@
 
 use crate::{
     OutputChain, UnusedTarget, InputBundle, StreamPack, Provider,
-    ModifiersUnset, AddOperation, Noop, IntoAsyncMap,
+    ModifiersUnset, AddOperation, Noop, IntoAsyncMap, Promise,
 };
 
-use bevy::prelude::Commands;
+use bevy::prelude::{Commands, Entity, Bundle};
 
 use std::future::Future;
 
@@ -117,6 +117,47 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
 
 async fn async_server<T: Future>(value: T) -> T::Output {
     value.await
+}
+
+pub struct Target<Response, Streams> {
+    session: Entity,
+    _ignore: std::marker::PhantomData<(Response, Streams)>
+}
+
+impl<Response, Streams> Target<Response, Streams> {
+    /// If the target is dropped, the request will not be cancelled.
+    pub fn detach(self) -> Target<Response, Streams> {
+
+    }
+
+    /// Take the data that comes out of the request.
+    #[must_use]
+    pub fn take(self) -> Recipient<Response, Streams> {
+
+    }
+
+    /// Pass the outcome of the request to another provider.
+    #[must_use]
+    pub fn then<P: Provider<Request = Response>>(
+        self,
+        provider: Provider,
+    ) -> Target<P::Response, P::Streams> {
+
+    }
+}
+
+impl<Response, Streams> Target<Response, Streams>
+where
+    Response: Bundle,
+{
+    pub fn store(self, target: Entity) {
+
+    }
+}
+
+pub struct Recipient<Response, Streams: StreamPack> {
+    pub response: Promise<Response>,
+    pub streams: Streams::Receiver,
 }
 
 #[cfg(test)]

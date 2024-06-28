@@ -17,6 +17,8 @@
 
 use bevy::prelude::{Component, Bundle, Entity, Commands, World};
 
+use crossbeam::channel::Receiver;
+
 use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, OperationRoster, OperationResult, OrBroken, ManageInput,
@@ -118,6 +120,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type StreamStorageBundle: Bundle;
     type StreamInputPack;
     type StreamOutputPack;
+    type Receiver;
 
     fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
@@ -140,6 +143,7 @@ impl<T: Stream> StreamPack for T {
     type StreamStorageBundle = StreamTargetStorage<Self>;
     type StreamInputPack = InputSlot<Self>;
     type StreamOutputPack = Output<Self>;
+    type Receiver = Receiver<Self>;
 
     fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
@@ -168,6 +172,7 @@ impl StreamPack for () {
     type StreamStorageBundle = ();
     type StreamInputPack = ();
     type StreamOutputPack = ();
+    type Receiver = ();
 
     fn spawn_scope_streams(_: Entity, _: &mut Commands) -> (
         Self::StreamStorageBundle,
@@ -196,6 +201,7 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     type StreamStorageBundle = T1::StreamStorageBundle;
     type StreamInputPack = T1::StreamInputPack;
     type StreamOutputPack = T1::StreamOutputPack;
+    type Receiver = T1::Receiver;
 
     fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
@@ -224,6 +230,7 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
     type StreamStorageBundle = (T1::StreamStorageBundle, T2::StreamStorageBundle);
     type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack);
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack);
+    type Receiver = (T1::Receiver, T2::Receiver);
 
     fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
@@ -258,6 +265,7 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
     type StreamStorageBundle = (T1::StreamStorageBundle, T2::StreamStorageBundle, T3::StreamStorageBundle);
     type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack, T3::StreamInputPack);
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack, T3::StreamOutputPack);
+    type Receiver = (T1::Receiver, T2::Receiver, T3::Receiver);
 
     fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
