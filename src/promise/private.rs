@@ -90,11 +90,11 @@ impl<T> Drop for Sender<T> {
 }
 
 impl<T> Promise<T> {
-    pub(crate) fn new() -> (Self, Sender<T>) {
+    pub(crate) fn new() -> (Sender<T>, Self) {
         let target = Arc::new(PromiseTarget::new());
         let sender = Sender::new(Arc::downgrade(&target));
         let promise = Self { state: PromiseState::Pending, target, dependencies: Vec::new() };
-        (promise, sender)
+        (sender, promise)
     }
 
     pub(super) fn impl_wait<'a>(
@@ -150,7 +150,7 @@ impl<T> Promise<T> {
 
 impl<T: 'static + Send + Sync> Promise<Promise<T>> {
     pub(super) fn impl_flatten(mut self) -> Promise<T> {
-        let (mut flat_promise, mut flat_sender) = Promise::new();
+        let (mut flat_sender, mut flat_promise) = Promise::new();
 
         let mut outer_promise_dependency = false;
         flat_promise.state = match self.target.inner.lock() {

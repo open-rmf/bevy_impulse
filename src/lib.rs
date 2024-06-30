@@ -30,6 +30,9 @@ pub use discovery::*;
 pub mod disposal;
 pub use disposal::*;
 
+pub mod errors;
+pub use errors::*;
+
 pub mod flush;
 pub use flush::*;
 
@@ -62,6 +65,9 @@ pub use service::*;
 
 pub mod stream;
 pub use stream::*;
+
+pub mod target;
+pub use target::*;
 
 pub mod workflow;
 pub use workflow::*;
@@ -125,7 +131,7 @@ pub type InBlockingService<Request> = In<BlockingService<Request>>;
 /// This comes with a Channel that allows your Future to interact with Bevy's
 /// ECS asynchronously while it is polled from inside the task pool.
 #[non_exhaustive]
-pub struct AsyncService<Request, Streams = ()> {
+pub struct AsyncService<Request, Streams: StreamPack = ()> {
     pub request: Request,
     pub channel: Channel<Streams>,
     pub provider: Entity,
@@ -147,7 +153,7 @@ pub struct BlockingHandler<Request> {
 /// and it must return a [`Future<Output=Response>`](std::future::Future) that
 /// will be polled by the async task pool.
 #[non_exhaustive]
-pub struct AsyncHandler<Request, Streams> {
+pub struct AsyncHandler<Request, Streams: StreamPack = ()> {
     pub request: Request,
     pub channel: Channel<Streams>,
 }
@@ -169,7 +175,7 @@ pub struct BlockingMap<Request> {
 /// An async Map must return a [`Future<Output=Response>`](std::future::Future)
 /// that will be polled by the async task pool.
 #[non_exhaustive]
-pub struct AsyncMap<Request, Streams> {
+pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     pub request: Request,
     pub channel: Channel<Streams>,
 }

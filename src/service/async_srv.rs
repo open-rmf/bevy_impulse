@@ -41,10 +41,10 @@ use std::future::Future;
 pub trait IsAsyncService<M> { }
 
 #[derive(Component)]
-struct AsyncServiceStorage<Request, Streams, Task>(Option<BoxedSystem<AsyncService<Request, Streams>, Task>>);
+struct AsyncServiceStorage<Request, Streams: StreamPack, Task>(Option<BoxedSystem<AsyncService<Request, Streams>, Task>>);
 
 #[derive(Component)]
-struct UninitAsyncServiceStorage<Request, Streams, Task>(BoxedSystem<AsyncService<Request, Streams>, Task>);
+struct UninitAsyncServiceStorage<Request, Streams: StreamPack, Task>(BoxedSystem<AsyncService<Request, Streams>, Task>);
 
 impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> for Sys
 where
@@ -220,8 +220,8 @@ where
     };
 
     let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-    let channel = InnerChannel::new(source, sender);
-    let job = service.run(AsyncService { request, channel: channel.into_specific(), provider }, world);
+    let channel = InnerChannel::new(source, session, sender).into_specific(world)?;
+    let job = service.run(AsyncService { request, channel, provider }, world);
     service.apply_deferred(world);
 
     if let Some(mut service_storage) = world.get_mut::<AsyncServiceStorage<Request, Streams, Task>>(provider) {

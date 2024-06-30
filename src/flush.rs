@@ -16,7 +16,9 @@
 */
 
 use bevy::{
-    prelude::{Entity, World, Query, QueryState, Added, With},
+    prelude::{
+        Entity, World, Query, QueryState, Added, With, Resource, Deref, DerefMut,
+    },
     ecs::system::SystemState,
 };
 
@@ -116,3 +118,8 @@ pub fn flush_impulses(
         }
     }
 }
+
+/// This resource is used to queue up operations in the roster in situations
+/// where the regular roster is not available.
+#[derive(Resource, Default, Deref, DerefMut)]
+pub(crate) struct DeferredRoster(pub OperationRoster);

@@ -70,7 +70,7 @@ where
     type Response = Response;
     type Streams = ();
 
-    fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
+    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddOperation::new(source, OperateBlockingMap::new(target, self.def)));
     }
 }
@@ -118,7 +118,7 @@ where
     }
 }
 
-pub(crate) trait CallAsyncMap<Request, Task, Streams> {
+pub(crate) trait CallAsyncMap<Request, Task, Streams: StreamPack> {
     fn call(self, input: AsyncMap<Request, Streams>) -> Task;
 }
 
@@ -171,7 +171,7 @@ where
     type Response = Task::Output;
     type Streams = Streams;
 
-    fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
+    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddOperation::new(source, OperateAsyncMap::new(target, self.def)));
     }
 }

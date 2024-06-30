@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Entity, Component, Bundle, Resource, World},
+    prelude::{Entity, Component, Bundle, World},
     ecs::world::EntityMut,
 };
 
@@ -27,8 +27,8 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 
 use crate::{
-    Disposal, DisposalFailure, Filtered, OperationError, ScopeStorage, OrBroken,
-    OperationResult, SingleTargetStorage, OperationRoster, Supplanted,
+    Disposal, Filtered, OperationError, ScopeStorage, OrBroken, CancelFailure,
+    OperationResult, OperationRoster, Supplanted, UnhandledErrors,
 };
 
 /// Information about the cancellation that occurred.
@@ -282,9 +282,10 @@ fn try_emit_cancel(
         // the scope
         let scope = scope.get();
         roster.cancel(Cancel { source, target: scope, session, cancellation });
-    } else if let Some(target) = source_mut.get::<SingleTargetStorage>() {
-        let target = target.get();
-        roster.cancel(Cancel { source, target, session, cancellation });
+    } else if let Some(session) = session {
+        // The cancellation is not happening inside a scope, so we should tell
+        // the session itself to cancel.
+        roster.cancel(Cancel { source, target: session, session: Some(session), cancellation });
     } else {
         return Err(CancelFailure::new(
             OperationError::Broken(Some(Backtrace::new())),
@@ -298,32 +299,6 @@ fn try_emit_cancel(
     }
 
     Ok(())
-}
-
-pub struct CancelFailure {
-    /// The error produced while the cancellation was happening
-    pub error: OperationError,
-    /// The cancellation that was being emitted
-    pub cancel: Cancel,
-}
-
-impl CancelFailure {
-    fn new(
-        error: OperationError,
-        cancel: Cancel,
-    ) -> Self {
-        Self { error, cancel }
-    }
-}
-
-// TODO(@mxgrey): Consider moving this into its own module since more than just
-// cancellation will use this resource.
-#[derive(Resource, Default)]
-pub struct UnhandledErrors {
-    pub cancellations: Vec<CancelFailure>,
-    pub operations: Vec<OperationError>,
-    pub disposals: Vec<DisposalFailure>,
-    pub stop_tasks: Vec<StopTaskFailure>,
 }
 
 pub struct OperationCancel<'a> {
@@ -345,11 +320,4 @@ impl CancellableBundle {
     pub fn new(cancel: fn(OperationCancel) -> OperationResult) -> Self {
         CancellableBundle { storage: Default::default(), cancel: OperationCancelStorage(cancel) }
     }
-}
-
-pub struct StopTaskFailure {
-    /// The task that was unable to be stopped
-    pub task: Entity,
-    /// The backtrace to indicate why it failed
-    pub backtrace: Option<Backtrace>,
 }

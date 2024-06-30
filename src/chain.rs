@@ -180,7 +180,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
-        provider.provide(source, target, self.commands);
+        provider.connect(source, target, self.commands);
         Chain::new(source, target, self.commands)
     }
 

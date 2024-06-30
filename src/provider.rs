@@ -27,5 +27,7 @@ pub trait Provider {
     type Response;
     type Streams;
 
-    fn provide(self, source: Entity, target: Entity, commands: &mut Commands);
+    fn connect(self, source: Entity, target: Entity, commands: &mut Commands);
+
+    fn request(self, request: Self::Request, target: Entity, commands: &mut Commands);
 }

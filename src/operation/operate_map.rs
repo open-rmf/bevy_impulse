@@ -173,8 +173,8 @@ where
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?.f;
 
-        let channel = InnerChannel::new(source, sender);
-        let channel = channel.into_specific();
+        let channel = InnerChannel::new(source, session, sender);
+        let channel = channel.into_specific(&world)?;
 
         let task = AsyncComputeTaskPool::get().spawn(map.call(AsyncMap { request, channel }));
 

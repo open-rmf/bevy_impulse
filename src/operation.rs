@@ -58,6 +58,9 @@ pub(crate) use operate_map::*;
 mod operate_service;
 pub(crate) use operate_service::*;
 
+mod operate_target;
+pub(crate) use operate_target::*;
+
 mod operate_task;
 pub(crate) use operate_task::*;
 

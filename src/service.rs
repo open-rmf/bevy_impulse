@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{StreamPack, AddOperation, OperateService, Provider};
+use crate::{StreamPack, AddOperation, OperateService, Provider, InputCommand};
 
 use bevy::{
     prelude::{Entity, App, Commands, Component},
@@ -54,7 +54,7 @@ pub(crate) use workflow::*;
 /// [1]: AddservicesExt::add_service
 /// [2]: SpawnServicesExt::spawn_service
 /// [3]: crate::RequestExt::request
-#[derive(Debug, PartialEq, Eq, Copy)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Service<Request, Response, Streams = ()> {
     provider: Entity,
     instructions: Option<DeliveryInstructions>,
@@ -70,6 +70,8 @@ impl<Req, Res, S> Clone for Service<Req, Res, S> {
         }
     }
 }
+
+impl<Req, Res, S> Copy for Service<Req, Res, S> {}
 
 impl<Request, Response, Streams> Service<Request, Response, Streams> {
     /// Get the underlying entity that the service provider is associated with.
@@ -348,7 +350,7 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn provide(self, source: Entity, target: Entity, commands: &mut Commands) {
+    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddOperation::new(source, OperateService::new(self, target)));
     }
 }

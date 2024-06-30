@@ -16,11 +16,11 @@
 */
 
 use crate::{
-    OutputChain, UnusedTarget, InputBundle, StreamPack, Provider,
-    ModifiersUnset, AddOperation, Noop, IntoAsyncMap, Promise,
+    UnusedTarget, InputBundle, StreamPack, Provider, IntoAsyncMap, Target,
+    TargetProperties,
 };
 
-use bevy::prelude::{Commands, Entity, Bundle};
+use bevy::prelude::Commands;
 
 use std::future::Future;
 
@@ -46,29 +46,24 @@ pub trait RequestExt<'w, 's> {
     /// context.run_while_pending(&mut promise);
     /// assert!(promise.peek().is_available());
     /// ```
+    #[must_use]
     fn request<'a, P: Provider>(
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Segment<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
+    ) -> Target<'w, 's, 'a, P::Response, P::Streams>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack;
 
-    /// Call this on [`Commands`] to begin building an impulse chain from a value
-    /// without calling any provider.
-    fn provide<'a, T: 'static + Send + Sync>(
-        &'a mut self,
-        value: T,
-    ) -> OutputChain<'w, 's, 'a, T>;
-
-    /// Call this on [`Commands`] to begin building an impulse chain from a [`Future`]
-    /// whose [`Future::Output`] will be the first item provided in the chain.
+    /// Call this on [`Commands`] to begin building an impulse chain from a
+    /// [`Future`] whose [`Future::Output`] will be the item provided to the
+    /// target.
     fn serve<'a, T: 'static + Send + Sync + Future>(
         &'a mut self,
         future: T,
-    ) -> OutputChain<'w, 's, 'a, T::Output>
+    ) -> Target<'w, 's, 'a, T::Output, ()>
     where
         T::Output: 'static + Send + Sync;
 }
@@ -78,86 +73,28 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Segment<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
+    ) -> Target<'w, 's, 'a, P::Response, P::Streams>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack,
     {
-        let source = self.spawn(InputBundle::new(request)).id();
-        let target = self.spawn(UnusedTarget).id();
-        provider.provide(source, target, self);
-
-        Segment::new(source, target, self)
-    }
-
-    fn provide<'a, T: 'static + Send + Sync>(
-        &'a mut self,
-        value: T,
-    ) -> OutputChain<'w, 's, 'a, T> {
-        let source = self.spawn(InputBundle::new(value)).id();
-        let target = self.spawn(UnusedTarget).id();
-
-        self.add(AddOperation::new(
-            source, Noop::<T>::new(target),
-        ));
-        Segment::new(source, target, self)
+        let session = self.spawn(TargetProperties::new());
     }
 
     fn serve<'a, T: 'static + Send + Sync + Future>(
         &'a mut self,
         future: T,
-    ) -> OutputChain<'w, 's, 'a, T::Output>
+    ) -> Target<'w, 's, 'a, T::Output, ()>
     where
         T::Output: 'static + Send + Sync,
     {
-        self.request(future, async_server.into_async_map()).output()
+        self.request(future, async_server.into_async_map())
     }
 }
 
 async fn async_server<T: Future>(value: T) -> T::Output {
     value.await
-}
-
-pub struct Target<Response, Streams> {
-    session: Entity,
-    _ignore: std::marker::PhantomData<(Response, Streams)>
-}
-
-impl<Response, Streams> Target<Response, Streams> {
-    /// If the target is dropped, the request will not be cancelled.
-    pub fn detach(self) -> Target<Response, Streams> {
-
-    }
-
-    /// Take the data that comes out of the request.
-    #[must_use]
-    pub fn take(self) -> Recipient<Response, Streams> {
-
-    }
-
-    /// Pass the outcome of the request to another provider.
-    #[must_use]
-    pub fn then<P: Provider<Request = Response>>(
-        self,
-        provider: Provider,
-    ) -> Target<P::Response, P::Streams> {
-
-    }
-}
-
-impl<Response, Streams> Target<Response, Streams>
-where
-    Response: Bundle,
-{
-    pub fn store(self, target: Entity) {
-
-    }
-}
-
-pub struct Recipient<Response, Streams: StreamPack> {
-    pub response: Promise<Response>,
-    pub streams: Streams::Receiver,
 }
 
 #[cfg(test)]

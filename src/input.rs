@@ -17,16 +17,23 @@
 
 use bevy::{
     prelude::{Entity, Component},
-    ecs::world::{EntityMut, EntityRef}
+    ecs::{
+        world::{EntityMut, EntityRef, World},
+        system::Command,
+    },
 };
 
 use smallvec::SmallVec;
 
+use std::collections::HashMap;
+
+use backtrace::Backtrace;
+
 use crate::{
     OperationRoster, OperationError, OrBroken, SingleTargetStorage,
+    DeferredRoster, Cancel, Cancellation, CancellationCause, Broken,
 };
 
-use std::collections::HashMap;
 
 /// Marker trait to indicate when an input is ready.
 #[derive(Component, Default)]
@@ -283,10 +290,40 @@ impl<'a> InspectInput for EntityRef<'a> {
     }
 }
 
-pub struct InputCommand<T> {
-    target: Entity,
-    session: Entity,
-    data: T,
+pub(crate) struct InputCommand<T> {
+    pub(crate) target: Entity,
+    pub(crate) session: Entity,
+    pub(crate) data: T,
+}
+
+impl<T: 'static + Send + Sync> Command for InputCommand<T> {
+    fn apply(self, world: &mut World) {
+        match world.get_mut::<InputStorage<T>>(self.target) {
+            Some(mut storage) => {
+                storage.reverse_queue
+                    .insert(0, Input { session: self.session, data: self.data });
+
+                world.get_resource_or_insert_with(|| DeferredRoster::default())
+                    .queue(self.target);
+            }
+            None => {
+                let cause = CancellationCause::Broken(Broken {
+                    node: self.target,
+                    backtrace: Some(Backtrace::new()),
+                });
+                let cancel = Cancel {
+                    source: self.target,
+                    target: self.session,
+                    session: Some(self.session),
+                    cancellation: Cancellation::from_cause(cause)
+                };
+
+                world.get_resource_or_insert_with(|| DeferredRoster::default())
+                    .cancel(cancel);
+            }
+        }
+
+    }
 }
 
 #[derive(Component)]

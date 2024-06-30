@@ -17,52 +17,44 @@
 
 use bevy::{
     prelude::{Entity, Resource, World},
-    ecs::system::{Command, CommandQueue, Commands},
+    ecs::system::{CommandQueue, Commands},
 };
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
-use crate::{StreamPack, Provider, Promise, RequestExt, OperationRoster};
+use std::sync::Arc;
+
+use crate::{
+    Stream, StreamPack, StreamRequest, Provider, Promise, RequestExt,
+    OperationRoster, OperationError,
+};
 
 #[derive(Clone)]
-pub struct Channel<Streams = ()> {
-    inner: InnerChannel,
+pub struct Channel<Streams: StreamPack = ()> {
+    inner: Arc<InnerChannel>,
+    streams: Streams::Channel,
     _ignore: std::marker::PhantomData<Streams>,
 }
 
-impl<Streams> Channel<Streams> {
-    pub fn push<C: Command>(&self, command: C) {
-        let mut queue = CommandQueue::default();
-        queue.push(command);
-        self.push_batch(queue);
-    }
-
-    pub fn push_batch(&self, mut queue: CommandQueue) {
-        self.inner.sender.send(Box::new(
-            move |world: &mut World, _: &mut OperationRoster| {
-                queue.apply(world);
-            }
-        )).ok();
-    }
-
+impl<Streams: StreamPack> Channel<Streams> {
     pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: 'static + StreamPack,
-        P: 'static + Send,
+        P: 'static + Send + Sync,
     {
-        self.build(move |commands| {
-            commands.request(request, provider).take()
+        self.command(move |commands| {
+            commands.request(request, provider).take().response
         }).flatten()
     }
 
-    pub fn build<F, U>(&self, f: F) -> Promise<U>
+    pub fn command<F, U>(&self, f: F) -> Promise<U>
     where
         F: FnOnce(&mut Commands) -> U + 'static + Send,
         U: 'static + Send,
     {
-        let (promise, sender) = Promise::new();
+        let (sender, promise) = Promise::new();
         self.inner.sender.send(Box::new(
             move |world: &mut World, _: &mut OperationRoster| {
                 let mut command_queue = CommandQueue::default();
@@ -80,16 +72,34 @@ impl<Streams> Channel<Streams> {
 #[derive(Clone)]
 pub(crate) struct InnerChannel {
     source: Entity,
+    session: Entity,
     sender: CbSender<ChannelItem>,
 }
 
 impl InnerChannel {
-    pub(crate) fn new(source: Entity, sender: CbSender<ChannelItem>) -> Self {
-        InnerChannel { source, sender }
+    pub fn source(&self) -> Entity {
+        self.source
     }
 
-    pub(crate) fn into_specific<Streams>(self) -> Channel<Streams> {
-        Channel { inner: self, _ignore: Default::default() }
+    pub fn sender(&self) -> &CbSender<ChannelItem> {
+        &self.sender
+    }
+
+    pub(crate) fn new(
+        source: Entity,
+        session: Entity,
+        sender: CbSender<ChannelItem>,
+    ) -> Self {
+        InnerChannel { source, session, sender }
+    }
+
+    pub(crate) fn into_specific<Streams: StreamPack>(
+        self,
+        world: &World,
+    ) -> Result<Channel<Streams>, OperationError> {
+        let inner = Arc::new(self);
+        let streams = Streams::make_channel(&inner, world)?;
+        Ok(Channel { inner, streams, _ignore: Default::default() })
     }
 }
 
@@ -114,17 +124,28 @@ impl Default for ChannelQueue {
     }
 }
 
-struct StreamCommand<T> {
-    source: Entity,
-    data: T,
+/// Use this channel to stream data using the [`StreamChannel::send`] method.
+pub struct StreamChannel<T> {
+    target: Entity,
+    inner: Arc<InnerChannel>,
+    _ignore: std::marker::PhantomData<T>,
 }
 
-impl<T: StreamPack> Command for StreamCommand<T> {
-    fn apply(self, world: &mut World) {
-        let Some(mut source_mut) = world.get_entity_mut(self.source) else {
-            return;
-        };
+impl<T: Stream> StreamChannel<T> {
+    /// Send an instance of data out over a stream.
+    pub fn send(&self, data: T) {
+        let source = self.inner.source;
+        let session = self.inner.session;
+        let target = self.target;
+        self.inner.sender.send(Box::new(
+            move |world: &mut World, roster: &mut OperationRoster| {
+                data.send(StreamRequest { source, session, target, world, roster });
+            }
+        ));
+    }
 
+    pub(crate) fn new(target: Entity, inner: Arc<InnerChannel>) -> Self {
+        Self { target, inner, _ignore: Default::default() }
     }
 }
 
@@ -162,7 +183,7 @@ mod tests {
                 commands.request(
                     RepeatRequest { service: hello, count: 5 },
                     repeat,
-                ).take()
+                ).take().response
             });
             context.run_while_pending(&mut promise);
             assert!(promise.peek().is_available());

@@ -431,12 +431,12 @@ mod tests {
     fn test_promise_flatten() {
         // Flatten, Outer, Inner
         {
-            let (mut flat_promise, outer_sender) = {
-                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
-                (outer_promise.flatten(), outer_sender)
+            let (outer_sender, mut flat_promise) = {
+                let (outer_sender, outer_promise) = Promise::<Promise<&str>>::new();
+                (outer_sender, outer_promise.flatten())
             };
 
-            let (inner_promise, inner_sender) = Promise::<&str>::new();
+            let (inner_sender, inner_promise) = Promise::<&str>::new();
             assert!(outer_sender.send(inner_promise).is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
@@ -445,12 +445,12 @@ mod tests {
 
         // Flatten, Inner, Outer
         {
-            let (mut flat_promise, outer_sender) = {
-                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
-                (outer_promise.flatten(), outer_sender)
+            let (outer_sender, mut flat_promise) = {
+                let (outer_sender, outer_promise) = Promise::<Promise<&str>>::new();
+                (outer_sender, outer_promise.flatten())
             };
 
-            let (inner_promise, inner_sender) = Promise::<&str>::new();
+            let (inner_sender, inner_promise) = Promise::<&str>::new();
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
             assert!(flat_promise.peek().is_pending());
@@ -460,13 +460,13 @@ mod tests {
 
         // Outer, Flatten, Inner
         {
-            let (mut flat_promise, inner_sender) = {
-                let (mut outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+            let (inner_sender, mut flat_promise) = {
+                let (outer_sender, mut outer_promise) = Promise::<Promise<&str>>::new();
                 assert!(outer_promise.peek().is_pending());
 
-                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                let (inner_sender, inner_promise) = Promise::<&str>::new();
                 assert!(outer_sender.send(inner_promise).is_ok());
-                (outer_promise.flatten(), inner_sender)
+                (inner_sender, outer_promise.flatten())
             };
 
             assert!(flat_promise.peek().is_pending());
@@ -477,9 +477,9 @@ mod tests {
         // Inner, Flatten, Outer
         {
             let (mut flat_promise, outer_sender, inner_promise) = {
-                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                let (outer_sender, outer_promise) = Promise::<Promise<&str>>::new();
 
-                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                let (inner_sender, inner_promise) = Promise::<&str>::new();
                 assert!(inner_sender.send("hello").is_ok());
                 (outer_promise.flatten(), outer_sender, inner_promise)
             };
@@ -492,10 +492,10 @@ mod tests {
         // Outer, Inner, Flatten
         {
             let mut flat_promise = {
-                let (mut outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
+                let (outer_sender, mut outer_promise) = Promise::<Promise<&str>>::new();
                 assert!(outer_promise.peek().is_pending());
 
-                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                let (inner_sender, inner_promise) = Promise::<&str>::new();
                 assert!(outer_sender.send(inner_promise).is_ok());
                 assert!(inner_sender.send("hello").is_ok());
                 assert!(outer_promise.peek().is_available());
@@ -508,8 +508,8 @@ mod tests {
         // Inner, Outer, Flatten
         {
             let mut flat_promise = {
-                let (outer_promise, outer_sender) = Promise::<Promise<&str>>::new();
-                let (inner_promise, inner_sender) = Promise::<&str>::new();
+                let (outer_sender, outer_promise) = Promise::<Promise<&str>>::new();
+                let (inner_sender, inner_promise) = Promise::<&str>::new();
                 assert!(inner_sender.send("hello").is_ok());
                 assert!(outer_sender.send(inner_promise).is_ok());
                 outer_promise.flatten()
@@ -531,9 +531,9 @@ mod tests {
 
     impl DoubleFlattenPairs {
         fn new() -> DoubleFlattenPairs {
-            let (outer_promise, outer_sender) = Promise::new();
-            let (mid_promise, mid_sender) = Promise::new();
-            let (inner_promise, inner_sender) = Promise::new();
+            let (outer_sender, outer_promise) = Promise::new();
+            let (mid_sender, mid_promise) = Promise::new();
+            let (inner_sender, inner_promise) = Promise::new();
             Self { outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender }
         }
     }

@@ -28,6 +28,7 @@ use std::collections::HashMap;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
+    DisposalFailure,
 };
 
 #[derive(Debug, Clone)]
@@ -298,16 +299,4 @@ pub fn emit_disposal(
 struct DisposalStorage {
     /// A map from a session to all the disposals that occurred for the session
     disposals: HashMap<Entity, Vec<Disposal>>,
-}
-
-/// When it is impossible for some reason to perform a disposal, the incident
-/// will be logged in this resource. This may happen if a node somehow gets
-/// despawned while its service is attempting to dispose a request.
-pub struct DisposalFailure {
-    /// The disposal that was attempted
-    pub disposal: Disposal,
-    /// The node which was attempting to report the disposal
-    pub broken_node: Entity,
-    /// The backtrace indicating what led up to the failure
-    pub backtrace: Option<Backtrace>,
 }
