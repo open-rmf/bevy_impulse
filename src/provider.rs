@@ -21,13 +21,14 @@ use bevy::prelude::{Entity, Commands};
 /// three different service types with different advantages and disadvantages:
 /// - [`Service`](crate::Service)
 /// - [`Handler`](crate::Handler)
-/// - [`Map`](crate::Map)
+/// - [`AsyncMap`](crate::AsyncMap)
+/// - [`BlockingMap`](crate::BlockingMap)
 pub trait Provider {
     type Request;
     type Response;
     type Streams;
 
+    /// Take a request from a source (stream target information will also be
+    /// extracted from the source) and connect it to a target.
     fn connect(self, source: Entity, target: Entity, commands: &mut Commands);
-
-    fn request(self, request: Self::Request, target: Entity, commands: &mut Commands);
 }

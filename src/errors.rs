@@ -21,7 +21,7 @@ use backtrace::Backtrace;
 
 use anyhow::Error as Anyhow;
 
-use crate::{OperationError, Cancel, Disposal};
+use crate::{OperationError, Cancel, Disposal, Broken};
 
 /// This resource stores errors that have occurred that could not be handled
 /// internally or communicated to the user by any other means.
@@ -31,9 +31,9 @@ pub struct UnhandledErrors {
     pub operations: Vec<OperationError>,
     pub disposals: Vec<DisposalFailure>,
     pub stop_tasks: Vec<StopTaskFailure>,
+    pub broken: Vec<Broken>,
     pub miscellaneous: Vec<MiscellaneousFailure>,
 }
-
 
 pub struct CancelFailure {
     /// The error produced while the cancellation was happening

@@ -16,11 +16,11 @@
 */
 
 use crate::{
-    UnusedTarget, InputBundle, StreamPack, Provider, IntoAsyncMap, Target,
-    TargetProperties,
+    UnusedTarget, InputCommand, StreamPack, Provider, IntoAsyncMap, Impulse,
+    ImpulseProperties,
 };
 
-use bevy::prelude::Commands;
+use bevy::prelude::{Commands, BuildChildren};
 
 use std::future::Future;
 
@@ -51,11 +51,18 @@ pub trait RequestExt<'w, 's> {
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Target<'w, 's, 'a, P::Response, P::Streams>
+    ) -> Impulse<'w, 's, 'a, P::Response, P::Streams>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack;
+
+    /// Call this on [`Commands`] to begin building an impulse chain from a value
+    /// without calling any provider.
+    fn provide<'a, T: 'static + Send + Sync>(
+        &'a mut self,
+        value: T,
+    ) -> Impulse<'w, 's, 'a, T, ()>;
 
     /// Call this on [`Commands`] to begin building an impulse chain from a
     /// [`Future`] whose [`Future::Output`] will be the item provided to the
@@ -63,7 +70,7 @@ pub trait RequestExt<'w, 's> {
     fn serve<'a, T: 'static + Send + Sync + Future>(
         &'a mut self,
         future: T,
-    ) -> Target<'w, 's, 'a, T::Output, ()>
+    ) -> Impulse<'w, 's, 'a, T::Output, ()>
     where
         T::Output: 'static + Send + Sync;
 }
@@ -73,19 +80,61 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         request: P::Request,
         provider: P,
-    ) -> Target<'w, 's, 'a, P::Response, P::Streams>
+    ) -> Impulse<'w, 's, 'a, P::Response, P::Streams>
     where
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack,
     {
-        let session = self.spawn(TargetProperties::new());
+        let session = self.spawn((
+            ImpulseProperties::new(),
+            UnusedTarget,
+        )).id();
+
+        let source = self.spawn(())
+            // We set the parent of this source to the target so that when the
+            // target gets despawned, this will also be despawned.
+            .set_parent(session)
+            .id();
+
+        provider.connect(source, session, self);
+
+        self.add(InputCommand { session, target: source, data: request });
+
+        Impulse {
+            source,
+            session,
+            commands: self,
+            _ignore: Default::default(),
+        }
+    }
+
+    fn provide<'a, T: 'static + Send + Sync>(
+        &'a mut self,
+        value: T,
+    ) -> Impulse<'w, 's, 'a, T, ()> {
+        let session = self.spawn((
+            ImpulseProperties::new(),
+            UnusedTarget,
+        )).id();
+
+        self.add(InputCommand { session, target: session, data: value });
+
+        Impulse {
+            session,
+            // The source field won't actually matter for impulse produced by
+            // this provide method, so we'll just use the session value as a
+            // placeholder
+            source: session,
+            commands: self,
+            _ignore: Default::default(),
+        }
     }
 
     fn serve<'a, T: 'static + Send + Sync + Future>(
         &'a mut self,
         future: T,
-    ) -> Target<'w, 's, 'a, T::Output, ()>
+    ) -> Impulse<'w, 's, 'a, T::Output, ()>
     where
         T::Output: 'static + Send + Sync,
     {
@@ -114,10 +163,10 @@ mod tests {
         });
 
         context.run_with_conditions(
-            &mut promise,
+            &mut promise.response,
             FlushConditions::new().with_update_count(2),
         );
-        assert!(promise.peek().is_available());
+        assert!(promise.response.peek().is_available());
     }
 
     #[test]
@@ -137,9 +186,9 @@ mod tests {
         });
 
         context.run_with_conditions(
-            &mut promise,
+            &mut promise.response,
             FlushConditions::new().with_timeout(Duration::from_secs_f32(5.0)),
         );
-        assert_eq!(promise.peek().available().copied(), Some("hello"));
+        assert_eq!(promise.response.peek().available().copied(), Some("hello"));
     }
 }

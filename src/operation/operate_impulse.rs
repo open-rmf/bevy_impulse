@@ -28,18 +28,19 @@ use backtrace::Backtrace;
 
 use crate::{
     Operation, OperationSetup, OperationRequest, OperationReachability, OperationCleanup,
-    MiscellaneousFailure, InputBundle, ReachabilityResult,
+    MiscellaneousFailure, InputBundle, ReachabilityResult, UnusedTarget, Storage,
     UnhandledErrors, OperationCancel, OperationResult, OrBroken, Input, ManageInput,
+    Collection,
     promise::private::Sender as PromiseSender,
 };
 
 #[derive(Component)]
-pub(crate) struct TargetProperties {
+pub(crate) struct ImpulseProperties {
     unused: bool,
     detached: bool,
 }
 
-impl TargetProperties {
+impl ImpulseProperties {
     pub(crate) fn new() -> Self {
         Self { unused: true, detached: false }
     }
@@ -51,20 +52,30 @@ pub(crate) struct Detach {
 
 impl Command for Detach {
     fn apply(self, world: &mut World) {
-        match world.get_mut::<TargetProperties>(self.session) {
-            Some(mut properties) => {
+        let backtrace;
+        if let Some(mut session_mut) = world.get_entity_mut(self.session) {
+            if let Some(mut properties) = session_mut.get_mut::<ImpulseProperties>() {
                 properties.detached = true;
+                session_mut.remove::<UnusedTarget>();
+                return;
+            } else {
+                // The session is missing the target properties that it's
+                // supposed to have
+                backtrace = Backtrace::new();
             }
-            None => {
-                let failure = MiscellaneousFailure {
-                    error: anyhow!("Unable to detach target {:?}", self.session),
-                    backtrace: Some(Backtrace::new()),
-                };
-                world.get_resource_or_insert_with(|| UnhandledErrors::default())
-                    .miscellaneous
-                    .push(failure);
-            }
+        } else {
+            // The session has despawned before we could manage to use it, or it
+            // never existed in the first place.
+            backtrace = Backtrace::new();
         }
+
+        let failure = MiscellaneousFailure {
+            error: anyhow!("Unable to detach target {:?}", self.session),
+            backtrace: Some(backtrace),
+        };
+        world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            .miscellaneous
+            .push(failure);
     }
 }
 
@@ -147,6 +158,90 @@ impl<T: 'static + Send + Sync> Operation for TakenStream<T> {
 
     fn is_reachable(_: OperationReachability) -> ReachabilityResult {
         unreachable!("Unexpected query for reachability on a TakenStream")
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct StoreResponse<Response> {
+    target: Entity,
+    _ignore: std::marker::PhantomData<Response>,
+}
+
+impl<Response> StoreResponse<Response> {
+    pub(crate) fn new(target: Entity) -> Self {
+        Self { target, _ignore: Default::default() }
+    }
+}
+
+impl<Response: 'static + Send + Sync> Operation for StoreResponse<Response> {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        add something to track the life of the target
+        world.entity_mut(source).insert(self);
+        Ok(())
+    }
+
+    fn execute(
+        OperationRequest { source, world, .. }: OperationRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, data } = source_mut.take_input::<Response>()?;
+        let target = source_mut.get::<StoreResponse<Response>>().or_broken()?.target;
+        world.get_entity_mut(target).or_broken()?.insert(Storage { data, session });
+
+        Ok(())
+    }
+
+    fn cleanup(_: OperationCleanup) -> OperationResult {
+        unreachable!("Unexpected request to cleanup a StoreResponse");
+    }
+
+    fn is_reachable(_: OperationReachability) -> ReachabilityResult {
+        unreachable!("Unexpected query for reachability on a StoreResponse");
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct PushResponse<Response> {
+    target: Entity,
+    _ignore: std::marker::PhantomData<Response>,
+}
+
+impl<Response> PushResponse<Response> {
+    pub(crate) fn new(target: Entity) -> Self {
+        Self { target, _ignore: Default::default() }
+    }
+}
+
+impl<Response: 'static + Send + Sync> Operation for PushResponse<Response> {
+    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        add something to track the life of the target
+        world.entity_mut(source).insert(self);
+        Ok(())
+    }
+
+    fn execute(
+        OperationRequest { source, world, .. }: OperationRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, data } = source_mut.take_input::<Response>()?;
+        let target = source_mut.get::<PushResponse<Response>>().or_broken()?.target;
+        let mut target_mut = world.get_entity_mut(target).or_broken()?;
+        if let Some(mut collection) = target_mut.get_mut::<Collection<Response>>() {
+            collection.items.push(Storage { session, data });
+        } else {
+            let mut collection = Collection::default();
+            collection.items.push(Storage { session, data });
+            target_mut.insert(collection);
+        }
+        Ok(())
+    }
+
+    fn cleanup(_: OperationCleanup) -> OperationResult {
+        unreachable!("Unexpected request to cleanup a PushResponse");
+    }
+
+    fn is_reachable(_: OperationReachability) -> ReachabilityResult {
+        unreachable!("Unexpected query for reachability on a PushResponse");
     }
 }
 

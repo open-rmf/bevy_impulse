@@ -52,14 +52,14 @@ pub(crate) use noop::*;
 mod operate_handler;
 pub(crate) use operate_handler::*;
 
+mod operate_impulse;
+pub(crate) use operate_impulse::*;
+
 mod operate_map;
 pub(crate) use operate_map::*;
 
 mod operate_service;
 pub(crate) use operate_service::*;
-
-mod operate_target;
-pub(crate) use operate_target::*;
 
 mod operate_task;
 pub(crate) use operate_task::*;
@@ -545,8 +545,7 @@ impl<Op: Operation> AddOperation<Op> {
 impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
     fn apply(self, world: &mut World) {
         self.operation.setup(OperationSetup { source: self.source, world });
-        let mut provider_mut = world.entity_mut(self.source);
-        provider_mut
+        world.entity_mut(self.source)
             .insert((
                 OperationExecuteStorage(perform_operation::<Op>),
                 OperationCleanupStorage(Op::cleanup),
@@ -556,7 +555,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
 }
 
 #[derive(Component)]
-struct OperationExecuteStorage(fn(OperationRequest));
+pub(crate) struct OperationExecuteStorage(pub(crate) fn(OperationRequest));
 
 #[derive(Component)]
 struct OperationCleanupStorage(fn(OperationCleanup) -> OperationResult);
@@ -568,7 +567,12 @@ struct OperationReachabiilityStorage(
 
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
-
+        request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            .broken
+            .push(Broken {
+                node: request.source,
+                backtrace: Some(Backtrace::new())
+            });
         return;
     };
     let operator = operator.0;

@@ -22,8 +22,6 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use smallvec::SmallVec;
-
 use std::sync::Arc;
 
 use crate::{
@@ -197,18 +195,6 @@ impl From<Unreachability> for CancellationCause {
     }
 }
 
-/// Signals that a cancellation has occurred. This can be read by receivers
-/// using [`try_receive_cancel()`](ManageCancellation).
-pub struct CancelSignal {
-    pub session: Entity,
-    pub cancellation: Cancellation,
-}
-
-#[derive(Component, Default)]
-struct CancelSignalStorage {
-    reverse_queue: SmallVec<[CancelSignal; 8]>,
-}
-
 pub trait ManageCancellation {
     /// Have this node emit a signal to cancel the current scope.
     fn emit_cancel(
@@ -223,8 +209,6 @@ pub trait ManageCancellation {
         backtrace: Option<Backtrace>,
         roster: &mut OperationRoster,
     );
-
-    fn try_receive_cancel(&mut self) -> Result<Option<CancelSignal>, OperationError>;
 }
 
 impl<'w> ManageCancellation for EntityMut<'w> {
@@ -262,11 +246,6 @@ impl<'w> ManageCancellation for EntityMut<'w> {
                 .cancellations.push(failure);
             });
         }
-    }
-
-    fn try_receive_cancel(&mut self) -> Result<Option<CancelSignal>, OperationError> {
-        let mut storage = self.get_mut::<CancelSignalStorage>().or_broken()?;
-        Ok(storage.reverse_queue.pop())
     }
 }
 
@@ -311,13 +290,12 @@ pub struct OperationCancel<'a> {
 struct OperationCancelStorage(fn(OperationCancel) -> OperationResult);
 
 #[derive(Bundle)]
-pub struct CancellableBundle {
-    storage: CancelSignalStorage,
+pub struct Cancellable {
     cancel: OperationCancelStorage,
 }
 
-impl CancellableBundle {
+impl Cancellable {
     pub fn new(cancel: fn(OperationCancel) -> OperationResult) -> Self {
-        CancellableBundle { storage: Default::default(), cancel: OperationCancelStorage(cancel) }
+        Cancellable { cancel: OperationCancelStorage(cancel) }
     }
 }

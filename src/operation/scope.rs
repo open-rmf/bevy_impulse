@@ -20,7 +20,7 @@ use crate::{
     OperationReachability, ReachabilityResult, OperationSetup, StreamPack,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
-    BufferSettings, Buffer, CancellableBundle, OperationRoster, ManageCancellation,
+    BufferSettings, Buffer, Cancellable, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
     ScopeSettings,
@@ -156,7 +156,7 @@ where
             ScopeContents::new(),
             ScopedSessionStorage::default(),
             TerminalStorage(self.terminal),
-            CancellableBundle::new(Self::receive_cancel),
+            Cancellable::new(Self::receive_cancel),
             ValidateScopeReachability(Self::validate_scope_reachability),
             FinalizeScopeCleanup(Self::finalize_scope_cleanup),
             BeginCancelStorage::default(),
@@ -840,7 +840,7 @@ impl Operation for FinishCancel {
             CancelFromScope(self.from_scope),
             InputBundle::<()>::new(),
             InputBundle::<CheckAwaitingSession>::new(),
-            CancellableBundle::new(Self::receive_cancel),
+            Cancellable::new(Self::receive_cancel),
             AwaitingCancelStorage::default(),
         ));
         Ok(())

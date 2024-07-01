@@ -113,9 +113,12 @@ impl<'a> HandleRequest<'a> {
         Ok(())
     }
 
-    fn get_channel<Streams: StreamPack>(&mut self) -> Result<Channel<Streams>, OperationError> {
+    fn get_channel<Streams: StreamPack>(
+        &mut self,
+        session: Entity,
+    ) -> Result<Channel<Streams>, OperationError> {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let channel = InnerChannel::new(self.source, sender);
+        let channel = InnerChannel::new(self.source, session, sender);
         channel.into_specific(&self.world)
     }
 }
@@ -188,7 +191,7 @@ where
     fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
         let Input { session, data: request } = input.get_request()?;
 
-        let channel = input.get_channel()?;
+        let channel = input.get_channel(session)?;
 
         if !self.initialized {
             self.system.initialize(&mut input.world);
@@ -300,7 +303,7 @@ where
     fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: HandleRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
-            let channel = input.get_channel()?;
+            let channel = input.get_channel(session)?;
             let task = (self)(AsyncHandler { request, channel });
             input.give_task(session, task)
         };

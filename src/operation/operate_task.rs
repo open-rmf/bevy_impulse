@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Component, Entity, World, Resource, Bundle},
+    prelude::{Component, Entity, World, Resource, Bundle, BuildWorldChildren},
     tasks::{Task as BevyTask, AsyncComputeTaskPool},
 };
 
@@ -118,11 +118,13 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let mut source_mut = world.entity_mut(source);
         let owner = self.owner.0;
         let session = self.session.0;
-        source_mut.insert((
-            self,
-            JobWakerStorage(waker),
-            StopTask(stop_task::<Response>),
-        ));
+        source_mut
+            .insert((
+                self,
+                JobWakerStorage(waker),
+                StopTask(stop_task::<Response>),
+            ))
+            .set_parent(owner);
 
         let mut owner_mut = world.get_entity_mut(owner).or_broken()?;
         let mut tasks = owner_mut.get_mut::<ActiveTasksStorage>().or_broken()?;

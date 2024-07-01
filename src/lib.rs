@@ -39,6 +39,9 @@ pub use flush::*;
 pub mod handler;
 pub use handler::*;
 
+pub mod impulse;
+pub use impulse::*;
+
 pub mod input;
 pub use input::*;
 
@@ -65,9 +68,6 @@ pub use service::*;
 
 pub mod stream;
 pub use stream::*;
-
-pub mod target;
-pub use target::*;
 
 pub mod workflow;
 pub use workflow::*;
