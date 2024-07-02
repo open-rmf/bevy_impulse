@@ -109,19 +109,19 @@ impl Drop for ServiceLifecycle {
 }
 
 #[derive(Resource, Clone)]
-pub(crate) struct ServiceLifecycleQueue {
+pub(crate) struct ServiceLifecycleChannel {
     pub(crate) sender: CbSender<Entity>,
     pub(crate) receiver: CbReceiver<Entity>,
 }
 
-impl ServiceLifecycleQueue {
+impl ServiceLifecycleChannel {
     pub(crate) fn new() -> Self {
         let (sender, receiver) = unbounded();
         Self { sender, receiver }
     }
 }
 
-impl Default for ServiceLifecycleQueue {
+impl Default for ServiceLifecycleChannel {
     fn default() -> Self {
         Self::new()
     }

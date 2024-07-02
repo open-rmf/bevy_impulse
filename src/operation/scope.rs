@@ -1095,7 +1095,9 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
-        let stream_target = world.get::<StreamTargetStorage<T>>(scope).or_broken()?.get();
+        let stream_target = world
+            .get::<StreamTargetStorage<T>>(scope)
+            .map(|target| target.get());
         let parent_session = world.get::<ParentSession>(scoped_session).or_broken()?.get();
         data.send(StreamRequest {
             source,
@@ -1160,7 +1162,7 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
         let parent_session = exit.parent_session;
 
         let stream_target = world.get::<StreamTargetStorage<T>>(exit_source)
-            .or_broken()?.get();
+            .map(|target| target.get());
 
         data.send(StreamRequest {
             source,

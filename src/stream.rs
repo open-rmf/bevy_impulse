@@ -23,8 +23,8 @@ use std::sync::Arc;
 
 use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
-    AddOperation, OperationRoster, OperationResult, OrBroken, ManageInput,
-    InnerChannel, TakenStream, StreamChannel, OperationError,
+    AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
+    InnerChannel, TakenStream, StreamChannel, PushResponse,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -32,7 +32,13 @@ pub trait Stream: 'static + Send + Sync + Sized {
         self,
         StreamRequest { session, target, world, roster, .. }: StreamRequest
     ) -> OperationResult {
-        world.get_entity_mut(target).or_broken()?.give_input(session, self, roster)
+        if let Some(target) = target {
+            world.get_entity_mut(target)
+                .or_broken()?
+                .give_input(session, self, roster)?;
+        }
+
+        Ok(())
     }
 
     fn spawn_scope_stream(
@@ -79,8 +85,8 @@ pub trait Stream: 'static + Send + Sync + Sized {
         )
     }
 
-    fn spawn_request_stream(
-        session: Entity,
+    fn take_stream(
+        source: Entity,
         commands: &mut Commands,
     ) -> (
         StreamTargetStorage<Self>,
@@ -91,15 +97,28 @@ pub trait Stream: 'static + Send + Sync + Sized {
             .spawn(())
             // Set the parent of this stream to be the session so it can be
             // recursively despawned together.
-            .set_parent(session)
+            .set_parent(source)
             .id();
 
-        commands.add(AddOperation::new(target, TakenStream::new(sender)));
+        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
 
         (
             StreamTargetStorage::new(target),
             receiver,
         )
+    }
+
+    fn collect_stream(
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) -> StreamTargetStorage<Self> {
+        let redirect = commands.spawn(()).set_parent(source).id();
+        commands.add(AddImpulse::new(
+            redirect,
+            PushResponse::<Self>::new(target, true),
+        ));
+        StreamTargetStorage::new(redirect)
     }
 }
 
@@ -108,8 +127,8 @@ pub struct StreamRequest<'a> {
     pub source: Entity,
     /// The session of the stream
     pub session: Entity,
-    /// The target of the stream
-    pub target: Entity,
+    /// The target of the stream, if a specific target exists.
+    pub target: Option<Entity>,
     /// The world that the stream exists inside
     pub world: &'a mut World,
     /// The roster of the stream
@@ -169,12 +188,18 @@ pub trait StreamPack: 'static + Send + Sync {
         Self::StreamOutputPack,
     );
 
-    fn make_receiver(session: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     );
 
-    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Result<Self::Channel, OperationError>;
+    fn collect_streams(
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) -> Self::StreamStorageBundle;
+
+    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
 }
 
 impl<T: Stream> StreamPack for T {
@@ -206,19 +231,28 @@ impl<T: Stream> StreamPack for T {
         T::spawn_node_stream(scope, commands)
     }
 
-    fn make_receiver(session: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        Self::spawn_request_stream(session, commands)
+        Self::take_stream(source, commands)
+    }
+
+    fn collect_streams(
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) -> Self::StreamStorageBundle {
+        Self::collect_stream(source, target, commands)
     }
 
     fn make_channel(
         inner: &Arc<InnerChannel>,
         world: &World,
-    ) -> Result<Self::Channel, OperationError> {
-        let target = world.get::<StreamTargetStorage<Self>>(inner.source()).or_broken()?.target;
-        Ok(StreamChannel::new(target, Arc::clone(inner)))
+    ) -> Self::Channel {
+        let target = world.get::<StreamTargetStorage<Self>>(inner.source())
+            .map(|t| t.target);
+        StreamChannel::new(target, Arc::clone(inner))
     }
 }
 
@@ -251,18 +285,26 @@ impl StreamPack for () {
         ((), ())
     }
 
-    fn make_receiver(_: Entity, _: &mut Commands) -> (
+    fn take_streams(_: Entity, _: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
         ((), ())
     }
 
+    fn collect_streams(
+        _: Entity,
+        _: Entity,
+        _: &mut Commands,
+    ) -> Self::StreamStorageBundle {
+        ()
+    }
+
     fn make_channel(
         _: &Arc<InnerChannel>,
         _: &World,
-    ) -> Result<Self::Channel, OperationError> {
-        Ok(())
+    ) -> Self::Channel {
+        ()
     }
 }
 
@@ -295,17 +337,25 @@ impl<T1: StreamPack> StreamPack for (T1,) {
         T1::spawn_node_streams(scope, commands)
     }
 
-    fn make_receiver(session: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        T1::make_receiver(session, commands)
+        T1::take_streams(source, commands)
+    }
+
+    fn collect_streams(
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) -> Self::StreamStorageBundle {
+        T1::collect_streams(source, target, commands)
     }
 
     fn make_channel(
         inner: &Arc<InnerChannel>,
         world: &World,
-    ) -> Result<Self::Channel, OperationError> {
+    ) -> Self::Channel {
         T1::make_channel(inner, world)
     }
 }
@@ -345,22 +395,32 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
         ((t1.0, t2.0), (t1.1, t2.1))
     }
 
-    fn make_receiver(session: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        let t1 = T1::make_receiver(session, commands);
-        let t2 = T2::make_receiver(session, commands);
+        let t1 = T1::take_streams(source, commands);
+        let t2 = T2::take_streams(source, commands);
         ((t1.0, t2.0), (t1.1, t2.1))
+    }
+
+    fn collect_streams(
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) -> Self::StreamStorageBundle {
+        let t1 = T1::collect_streams(source, target, commands);
+        let t2 = T2::collect_streams(source, target, commands);
+        (t1, t2)
     }
 
     fn make_channel(
         inner: &Arc<InnerChannel>,
         world: &World,
-    ) -> Result<Self::Channel, OperationError> {
-        let t1 = T1::make_channel(inner, world)?;
-        let t2 = T2::make_channel(inner, world)?;
-        Ok((t1, t2))
+    ) -> Self::Channel {
+        let t1 = T1::make_channel(inner, world);
+        let t2 = T2::make_channel(inner, world);
+        (t1, t2)
     }
 }
 
@@ -402,23 +462,34 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 
-    fn make_receiver(session: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        let t1 = T1::make_receiver(session, commands);
-        let t2 = T2::make_receiver(session, commands);
-        let t3 = T3::make_receiver(session, commands);
+        let t1 = T1::take_streams(source, commands);
+        let t2 = T2::take_streams(source, commands);
+        let t3 = T3::take_streams(source, commands);
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
+    }
+
+    fn collect_streams(
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) -> Self::StreamStorageBundle {
+        let t1 = T1::collect_streams(source, target, commands);
+        let t2 = T2::collect_streams(source, target, commands);
+        let t3 = T3::collect_streams(source, target, commands);
+        (t1, t2, t3)
     }
 
     fn make_channel(
         inner: &Arc<InnerChannel>,
         world: &World,
-    ) -> Result<Self::Channel, OperationError> {
-        let t1 = T1::make_channel(inner, world)?;
-        let t2 = T2::make_channel(inner, world)?;
-        let t3 = T3::make_channel(inner, world)?;
-        Ok((t1, t2, t3))
+    ) -> Self::Channel {
+        let t1 = T1::make_channel(inner, world);
+        let t2 = T2::make_channel(inner, world);
+        let t3 = T3::make_channel(inner, world);
+        (t1, t2, t3)
     }
 }

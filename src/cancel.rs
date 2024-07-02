@@ -25,7 +25,7 @@ use backtrace::Backtrace;
 use std::sync::Arc;
 
 use crate::{
-    Disposal, Filtered, OperationError, ScopeStorage, OrBroken, CancelFailure,
+    Disposal, Filtered, OperationError, ScopeStorage, CancelFailure,
     OperationResult, OperationRoster, Supplanted, UnhandledErrors,
 };
 

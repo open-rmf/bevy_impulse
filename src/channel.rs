@@ -98,7 +98,7 @@ impl InnerChannel {
         world: &World,
     ) -> Result<Channel<Streams>, OperationError> {
         let inner = Arc::new(self);
-        let streams = Streams::make_channel(&inner, world)?;
+        let streams = Streams::make_channel(&inner, world);
         Ok(Channel { inner, streams, _ignore: Default::default() })
     }
 }
@@ -126,7 +126,7 @@ impl Default for ChannelQueue {
 
 /// Use this channel to stream data using the [`StreamChannel::send`] method.
 pub struct StreamChannel<T> {
-    target: Entity,
+    target: Option<Entity>,
     inner: Arc<InnerChannel>,
     _ignore: std::marker::PhantomData<T>,
 }
@@ -144,7 +144,7 @@ impl<T: Stream> StreamChannel<T> {
         ));
     }
 
-    pub(crate) fn new(target: Entity, inner: Arc<InnerChannel>) -> Self {
+    pub(crate) fn new(target: Option<Entity>, inner: Arc<InnerChannel>) -> Self {
         Self { target, inner, _ignore: Default::default() }
     }
 }

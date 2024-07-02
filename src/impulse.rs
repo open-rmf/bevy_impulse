@@ -22,13 +22,26 @@ use bevy::prelude::{
 use std::future::Future;
 
 use crate::{
-    Promise, Provider, StreamPack, Detach, TakenResponse, AddOperation,
-    IntoBlockingMap, IntoAsyncMap, ImpulseProperties, UnusedTarget, StoreResponse,
-    PushResponse,
+    Promise, Provider, StreamPack, IntoBlockingMap, IntoAsyncMap, UnusedTarget,
 };
 
-pub mod traits;
-pub use traits::*;
+mod detach;
+pub(crate) use detach::*;
+
+mod insert;
+pub(crate) use insert::*;
+
+mod internal;
+pub(crate) use internal::*;
+
+mod push;
+pub(crate) use push::*;
+
+mod store;
+pub(crate) use store::*;
+
+mod taken;
+pub(crate) use taken::*;
 
 /// Impulses can be chained as a simple sequence of [providers](Provider).
 pub struct Impulse<'w, 's, 'a, Response, Streams> {
@@ -50,21 +63,33 @@ where
         self
     }
 
-    /// Take the data that comes out of the request.
+    /// Take the data that comes out of the request, including both the response
+    /// and the streams.
     #[must_use]
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
-        self.commands.add(AddOperation::new(
+        self.commands.add(AddImpulse::new(
             self.session,
             TakenResponse::<Response>::new(response_sender),
         ));
-        let (bundle, stream_receivers) = Streams::make_receiver(self.session, self.commands);
+        let (bundle, stream_receivers) = Streams::take_streams(self.session, self.commands);
         self.commands.entity(self.source).insert(bundle);
 
         Recipient {
             response: response_promise,
             streams: stream_receivers,
         }
+    }
+
+    /// Take only the response data that comes out of the request.
+    #[must_use]
+    pub fn take_response(self) -> Promise<Response> {
+        let (response_sender, response_promise) = Promise::<Response>::new();
+        self.commands.add(AddImpulse::new(
+            self.session,
+            TakenResponse::<Response>::new(response_sender),
+        ));
+        response_promise
     }
 
     /// Pass the outcome of the request to another provider.
@@ -75,7 +100,7 @@ where
     ) -> Impulse<'w, 's, 'a, P::Response, P::Streams> {
         let source = self.session;
         let session = self.commands.spawn((
-            ImpulseProperties::new(),
+            Detached::default(),
             UnusedTarget,
         )).id();
 
@@ -127,36 +152,75 @@ where
 
     /// Store the response in a [`Storage`] component in the specified entity.
     ///
+    /// Each stream will be collected into [`Collection`] components in the
+    /// specified entity, one for each stream type. To store the streams in a
+    /// different entity, call [`Self::collect_streams`] before this.
+    ///
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
-        self.commands.add(AddOperation::new(
+        self.commands.add(AddImpulse::new(
             self.session,
             StoreResponse::<Response>::new(target),
         ));
+
+        let stream_targets = Streams::collect_streams(
+            self.source, target, self.commands,
+        );
+        self.commands.entity(self.source).insert(stream_targets);
     }
 
-    /// Push the response to the back of a [`Storage<Vec<T>>`] component in an
+    /// Collect the stream data into [`Collection<T>`] components in the
+    /// specified target, one collection for each stream data type. You must
+    /// still decide what to do with the final response data.
+    #[must_use]
+    pub fn collect_streams(self, target: Entity) -> Impulse<'w, 's, 'a, Response, ()> {
+        let stream_targets = Streams::collect_streams(
+            self.source, target, self.commands,
+        );
+        self.commands.entity(self.source).insert(stream_targets);
+
+        Impulse {
+            source: self.source,
+            session: self.session,
+            commands: self.commands,
+            _ignore: Default::default(),
+        }
+    }
+
+    /// Push the response to the back of a [`Collection<T>`] component in an
+    /// entity.
+    ///
+    /// Similar to [`Self::store`] this will also collect streams into this
     /// entity.
     ///
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn push(self, target: Entity) {
-        self.commands.add(AddOperation::new(
+        self.commands.add(AddImpulse::new(
             self.session,
-            PushResponse::<Response>::new(target),
+            PushResponse::<Response>::new(target, false),
         ));
+
+        let stream_targets = Streams::collect_streams(
+            self.source, target, self.commands,
+        );
+        self.commands.entity(self.source).insert(stream_targets);
     }
 
-    // TODO(@mxgrey): Offer an on_cancel method that lets users provide a
-    // callback to be triggered when a cancellation happens.
+    // TODO(@mxgrey): Consider offering ways for users to respond to cancellations.
+    // For example, offer an on_cancel method that lets users provide a callback
+    // to be triggered when a cancellation happens. Or focus on terminal impulses,
+    // like offer store_or_else(~), push_or_else(~) etc which accept a callback
+    // that will be triggered after a cancellation.
 }
 
 impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>
 where
     Response: Bundle,
 {
-    /// Insert the response as a bundle in the specified entity.
+    /// Insert the response as a bundle in the specified entity. Stream data
+    /// will be dropped unless you use [`Self::collect_streams`] before this.
     ///
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
@@ -173,9 +237,11 @@ impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>
 where
     Response: Event,
 {
-    /// Send the response out as an event once it is ready. Using this will also
-    /// effectively [detach](Self::detach) the impulse.
-    pub fn send(self) {
+    /// Send the response out as an event once it is ready. Stream data will be
+    /// dropped unless you use [`Self::collect_streams`] before this.
+    ///
+    /// Using this will also effectively [detach](Self::detach) the impulse.
+    pub fn send_event(self) {
 
     }
 }
@@ -192,7 +258,10 @@ pub struct Storage<T> {
     pub session: Entity,
 }
 
-/// Used to collect responses from multiple impulse chains into a container.
+/// Used to collect responses from multiple impulse chains into a container
+/// attached to an entity.
+//
+// TODO(@mxgrey): Consider allowing the user to choose the container type.
 #[derive(Component)]
 pub struct Collection<T> {
     /// The items that have been collected.

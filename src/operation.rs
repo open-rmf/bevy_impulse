@@ -52,9 +52,6 @@ pub(crate) use noop::*;
 mod operate_handler;
 pub(crate) use operate_handler::*;
 
-mod operate_impulse;
-pub(crate) use operate_impulse::*;
-
 mod operate_map;
 pub(crate) use operate_map::*;
 
@@ -604,7 +601,7 @@ fn perform_operation<Op: Operation>(
                         session: None,
                         cancellation: Broken { node: source, backtrace }.into(),
                     }
-                })
+                });
             }
         }
     }

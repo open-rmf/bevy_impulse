@@ -26,7 +26,7 @@ use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    Cancel, DroppedPromiseQueue, UnusedTarget, ServiceLifecycle, ServiceLifecycleQueue,
+    Cancel, DroppedPromiseQueue, UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel,
     OperationRequest,
     execute_operation, dispose_for_despawned_service,
 };
@@ -39,8 +39,8 @@ pub fn flush_impulses(
 ) {
     let mut roster = OperationRoster::new();
 
-    world.get_resource_or_insert_with(|| ServiceLifecycleQueue::new());
-    world.resource_scope::<ServiceLifecycleQueue, ()>(|world, lifecycles| {
+    world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
+    world.resource_scope::<ServiceLifecycleChannel, ()>(|world, lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.
         for removed_service in lifecycles.receiver.try_iter() {
             dispose_for_despawned_service(removed_service, world, &mut roster)

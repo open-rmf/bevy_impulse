@@ -15,18 +15,20 @@
  *
 */
 
-use crate::{
-    UnusedTarget, InputCommand, StreamPack, Provider, IntoAsyncMap, Impulse,
-    ImpulseProperties,
-};
-
 use bevy::prelude::{Commands, BuildChildren};
 
 use std::future::Future;
 
+use crate::{
+    UnusedTarget, InputCommand, StreamPack, Provider, IntoAsyncMap, Impulse,
+    Detached,
+};
+
 mod internal;
 pub use internal::{ApplyLabel, BuildLabel};
 
+/// Extensions for creating impulse chains by making a request to a provider or
+/// serving a value. This is implemented for [`Commands`].
 pub trait RequestExt<'w, 's> {
     /// Call this on [`Commands`] to begin building a impulse chain by submitting
     /// a request to a provider.
@@ -41,6 +43,7 @@ pub trait RequestExt<'w, 's> {
     ///     commands
     ///     .request(request, service)
     ///     .take()
+    ///     .response
     /// });
     ///
     /// context.run_while_pending(&mut promise);
@@ -87,7 +90,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         P::Streams: StreamPack,
     {
         let session = self.spawn((
-            ImpulseProperties::new(),
+            Detached::default(),
             UnusedTarget,
         )).id();
 
@@ -114,7 +117,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         value: T,
     ) -> Impulse<'w, 's, 'a, T, ()> {
         let session = self.spawn((
-            ImpulseProperties::new(),
+            Detached::default(),
             UnusedTarget,
         )).id();
 
@@ -122,7 +125,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
 
         Impulse {
             session,
-            // The source field won't actually matter for impulse produced by
+            // The source field won't actually matter for an impulse produced by
             // this provide method, so we'll just use the session value as a
             // placeholder
             source: session,
