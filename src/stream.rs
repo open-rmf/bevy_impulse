@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
-    InnerChannel, TakenStream, StreamChannel, PushResponse,
+    InnerChannel, TakenStream, StreamChannel, Push,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -116,7 +116,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         let redirect = commands.spawn(()).set_parent(source).id();
         commands.add(AddImpulse::new(
             redirect,
-            PushResponse::<Self>::new(target, true),
+            Push::<Self>::new(target, true),
         ));
         StreamTargetStorage::new(redirect)
     }

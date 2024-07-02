@@ -37,6 +37,9 @@ pub(crate) use internal::*;
 mod push;
 pub(crate) use push::*;
 
+mod send_event;
+pub(crate) use send_event::*;
+
 mod store;
 pub(crate) use store::*;
 
@@ -46,7 +49,7 @@ pub(crate) use taken::*;
 /// Impulses can be chained as a simple sequence of [providers](Provider).
 pub struct Impulse<'w, 's, 'a, Response, Streams> {
     pub(crate) source: Entity,
-    pub(crate) session: Entity,
+    pub(crate) target: Entity,
     pub(crate) commands: &'a mut Commands<'w, 's>,
     pub(crate) _ignore: std::marker::PhantomData<(Response, Streams)>
 }
@@ -59,7 +62,7 @@ where
     /// Keep carrying out the impulse chain up to here even if a downstream
     /// dependent was dropped.
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
-        self.commands.add(Detach { session: self.session });
+        self.commands.add(Detach { session: self.target });
         self
     }
 
@@ -69,10 +72,10 @@ where
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
-            self.session,
+            self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
-        let (bundle, stream_receivers) = Streams::take_streams(self.session, self.commands);
+        let (bundle, stream_receivers) = Streams::take_streams(self.target, self.commands);
         self.commands.entity(self.source).insert(bundle);
 
         Recipient {
@@ -86,7 +89,7 @@ where
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
-            self.session,
+            self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
         response_promise
@@ -98,7 +101,7 @@ where
         self,
         provider: P,
     ) -> Impulse<'w, 's, 'a, P::Response, P::Streams> {
-        let source = self.session;
+        let source = self.target;
         let session = self.commands.spawn((
             Detached::default(),
             UnusedTarget,
@@ -110,7 +113,7 @@ where
         provider.connect(source, session, self.commands);
         Impulse {
             source,
-            session,
+            target: session,
             commands: self.commands,
             _ignore: Default::default(),
         }
@@ -135,7 +138,7 @@ where
 
     /// Apply a one-time callback whose output is a [`Future`] that will be run
     /// in the [`AsyncComputeTaskPool`][1]. The output of the [`Future`] will be
-    /// the Response of the returned target.
+    /// the Response of the returned Impulse.
     ///
     /// [1]: bevy::tasks::AsyncComputeTaskPool
     #[must_use]
@@ -160,8 +163,8 @@ where
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
         self.commands.add(AddImpulse::new(
-            self.session,
-            StoreResponse::<Response>::new(target),
+            self.target,
+            Store::<Response>::new(target),
         ));
 
         let stream_targets = Streams::collect_streams(
@@ -182,7 +185,7 @@ where
 
         Impulse {
             source: self.source,
-            session: self.session,
+            target: self.target,
             commands: self.commands,
             _ignore: Default::default(),
         }
@@ -198,8 +201,8 @@ where
     /// [`Self::detach`] before calling this.
     pub fn push(self, target: Entity) {
         self.commands.add(AddImpulse::new(
-            self.session,
-            PushResponse::<Response>::new(target, false),
+            self.target,
+            Push::<Response>::new(target, false),
         ));
 
         let stream_targets = Streams::collect_streams(
@@ -229,7 +232,10 @@ where
     /// [`Self::store`] or [`Self::append`]. Alternatively you can transform it
     /// into a bundle using [`Self::map_block`] or [`Self::map_async`].
     pub fn insert(self, target: Entity) {
-
+        self.commands.add(AddImpulse::new(
+            self.target,
+            Insert::<Response>::new(target),
+        ));
     }
 }
 
@@ -242,7 +248,10 @@ where
     ///
     /// Using this will also effectively [detach](Self::detach) the impulse.
     pub fn send_event(self) {
-
+        self.commands.add(AddImpulse::new(
+            self.target,
+            SendEvent::<Response>::new(),
+        ));
     }
 }
 

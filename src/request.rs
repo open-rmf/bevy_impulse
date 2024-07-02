@@ -106,7 +106,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
 
         Impulse {
             source,
-            session,
+            target: session,
             commands: self,
             _ignore: Default::default(),
         }
@@ -124,7 +124,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         self.add(InputCommand { session, target: session, data: value });
 
         Impulse {
-            session,
+            target: session,
             // The source field won't actually matter for an impulse produced by
             // this provide method, so we'll just use the session value as a
             // placeholder

@@ -15,29 +15,29 @@
  *
 */
 
-use bevy::prelude::{Entity, Component};
+use bevy::prelude::{Entity, Component, Bundle, DespawnRecursiveExt};
 
 use crate::{
-    Impulsive, OperationSetup, OperationRequest, Storage,
-    OperationResult, OrBroken, Input, ManageInput,
-    Collection, InputBundle,
+    Impulsive, OperationSetup, OperationRequest, OperationResult, OrBroken,
+    Input, ManageInput, InputBundle,
     add_lifecycle_dependency,
 };
 
 #[derive(Component)]
-pub(crate) struct InsertResponse<T> {
+pub(crate) struct Insert<T> {
     target: Entity,
     _ignore: std::marker::PhantomData<T>,
 }
 
-impl<T> InsertResponse<T> {
+impl<T> Insert<T> {
     pub(crate) fn new(target: Entity) -> Self {
         Self { target, _ignore: Default::default() }
     }
 }
 
-impl<T: 'static + Send + Sync> Impulsive for InsertResponse<T> {
+impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        add_lifecycle_dependency(source, self.target, world);
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
             self,
@@ -46,9 +46,15 @@ impl<T: 'static + Send + Sync> Impulsive for InsertResponse<T> {
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest { source, world, .. }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-
+        let Input { data, .. } = source_mut.take_input::<T>()?;
+        let target = source_mut.get::<Insert<T>>().or_broken()?.target;
+        if let Some(mut target_mut) = world.get_entity_mut(target) {
+            target_mut.insert(data);
+        }
+        world.entity_mut(source).despawn_recursive();
+        Ok(())
     }
 }
