@@ -184,7 +184,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         Chain::new(source, target, self.commands)
     }
 
-    /// Apply a one-time callback whose input is a [`BlockingMap`](crate::BlockingMap)
+    /// Apply a one-time map whose input is a [`BlockingMap`](crate::BlockingMap)
     /// or an [`AsyncMap`](crate::AsyncMap).
     pub fn map<M, F: AsMap<M>>(
         self,
@@ -198,15 +198,15 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         self.then(f.as_map())
     }
 
-    /// Apply a one-time callback whose input is the Response of the current
-    /// Chain. The output of the map will be the Response of the returned Chain.
+    /// Apply a map whose input is the Response of the current Chain. The
+    /// output of the map will be the Response of the returned Chain.
     ///
     /// This takes in a regular blocking function rather than an async function,
     /// so while the function is executing, it will block all systems from
     /// running, similar to how [`Commands`] are flushed.
     pub fn map_block<U>(
         self,
-        f: impl FnOnce(Response) -> U + 'static + Send + Sync,
+        f: impl FnMut(Response) -> U + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, U, (), ModifiersUnset>
     where
         U: 'static + Send + Sync,
@@ -214,12 +214,12 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
         self.then(f.into_blocking_map())
     }
 
-    /// Apply a one-time callback whose output is a Future that will be run in
-    /// the [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool). The
+    /// Apply a map whose output is a Future that will be run in the
+    /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool). The
     /// output of the Future will be the Response of the returned Chain.
     pub fn map_async<Task>(
         self,
-        f: impl FnOnce(Response) -> Task + 'static + Send + Sync,
+        f: impl FnMut(Response) -> Task + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, Task::Output, (), ModifiersUnset>
     where
         Task: Future + 'static + Send + Sync,
@@ -266,7 +266,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
 
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different impulse chains: one
-    /// determined by the `build` callback provided to this function and the
+    /// determined by the `build` map provided to this function and the
     /// other determined by the [`Chain`] that gets returned by this function.
     ///
     /// This can only be applied when `Response` can be cloned.

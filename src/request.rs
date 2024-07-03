@@ -20,12 +20,9 @@ use bevy::prelude::{Commands, BuildChildren};
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, InputCommand, StreamPack, Provider, IntoAsyncMap, Impulse,
+    UnusedTarget, InputCommand, StreamPack, ProvideOnce, IntoAsyncMap, Impulse,
     Detached,
 };
-
-mod internal;
-pub use internal::{ApplyLabel, BuildLabel};
 
 /// Extensions for creating impulse chains by making a request to a provider or
 /// serving a value. This is implemented for [`Commands`].
@@ -50,7 +47,7 @@ pub trait RequestExt<'w, 's> {
     /// assert!(promise.peek().is_available());
     /// ```
     #[must_use]
-    fn request<'a, P: Provider>(
+    fn request<'a, P: ProvideOnce>(
         &'a mut self,
         request: P::Request,
         provider: P,
@@ -79,7 +76,7 @@ pub trait RequestExt<'w, 's> {
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
-    fn request<'a, P: Provider>(
+    fn request<'a, P: ProvideOnce>(
         &'a mut self,
         request: P::Request,
         provider: P,

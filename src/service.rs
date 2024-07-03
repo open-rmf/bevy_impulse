@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{StreamPack, AddOperation, OperateService, Provider};
+use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
 use bevy::{
     prelude::{Entity, App, Commands, Component},
@@ -47,7 +47,7 @@ pub(crate) use workflow::*;
 /// provider. Downstream users can obtain a Provider using
 /// - [`crate::ServiceDiscovery`].iter()
 /// - [`bevy::prelude::App`]`.`[`add_*_service(~)`][1]
-/// - [`bevy::prelude::Commands`]`.`[`spawn_*_service(~)`][]
+/// - [`bevy::prelude::Commands`]`.`[`spawn_*_service(~)`][2]
 ///
 /// To use a provider, call [`bevy::prelude::Commands`]`.`[`request(provider, request)`][3].
 ///
@@ -342,7 +342,7 @@ impl AddServicesExt for App {
     }
 }
 
-impl<Request, Response, Streams> Provider for Service<Request, Response, Streams>
+impl<Request, Response, Streams> ProvideOnce for Service<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
 {
@@ -353,6 +353,13 @@ where
     fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddOperation::new(source, OperateService::new(self, target)));
     }
+}
+
+impl<Request, Response, Streams> Provider for Service<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+{
+
 }
 
 #[cfg(test)]

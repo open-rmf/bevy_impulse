@@ -17,7 +17,7 @@
 
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, StreamPack, Input, Provider,
+    OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateHandler, ManageInput, OperationError,
     OrBroken, OperateTask, Operation, OperationSetup,
 };
@@ -105,9 +105,10 @@ impl<'a> HandleRequest<'a> {
     where
         Task::Output: Send + Sync,
     {
+        let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let task = AsyncComputeTaskPool::get().spawn(task);
         let task_id = self.world.spawn(()).id();
-        OperateTask::new(session, self.source, self.target, task, None)
+        OperateTask::new(task_id, session, self.source, self.target, task, None, sender)
             .setup(OperationSetup { source: task_id, world: self.world });
         self.roster.queue(task_id);
         Ok(())
@@ -393,7 +394,7 @@ where
     }
 }
 
-impl<Request, Response, Streams> Provider for Handler<Request, Response, Streams>
+impl<Request, Response, Streams> ProvideOnce for Handler<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -406,4 +407,13 @@ where
     fn connect(self, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
         commands.add(AddOperation::new(source, OperateHandler::new(self, target)));
     }
+}
+
+impl<Request, Response, Streams> Provider for Handler<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+
 }

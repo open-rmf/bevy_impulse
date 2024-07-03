@@ -17,13 +17,21 @@
 
 use bevy::prelude::{Entity, Commands};
 
-/// The `Provider` trait encapsulates the idea of providing a service. There are
-/// three different service types with different advantages and disadvantages:
+/// The `Provider` trait encapsulates the idea of providing a response to a
+/// request. There are three different provider types with different advantages:
 /// - [`Service`](crate::Service)
 /// - [`Handler`](crate::Handler)
 /// - [`AsyncMap`](crate::AsyncMap)
 /// - [`BlockingMap`](crate::BlockingMap)
-pub trait Provider {
+///
+/// Types that implement this trait can be used to create nodes in a workflow or
+/// impulses in an impulse chain.
+pub trait Provider: ProvideOnce {}
+
+/// Similar to [`Provider`] but can be used for functions that are only able to
+/// run once, e.g. that use [`FnOnce`]. Because of this, [`ProvideOnce`] is
+/// suitable for impulses, but not for workflows.
+pub trait ProvideOnce {
     type Request;
     type Response;
     type Streams;

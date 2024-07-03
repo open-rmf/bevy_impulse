@@ -15,35 +15,38 @@
  *
 */
 
-use crate::{
-    BlockingMap, AsyncMap, Operation, ChannelQueue, InnerChannel,
-    SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
-    CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
-    OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
-    OperationReachability, ReachabilityResult, InputBundle,
-};
-
 use bevy::{
-    prelude::{Component, Entity, Bundle},
+    prelude::{Entity, Component, Bundle},
     tasks::AsyncComputeTaskPool,
 };
 
 use std::future::Future;
 
+use crate::{
+    Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
+    InputBundle, OperationResult, OrBroken, Input, ManageInput,
+    ChannelQueue, BlockingMap, AsyncMap, InnerChannel, OperateTask, ActiveTasksStorage,
+    CallBlockingMapOnce, CallAsyncMapOnce, Operation,
+};
+
+/// The key difference between this and [`crate::OperateBlockingMap`] is that
+/// this supports FnOnce since it's used for impulse chains which are not
+/// reusable, whereas [`crate::OperateBlockingMap`] is used in workflows which
+/// need to be reusable, so it can only support FnMut.
 #[derive(Bundle)]
-pub(crate) struct OperateBlockingMap<F, Request, Response>
+pub(crate) struct ImpulseBlockingMap<F, Request, Response>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    storage: BlockingMapStorage<F>,
+    f: BlockingMapOnceStorage<F>,
     target: SingleTargetStorage,
     #[bundle(ignore)]
     _ignore: std::marker::PhantomData<(Request, Response)>,
 }
 
-impl<F, Request, Response> OperateBlockingMap<F, Request, Response>
+impl<F, Request, Response> ImpulseBlockingMap<F, Request, Response>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -51,7 +54,7 @@ where
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
-            storage: BlockingMapStorage { f: Some(f) },
+            f: BlockingMapOnceStorage { f },
             target: SingleTargetStorage::new(target),
             _ignore: Default::default(),
         }
@@ -59,20 +62,17 @@ where
 }
 
 #[derive(Component)]
-struct BlockingMapStorage<F> {
-    f: Option<F>,
+struct BlockingMapOnceStorage<F> {
+    f: F,
 }
 
-impl<F, Request, Response> Operation for OperateBlockingMap<F, Request, Response>
+impl<F, Request, Response> Impulsive for ImpulseBlockingMap<F, Request, Response>
 where
-    F: CallBlockingMap<Request, Response> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    F: CallBlockingMapOnce<Request, Response> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target.0).or_broken()?
-            .insert(SingleInputStorage::new(source));
-
         world.entity_mut(source).insert((
             self,
             InputBundle::<Request>::new(),
@@ -81,58 +81,51 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let mut map = source_mut.get_mut::<BlockingMapStorage<F>>().or_broken()?;
-        let mut f = map.f.take().or_broken()?;
+        let f = source_mut.take::<BlockingMapOnceStorage<F>>().or_broken()?.f;
 
         let response = f.call(BlockingMap { request });
-        map.f = Some(f);
 
         world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
         Ok(())
     }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<Request>()?;
-        clean.notify_cleaned()
-    }
-
-    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
-        if reachability.has_input::<Request>()? {
-            return Ok(true);
-        }
-        SingleInputStorage::is_reachable(&mut reachability)
-    }
 }
 
+
+// impl
+
+/// The key difference between this and [`crate::OperateAsyncMap`] is that
+/// this supports FnOnce since it's used for impulse chains which are not
+/// reusable, whereas [`crate::OperateAsyncMap`] is used in workflows which
+/// need to be reusable, so it can only support FnMut.
 #[derive(Bundle)]
-pub(crate) struct OperateAsyncMap<F, Request, Task, Streams>
+pub(crate) struct ImpulseAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: 'static + Send + Sync,
-    Streams: StreamPack,
+    Streams: 'static + Send + Sync,
 {
-    storage: AsyncMapStorage<F>,
+    f: AsyncMapOnceStorage<F>,
     target: SingleTargetStorage,
     #[bundle(ignore)]
     _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
 }
 
-impl<F, Request, Task, Streams> OperateAsyncMap<F, Request, Task, Streams>
+impl<F, Request, Task, Streams> ImpulseAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: 'static + Send + Sync,
-    Streams: StreamPack,
+    Streams: 'static + Send + Sync,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
-            storage: AsyncMapStorage { f: Some(f) },
+            f: AsyncMapOnceStorage { f },
             target: SingleTargetStorage::new(target),
             _ignore: Default::default(),
         }
@@ -140,26 +133,23 @@ where
 }
 
 #[derive(Component)]
-struct AsyncMapStorage<F> {
-    f: Option<F>,
+struct AsyncMapOnceStorage<F> {
+    f: F,
 }
 
-impl<F, Request, Task, Streams> Operation for OperateAsyncMap<F, Request, Task, Streams>
+impl<F, Request, Task, Streams> Impulsive for ImpulseAsyncMap<F, Request, Task, Streams>
 where
-    F: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
     Request: 'static + Send + Sync,
+    Task: Future + 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
+    F: CallAsyncMapOnce<Request, Task, Streams> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target.0).or_broken()?
-            .insert(SingleInputStorage::new(source));
-
         world.entity_mut(source).insert((
             self,
-            ActiveTasksStorage::default(),
             InputBundle::<Request>::new(),
+            ActiveTasksStorage::default(),
         ));
         Ok(())
     }
@@ -170,37 +160,18 @@ where
         let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let mut f = source_mut.get_mut::<AsyncMapStorage<F>>().or_broken()?
-            .f.take().or_broken()?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
+        let f = source_mut.take::<AsyncMapOnceStorage<F>>().or_broken()?.f;
 
         let channel = InnerChannel::new(source, session, sender.clone());
         let channel = channel.into_specific(&world)?;
 
         let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap { request, channel }));
-        world.get_entity_mut(source).or_broken()?
-            .get_mut::<AsyncMapStorage<F>>().or_broken()?
-            .f = Some(f);
 
         let task_source = world.spawn(()).id();
         OperateTask::new(task_source, session, source, target, task, None, sender)
             .setup(OperationSetup { source: task_source, world });
         roster.queue(task_source);
         Ok(())
-    }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<Request>()?;
-        ActiveTasksStorage::cleanup(clean)
-    }
-
-    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
-        if reachability.has_input::<Request>()? {
-            return Ok(true);
-        }
-        if ActiveTasksStorage::contains_session(&mut reachability)? {
-            return Ok(true);
-        }
-        SingleInputStorage::is_reachable(&mut reachability)
     }
 }

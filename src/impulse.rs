@@ -22,7 +22,8 @@ use bevy::prelude::{
 use std::future::Future;
 
 use crate::{
-    Promise, Provider, StreamPack, IntoBlockingMap, IntoAsyncMap, UnusedTarget,
+    Promise, ProvideOnce, StreamPack, IntoBlockingMapOnce, IntoAsyncMapOnce,
+    AsMapOnce, UnusedTarget,
 };
 
 mod detach;
@@ -33,6 +34,9 @@ pub(crate) use insert::*;
 
 mod internal;
 pub(crate) use internal::*;
+
+mod map;
+pub(crate) use map::*;
 
 mod push;
 pub(crate) use push::*;
@@ -97,27 +101,28 @@ where
 
     /// Pass the outcome of the request to another provider.
     #[must_use]
-    pub fn then<P: Provider<Request = Response>>(
+    pub fn then<P: ProvideOnce<Request = Response>>(
         self,
         provider: P,
     ) -> Impulse<'w, 's, 'a, P::Response, P::Streams> {
         let source = self.target;
-        let session = self.commands.spawn((
+        let target = self.commands.spawn((
             Detached::default(),
             UnusedTarget,
         )).id();
 
         // We should automatically delete the previous step in the chain once
         // this one is finished.
-        self.commands.entity(source).set_parent(session);
-        provider.connect(source, session, self.commands);
+        self.commands.entity(source).set_parent(target);
+        provider.connect(source, target, self.commands);
         Impulse {
             source,
-            target: session,
+            target,
             commands: self.commands,
             _ignore: Default::default(),
         }
     }
+
 
     /// Apply a one-time callback whose input is the Response of the current
     /// target. The output of the map will become the Response of the returned
@@ -133,7 +138,7 @@ where
     where
         U: 'static + Send + Sync,
     {
-        self.then(f.into_blocking_map())
+        self.then(f.into_blocking_map_once())
     }
 
     /// Apply a one-time callback whose output is a [`Future`] that will be run
@@ -150,7 +155,25 @@ where
         Task: Future + 'static + Send + Sync,
         Task::Output: 'static + Send + Sync,
     {
-        self.then(f.into_async_map())
+        self.then(f.into_async_map_once())
+    }
+
+    /// Apply a one-time map that implements one of
+    /// - [`FnOnce(BlockingMap<Request, Streams>) -> Response`](crate::BlockingMap)
+    /// - [`FnOnce(AsyncMap<Request, Streams>) -> impl Future<Response>`](crate::AsyncMap)
+    ///
+    /// If you do not care about providing streams then you can use
+    /// [`Self::map_block`] or [`Self::map_async`] instead.
+    pub fn map<M, F: AsMapOnce<M>>(
+        self,
+        f: F,
+    ) -> Impulse<'w, 's, 'a, <F::MapType as ProvideOnce>::Response, <F::MapType as ProvideOnce>::Streams>
+    where
+        F::MapType: ProvideOnce<Request = Response>,
+        <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
+        <F::MapType as ProvideOnce>::Streams: StreamPack,
+    {
+        self.then(f.as_map_once())
     }
 
     /// Store the response in a [`Storage`] component in the specified entity.

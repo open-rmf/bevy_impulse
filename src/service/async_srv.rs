@@ -220,7 +220,7 @@ where
     };
 
     let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-    let channel = InnerChannel::new(source, session, sender).into_specific(world)?;
+    let channel = InnerChannel::new(source, session, sender.clone()).into_specific(world)?;
     let job = service.run(AsyncService { request, channel, provider }, world);
     service.apply_deferred(world);
 
@@ -237,7 +237,7 @@ where
 
     let task = AsyncComputeTaskPool::get().spawn(job);
 
-    OperateTask::new(session, source, target, task, blocker)
+    OperateTask::new(task_id, session, source, target, task, blocker, sender)
         .setup(OperationSetup { source: task_id, world });
     roster.queue(task_id);
     Ok(())

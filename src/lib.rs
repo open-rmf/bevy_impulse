@@ -48,6 +48,9 @@ pub use input::*;
 pub mod map;
 pub use map::*;
 
+pub mod map_once;
+pub use map_once::*;
+
 pub mod node;
 pub use node::*;
 

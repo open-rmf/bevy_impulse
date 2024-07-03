@@ -17,7 +17,7 @@
 
 use crate::{
     Provider, BlockingMap, AsyncMap, AddOperation, OperateBlockingMap,
-    OperateAsyncMap, StreamPack,
+    OperateAsyncMap, StreamPack, ProvideOnce,
 };
 
 use bevy::prelude::{Entity, Commands};
@@ -27,8 +27,8 @@ use std::future::Future;
 /// A newtype to indicate that the map definition is given directly by F.
 pub struct MapDef<F>(F);
 
-/// Convert an FnOnce that takes in a [`BlockingMap`] or an [`AsyncMap`] into a
-/// recognized map type.
+/// Convert an [`FnMut`] that takes in a [`BlockingMap`] or an [`AsyncMap`] into
+/// a recognized map type.
 pub trait AsMap<M> {
     type MapType;
     fn as_map(self) -> Self::MapType;
@@ -54,13 +54,13 @@ where
 /// A newtype to mark the definition of a BlockingMap.
 ///
 /// Maps cannot contain Bevy Systems; they can only contain objects that
-/// implement [`FnOnce`].
+/// implement [`FnMut`].
 pub struct BlockingMapDef<Def, Request, Response> {
     def: Def,
     _ignore: std::marker::PhantomData<(Request, Response)>,
 }
 
-impl<Def, Request, Response> Provider for BlockingMapDef<Def, Request, Response>
+impl<Def, Request, Response> ProvideOnce for BlockingMapDef<Def, Request, Response>
 where
     Def: CallBlockingMap<Request, Response> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -75,11 +75,20 @@ where
     }
 }
 
+impl<Def, Request, Response> Provider for BlockingMapDef<Def, Request, Response>
+where
+    Def: CallBlockingMap<Request, Response> + 'static + Send + Sync,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+{
+
+}
+
 pub struct BlockingMapMarker;
 
 impl<F, Request, Response> AsMap<(Request, Response, BlockingMapMarker)> for F
 where
-    F: FnOnce(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnMut(BlockingMap<Request>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -89,7 +98,7 @@ where
     }
 }
 
-/// Convert any [`FnOnce`] into a [`BlockingMapDef`].
+/// Convert any [`FnMut`] into a [`BlockingMapDef`].
 pub trait IntoBlockingMap<M> {
     type MapType;
     fn into_blocking_map(self) -> Self::MapType;
@@ -97,7 +106,7 @@ pub trait IntoBlockingMap<M> {
 
 impl<F, Request, Response> IntoBlockingMap<(Request, Response)> for F
 where
-    F: FnOnce(Request) -> Response + 'static + Send + Sync,
+    F: FnMut(Request) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -138,7 +147,7 @@ pub struct AsyncMapMarker;
 
 impl<F, Request, Task, Streams> AsMap<(Request, Task, Streams, AsyncMapMarker)> for F
 where
-    F: FnOnce(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
+    F: FnMut(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
     Task: Future + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -153,13 +162,13 @@ where
 /// A newtype to mark the definition of an AsyncMap.
 ///
 /// Maps cannot contain Bevy Systems; they can only contain objects that
-/// implement [`FnOnce`].
+/// implement [`FnMut`].
 pub struct AsyncMapDef<Def, Request, Task, Streams> {
     def: Def,
     _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
 }
 
-impl<Def, Request, Task, Streams> Provider for AsyncMapDef<Def, Request, Task, Streams>
+impl<Def, Request, Task, Streams> ProvideOnce for AsyncMapDef<Def, Request, Task, Streams>
 where
     Def: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
     Task: Future + 'static + Send + Sync,
@@ -176,6 +185,17 @@ where
     }
 }
 
+impl<Def, Request, Task, Streams> Provider for AsyncMapDef<Def, Request, Task, Streams>
+where
+    Def: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
+    Task: Future + 'static + Send + Sync,
+    Request: 'static + Send + Sync,
+    Task::Output: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+
+}
+
 pub trait IntoAsyncMap<M> {
     type MapType;
     fn into_async_map(self) -> Self::MapType;
@@ -183,7 +203,7 @@ pub trait IntoAsyncMap<M> {
 
 impl<F, Request, Task> IntoAsyncMap<(Request, Task)> for F
 where
-    F: FnOnce(Request) -> Task + 'static + Send + Sync,
+    F: FnMut(Request) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: Future + 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,

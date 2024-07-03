@@ -24,7 +24,6 @@ use crate::{
     add_lifecycle_dependency,
 };
 
-
 #[derive(Component)]
 pub(crate) struct Push<T> {
     target: Entity,
