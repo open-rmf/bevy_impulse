@@ -36,16 +36,16 @@ pub trait AsMap<M> {
 
 /// A trait that all different ways of defining a Blocking Map must funnel into.
 pub(crate) trait CallBlockingMap<Request, Response> {
-    fn call(self, input: BlockingMap<Request>) -> Response;
+    fn call(&mut self, input: BlockingMap<Request>) -> Response;
 }
 
 impl<F, Request, Response> CallBlockingMap<Request, Response> for MapDef<F>
 where
-    F: FnOnce(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnMut(BlockingMap<Request>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    fn call(self, request: BlockingMap<Request>) -> Response {
+    fn call(&mut self, request: BlockingMap<Request>) -> Response {
         (self.0)(request)
     }
 }
@@ -111,25 +111,25 @@ pub struct BlockingMapAdapter<F>(F);
 
 impl<F, Request, Response> CallBlockingMap<Request, Response> for BlockingMapAdapter<F>
 where
-    F: FnOnce(Request) -> Response,
+    F: FnMut(Request) -> Response,
 {
-    fn call(self, BlockingMap{ request }: BlockingMap<Request>) -> Response {
+    fn call(&mut self, BlockingMap{ request }: BlockingMap<Request>) -> Response {
         (self.0)(request)
     }
 }
 
 pub(crate) trait CallAsyncMap<Request, Task, Streams: StreamPack> {
-    fn call(self, input: AsyncMap<Request, Streams>) -> Task;
+    fn call(&mut self, input: AsyncMap<Request, Streams>) -> Task;
 }
 
 impl<F, Request, Task, Streams> CallAsyncMap<Request, Task, Streams> for MapDef<F>
 where
-    F: FnOnce(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
+    F: FnMut(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Task: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    fn call(self, input: AsyncMap<Request, Streams>) -> Task {
+    fn call(&mut self, input: AsyncMap<Request, Streams>) -> Task {
         (self.0)(input)
     }
 }
@@ -198,10 +198,10 @@ pub struct AsyncMapAdapter<F>(F);
 
 impl<F, Request, Task> CallAsyncMap<Request, Task, ()> for AsyncMapAdapter<F>
 where
-    F: FnOnce(Request) -> Task + 'static + Send + Sync,
+    F: FnMut(Request) -> Task + 'static + Send + Sync,
     Task: Future + 'static + Send + Sync,
 {
-    fn call(self, AsyncMap{ request, .. }: AsyncMap<Request, ()>) -> Task {
+    fn call(&mut self, AsyncMap{ request, .. }: AsyncMap<Request, ()>) -> Task {
         (self.0)(request)
     }
 }

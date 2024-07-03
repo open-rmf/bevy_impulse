@@ -50,7 +50,7 @@ where
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
             storage: BlockingMapStorage {
-                f,
+                f: Some(f),
                 _ignore: Default::default(),
             },
             target: SingleTargetStorage::new(target),
@@ -60,7 +60,7 @@ where
 
 #[derive(Component)]
 struct BlockingMapStorage<F, Request, Response> {
-    f: F,
+    f: Option<F>,
     _ignore: std::marker::PhantomData<(Request, Response)>,
 }
 
@@ -87,11 +87,13 @@ where
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().or_broken()?.f;
-        let mut target_mut = world.get_entity_mut(target).or_broken()?;
+        let mut map = source_mut.take::<BlockingMapStorage<F, Request, Response>>().or_broken()?;
+        let mut f = map.f.take().or_broken()?;
 
-        let response = map.call(BlockingMap { request });
-        target_mut.give_input(session, response, roster)?;
+        let response = f.call(BlockingMap { request });
+        map.f = Some(f);
+
+        world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
         Ok(())
     }
 
@@ -130,7 +132,7 @@ where
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
             storage: AsyncMapStorage {
-                f,
+                f: Some(f),
                 _ignore: Default::default(),
             },
             target: SingleTargetStorage::new(target),
@@ -140,7 +142,7 @@ where
 
 #[derive(Component)]
 struct AsyncMapStorage<F, Request, Task, Streams> {
-    f: F,
+    f: Option<F>,
     _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
 }
 
@@ -171,15 +173,19 @@ where
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let map = source_mut.take::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?.f;
+        let mut f = source_mut.get_mut::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?
+            .f.take().or_broken()?;
 
-        let channel = InnerChannel::new(source, session, sender);
+        let channel = InnerChannel::new(source, session, sender.clone());
         let channel = channel.into_specific(&world)?;
 
-        let task = AsyncComputeTaskPool::get().spawn(map.call(AsyncMap { request, channel }));
+        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap { request, channel }));
+        world.get_entity_mut(source).or_broken()?
+            .get_mut::<AsyncMapStorage<F, Request, Task, Streams>>().or_broken()?
+            .f = Some(f);
 
         let task_source = world.spawn(()).id();
-        OperateTask::new(session, source, target, task, None)
+        OperateTask::new(task_source, session, source, target, task, None, sender)
             .setup(OperationSetup { source: task_source, world });
         roster.queue(task_source);
         Ok(())

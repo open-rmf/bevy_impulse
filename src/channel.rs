@@ -103,7 +103,7 @@ impl InnerChannel {
     }
 }
 
-type ChannelItem = Box<dyn FnOnce(&mut World, &mut OperationRoster) + Send>;
+pub(crate) type ChannelItem = Box<dyn FnOnce(&mut World, &mut OperationRoster) + Send>;
 
 #[derive(Resource)]
 pub(crate) struct ChannelQueue {

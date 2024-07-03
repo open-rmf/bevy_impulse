@@ -61,9 +61,6 @@ pub(crate) use operate_service::*;
 mod operate_task;
 pub(crate) use operate_task::*;
 
-mod receive;
-pub(crate) use receive::*;
-
 mod scope;
 pub use scope::*;
 
@@ -264,9 +261,6 @@ pub(crate) struct Blocker {
     /// Function pointer to call when this is no longer blocking
     pub(crate) serve_next: fn(Blocker, &mut World, &mut OperationRoster),
 }
-
-#[derive(Component)]
-pub(crate) struct BlockerStorage(pub(crate) Option<Blocker>);
 
 pub enum OperationError {
     Broken(Option<Backtrace>),

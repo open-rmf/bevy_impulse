@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Component, Entity, World, Resource, Bundle, BuildWorldChildren},
+    prelude::{Component, Entity, World, Resource, BuildWorldChildren},
     tasks::{Task as BevyTask, AsyncComputeTaskPool},
 };
 
@@ -35,9 +35,9 @@ use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 use smallvec::SmallVec;
 
 use crate::{
-    SingleTargetStorage, OperationRoster, Blocker, ManageInput,
+    OperationRoster, Blocker, ManageInput, ChannelQueue,
     OperationSetup, OperationRequest, OperationResult, Operation,
-    OrBroken, BlockerStorage, OperationCleanup, ChannelQueue,
+    OrBroken, OperationCleanup, ChannelItem,
     OperationReachability, ReachabilityResult, emit_disposal, Disposal,
 };
 
@@ -69,41 +69,72 @@ impl WakeQueue {
 }
 
 #[derive(Component)]
-struct TaskStorage<Response>(BevyTask<Response>);
-
-#[derive(Component)]
-struct TaskSessionStorage(Entity);
-
-#[derive(Component)]
-struct TaskOwnerStorage(Entity);
-
-#[derive(Component)]
 pub(crate) struct PollTask(pub(crate) fn(Entity, &mut World, &mut OperationRoster));
 
-#[derive(Bundle)]
+#[derive(Component)]
 pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
-    session: TaskSessionStorage,
-    owner: TaskOwnerStorage,
-    target: SingleTargetStorage,
-    task: TaskStorage<Response>,
-    blocker: BlockerStorage,
+    source: Entity,
+    session: Entity,
+    node: Entity,
+    target: Entity,
+    task: Option<BevyTask<Response>>,
+    blocker: Option<Blocker>,
+    sender: CbSender<ChannelItem>,
+    disposal: Option<Disposal>,
 }
 
 impl<Response: 'static + Send + Sync> OperateTask<Response> {
     pub(crate) fn new(
+        source: Entity,
         session: Entity,
-        owner: Entity,
+        node: Entity,
         target: Entity,
         task: BevyTask<Response>,
         blocker: Option<Blocker>,
+        sender: CbSender<ChannelItem>,
     ) -> Self {
-        Self {
-            session: TaskSessionStorage(session),
-            owner: TaskOwnerStorage(owner),
-            target: SingleTargetStorage::new(target),
-            task: TaskStorage(task),
-            blocker: BlockerStorage(blocker),
-        }
+        Self { source, session, node, target, task: Some(task), blocker, sender, disposal: None }
+    }
+}
+
+impl<Response: 'static + Send + Sync> Drop for OperateTask<Response> {
+    fn drop(&mut self) {
+        let Some(task) = self.task.take() else {
+            // This task operation has already been emptied, nothing to do here
+            return;
+        };
+
+        let source = self.source;
+        let session = self.session;
+        let node = self.node;
+        let unblock = self.blocker.take();
+        let sender = self.sender.clone();
+        let disposal = self.disposal.take();
+
+        AsyncComputeTaskPool::get().spawn(async move {
+            task.cancel().await;
+            sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+                if let Some(unblock) = unblock {
+                    roster.unblock(unblock);
+                }
+
+                if let Some(mut node_mut) = world.get_entity_mut(node) {
+                    if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
+                        active_tasks.list.retain(|ActiveTask { task_id: id, .. }| {
+                            *id != source
+                        });
+                    }
+                }
+
+                if world.get_entity(source).is_some() {
+                    world.despawn(source);
+                }
+                let disposal = disposal.unwrap_or_else(|| {
+                    Disposal::task_despawned(source, node)
+                });
+                emit_disposal(node, session, disposal, world, roster);
+            }))
+        }).detach();
     }
 }
 
@@ -116,18 +147,18 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         });
 
         let mut source_mut = world.entity_mut(source);
-        let owner = self.owner.0;
-        let session = self.session.0;
+        let node = self.node;
+        let session = self.session;
         source_mut
             .insert((
                 self,
                 JobWakerStorage(waker),
                 StopTask(stop_task::<Response>),
             ))
-            .set_parent(owner);
+            .set_parent(node);
 
-        let mut owner_mut = world.get_entity_mut(owner).or_broken()?;
-        let mut tasks = owner_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
+        let mut node_mut = world.get_entity_mut(node).or_broken()?;
+        let mut tasks = node_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
         tasks.list.push(ActiveTask { task_id: source, session });
         Ok(())
     }
@@ -136,7 +167,15 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let mut task = source_mut.take::<TaskStorage<Response>>().or_broken()?.0;
+        let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_broken()?;
+        let mut task = operation.task.take().or_broken()?;
+        let target = operation.target;
+        let session = operation.session;
+        let node = operation.node;
+        // We take out unblock here just in case the entity gets despawned and/or
+        // the OperateTask component gets dropped before we reach the end of the
+        // function.
+        let unblock = operation.blocker.take();
 
         let waker = if let Some(waker) = source_mut.take::<JobWakerStorage>() {
             waker.0.clone()
@@ -154,11 +193,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         ) {
             Poll::Ready(result) => {
                 // Task has finished
-                let mut source_mut = world.entity_mut(source);
-                let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-                let session = source_mut.get::<TaskSessionStorage>().or_broken()?.0;
-                let unblock = source_mut.take::<BlockerStorage>().or_broken()?;
-                if let Some(unblock) = unblock.0 {
+                if let Some(unblock) = unblock {
                     roster.unblock(unblock);
                 }
 
@@ -167,10 +202,29 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
             }
             Poll::Pending => {
                 // Task is still running
-                world.entity_mut(source).insert((
-                    TaskStorage(task),
-                    JobWakerStorage(waker),
-                ));
+                if let Some(mut operation) = world.get_mut::<OperateTask<Response>>(source) {
+                    operation.task = Some(task);
+                    operation.blocker = unblock;
+                    world.entity_mut(source).insert(JobWakerStorage(waker));
+                } else {
+                    if unblock.is_some() {
+                        // Somehow the task entity and/or the OperateTask
+                        // component has dropped while the task information was
+                        // outside of it. Since this task was blocking a service
+                        // we should recreate the OperateTask object with
+                        // everything filled in, and then drop it according.
+                        let sender = world.get_resource_or_insert_with(
+                            || ChannelQueue::default()
+                        ).sender.clone();
+
+                        let operation = OperateTask::new(
+                            source, session, node, target, task, unblock, sender,
+                        );
+
+                        // Dropping this operation will trigger the task cancellation
+                        drop(operation);
+                    }
+                }
             }
         }
 
@@ -181,10 +235,11 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let session = clean.session;
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
-        let owner = source_mut.get::<TaskOwnerStorage>().or_broken()?.0;
-        let task = source_mut.take::<TaskStorage<Response>>().or_broken()?.0;
-        let unblock = source_mut.take::<BlockerStorage>().or_broken()?.0;
-        let sender = clean.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_broken()?;
+        let node = operation.node;
+        let task = operation.task.take().or_broken()?;
+        let unblock = operation.blocker.take();
+        let sender = operation.sender.clone();
         AsyncComputeTaskPool::get().spawn(async move {
             task.cancel().await;
             sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
@@ -192,8 +247,8 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                     roster.unblock(unblock);
                 }
 
-                if let Some(mut owner_mut) = world.get_entity_mut(owner) {
-                    if let Some(mut active_tasks) = owner_mut.get_mut::<ActiveTasksStorage>() {
+                if let Some(mut node_mut) = world.get_entity_mut(node) {
+                    if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
                         let mut cleanup_ready = true;
                         active_tasks.list.retain(|ActiveTask { task_id: id, session: r }| {
                             if *id == source {
@@ -201,7 +256,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                             }
 
                             if *r == session {
-                                // The owner has another active task related to this
+                                // The node has another active task related to this
                                 // session so its cleanup is not finished yet.
                                 cleanup_ready = false;
                             }
@@ -209,7 +264,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                         });
 
                         if cleanup_ready {
-                            OperationCleanup { source: owner, session, world, roster }
+                            OperationCleanup { source: node, session, world, roster }
                                 .notify_cleaned();
                         }
                     };
@@ -225,7 +280,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
     fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
         let session = reachability.world
             .get_entity(reachability.source).or_broken()?
-            .get::<TaskSessionStorage>().or_broken()?.0;
+            .get::<OperateTask<Response>>().or_broken()?.session;
         Ok(session == reachability.session)
     }
 }
@@ -237,32 +292,12 @@ fn stop_task<Response: 'static + Send + Sync>(
     OperationRequest { source, world, .. }: OperationRequest,
     disposal: Disposal,
 ) -> OperationResult {
-    let mut source_mut = world.get_entity_mut(source).or_broken()?;
-    let owner = source_mut.get::<TaskOwnerStorage>().or_broken()?.0;
-    let session = source_mut.get::<TaskSessionStorage>().or_broken()?.0;
-    let task = source_mut.take::<TaskStorage<Response>>().or_broken()?.0;
-    let unblock = source_mut.take::<BlockerStorage>().or_broken()?.0;
-    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-    AsyncComputeTaskPool::get().spawn(async move {
-        task.cancel().await;
-        sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-            if let Some(unblock) = unblock {
-                roster.unblock(unblock);
-            }
+    let mut operation = world
+        .get_entity_mut(source).or_broken()?
+        .take::<OperateTask<Response>>().or_broken()?;
 
-            if let Some(mut owner_mut) = world.get_entity_mut(owner) {
-                if let Some(mut active_tasks) = owner_mut.get_mut::<ActiveTasksStorage>() {
-                    active_tasks.list.retain(|ActiveTask { task_id: id, .. }| {
-                        *id != source
-                    });
-                }
-            }
-
-            world.despawn(source);
-            emit_disposal(owner, session, disposal, world, roster);
-        }));
-    }).detach();
-
+    operation.disposal = Some(disposal);
+    drop(operation);
     Ok(())
 }
 

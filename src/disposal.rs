@@ -47,6 +47,10 @@ impl Disposal {
         ServiceUnavailable { service, for_node }.into()
     }
 
+    pub fn task_despawned(task: Entity, node: Entity) -> Disposal {
+        TaskDespawned { task, node }.into()
+    }
+
     pub fn branching(
         branched_at_node: Entity,
         disposed_for_target: Entity,
@@ -84,6 +88,11 @@ pub enum DisposalCause {
     /// or had a critical component removed. The entity provided in the variant
     /// is the unavailable service.
     ServiceUnavailable(ServiceUnavailable),
+
+    /// An entity that was managing the execution of a task was despawned,
+    /// causing the task to be cancelled and making it impossible to deliver a
+    /// response.
+    TaskDespawned(TaskDespawned),
 
     /// An output was disposed because a mutex was poisoned.
     PoisonedMutex(PoisonedMutexDisposal),
@@ -184,6 +193,21 @@ pub struct ServiceUnavailable {
 impl From<ServiceUnavailable> for DisposalCause {
     fn from(value: ServiceUnavailable) -> Self {
         Self::ServiceUnavailable(value)
+    }
+}
+
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct TaskDespawned {
+    /// The entity that was managing the task
+    pub task: Entity,
+    /// The node that the task was spawned by
+    pub node: Entity,
+}
+
+impl From<TaskDespawned> for DisposalCause {
+    fn from(value: TaskDespawned) -> Self {
+        Self::TaskDespawned(value)
     }
 }
 

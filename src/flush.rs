@@ -26,7 +26,7 @@ use smallvec::SmallVec;
 
 use crate::{
     ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    Cancel, DroppedPromiseQueue, UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel,
+    Cancel, UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel,
     OperationRequest,
     execute_operation, dispose_for_despawned_service,
 };
