@@ -32,6 +32,7 @@ pub struct UnhandledErrors {
     pub disposals: Vec<DisposalFailure>,
     pub stop_tasks: Vec<StopTaskFailure>,
     pub broken: Vec<Broken>,
+    pub unused_targets: Vec<UnusedTargetDrop>,
     pub miscellaneous: Vec<MiscellaneousFailure>,
 }
 
@@ -68,6 +69,15 @@ pub struct StopTaskFailure {
     pub task: Entity,
     /// The backtrace to indicate why it failed
     pub backtrace: Option<Backtrace>,
+}
+
+/// An impulse chain was dropped because its final target was unused but `detach()`
+/// was not called on it. This is almost always a usage error, so we report it here.
+pub struct UnusedTargetDrop {
+    /// Which target was dropped.
+    pub unused_target: Entity,
+    /// Which impulses were dropped as a consequence of the unused target.
+    pub dropped_impulses: Vec<Entity>,
 }
 
 /// Use this for any failures that are not covered by the other categories

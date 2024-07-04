@@ -185,8 +185,6 @@ pub struct OperationRoster {
     pub(crate) unblock: VecDeque<Blocker>,
     /// Remove these entities as they are no longer needed
     pub(crate) disposed: Vec<DisposalNotice>,
-    /// Indicate that there is no longer a need for this chain
-    pub(crate) drop_dependency: Vec<Cancel>,
     /// Tell a scope to attempt cleanup
     pub(crate) cleanup_finished: Vec<CleanupFinished>,
 }
@@ -212,10 +210,6 @@ impl OperationRoster {
         self.disposed.push(DisposalNotice { scope, session });
     }
 
-    pub fn drop_dependency(&mut self, source: Cancel) {
-        self.drop_dependency.push(source);
-    }
-
     pub fn cleanup_finished(&mut self, cleanup: CleanupFinished) {
         self.cleanup_finished.push(cleanup);
     }
@@ -223,7 +217,26 @@ impl OperationRoster {
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty() && self.cancel.is_empty()
         && self.unblock.is_empty() && self.disposed.is_empty()
-        && self.drop_dependency.is_empty() && self.cleanup_finished.is_empty()
+        && self.cleanup_finished.is_empty()
+    }
+
+    pub fn append(&mut self, other: &mut Self) {
+        self.queue.append(&mut other.queue);
+        self.cancel.append(&mut other.cancel);
+        self.unblock.append(&mut other.unblock);
+        self.disposed.append(&mut other.disposed);
+        self.cleanup_finished.append(&mut other.cleanup_finished);
+    }
+
+    /// Remove all instances of the target from the roster. This prevents a
+    /// despawned entity from needlessly tripping errors.
+    pub fn purge(&mut self, target: Entity) {
+        let condition = |e| *e != target;
+        self.queue.retain(condition);
+        self.cancel.retain(condition);
+        self.unblock.retain(condition);
+        self.disposed.retain(condition);
+        self.cleanup_finished.retain(condition);
     }
 }
 

@@ -18,40 +18,92 @@
 use bevy::{
     prelude::{
         Entity, World, Query, QueryState, Added, With, Resource, Deref, DerefMut,
+        Children, BuildWorldChildren, DespawnRecursiveExt,
     },
-    ecs::system::SystemState,
+    ecs::system::{SystemState, Command},
 };
 
 use smallvec::SmallVec;
 
 use crate::{
-    ChannelQueue, WakeQueue, OperationRoster, ServiceHook, InputReady,
-    Cancel, UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel,
-    OperationRequest,
+    ChannelQueue, WakeQueue, OperationRoster, ServiceHook, Detached,
+    UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel,
+    OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished,
+    UnhandledErrors, UnusedTargetDrop,
     execute_operation, dispose_for_despawned_service,
 };
+
+#[derive(Resource, Default)]
+pub struct FlushParameters {
+    /// By default, a flush will loop until the whole [`OperationRoster`] is empty.
+    /// If there are loops of blocking services then it is possible for the flush
+    /// to loop indefinitely, creating the appearance of a blockup in the
+    /// application, or delaying other systems from running for a prolonged amount
+    /// of time.
+    ///
+    /// Use this limit to prevent the flush from blocking for too long in those
+    /// scenarios. If the flush loops beyond this limit, anything remaining in
+    /// the roster will be moved into the [`DeferredRoster`] to be processed
+    /// during the next flush.
+    ///
+    /// A value of `None` means the flush can loop indefinitely (this is the default).
+    pub flush_loop_limit: Option<usize>,
+}
 
 #[allow(private_interfaces)]
 pub fn flush_impulses(
     world: &mut World,
-    input_ready_query: &mut QueryState<Entity, Added<InputReady>>,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
     let mut roster = OperationRoster::new();
+    collect_from_channels(new_service_query, world, &mut roster);
 
-    world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
-    world.resource_scope::<ServiceLifecycleChannel, ()>(|world, lifecycles| {
-        // Clean up the dangling requests of any services that have been despawned.
-        for removed_service in lifecycles.receiver.try_iter() {
-            dispose_for_despawned_service(removed_service, world, &mut roster)
+    let mut loop_count = 0;
+    while !roster.is_empty() {
+        if world.get_resource_or_insert_with(
+            || FlushParameters::default()
+        ).flush_loop_limit.is_some_and(
+            |limit| limit <= loop_count
+        ) {
+            // We have looped beyoond the limit, so we will defer anything that
+            // remains in the roster and stop looping from here.
+            world.get_resource_or_insert_with(|| DeferredRoster::default())
+                .append(&mut roster);
+            break;
         }
 
-        // Add a lifecycle tracker to any new services that might have shown up
-        for (e, mut hook) in new_service_query.iter_mut(world) {
-            hook.lifecycle = Some(ServiceLifecycle::new(e, lifecycles.sender.clone()));
-        }
-    });
+        garbage_cleanup(world, &mut roster);
 
+        while let Some(unblock) = roster.unblock.pop_front() {
+            let serve_next = unblock.serve_next;
+            serve_next(unblock, world, &mut roster);
+            garbage_cleanup(world, &mut roster);
+        }
+
+        while let Some(source) = roster.queue.pop_front() {
+            execute_operation(OperationRequest { source, world, roster: &mut roster });
+            garbage_cleanup(world, &mut roster);
+        }
+
+        collect_from_channels(new_service_query, world, &mut roster);
+    }
+}
+
+fn garbage_cleanup(world: &mut World, roster: &mut OperationRoster) {
+    while let Some(cleanup) = roster.cleanup_finished.pop() {
+        cleanup.trigger(world, roster);
+    }
+
+    while let Some(cancel) = roster.cancel.pop_front() {
+        cancel.trigger(world, roster);
+    }
+}
+
+fn collect_from_channels(
+    new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
     // Get the receiver for async task commands
     let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
 
@@ -60,10 +112,24 @@ pub fn flush_impulses(
         (item)(world, &mut roster);
     }
 
-    // Queue any operations whose inputs are ready
-    for e in input_ready_query.iter(world) {
-        roster.queue(e);
-    }
+    world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
+    world.resource_scope(|world, lifecycles: ServiceLifecycleChannel| {
+        // Clean up the dangling requests of any services that have been despawned.
+        for removed_service in lifecycles.receiver.try_iter() {
+            dispose_for_despawned_service(removed_service, world, &mut roster)
+        }
+
+        // Add a lifecycle tracker to any new services that might have shown up
+        // TODO(@mxgrey): Make sure this works for services which are spawned by
+        // providers that are being flushed.
+        for (e, mut hook) in new_service_query.iter_mut(world) {
+            hook.lifecycle = Some(ServiceLifecycle::new(e, lifecycles.sender.clone()));
+        }
+    });
+
+    // Queue any operations that needed to be deferred
+    let mut deferred = world.get_resource_or_insert_with(|| DeferredRoster::default());
+    roster.append(&mut deferred);
 
     // Collect any tasks that are ready to be woken
     for wakeable in world
@@ -74,48 +140,102 @@ pub fn flush_impulses(
         roster.queue(wakeable);
     }
 
-    let mut unused_targets_state: SystemState<Query<Entity, With<UnusedTarget>>> =
+    let mut unused_targets_state: SystemState<Query<(Entity, &Detached), With<UnusedTarget>>> =
         SystemState::new(world);
-    let mut unused_targets: SmallVec<[_; 8]> = unused_targets_state.get(world).iter().collect();
-    for target in unused_targets.drain(..) {
-        roster.drop_dependency(Cancel::unused_target(target));
+
+    let mut add_finish: SmallVec<[_; 8]> = SmallVec::new();
+    let mut drop_targets: SmallVec<[_; 8]> = SmallVec::new();
+    for (e, detached) in unused_targets_state.get(world).iter() {
+        if detached.is_detached() {
+            add_finish.push(e);
+        } else {
+            drop_targets.push(e);
+        }
     }
 
-    unused_targets.extend(
+    for e in add_finish {
+        // Add a Finished impulse to the unused target of a detached impulse
+        // chain.
+        AddImpulse::new(e, Finished).apply(world);
+    }
+
+    for target in drop_targets.drain(..) {
+        drop_target(target, world, roster, true);
+    }
+
+    drop_targets.extend(
         world
-            .get_resource_or_insert_with(|| DroppedPromiseQueue::new())
+            .get_resource_or_insert_with(|| ImpulseLifecycleChannel::default())
             .receiver
             .try_iter()
     );
-    for target in unused_targets.drain(..) {
-        roster.drop_dependency(Cancel::dropped(target))
+
+    for target in drop_targets.drain(..) {
+        drop_target(target, world, roster, false);
+    }
+}
+
+fn drop_target(
+    target: Entity,
+    world: &mut World,
+    roster: &mut OperationRoster,
+    unused: bool,
+) {
+    roster.purge(target);
+    let mut dropped_impulses = Vec::new();
+    let mut detached_impulse = None;
+
+    let mut impulse = target;
+    let mut search_state: SystemState<(
+        Query<&Children>,
+        Query<&Detached>,
+    )> = SystemState::new(world);
+
+    let (q_children, q_detached) = search_state.get(world);
+    loop {
+        if let Ok(children) = q_children.get(impulse) {
+            for child in children {
+                let Ok(detached) = q_detached.get(*child) else {
+                    continue;
+                };
+                if detached.is_detached() {
+                    // This child is detached so we will not include it in the
+                    // dropped impulses. We need to de-parent it so that it does
+                    // not get despawned with the rest of the impulses that we
+                    // are dropping.
+                    detached_impulse = Some(*child);
+                    break;
+                } else {
+                    // This child is not detached, so we will include it in our
+                    // dropped impulses, and crawl towards one of it children.
+                    if unused {
+                        dropped_impulses.push(impulse);
+                    }
+                    roster.purge(impulse);
+                    impulse = *child;
+                    continue;
+                }
+            }
+        }
+
+        // There is nothing further to include in the drop
+        break;
     }
 
-    while !roster.is_empty() {
-        while let Some(unblock) = roster.unblock.pop_front() {
-            let serve_next = unblock.serve_next;
-            serve_next(unblock, world, &mut roster);
-
-            while let Some(cleanup) = roster.cleanup_finished.pop() {
-                cleanup.trigger(world, &mut roster);
-            }
-
-            while let Some(cancel) = roster.cancel.pop_front() {
-                cancel.trigger(world, &mut roster);
-            }
+    if let Some(detached_impulse) = detached_impulse {
+        if let Some(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
+            detached_impulse_mut.remove_parent();
         }
+    }
 
-        while let Some(source) = roster.queue.pop_front() {
-            execute_operation(OperationRequest { source, world, roster: &mut roster });
+    if let Some(mut unused_target_mut) = world.get_entity_mut(target) {
+        unused_target_mut.despawn_recursive();
+    }
 
-            while let Some(cleanup) = roster.cleanup_finished.pop() {
-                cleanup.trigger(world, &mut roster);
-            }
-
-            while let Some(cancel) = roster.cancel.pop_front() {
-                cancel.trigger(world, &mut roster);
-            }
-        }
+    if unused {
+        world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            .unused_targets
+            .push(UnusedTargetDrop { unused_target: target, dropped_impulses });
     }
 }
 

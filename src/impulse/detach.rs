@@ -35,14 +35,20 @@ impl Default for Detached {
     }
 }
 
+impl Detached {
+    pub fn is_detached(&self) {
+        self.0
+    }
+}
+
 pub(crate) struct Detach {
-    pub(crate) session: Entity,
+    pub(crate) target: Entity,
 }
 
 impl Command for Detach {
     fn apply(self, world: &mut World) {
         let backtrace;
-        if let Some(mut session_mut) = world.get_entity_mut(self.session) {
+        if let Some(mut session_mut) = world.get_entity_mut(self.target) {
             if let Some(mut detached) = session_mut.get_mut::<Detached>() {
                 detached.0 = true;
                 session_mut.remove::<UnusedTarget>();
@@ -59,7 +65,7 @@ impl Command for Detach {
         }
 
         let failure = MiscellaneousFailure {
-            error: anyhow!("Unable to detach target {:?}", self.session),
+            error: anyhow!("Unable to detach target {:?}", self.target),
             backtrace: Some(backtrace),
         };
         world.get_resource_or_insert_with(|| UnhandledErrors::default())

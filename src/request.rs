@@ -86,7 +86,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack,
     {
-        let session = self.spawn((
+        let target = self.spawn((
             Detached::default(),
             UnusedTarget,
         )).id();
@@ -94,16 +94,16 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let source = self.spawn(())
             // We set the parent of this source to the target so that when the
             // target gets despawned, this will also be despawned.
-            .set_parent(session)
+            .set_parent(target)
             .id();
 
-        provider.connect(source, session, self);
+        provider.connect(source, target, self);
 
-        self.add(InputCommand { session, target: source, data: request });
+        self.add(InputCommand { session: source, target: source, data: request });
 
         Impulse {
             source,
-            target: session,
+            target,
             commands: self,
             _ignore: Default::default(),
         }
@@ -113,19 +113,19 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         value: T,
     ) -> Impulse<'w, 's, 'a, T, ()> {
-        let session = self.spawn((
+        let target = self.spawn((
             Detached::default(),
             UnusedTarget,
         )).id();
 
-        self.add(InputCommand { session, target: session, data: value });
+        self.add(InputCommand { session: target, target, data: value });
 
         Impulse {
-            target: session,
+            target,
             // The source field won't actually matter for an impulse produced by
             // this provide method, so we'll just use the session value as a
             // placeholder
-            source: session,
+            source: target,
             commands: self,
             _ignore: Default::default(),
         }

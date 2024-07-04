@@ -34,11 +34,6 @@ use crate::{
     DeferredRoster, Cancel, Cancellation, CancellationCause, Broken,
 };
 
-
-/// Marker trait to indicate when an input is ready.
-#[derive(Component, Default)]
-pub(crate) struct InputReady;
-
 /// Typical container for input data accompanied by its session information.
 /// This defines the elements of [`InputStorage`].
 pub struct Input<T> {
@@ -78,16 +73,12 @@ impl<T> Default for InputStorage<T> {
 
 #[derive(Component)]
 pub struct InputBundle<T> {
-    ready: InputReady,
     storage: InputStorage<T>,
 }
 
 impl<T> InputBundle<T> {
     pub fn new() -> Self {
-        Self {
-            ready: Default::default(),
-            storage: Default::default(),
-        }
+        Self { storage: Default::default() }
     }
 }
 

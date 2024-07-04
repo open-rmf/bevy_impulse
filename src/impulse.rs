@@ -29,6 +29,9 @@ use crate::{
 mod detach;
 pub(crate) use detach::*;
 
+mod finished;
+pub(crate) use finished::*;
+
 mod insert;
 pub(crate) use insert::*;
 
@@ -63,10 +66,20 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    /// Keep carrying out the impulse chain up to here even if a downstream
-    /// dependent was dropped.
+    /// Keep executing out the impulse chain up to here even if a downstream
+    /// dependent was dropped. If you continue building the chain from this
+    /// point then the later impulses will not be affected by this use of
+    /// detached.
+    ///
+    /// Downstream dependencies get dropped in the following situations:
+    /// - [`Self::take`] or [`Self::take_response`]: The promise containing the response is dropped.
+    /// - [`Self::store`], [`Self::push`], or [`Self::insert`]: The target entity of the operation is despawned.
+    /// - [`Self::send_event`]: This will never be dropped, effectively making it detached automatically.
+    /// - Not using any of the above: The dependency will immediately be dropped during a flush.
+    ///   If you do not use detach in this scenario, then the chain will be immediately dropped
+    ///   without being run at all. This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors).
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
-        self.commands.add(Detach { session: self.target });
+        self.commands.add(Detach { target: self.target });
         self
     }
 
@@ -278,6 +291,7 @@ where
     }
 }
 
+/// Contains the final response and streams produced at the end of an impulse chain.
 pub struct Recipient<Response, Streams: StreamPack> {
     pub response: Promise<Response>,
     pub streams: Streams::Receiver,
