@@ -18,10 +18,10 @@
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, Receive, AddOperation,
-    ForkClone, Chosen, ApplyLabel, StreamPack, Provider,
+    UnusedTarget, AddOperation,
+    ForkClone, StreamPack, Provider, ProvideOnce,
     AsMap, IntoBlockingMap, IntoAsyncMap, EnterCancel,
-    DetachDependency, DisposeOnCancel, Promise, Noop,
+    DetachDependency, Output, Noop,
     Cancelled, ForkTargetStorage,
     make_result_branching, make_cancel_filter_on_err,
     make_option_branching, make_cancel_filter_on_none,
@@ -58,113 +58,25 @@ pub use unzip::*;
 /// If you do not select one of the above then the service request will be
 /// cancelled without ever attempting to run.
 #[must_use]
-pub struct Chain<'w, 's, 'a, Response, Streams, M> {
+pub struct Chain<'w, 's, 'a, Response> {
     source: Entity,
     target: Entity,
+    scope: Entity,
     commands: &'a mut Commands<'w, 's>,
-    response: std::marker::PhantomData<Response>,
-    streams: std::marker::PhantomData<Streams>,
-    modifiers: std::marker::PhantomData<M>,
+    _ignore: std::marker::PhantomData<Response>,
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, 'a, Response, Streams, Modifiers<L, C>> {
-    /// Have the impulse chain run until it is finished without holding onto any
-    /// [`Promise`]. The final output will be automatically disposed.
-    pub fn detach(self) {
-        self.commands.add(AddOperation::new(
-            self.target,
-            Receive::<Response>::new(None, true),
-        ));
-    }
-
-    /// Take a [`Promise`] so you can receive the final response in the chain later.
-    /// If the [`Promise`] is dropped then the entire impulse chain will
-    /// automatically be cancelled from whichever link in the chain has not been
-    /// completed yet, triggering every on_cancel branch from that link to the
-    /// end of the chain.
-    pub fn take(self) -> Promise<Response> {
-        let (promise, sender) = Promise::new();
-        self.commands.add(AddOperation::new(
-            self.target,
-            Receive::new(Some(sender), false),
-        ));
-        promise
-    }
-
-    /// Take the promise so you can reference it later. The service request
-    /// will continue to be fulfilled even if you drop the [`Promise`].
+impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
+    /// Get the raw [`Output`] slot for the current link in the chain. You can
+    /// use this to resume building this chain later.
     ///
-    /// This is effectively equivalent to running both [`Chain::detach`] and
-    /// [`Chain::take`] together.
-    pub fn detach_and_take(self) -> Promise<Response> {
-        let (promise, sender) = Promise::new();
-        self.commands.add(AddOperation::new(
-            self.target,
-            Receive::new(Some(sender), true),
-        ));
-        promise
-    }
-
-    /// Have the ancestor links in the impulse chain run until they are finished,
-    /// even if the remainder of this chain gets dropped. You can continue adding
-    /// links as if this is one continuous chain.
+    /// Note that if you do not connect some path of your workflow into the
+    /// `terminate` slot of your [`Scope`][1] then the workflow will not be able
+    /// to run.
     ///
-    /// If the ancestor links get cancelled, the cancellation cascade will still
-    /// continue past this link. To prevent that from happening, use
-    /// [`Chain::sever_cancel_cascade`].
-    pub fn detach_and_chain(self) -> Chain<'w, 's, 'a, Response, Streams, ModifiersClosed> {
-        self.commands.entity(self.source).insert(DetachDependency);
-        Chain::new(self.source, self.target, self.commands)
-    }
-
-    /// Change this into a [`Dangling`] chain. You can use this to resume building
-    /// this chain later.
-    ///
-    /// Note that if you do not finish building the dangling chain before the
-    /// next flush, the chain will be cancelled up to its closest
-    /// [`Chain::detach_and_chain`] link. You can use [`Chain::detach_and_dangle`]
-    /// to obtain a [`Dangling`] while still ensuring that this chain will be executed.
-    pub fn dangle(self) -> Dangling<Response, Streams> {
-        Dangling::new(self.source, self.target)
-    }
-
-    /// A combination of [`Chain::detach`] and [`Chain::dangle`].
-    pub fn detach_and_dangle(self) -> Dangling<Response, Streams> {
-        self.detach_and_chain().dangle()
-    }
-
-    /// If any ancestor links in this chain get cancelled, the cancellation cascade
-    /// will be stopped at this link and the remainder of the chain will be
-    /// disposed instead of cancelled. No child links from this one will have
-    /// their cancellation branches triggered from a cancellation that happens
-    /// before this link. Any cancellation behavior assigned to this link will
-    /// still apply.
-    ///
-    /// Any cancellation that happens after this link will cascade down as
-    /// normal until it reaches the next instance of `dispose_on_cancel`.
-    ///
-    /// If a non-detached descendant of this link gets dropped, the ancestors of
-    /// this link will still be cancelled as usual. To prevent a dropped
-    /// descendant from cancelling its ancestors, use [`Chain::detach_and_chain`].
-    ///
-    /// ```
-    /// use bevy_impulse::{*, testing::*};
-    /// let mut context = TestingContext::minimal_plugins();
-    /// let mut promise = context.build(|commands| {
-    ///     commands
-    ///     .provide("hello")
-    ///     .map_block(produce_err)
-    ///     .cancel_on_err()
-    ///     .dispose_on_cancel()
-    ///     .take()
-    /// });
-    ///
-    /// context.run_while_pending(&mut promise);
-    /// assert!(promise.peek().is_disposed());
-    /// ```
-    pub fn dispose_on_cancel(self) -> Chain<'w, 's, 'a, Response, (), ModifiersClosed> {
-        self.commands.entity(self.source).insert(DisposeOnCancel);
-        Chain::new(self.source, self.target, self.commands)
+    /// [1]: crate::Scope
+    pub fn output(self) -> Output<Response> {
+        Output::new(self.scope, self.target)
     }
 
     /// Use the response in the chain as a new request as soon as the response
@@ -173,10 +85,9 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn then<P: Provider<Request = Response>>(
         self,
         provider: P,
-    ) -> Chain<'w, 's, 'a, P::Response, P::Streams, ModifiersUnset>
+    ) -> Chain<'w, 's, 'a, P::Response>
     where
         P::Response: 'static + Send + Sync,
-        P::Streams: StreamPack,
     {
         let source = self.target;
         let target = self.commands.spawn(UnusedTarget).id();
@@ -189,11 +100,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn map<M, F: AsMap<M>>(
         self,
         f: F,
-    ) -> Chain<'w, 's, 'a, <F::MapType as Provider>::Response, <F::MapType as Provider>::Streams, ModifiersUnset>
+    ) -> Chain<'w, 's, 'a, <F::MapType as ProvideOnce>::Response>
     where
         F::MapType: Provider<Request=Response>,
-        <F::MapType as Provider>::Response: 'static + Send + Sync,
-        <F::MapType as Provider>::Streams: StreamPack,
+        <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
     {
         self.then(f.as_map())
     }
@@ -207,7 +117,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn map_block<U>(
         self,
         f: impl FnMut(Response) -> U + 'static + Send + Sync,
-    ) -> Chain<'w, 's, 'a, U, (), ModifiersUnset>
+    ) -> Chain<'w, 's, 'a, U>
     where
         U: 'static + Send + Sync,
     {
@@ -220,7 +130,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn map_async<Task>(
         self,
         f: impl FnMut(Response) -> Task + 'static + Send + Sync,
-    ) -> Chain<'w, 's, 'a, Task::Output, (), ModifiersUnset>
+    ) -> Chain<'w, 's, 'a, Task::Output>
     where
         Task: Future + 'static + Send + Sync,
         Task::Output: 'static + Send + Sync,
@@ -238,7 +148,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     pub fn cancellation_filter<ThenResponse, F>(
         self,
         filter_provider: F
-    ) -> Chain<'w, 's, 'a, ThenResponse, (), ModifiersUnset>
+    ) -> Chain<'w, 's, 'a, ThenResponse>
     where
         ThenResponse: 'static + Send + Sync,
         F: Provider<Request = Response, Response = Option<ThenResponse>>,
@@ -249,12 +159,12 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync, Streams, L, C> Chain<'w, 's, '
     }
 
     /// Same as [`Chain::cancellation_filter`] but the chain will be disposed
-    /// instead of cancelled, so the chain will be dropped without any
-    /// cancellation behavior occurring.
+    /// instead of cancelled, so the workflow may continue if the termination
+    /// node can still be reached.
     pub fn disposal_filter<ThenResponse, F>(
         self,
         filter_provider: F,
-    ) -> Chain<'w, 's, 'a, ThenResponse, (), ModifiersClosed>
+    ) -> Chain<'w, 's, 'a, ThenResponse>
     where
         ThenResponse: 'static + Send + Sync,
         F: Provider<Request = Response, Response = Option<ThenResponse>>,
