@@ -17,13 +17,14 @@
 
 use bevy::prelude::{Entity, Commands};
 
-use crate::{OutputChain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage};
+use crate::{Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage};
 
 pub trait ForkCloneBuilder<Response> {
     type Outputs;
 
     fn build_fork_clone(
         self,
+        scope: Entity,
         source: Entity,
         commands: &mut Commands
     ) -> Self::Outputs;
@@ -32,13 +33,14 @@ pub trait ForkCloneBuilder<Response> {
 impl<R, F0, U0, F1, U1> ForkCloneBuilder<R> for (F0, F1)
 where
     R: 'static + Send + Sync + Clone,
-    F0: FnOnce(OutputChain<R>) -> U0,
-    F1: FnOnce(OutputChain<R>) -> U1,
+    F0: FnOnce(Chain<R>) -> U0,
+    F1: FnOnce(Chain<R>) -> U1,
 {
     type Outputs = (U0, U1);
 
     fn build_fork_clone(
         self,
+        scope: Entity,
         source: Entity,
         commands: &mut Commands
     ) -> Self::Outputs {
@@ -52,8 +54,8 @@ where
             )
         ));
 
-        let u_0 = (self.0)(OutputChain::new(source, target_0, commands));
-        let u_1 = (self.1)(OutputChain::new(source, target_1, commands));
+        let u_0 = (self.0)(Chain::new(scope, target_0, commands));
+        let u_1 = (self.1)(Chain::new(scope, target_1, commands));
         (u_0, u_1)
     }
 }
@@ -61,14 +63,15 @@ where
 impl<R, F0, U0, F1, U1, F2, U2> ForkCloneBuilder<R> for (F0, F1, F2)
 where
     R: 'static + Send + Sync + Clone,
-    F0: FnOnce(OutputChain<R>) -> U0,
-    F1: FnOnce(OutputChain<R>) -> U1,
-    F2: FnOnce(OutputChain<R>) -> U2,
+    F0: FnOnce(Chain<R>) -> U0,
+    F1: FnOnce(Chain<R>) -> U1,
+    F2: FnOnce(Chain<R>) -> U2,
 {
     type Outputs = (U0, U1, U2);
 
     fn build_fork_clone(
         self,
+        scope: Entity,
         source: Entity,
         commands: &mut Commands
     ) -> Self::Outputs {
@@ -83,9 +86,9 @@ where
             )
         ));
 
-        let u_0 = (self.0)(OutputChain::new(source, target_0, commands));
-        let u_1 = (self.1)(OutputChain::new(source, target_1, commands));
-        let u_2 = (self.2)(OutputChain::new(source, target_2, commands));
+        let u_0 = (self.0)(Chain::new(scope, target_0, commands));
+        let u_1 = (self.1)(Chain::new(scope, target_1, commands));
+        let u_2 = (self.2)(Chain::new(scope, target_2, commands));
         (u_0, u_1, u_2)
     }
 }

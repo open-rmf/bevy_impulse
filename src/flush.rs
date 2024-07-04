@@ -72,6 +72,8 @@ pub fn flush_impulses(
             break;
         }
 
+        loop_count += 1;
+
         garbage_cleanup(world, &mut roster);
 
         while let Some(unblock) = roster.unblock.pop_front() {
@@ -108,15 +110,15 @@ fn collect_from_channels(
     let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
 
     // Apply all the commands that have been received
-    while let Ok(mut item) = async_receiver.try_recv() {
-        (item)(world, &mut roster);
+    while let Ok(item) = async_receiver.try_recv() {
+        (item)(world, roster);
     }
 
     world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
-    world.resource_scope(|world, lifecycles: ServiceLifecycleChannel| {
+    world.resource_scope::<ServiceLifecycleChannel, ()>(|world, lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.
         for removed_service in lifecycles.receiver.try_iter() {
-            dispose_for_despawned_service(removed_service, world, &mut roster)
+            dispose_for_despawned_service(removed_service, world, roster);
         }
 
         // Add a lifecycle tracker to any new services that might have shown up
@@ -228,7 +230,7 @@ fn drop_target(
         }
     }
 
-    if let Some(mut unused_target_mut) = world.get_entity_mut(target) {
+    if let Some(unused_target_mut) = world.get_entity_mut(target) {
         unused_target_mut.despawn_recursive();
     }
 

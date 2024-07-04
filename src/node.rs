@@ -15,13 +15,13 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, Commands};
 
-use crate::StreamPack;
+use crate::{StreamPack, Chain};
 
 /// A collection of all the inputs and outputs for a node within a workflow.
 pub struct Node<Request, Response, Streams: StreamPack> {
-    /// The input slot for the node. Feed requests into this slot to trigger
+    /// The input slot for the node. Connect outputs into this slot to trigger
     /// the node.
     pub input: InputSlot<Request>,
     /// The final output of the node. Build off of this to handle the response
@@ -29,7 +29,7 @@ pub struct Node<Request, Response, Streams: StreamPack> {
     pub output: Output<Response>,
     /// The streams that come out of the node. A stream may fire off data any
     /// number of times while a node is active. Each stream can fire off data
-    /// independently. Once the final output of the node is delivered, no more
+    /// independently. Once the final output of the node is sent, no more
     /// stream data will come out.
     pub streams: Streams::StreamOutputPack,
 }
@@ -64,12 +64,27 @@ pub struct Output<Response> {
 }
 
 impl<Response> Output<Response> {
+    /// Create a chain that builds off of this response.
+    pub fn chain<'w, 's, 'a>(
+        self,
+        commands: &'a mut Commands<'w, 's>,
+    ) -> Chain<'w, 's, 'a, Response>
+    where
+        Response: 'static + Send + Sync,
+    {
+        Chain::new(self.scope, self.target, commands)
+    }
+
+    /// Get the entity that this output will be sent to.
     pub fn id(&self) -> Entity {
         self.target
     }
+
+    /// Get the scope that this output exists inside of.
     pub fn scope(&self) -> Entity {
         self.scope
     }
+
     pub(crate) fn new(scope: Entity, target: Entity) -> Self {
         Self { scope, target, _ignore: Default::default() }
     }

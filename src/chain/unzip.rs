@@ -20,16 +20,16 @@ use bevy::prelude::{Entity, Commands};
 use smallvec::SmallVec;
 
 use crate::{
-    Dangling, UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
-    ForkUnzip, AddOperation, OutputChain, FunnelInputStorage, OperationResult,
-    SingleTargetStorage, OrBroken, OperationReachability,
-    OperationError, InspectInput,
+    UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
+    ForkUnzip, AddOperation, FunnelInputStorage, OperationResult,
+    SingleTargetStorage, OrBroken, OperationReachability, Output,
+    OperationError, InspectInput, Chain,
 };
 
 /// A trait for response types that can be unzipped
 pub trait Unzippable {
     type Unzipped;
-    fn unzip_chain(source: Entity, commands: &mut Commands) -> Self::Unzipped;
+    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped;
 
     fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]>;
 
@@ -62,11 +62,11 @@ pub enum JoinStatus {
 pub type JoinStatusResult = Result<JoinStatus, OperationError>;
 
 impl<A: 'static + Send + Sync> Unzippable for (A,) {
-    type Unzipped = Dangling<A>;
-    fn unzip_chain(source: Entity, commands: &mut Commands) -> Self::Unzipped {
+    type Unzipped = Output<A>;
+    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped {
         let targets = Self::make_targets(commands);
 
-        let result = Dangling::new(source, targets[0]);
+        let result = Output::new(scope, targets[0]);
 
         commands.add(AddOperation::new(
             source,
@@ -130,7 +130,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
+        let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
 
         let input_0 = *inputs.0.get(0).or_broken()?;
 
@@ -146,13 +146,13 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 }
 
 impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
-    type Unzipped = (Dangling<A>, Dangling<B>);
-    fn unzip_chain(source: Entity, commands: &mut Commands) -> Self::Unzipped {
+    type Unzipped = (Output<A>, Output<B>);
+    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped {
         let targets = Self::make_targets(commands);
 
         let result = (
-            Dangling::new(source, targets[0]),
-            Dangling::new(source, targets[1]),
+            Output::new(scope, targets[0]),
+            Output::new(scope, targets[1]),
         );
 
         commands.add(AddOperation::new(
@@ -216,6 +216,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
             }
         }
 
+        let world = reachability.world();
         if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_1)? {
@@ -235,7 +236,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
+        let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
 
         let input_0 = *inputs.0.get(0).or_broken()?;
         let input_1 = *inputs.0.get(1).or_broken()?;
@@ -262,14 +263,14 @@ where
     B: 'static + Send + Sync,
     C: 'static + Send + Sync,
 {
-    type Unzipped = (Dangling<A>, Dangling<B>, Dangling<C>);
-    fn unzip_chain(source: Entity, commands: &mut Commands) -> Self::Unzipped {
+    type Unzipped = (Output<A>, Output<B>, Output<C>);
+    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped {
         let targets = Self::make_targets(commands);
 
         let result = (
-            Dangling::new(source, targets[0]),
-            Dangling::new(source, targets[1]),
-            Dangling::new(source, targets[2]),
+            Output::new(scope, targets[0]),
+            Output::new(scope, targets[1]),
+            Output::new(scope, targets[2]),
         );
 
         commands.add(AddOperation::new(
@@ -320,12 +321,11 @@ where
     }
 
     fn join_status(
-        mut reachability: OperationReachability,
+        mut r: OperationReachability,
     ) -> JoinStatusResult {
-        let source = reachability.source();
-        let session = reachability.session();
-        let world = reachability.world();
-        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
+        let source = r.source();
+        let session = r.session();
+        let inputs = r.world().get::<FunnelInputStorage>(source).or_broken()?;
         let mut unreachable: Vec<Entity> = Vec::new();
         let mut status = JoinStatus::Ready;
 
@@ -333,23 +333,23 @@ where
         let input_1 = *inputs.0.get(1).or_broken()?;
         let input_2 = *inputs.0.get(2).or_broken()?;
 
-        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
+        if !r.world().get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
             status = JoinStatus::Pending;
-            if !reachability.check_upstream(input_0)? {
+            if !r.check_upstream(input_0)? {
                 unreachable.push(input_0);
             }
         }
 
-        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
+        if !r.world().get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
             status = JoinStatus::Pending;
-            if !reachability.check_upstream(input_1)? {
+            if !r.check_upstream(input_1)? {
                 unreachable.push(input_1);
             }
         }
 
-        if !world.get_entity(input_2).or_broken()?.buffer_ready::<C>(session)? {
+        if !r.world().get_entity(input_2).or_broken()?.buffer_ready::<C>(session)? {
             status = JoinStatus::Pending;
-            if !reachability.check_upstream(input_2)? {
+            if !r.check_upstream(input_2)? {
                 unreachable.push(input_2);
             }
         }
@@ -366,7 +366,7 @@ where
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
+        let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
 
         let input_0 = *inputs.0.get(0).or_broken()?;
         let input_1 = *inputs.0.get(1).or_broken()?;
@@ -397,21 +397,21 @@ where
 /// tuple.
 pub trait UnzipBuilder<Z> {
     type Output;
-    fn unzip_build(self, source: Entity, commands: &mut Commands) -> Self::Output;
+    fn unzip_build(self, scope: Entity, source: Entity, commands: &mut Commands) -> Self::Output;
 }
 
 impl<A, Fa, Ua, B, Fb, Ub> UnzipBuilder<(A, B)> for (Fa, Fb)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
-    Fa: FnOnce(OutputChain<A>) -> Ua,
-    Fb: FnOnce(OutputChain<B>) -> Ub,
+    Fa: FnOnce(Chain<A>) -> Ua,
+    Fb: FnOnce(Chain<B>) -> Ub,
 {
     type Output = (Ua, Ub);
-    fn unzip_build(self, source: Entity, commands: &mut Commands) -> Self::Output {
-        let dangling = <(A, B)>::unzip_chain(source, commands);
-        let u_a = (self.0)(dangling.0.resume(commands));
-        let u_b = (self.1)(dangling.1.resume(commands));
+    fn unzip_build(self, scope: Entity, source: Entity, commands: &mut Commands) -> Self::Output {
+        let outputs = <(A, B)>::unzip_chain(scope, source, commands);
+        let u_a = (self.0)(outputs.0.chain(commands));
+        let u_b = (self.1)(outputs.1.chain(commands));
         (u_a, u_b)
     }
 }
@@ -421,16 +421,16 @@ where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
     C: 'static + Send + Sync,
-    Fa: FnOnce(OutputChain<A>) -> Ua,
-    Fb: FnOnce(OutputChain<B>) -> Ub,
-    Fc: FnOnce(OutputChain<C>) -> Uc,
+    Fa: FnOnce(Chain<A>) -> Ua,
+    Fb: FnOnce(Chain<B>) -> Ub,
+    Fc: FnOnce(Chain<C>) -> Uc,
 {
     type Output = (Ua, Ub, Uc);
-    fn unzip_build(self, source: Entity, commands: &mut Commands) -> Self::Output {
-        let dangling = <(A, B, C)>::unzip_chain(source, commands);
-        let u_a = (self.0)(dangling.0.resume(commands));
-        let u_b = (self.1)(dangling.1.resume(commands));
-        let u_c = (self.2)(dangling.2.resume(commands));
+    fn unzip_build(self, scope: Entity, source: Entity, commands: &mut Commands) -> Self::Output {
+        let outputs = <(A, B, C)>::unzip_chain(scope, source, commands);
+        let u_a = (self.0)(outputs.0.chain(commands));
+        let u_b = (self.1)(outputs.1.chain(commands));
+        let u_c = (self.2)(outputs.2.chain(commands));
         (u_a, u_b, u_c)
     }
 }

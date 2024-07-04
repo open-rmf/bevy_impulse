@@ -16,46 +16,19 @@
 */
 
 use crate::{
-    Chain, OutputChain, ModifiersClosed, ModifiersUnset, UnusedTarget,
+    Chain, UnusedTarget, Output,
     FunnelInputStorage, JoinInput, ZipJoin,
     BundleJoin, AddOperation,
 };
 
-use bevy::prelude::{Entity, Commands};
+use bevy::prelude::Commands;
 
 use smallvec::SmallVec;
-
-/// While building a [`Chain`] you may need to pause building the chain and
-/// resume chaining later. You can also zip multiple [`Dangling`] instances
-/// together with a tuple and join or race them.
-///
-/// Use [`Chain::dangle`] to obtain a [`Dangling`].
-#[must_use]
-pub struct Dangling<Response, Streams=()> {
-    source: Entity,
-    target: Entity,
-    _ignore: std::marker::PhantomData<(Response, Streams)>,
-}
-
-impl<Response: 'static + Send + Sync, Streams> Dangling<Response, Streams> {
-    /// Resume operating on this [`Dangling`] chain by providing it with a fresh
-    /// mutable borrow of a [`Commands`].
-    pub fn resume<'w, 's, 'a>(
-        self,
-        commands: &'a mut Commands<'w, 's>
-    ) -> Chain<'w, 's, 'a, Response, Streams, ModifiersClosed> {
-        Chain::new(self.source, self.target, commands)
-    }
-
-    pub(crate) fn new(source: Entity, target: Entity) -> Self {
-        Self { source, target, _ignore: Default::default() }
-    }
-}
 
 /// This trait is for [`Dangling`] [`Chains`](Chain) that are "zipped" together in a tuple. The
 /// chains may all have different types and therefore must be handled
 /// independently even if we want to handle them simultaneously.
-pub trait ZippedChains {
+pub trait ZippedOutputs {
     /// The type that gets returned after this zipped set of chains gets joined.
     type JoinedResponse;
 
@@ -64,7 +37,7 @@ pub trait ZippedChains {
     fn join_zip<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>
-    ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse>;
+    ) -> Chain<'w, 's, 'a, Self::JoinedResponse>;
 
     /// Build the zipped chains, with a different builder for each chain.
     ///
@@ -80,7 +53,7 @@ pub trait ZippedChains {
         Self: Sized;
 }
 
-impl<A, StreamsA, B, StreamsB> ZippedChains for (Dangling<A, StreamsA>, Dangling<B, StreamsB>)
+impl<A, B> ZippedOutputs for (Output<A>, Output<B>)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
@@ -89,9 +62,9 @@ where
     fn join_zip<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>
-    ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse> {
-        let input_a = self.0.target;
-        let input_b = self.1.target;
+    ) -> Chain<'w, 's, 'a, Self::JoinedResponse> {
+        let input_a = self.0.id();
+        let input_b = self.1.id();
         let joiner = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
 
@@ -120,11 +93,7 @@ where
     }
 }
 
-impl<A, StreamsA, B, StreamsB, C, StreamsC> ZippedChains for (
-    Dangling<A, StreamsA>,
-    Dangling<B, StreamsB>,
-    Dangling<C, StreamsC>,
-)
+impl<A, B, C> ZippedOutputs for (Output<A>, Output<B>, Output<C>)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
@@ -134,10 +103,10 @@ where
     fn join_zip<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>
-    ) -> OutputChain<'w, 's, 'a, Self::JoinedResponse> {
-        let input_a = self.0.target;
-        let input_b = self.1.target;
-        let input_c = self.2.target;
+    ) -> Chain<'w, 's, 'a, Self::JoinedResponse> {
+        let input_a = self.0.id();
+        let input_b = self.1.id();
+        let input_c = self.2.id();
         let joiner = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
 
@@ -175,22 +144,22 @@ pub trait ZippedBuilders<'w, 's, Z> {
     fn apply_zipped_builders<'a>(self, zip: Z, commands: &'a mut Commands<'w, 's>) -> Self::Output;
 }
 
-impl<'w, 's, A, StreamsA, Fa, Ua, B, StreamsB, Fb, Ub> ZippedBuilders<'w, 's, (Dangling<A, StreamsA>, Dangling<B, StreamsB>)> for (Fa, Fb)
+impl<'w, 's, A, Fa, Ua, B, Fb, Ub> ZippedBuilders<'w, 's, (Output<A>, Output<B>)> for (Fa, Fb)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
-    Fa: FnOnce(OutputChain<'w, 's, '_, A>) -> Ua,
-    Fb: FnOnce(OutputChain<'w, 's, '_, B>) -> Ub,
+    Fa: FnOnce(Chain<'w, 's, '_, A>) -> Ua,
+    Fb: FnOnce(Chain<'w, 's, '_, B>) -> Ub,
 {
     type Output = (Ua, Ub);
     fn apply_zipped_builders<'a>(
         self,
-        (dangle_a, dangle_b): (Dangling<A, StreamsA>, Dangling<B, StreamsB>),
+        (output_a, output_b): (Output<A>, Output<B>),
         commands: &'a mut Commands<'w, 's>
     ) -> Self::Output {
         let (f_a, f_b) = self;
-        let u_a = (f_a)(Chain::new(dangle_a.source, dangle_a.target, commands));
-        let u_b = (f_b)(Chain::new(dangle_b.source, dangle_b.target, commands));
+        let u_a = (f_a)(Chain::new(output_a.scope(), output_a.id(), commands));
+        let u_b = (f_b)(Chain::new(output_b.scope(), output_b.id(), commands));
         (u_a, u_b)
     }
 }
@@ -199,37 +168,33 @@ where
 /// is only implemented for zipped chains that have a uniform
 pub trait ZippedChainsToBundle {
     type Response;
-    type Bundle: IntoIterator<Item=Dangling<Self::Response>>;
+    type Bundle: IntoIterator<Item=Output<Self::Response>>;
 
     fn bundle(self) -> Self::Bundle;
 }
 
-impl<Response: 'static + Send + Sync, StreamA, StreamB> ZippedChainsToBundle for (Dangling<Response, StreamA>, Dangling<Response, StreamB>) {
+impl<Response: 'static + Send + Sync> ZippedChainsToBundle for (Output<Response>, Output<Response>) {
     type Response = Response;
-    type Bundle = [Dangling<Response>; 2];
+    type Bundle = [Output<Response>; 2];
     fn bundle(self) -> Self::Bundle {
         [
-            Dangling::new(self.0.source, self.0.target),
-            Dangling::new(self.1.source, self.1.target),
+            Output::new(self.0.scope(), self.0.id()),
+            Output::new(self.1.scope(), self.1.id()),
         ]
     }
 }
 
-impl<Response, StreamsA, StreamsB, StreamsC> ZippedChainsToBundle for (
-    Dangling<Response, StreamsA>,
-    Dangling<Response, StreamsB>,
-    Dangling<Response, StreamsC>,
-)
+impl<Response> ZippedChainsToBundle for (Output<Response>, Output<Response>, Output<Response>)
 where
     Response: 'static + Send + Sync,
 {
     type Response = Response;
-    type Bundle = [Dangling<Response>; 3];
+    type Bundle = [Output<Response>; 3];
     fn bundle(self) -> Self::Bundle {
         [
-            Dangling::new(self.0.source, self.0.target),
-            Dangling::new(self.1.source, self.1.target),
-            Dangling::new(self.2.source, self.2.target),
+            Output::new(self.0.scope(), self.0.id()),
+            Output::new(self.1.scope(), self.1.id()),
+            Output::new(self.2.scope(), self.2.id()),
         ]
     }
 }
@@ -248,21 +213,21 @@ pub trait BundledChains {
     fn join_bundle<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset>;
+    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>>;
 }
 
-impl<Response, Streams, T> BundledChains for T
+impl<Response, T> BundledChains for T
 where
     Response: 'static + Send + Sync,
-    T: IntoIterator<Item=Dangling<Response, Streams>>,
+    T: IntoIterator<Item=Output<Response>>,
 {
     type Response = Response;
     fn join_bundle<'w, 's, 'a>(
         self,
         commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>, (), ModifiersUnset> {
+    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>> {
         let inputs = FunnelInputStorage::from_iter(
-            self.into_iter().map(|dangle| dangle.target)
+            self.into_iter().map(|output| output.id())
         );
         let joiner = commands.spawn(()).id();
         for input in &inputs.0 {

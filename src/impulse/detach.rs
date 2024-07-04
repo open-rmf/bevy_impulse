@@ -36,7 +36,7 @@ impl Default for Detached {
 }
 
 impl Detached {
-    pub fn is_detached(&self) {
+    pub fn is_detached(&self) -> bool {
         self.0
     }
 }

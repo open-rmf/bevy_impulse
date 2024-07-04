@@ -231,12 +231,7 @@ impl OperationRoster {
     /// Remove all instances of the target from the roster. This prevents a
     /// despawned entity from needlessly tripping errors.
     pub fn purge(&mut self, target: Entity) {
-        let condition = |e| *e != target;
-        self.queue.retain(condition);
-        self.cancel.retain(condition);
-        self.unblock.retain(condition);
-        self.disposed.retain(condition);
-        self.cleanup_finished.retain(condition);
+        self.queue.retain(|e| *e != target);
     }
 }
 
