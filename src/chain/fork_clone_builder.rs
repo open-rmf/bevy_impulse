@@ -15,18 +15,19 @@
  *
 */
 
-use bevy::prelude::{Entity, Commands};
+use bevy::prelude::Entity;
 
-use crate::{Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage};
+use crate::{
+    Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage, Builder,
+};
 
 pub trait ForkCloneBuilder<Response> {
     type Outputs;
 
     fn build_fork_clone(
         self,
-        scope: Entity,
         source: Entity,
-        commands: &mut Commands
+        builder: &mut Builder,
     ) -> Self::Outputs;
 }
 
@@ -40,22 +41,21 @@ where
 
     fn build_fork_clone(
         self,
-        scope: Entity,
         source: Entity,
-        commands: &mut Commands
+        builder: &mut Builder,
     ) -> Self::Outputs {
-        let target_0 = commands.spawn(UnusedTarget).id();
-        let target_1 = commands.spawn(UnusedTarget).id();
+        let target_0 = builder.commands.spawn(UnusedTarget).id();
+        let target_1 = builder.commands.spawn(UnusedTarget).id();
 
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(
             source,
             ForkClone::<R>::new(
                 ForkTargetStorage::from_iter([target_0, target_1])
             )
         ));
 
-        let u_0 = (self.0)(Chain::new(scope, target_0, commands));
-        let u_1 = (self.1)(Chain::new(scope, target_1, commands));
+        let u_0 = (self.0)(Chain::new(target_0, builder));
+        let u_1 = (self.1)(Chain::new(target_1, builder));
         (u_0, u_1)
     }
 }
@@ -71,24 +71,23 @@ where
 
     fn build_fork_clone(
         self,
-        scope: Entity,
         source: Entity,
-        commands: &mut Commands
+        builder: &mut Builder,
     ) -> Self::Outputs {
-        let target_0 = commands.spawn(UnusedTarget).id();
-        let target_1 = commands.spawn(UnusedTarget).id();
-        let target_2 = commands.spawn(UnusedTarget).id();
+        let target_0 = builder.commands.spawn(UnusedTarget).id();
+        let target_1 = builder.commands.spawn(UnusedTarget).id();
+        let target_2 = builder.commands.spawn(UnusedTarget).id();
 
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(
             source,
             ForkClone::<R>::new(
                 ForkTargetStorage::from_iter([target_0, target_1, target_2])
             )
         ));
 
-        let u_0 = (self.0)(Chain::new(scope, target_0, commands));
-        let u_1 = (self.1)(Chain::new(scope, target_1, commands));
-        let u_2 = (self.2)(Chain::new(scope, target_2, commands));
+        let u_0 = (self.0)(Chain::new(target_0, builder));
+        let u_1 = (self.1)(Chain::new(target_1, builder));
+        let u_2 = (self.2)(Chain::new(target_2, builder));
         (u_0, u_1, u_2)
     }
 }

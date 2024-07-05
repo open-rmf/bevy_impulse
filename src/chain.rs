@@ -18,7 +18,7 @@
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, AddOperation, Node, InputSlot,
+    UnusedTarget, AddOperation, Node, InputSlot, Builder,
     ForkClone, StreamPack, Provider, ProvideOnce,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
     ForkTargetStorage,
@@ -57,14 +57,13 @@ pub use zipped::*;
 /// If you do not select one of the above then the service request will be
 /// cancelled without ever attempting to run.
 #[must_use]
-pub struct Chain<'w, 's, 'a, Response> {
-    scope: Entity,
+pub struct Chain<'w, 's, 'a, 'b, T> {
     target: Entity,
-    commands: &'a mut Commands<'w, 's>,
-    _ignore: std::marker::PhantomData<Response>,
+    builder: &'b mut Builder<'w, 's, 'a>,
+    _ignore: std::marker::PhantomData<T>,
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
+impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Get the raw [`Output`] slot for the current link in the chain. You can
     /// use this to resume building this chain later.
     ///
@@ -73,14 +72,14 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// to run.
     ///
     /// [1]: crate::Scope
-    pub fn output(self) -> Output<Response> {
-        Output::new(self.scope, self.target)
+    pub fn output(self) -> Output<T> {
+        Output::new(self.builder.scope, self.target)
     }
 
     /// Connect the response at the end of the chain into a new provider. Get
     /// the response of the new provider as a chain so you can continue chaining
     /// operations.
-    pub fn then<P: Provider<Request = Response>>(
+    pub fn then<P: Provider<Request = T>>(
         self,
         provider: P,
     ) -> Chain<'w, 's, 'a, P::Response>
@@ -95,10 +94,10 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
 
     /// Connect the response in the chain into a new provider. Get the node
     /// slots that wrap around the new provider.
-    pub fn then_node<P: Provider<Request = Response>>(
+    pub fn then_node<P: Provider<Request = T>>(
         self,
         provider: P,
-    ) -> Node<Response, P::Response, P::Streams>
+    ) -> Node<T, P::Response, P::Streams>
     where
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack,
@@ -124,7 +123,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
         f: F,
     ) -> Chain<'w, 's, 'a, <F::MapType as ProvideOnce>::Response>
     where
-        F::MapType: Provider<Request=Response>,
+        F::MapType: Provider<Request=T>,
         <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
     {
         self.then(f.as_map())
@@ -135,9 +134,9 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     pub fn map_node<M, F: AsMap<M>>(
         self,
         f: F,
-    ) -> Node<Response, <F::MapType as ProvideOnce>::Response, <F::MapType as ProvideOnce>::Streams>
+    ) -> Node<T, <F::MapType as ProvideOnce>::Response, <F::MapType as ProvideOnce>::Streams>
     where
-        F::MapType: Provider<Request = Response>,
+        F::MapType: Provider<Request = T>,
         <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
         <F::MapType as ProvideOnce>::Streams: StreamPack,
     {
@@ -152,7 +151,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// running, similar to how [`Commands`] are flushed.
     pub fn map_block<U>(
         self,
-        f: impl FnMut(Response) -> U + 'static + Send + Sync,
+        f: impl FnMut(T) -> U + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, U>
     where
         U: 'static + Send + Sync,
@@ -164,8 +163,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// continuing a chain.
     pub fn map_block_node<U>(
         self,
-        f: impl FnMut(Response) -> U + 'static + Send + Sync,
-    ) -> Node<Response, U, ()>
+        f: impl FnMut(T) -> U + 'static + Send + Sync,
+    ) -> Node<T, U, ()>
     where
         U: 'static + Send + Sync,
     {
@@ -177,7 +176,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// output of the Future will be the Response of the returned Chain.
     pub fn map_async<Task>(
         self,
-        f: impl FnMut(Response) -> Task + 'static + Send + Sync,
+        f: impl FnMut(T) -> Task + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, Task::Output>
     where
         Task: Future + 'static + Send + Sync,
@@ -190,8 +189,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// continuing a chain.
     pub fn map_async_node<Task>(
         self,
-        f: impl FnMut(Response) -> Task + 'static + Send + Sync,
-    ) -> Node<Response, Task::Output, ()>
+        f: impl FnMut(T) -> Task + 'static + Send + Sync,
+    ) -> Node<T, Task::Output, ()>
     where
         Task: Future + 'static + Send + Sync,
         Task::Output: 'static + Send + Sync,
@@ -212,7 +211,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     ) -> Chain<'w, 's, 'a, ThenResponse>
     where
         ThenResponse: 'static + Send + Sync,
-        F: Provider<Request = Response, Response = Option<ThenResponse>>,
+        F: Provider<Request = T, Response = Option<ThenResponse>>,
         F::Response: 'static + Send + Sync,
         F::Streams: StreamPack,
     {
@@ -245,15 +244,15 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// See also [`Chain::fork_clone_zip`]
     pub fn fork_clone(
         self,
-        build: impl FnOnce(Chain<Response>),
-    ) -> Chain<'w, 's, 'a, Response>
+        build: impl FnOnce(Chain<T>),
+    ) -> Chain<'w, 's, 'a, T>
     where
-        Response: Clone,
+        T: Clone,
     {
-        Chain::<'w, 's, '_, Response>::new(
+        Chain::<'w, 's, '_, T>::new(
             self.scope, self.target, self.commands,
         ).fork_clone_zip((
-            |chain: Chain<Response>| chain.output(),
+            |chain: Chain<T>| chain.output(),
             build
         )).0.chain(self.commands)
     }
@@ -267,14 +266,14 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// output by this function. If all of the builders output [`Dangling`] then
     /// you can easily continue chaining more operations like `join` and `race`
     /// from the [`ZippedChains`] trait.
-    pub fn fork_clone_zip<Builder: ForkCloneBuilder<Response>>(
+    pub fn fork_clone_zip<Builder: ForkCloneBuilder<T>>(
         self,
         builder: Builder,
     ) -> Builder::Outputs
     where
-        Response: Clone,
+        T: Clone,
     {
-        builder.build_fork_clone(self.scope, self.target, self.commands)
+        builder.build_fork_clone(self.target, self.builder)
     }
 
     /// Similar to [`Chain::fork_clone_zip`], except you provide only one
@@ -287,23 +286,23 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// trait.
     pub fn fork_clone_bundle<const N: usize, U>(
         self,
-        mut builder: impl FnMut(Chain<Response>) -> U,
+        mut build: impl FnMut(Chain<T>) -> U,
     ) -> [U; N]
     where
-        Response: Clone,
+        T: Clone,
     {
         let source = self.target;
         let targets: [Entity; N] = core::array::from_fn(
-            |_| self.commands.spawn(UnusedTarget).id()
+            |_| self.builder.commands.spawn(UnusedTarget).id()
         );
 
-        self.commands.add(AddOperation::new(
+        self.builder.commands.add(AddOperation::new(
             source,
-            ForkClone::<Response>::new(ForkTargetStorage::from_iter(targets)),
+            ForkClone::<T>::new(ForkTargetStorage::from_iter(targets)),
         ));
 
         let output = targets.map(
-            |target| builder(Chain::new(self.scope, target, self.commands))
+            |target| build(Chain::new(target, self.builder))
         );
 
         output
@@ -320,22 +319,22 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     pub fn fork_clone_bundle_vec<const N: usize, U>(
         self,
         number_forks: usize,
-        mut builder: impl FnMut(Chain<Response>) -> U,
+        mut build: impl FnMut(Chain<T>) -> U,
     ) -> SmallVec<[U; N]>
     where
-        Response: Clone,
+        T: Clone,
     {
         let source = self.target;
         let mut targets = ForkTargetStorage::new();
         targets.0.reserve(number_forks);
 
-        self.commands.add(AddOperation::new(
+        self.builder.commands.add(AddOperation::new(
             source,
-            ForkClone::<Response>::new(targets.clone())
+            ForkClone::<T>::new(targets.clone())
         ));
 
         targets.0.into_iter().map(
-            |target| builder(Chain::new(self.scope, target, self.commands))
+            |target| build(Chain::new(target, self.builder))
         ).collect()
     }
 
@@ -346,11 +345,11 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// You can also consider using `unzip_build` to continue building each
     /// chain in the tuple independently by providing a builder function for
     /// each element of the tuple.
-    pub fn unzip(self) -> Response::Unzipped
+    pub fn unzip(self) -> T::Unzipped
     where
-        Response: Unzippable,
+        T: Unzippable,
     {
-        Response::unzip_chain(self.scope, self.target, self.commands)
+        T::unzip_chain(self.target, self.builder)
     }
 
     /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
@@ -359,18 +358,18 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// zipped output of all the builder functions.
     pub fn unzip_build<Builders>(self, builders: Builders) -> Builders::Output
     where
-        Builders: UnzipBuilder<Response>
+        Builders: UnzipBuilder<T>
     {
-        builders.unzip_build(self.scope, self.target, self.commands)
+        builders.unzip_build(self.target, self.builder)
     }
 
     /// If the chain's response implements the [`Future`] trait, applying
     /// `.flatten()` to the chain will yield the output of that Future as the
     /// chain's response.
-    pub fn flatten(self) -> Chain<'w, 's, 'a, Response::Output>
+    pub fn flatten(self) -> Chain<'w, 's, 'a, 'b, T::Output>
     where
-        Response: Future,
-        Response::Output: 'static + Send + Sync,
+        T: Future,
+        T::Output: 'static + Send + Sync,
     {
         self.map_async(|r| async { r.await })
     }
@@ -392,14 +391,14 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     pub fn pull_one<InitialValue>(
         self,
         value: InitialValue,
-        builder: impl FnOnce(Chain<InitialValue>)
-    ) -> Chain<'w, 's, 'a, Response>
+        build: impl FnOnce(Chain<InitialValue>)
+    ) -> Chain<'w, 's, 'a, 'b, T>
     where
         InitialValue: Clone + 'static + Send + Sync
     {
-        Chain::<'w, 's, '_, Response>::new(
-            self.scope, self.target, self.commands,
-        ).pull_one_zip(value, builder).0.chain(self.commands)
+        Chain::<T>::new(
+            self.target, self.builder,
+        ).pull_one_zip(value, build).0.chain(self.builder)
     }
 
     /// "Pull" means that another chain will be activated when the execution of
@@ -415,8 +414,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     pub fn pull_one_zip<InitialValue, U>(
         self,
         value: InitialValue,
-        builder: impl FnOnce(Chain<InitialValue>) -> U,
-    ) -> (Output<Response>, U)
+        build: impl FnOnce(Chain<InitialValue>) -> U,
+    ) -> (Output<T>, U)
     where
         InitialValue: Clone + 'static + Send + Sync,
     {
@@ -424,8 +423,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
         .pull_zip(
             (value,),
             (
-                |chain: Chain<Response>| chain.output(),
-                builder
+                |chain: Chain<T>| chain.output(),
+                build
             )
         )
     }
@@ -489,8 +488,8 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     ) -> Builders::Output
     where
         InitialValues: Unzippable + Clone + 'static + Send + Sync,
-        InitialValues::Prepended<Response>: 'static + Send + Sync,
-        Builders: UnzipBuilder<InitialValues::Prepended<Response>>,
+        InitialValues::Prepended<T>: 'static + Send + Sync,
+        Builders: UnzipBuilder<InitialValues::Prepended<T>>,
     {
         self
         .map_block(move |r| values.clone().prepend(r))
@@ -502,18 +501,18 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     /// As the name suggests, a no-op will not actually do anything, but it adds
     /// a new link (entity) into the chain.
     /// [1]: https://en.wikipedia.org/wiki/NOP_(code)
-    pub fn noop(self) -> Chain<'w, 's, 'a, Response> {
+    pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
+        let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(AddOperation::new(
-            source, Noop::<Response>::new(target),
+        self.builder.commands.add(AddOperation::new(
+            source, Noop::<T>::new(target),
         ));
-        Chain::new(self.scope, target, self.commands)
+        Chain::new(target, self.builder)
     }
 
     pub fn scope(&self) -> Entity {
-        self.scope
+        self.builder.scope
     }
 
     pub fn target(&self) -> Entity {
@@ -521,7 +520,7 @@ impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
     }
 }
 
-impl<'w, 's, 'a, T, E> Chain<'w, 's, 'a, Result<T, E>>
+impl<'w, 's, 'a, 'b, T, E> Chain<'w, 's, 'a, 'b, Result<T, E>>
 where
     T: 'static + Send + Sync,
     E: 'static + Send + Sync,
@@ -539,13 +538,13 @@ where
     pub fn branch_for_err(
         self,
         build_err: impl FnOnce(Chain<E>),
-    ) -> Chain<'w, 's, 'a, T> {
-        Chain::<'w, 's, '_, Result<T, E>>::new(
-            self.scope, self.target, self.commands,
+    ) -> Chain<'w, 's, 'a, 'b, T> {
+        Chain::<Result<T, E>>::new(
+            self.target, self.builder,
         ).branch_result_zip(
             |chain| chain.output(),
             build_err,
-        ).0.chain(self.commands)
+        ).0.chain(self.builder)
     }
 
     /// Build two branching chains, one for the case where the response is [`Ok`]
@@ -561,18 +560,18 @@ where
         build_err: impl FnOnce(Chain<E>) -> V,
     ) -> (U, V) {
         let source = self.target;
-        let target_ok = self.commands.spawn(UnusedTarget).id();
-        let target_err = self.commands.spawn(UnusedTarget).id();
+        let target_ok = self.builder.commands.spawn(UnusedTarget).id();
+        let target_err = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(AddOperation::new(
+        self.builder.commands.add(AddOperation::new(
             source,
             make_result_branching::<T, E>(
                 ForkTargetStorage::from_iter([target_ok, target_err])
             ),
         ));
 
-        let u = build_ok(Chain::new(self.scope, target_ok, self.commands));
-        let v = build_err(Chain::new(self.scope, target_err, self.commands));
+        let u = build_ok(Chain::new(target_ok, self.builder));
+        let v = build_err(Chain::new(target_err, self.builder));
         (u, v)
     }
 
@@ -619,7 +618,7 @@ where
     // }
 }
 
-impl<'w, 's, 'a, T> Chain<'w, 's, 'a, Option<T>>
+impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, Option<T>>
 where
     T: 'static + Send + Sync,
 {
@@ -636,13 +635,13 @@ where
     pub fn branch_for_none(
         self,
         build_none: impl FnOnce(Chain<()>),
-    ) -> Chain<'w, 's, 'a, T> {
-        Chain::<'w, 's, '_, Option<T>>::new(
-            self.scope, self.target, self.commands,
+    ) -> Chain<'w, 's, 'a, 'b, T> {
+        Chain::<Option<T>>::new(
+            self.target, self.builder,
         ).branch_option_zip(
             |chain| chain.output(),
             build_none,
-        ).0.chain(self.commands)
+        ).0.chain(self.builder)
     }
 
     /// Build two branching chains, one for the case where the response is [`Some`]
@@ -658,49 +657,47 @@ where
         build_none: impl FnOnce(Chain<()>) -> V,
     ) -> (U, V) {
         let source = self.target;
-        let target_some = self.commands.spawn(UnusedTarget).id();
-        let target_none = self.commands.spawn(UnusedTarget).id();
+        let target_some = self.builder.commands.spawn(UnusedTarget).id();
+        let target_none = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(AddOperation::new(
+        self.builder.commands.add(AddOperation::new(
             source,
             make_option_branching::<T>(
                 ForkTargetStorage::from_iter([target_some, target_none])
             ),
         ));
 
-        let u = build_some(Chain::new(self.scope, target_some, self.commands));
-        let v = build_none(Chain::new(self.scope, target_none, self.commands));
+        let u = build_some(Chain::new(target_some, self.builder));
+        let v = build_none(Chain::new(target_none, self.builder));
         (u, v)
     }
 
     /// If the result contains a [`None`] value then the chain will be cancelled
     /// from this link onwards. The next link in the chain will receive a `T` if
     /// the chain is not cancelled.
-    pub fn cancel_on_none(self) -> Chain<'w, 's, 'a, T> {
+    pub fn cancel_on_none(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
+        let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.commands.add(AddOperation::new(
+        self.builder.commands.add(AddOperation::new(
             source,
             make_cancel_filter_on_none::<T>(target),
         ));
 
-        Chain::new(source, target, self.commands)
+        Chain::new(target, self.builder)
     }
 }
 
-impl<'w, 's, 'a, Response: 'static + Send + Sync> Chain<'w, 's, 'a, Response> {
+impl<'w, 's, 'a, 'b, Response: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, Response> {
     /// Used internally to create a [`Chain`] that can accept a label
     /// and hook into streams.
     pub(crate) fn new(
-        scope: Entity,
         target: Entity,
-        commands: &'a mut Commands<'w, 's>,
+        builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Self {
         Self {
-            scope,
             target,
-            commands,
+            builder,
             _ignore: Default::default()
         }
     }

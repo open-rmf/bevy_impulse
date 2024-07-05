@@ -86,9 +86,21 @@ pub struct Scope<Request, Response, Streams: StreamPack> {
 /// way to trick the compiler into using a [`Builder`] in the wrong scope, but
 /// please open an issue with a minimal reproducible example if you find a way
 /// to make it panic.
-pub struct Builder<'a, 'w, 's> {
-    scope: Entity,
-    commands: &'a mut Commands<'w, 's>,
+pub struct Builder<'w, 's, 'a> {
+    pub(crate) scope: Entity,
+    pub(crate) commands: &'a mut Commands<'w, 's>,
+}
+
+impl<'w, 's, 'a> Builder<'w, 's, 'a> {
+    /// Get the scope that this builder is building for
+    pub fn scope(&self) -> Entity {
+        self.scope
+    }
+
+    /// Borrow the commands for the builder
+    pub fn commands(&'a mut self) -> &'a mut Commands<'w, 's> {
+        &mut self.commands
+    }
 }
 
 /// Settings that describe some aspects of a workflow's behavior.

@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Chain, UnusedTarget, Output,
+    Chain, UnusedTarget, Output, Builder,
     FunnelInputStorage, JoinInput, ZipJoin,
     BundleJoin, AddOperation,
 };
@@ -34,19 +34,19 @@ pub trait ZippedOutputs {
 
     /// Join the zipped chains, producing a single chain whose response is the
     /// zip of the responses of all the chains.
-    fn join_zip<'w, 's, 'a>(
+    fn join_zip<'w, 's, 'a, 'b>(
         self,
-        commands: &'a mut Commands<'w, 's>
-    ) -> Chain<'w, 's, 'a, Self::JoinedResponse>;
+        commands: &'b mut Builder<'w, 's, 'a>
+    ) -> Chain<'w, 's, 'a, 'b, Self::JoinedResponse>;
 
     /// Build the zipped chains, with a different builder for each chain.
     ///
     /// There will be no dependency or synchronization added between any of the
     /// chains by using this function; it's simply an ergonomic way to continue
     /// building chains after they have been zipped together.
-    fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn build_zip<'w, 's, 'a, 'b, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
-        commands: &'a mut Commands<'w, 's>,
+        builder: &'b mut Builder<'w, 's, 'a>,
         builders: Builders,
     ) -> Builders::Output
     where
@@ -59,18 +59,18 @@ where
     B: 'static + Send + Sync,
 {
     type JoinedResponse = (A, B);
-    fn join_zip<'w, 's, 'a>(
+    fn join_zip<'w, 's, 'a, 'b>(
         self,
-        commands: &'a mut Commands<'w, 's>
-    ) -> Chain<'w, 's, 'a, Self::JoinedResponse> {
+        builder: &'b mut Builder<'w, 's, 'a>
+    ) -> Chain<'w, 's, 'a, 'b, Self::JoinedResponse> {
         let input_a = self.0.id();
         let input_b = self.1.id();
-        let joiner = commands.spawn(()).id();
-        let target = commands.spawn(UnusedTarget).id();
+        let joiner = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
 
-        commands.add(AddOperation::new(input_a, JoinInput::<A>::new(joiner)));
-        commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(input_a, JoinInput::<A>::new(joiner)));
+        builder.commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
+        builder.commands.add(AddOperation::new(
             joiner,
             ZipJoin::<Self::JoinedResponse>::new(
                 FunnelInputStorage::from_iter([input_a, input_b]),
@@ -78,18 +78,18 @@ where
             )
         ));
 
-        Chain::new(joiner, target, commands)
+        Chain::new(target, builder)
     }
 
-    fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn build_zip<'w, 's, 'a, 'b, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
-        commands: &'a mut Commands<'w, 's>,
+        builder: &'b mut Builder<'w, 's, 'a>,
         builders: Builders,
     ) -> Builders::Output
     where
         Self: Sized
     {
-        builders.apply_zipped_builders(self, commands)
+        builders.apply_zipped_builders(self, builder)
     }
 }
 
@@ -100,20 +100,20 @@ where
     C: 'static + Send + Sync,
 {
     type JoinedResponse = (A, B, C);
-    fn join_zip<'w, 's, 'a>(
+    fn join_zip<'w, 's, 'a, 'b>(
         self,
-        commands: &'a mut Commands<'w, 's>
-    ) -> Chain<'w, 's, 'a, Self::JoinedResponse> {
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::JoinedResponse> {
         let input_a = self.0.id();
         let input_b = self.1.id();
         let input_c = self.2.id();
-        let joiner = commands.spawn(()).id();
-        let target = commands.spawn(UnusedTarget).id();
+        let joiner = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
 
-        commands.add(AddOperation::new(input_a, JoinInput::<A>::new(joiner)));
-        commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
-        commands.add(AddOperation::new(input_c, JoinInput::<C>::new(joiner)));
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(input_a, JoinInput::<A>::new(joiner)));
+        builder.commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
+        builder.commands.add(AddOperation::new(input_c, JoinInput::<C>::new(joiner)));
+        builder.commands.add(AddOperation::new(
             joiner,
             ZipJoin::<Self::JoinedResponse>::new(
                 FunnelInputStorage::from_iter([input_a, input_b, input_c]),
@@ -121,7 +121,7 @@ where
             )
         ));
 
-        Chain::new(joiner, target, commands)
+        Chain::new(target, builder)
     }
 
     fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
@@ -141,25 +141,25 @@ where
 /// zipped together.
 pub trait ZippedBuilders<'w, 's, Z> {
     type Output;
-    fn apply_zipped_builders<'a>(self, zip: Z, commands: &'a mut Commands<'w, 's>) -> Self::Output;
+    fn apply_zipped_builders<'a, 'b>(self, zip: Z, commands: &'b mut Builder<'w, 's, 'a>) -> Self::Output;
 }
 
 impl<'w, 's, A, Fa, Ua, B, Fb, Ub> ZippedBuilders<'w, 's, (Output<A>, Output<B>)> for (Fa, Fb)
 where
     A: 'static + Send + Sync,
     B: 'static + Send + Sync,
-    Fa: FnOnce(Chain<'w, 's, '_, A>) -> Ua,
-    Fb: FnOnce(Chain<'w, 's, '_, B>) -> Ub,
+    Fa: FnOnce(Chain<A>) -> Ua,
+    Fb: FnOnce(Chain<B>) -> Ub,
 {
     type Output = (Ua, Ub);
-    fn apply_zipped_builders<'a>(
+    fn apply_zipped_builders<'a, 'b>(
         self,
         (output_a, output_b): (Output<A>, Output<B>),
-        commands: &'a mut Commands<'w, 's>
+        builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Self::Output {
         let (f_a, f_b) = self;
-        let u_a = (f_a)(Chain::new(output_a.scope(), output_a.id(), commands));
-        let u_b = (f_b)(Chain::new(output_b.scope(), output_b.id(), commands));
+        let u_a = (f_a)(Chain::new(output_a.id(), builder));
+        let u_b = (f_b)(Chain::new(output_b.id(), builder));
         (u_a, u_b)
     }
 }

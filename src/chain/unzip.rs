@@ -23,13 +23,13 @@ use crate::{
     UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
     ForkUnzip, AddOperation, FunnelInputStorage, OperationResult,
     SingleTargetStorage, OrBroken, OperationReachability, Output,
-    OperationError, InspectInput, Chain,
+    OperationError, InspectInput, Chain, Builder,
 };
 
 /// A trait for response types that can be unzipped
 pub trait Unzippable {
     type Unzipped;
-    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped;
+    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped;
 
     fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]>;
 
@@ -63,12 +63,12 @@ pub type JoinStatusResult = Result<JoinStatus, OperationError>;
 
 impl<A: 'static + Send + Sync> Unzippable for (A,) {
     type Unzipped = Output<A>;
-    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped {
-        let targets = Self::make_targets(commands);
+    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped {
+        let targets = Self::make_targets(builder.commands);
 
-        let result = Output::new(scope, targets[0]);
+        let result = Output::new(builder.scope, targets[0]);
 
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(
             source,
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -147,15 +147,15 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
 impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     type Unzipped = (Output<A>, Output<B>);
-    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped {
-        let targets = Self::make_targets(commands);
+    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped {
+        let targets = Self::make_targets(builder.commands);
 
         let result = (
-            Output::new(scope, targets[0]),
-            Output::new(scope, targets[1]),
+            Output::new(builder.scope, targets[0]),
+            Output::new(builder.scope, targets[1]),
         );
 
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(
             source,
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -185,7 +185,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         }
 
         if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.give_input(session, inputs.1, roster);
+            t_mut.give_input(session, inputs.1, roster)?;
         }
 
         Ok(())
@@ -251,7 +251,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 
         world
             .get_entity_mut(target).or_broken()?
-            .give_input(session, (v_0, v_1), roster);
+            .give_input(session, (v_0, v_1), roster)?;
         roster.queue(target);
         Ok(())
     }
@@ -264,16 +264,16 @@ where
     C: 'static + Send + Sync,
 {
     type Unzipped = (Output<A>, Output<B>, Output<C>);
-    fn unzip_chain(scope: Entity, source: Entity, commands: &mut Commands) -> Self::Unzipped {
-        let targets = Self::make_targets(commands);
+    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped {
+        let targets = Self::make_targets(builder.commands);
 
         let result = (
-            Output::new(scope, targets[0]),
-            Output::new(scope, targets[1]),
-            Output::new(scope, targets[2]),
+            Output::new(builder.scope, targets[0]),
+            Output::new(builder.scope, targets[1]),
+            Output::new(builder.scope, targets[2]),
         );
 
-        commands.add(AddOperation::new(
+        builder.commands.add(AddOperation::new(
             source,
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -397,7 +397,7 @@ where
 /// tuple.
 pub trait UnzipBuilder<Z> {
     type Output;
-    fn unzip_build(self, scope: Entity, source: Entity, commands: &mut Commands) -> Self::Output;
+    fn unzip_build(self, source: Entity, builder: &mut Builder) -> Self::Output;
 }
 
 impl<A, Fa, Ua, B, Fb, Ub> UnzipBuilder<(A, B)> for (Fa, Fb)
@@ -408,10 +408,10 @@ where
     Fb: FnOnce(Chain<B>) -> Ub,
 {
     type Output = (Ua, Ub);
-    fn unzip_build(self, scope: Entity, source: Entity, commands: &mut Commands) -> Self::Output {
-        let outputs = <(A, B)>::unzip_chain(scope, source, commands);
-        let u_a = (self.0)(outputs.0.chain(commands));
-        let u_b = (self.1)(outputs.1.chain(commands));
+    fn unzip_build(self, source: Entity, builder: &mut Builder) -> Self::Output {
+        let outputs = <(A, B)>::unzip_chain(source, builder);
+        let u_a = (self.0)(outputs.0.chain(builder));
+        let u_b = (self.1)(outputs.1.chain(builder));
         (u_a, u_b)
     }
 }
@@ -426,11 +426,11 @@ where
     Fc: FnOnce(Chain<C>) -> Uc,
 {
     type Output = (Ua, Ub, Uc);
-    fn unzip_build(self, scope: Entity, source: Entity, commands: &mut Commands) -> Self::Output {
-        let outputs = <(A, B, C)>::unzip_chain(scope, source, commands);
-        let u_a = (self.0)(outputs.0.chain(commands));
-        let u_b = (self.1)(outputs.1.chain(commands));
-        let u_c = (self.2)(outputs.2.chain(commands));
+    fn unzip_build(self, source: Entity, builder: &mut Builder) -> Self::Output {
+        let outputs = <(A, B, C)>::unzip_chain(source, builder);
+        let u_a = (self.0)(outputs.0.chain(builder));
+        let u_b = (self.1)(outputs.1.chain(builder));
+        let u_c = (self.2)(outputs.2.chain(builder));
         (u_a, u_b, u_c)
     }
 }

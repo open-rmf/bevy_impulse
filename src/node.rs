@@ -17,7 +17,7 @@
 
 use bevy::prelude::{Entity, Commands};
 
-use crate::{StreamPack, Chain};
+use crate::{StreamPack, Chain, Builder};
 
 /// A collection of all the inputs and outputs for a node within a workflow.
 pub struct Node<Request, Response, Streams: StreamPack> {
@@ -65,14 +65,15 @@ pub struct Output<Response> {
 
 impl<Response> Output<Response> {
     /// Create a chain that builds off of this response.
-    pub fn chain<'w, 's, 'a>(
+    pub fn chain<'w, 's, 'a, 'b>(
         self,
-        commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, Response>
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Response>
     where
         Response: 'static + Send + Sync,
     {
-        Chain::new(self.scope, self.target, commands)
+        assert_eq!(self.scope, builder.scope);
+        Chain::new(self.target, builder)
     }
 
     /// Get the entity that this output will be sent to.
