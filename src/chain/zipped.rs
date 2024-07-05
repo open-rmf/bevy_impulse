@@ -21,8 +21,6 @@ use crate::{
     BundleJoin, AddOperation,
 };
 
-use bevy::prelude::Commands;
-
 use smallvec::SmallVec;
 
 /// This trait is for [`Dangling`] [`Chains`](Chain) that are "zipped" together in a tuple. The
@@ -124,15 +122,15 @@ where
         Chain::new(target, builder)
     }
 
-    fn build_zip<'w, 's, 'a, Builders: ZippedBuilders<'w, 's, Self>>(
+    fn build_zip<'w, 's, 'a, 'b, Builders: ZippedBuilders<'w, 's, Self>>(
         self,
-        commands: &'a mut Commands<'w, 's>,
+        builder: &'b mut Builder<'w, 's, 'a>,
         builders: Builders,
     ) -> Builders::Output
     where
         Self: Sized
     {
-        builders.apply_zipped_builders(self, commands)
+        builders.apply_zipped_builders(self, builder)
     }
 }
 
@@ -141,7 +139,7 @@ where
 /// zipped together.
 pub trait ZippedBuilders<'w, 's, Z> {
     type Output;
-    fn apply_zipped_builders<'a, 'b>(self, zip: Z, commands: &'b mut Builder<'w, 's, 'a>) -> Self::Output;
+    fn apply_zipped_builders<'a, 'b>(self, zip: Z, builder: &'b mut Builder<'w, 's, 'a>) -> Self::Output;
 }
 
 impl<'w, 's, A, Fa, Ua, B, Fb, Ub> ZippedBuilders<'w, 's, (Output<A>, Output<B>)> for (Fa, Fb)
@@ -210,10 +208,10 @@ pub trait BundledChains {
 
     /// Join the bundle into one [`Chain`] whose response is the combined
     /// responses of all the chains.
-    fn join_bundle<'w, 's, 'a>(
+    fn join_bundle<'w, 's, 'a, 'b>(
         self,
-        commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>>;
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, JoinedBundle<Self::Response>>;
 }
 
 impl<Response, T> BundledChains for T
@@ -222,27 +220,27 @@ where
     T: IntoIterator<Item=Output<Response>>,
 {
     type Response = Response;
-    fn join_bundle<'w, 's, 'a>(
+    fn join_bundle<'w, 's, 'a, 'b>(
         self,
-        commands: &'a mut Commands<'w, 's>,
-    ) -> Chain<'w, 's, 'a, JoinedBundle<Self::Response>> {
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, JoinedBundle<Self::Response>> {
         let inputs = FunnelInputStorage::from_iter(
             self.into_iter().map(|output| output.id())
         );
-        let joiner = commands.spawn(()).id();
+        let joiner = builder.commands.spawn(()).id();
         for input in &inputs.0 {
-            commands.add(AddOperation::new(
+            builder.commands.add(AddOperation::new(
                 *input,
                 JoinInput::<Response>::new(joiner),
             ));
         }
 
-        let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
             joiner,
             BundleJoin::<Response>::new(inputs, target),
         ));
 
-        Chain::new(joiner, target, commands)
+        Chain::new(target, builder)
     }
 }

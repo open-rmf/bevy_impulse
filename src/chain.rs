@@ -82,14 +82,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then<P: Provider<Request = T>>(
         self,
         provider: P,
-    ) -> Chain<'w, 's, 'a, P::Response>
+    ) -> Chain<'w, 's, 'a, 'b, P::Response>
     where
         P::Response: 'static + Send + Sync,
     {
         let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
-        provider.connect(source, target, self.commands);
-        Chain::new(self.scope, target, self.commands)
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        provider.connect(source, target, self.builder.commands);
+        Chain::new(target, self.builder)
     }
 
     /// Connect the response in the chain into a new provider. Get the node
@@ -103,15 +103,15 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         P::Streams: StreamPack,
     {
         let source = self.target;
-        let target = self.commands.spawn(UnusedTarget).id();
-        provider.connect(source, target, self.commands);
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        provider.connect(source, target, self.builder.commands);
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            self.scope, self.commands,
+            self.builder.scope, self.builder.commands,
         );
-        self.commands.entity(source).insert(bundle);
+        self.builder.commands.entity(source).insert(bundle);
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.builder.scope, source),
+            output: Output::new(self.builder.scope, target),
             streams,
         }
     }
@@ -121,7 +121,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn map<M, F: AsMap<M>>(
         self,
         f: F,
-    ) -> Chain<'w, 's, 'a, <F::MapType as ProvideOnce>::Response>
+    ) -> Chain<'w, 's, 'a, 'b, <F::MapType as ProvideOnce>::Response>
     where
         F::MapType: Provider<Request=T>,
         <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
@@ -152,7 +152,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn map_block<U>(
         self,
         f: impl FnMut(T) -> U + 'static + Send + Sync,
-    ) -> Chain<'w, 's, 'a, U>
+    ) -> Chain<'w, 's, 'a, 'b, U>
     where
         U: 'static + Send + Sync,
     {
@@ -177,7 +177,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn map_async<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
-    ) -> Chain<'w, 's, 'a, Task::Output>
+    ) -> Chain<'w, 's, 'a, 'b, Task::Output>
     where
         Task: Future + 'static + Send + Sync,
         Task::Output: 'static + Send + Sync,
@@ -208,7 +208,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn cancellation_filter<ThenResponse, F>(
         self,
         filter_provider: F
-    ) -> Chain<'w, 's, 'a, ThenResponse>
+    ) -> Chain<'w, 's, 'a, 'b, ThenResponse>
     where
         ThenResponse: 'static + Send + Sync,
         F: Provider<Request = T, Response = Option<ThenResponse>>,
@@ -245,16 +245,16 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn fork_clone(
         self,
         build: impl FnOnce(Chain<T>),
-    ) -> Chain<'w, 's, 'a, T>
+    ) -> Chain<'w, 's, 'a, 'b, T>
     where
         T: Clone,
     {
-        Chain::<'w, 's, '_, T>::new(
-            self.scope, self.target, self.commands,
-        ).fork_clone_zip((
-            |chain: Chain<T>| chain.output(),
-            build
-        )).0.chain(self.commands)
+        Chain::<T>::new(self.target, self.builder)
+            .fork_clone_zip((
+                |chain: Chain<T>| chain.output(),
+                build,
+            )).0
+            .chain(self.builder)
     }
 
     /// When the response is delivered, we will make clones of it and

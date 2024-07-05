@@ -173,6 +173,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type Receiver;
     type Channel;
 
+    // TODO(@mxgrey): Consider passing in Builder instead of (scope, commands)
     fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::StreamInputPack,
