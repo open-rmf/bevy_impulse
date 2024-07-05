@@ -23,7 +23,7 @@ use std::future::Future;
 
 use crate::{
     Promise, ProvideOnce, StreamPack, IntoBlockingMapOnce, IntoAsyncMapOnce,
-    AsMapOnce, UnusedTarget,
+    AsMapOnce, UnusedTarget, StreamTargetMap,
 };
 
 mod detach;
@@ -92,8 +92,9 @@ where
             self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
-        let (bundle, stream_receivers) = Streams::take_streams(self.target, self.commands);
-        self.commands.entity(self.source).insert(bundle);
+        let mut map = StreamTargetMap::default();
+        let (bundle, stream_receivers) = Streams::take_streams(self.target, &mut map, self.commands);
+        self.commands.entity(self.source).insert((bundle, map));
 
         Recipient {
             response: response_promise,
@@ -203,10 +204,11 @@ where
             Store::<Response>::new(target),
         ));
 
+        let mut map = StreamTargetMap::default();
         let stream_targets = Streams::collect_streams(
-            self.source, target, self.commands,
+            self.source, target, &mut map, self.commands,
         );
-        self.commands.entity(self.source).insert(stream_targets);
+        self.commands.entity(self.source).insert((stream_targets, map));
     }
 
     /// Collect the stream data into [`Collection<T>`] components in the
@@ -214,10 +216,11 @@ where
     /// still decide what to do with the final response data.
     #[must_use]
     pub fn collect_streams(self, target: Entity) -> Impulse<'w, 's, 'a, Response, ()> {
+        let mut map = StreamTargetMap::default();
         let stream_targets = Streams::collect_streams(
-            self.source, target, self.commands,
+            self.source, target, &mut map, self.commands,
         );
-        self.commands.entity(self.source).insert(stream_targets);
+        self.commands.entity(self.source).insert((stream_targets, map));
 
         Impulse {
             source: self.source,
@@ -241,10 +244,11 @@ where
             Push::<Response>::new(target, false),
         ));
 
+        let mut map = StreamTargetMap::default();
         let stream_targets = Streams::collect_streams(
-            self.source, target, self.commands,
+            self.source, target, &mut map, self.commands,
         );
-        self.commands.entity(self.source).insert(stream_targets);
+        self.commands.entity(self.source).insert((stream_targets, map));
     }
 
     // TODO(@mxgrey): Consider offering ways for users to respond to cancellations.

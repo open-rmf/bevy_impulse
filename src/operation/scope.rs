@@ -23,7 +23,7 @@ use crate::{
     BufferSettings, Buffer, Cancellable, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
-    ScopeSettings,
+    ScopeSettings, StreamTargetMap,
 };
 
 use backtrace::Backtrace;
@@ -1072,20 +1072,22 @@ pub(crate) struct ExitTarget {
 }
 
 pub(crate) struct RedirectScopeStream<T: Stream> {
+    target: Entity,
     _ignore: std::marker::PhantomData<T>,
 }
 
 impl<T: Stream> RedirectScopeStream<T> {
-    pub(crate) fn new() -> Self {
-        Self { _ignore: Default::default() }
+    pub(crate) fn new(target: Entity) -> Self {
+        Self { target, _ignore: Default::default() }
     }
 }
 
 impl<T: Stream> Operation for RedirectScopeStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert(
+        world.entity_mut(source).insert((
             InputBundle::<T>::new(),
-        );
+            SingleTargetStorage::new(self.target),
+        ));
         Ok(())
     }
 
@@ -1093,16 +1095,17 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
+
+        // The target is optional because we want to "send" this stream even if
+        // there is no target listening, because streams may have custom sending
+        // behavior
+        let target = source_mut.get::<SingleTargetStorage>().map(|t| t.get());
         let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
-        let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
-        let stream_target = world
-            .get::<StreamTargetStorage<T>>(scope)
-            .map(|target| target.get());
         let parent_session = world.get::<ParentSession>(scoped_session).or_broken()?.get();
         data.send(StreamRequest {
             source,
             session: parent_session,
-            target: stream_target,
+            target,
             world,
             roster
         })
@@ -1161,8 +1164,10 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
         let exit_source = exit.source;
         let parent_session = exit.parent_session;
 
+        let stream_target_map = world.get::<StreamTargetMap>(exit_source).or_broken()?;
         let stream_target = world.get::<StreamTargetStorage<T>>(exit_source)
-            .map(|target| target.get());
+            .map(|target| stream_target_map.get(target.get()))
+            .flatten();
 
         data.send(StreamRequest {
             source,

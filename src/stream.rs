@@ -21,10 +21,12 @@ use crossbeam::channel::{Receiver, unbounded};
 
 use std::sync::Arc;
 
+use smallvec::SmallVec;
+
 use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
-    InnerChannel, TakenStream, StreamChannel, Push,
+    InnerChannel, TakenStream, StreamChannel, Push, Builder,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -42,51 +44,46 @@ pub trait Stream: 'static + Send + Sync + Sized {
     }
 
     fn spawn_scope_stream(
-        scope: Entity,
-        commands: &mut Commands
+        builder: &mut Builder,
     ) -> (
-        StreamTargetStorage<Self>,
         InputSlot<Self>,
+        Output<Self>,
     ) {
-        let source = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(source, RedirectScopeStream::<Self>::new()));
+        let source = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(source, RedirectScopeStream::<Self>::new(target)));
         (
-            StreamTargetStorage::new(source),
-            InputSlot::new(scope, source),
+            InputSlot::new(builder.scope, source),
+            Output::new(builder.scope, target),
         )
     }
 
     fn spawn_workflow_stream(
-        scope: Entity,
-        commands: &mut Commands,
-    ) -> (
-        StreamTargetStorage<Self>,
-        InputSlot<Self>,
-    ) {
-        let source = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(source, RedirectWorkflowStream::<Self>::new()));
-        (
-            StreamTargetStorage::new(source),
-            InputSlot::new(scope, source),
-        )
+        builder: &mut Builder,
+    ) -> InputSlot<Self> {
+        let source = builder.commands.spawn(()).id();
+        builder.commands.add(AddOperation::new(source, RedirectWorkflowStream::<Self>::new()));
+        InputSlot::new(builder.scope, source)
     }
 
     fn spawn_node_stream(
-        scope: Entity,
-        commands: &mut Commands,
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
     ) -> (
         StreamTargetStorage<Self>,
         Output<Self>,
     ) {
-        let target = commands.spawn(UnusedTarget).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        let index = map.add(target);
         (
-            StreamTargetStorage::new(target),
-            Output::new(scope, target),
+            StreamTargetStorage::new(index),
+            Output::new(builder.scope, target),
         )
     }
 
     fn take_stream(
         source: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> (
         StreamTargetStorage<Self>,
@@ -100,10 +97,12 @@ pub trait Stream: 'static + Send + Sync + Sized {
             .set_parent(source)
             .id();
 
+        let index = map.add(target);
+
         commands.add(AddImpulse::new(target, TakenStream::new(sender)));
 
         (
-            StreamTargetStorage::new(target),
+            StreamTargetStorage::new(index),
             receiver,
         )
     }
@@ -111,6 +110,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
     fn collect_stream(
         source: Entity,
         target: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> StreamTargetStorage<Self> {
         let redirect = commands.spawn(()).set_parent(source).id();
@@ -118,7 +118,8 @@ pub trait Stream: 'static + Send + Sync + Sized {
             redirect,
             Push::<Self>::new(target, true),
         ));
-        StreamTargetStorage::new(redirect)
+        let index = map.add(redirect);
+        StreamTargetStorage::new(index)
     }
 }
 
@@ -151,17 +152,41 @@ impl<T: Stream> Default for StreamAvailable<T> {
 /// [`StreamTargetStorage`] keeps track of the target for each stream for a source.
 #[derive(Component)]
 pub struct StreamTargetStorage<T: Stream> {
-    target: Entity,
+    index: usize,
     _ignore: std::marker::PhantomData<T>,
 }
 
 impl<T: Stream> StreamTargetStorage<T> {
-    fn new(target: Entity) -> Self {
-        Self { target, _ignore: Default::default() }
+    fn new(index: usize) -> Self {
+        Self { index, _ignore: Default::default() }
     }
 
-    pub fn get(&self) -> Entity {
-        self.target
+    pub fn get(&self) -> usize {
+        self.index
+    }
+}
+
+/// The actual entity target of the stream is held in this component which does
+/// not have any generic parameters. This means it is possible to lookup the
+/// targets of the streams coming out of the node without knowing the concrete
+/// type of the streams. This is crucial for being able to redirect the stream
+/// targets.
+//
+// TODO(@mxgrey): Consider whether we should store stream type information in here
+#[derive(Component, Default)]
+pub struct StreamTargetMap {
+    map: SmallVec<[Entity; 8]>,
+}
+
+impl StreamTargetMap {
+    fn add(&mut self, target: Entity) -> usize {
+        let index = self.map.len();
+        self.map.push(target);
+        index
+    }
+
+    pub fn get(&self, index: usize) -> Option<Entity> {
+        self.map.get(index).copied()
     }
 }
 
@@ -173,23 +198,22 @@ pub trait StreamPack: 'static + Send + Sync {
     type Receiver;
     type Channel;
 
-    // TODO(@mxgrey): Consider passing in Builder instead of (scope, commands)
-    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
+    fn spawn_scope_streams(builder: &mut Builder) -> (
         Self::StreamInputPack,
+        Self::StreamOutputPack,
     );
 
-    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::StreamInputPack,
-    );
+    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack;
 
-    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_node_streams(
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     );
 
-    fn take_streams(source: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     );
@@ -197,6 +221,7 @@ pub trait StreamPack: 'static + Send + Sync {
     fn collect_streams(
         source: Entity,
         target: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> Self::StreamStorageBundle;
 
@@ -211,48 +236,59 @@ impl<T: Stream> StreamPack for T {
     type Receiver = Receiver<Self>;
     type Channel = StreamChannel<Self>;
 
-    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
+    fn spawn_scope_streams(builder: &mut Builder) -> (
         Self::StreamInputPack,
+        Self::StreamOutputPack,
     ) {
-        T::spawn_scope_stream(scope, commands)
+        T::spawn_scope_stream(builder)
     }
 
-    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::StreamInputPack,
-    ) {
-        T::spawn_workflow_stream(scope, commands)
+    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
+        T::spawn_workflow_stream(builder)
     }
 
-    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_node_streams(
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     ) {
-        T::spawn_node_stream(scope, commands)
+        T::spawn_node_stream(map, builder)
     }
 
-    fn take_streams(source: Entity, commands: &mut Commands) -> (
+    fn take_streams(
+        source: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        Self::take_stream(source, commands)
+        Self::take_stream(source, map, commands)
     }
 
     fn collect_streams(
         source: Entity,
         target: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> Self::StreamStorageBundle {
-        Self::collect_stream(source, target, commands)
+        Self::collect_stream(source, target, map, commands)
     }
 
     fn make_channel(
         inner: &Arc<InnerChannel>,
         world: &World,
     ) -> Self::Channel {
-        let target = world.get::<StreamTargetStorage<Self>>(inner.source())
-            .map(|t| t.target);
+        let index = world.get::<StreamTargetStorage<Self>>(inner.source())
+            .map(|t| t.index);
+        let target = index.map(
+            |index| world
+                .get::<StreamTargetMap>(inner.source())
+                .map(|t| t.get(index))
+                .flatten()
+        ).flatten();
         StreamChannel::new(target, Arc::clone(inner))
     }
 }
@@ -265,28 +301,28 @@ impl StreamPack for () {
     type Receiver = ();
     type Channel = ();
 
-    fn spawn_scope_streams(_: Entity, _: &mut Commands) -> (
-        Self::StreamStorageBundle,
+    fn spawn_scope_streams(_: &mut Builder) -> (
         Self::StreamInputPack,
+        Self::StreamOutputPack,
     ) {
         ((), ())
     }
 
-    fn spawn_workflow_streams(_: Entity, _: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::StreamInputPack,
-    ) {
-        ((), ())
+    fn spawn_workflow_streams(_: &mut Builder) -> Self::StreamInputPack {
+        ()
     }
 
-    fn spawn_node_streams(_: Entity, _: &mut Commands) -> (
+    fn spawn_node_streams(
+        _: &mut StreamTargetMap,
+        _: &mut Builder,
+    ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     ) {
         ((), ())
     }
 
-    fn take_streams(_: Entity, _: &mut Commands) -> (
+    fn take_streams(_: Entity, _: &mut StreamTargetMap, _: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
@@ -296,6 +332,7 @@ impl StreamPack for () {
     fn collect_streams(
         _: Entity,
         _: Entity,
+        _: &mut StreamTargetMap,
         _: &mut Commands,
     ) -> Self::StreamStorageBundle {
         ()
@@ -317,40 +354,41 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     type Receiver = T1::Receiver;
     type Channel = T1::Channel;
 
-    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
+    fn spawn_scope_streams(builder: &mut Builder) -> (
         Self::StreamInputPack,
+        Self::StreamOutputPack,
     ) {
-        T1::spawn_scope_streams(scope, commands)
+        T1::spawn_scope_streams(builder)
     }
 
-    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::StreamInputPack,
-    ) {
-        T1::spawn_workflow_streams(scope, commands)
+    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
+        T1::spawn_workflow_streams(builder)
     }
 
-    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_node_streams(
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     ) {
-        T1::spawn_node_streams(scope, commands)
+        T1::spawn_node_streams(map, builder)
     }
 
-    fn take_streams(source: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        T1::take_streams(source, commands)
+        T1::take_streams(source, map, builder)
     }
 
     fn collect_streams(
         source: Entity,
         target: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> Self::StreamStorageBundle {
-        T1::collect_streams(source, target, commands)
+        T1::collect_streams(source, target, map, commands)
     }
 
     fn make_channel(
@@ -369,49 +407,50 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
     type Receiver = (T1::Receiver, T2::Receiver);
     type Channel = (T1::Channel, T2::Channel);
 
-    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
+    fn spawn_scope_streams(builder: &mut Builder) -> (
         Self::StreamInputPack,
+        Self::StreamOutputPack,
     ) {
-        let t1 = T1::spawn_scope_streams(scope, commands);
-        let t2 = T2::spawn_scope_streams(scope, commands);
+        let t1 = T1::spawn_scope_streams(builder);
+        let t2 = T2::spawn_scope_streams(builder);
         ((t1.0, t2.0), (t1.1, t2.1))
     }
 
-    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::StreamInputPack,
-    ) {
-        let t1 = T1::spawn_workflow_streams(scope, commands);
-        let t2 = T2::spawn_workflow_streams(scope, commands);
-        ((t1.0, t2.0), (t1.1, t2.1))
+    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
+        let t1 = T1::spawn_workflow_streams(builder);
+        let t2 = T2::spawn_workflow_streams(builder);
+        (t1, t2)
     }
 
-    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_node_streams(
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     ) {
-        let t1 = T1::spawn_node_streams(scope, commands);
-        let t2 = T2::spawn_node_streams(scope, commands);
+        let t1 = T1::spawn_node_streams(map, builder);
+        let t2 = T2::spawn_node_streams(map, builder);
         ((t1.0, t2.0), (t1.1, t2.1))
     }
 
-    fn take_streams(source: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        let t1 = T1::take_streams(source, commands);
-        let t2 = T2::take_streams(source, commands);
+        let t1 = T1::take_streams(source, map, builder);
+        let t2 = T2::take_streams(source, map, builder);
         ((t1.0, t2.0), (t1.1, t2.1))
     }
 
     fn collect_streams(
         source: Entity,
         target: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> Self::StreamStorageBundle {
-        let t1 = T1::collect_streams(source, target, commands);
-        let t2 = T2::collect_streams(source, target, commands);
+        let t1 = T1::collect_streams(source, target, map, commands);
+        let t2 = T2::collect_streams(source, target, map, commands);
         (t1, t2)
     }
 
@@ -433,54 +472,55 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
     type Receiver = (T1::Receiver, T2::Receiver, T3::Receiver);
     type Channel = (T1::Channel, T2::Channel, T3::Channel);
 
-    fn spawn_scope_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
+    fn spawn_scope_streams(builder: &mut Builder) -> (
         Self::StreamInputPack,
+        Self::StreamOutputPack,
     ) {
-        let t1 = T1::spawn_scope_streams(scope, commands);
-        let t2 = T2::spawn_scope_streams(scope, commands);
-        let t3 = T3::spawn_scope_streams(scope, commands);
+        let t1 = T1::spawn_scope_streams(builder);
+        let t2 = T2::spawn_scope_streams(builder);
+        let t3 = T3::spawn_scope_streams(builder);
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 
-    fn spawn_workflow_streams(scope: Entity, commands: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::StreamInputPack,
-    ) {
-        let t1 = T1::spawn_workflow_streams(scope, commands);
-        let t2 = T2::spawn_workflow_streams(scope, commands);
-        let t3 = T3::spawn_workflow_streams(scope, commands);
-        ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
+    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
+        let t1 = T1::spawn_workflow_streams(builder);
+        let t2 = T2::spawn_workflow_streams(builder);
+        let t3 = T3::spawn_workflow_streams(builder);
+        (t1, t2, t3)
     }
 
-    fn spawn_node_streams(scope: Entity, commands: &mut Commands) -> (
+    fn spawn_node_streams(
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     ) {
-        let t1 = T1::spawn_node_streams(scope, commands);
-        let t2 = T2::spawn_node_streams(scope, commands);
-        let t3 = T3::spawn_node_streams(scope, commands);
+        let t1 = T1::spawn_node_streams(map, builder);
+        let t2 = T2::spawn_node_streams(map, builder);
+        let t3 = T3::spawn_node_streams(map, builder);
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 
-    fn take_streams(source: Entity, commands: &mut Commands) -> (
+    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
         Self::StreamStorageBundle,
         Self::Receiver,
     ) {
-        let t1 = T1::take_streams(source, commands);
-        let t2 = T2::take_streams(source, commands);
-        let t3 = T3::take_streams(source, commands);
+        let t1 = T1::take_streams(source, map, builder);
+        let t2 = T2::take_streams(source, map, builder);
+        let t3 = T3::take_streams(source, map, builder);
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 
     fn collect_streams(
         source: Entity,
         target: Entity,
+        map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> Self::StreamStorageBundle {
-        let t1 = T1::collect_streams(source, target, commands);
-        let t2 = T2::collect_streams(source, target, commands);
-        let t3 = T3::collect_streams(source, target, commands);
+        let t1 = T1::collect_streams(source, target, map, commands);
+        let t2 = T2::collect_streams(source, target, map, commands);
+        let t3 = T3::collect_streams(source, target, map, commands);
         (t1, t2, t3)
     }
 

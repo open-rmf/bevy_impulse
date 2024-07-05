@@ -16,13 +16,13 @@
 */
 
 use bevy::{
-    prelude::{Entity, Commands, World},
+    prelude::{Commands, World},
     ecs::system::CommandQueue,
 };
 
 use crate::{
     Service, InputSlot, Output, StreamPack, AddOperation, OperateScope,
-    Terminate, WorkflowService,
+    Terminate, WorkflowService, Builder,
 };
 
 /// Trait to allow workflows to be spawned from a [`Commands`] or a [`World`].
@@ -76,31 +76,6 @@ pub struct Scope<Request, Response, Streams: StreamPack> {
     /// You can feed data into these input slots at any time during the execution
     /// of the workflow.
     pub streams: Streams::StreamInputPack,
-}
-
-/// Device used for building a workflow. Simply pass a mutable borrow of this
-/// into any functions which ask for it.
-///
-/// Note that each scope has its own [`Builder`], and a panic will occur if a
-/// [`Builder`] gets used in the wrong scope. As of right now there is no known
-/// way to trick the compiler into using a [`Builder`] in the wrong scope, but
-/// please open an issue with a minimal reproducible example if you find a way
-/// to make it panic.
-pub struct Builder<'w, 's, 'a> {
-    pub(crate) scope: Entity,
-    pub(crate) commands: &'a mut Commands<'w, 's>,
-}
-
-impl<'w, 's, 'a> Builder<'w, 's, 'a> {
-    /// Get the scope that this builder is building for
-    pub fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    /// Borrow the commands for the builder
-    pub fn commands(&'a mut self) -> &'a mut Commands<'w, 's> {
-        &mut self.commands
-    }
 }
 
 /// Settings that describe some aspects of a workflow's behavior.
@@ -207,7 +182,6 @@ impl ScopeSettings {
         self.uninterruptible = uninterruptible;
     }
 }
-
 
 impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
     fn spawn_workflow<Request, Response, Streams>(

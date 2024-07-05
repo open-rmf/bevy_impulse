@@ -17,16 +17,16 @@
 
 use std::future::Future;
 
+use bevy::prelude::Entity;
+
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
     ForkClone, StreamPack, Provider, ProvideOnce,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
-    ForkTargetStorage,
+    ForkTargetStorage, StreamTargetMap,
     make_result_branching, make_cancel_filter_on_err,
     make_option_branching, make_cancel_filter_on_none,
 };
-
-use bevy::prelude::{Entity, Commands};
 
 use smallvec::SmallVec;
 
@@ -76,6 +76,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Output::new(self.builder.scope, self.target)
     }
 
+    /// Connect this output into an input slot.
+    pub fn connect(self, input: InputSlot<T>) {
+        TODO: Finish implementing this
+    }
+
     /// Connect the response at the end of the chain into a new provider. Get
     /// the response of the new provider as a chain so you can continue chaining
     /// operations.
@@ -105,10 +110,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         provider.connect(source, target, self.builder.commands);
+
+        let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            self.builder.scope, self.builder.commands,
+            &mut map, self.builder,
         );
-        self.builder.commands.entity(source).insert(bundle);
+        self.builder.commands.entity(source).insert((bundle, map));
         Node {
             input: InputSlot::new(self.builder.scope, source),
             output: Output::new(self.builder.scope, target),
