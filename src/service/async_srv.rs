@@ -238,12 +238,12 @@ where
     let task = AsyncComputeTaskPool::get().spawn(job);
 
     OperateTask::new(task_id, session, source, target, task, blocker, sender)
-        .setup(OperationSetup { source: task_id, world });
+        .setup(OperationSetup { source: task_id, world })?;
     roster.queue(task_id);
     Ok(())
 }
 
-pub fn serve_next_async_request<Request, Streams, Task>(
+pub(crate) fn serve_next_async_request<Request, Streams, Task>(
     unblock: Blocker,
     world: &mut World,
     roster: &mut OperationRoster,

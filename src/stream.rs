@@ -175,7 +175,7 @@ impl<T: Stream> StreamTargetStorage<T> {
 // TODO(@mxgrey): Consider whether we should store stream type information in here
 #[derive(Component, Default)]
 pub struct StreamTargetMap {
-    map: SmallVec<[Entity; 8]>,
+    pub(crate) map: SmallVec<[Entity; 8]>,
 }
 
 impl StreamTargetMap {
@@ -183,6 +183,10 @@ impl StreamTargetMap {
         let index = self.map.len();
         self.map.push(target);
         index
+    }
+
+    pub fn map(&self) -> &SmallVec<[Entity; 8]> {
+        &self.map
     }
 
     pub fn get(&self, index: usize) -> Option<Entity> {

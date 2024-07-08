@@ -24,6 +24,8 @@ use anyhow::anyhow;
 
 use backtrace::Backtrace;
 
+use std::sync::Arc;
+
 use crate::{MiscellaneousFailure, UnusedTarget, UnhandledErrors};
 
 #[derive(Component)]
@@ -65,7 +67,7 @@ impl Command for Detach {
         }
 
         let failure = MiscellaneousFailure {
-            error: anyhow!("Unable to detach target {:?}", self.target),
+            error: Arc::new(anyhow!("Unable to detach target {:?}", self.target)),
             backtrace: Some(backtrace),
         };
         world.get_resource_or_insert_with(|| UnhandledErrors::default())

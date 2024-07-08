@@ -32,6 +32,7 @@ use backtrace::Backtrace;
 use crate::{
     OperationRoster, OperationError, OrBroken, SingleTargetStorage,
     DeferredRoster, Cancel, Cancellation, CancellationCause, Broken,
+    BufferSettings, RetentionPolicy, ForkTargetStorage,
 };
 
 /// Typical container for input data accompanied by its session information.
@@ -116,17 +117,22 @@ pub trait ManageInput {
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError>;
 
-    fn from_buffer<T: 'static + Send + Sync>(
+    fn pull_from_buffer<T: 'static + Send + Sync>(
         &mut self,
         session: Entity
     ) -> Result<T, OperationError> {
-        self.try_from_buffer(session).and_then(|r| r.or_not_ready())
+        self.try_pull_from_buffer(session).and_then(|r| r.or_not_ready())
     }
 
-    fn try_from_buffer<T: 'static + Send + Sync>(
+    fn try_pull_from_buffer<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
     ) -> Result<Option<T>, OperationError>;
+
+    fn iter_from_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+    ) -> Result<SmallVec<[T; 16]>, OperationError>;
 
     fn cleanup_inputs<T: 'static + Send + Sync>(
         &mut self,
@@ -153,7 +159,7 @@ impl<'w> ManageInput for EntityMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        unsafe { self.sneak_input(session, data); }
+        unsafe { self.sneak_input(session, data)?; }
         roster.queue(self.id());
         Ok(())
     }
@@ -184,49 +190,40 @@ impl<'w> ManageInput for EntityMut<'w> {
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
         let Input { session, data } = self.take_input::<T>()?;
-        let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
-        let policy = buffer.settings.policy;
-        let reverse_queue = buffer.reverse_queues.entry(session).or_default();
-        match policy {
-            BufferPolicy::KeepFirst(n) => {
-                while n > 0 && reverse_queue.len() > n {
-                    // This shouldn't happen, but we'll handle it anyway.
-                    reverse_queue.remove(0);
-                }
-
-                if reverse_queue.len() == n {
-                    // We're at the limit for inputs in this queue so just skip
-                    return Ok(());
-                }
-            }
-            BufferPolicy::KeepLast(n) => {
-                while n > 0 && reverse_queue.len() >= n {
-                    reverse_queue.pop();
-                }
-            }
-            BufferPolicy::KeepAll => {
-                // Do nothing
-            }
+        let mut buffer = self.get_mut::<BufferStorage<T>>().or_broken()?;
+        if !buffer.push(session, data) {
+            // The data is not being stored because the buffer is at its limit,
+            // so return here.
+            return Ok(());
         }
 
-        reverse_queue.insert(0, data);
-
-        // CancelInputBuffer does not have a target, it is pull-only, so we
-        // should not queue an operation for it.
-        if let Some(target) = self.get::<SingleTargetStorage>() {
-            roster.queue(target.get());
+        let targets = self.get::<ForkTargetStorage>().or_broken()?.0.clone();
+        for target in targets {
+            self.world_scope(|world| {
+                let mut target_mut = world.get_entity_mut(target).or_broken()?;
+                target_mut.give_input(session, (), roster)
+            })?;
         }
 
         Ok(())
     }
 
-    fn try_from_buffer<T: 'static + Send + Sync>(
+    fn try_pull_from_buffer<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
     ) -> Result<Option<T>, OperationError> {
-        let mut buffer = self.get_mut::<Buffer<T>>().or_broken()?;
-        let reverse_queue = buffer.reverse_queues.entry(session).or_default();
-        Ok(reverse_queue.pop())
+        let mut buffer = self.get_mut::<BufferStorage<T>>().or_broken()?;
+        Ok(buffer.pull(session))
+    }
+
+    /// This will either drain the buffer or clone it, depending on whether T
+    /// can be cloned.
+    fn iter_from_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+    ) -> Result<SmallVec<[T; 16]>, OperationError> {
+        let mut buffer = self.get_mut::<BufferStorage<T>>().or_broken()?;
+        Ok(buffer.iter(session))
     }
 
     fn cleanup_inputs<T: 'static + Send + Sync>(
@@ -239,7 +236,7 @@ impl<'w> ManageInput for EntityMut<'w> {
             );
         }
 
-        if let Some(mut buffer) = self.get_mut::<Buffer<T>>() {
+        if let Some(mut buffer) = self.get_mut::<BufferStorage<T>>() {
             buffer.reverse_queues.remove(&session);
         };
     }
@@ -250,7 +247,7 @@ impl<'a> InspectInput for EntityMut<'a> {
         &self,
         session: Entity,
     ) -> Result<bool, OperationError> {
-        let buffer = self.get::<Buffer<T>>().or_broken()?;
+        let buffer = self.get::<BufferStorage<T>>().or_broken()?;
         Ok(buffer.reverse_queues.get(&session).is_some_and(|q| !q.is_empty()))
     }
 
@@ -268,7 +265,7 @@ impl<'a> InspectInput for EntityRef<'a> {
         &self,
         session: Entity,
     ) -> Result<bool, OperationError> {
-        let buffer = self.get::<Buffer<T>>().or_broken()?;
+        let buffer = self.get::<BufferStorage<T>>().or_broken()?;
         Ok(buffer.reverse_queues.get(&session).is_some_and(|q| !q.is_empty()))
     }
 
@@ -318,35 +315,99 @@ impl<T: 'static + Send + Sync> Command for InputCommand<T> {
 }
 
 #[derive(Component)]
-pub struct Buffer<T> {
+pub(crate) struct BufferStorage<T> {
     /// Settings that determine how this buffer will behave.
     settings: BufferSettings,
     /// Map from session ID to a queue of data that has arrived for it. This
     /// is used by nodes that feed into joiner nodes to store input so that it's
     /// readily available when needed.
+    ///
+    /// The main reason we use this as a reverse queue instead of a forward queue
+    /// is because SmallVec doesn't have a version of pop that we can use on the
+    /// front. We should reconsider whether this is really a sensible choice.
     reverse_queues: HashMap<Entity, SmallVec<[T; 16]>>,
+    pull_from_buffer: fn(&mut SmallVec<[T; 16]>) -> Option<T>,
+    iter_from_buffer: fn(&mut SmallVec<[T; 16]>) -> SmallVec<[T; 16]>,
 }
 
-impl<T> Buffer<T> {
-    pub fn new(settings: BufferSettings) -> Self {
-        Self { settings, reverse_queues: Default::default() }
+impl<T> BufferStorage<T> {
+    fn push(&mut self, session: Entity, value: T) -> bool {
+        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        match self.settings.retention() {
+            RetentionPolicy::KeepFirst(n) => {
+                while n > 0 && reverse_queue.len() > n {
+                    // This shouldn't happen, but we'll handle it anyway.
+                    reverse_queue.remove(0);
+                }
+
+                if reverse_queue.len() == n {
+                    // We're at the limit for inputs in this queue so just skip
+                    return false;
+                }
+            }
+            RetentionPolicy::KeepLast(n) => {
+                while n > 0 && reverse_queue.len() >= n {
+                    reverse_queue.pop();
+                }
+            }
+            RetentionPolicy::KeepAll => {
+                // Do nothing
+            }
+        }
+
+        reverse_queue.insert(0, value);
+        return true;
+    }
+
+    fn pull(&mut self, session: Entity) -> Option<T> {
+        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        (self.pull_from_buffer)(reverse_queue)
+    }
+
+    fn iter(&mut self, session: Entity) -> SmallVec<[T; 16]> {
+        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        (self.iter_from_buffer)(reverse_queue)
+    }
+
+    pub(crate) fn new(settings: BufferSettings) -> Self {
+        Self {
+            settings,
+            reverse_queues: Default::default(),
+            pull_from_buffer: pop_from_buffer::<T>,
+            iter_from_buffer: drain_from_buffer::<T>,
+        }
+    }
+
+    pub(crate) fn new_cloning(settings: BufferSettings) -> Self
+    where
+        T: Clone,
+    {
+        Self {
+            settings,
+            reverse_queues: Default::default(),
+            pull_from_buffer: clone_from_buffer::<T>,
+            iter_from_buffer: clone_whole_buffer::<T>,
+        }
     }
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct BufferSettings {
-    policy: BufferPolicy,
+fn pop_from_buffer<T>(reverse_queue: &mut SmallVec<[T; 16]>) -> Option<T> {
+    reverse_queue.pop()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum BufferPolicy {
-    KeepLast(usize),
-    KeepFirst(usize),
-    KeepAll,
+fn clone_from_buffer<T: Clone>(reverse_queue: &mut SmallVec<[T; 16]>) -> Option<T> {
+    reverse_queue.last().cloned()
 }
 
-impl Default for BufferPolicy {
-    fn default() -> Self {
-        Self::KeepLast(1)
-    }
+fn drain_from_buffer<T>(reverse_queue: &mut SmallVec<[T; 16]>) -> SmallVec<[T; 16]> {
+    let mut result = SmallVec::new();
+    std::mem::swap(reverse_queue, &mut result);
+    result.reverse();
+    result
+}
+
+fn clone_whole_buffer<T: Clone>(reverse_queue: &mut SmallVec<[T; 16]>) -> SmallVec<[T; 16]> {
+    let mut result = reverse_queue.clone();
+    result.reverse();
+    result
 }

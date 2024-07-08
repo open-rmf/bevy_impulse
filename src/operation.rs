@@ -49,6 +49,9 @@ pub(crate) use join::*;
 mod noop;
 pub(crate) use noop::*;
 
+mod operate_buffer;
+pub(crate) use operate_buffer::*;
+
 mod operate_handler;
 pub(crate) use operate_handler::*;
 
@@ -76,6 +79,14 @@ impl SingleInputStorage {
         Self(SmallVec::from_iter([input]))
     }
 
+    pub fn empty() -> Self {
+        Self(SmallVec::new())
+    }
+
+    pub fn get(&self) -> &SmallVec<[Entity; 8]> {
+        &self.0
+    }
+
     pub fn is_reachable(r: &mut OperationReachability) -> ReachabilityResult {
         let Some(inputs) = r.world.get_entity(r.source).or_broken()?.get::<Self>() else {
             return Ok(false);
@@ -94,11 +105,15 @@ impl SingleInputStorage {
 /// This is for links that draw from multiple sources simultaneously, such as
 /// join and race.
 #[derive(Component, Clone)]
-pub struct FunnelInputStorage(pub SmallVec<[Entity; 8]>);
+pub struct FunnelInputStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 impl FunnelInputStorage {
     pub fn new() -> Self {
         Self(SmallVec::new())
+    }
+
+    pub fn get(&self) -> &SmallVec<[Entity; 8]> {
+        &self.0
     }
 
     pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
@@ -117,6 +132,10 @@ impl SingleTargetStorage {
 
     pub fn get(&self) -> Entity {
         self.0
+    }
+
+    pub(crate) fn set(&mut self, target: Entity) {
+        self.0 = target;
     }
 }
 
@@ -237,9 +256,9 @@ impl OperationRoster {
 
 /// Notify the scope manager that a disposal took place. This will prompt the
 /// scope to check whether it's still possible to terminate.
-struct DisposalNotice {
-    scope: Entity,
-    session: Entity,
+pub struct DisposalNotice {
+    pub scope: Entity,
+    pub session: Entity,
 }
 
 /// Notify the scope manager that the request may be finished with cleanup
@@ -270,6 +289,7 @@ pub(crate) struct Blocker {
     pub(crate) serve_next: fn(Blocker, &mut World, &mut OperationRoster),
 }
 
+#[derive(Clone, Debug)]
 pub enum OperationError {
     Broken(Option<Backtrace>),
     NotReady,

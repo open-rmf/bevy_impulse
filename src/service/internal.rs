@@ -17,12 +17,15 @@
 
 use bevy::prelude::*;
 
-use std::collections::VecDeque;
-
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
+
+use anyhow::anyhow;
+
+use std::{collections::VecDeque, sync::Arc};
 
 use crate::{
     OperationRoster, OperationRequest, PendingOperationRequest, ServiceTrait,
+    OperationError, UnhandledErrors, MiscellaneousFailure,
     dispose_for_despawned_service,
 };
 
@@ -31,16 +34,6 @@ pub struct ServiceRequest<'a> {
     pub(crate) provider: Entity,
     pub(crate) target: Entity,
     pub(crate) operation: OperationRequest<'a>,
-}
-
-impl<'a> ServiceRequest<'a> {
-    fn pend(self) -> PendingServiceRequest {
-        PendingServiceRequest {
-            provider: self.provider,
-            target: self.target,
-            operation: self.operation.pend(),
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -142,8 +135,32 @@ impl<Srv: ServiceTrait + 'static + Send + Sync> ServiceBundle<Srv> {
     }
 }
 
-fn service_hook<Srv: ServiceTrait>(request: ServiceRequest) {
-    Srv::serve(request);
+fn service_hook<Srv: ServiceTrait>(
+    ServiceRequest {
+            provider,
+            target,
+            operation: OperationRequest { source, world, roster }
+        }: ServiceRequest,
+) {
+    match Srv::serve(ServiceRequest {
+        provider,
+        target,
+        operation: OperationRequest { source, world, roster }
+    }) {
+        Ok(()) | Err(OperationError::NotReady) => {
+            // Do nothing
+        }
+        Err(OperationError::Broken(backtrace)) => {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: Arc::new(anyhow!(
+                        "Failed to serve: provider {provider:?}, source {source:?}, target {target:?}",
+                    )),
+                    backtrace,
+                });
+        }
+    }
 }
 
 #[derive(Resource)]

@@ -19,10 +19,11 @@ use bevy::prelude::{Entity, Commands};
 
 use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
+    Buffer, BufferSettings, AddOperation, OperateBuffer,
 };
 
-pub(crate) mod internal;
-pub(crate) use internal::*;
+pub(crate) mod connect;
+pub(crate) use connect::*;
 
 /// Device used for building a workflow. Simply pass a mutable borrow of this
 /// into any functions which ask for it.
@@ -38,6 +39,10 @@ pub struct Builder<'w, 's, 'a> {
 }
 
 impl<'w, 's, 'a> Builder<'w, 's, 'a> {
+    /// Create a node for a provider. This will give access to an input slot, an
+    /// output slots, and a pack of stream outputs which can all be connected to
+    /// other nodes.
+    #[must_use]
     pub fn create_node<P: Provider>(
         &mut self,
         provider: P,
@@ -61,6 +66,54 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             output: Output::new(self.scope, target),
             streams,
         }
+    }
+
+    /// Connect the output of one into the input slot of another node.
+    pub fn connect<T: 'static + Send + Sync>(
+        &mut self,
+        output: Output<T>,
+        input: InputSlot<T>,
+    ) {
+        assert_eq!(output.scope(), input.scope());
+        self.commands.add(Connect {
+            original_target: output.id(),
+            new_target: input.id(),
+        });
+    }
+
+    /// Create a [`Buffer`] which can be used to store and pull data within
+    /// a scope. This is often used along with joining to synchronize multiple
+    /// branches.
+    pub fn create_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        settings: BufferSettings,
+    ) -> Buffer<T> {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            source,
+            OperateBuffer::<T>::new(settings),
+        ));
+
+        Buffer { scope: self.scope, source, _ignore: Default::default() }
+    }
+
+    /// Create a [`Buffer`] which can be used to store and pull data within a
+    /// scope. Unlike the buffer created by [`Self::create_buffer`], this will
+    /// give a clone of the latest items to nodes that pull from it instead of
+    /// the items being consumed. That means the items are reused by default,
+    /// which may be useful if you want some data to persist across multiple
+    /// uses.
+    pub fn create_cloning_buffer<T: 'static + Send + Sync + Clone>(
+        &mut self,
+        settings: BufferSettings,
+    ) -> Buffer<T> {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            source,
+            OperateBuffer::<T>::new_cloning(settings),
+        ));
+
+        Buffer { scope: self.scope, source, _ignore: Default::default() }
     }
 
     /// Get the scope that this builder is building for

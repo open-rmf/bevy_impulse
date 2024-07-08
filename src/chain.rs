@@ -23,7 +23,7 @@ use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
     ForkClone, StreamPack, Provider, ProvideOnce,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
-    ForkTargetStorage, StreamTargetMap,
+    ForkTargetStorage, StreamTargetMap, Connect,
     make_result_branching, make_cancel_filter_on_err,
     make_option_branching, make_cancel_filter_on_none,
 };
@@ -72,18 +72,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// to run.
     ///
     /// [1]: crate::Scope
+    #[must_use]
     pub fn output(self) -> Output<T> {
         Output::new(self.builder.scope, self.target)
     }
 
     /// Connect this output into an input slot.
+    ///
+    /// Pass a [terminate](crate::Scope::terminate) into this function to
+    /// end a chain.
     pub fn connect(self, input: InputSlot<T>) {
-        TODO: Finish implementing this
+        let output = Output::new(self.builder.scope, self.target);
+        self.builder.connect(output, input)
     }
 
     /// Connect the response at the end of the chain into a new provider. Get
     /// the response of the new provider as a chain so you can continue chaining
     /// operations.
+    #[must_use]
     pub fn then<P: Provider<Request = T>>(
         self,
         provider: P,
@@ -99,6 +105,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Connect the response in the chain into a new provider. Get the node
     /// slots that wrap around the new provider.
+    #[must_use]
     pub fn then_node<P: Provider<Request = T>>(
         self,
         provider: P,
@@ -125,6 +132,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Apply a one-time map whose input is a [`BlockingMap`](crate::BlockingMap)
     /// or an [`AsyncMap`](crate::AsyncMap).
+    #[must_use]
     pub fn map<M, F: AsMap<M>>(
         self,
         f: F,
@@ -138,6 +146,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map`] but receive the new node instead of continuing a
     /// chain.
+    #[must_use]
     pub fn map_node<M, F: AsMap<M>>(
         self,
         f: F,
@@ -156,6 +165,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This takes in a regular blocking function rather than an async function,
     /// so while the function is executing, it will block all systems from
     /// running, similar to how [`Commands`] are flushed.
+    #[must_use]
     pub fn map_block<U>(
         self,
         f: impl FnMut(T) -> U + 'static + Send + Sync,
@@ -168,6 +178,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map_block`] but receive the new node instead of
     /// continuing a chain.
+    #[must_use]
     pub fn map_block_node<U>(
         self,
         f: impl FnMut(T) -> U + 'static + Send + Sync,
@@ -181,6 +192,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Apply a map whose output is a Future that will be run in the
     /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool). The
     /// output of the Future will be the Response of the returned Chain.
+    #[must_use]
     pub fn map_async<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
@@ -194,6 +206,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map_async`] but receive the new node instead of
     /// continuing a chain.
+    #[must_use]
     pub fn map_async_node<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
@@ -212,6 +225,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This is conceptually similar to [`Iterator::filter_map`]. You can also
     /// use [`Chain::disposal_filter`] to dispose the remainder of the chain
     /// instead of cancelling it.
+    #[must_use]
     pub fn cancellation_filter<ThenResponse, F>(
         self,
         filter_provider: F
@@ -249,6 +263,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This can only be applied when `Response` can be cloned.
     ///
     /// See also [`Chain::fork_clone_zip`]
+    #[must_use]
     pub fn fork_clone(
         self,
         build: impl FnOnce(Chain<T>),
@@ -273,6 +288,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// output by this function. If all of the builders output [`Dangling`] then
     /// you can easily continue chaining more operations like `join` and `race`
     /// from the [`ZippedChains`] trait.
+    #[must_use]
     pub fn fork_clone_zip<Builder: ForkCloneBuilder<T>>(
         self,
         builder: Builder,
@@ -291,6 +307,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If your function outputs [`Dangling`] then you can easily continue
     /// chaining more operations like `join` and `race` from the [`BundledChains`]
     /// trait.
+    #[must_use]
     pub fn fork_clone_bundle<const N: usize, U>(
         self,
         mut build: impl FnMut(Chain<T>) -> U,
@@ -323,6 +340,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// heap allocations if it is greater than or equal to the number of forks
     /// that are actually produced. This value should be kept somewhat modest,
     /// like 8 - 16, to avoid excessively large stack frames.
+    #[must_use]
     pub fn fork_clone_bundle_vec<const N: usize, U>(
         self,
         number_forks: usize,
@@ -352,6 +370,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// You can also consider using `unzip_build` to continue building each
     /// chain in the tuple independently by providing a builder function for
     /// each element of the tuple.
+    #[must_use]
     pub fn unzip(self) -> T::Unzipped
     where
         T: Unzippable,
@@ -363,6 +382,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// `unzip_build` allows you to split it into multiple chains and apply a
     /// separate builder function to each chain. You will be passed back the
     /// zipped output of all the builder functions.
+    #[must_use]
     pub fn unzip_build<Builders>(self, builders: Builders) -> Builders::Output
     where
         Builders: UnzipBuilder<T>
@@ -373,6 +393,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the chain's response implements the [`Future`] trait, applying
     /// `.flatten()` to the chain will yield the output of that Future as the
     /// chain's response.
+    #[must_use]
     pub fn flatten(self) -> Chain<'w, 's, 'a, 'b, T::Output>
     where
         T: Future,
@@ -381,133 +402,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.map_async(|r| async { r.await })
     }
 
-    /// "Pull" means that another chain will be activated when the execution of
-    /// the current chain delivers the response for this link.
-    ///
-    /// `pull_one` lets you build one chain that will be activated when the
-    /// current link in the chain receives its response. The builder function
-    /// must be self-contained, so you are advised to use [`Chain::detach`] when
-    /// you are finished building it.
-    ///
-    /// The return value of `pull_one` will be the original chain that was being
-    /// built.
-    ///
-    /// * `value` - an initial value to provide for the pulled chain that will
-    /// be triggered by the pull.
-    /// * `builder` - a function that builds the pulled chain.
-    pub fn pull_one<InitialValue>(
-        self,
-        value: InitialValue,
-        build: impl FnOnce(Chain<InitialValue>)
-    ) -> Chain<'w, 's, 'a, 'b, T>
-    where
-        InitialValue: Clone + 'static + Send + Sync
-    {
-        Chain::<T>::new(
-            self.target, self.builder,
-        ).pull_one_zip(value, build).0.chain(self.builder)
-    }
-
-    /// "Pull" means that another chain will be activated when the execution of
-    /// the current chain delivers the response for this link.
-    ///
-    /// `pull_one_zip` is the same as [`Chain::pull_one`] except that the output
-    /// of the builder function will be zipped with a [`Output`] of the original
-    /// chain and provided as the return value of this function.
-    ///
-    /// * `value` - an initial value to provide for the pulled chain that will
-    /// be triggered by the pull.
-    /// * `builder` - a function that builds the pulled chain.
-    pub fn pull_one_zip<InitialValue, U>(
-        self,
-        value: InitialValue,
-        build: impl FnOnce(Chain<InitialValue>) -> U,
-    ) -> (Output<T>, U)
-    where
-        InitialValue: Clone + 'static + Send + Sync,
-    {
-        self
-        .pull_zip(
-            (value,),
-            (
-                |chain: Chain<T>| chain.output(),
-                build
-            )
-        )
-    }
-
-    /// "Pull" means that other chains will be activated when the execution of
-    /// the current chain delivers the response for this link.
-    ///
-    /// `pull_zip` takes in a tuple of initial values and a tuple of builders.
-    /// The tuple of builders needs to have one more element on the front, which
-    /// continues building the original chain.
-    ///
-    /// * `values` - a tuple `(a, b, c, ...)`` of initial values to provide to
-    /// the new chains that are being built.
-    ///
-    /// * `builder` - a tuple of functions `(f, f_a, f_b, f_c, ...)` whose first
-    /// element continues building the original chain that `pull_zip` is being
-    /// called on, and the remaining elements build each element of the `values`
-    /// tuple.
-    ///
-    /// ```
-    /// use bevy_impulse::{*, testing::*};
-    /// let mut context = TestingContext::minimal_plugins();
-    /// let mut promise = context.build(|commands| {
-    ///     commands
-    ///     .request("thanks".to_owned(), to_uppercase.into_blocking_map())
-    ///     .pull_zip(
-    ///         (4.0, [0xF0, 0x9F, 0x90, 0x9F]),
-    ///         (
-    ///             |chain: OutputChain<String>| {
-    ///                 chain.dangle()
-    ///             },
-    ///             |chain: OutputChain<f64>| {
-    ///                 chain
-    ///                 .map_block(|value| value.to_string())
-    ///                 .dangle()
-    ///             },
-    ///             |chain: OutputChain<[u8; 4]>| {
-    ///                 chain
-    ///                 .map_block(string_from_utf8)
-    ///                 .cancel_on_err()
-    ///                 .dangle()
-    ///             },
-    ///         )
-    ///     )
-    ///     .bundle()
-    ///     .join_bundle(commands)
-    ///     .map_block(|string_bundle| string_bundle.join(" "))
-    ///     .take()
-    /// });
-    ///
-    /// context.run_while_pending(&mut promise);
-    /// assert_eq!(
-    ///     promise.peek().available().map(|v| v.as_str()),
-    ///     Some("THANKS 4 🐟"),
-    /// );
-    /// ```
-    pub fn pull_zip<InitialValues, Builders>(
-        self,
-        values: InitialValues,
-        builders: Builders,
-    ) -> Builders::Output
-    where
-        InitialValues: Unzippable + Clone + 'static + Send + Sync,
-        InitialValues::Prepended<T>: 'static + Send + Sync,
-        Builders: UnzipBuilder<InitialValues::Prepended<T>>,
-    {
-        self
-        .map_block(move |r| values.clone().prepend(r))
-        .unzip_build(builders)
-    }
-
     /// Add a [no-op][1] to the current end of the chain.
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
     /// a new link (entity) into the chain.
     /// [1]: https://en.wikipedia.org/wiki/NOP_(code)
+    #[must_use]
     pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
@@ -542,6 +442,7 @@ where
     /// You should make sure to [`detach`](Chain::detach) the chain inside your
     /// builder or else it will be disposed during the first flush, even if an
     /// [`Err`] value arrives.
+    #[must_use]
     pub fn branch_for_err(
         self,
         build_err: impl FnOnce(Chain<E>),
@@ -561,6 +462,7 @@ where
     ///
     /// The outputs of both builder functions will be zipped as the return value
     /// of this function.
+    #[must_use]
     pub fn branch_result_zip<U, V>(
         self,
         build_ok: impl FnOnce(Chain<T>) -> U,
@@ -639,6 +541,7 @@ where
     /// You should make sure to [`detach`](Chain::detach) the chain inside this
     /// builder or else it will be disposed during the first flush, even if a
     /// [`None`] value arrives.
+    #[must_use]
     pub fn branch_for_none(
         self,
         build_none: impl FnOnce(Chain<()>),
@@ -658,6 +561,7 @@ where
     ///
     /// The outputs of both builder functions will be zipped as the return value
     /// of this function.
+    #[must_use]
     pub fn branch_option_zip<U, V>(
         self,
         build_some: impl FnOnce(Chain<T>) -> U,
@@ -682,6 +586,7 @@ where
     /// If the result contains a [`None`] value then the chain will be cancelled
     /// from this link onwards. The next link in the chain will receive a `T` if
     /// the chain is not cancelled.
+    #[must_use]
     pub fn cancel_on_none(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();

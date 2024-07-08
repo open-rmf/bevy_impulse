@@ -21,11 +21,13 @@ use backtrace::Backtrace;
 
 use anyhow::Error as Anyhow;
 
+use std::sync::Arc;
+
 use crate::{OperationError, Cancel, Disposal, Broken};
 
 /// This resource stores errors that have occurred that could not be handled
 /// internally or communicated to the user by any other means.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone, Debug)]
 pub struct UnhandledErrors {
     pub cancellations: Vec<CancelFailure>,
     pub operations: Vec<OperationError>,
@@ -33,9 +35,11 @@ pub struct UnhandledErrors {
     pub stop_tasks: Vec<StopTaskFailure>,
     pub broken: Vec<Broken>,
     pub unused_targets: Vec<UnusedTargetDrop>,
+    pub connections: Vec<ConnectionFailure>,
     pub miscellaneous: Vec<MiscellaneousFailure>,
 }
 
+#[derive(Clone, Debug)]
 pub struct CancelFailure {
     /// The error produced while the cancellation was happening
     pub error: OperationError,
@@ -55,6 +59,7 @@ impl CancelFailure {
 /// When it is impossible for some reason to perform a disposal, the incident
 /// will be logged in this resource. This may happen if a node somehow gets
 /// despawned while its service is attempting to dispose a request.
+#[derive(Clone, Debug)]
 pub struct DisposalFailure {
     /// The disposal that was attempted
     pub disposal: Disposal,
@@ -64,6 +69,8 @@ pub struct DisposalFailure {
     pub backtrace: Option<Backtrace>,
 }
 
+/// An error happened, causing the task of a provider to be unable to stop.
+#[derive(Clone, Debug)]
 pub struct StopTaskFailure {
     /// The task that was unable to be stopped
     pub task: Entity,
@@ -73,6 +80,7 @@ pub struct StopTaskFailure {
 
 /// An impulse chain was dropped because its final target was unused but `detach()`
 /// was not called on it. This is almost always a usage error, so we report it here.
+#[derive(Clone, Debug)]
 pub struct UnusedTargetDrop {
     /// Which target was dropped.
     pub unused_target: Entity,
@@ -80,8 +88,17 @@ pub struct UnusedTargetDrop {
     pub dropped_impulses: Vec<Entity>,
 }
 
+/// Something went wrong while trying to connect a target into a source.
+#[derive(Clone, Debug)]
+pub struct ConnectionFailure {
+    pub original_target: Entity,
+    pub new_target: Entity,
+    pub backtrace: Backtrace,
+}
+
 /// Use this for any failures that are not covered by the other categories
+#[derive(Clone, Debug)]
 pub struct MiscellaneousFailure {
-    pub error: Anyhow,
+    pub error: Arc<Anyhow>,
     pub backtrace: Option<Backtrace>,
 }

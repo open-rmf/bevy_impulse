@@ -15,11 +15,20 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy::{
+    prelude::{Entity, World},
+    ecs::system::Command,
+};
+
+use anyhow::anyhow;
+
+use backtrace::Backtrace;
+
+use std::sync::Arc;
 
 use crate::{
-    Input, ManageInput, Operation, InputBundle,
-    ForkTargetStorage, SingleInputStorage,
+    Input, ManageInput, Operation, InputBundle, MiscellaneousFailure,
+    ForkTargetStorage, SingleInputStorage, UnhandledErrors,
     OperationResult, OrBroken, OperationRequest, OperationSetup, OperationError,
     OperationCleanup, OperationReachability, ReachabilityResult,
 };
@@ -88,4 +97,35 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
 
         SingleInputStorage::is_reachable(&mut reachability)
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct AddBranchToForkClone {
+    pub(crate) source: Entity,
+    pub(crate) target: Entity,
+}
+
+impl Command for AddBranchToForkClone {
+    fn apply(self, world: &mut World) {
+        if let Err(OperationError::Broken(backtrace)) = try_add_branch_to_fork_clone(self, world) {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: Arc::new(anyhow!(
+                        "Unable to create a new branch for a fork clone, source: {:?}, target: {:?}",
+                        self.source, self.target,
+                    )),
+                    backtrace: Some(backtrace.unwrap_or_else(|| Backtrace::new()))
+                })
+        }
+    }
+}
+
+fn try_add_branch_to_fork_clone(
+    branch: AddBranchToForkClone,
+    world: &mut World,
+) -> OperationResult {
+    let mut targets = world.get_mut::<ForkTargetStorage>(branch.source).or_broken()?;
+    targets.0.push(branch.target);
+    Ok(())
 }

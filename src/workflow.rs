@@ -199,12 +199,9 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
             scope_id, None, settings.scope, self,
         );
         self.add(AddOperation::new(scope.terminal(), Terminate::<Response>::new()));
+        let mut builder = Builder { scope: scope_id, commands: self };
 
-        let (
-            stream_storage,
-            streams
-        ) = Streams::spawn_scope_streams(scope_id, self);
-        self.entity(scope_id).insert(stream_storage);
+        let streams = Streams::spawn_workflow_streams(&mut builder);
 
         let scope = Scope {
             input: Output::new(scope_id, scope.enter_scope()),
@@ -212,7 +209,6 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
             streams,
         };
 
-        let mut builder = Builder { scope: scope_id, commands: self };
         build(scope, &mut builder);
 
         WorkflowService::<Request, Response, Streams>::cast(scope_id)

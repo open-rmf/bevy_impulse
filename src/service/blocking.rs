@@ -118,7 +118,7 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
         }
 
         world.get_entity_mut(target).or_broken()?
-            .give_input(session, response, roster);
+            .give_input(session, response, roster)?;
         Ok(())
     }
 }

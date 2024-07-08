@@ -126,7 +126,7 @@ impl From<Broken> for CancellationCause {
 /// Passed into the [`OperationRoster`](crate::OperationRoster) to pass a cancel
 /// signal into the target.
 #[derive(Debug, Clone)]
-pub(crate) struct Cancel {
+pub struct Cancel {
     /// The entity that triggered the cancellation
     pub(crate) source: Entity,
     /// The target of the cancellation
@@ -160,15 +160,18 @@ impl Cancel {
     ) -> Result<(), CancelFailure> {
         if let Some(cancel) = world.get::<OperationCancelStorage>(self.target) {
             let cancel = cancel.0;
-            (cancel)(OperationCancel { cancel: self, world, roster });
+            // TODO(@mxgrey): Figure out a way to structure this so we don't
+            // need to always clone self.
+            return (cancel)(OperationCancel { cancel: self.clone(), world, roster })
+                .map_err(|error| {
+                    CancelFailure::new(error, self)
+                });
         } else {
             return Err(CancelFailure::new(
                 OperationError::Broken(Some(Backtrace::new())),
                 self,
             ));
         }
-
-        Ok(())
     }
 }
 

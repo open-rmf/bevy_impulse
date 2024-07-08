@@ -20,7 +20,7 @@ use crate::{
     OperationReachability, ReachabilityResult, OperationSetup, StreamPack,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
-    BufferSettings, Buffer, Cancellable, OperationRoster, ManageCancellation,
+    Cancellable, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
     ScopeSettings, StreamTargetMap,
@@ -472,7 +472,7 @@ where
                     .remove(&clean.session).or_broken()?;
                 clean.world.get_entity_mut(target).or_broken()?.give_input(
                     pair.parent_session, response, clean.roster,
-                );
+                )?;
 
                 if let Some(blocker) = blocker {
                     let serve_next = blocker.serve_next;
@@ -486,14 +486,14 @@ where
                 Self::begin_cancellation_workflows(
                     CancelledSession { parent_session, status },
                     clean,
-                );
+                )?;
             }
             ScopedSessionStatus::Cancelled(cancellation) => {
                 let status = CancelStatus::Cancelled(cancellation);
                 Self::begin_cancellation_workflows(
                     CancelledSession { parent_session, status },
                     clean,
-                );
+                )?;
             }
         }
 
@@ -725,39 +725,6 @@ impl CancelStatus {
     }
 }
 
-pub(crate) struct CancelInputBuffer<T> {
-    settings: BufferSettings,
-    _ignore: std::marker::PhantomData<T>,
-}
-
-impl<T> Operation for CancelInputBuffer<T>
-where
-    T: 'static + Send + Sync,
-{
-    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert(Buffer::<T>::new(self.settings));
-        Ok(())
-    }
-
-    fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        source_mut.transfer_to_buffer::<T>(roster)
-    }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>();
-        clean.notify_cleaned()
-    }
-
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
-        reachability.has_input::<T>()
-        // If this node is active then there is nothing upstream of it, so no
-        // need to crawl further up than this.
-    }
-}
-
 pub(crate) struct BeginCancel<T> {
     from_scope: Entity,
     buffer: Entity,
@@ -797,13 +764,14 @@ where
         let from_scope = source_mut.get::<CancelFromScope>().or_broken()?.0;
         let finish_cancel = world.get::<FinishCancelStorage>(from_scope).or_broken()?.0;
 
-        while let Some(data) = world.get_entity_mut(input)
+        let buffer = world.get_entity_mut(input)
             .or_broken()?
-            .try_from_buffer::<T>(scoped_session)?
-        {
+            .iter_from_buffer::<T>(scoped_session)?;
+
+        for data in buffer {
             let cancellation_session = world.spawn(ParentSession(scoped_session)).id();
             world.get_entity_mut(target).or_broken()?
-                .give_input(cancellation_session, data, roster);
+                .give_input(cancellation_session, data, roster)?;
 
             world.get_entity_mut(finish_cancel).or_broken()?
                 .get_mut::<AwaitingCancelStorage>().or_broken()?.0.iter_mut()

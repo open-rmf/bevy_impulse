@@ -136,7 +136,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
         let v_0  = world
             .get_entity_mut(input_0).or_broken()?
-            .from_buffer::<A>(session)?;
+            .pull_from_buffer::<A>(session)?;
 
         world
             .get_entity_mut(target).or_broken()?
@@ -243,11 +243,11 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
 
         let v_0 = world
             .get_entity_mut(input_0).or_broken()?
-            .from_buffer::<A>(session)?;
+            .pull_from_buffer::<A>(session)?;
 
         let v_1 = world
             .get_entity_mut(input_1).or_broken()?
-            .from_buffer::<B>(session)?;
+            .pull_from_buffer::<B>(session)?;
 
         world
             .get_entity_mut(target).or_broken()?
@@ -374,15 +374,15 @@ where
 
         let v_0 = world
             .get_entity_mut(input_0).or_broken()?
-            .from_buffer::<A>(session)?;
+            .pull_from_buffer::<A>(session)?;
 
         let v_1 = world
             .get_entity_mut(input_1).or_broken()?
-            .from_buffer::<B>(session)?;
+            .pull_from_buffer::<B>(session)?;
 
         let v_2 = world
             .get_entity_mut(input_2).or_broken()?
-            .from_buffer::<C>(session)?;
+            .pull_from_buffer::<C>(session)?;
 
         world
             .get_entity_mut(target).or_broken()?

@@ -25,11 +25,17 @@ use bevy::{
 
 use smallvec::SmallVec;
 
+use anyhow::anyhow;
+
+use backtrace::Backtrace;
+
+use std::sync::Arc;
+
 use crate::{
-    ChannelQueue, WakeQueue, OperationRoster, ServiceHook, Detached,
-    UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel,
-    OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished,
-    UnhandledErrors, UnusedTargetDrop,
+    ChannelQueue, WakeQueue, OperationRoster, ServiceHook, Detached, DisposalNotice,
+    UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel, MiscellaneousFailure,
+    OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished, OperationCleanup,
+    UnhandledErrors, UnusedTargetDrop, ValidateScopeReachability, OperationError,
     execute_operation, dispose_for_despawned_service,
 };
 
@@ -174,6 +180,34 @@ fn collect_from_channels(
 
     for target in drop_targets.drain(..) {
         drop_target(target, world, roster, false);
+    }
+
+    while let Some(DisposalNotice { scope: source, session }) = roster.disposed.pop() {
+        let Some(validate) = world.get::<ValidateScopeReachability>(source) else {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: Arc::new(anyhow!(
+                        "Scope {source:?} for disposal notification does not \
+                        have validation component",
+                    )),
+                    backtrace: Some(Backtrace::new()),
+                });
+            continue;
+        };
+
+        let validate = validate.0;
+        let cleanup = OperationCleanup { source, session, world, roster };
+        if let Err(OperationError::Broken(backtrace)) = validate(cleanup) {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: Arc::new(anyhow!(
+                        "Scope {source:?} broken while validating a disposal"
+                    )),
+                    backtrace,
+                });
+        }
     }
 }
 

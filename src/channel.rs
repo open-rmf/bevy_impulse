@@ -67,10 +67,17 @@ impl<Streams: StreamPack> Channel<Streams> {
 
         promise
     }
+
+    /// Get stream channels that will let you send stream information. This will
+    /// usually be one [`StreamChannel`] or a (possibly nested) tuple of
+    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
+    pub fn streams(&self) -> &Streams::Channel {
+        &self.streams
+    }
 }
 
 #[derive(Clone)]
-pub(crate) struct InnerChannel {
+pub struct InnerChannel {
     source: Entity,
     session: Entity,
     sender: CbSender<ChannelItem>,
@@ -85,14 +92,6 @@ impl InnerChannel {
         &self.sender
     }
 
-    pub(crate) fn new(
-        source: Entity,
-        session: Entity,
-        sender: CbSender<ChannelItem>,
-    ) -> Self {
-        InnerChannel { source, session, sender }
-    }
-
     pub(crate) fn into_specific<Streams: StreamPack>(
         self,
         world: &World,
@@ -100,6 +99,14 @@ impl InnerChannel {
         let inner = Arc::new(self);
         let streams = Streams::make_channel(&inner, world);
         Ok(Channel { inner, streams, _ignore: Default::default() })
+    }
+
+    pub(crate) fn new(
+        source: Entity,
+        session: Entity,
+        sender: CbSender<ChannelItem>,
+    ) -> Self {
+        InnerChannel { source, session, sender }
     }
 }
 
@@ -139,9 +146,9 @@ impl<T: Stream> StreamChannel<T> {
         let target = self.target;
         self.inner.sender.send(Box::new(
             move |world: &mut World, roster: &mut OperationRoster| {
-                data.send(StreamRequest { source, session, target, world, roster });
+                data.send(StreamRequest { source, session, target, world, roster }).ok();
             }
-        ));
+        )).ok();
     }
 
     pub(crate) fn new(target: Option<Entity>, inner: Arc<InnerChannel>) -> Self {

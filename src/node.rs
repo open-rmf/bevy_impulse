@@ -15,11 +15,15 @@
  *
 */
 
-use bevy::prelude::{Entity, Commands};
+use bevy::prelude::Entity;
 
-use crate::{StreamPack, Chain, Builder};
+use crate::{
+    StreamPack, Chain, Builder, UnusedTarget, AddBranchToForkClone, ForkClone,
+    AddOperation, ForkTargetStorage,
+};
 
 /// A collection of all the inputs and outputs for a node within a workflow.
+#[must_use]
 pub struct Node<Request, Response, Streams: StreamPack> {
     /// The input slot for the node. Connect outputs into this slot to trigger
     /// the node.
@@ -36,6 +40,10 @@ pub struct Node<Request, Response, Streams: StreamPack> {
 
 /// The slot that receives input for a node. When building a workflow, you can
 /// connect the output of a node to this, as long as the types match.
+///
+/// Any number of node outputs can be connected to one input slot.
+#[derive(Clone, Copy)]
+#[must_use]
 pub struct InputSlot<Request> {
     scope: Entity,
     source: Entity,
@@ -54,16 +62,18 @@ impl<Request> InputSlot<Request> {
     }
 }
 
-/// The output of a node. This can only be fed to one input slot before being
-/// consumed. If the `Response` parameter can be cloned then you can feed this
-/// into a [`CloneForkOutput`] to feed the output into any number of input slots.
+/// The output of a node. This can only be connected to one input slot. If the
+/// `Response` parameter can be cloned then you can call [`Self::fork_clone`] to
+/// transform this into a [`ForkCloneOutput`] and then connect the output into
+/// any number of input slots.
+#[must_use]
 pub struct Output<Response> {
     scope: Entity,
     target: Entity,
     _ignore: std::marker::PhantomData<Response>,
 }
 
-impl<Response> Output<Response> {
+impl<Response: 'static + Send + Sync> Output<Response> {
     /// Create a chain that builds off of this response.
     pub fn chain<'w, 's, 'a, 'b>(
         self,
@@ -74,6 +84,24 @@ impl<Response> Output<Response> {
     {
         assert_eq!(self.scope, builder.scope);
         Chain::new(self.target, builder)
+    }
+
+    /// Create a node that will fork the output along multiple branches, giving
+    /// a clone of the output to each branch.
+    #[must_use]
+    pub fn fork_clone<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> ForkCloneOutput<Response>
+    where
+        Response: Clone,
+    {
+        assert_eq!(self.scope, builder.scope);
+        builder.commands.add(AddOperation::new(
+            self.target,
+            ForkClone::<Response>::new(ForkTargetStorage::new()),
+        ));
+        ForkCloneOutput::new(self.scope, self.target)
     }
 
     /// Get the entity that this output will be sent to.
@@ -91,22 +119,36 @@ impl<Response> Output<Response> {
     }
 }
 
-/// The output of a cloning fork node. This output can be fed into any number of
-/// input slots.
-pub struct CloneForkOutput<Response> {
+/// The output of a cloning fork node. Use [`Self::clone_output`] to create a
+/// cloned output that you can connect to an input slot.
+#[must_use]
+pub struct ForkCloneOutput<Response> {
     scope: Entity,
-    target: Entity,
+    source: Entity,
     _ignore: std::marker::PhantomData<Response>,
 }
 
-impl<Response> CloneForkOutput<Response> {
-    pub fn id(&self) -> Entity {
-        self.target
+impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
+    pub fn clone_output(&self, builder: &mut Builder) -> Output<Response> {
+        assert_eq!(self.scope, builder.scope);
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddBranchToForkClone {
+            source: self.source,
+            target,
+        });
+
+        Output::new(self.scope, target)
     }
+
+    pub fn id(&self) -> Entity {
+        self.source
+    }
+
     pub fn scope(&self) -> Entity {
         self.scope
     }
-    pub(crate) fn new(scope: Entity, target: Entity) -> Self {
-        Self { scope, target, _ignore: Default::default() }
+
+    pub(crate) fn new(scope: Entity, source: Entity) -> Self {
+        Self { scope, source, _ignore: Default::default() }
     }
 }
