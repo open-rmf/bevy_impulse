@@ -17,10 +17,56 @@
 
 use bevy::prelude::Entity;
 
+use crate::{Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot};
+
+mod buffered;
+pub use buffered::*;
+
+mod bufferable;
+pub use bufferable::*;
+
 /// A buffer is a special type of node within a workflow that is able to store
 /// and release data. When a session is finished, the buffered data from the
 /// session will be automatically cleared.
 pub struct Buffer<T> {
+    pub(crate) scope: Entity,
+    pub(crate) source: Entity,
+    pub(crate) _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> Buffer<T> {
+    /// Get a unit `()` trigger output each time a new value is added to the buffer.
+    pub fn on_new_value<'w, 's, 'a, 'b>(
+        &self,
+        builder: &'b mut Builder<'w, 's, 'a>
+    ) -> Chain<'w, 's, 'a, 'b, ()> {
+        assert_eq!(self.scope, builder.scope);
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(OnNewBufferValue::new(self.source, target));
+        Chain::new(target, builder)
+    }
+
+    /// Specify that you want to pull from this Buffer by cloning. This can be
+    /// used by operations like join to tell them that they should clone from
+    /// the buffer instead of consuming from it.
+    pub fn by_cloning(self) -> CloneFromBuffer<T>
+    where
+        T: Clone,
+    {
+        CloneFromBuffer {
+            scope: self.scope,
+            source: self.source,
+            _ignore: Default::default()
+        }
+    }
+
+    /// Get an input slot for this buffer.
+    pub fn input_slot(self) -> InputSlot<T> {
+        InputSlot::new(self.scope, self.source)
+    }
+}
+
+pub struct CloneFromBuffer<T: Clone> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
     pub(crate) _ignore: std::marker::PhantomData<T>,
@@ -62,3 +108,27 @@ impl Default for RetentionPolicy {
         Self::KeepLast(1)
     }
 }
+
+impl<T> Clone for Buffer<T> {
+    fn clone(&self) -> Self {
+        Self {
+            scope: self.scope,
+            source: self.source,
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<T> Copy for Buffer<T> {}
+
+impl<T: Clone> Clone for CloneFromBuffer<T> {
+    fn clone(&self) -> Self {
+        Self {
+            scope: self.scope,
+            source: self.source,
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<T: Clone> Copy for CloneFromBuffer<T> {}

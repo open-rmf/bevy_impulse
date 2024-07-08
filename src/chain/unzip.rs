@@ -111,7 +111,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
 
         let input_0 = *inputs.0.get(0).or_broken()?;
 
-        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
+        if !world.get_entity(input_0).or_broken()?.buffered_count::<A>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_0)? {
                 unreachable.push(input_0);
@@ -209,7 +209,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         let input_0 = *inputs.0.get(0).or_broken()?;
         let input_1 = *inputs.0.get(1).or_broken()?;
 
-        if !world.get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
+        if !world.get_entity(input_0).or_broken()?.buffered_count::<A>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_0)? {
                 unreachable.push(input_0);
@@ -217,7 +217,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         }
 
         let world = reachability.world();
-        if !world.get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
+        if !world.get_entity(input_1).or_broken()?.buffered_count::<B>(session)? {
             status = JoinStatus::Pending;
             if !reachability.check_upstream(input_1)? {
                 unreachable.push(input_1);
@@ -333,21 +333,21 @@ where
         let input_1 = *inputs.0.get(1).or_broken()?;
         let input_2 = *inputs.0.get(2).or_broken()?;
 
-        if !r.world().get_entity(input_0).or_broken()?.buffer_ready::<A>(session)? {
+        if !r.world().get_entity(input_0).or_broken()?.buffered_count::<A>(session)? {
             status = JoinStatus::Pending;
             if !r.check_upstream(input_0)? {
                 unreachable.push(input_0);
             }
         }
 
-        if !r.world().get_entity(input_1).or_broken()?.buffer_ready::<B>(session)? {
+        if !r.world().get_entity(input_1).or_broken()?.buffered_count::<B>(session)? {
             status = JoinStatus::Pending;
             if !r.check_upstream(input_1)? {
                 unreachable.push(input_1);
             }
         }
 
-        if !r.world().get_entity(input_2).or_broken()?.buffer_ready::<C>(session)? {
+        if !r.world().get_entity(input_2).or_broken()?.buffered_count::<C>(session)? {
             status = JoinStatus::Pending;
             if !r.check_upstream(input_2)? {
                 unreachable.push(input_2);

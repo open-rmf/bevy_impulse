@@ -81,9 +81,6 @@ pub enum DisposalCause {
     /// A node disposed of one of its output branches.
     Branching(DisposedBranch),
 
-    /// A join was halted because one or more of its inputs became unreachable.
-    JoinImpossible(JoinImpossible),
-
     /// A [`Service`](crate::Service) provider needed by the chain was despawned
     /// or had a critical component removed. The entity provided in the variant
     /// is the unavailable service.
@@ -163,21 +160,6 @@ pub struct DisposedBranch {
 impl From<DisposedBranch> for DisposalCause {
     fn from(value: DisposedBranch) -> Self {
         Self::Branching(value)
-    }
-}
-
-/// A variant of [`DisposalCause`]
-#[derive(Debug)]
-pub struct JoinImpossible {
-    /// The source node of the join
-    pub join: Entity,
-    /// The unreachable input nodes
-    pub unreachable: Vec<Entity>,
-}
-
-impl From<JoinImpossible> for DisposalCause {
-    fn from(value: JoinImpossible) -> Self {
-        DisposalCause::JoinImpossible(value)
     }
 }
 

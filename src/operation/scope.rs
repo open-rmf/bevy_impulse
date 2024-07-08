@@ -766,7 +766,7 @@ where
 
         let buffer = world.get_entity_mut(input)
             .or_broken()?
-            .iter_from_buffer::<T>(scoped_session)?;
+            .consume_buffer::<T>(scoped_session)?;
 
         for data in buffer {
             let cancellation_session = world.spawn(ParentSession(scoped_session)).id();

@@ -53,10 +53,10 @@ impl Command for Connect {
 }
 
 fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
-    let inputs = world.get::<SingleInputStorage>(connect.original_target)
+    let old_inputs = world.get::<SingleInputStorage>(connect.original_target)
         .or_broken()?.get().clone();
 
-    for input in inputs {
+    for input in old_inputs {
         let mut input_mut = world.get_entity_mut(input).or_broken()?;
 
         if let Some(mut target) = input_mut.get_mut::<SingleTargetStorage>() {
@@ -77,6 +77,13 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
                     *target = connect.new_target;
                 }
             }
+        }
+
+        if let Some(mut new_inputs_mut) = world.get_mut::<SingleInputStorage>(connect.new_target) {
+            new_inputs_mut.add(input);
+        } else {
+            world.get_entity_mut(connect.new_target).or_broken()?
+                .insert(SingleInputStorage::new(input));
         }
     }
 

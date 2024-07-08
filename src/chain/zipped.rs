@@ -17,8 +17,8 @@
 
 use crate::{
     Chain, UnusedTarget, Output, Builder,
-    FunnelInputStorage, JoinInput, ZipJoin,
-    BundleJoin, AddOperation,
+    FunnelInputStorage, JoinInput, Join,
+    CollectionJoin, AddOperation,
 };
 
 use smallvec::SmallVec;
@@ -70,7 +70,7 @@ where
         builder.commands.add(AddOperation::new(input_b, JoinInput::<B>::new(joiner)));
         builder.commands.add(AddOperation::new(
             joiner,
-            ZipJoin::<Self::JoinedResponse>::new(
+            Join::<Self::JoinedResponse>::new(
                 FunnelInputStorage::from_iter([input_a, input_b]),
                 target,
             )
@@ -113,7 +113,7 @@ where
         builder.commands.add(AddOperation::new(input_c, JoinInput::<C>::new(joiner)));
         builder.commands.add(AddOperation::new(
             joiner,
-            ZipJoin::<Self::JoinedResponse>::new(
+            Join::<Self::JoinedResponse>::new(
                 FunnelInputStorage::from_iter([input_a, input_b, input_c]),
                 target,
             )
@@ -238,7 +238,7 @@ where
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
             joiner,
-            BundleJoin::<Response>::new(inputs, target),
+            CollectionJoin::<Response>::new(inputs, target),
         ));
 
         Chain::new(target, builder)

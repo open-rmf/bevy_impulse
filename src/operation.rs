@@ -87,6 +87,12 @@ impl SingleInputStorage {
         &self.0
     }
 
+    pub(crate) fn add(&mut self, input: Entity) {
+        if !self.0.contains(&input) {
+            self.0.push(input);
+        }
+    }
+
     pub fn is_reachable(r: &mut OperationReachability) -> ReachabilityResult {
         let Some(inputs) = r.world.get_entity(r.source).or_broken()?.get::<Self>() else {
             return Ok(false);
@@ -118,6 +124,12 @@ impl FunnelInputStorage {
 
     pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
         Self(SmallVec::from_iter(iter))
+    }
+}
+
+impl From<SmallVec<[Entity; 8]>> for FunnelInputStorage {
+    fn from(value: SmallVec<[Entity; 8]>) -> Self {
+        Self(value)
     }
 }
 

@@ -15,91 +15,63 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, Component};
 
 use crate::{
-    Input, ManageInput, InspectInput, InputBundle, FunnelInputStorage,
-    SingleTargetStorage, Operation, Unzippable,
-    SingleInputStorage, JoinedBundle, JoinStatus, JoinStatusResult,
-    OperationResult, OrBroken, OperationRequest, OperationSetup,
-    OperationCleanup, OperationReachability, ReachabilityResult,
-    ManageDisposal, JoinImpossible,
+    Input, ManageInput, InputBundle, FunnelInputStorage,
+    SingleTargetStorage, Operation, OperationError,
+    SingleInputStorage, OperationResult, OrBroken, OperationRequest, OperationSetup,
+    OperationCleanup, OperationReachability, ReachabilityResult, Buffered,
 };
 
-use std::collections::HashMap;
-
-pub(crate) struct JoinInput<T> {
+pub(crate) struct Join<Buffers> {
+    buffers: Buffers,
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
 }
 
-impl<T> JoinInput<T> {
-    pub(crate) fn new(target: Entity) -> Self {
-        Self { target, _ignore: Default::default() }
+impl<Buffers> Join<Buffers> {
+    pub(crate) fn new(
+        buffers: Buffers,
+        target: Entity,
+    ) -> Self {
+        Self { buffers, target }
     }
 }
 
-impl<T: 'static + Send + Sync> Operation for JoinInput<T> {
+#[derive(Component)]
+struct BufferStorage<Buffers>(Buffers);
+
+impl<Buffers: Buffered + 'static + Send + Sync> Operation for Join<Buffers>
+where
+    Buffers::Item: 'static + Send + Sync,
+{
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
-            SingleTargetStorage::new(self.target)),
-        );
+            FunnelInputStorage::from(self.buffers.as_input()),
+            BufferStorage(self.buffers),
+            InputBundle::<()>::new(),
+            SingleTargetStorage::new(self.target),
+        ));
         Ok(())
     }
 
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        world
-        .get_entity_mut(source).or_broken()?
-        .transfer_to_buffer::<T>(roster)
-    }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>()?;
-        clean.notify_cleaned()
-    }
-
-    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
-        if reachability.has_input::<T>()? {
-            return Ok(true);
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, .. } = source_mut.take_input::<()>()?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
+        let buffers = source_mut.get::<BufferStorage<Buffers>>().or_broken()?.0;
+        if buffers.buffered_count(session, world)? < 1 {
+            return Err(OperationError::NotReady);
         }
 
-        SingleInputStorage::is_reachable(&mut reachability)
-    }
-}
-
-pub(crate) struct ZipJoin<Values> {
-    sources: FunnelInputStorage,
-    target: Entity,
-    _ignore: std::marker::PhantomData<Values>,
-}
-
-impl<Values> ZipJoin<Values> {
-    pub(crate) fn new(
-        sources: FunnelInputStorage,
-        target: Entity,
-    ) -> Self {
-        Self { sources, target, _ignore: Default::default() }
-    }
-}
-
-impl<Values: Unzippable> Operation for ZipJoin<Values> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
-            .insert(SingleInputStorage::new(source));
-
-        world.entity_mut(source).insert((
-            self.sources,
-            InputBundle::<()>::new(),
-            SingleTargetStorage::new(self.target),
-        ));
-        Ok(())
-    }
-
-    fn execute(request: OperationRequest) -> OperationResult {
-        manage_join_delivery(request, Values::join_status, Values::join_values)
+        let output = buffers.pull(session, world)?;
+        world.get_entity_mut(target).or_broken()?
+            .give_input(session, output, roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
@@ -118,133 +90,4 @@ impl<Values: Unzippable> Operation for ZipJoin<Values> {
 
         Ok(true)
     }
-}
-
-pub(crate) struct BundleJoin<T> {
-    sources: FunnelInputStorage,
-    target: Entity,
-    _ignore: std::marker::PhantomData<T>,
-}
-
-impl<T> BundleJoin<T> {
-    pub(crate) fn new(sources: FunnelInputStorage, target: Entity) -> Self {
-        Self { sources, target, _ignore: Default::default() }
-    }
-}
-
-impl<T: 'static + Send + Sync> Operation for BundleJoin<T> {
-    fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
-            .insert(SingleInputStorage::new(source));
-
-        world.entity_mut(source).insert((
-            self.sources,
-            InputBundle::<()>::new(),
-            SingleTargetStorage::new(self.target),
-        ));
-        Ok(())
-    }
-
-    fn execute(request: OperationRequest) -> OperationResult {
-        manage_join_delivery(request, status_bundle_join::<T>, deliver_bundle_join::<T>)
-    }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<()>()?;
-        clean.notify_cleaned()
-    }
-
-    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        let inputs = r.world.get_entity(r.source).or_broken()?
-            .get::<FunnelInputStorage>().or_broken()?;
-        for input in &inputs.0 {
-            if !r.check_upstream(*input)? {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-}
-
-fn manage_join_delivery(
-    request: OperationRequest,
-    reachable: fn(OperationReachability) -> JoinStatusResult,
-    deliver: fn(Entity, OperationRequest) -> OperationResult,
-) -> OperationResult {
-    let Input { session, .. } = request.world
-        .get_entity_mut(request.source).or_broken()?
-        .take_input::<()>()?;
-
-    let mut visited = HashMap::new();
-    match reachable(OperationReachability::new(
-        session, request.source, request.world, &mut visited,
-    ))? {
-        JoinStatus::Pending => {
-            // Simply return
-        }
-        JoinStatus::Ready => {
-            deliver(session, request)?
-        }
-        JoinStatus::Unreachable(unreachable) => {
-            // request.roster.cancel(Cancel::join(request.source, unreachable));
-            // request.roster.disposed()
-            request.world.get_entity_mut(request.source).or_broken()?
-                .emit_disposal(
-                    session,
-                    JoinImpossible { join: request.source, unreachable }.into(),
-                    request.roster,
-                );
-        }
-    }
-
-    Ok(())
-}
-
-fn status_bundle_join<T: 'static + Send + Sync>(
-    mut reachability: OperationReachability,
-) -> JoinStatusResult {
-    let source = reachability.source();
-    let session = reachability.session();
-    let inputs = reachability.world().get::<FunnelInputStorage>(source).or_broken()?.0.clone();
-    let mut unreachable: Vec<Entity> = Vec::new();
-    let mut status = JoinStatus::Ready;
-
-    for input in inputs {
-        if !reachability.world().get_entity(input).or_broken()?.buffer_ready::<T>(session)? {
-            status = JoinStatus::Pending;
-            if !reachability.check_upstream(input)? {
-                unreachable.push(input);
-            }
-        }
-    }
-
-    if !unreachable.is_empty() {
-        return Ok(JoinStatus::Unreachable(unreachable));
-    }
-
-    Ok(status)
-}
-
-fn deliver_bundle_join<T: 'static + Send + Sync>(
-    session: Entity,
-    OperationRequest { source, world, roster }: OperationRequest,
-) -> OperationResult {
-    let target = world.get::<SingleTargetStorage>(source).or_broken()?.0;
-    // Consider ways to avoid cloning here. Maybe InputStorage should have an
-    // Option inside to take from it via a Query<&mut InputStorage<T>>.
-    let inputs = world.get::<FunnelInputStorage>(source).or_broken()?.0.clone();
-    let mut response = JoinedBundle::new();
-    for input in inputs {
-        let value = world
-            .get_entity_mut(input).or_broken()?
-            .pull_from_buffer::<T>(session)?;
-        response.push(value);
-    }
-
-    world
-        .get_entity_mut(target).or_broken()?
-        .give_input(session, response, roster);
-
-    Ok(())
 }

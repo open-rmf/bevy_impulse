@@ -97,25 +97,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Buffer { scope: self.scope, source, _ignore: Default::default() }
     }
 
-    /// Create a [`Buffer`] which can be used to store and pull data within a
-    /// scope. Unlike the buffer created by [`Self::create_buffer`], this will
-    /// give a clone of the latest items to nodes that pull from it instead of
-    /// the items being consumed. That means the items are reused by default,
-    /// which may be useful if you want some data to persist across multiple
-    /// uses.
-    pub fn create_cloning_buffer<T: 'static + Send + Sync + Clone>(
-        &mut self,
-        settings: BufferSettings,
-    ) -> Buffer<T> {
-        let source = self.commands.spawn(()).id();
-        self.commands.add(AddOperation::new(
-            source,
-            OperateBuffer::<T>::new_cloning(settings),
-        ));
-
-        Buffer { scope: self.scope, source, _ignore: Default::default() }
-    }
-
     /// Get the scope that this builder is building for
     pub fn scope(&self) -> Entity {
         self.scope

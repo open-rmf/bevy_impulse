@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use backtrace::Backtrace;
 
 use crate::{
-    OperationRoster, OperationError, OrBroken, SingleTargetStorage,
+    OperationRoster, OperationError, OrBroken,
     DeferredRoster, Cancel, Cancellation, CancellationCause, Broken,
     BufferSettings, RetentionPolicy, ForkTargetStorage,
 };
@@ -119,9 +119,9 @@ pub trait ManageInput {
 
     fn pull_from_buffer<T: 'static + Send + Sync>(
         &mut self,
-        session: Entity
+        session: Entity,
     ) -> Result<T, OperationError> {
-        self.try_pull_from_buffer(session).and_then(|r| r.or_not_ready())
+        self.try_pull_from_buffer(session).and_then(|r| r.or_broken())
     }
 
     fn try_pull_from_buffer<T: 'static + Send + Sync>(
@@ -129,7 +129,7 @@ pub trait ManageInput {
         session: Entity,
     ) -> Result<Option<T>, OperationError>;
 
-    fn iter_from_buffer<T: 'static + Send + Sync>(
+    fn consume_buffer<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
     ) -> Result<SmallVec<[T; 16]>, OperationError>;
@@ -141,15 +141,32 @@ pub trait ManageInput {
 }
 
 pub trait InspectInput {
-    fn buffer_ready<T: 'static + Send + Sync>(
+    fn buffered_count<T: 'static + Send + Sync>(
         &self,
         session: Entity,
-    ) -> Result<bool, OperationError>;
+    ) -> Result<usize, OperationError>;
 
     fn has_input<T: 'static + Send + Sync>(
         &self,
         session: Entity,
     ) -> Result<bool, OperationError>;
+
+    fn clone_from_buffer<T: 'static + Send + Sync + Clone>(
+        &self,
+        session: Entity,
+    ) -> Result<T, OperationError>
+    where
+        T: Clone,
+    {
+        self.try_clone_from_buffer(session).and_then(|r| r.or_broken())
+    }
+
+    fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
+        &self,
+        session: Entity,
+    ) -> Result<Option<T>, OperationError>
+    where
+        T: Clone;
 }
 
 impl<'w> ManageInput for EntityMut<'w> {
@@ -198,12 +215,13 @@ impl<'w> ManageInput for EntityMut<'w> {
         }
 
         let targets = self.get::<ForkTargetStorage>().or_broken()?.0.clone();
-        for target in targets {
-            self.world_scope(|world| {
-                let mut target_mut = world.get_entity_mut(target).or_broken()?;
-                target_mut.give_input(session, (), roster)
-            })?;
-        }
+        self.world_scope(|world| {
+            for target in targets {
+                    let mut target_mut = world.get_entity_mut(target).or_broken()?;
+                    target_mut.give_input(session, (), roster)?;
+            }
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -216,14 +234,12 @@ impl<'w> ManageInput for EntityMut<'w> {
         Ok(buffer.pull(session))
     }
 
-    /// This will either drain the buffer or clone it, depending on whether T
-    /// can be cloned.
-    fn iter_from_buffer<T: 'static + Send + Sync>(
+    fn consume_buffer<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
     ) -> Result<SmallVec<[T; 16]>, OperationError> {
         let mut buffer = self.get_mut::<BufferStorage<T>>().or_broken()?;
-        Ok(buffer.iter(session))
+        Ok(buffer.consume(session))
     }
 
     fn cleanup_inputs<T: 'static + Send + Sync>(
@@ -243,12 +259,12 @@ impl<'w> ManageInput for EntityMut<'w> {
 }
 
 impl<'a> InspectInput for EntityMut<'a> {
-    fn buffer_ready<T: 'static + Send + Sync>(
+    fn buffered_count<T: 'static + Send + Sync>(
         &self,
         session: Entity,
-    ) -> Result<bool, OperationError> {
+    ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&session).is_some_and(|q| !q.is_empty()))
+        Ok(buffer.reverse_queues.get(&session).or_broken()?.len())
     }
 
     fn has_input<T: 'static + Send + Sync>(
@@ -257,16 +273,27 @@ impl<'a> InspectInput for EntityMut<'a> {
     ) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
         Ok(inputs.contains_session(session))
+    }
+
+    fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
+        &self,
+        session: Entity,
+    ) -> Result<Option<T>, OperationError>
+    where
+        T: Clone,
+    {
+        let buffer = self.get::<BufferStorage<T>>().or_broken()?;
+        Ok(buffer.reverse_queues.get(&session).map(|q| q.last().cloned()).flatten())
     }
 }
 
 impl<'a> InspectInput for EntityRef<'a> {
-    fn buffer_ready<T: 'static + Send + Sync>(
+    fn buffered_count<T: 'static + Send + Sync>(
         &self,
         session: Entity,
-    ) -> Result<bool, OperationError> {
+    ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&session).is_some_and(|q| !q.is_empty()))
+        Ok(buffer.reverse_queues.get(&session).or_broken()?.len())
     }
 
     fn has_input<T: 'static + Send + Sync>(
@@ -275,6 +302,17 @@ impl<'a> InspectInput for EntityRef<'a> {
     ) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
         Ok(inputs.contains_session(session))
+    }
+
+    fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
+        &self,
+        session: Entity,
+    ) -> Result<Option<T>, OperationError>
+    where
+        T: Clone,
+    {
+        let buffer = self.get::<BufferStorage<T>>().or_broken()?;
+        Ok(buffer.reverse_queues.get(&session).map(|q| q.last().cloned()).flatten())
     }
 }
 
@@ -326,8 +364,6 @@ pub(crate) struct BufferStorage<T> {
     /// is because SmallVec doesn't have a version of pop that we can use on the
     /// front. We should reconsider whether this is really a sensible choice.
     reverse_queues: HashMap<Entity, SmallVec<[T; 16]>>,
-    pull_from_buffer: fn(&mut SmallVec<[T; 16]>) -> Option<T>,
-    iter_from_buffer: fn(&mut SmallVec<[T; 16]>) -> SmallVec<[T; 16]>,
 }
 
 impl<T> BufferStorage<T> {
@@ -361,53 +397,21 @@ impl<T> BufferStorage<T> {
 
     fn pull(&mut self, session: Entity) -> Option<T> {
         let reverse_queue = self.reverse_queues.entry(session).or_default();
-        (self.pull_from_buffer)(reverse_queue)
+        reverse_queue.pop()
     }
 
-    fn iter(&mut self, session: Entity) -> SmallVec<[T; 16]> {
+    fn consume(&mut self, session: Entity) -> SmallVec<[T; 16]> {
         let reverse_queue = self.reverse_queues.entry(session).or_default();
-        (self.iter_from_buffer)(reverse_queue)
+        let mut result = SmallVec::new();
+        std::mem::swap(reverse_queue, &mut result);
+        result.reverse();
+        result
     }
 
     pub(crate) fn new(settings: BufferSettings) -> Self {
         Self {
             settings,
             reverse_queues: Default::default(),
-            pull_from_buffer: pop_from_buffer::<T>,
-            iter_from_buffer: drain_from_buffer::<T>,
         }
     }
-
-    pub(crate) fn new_cloning(settings: BufferSettings) -> Self
-    where
-        T: Clone,
-    {
-        Self {
-            settings,
-            reverse_queues: Default::default(),
-            pull_from_buffer: clone_from_buffer::<T>,
-            iter_from_buffer: clone_whole_buffer::<T>,
-        }
-    }
-}
-
-fn pop_from_buffer<T>(reverse_queue: &mut SmallVec<[T; 16]>) -> Option<T> {
-    reverse_queue.pop()
-}
-
-fn clone_from_buffer<T: Clone>(reverse_queue: &mut SmallVec<[T; 16]>) -> Option<T> {
-    reverse_queue.last().cloned()
-}
-
-fn drain_from_buffer<T>(reverse_queue: &mut SmallVec<[T; 16]>) -> SmallVec<[T; 16]> {
-    let mut result = SmallVec::new();
-    std::mem::swap(reverse_queue, &mut result);
-    result.reverse();
-    result
-}
-
-fn clone_whole_buffer<T: Clone>(reverse_queue: &mut SmallVec<[T; 16]>) -> SmallVec<[T; 16]> {
-    let mut result = reverse_queue.clone();
-    result.reverse();
-    result
 }
