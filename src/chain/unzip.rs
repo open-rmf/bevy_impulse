@@ -21,9 +21,7 @@ use smallvec::SmallVec;
 
 use crate::{
     UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
-    ForkUnzip, AddOperation, FunnelInputStorage, OperationResult,
-    SingleTargetStorage, OrBroken, OperationReachability, Output,
-    OperationError, InspectInput, Chain, Builder,
+    ForkUnzip, AddOperation, OperationResult, OrBroken, Output, Chain, Builder,
 };
 
 /// A trait for response types that can be unzipped

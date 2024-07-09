@@ -114,7 +114,6 @@ impl<'a> HandleRequest<'a> {
             self.world.get_resource_or_insert_with(|| UnhandledErrors::default())
                 .setup
                 .push(SetupFailure { broken_node: self.source, error });
-
         }
         self.roster.queue(task_id);
         Ok(())

@@ -47,7 +47,6 @@ impl ParentSession {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct OperateScope<Request, Response, Streams> {
     /// The first node that is inside of the scope
     enter_scope: Entity,
@@ -65,6 +64,20 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
+impl<Request, Response, Streams> Clone for OperateScope<Request, Response, Streams> {
+    fn clone(&self) -> Self {
+        Self {
+            enter_scope: self.enter_scope,
+            terminal: self.terminal,
+            exit_scope: self.exit_scope,
+            finish_cancel: self.finish_cancel,
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<Request, Response, Streams> Copy for OperateScope<Request, Response, Streams> {}
+
 impl<Request, Response, Streams> OperateScope<Request, Response, Streams> {
     pub(crate) fn terminal(&self) -> Entity {
         self.terminal
@@ -72,6 +85,10 @@ impl<Request, Response, Streams> OperateScope<Request, Response, Streams> {
 
     pub(crate) fn enter_scope(&self) -> Entity {
         self.enter_scope
+    }
+
+    pub(crate) fn finish_cancel(&self) -> Entity {
+        self.finish_cancel
     }
 }
 
@@ -308,7 +325,13 @@ where
         commands: &mut Commands,
     ) -> Self {
         let enter_scope = commands.spawn(()).id();
+
         let terminal = commands.spawn(()).id();
+        commands.add(AddOperation::new(
+            terminal,
+            Terminate::<Response>::new()
+        ));
+
         let finish_cancel = commands.spawn(()).id();
         commands.add(AddOperation::new(
             finish_cancel,
@@ -542,9 +565,6 @@ pub struct FinalizeScopeCleanup(pub(crate) fn(OperationCleanup) -> OperationResu
 struct ScopeEntryStorage(Entity);
 
 #[derive(Component)]
-struct CancelEntryStorage(Entity);
-
-#[derive(Component)]
 pub struct FinishedStagingStorage(Entity);
 
 impl FinishedStagingStorage {
@@ -705,15 +725,6 @@ pub(crate) struct CancelledSession {
     status: CancelStatus,
 }
 
-impl CancelledSession {
-    pub(crate) fn new(
-        parent_session: Entity,
-        status: CancelStatus,
-    ) -> Self {
-        Self { parent_session, status }
-    }
-}
-
 pub(crate) enum CancelStatus {
     Cleanup,
     Cancelled(Cancellation),
@@ -730,6 +741,12 @@ pub(crate) struct BeginCancel<T> {
     buffer: Entity,
     target: Entity,
     _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> BeginCancel<T> {
+    pub(crate) fn new(from_scope: Entity, buffer: Entity, target: Entity) -> Self {
+        Self { from_scope, buffer, target, _ignore: Default::default() }
+    }
 }
 
 impl<T> Operation for BeginCancel<T>

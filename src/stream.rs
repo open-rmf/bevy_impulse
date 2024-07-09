@@ -44,17 +44,19 @@ pub trait Stream: 'static + Send + Sync + Sized {
     }
 
     fn spawn_scope_stream(
-        builder: &mut Builder,
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
     ) -> (
         InputSlot<Self>,
         Output<Self>,
     ) {
-        let source = builder.commands.spawn(()).id();
-        let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(source, RedirectScopeStream::<Self>::new(target)));
+        let source = commands.spawn(()).id();
+        let target = commands.spawn(UnusedTarget).id();
+        commands.add(AddOperation::new(source, RedirectScopeStream::<Self>::new(target)));
         (
-            InputSlot::new(builder.scope, source),
-            Output::new(builder.scope, target),
+            InputSlot::new(in_scope, source),
+            Output::new(out_scope, target),
         )
     }
 
@@ -202,7 +204,11 @@ pub trait StreamPack: 'static + Send + Sync {
     type Receiver;
     type Channel;
 
-    fn spawn_scope_streams(builder: &mut Builder) -> (
+    fn spawn_scope_streams(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (
         Self::StreamInputPack,
         Self::StreamOutputPack,
     );
@@ -240,11 +246,15 @@ impl<T: Stream> StreamPack for T {
     type Receiver = Receiver<Self>;
     type Channel = StreamChannel<Self>;
 
-    fn spawn_scope_streams(builder: &mut Builder) -> (
+    fn spawn_scope_streams(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (
         Self::StreamInputPack,
         Self::StreamOutputPack,
     ) {
-        T::spawn_scope_stream(builder)
+        T::spawn_scope_stream(in_scope, out_scope, commands)
     }
 
     fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
@@ -305,7 +315,11 @@ impl StreamPack for () {
     type Receiver = ();
     type Channel = ();
 
-    fn spawn_scope_streams(_: &mut Builder) -> (
+    fn spawn_scope_streams(
+        _: Entity,
+        _: Entity,
+        _: &mut Commands,
+    ) -> (
         Self::StreamInputPack,
         Self::StreamOutputPack,
     ) {
@@ -358,11 +372,15 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     type Receiver = T1::Receiver;
     type Channel = T1::Channel;
 
-    fn spawn_scope_streams(builder: &mut Builder) -> (
+    fn spawn_scope_streams(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (
         Self::StreamInputPack,
         Self::StreamOutputPack,
     ) {
-        T1::spawn_scope_streams(builder)
+        T1::spawn_scope_streams(in_scope, out_scope, commands)
     }
 
     fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
@@ -411,12 +429,16 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
     type Receiver = (T1::Receiver, T2::Receiver);
     type Channel = (T1::Channel, T2::Channel);
 
-    fn spawn_scope_streams(builder: &mut Builder) -> (
+    fn spawn_scope_streams(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (
         Self::StreamInputPack,
         Self::StreamOutputPack,
     ) {
-        let t1 = T1::spawn_scope_streams(builder);
-        let t2 = T2::spawn_scope_streams(builder);
+        let t1 = T1::spawn_scope_streams(in_scope, out_scope, commands);
+        let t2 = T2::spawn_scope_streams(in_scope, out_scope, commands);
         ((t1.0, t2.0), (t1.1, t2.1))
     }
 
@@ -476,13 +498,17 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
     type Receiver = (T1::Receiver, T2::Receiver, T3::Receiver);
     type Channel = (T1::Channel, T2::Channel, T3::Channel);
 
-    fn spawn_scope_streams(builder: &mut Builder) -> (
+    fn spawn_scope_streams(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (
         Self::StreamInputPack,
         Self::StreamOutputPack,
     ) {
-        let t1 = T1::spawn_scope_streams(builder);
-        let t2 = T2::spawn_scope_streams(builder);
-        let t3 = T3::spawn_scope_streams(builder);
+        let t1 = T1::spawn_scope_streams(in_scope, out_scope, commands);
+        let t2 = T2::spawn_scope_streams(in_scope, out_scope, commands);
+        let t3 = T3::spawn_scope_streams(in_scope, out_scope, commands);
         ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
     }
 

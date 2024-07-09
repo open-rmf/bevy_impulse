@@ -22,7 +22,7 @@ use bevy::{
 
 use crate::{
     Service, InputSlot, Output, StreamPack, AddOperation, OperateScope,
-    Terminate, WorkflowService, Builder,
+    WorkflowService, Builder,
 };
 
 /// Trait to allow workflows to be spawned from a [`Commands`] or a [`World`].
@@ -198,8 +198,12 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         let scope = OperateScope::<Request, Response, Streams>::new(
             scope_id, None, settings.scope, self,
         );
-        self.add(AddOperation::new(scope.terminal(), Terminate::<Response>::new()));
-        let mut builder = Builder { scope: scope_id, commands: self };
+        self.add(AddOperation::new(scope_id, scope));
+        let mut builder = Builder {
+            scope: scope_id,
+            finish_scope_cancel: scope.finish_cancel(),
+            commands: self
+        };
 
         let streams = Streams::spawn_workflow_streams(&mut builder);
 

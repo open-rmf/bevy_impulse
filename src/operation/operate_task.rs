@@ -69,9 +69,6 @@ impl WakeQueue {
 }
 
 #[derive(Component)]
-pub(crate) struct PollTask(pub(crate) fn(Entity, &mut World, &mut OperationRoster));
-
-#[derive(Component)]
 pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
     source: Entity,
     session: Entity,

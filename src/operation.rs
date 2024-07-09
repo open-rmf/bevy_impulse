@@ -17,14 +17,13 @@
 
 use crate::{
     DeliveryLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
-    CancelFailure, Broken, ManageCancellation, ManageDisposal, SetupFailure,
-    MiscellaneousFailure,
+    Broken, ManageDisposal, SetupFailure, MiscellaneousFailure,
     try_emit_broken,
 };
 
 use bevy::{
-    prelude::{Entity, World, Component, Query},
-    ecs::system::{Command, SystemParam},
+    prelude::{Entity, World, Component},
+    ecs::system::Command,
 };
 
 use backtrace::Backtrace;
