@@ -26,11 +26,15 @@ use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 
 use smallvec::SmallVec;
 
+use anyhow::anyhow;
+
+use std::sync::Arc;
+
 use crate::{
     OperationSetup, OperationRequest, OperationResult, OperationCancel,
     OperationExecuteStorage, OperationError, Cancellable, ManageCancellation,
     UnhandledErrors, CancelFailure, Cancel, Broken, SingleTargetStorage,
-    UnusedTarget,
+    UnusedTarget, MiscellaneousFailure, SetupFailure,
 };
 
 pub(crate) trait Impulsive {
@@ -51,7 +55,11 @@ impl<I: Impulsive> AddImpulse<I> {
 
 impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
     fn apply(self, world: &mut World) {
-        self.impulse.setup(OperationSetup { source: self.source, world });
+        if let Err(error) = self.impulse.setup(OperationSetup { source: self.source, world }) {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .setup
+                .push(SetupFailure { broken_node: self.source, error });
+        }
         world.entity_mut(self.source)
             .insert((
                 OperationExecuteStorage(perform_impulse::<I>),
@@ -169,7 +177,12 @@ impl ImpulseLifecycle {
 impl Drop for ImpulseLifecycle {
     fn drop(&mut self) {
         for source in &self.sources {
-            self.sender.send(*source);
+            if let Err(err) = self.sender.send(*source) {
+                eprintln!(
+                    "Failed to notify that an impulse was dropped: {err}\nBacktrace:\n{:#?}",
+                    Backtrace::new(),
+                );
+            }
         }
     }
 }
@@ -190,6 +203,13 @@ pub(crate) fn add_lifecycle_dependency<'a>(
         target_mut.insert(ImpulseLifecycle::new(source, sender));
     } else {
         // The target is already despawned
-        sender.send(source);
+        if let Err(err) = sender.send(source) {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: Arc::new(anyhow!("Failed to notify that a target is already despawned: {err}")),
+                    backtrace: Some(Backtrace::new()),
+                })
+        }
     }
 }

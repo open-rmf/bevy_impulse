@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Entity, Component},
+    prelude::{Entity, Component, Bundle},
     ecs::{
         world::{EntityMut, EntityRef, World},
         system::Command,
@@ -72,12 +72,12 @@ impl<T> Default for InputStorage<T> {
     }
 }
 
-#[derive(Component)]
-pub struct InputBundle<T> {
+#[derive(Bundle)]
+pub struct InputBundle<T: 'static + Send + Sync> {
     storage: InputStorage<T>,
 }
 
-impl<T> InputBundle<T> {
+impl<T: 'static + Send + Sync> InputBundle<T> {
     pub fn new() -> Self {
         Self { storage: Default::default() }
     }

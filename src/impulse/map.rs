@@ -170,7 +170,7 @@ where
 
         let task_source = world.spawn(()).id();
         OperateTask::new(task_source, session, source, target, task, None, sender)
-            .setup(OperationSetup { source: task_source, world });
+            .setup(OperationSetup { source: task_source, world })?;
         roster.queue(task_source);
         Ok(())
     }

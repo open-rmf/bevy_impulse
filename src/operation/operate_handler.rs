@@ -19,7 +19,8 @@ use crate::{
     Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
     StreamPack, SingleInputStorage, OperationResult, OrBroken, InputBundle,
     OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
-    OperationReachability, ReachabilityResult,
+    OperationReachability, ReachabilityResult, OperationError,
+    try_emit_broken,
 };
 
 use bevy::prelude::{Entity, Component};
@@ -80,27 +81,23 @@ where
 
         // The handler implementation is available, so run it immediately
         // for this operation.
-        handler_impl.handle(HandleRequest { source, target, world, roster });
+        let r = handler_impl.handle(HandleRequest { source, target, world, roster });
 
         loop {
             // Empty out the queue in case that was filled up at all from doing the handling
-            let mut inner = match handler.inner.lock() {
-                Ok(inner) => inner,
-                Err(_) => {
-                    // TODO(@mxgrey): Is there a better way to handle this?
-                    return Ok(());
-                }
-            };
-
+            let mut inner = handler.inner.lock().or_broken()?;
             if let Some(pending) = inner.queue.pop_front() {
-                handler_impl.handle(pending.activate(world, roster));
+                let source = pending.source;
+                if let Err(OperationError::Broken(backtrace)) = handler_impl.handle(pending.activate(world, roster)) {
+                    try_emit_broken(source, backtrace, world, roster);
+                }
             } else {
                 inner.handler = Some(handler_impl);
                 break;
             }
         }
 
-        Ok(())
+        r
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {

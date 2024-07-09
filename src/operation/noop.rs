@@ -53,8 +53,7 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let Input { session, data: value } = source_mut.take_input::<T>()?;
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
-        target_mut.give_input(session, value, roster);
-        Ok(())
+        target_mut.give_input(session, value, roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {

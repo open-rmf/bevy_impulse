@@ -35,9 +35,9 @@ use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 use smallvec::SmallVec;
 
 use crate::{
-    OperationRoster, Blocker, ManageInput, ChannelQueue,
+    OperationRoster, Blocker, ManageInput, ChannelQueue, UnhandledErrors,
     OperationSetup, OperationRequest, OperationResult, Operation,
-    OrBroken, OperationCleanup, ChannelItem,
+    OrBroken, OperationCleanup, ChannelItem, OperationError, Broken,
     OperationReachability, ReachabilityResult, emit_disposal, Disposal,
 };
 
@@ -197,8 +197,9 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                     roster.unblock(unblock);
                 }
 
-                world.entity_mut(target).give_input(session, result, roster);
+                let r = world.entity_mut(target).give_input(session, result, roster);
                 world.despawn(source);
+                r?;
             }
             Poll::Pending => {
                 // Task is still running
@@ -242,7 +243,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let sender = operation.sender.clone();
         AsyncComputeTaskPool::get().spawn(async move {
             task.cancel().await;
-            sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+            if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
                 if let Some(unblock) = unblock {
                     roster.unblock(unblock);
                 }
@@ -264,14 +265,22 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                         });
 
                         if cleanup_ready {
-                            OperationCleanup { source: node, session, world, roster }
-                                .notify_cleaned();
+                            let mut cleanup = OperationCleanup {
+                                source: node, session, world, roster
+                            };
+                            if let Err(OperationError::Broken(backtrace)) = cleanup.notify_cleaned() {
+                                world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                                    .broken
+                                    .push(Broken { node, backtrace });
+                            }
                         }
                     };
                 };
 
                 world.despawn(source);
-            }));
+            })) {
+                eprintln!("Failed to send a command to cleanup a task: {err}");
+            }
         }).detach();
 
         Ok(())
@@ -330,7 +339,7 @@ impl ActiveTasksStorage {
         }
 
         if cleanup_ready {
-            cleaner.notify_cleaned();
+            cleaner.notify_cleaned()?;
         }
 
         Ok(())

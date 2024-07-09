@@ -23,7 +23,7 @@ use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
     ForkClone, StreamPack, Provider, ProvideOnce,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
-    ForkTargetStorage, StreamTargetMap, Connect,
+    ForkTargetStorage, StreamTargetMap,
     make_result_branching, make_cancel_filter_on_err,
     make_option_branching, make_cancel_filter_on_none,
 };
@@ -35,9 +35,6 @@ pub use fork_clone_builder::*;
 
 pub mod unzip;
 pub use unzip::*;
-
-pub mod zipped;
-pub use zipped::*;
 
 /// After submitting a service request, use [`Chain`] to describe how
 /// the response should be handled. At a minimum, for the response to be
@@ -363,9 +360,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         ).collect()
     }
 
-    /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
+    /// If you have a `Chain<(A, B, C, ...)>` with a tuple response then
     /// `unzip` allows you to convert it into a tuple of chains:
-    /// `(Dangling<A>, Dangling<B>, Dangling<C>, ...)`.
+    /// `(Output<A>, Output<B>, Output<C>, ...)`.
     ///
     /// You can also consider using `unzip_build` to continue building each
     /// chain in the tuple independently by providing a builder function for
@@ -375,19 +372,19 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     where
         T: Unzippable,
     {
-        T::unzip_chain(self.target, self.builder)
+        T::unzip_output(Output::<T>::new(self.scope(), self.target), self.builder)
     }
 
-    /// If you have a `Chain<(A, B, C, ...), _, _>` with a tuple response then
-    /// `unzip_build` allows you to split it into multiple chains and apply a
-    /// separate builder function to each chain. You will be passed back the
-    /// zipped output of all the builder functions.
+    /// If you have a `Chain<(A, B, C, ...)>` with a tuple response then
+    /// `unzip_build` allows you to split it into multiple chains (one for each
+    /// tuple element) and apply a separate builder function to each chain. You
+    /// will be passed back the zipped output of all the builder functions.
     #[must_use]
-    pub fn unzip_build<Builders>(self, builders: Builders) -> Builders::Output
+    pub fn unzip_build<Build>(self, build: Build) -> Build::ReturnType
     where
-        Builders: UnzipBuilder<T>
+        Build: UnzipBuilder<T>
     {
-        builders.unzip_build(self.target, self.builder)
+        build.unzip_build(Output::<T>::new(self.scope(), self.target), self.builder)
     }
 
     /// If the chain's response implements the [`Future`] trait, applying

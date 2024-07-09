@@ -58,7 +58,7 @@ impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let sender = source_mut.take::<TakenResponse<T>>().or_broken()?.sender;
-        sender.send(data);
+        sender.send(data).ok();
         source_mut.despawn_recursive();
 
         Ok(())
@@ -105,7 +105,7 @@ where
 {
     let mut target_mut = world.get_entity_mut(cancel.target).or_broken()?;
     let taken = target_mut.take::<TakenResponse<T>>().or_broken()?;
-    taken.sender.cancel(cancel.cancellation);
+    taken.sender.cancel(cancel.cancellation).ok();
     target_mut.despawn_recursive();
 
     Ok(())

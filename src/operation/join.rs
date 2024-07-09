@@ -64,7 +64,7 @@ where
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, .. } = source_mut.take_input::<()>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
-        let buffers = source_mut.get::<BufferStorage<Buffers>>().or_broken()?.0;
+        let buffers = source_mut.get::<BufferStorage<Buffers>>().or_broken()?.0.clone();
         if buffers.buffered_count(session, world)? < 1 {
             return Err(OperationError::NotReady);
         }

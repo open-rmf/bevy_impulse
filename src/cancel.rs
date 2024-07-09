@@ -252,6 +252,30 @@ impl<'w> ManageCancellation for EntityMut<'w> {
     }
 }
 
+pub fn try_emit_broken(
+    source: Entity,
+    backtrace: Option<Backtrace>,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
+    if let Some(mut source_mut) = world.get_entity_mut(source) {
+        source_mut.emit_broken(backtrace, roster);
+    } else {
+        world
+        .get_resource_or_insert_with(|| UnhandledErrors::default())
+        .cancellations
+        .push(CancelFailure {
+            error: OperationError::Broken(Some(Backtrace::new())),
+            cancel: Cancel {
+                source,
+                target: source,
+                session: None,
+                cancellation: Broken { node: source, backtrace }.into(),
+            }
+        });
+    }
+}
+
 fn try_emit_cancel(
     source_mut: &mut EntityMut,
     session: Option<Entity>,

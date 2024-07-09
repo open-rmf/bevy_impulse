@@ -27,9 +27,9 @@ use crate::{
 };
 
 /// A trait for response types that can be unzipped
-pub trait Unzippable {
+pub trait Unzippable: Sized {
     type Unzipped;
-    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped;
+    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped;
 
     fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]>;
 
@@ -37,39 +37,18 @@ pub trait Unzippable {
 
     type Prepended<T>;
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
-
-    fn join_status(
-        reachability: OperationReachability,
-    ) -> JoinStatusResult;
-
-    fn join_values(
-        session: Entity,
-        request: OperationRequest,
-    ) -> OperationResult;
 }
-
-/// What is the current status of a Join node
-pub enum JoinStatus {
-    /// The join is pending on some more inputs that are able to arrive
-    Pending,
-    /// The join is ready to be triggered
-    Ready,
-    /// The join can never be triggered because one or more of its inputs will
-    /// never make it.
-    Unreachable(Vec<Entity>),
-}
-
-pub type JoinStatusResult = Result<JoinStatus, OperationError>;
 
 impl<A: 'static + Send + Sync> Unzippable for (A,) {
     type Unzipped = Output<A>;
-    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped {
+    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
+        assert_eq!(output.scope(), builder.scope());
         let targets = Self::make_targets(builder.commands);
 
         let result = Output::new(builder.scope, targets[0]);
 
         builder.commands.add(AddOperation::new(
-            source,
+            output.id(),
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
         result
@@ -89,7 +68,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
         let target = (targets.0)[0];
         if let Some(mut t_mut) = world.get_entity_mut(target) {
-            t_mut.give_input(session, inputs.0, roster);
+            t_mut.give_input(session, inputs.0, roster)?;
         }
         Ok(())
     }
@@ -98,56 +77,12 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
     fn prepend<T>(self, value: T) -> Self::Prepended<T> {
         (value, self.0)
     }
-
-    fn join_status(
-        mut reachability: OperationReachability,
-    ) -> JoinStatusResult {
-        let source = reachability.source();
-        let session = reachability.session();
-        let world = reachability.world();
-        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let mut unreachable: Vec<Entity> = Vec::new();
-        let mut status = JoinStatus::Ready;
-
-        let input_0 = *inputs.0.get(0).or_broken()?;
-
-        if !world.get_entity(input_0).or_broken()?.buffered_count::<A>(session)? {
-            status = JoinStatus::Pending;
-            if !reachability.check_upstream(input_0)? {
-                unreachable.push(input_0);
-            }
-        }
-
-        if !unreachable.is_empty() {
-            return Ok(JoinStatus::Unreachable(unreachable));
-        }
-
-        Ok(status)
-    }
-
-    fn join_values(
-        session: Entity,
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
-
-        let input_0 = *inputs.0.get(0).or_broken()?;
-
-        let v_0  = world
-            .get_entity_mut(input_0).or_broken()?
-            .pull_from_buffer::<A>(session)?;
-
-        world
-            .get_entity_mut(target).or_broken()?
-            .give_input(session, v_0, roster)?;
-        Ok(())
-    }
 }
 
 impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     type Unzipped = (Output<A>, Output<B>);
-    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped {
+    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
+        assert_eq!(output.scope(), builder.scope());
         let targets = Self::make_targets(builder.commands);
 
         let result = (
@@ -156,7 +91,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         );
 
         builder.commands.add(AddOperation::new(
-            source,
+            output.id(),
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
         result
@@ -195,66 +130,6 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
     fn prepend<T>(self, value: T) -> Self::Prepended<T> {
         (value, self.0, self.1)
     }
-
-    fn join_status(
-        mut reachability: OperationReachability,
-    ) -> JoinStatusResult {
-        let source = reachability.source();
-        let session = reachability.session();
-        let world = reachability.world();
-        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let mut unreachable: Vec<Entity> = Vec::new();
-        let mut status = JoinStatus::Ready;
-
-        let input_0 = *inputs.0.get(0).or_broken()?;
-        let input_1 = *inputs.0.get(1).or_broken()?;
-
-        if !world.get_entity(input_0).or_broken()?.buffered_count::<A>(session)? {
-            status = JoinStatus::Pending;
-            if !reachability.check_upstream(input_0)? {
-                unreachable.push(input_0);
-            }
-        }
-
-        let world = reachability.world();
-        if !world.get_entity(input_1).or_broken()?.buffered_count::<B>(session)? {
-            status = JoinStatus::Pending;
-            if !reachability.check_upstream(input_1)? {
-                unreachable.push(input_1);
-            }
-        }
-
-        if !unreachable.is_empty() {
-            return Ok(JoinStatus::Unreachable(unreachable));
-        }
-
-        Ok(status)
-    }
-
-    fn join_values(
-        session: Entity,
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
-
-        let input_0 = *inputs.0.get(0).or_broken()?;
-        let input_1 = *inputs.0.get(1).or_broken()?;
-
-        let v_0 = world
-            .get_entity_mut(input_0).or_broken()?
-            .pull_from_buffer::<A>(session)?;
-
-        let v_1 = world
-            .get_entity_mut(input_1).or_broken()?
-            .pull_from_buffer::<B>(session)?;
-
-        world
-            .get_entity_mut(target).or_broken()?
-            .give_input(session, (v_0, v_1), roster)?;
-        roster.queue(target);
-        Ok(())
-    }
 }
 
 impl<A, B, C> Unzippable for (A, B, C)
@@ -264,7 +139,8 @@ where
     C: 'static + Send + Sync,
 {
     type Unzipped = (Output<A>, Output<B>, Output<C>);
-    fn unzip_chain(source: Entity, builder: &mut Builder) -> Self::Unzipped {
+    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
+        assert_eq!(output.scope(), builder.scope());
         let targets = Self::make_targets(builder.commands);
 
         let result = (
@@ -274,7 +150,7 @@ where
         );
 
         builder.commands.add(AddOperation::new(
-            source,
+            output.id(),
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
         result
@@ -319,85 +195,14 @@ where
     fn prepend<T>(self, value: T) -> Self::Prepended<T> {
         (value, self.0, self.1, self.2)
     }
-
-    fn join_status(
-        mut r: OperationReachability,
-    ) -> JoinStatusResult {
-        let source = r.source();
-        let session = r.session();
-        let inputs = r.world().get::<FunnelInputStorage>(source).or_broken()?;
-        let mut unreachable: Vec<Entity> = Vec::new();
-        let mut status = JoinStatus::Ready;
-
-        let input_0 = *inputs.0.get(0).or_broken()?;
-        let input_1 = *inputs.0.get(1).or_broken()?;
-        let input_2 = *inputs.0.get(2).or_broken()?;
-
-        if !r.world().get_entity(input_0).or_broken()?.buffered_count::<A>(session)? {
-            status = JoinStatus::Pending;
-            if !r.check_upstream(input_0)? {
-                unreachable.push(input_0);
-            }
-        }
-
-        if !r.world().get_entity(input_1).or_broken()?.buffered_count::<B>(session)? {
-            status = JoinStatus::Pending;
-            if !r.check_upstream(input_1)? {
-                unreachable.push(input_1);
-            }
-        }
-
-        if !r.world().get_entity(input_2).or_broken()?.buffered_count::<C>(session)? {
-            status = JoinStatus::Pending;
-            if !r.check_upstream(input_2)? {
-                unreachable.push(input_2);
-            }
-        }
-
-        if !unreachable.is_empty() {
-            return Ok(JoinStatus::Unreachable(unreachable));
-        }
-
-        Ok(status)
-    }
-
-    fn join_values(
-        session: Entity,
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let inputs = world.get::<FunnelInputStorage>(source).or_broken()?;
-        let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
-
-        let input_0 = *inputs.0.get(0).or_broken()?;
-        let input_1 = *inputs.0.get(1).or_broken()?;
-        let input_2 = *inputs.0.get(2).or_broken()?;
-
-        let v_0 = world
-            .get_entity_mut(input_0).or_broken()?
-            .pull_from_buffer::<A>(session)?;
-
-        let v_1 = world
-            .get_entity_mut(input_1).or_broken()?
-            .pull_from_buffer::<B>(session)?;
-
-        let v_2 = world
-            .get_entity_mut(input_2).or_broken()?
-            .pull_from_buffer::<C>(session)?;
-
-        world
-            .get_entity_mut(target).or_broken()?
-            .give_input(session, (v_0, v_1, v_2), roster);
-        roster.queue(target);
-        Ok(())
-    }
 }
 
 /// A trait for constructs that are able to perform a forking unzip of an
 /// unzippable chain. An unzippable chain is one whose response type contains a
 /// tuple.
 pub trait UnzipBuilder<Z> {
-    type Output;
-    fn unzip_build(self, source: Entity, builder: &mut Builder) -> Self::Output;
+    type ReturnType;
+    fn unzip_build(self, output: Output<Z>, builder: &mut Builder) -> Self::ReturnType;
 }
 
 impl<A, Fa, Ua, B, Fb, Ub> UnzipBuilder<(A, B)> for (Fa, Fb)
@@ -407,9 +212,9 @@ where
     Fa: FnOnce(Chain<A>) -> Ua,
     Fb: FnOnce(Chain<B>) -> Ub,
 {
-    type Output = (Ua, Ub);
-    fn unzip_build(self, source: Entity, builder: &mut Builder) -> Self::Output {
-        let outputs = <(A, B)>::unzip_chain(source, builder);
+    type ReturnType = (Ua, Ub);
+    fn unzip_build(self, output: Output<(A, B)>, builder: &mut Builder) -> Self::ReturnType {
+        let outputs = <(A, B)>::unzip_output(output, builder);
         let u_a = (self.0)(outputs.0.chain(builder));
         let u_b = (self.1)(outputs.1.chain(builder));
         (u_a, u_b)
@@ -425,9 +230,9 @@ where
     Fb: FnOnce(Chain<B>) -> Ub,
     Fc: FnOnce(Chain<C>) -> Uc,
 {
-    type Output = (Ua, Ub, Uc);
-    fn unzip_build(self, source: Entity, builder: &mut Builder) -> Self::Output {
-        let outputs = <(A, B, C)>::unzip_chain(source, builder);
+    type ReturnType = (Ua, Ub, Uc);
+    fn unzip_build(self, output: Output<(A, B, C)>, builder: &mut Builder) -> Self::ReturnType {
+        let outputs = <(A, B, C)>::unzip_output(output, builder);
         let u_a = (self.0)(outputs.0.chain(builder));
         let u_b = (self.1)(outputs.1.chain(builder));
         let u_c = (self.2)(outputs.2.chain(builder));

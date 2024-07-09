@@ -86,7 +86,7 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>();
+        clean.cleanup_inputs::<T>()?;
         clean.notify_cleaned()
     }
 

@@ -29,6 +29,7 @@ use crate::{OperationError, Cancel, Disposal, Broken};
 /// internally or communicated to the user by any other means.
 #[derive(Resource, Default, Clone, Debug)]
 pub struct UnhandledErrors {
+    pub setup: Vec<SetupFailure>,
     pub cancellations: Vec<CancelFailure>,
     pub operations: Vec<OperationError>,
     pub disposals: Vec<DisposalFailure>,
@@ -37,6 +38,12 @@ pub struct UnhandledErrors {
     pub unused_targets: Vec<UnusedTargetDrop>,
     pub connections: Vec<ConnectionFailure>,
     pub miscellaneous: Vec<MiscellaneousFailure>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetupFailure {
+    pub broken_node: Entity,
+    pub error: OperationError,
 }
 
 #[derive(Clone, Debug)]

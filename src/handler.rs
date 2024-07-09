@@ -17,8 +17,8 @@
 
 use crate::{
     BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, StreamPack, Input, Provider, ProvideOnce,
-    AddOperation, OperateHandler, ManageInput, OperationError,
+    OperationRoster, StreamPack, Input, Provider, ProvideOnce, UnhandledErrors,
+    AddOperation, OperateHandler, ManageInput, OperationError, SetupFailure,
     OrBroken, OperateTask, Operation, OperationSetup,
 };
 
@@ -108,8 +108,14 @@ impl<'a> HandleRequest<'a> {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let task = AsyncComputeTaskPool::get().spawn(task);
         let task_id = self.world.spawn(()).id();
-        OperateTask::new(task_id, session, self.source, self.target, task, None, sender)
-            .setup(OperationSetup { source: task_id, world: self.world });
+        let operation = OperateTask::new(task_id, session, self.source, self.target, task, None, sender);
+        let setup = OperationSetup { source: task_id, world: self.world };
+        if let Err(error) = operation.setup(setup) {
+            self.world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .setup
+                .push(SetupFailure { broken_node: self.source, error });
+
+        }
         self.roster.queue(task_id);
         Ok(())
     }
@@ -170,8 +176,7 @@ where
         let response = self.system.run(BlockingHandler { request }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_response(session, response);
-        Ok(())
+        input.give_response(session, response)
     }
 }
 

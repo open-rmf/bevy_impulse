@@ -15,6 +15,8 @@
  *
 */
 
+use smallvec::SmallVec;
+
 use crate::{
     Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
     UnusedTarget, AddOperation,
@@ -107,5 +109,38 @@ impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
     type BufferType = [T::BufferType; N];
     fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
         self.map(|b| b.as_buffer(builder))
+    }
+}
+
+pub trait IterBufferable {
+    type BufferType: Buffered;
+
+    /// Convert an iterable collection of bufferable workflow elements into
+    /// buffers if they are not buffers already.
+    fn as_buffer_vec<const N: usize>(
+        self,
+        builder: &mut Builder,
+    ) -> SmallVec<[Self::BufferType; N]>;
+
+    /// Join an iterable collection of bufferable workflow elements.
+    ///
+    /// Performance is best if you can choose an `N` which is equal to the
+    /// number of buffers inside the iterable, but this will work even if `N`
+    /// does not match the number.
+    fn join_vec<const N: usize>(
+        self,
+        builder: &mut Builder,
+    ) -> Output<SmallVec<[<Self::BufferType as Buffered>::Item; N]>>
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        <Self::BufferType as Buffered>::Item: 'static + Send + Sync,
+    {
+        let buffers = self.as_buffer_vec::<N>(builder);
+        let join = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(join, Join::new(buffers, target)));
+
+        Output::new(builder.scope, target)
     }
 }

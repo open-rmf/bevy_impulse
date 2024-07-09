@@ -17,7 +17,9 @@
 
 use crate::{
     DeliveryLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
-    CancelFailure, Broken, ManageCancellation, ManageDisposal,
+    CancelFailure, Broken, ManageCancellation, ManageDisposal, SetupFailure,
+    MiscellaneousFailure,
+    try_emit_broken,
 };
 
 use bevy::{
@@ -27,7 +29,12 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use std::collections::{VecDeque, HashMap, hash_map::Entry};
+use std::{
+    sync::Arc,
+    collections::{VecDeque, HashMap, hash_map::Entry}
+};
+
+use anyhow::anyhow;
 
 use smallvec::SmallVec;
 
@@ -165,44 +172,6 @@ impl ForkTargetStorage {
     }
 }
 
-#[derive(SystemParam)]
-pub(crate) struct NextOperationLink<'w, 's> {
-    single_target: Query<'w, 's, &'static SingleTargetStorage>,
-    fork_targets: Query<'w, 's, &'static ForkTargetStorage>,
-}
-
-impl<'w, 's> NextOperationLink<'w, 's> {
-    pub(crate) fn iter(&self, entity: Entity) -> NextOperationLinkIter {
-        if let Ok(target) = self.single_target.get(entity) {
-            return NextOperationLinkIter::Target(Some(target.0));
-        } else if let Ok(fork) = self.fork_targets.get(entity) {
-            return NextOperationLinkIter::Fork(fork.0.clone());
-        }
-
-        return NextOperationLinkIter::Target(None);
-    }
-}
-
-pub(crate) enum NextOperationLinkIter {
-    Target(Option<Entity>),
-    Fork(SmallVec<[Entity; 8]>),
-}
-
-impl Iterator for NextOperationLinkIter {
-    type Item = Entity;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            NextOperationLinkIter::Target(target) => {
-                return target.take();
-            }
-            NextOperationLinkIter::Fork(fork) => {
-                return fork.pop();
-            }
-        }
-    }
-}
-
 #[derive(Component)]
 pub(crate) struct UnusedTarget;
 
@@ -284,7 +253,17 @@ impl CleanupFinished {
         let Some(FinalizeScopeCleanup(f)) = world.get::<FinalizeScopeCleanup>(self.scope).copied() else {
             return;
         };
-        (f)(OperationCleanup { source: self.scope, session: self.session, world, roster });
+        if let Err(OperationError::Broken(backtrace)) = (f)(OperationCleanup { source: self.scope, session: self.session, world, roster }) {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: Arc::new(anyhow!(
+                        "Failed to finalize scope after cleanup: scope {:?}, session {:?}",
+                        self.scope, self.session,
+                    )),
+                    backtrace,
+                })
+        }
     }
 }
 
@@ -575,7 +554,12 @@ impl<Op: Operation> AddOperation<Op> {
 
 impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
     fn apply(self, world: &mut World) {
-        self.operation.setup(OperationSetup { source: self.source, world });
+        if let Err(error) = self.operation.setup(OperationSetup { source: self.source, world }) {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .setup
+                .push(SetupFailure { broken_node: self.source, error });
+        }
+
         world.entity_mut(self.source)
             .insert((
                 OperationExecuteStorage(perform_operation::<Op>),
@@ -621,22 +605,7 @@ fn perform_operation<Op: Operation>(
             // Do nothing
         }
         Err(OperationError::Broken(backtrace)) => {
-            if let Some(mut source_mut) = world.get_entity_mut(source) {
-                source_mut.emit_broken(backtrace, roster);
-            } else {
-                world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .cancellations
-                .push(CancelFailure {
-                    error: OperationError::Broken(Some(Backtrace::new())),
-                    cancel: Cancel {
-                        source,
-                        target: source,
-                        session: None,
-                        cancellation: Broken { node: source, backtrace }.into(),
-                    }
-                });
-            }
+            try_emit_broken(source, backtrace, world, roster);
         }
     }
 }

@@ -23,7 +23,7 @@ use crate::{
     Buffer, CloneFromBuffer, OperationError, OrBroken, InspectInput, ManageInput,
 };
 
-pub trait Buffered: Copy {
+pub trait Buffered: Clone {
     fn buffered_count(
         &self,
         session: Entity,
@@ -179,6 +179,39 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
 
     // TODO(@mxgrey) We may be able to use [T::Item; N] here instead of SmallVec
     // when try_map is stabilized: https://github.com/rust-lang/rust/issues/79711
+    type Item = SmallVec<[T::Item; N]>;
+    fn pull(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> Result<Self::Item, OperationError> {
+        self.iter().map(|buffer| {
+            buffer.pull(session, world)
+        }).collect()
+    }
+
+    fn as_input(&self) -> SmallVec<[Entity; 8]> {
+        self.iter().flat_map(|buffer| buffer.as_input()).collect()
+    }
+}
+
+impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
+    fn buffered_count(
+        &self,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        let mut min_count = None;
+        for buffer in self.iter() {
+            let count = buffer.buffered_count(session, world)?;
+            if !min_count.is_some_and(|min| min < count) {
+                min_count = Some(count);
+            }
+        }
+
+        Ok(min_count.unwrap_or(0))
+    }
+
     type Item = SmallVec<[T::Item; N]>;
     fn pull(
         &self,

@@ -136,10 +136,7 @@ where
         // At this point we have the correct type to deliver to the target, so
         // we proceed with doing that.
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
-        target_mut.give_input(session, output, roster);
-        roster.queue(target);
-
-        Ok(())
+        target_mut.give_input(session, output, roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
