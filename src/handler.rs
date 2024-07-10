@@ -175,7 +175,9 @@ where
 
         let streams = Streams::make_buffer(input.source, input.world);
 
-        let response = self.system.run(BlockingHandler { request, streams: streams.clone() }, input.world);
+        let response = self.system.run(BlockingHandler {
+            request, streams: streams.clone(), source: input.source, session,
+        }, input.world);
         self.system.apply_deferred(&mut input.world);
 
         Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
@@ -207,7 +209,9 @@ where
             self.system.initialize(&mut input.world);
         }
 
-        let task = self.system.run(AsyncHandler { request, channel }, &mut input.world);
+        let task = self.system.run(AsyncHandler {
+            request, channel, source: input.source, session,
+        }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
         input.give_task(session, task)
@@ -293,7 +297,9 @@ where
         let callback = move |mut input: HandleRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
             let streams = Streams::make_buffer(input.source, input.world);
-            let response = (self)(BlockingHandler { request, streams: streams.clone() });
+            let response = (self)(BlockingHandler {
+                request, streams: streams.clone(), source: input.source, session,
+            });
             Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
             input.give_response(session, response)
         };
@@ -317,7 +323,9 @@ where
         let callback = move |mut input: HandleRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
             let channel = input.get_channel(session)?;
-            let task = (self)(AsyncHandler { request, channel });
+            let task = (self)(AsyncHandler {
+                request, channel, source: input.source, session,
+            });
             input.give_task(session, task)
         };
         Handler::new(CallbackHandler { callback })

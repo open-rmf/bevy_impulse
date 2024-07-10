@@ -126,9 +126,16 @@ use bevy::prelude::{Entity, In};
 /// ```
 #[non_exhaustive]
 pub struct BlockingService<Request, Streams: StreamPack = ()> {
+    /// The input data of the request
     pub request: Request,
-    pub provider: Entity,
+    /// The buffer to hold stream output data until the function is finished
     pub streams: Streams::Buffer,
+    /// The entity providing the service
+    pub provider: Entity,
+    /// The node in a workflow or impulse chain that asked for the service
+    pub source: Entity,
+    /// The unique session ID for the workflow
+    pub session: Entity,
 }
 
 /// Use this to reduce bracket noise when you need `In<BlockingService<R>>`.
@@ -142,9 +149,18 @@ pub type InBlockingService<Request, Streams = ()> = In<BlockingService<Request, 
 /// ECS asynchronously while it is polled from inside the task pool.
 #[non_exhaustive]
 pub struct AsyncService<Request, Streams: StreamPack = ()> {
+    /// The input data of the request
     pub request: Request,
+    /// The channel that allows querying and syncing with the world while the
+    /// service runs asynchronously. Use the [`Channel::streams`] method to
+    /// send stream output data from the service.
     pub channel: Channel<Streams>,
+    /// The entity providing the service
     pub provider: Entity,
+    /// The node in a workflow or impulse chain that asked for the service
+    pub source: Entity,
+    /// The unique session ID for the workflow
+    pub session: Entity,
 }
 
 /// Use this to reduce backet noise when you need `In<AsyncService<R, S>>`.
@@ -155,8 +171,14 @@ pub type InAsyncService<Request, Streams = ()> = In<AsyncService<Request, Stream
 /// not associated with any entity.
 #[non_exhaustive]
 pub struct BlockingHandler<Request, Streams: StreamPack = ()> {
+    /// The input data of the request
     pub request: Request,
+    /// The buffer to hold stream output data until the function is finished
     pub streams: Streams::Buffer,
+    /// The node in a workflow or impulse chain that asked for the callback
+    pub source: Entity,
+    /// The unique session ID for the workflow
+    pub session: Entity,
 }
 
 /// Use AsyncHandler to indicate that your system or function is meant to define
@@ -165,8 +187,16 @@ pub struct BlockingHandler<Request, Streams: StreamPack = ()> {
 /// will be polled by the async task pool.
 #[non_exhaustive]
 pub struct AsyncHandler<Request, Streams: StreamPack = ()> {
+    /// The input data of the request
     pub request: Request,
+    /// The channel that allows querying and syncing with the world while the
+    /// service runs asynchronously. Use the [`Channel::streams`] method to
+    /// send stream output data from the service.
     pub channel: Channel<Streams>,
+    /// The node in a workflow or impulse chain that asked for the callback
+    pub source: Entity,
+    /// The unique session ID for the workflow
+    pub session: Entity,
 }
 
 /// Use BlockingMap to indicate that your function is meant to define a blocking
@@ -175,8 +205,14 @@ pub struct AsyncHandler<Request, Streams: StreamPack = ()> {
 /// implement [`FnOnce`].
 #[non_exhaustive]
 pub struct BlockingMap<Request, Streams: StreamPack = ()> {
+    /// The input data of the request
     pub request: Request,
+    /// The buffer to hold stream output data until the function is finished
     pub streams: Streams::Buffer,
+    /// The node in a workflow or impulse chain that asked for the callback
+    pub source: Entity,
+    /// The unique session ID for the workflow
+    pub session: Entity,
 }
 
 /// Use AsyncMap to indicate that your function is meant to define an async

@@ -111,7 +111,9 @@ where
         };
 
         let streams = Streams::make_buffer(source, world);
-        let response = service.run(BlockingService { request, provider, streams: streams.clone() }, world);
+        let response = service.run(BlockingService {
+            request, streams: streams.clone(), provider, source, session,
+        }, world);
         service.apply_deferred(world);
         Streams::process_buffer(streams, source, session, world, roster)?;
 

@@ -93,7 +93,7 @@ where
         let mut map = source_mut.get_mut::<BlockingMapStorage<F>>().or_broken()?;
         let mut f = map.f.take().or_broken()?;
 
-        let response = f.call(BlockingMap { request, streams: streams.clone() });
+        let response = f.call(BlockingMap { request, streams: streams.clone(), source, session });
         map.f = Some(f);
 
         Streams::process_buffer(streams, source, session, world, roster)?;
