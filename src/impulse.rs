@@ -89,7 +89,7 @@ where
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
-            self.target,
+            dbg!(self.target),
             TakenResponse::<Response>::new(response_sender),
         ));
         let mut map = StreamTargetMap::default();
@@ -107,7 +107,7 @@ where
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
-            self.target,
+            dbg!(self.target),
             TakenResponse::<Response>::new(response_sender),
         ));
         response_promise
@@ -321,5 +321,45 @@ pub struct Collection<T> {
 impl<T> Default for Collection<T> {
     fn default() -> Self {
         Self { items: Default::default() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+    use std::time::Duration;
+
+    #[test]
+    fn test_provide() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let mut promise = context.build(|commands| {
+            commands.provide("hello".to_owned()).take_response()
+        });
+        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+    }
+
+    #[test]
+    fn test_async_map() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(
+                WaitRequest {
+                    duration: Duration::from_secs_f64(0.001),
+                    value: "hello".to_owned(),
+                },
+                wait.into_async_map(),
+            )
+            .take_response()
+        });
+
+        context.run_with_conditions(
+            &mut promise,
+            FlushConditions::new()
+            .with_timeout(Duration::from_secs_f64(5.0)),
+        );
+        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
     }
 }

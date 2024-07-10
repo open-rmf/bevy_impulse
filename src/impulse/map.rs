@@ -26,7 +26,7 @@ use crate::{
     Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
     InputBundle, OperationResult, OrBroken, Input, ManageInput,
     ChannelQueue, BlockingMap, AsyncMap, InnerChannel, OperateTask, ActiveTasksStorage,
-    CallBlockingMapOnce, CallAsyncMapOnce, Operation,
+    CallBlockingMapOnce, CallAsyncMapOnce,
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
@@ -176,8 +176,7 @@ where
 
         let task_source = world.spawn(()).id();
         OperateTask::new(task_source, session, source, target, task, None, sender)
-            .setup(OperationSetup { source: task_source, world })?;
-        roster.queue(task_source);
+            .add(world, roster);
         Ok(())
     }
 }

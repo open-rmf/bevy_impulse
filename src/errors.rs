@@ -40,6 +40,20 @@ pub struct UnhandledErrors {
     pub miscellaneous: Vec<MiscellaneousFailure>,
 }
 
+impl UnhandledErrors {
+    pub fn is_empty(&self) -> bool {
+        self.setup.is_empty()
+        && self.cancellations.is_empty()
+        && self.operations.is_empty()
+        && self.disposals.is_empty()
+        && self.stop_tasks.is_empty()
+        && self.broken.is_empty()
+        && self.unused_targets.is_empty()
+        && self.connections.is_empty()
+        && self.miscellaneous.is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SetupFailure {
     pub broken_node: Entity,

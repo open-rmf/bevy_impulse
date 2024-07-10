@@ -19,8 +19,8 @@ use crate::{
     AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
     InnerChannel, ChannelQueue, OperationRoster, Blocker,
     StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
-    OperationError, OrBroken, ManageInput, Input, OperateTask, Operation,
-    OperationSetup, SingleTargetStorage, dispose_for_despawned_service,
+    OperationError, OrBroken, ManageInput, Input, OperateTask,
+    SingleTargetStorage, dispose_for_despawned_service,
     service::builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
     StopTask, UnhandledErrors, StopTaskFailure, Delivery, DeliveryInstructions,
     Deliver, DeliveryOrder, DeliveryUpdate, insert_new_order, pop_next_delivery,
@@ -238,8 +238,7 @@ where
     let task = AsyncComputeTaskPool::get().spawn(job);
 
     OperateTask::new(task_id, session, source, target, task, blocker, sender)
-        .setup(OperationSetup { source: task_id, world })?;
-    roster.queue(task_id);
+        .add(world, roster);
     Ok(())
 }
 

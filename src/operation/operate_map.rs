@@ -15,6 +15,13 @@
  *
 */
 
+use bevy::{
+    prelude::{Component, Entity, Bundle},
+    tasks::AsyncComputeTaskPool,
+};
+
+use std::future::Future;
+
 use crate::{
     BlockingMap, AsyncMap, Operation, ChannelQueue, InnerChannel,
     SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
@@ -22,13 +29,6 @@ use crate::{
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
     OperationReachability, ReachabilityResult, InputBundle,
 };
-
-use bevy::{
-    prelude::{Component, Entity, Bundle},
-    tasks::AsyncComputeTaskPool,
-};
-
-use std::future::Future;
 
 #[derive(Bundle)]
 pub(crate) struct OperateBlockingMap<F, Request, Response, Streams>
@@ -189,9 +189,9 @@ where
             .f = Some(f);
 
         let task_source = world.spawn(()).id();
-        OperateTask::new(task_source, session, source, target, task, None, sender)
-            .setup(OperationSetup { source: task_source, world })?;
-        roster.queue(task_source);
+        OperateTask::new(
+            dbg!(task_source), session, source, dbg!(target), task, None, sender
+        ).add(world, roster);
         Ok(())
     }
 

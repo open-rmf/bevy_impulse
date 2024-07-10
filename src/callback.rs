@@ -17,7 +17,7 @@
 
 use crate::{
     BlockingCallback, AsyncCallback, Channel, InnerChannel, ChannelQueue,
-    OperationRoster, StreamPack, Input, Provider, ProvideOnce, UnhandledErrors,
+    OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateCallback, ManageInput, OperationError, SetupFailure,
     OrBroken, OperateTask, Operation, OperationSetup,
 };
@@ -108,14 +108,8 @@ impl<'a> CallbackRequest<'a> {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let task = AsyncComputeTaskPool::get().spawn(task);
         let task_id = self.world.spawn(()).id();
-        let operation = OperateTask::new(task_id, session, self.source, self.target, task, None, sender);
-        let setup = OperationSetup { source: task_id, world: self.world };
-        if let Err(error) = operation.setup(setup) {
-            self.world.get_resource_or_insert_with(|| UnhandledErrors::default())
-                .setup
-                .push(SetupFailure { broken_node: self.source, error });
-        }
-        self.roster.queue(task_id);
+        OperateTask::new(task_id, session, self.source, self.target, task, None, sender)
+            .add(self.world, self.roster);
         Ok(())
     }
 

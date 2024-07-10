@@ -20,8 +20,8 @@ use bevy::prelude::{Commands, BuildChildren};
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, InputCommand, StreamPack, ProvideOnce, IntoAsyncMap, Impulse,
-    Detached,
+    UnusedTarget, StreamPack, ProvideOnce, IntoBlockingMapOnce, IntoAsyncMap,
+    Impulse, Detached, InputCommand,
 };
 
 /// Extensions for creating impulse chains by making a request to a provider or
@@ -97,9 +97,9 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             .set_parent(target)
             .id();
 
-        provider.connect(source, target, self);
+        provider.connect(source, dbg!(target), self);
 
-        self.add(InputCommand { session: source, target: source, data: request });
+        self.add(InputCommand { session: dbg!(source), target: dbg!(source), data: request });
 
         Impulse {
             source,
@@ -113,22 +113,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         &'a mut self,
         value: T,
     ) -> Impulse<'w, 's, 'a, T, ()> {
-        let target = self.spawn((
-            Detached::default(),
-            UnusedTarget,
-        )).id();
-
-        self.add(InputCommand { session: target, target, data: value });
-
-        Impulse {
-            target,
-            // The source field won't actually matter for an impulse produced by
-            // this provide method, so we'll just use the session value as a
-            // placeholder
-            source: target,
-            commands: self,
-            _ignore: Default::default(),
-        }
+        self.request(value, provide_value.into_blocking_map_once())
     }
 
     fn serve<'a, T: 'static + Send + Sync + Future>(
@@ -140,6 +125,10 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
     {
         self.request(future, async_server.into_async_map())
     }
+}
+
+fn provide_value<T>(value: T) -> T {
+    value
 }
 
 async fn async_server<T: Future>(value: T) -> T::Output {

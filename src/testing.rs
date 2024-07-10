@@ -24,7 +24,10 @@ pub use bevy::{
     ecs::system::CommandQueue,
 };
 
-use crate::{Promise, Service, InAsyncService, InBlockingService, flush_impulses};
+use crate::{
+    Promise, Service, InAsyncService, InBlockingService, UnhandledErrors,
+    flush_impulses,
+};
 
 pub struct TestingContext {
     pub app: App,
@@ -108,6 +111,18 @@ impl TestingContext {
         }
 
         return true;
+    }
+
+    pub fn no_unhandled_errors(&self) -> bool {
+        let Some(errors) = self.app.world.get_resource::<UnhandledErrors>() else {
+            return true;
+        };
+
+        errors.is_empty()
+    }
+
+    pub fn get_unhandled_errors(&self) -> Option<&UnhandledErrors> {
+        self.app.world.get_resource::<UnhandledErrors>()
     }
 }
 
