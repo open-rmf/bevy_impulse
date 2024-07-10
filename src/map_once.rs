@@ -35,17 +35,18 @@ pub trait AsMapOnce<M> {
     fn as_map_once(self) -> Self::MapType;
 }
 
-pub(crate) trait CallBlockingMapOnce<Request, Response> {
-    fn call(self, input: BlockingMap<Request>) -> Response;
+pub(crate) trait CallBlockingMapOnce<Request, Response, Streams: StreamPack> {
+    fn call(self, input: BlockingMap<Request, Streams>) -> Response;
 }
 
-impl<F, Request, Response> CallBlockingMapOnce<Request, Response> for MapOnceDef<F>
+impl<F, Request, Response, Streams> CallBlockingMapOnce<Request, Response, Streams> for MapOnceDef<F>
 where
-    F: FnOnce(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnOnce(BlockingMap<Request, Streams>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
-    fn call(self, input: BlockingMap<Request>) -> Response {
+    fn call(self, input: BlockingMap<Request, Streams>) -> Response {
         (self.0)(input)
     }
 }
@@ -54,16 +55,17 @@ where
 ///
 /// Maps cannot contain Bevy Systems; they can only contain objects that
 /// implement [`FnOnce`].
-pub struct BlockingMapOnceDef<Def, Request, Response> {
+pub struct BlockingMapOnceDef<Def, Request, Response, Streams> {
     def: Def,
-    _ignore: std::marker::PhantomData<(Request, Response)>,
+    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Def, Request, Response> ProvideOnce for BlockingMapOnceDef<Def, Request, Response>
+impl<Def, Request, Response, Streams> ProvideOnce for BlockingMapOnceDef<Def, Request, Response, Streams>
 where
-    Def: CallBlockingMapOnce<Request, Response> + 'static + Send + Sync,
+    Def: CallBlockingMapOnce<Request, Response, Streams> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
@@ -74,13 +76,14 @@ where
     }
 }
 
-impl<F, Request, Response> AsMapOnce<(Request, Response, BlockingMapMarker)> for F
+impl<F, Request, Response, Streams> AsMapOnce<(Request, Response, Streams, BlockingMapMarker)> for F
 where
-    F: FnOnce(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnOnce(BlockingMap<Request, Streams>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
-    type MapType = BlockingMapOnceDef<MapOnceDef<F>, Request, Response>;
+    type MapType = BlockingMapOnceDef<MapOnceDef<F>, Request, Response, Streams>;
     fn as_map_once(self) -> Self::MapType {
         BlockingMapOnceDef { def: MapOnceDef(self), _ignore: Default::default() }
     }
@@ -98,7 +101,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    type MapType = BlockingMapOnceDef<BlockingMapOnceAdapter<F>, Request, Response>;
+    type MapType = BlockingMapOnceDef<BlockingMapOnceAdapter<F>, Request, Response, ()>;
     fn into_blocking_map_once(self) -> Self::MapType {
         BlockingMapOnceDef { def: BlockingMapOnceAdapter(self), _ignore: Default::default() }
     }
@@ -106,11 +109,11 @@ where
 
 pub struct BlockingMapOnceAdapter<F>(F);
 
-impl<F, Request, Response> CallBlockingMapOnce<Request, Response> for BlockingMapOnceAdapter<F>
+impl<F, Request, Response> CallBlockingMapOnce<Request, Response, ()> for BlockingMapOnceAdapter<F>
 where
     F: FnOnce(Request) -> Response,
 {
-    fn call(self, BlockingMap { request }: BlockingMap<Request>) -> Response {
+    fn call(self, BlockingMap { request, .. }: BlockingMap<Request, ()>) -> Response {
         (self.0)(request)
     }
 }

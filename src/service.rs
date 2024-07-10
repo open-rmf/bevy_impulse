@@ -507,7 +507,7 @@ mod tests {
     }
 
     fn sys_blocking_service(
-        In(BlockingService{ request, provider }): InBlockingService<String>,
+        In(BlockingService{ request, provider, .. }): InBlockingService<String>,
         people: Query<&TestPeople>,
         multipliers: Query<&Multiplier>,
     ) -> u64 {

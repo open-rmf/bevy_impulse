@@ -125,13 +125,14 @@ use bevy::prelude::{Entity, In};
 /// }
 /// ```
 #[non_exhaustive]
-pub struct BlockingService<Request> {
+pub struct BlockingService<Request, Streams: StreamPack = ()> {
     pub request: Request,
     pub provider: Entity,
+    pub streams: Streams::Buffer,
 }
 
 /// Use this to reduce bracket noise when you need `In<BlockingService<R>>`.
-pub type InBlockingService<Request> = In<BlockingService<Request>>;
+pub type InBlockingService<Request, Streams = ()> = In<BlockingService<Request, Streams>>;
 
 /// Use AsyncService to indicate that your system is an async service and to
 /// specify its input request type. Being async means it must return a
@@ -153,8 +154,9 @@ pub type InAsyncService<Request, Streams = ()> = In<AsyncService<Request, Stream
 /// blocking [`Handler`]. Handlers are different from services because they are
 /// not associated with any entity.
 #[non_exhaustive]
-pub struct BlockingHandler<Request> {
+pub struct BlockingHandler<Request, Streams: StreamPack = ()> {
     pub request: Request,
+    pub streams: Streams::Buffer,
 }
 
 /// Use AsyncHandler to indicate that your system or function is meant to define
@@ -172,8 +174,9 @@ pub struct AsyncHandler<Request, Streams: StreamPack = ()> {
 /// and it can only be used once, making it suitable for functions that only
 /// implement [`FnOnce`].
 #[non_exhaustive]
-pub struct BlockingMap<Request> {
+pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     pub request: Request,
+    pub streams: Streams::Buffer,
 }
 
 /// Use AsyncMap to indicate that your function is meant to define an async

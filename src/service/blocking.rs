@@ -17,7 +17,7 @@
 
 use crate::{
     BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest,
-    Input, ManageInput, ServiceBundle, OperationRequest, OperationError,
+    Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
     OrBroken, dispose_for_despawned_service,
     service::builder::BlockingChosen,
 };
@@ -33,16 +33,21 @@ use bevy::{
 pub struct Blocking<M>(std::marker::PhantomData<M>);
 
 #[derive(Component)]
-struct BlockingServiceStorage<Request, Response>(Option<BoxedSystem<BlockingService<Request>, Response>>);
+struct BlockingServiceStorage<Request, Response, Streams: StreamPack>(
+    Option<BoxedSystem<BlockingService<Request, Streams>, Response>>
+);
 
 #[derive(Component)]
-struct UninitBlockingServiceStorage<Request, Response>(BoxedSystem<BlockingService<Request>, Response>);
+struct UninitBlockingServiceStorage<Request, Response, Streams: StreamPack>(
+    BoxedSystem<BlockingService<Request, Streams>, Response>,
+);
 
-impl<Request, Response, M, Sys> IntoService<Blocking<(Request, Response, M)>> for Sys
+impl<Request, Response, Streams, M, Sys> IntoService<Blocking<(Request, Response, Streams, M)>> for Sys
 where
-    Sys: IntoSystem<BlockingService<Request>, Response, M>,
+    Sys: IntoSystem<BlockingService<Request, Streams>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
@@ -52,19 +57,24 @@ where
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
         entity_commands.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceBundle::<BlockingServiceStorage<Request, Response>>::new(),
+            ServiceBundle::<BlockingServiceStorage<Request, Response, Streams>>::new(),
         ));
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
         entity_mut.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
-            ServiceBundle::<BlockingServiceStorage<Request, Response>>::new(),
+            ServiceBundle::<BlockingServiceStorage<Request, Response, Streams>>::new(),
         ));
     }
 }
 
-impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTrait for BlockingServiceStorage<Request, Response> {
+impl<Request, Response, Streams> ServiceTrait for BlockingServiceStorage<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
     type Request = Request;
     type Response = Response;
     fn serve(
@@ -75,18 +85,18 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
             .take_input::<Request>()?;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {
+            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>() {
                 storage.0.take().expect("Service is missing while attempting to serve")
             } else {
                 // Check if the system still needs to be initialized
-                if let Some(uninit) = provider_mut.take::<UninitBlockingServiceStorage<Request, Response>>() {
+                if let Some(uninit) = provider_mut.take::<UninitBlockingServiceStorage<Request, Response, Streams>>() {
                     // We need to initialize the service
                     let mut service = uninit.0;
                     service.initialize(world);
 
                     // Re-obtain the provider since we needed to mutably borrow the world a moment ago
                     let mut provider_mut = world.entity_mut(provider);
-                    provider_mut.insert(BlockingServiceStorage::<Request, Response>(None));
+                    provider_mut.insert(BlockingServiceStorage::<Request, Response, Streams>(None));
                     service
                 } else {
                     // The provider has had its service removed, so we treat this request as cancelled.
@@ -100,11 +110,13 @@ impl<Request: 'static + Send + Sync, Response: 'static + Send + Sync> ServiceTra
             return Ok(());
         };
 
-        let response = service.run(BlockingService { request, provider }, world);
+        let streams = Streams::make_buffer(source, world);
+        let response = service.run(BlockingService { request, provider, streams: streams.clone() }, world);
         service.apply_deferred(world);
+        Streams::process_buffer(streams, source, session, world, roster)?;
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response>>() {
+            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>() {
                 storage.0 = Some(service);
             } else {
                 // The service storage has been removed for some reason. We

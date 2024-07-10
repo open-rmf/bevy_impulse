@@ -155,15 +155,16 @@ pub trait HandlerTrait<Request, Response, Streams> {
 
 pub struct BlockingHandlerMarker<M>(std::marker::PhantomData<M>);
 
-struct BlockingHandlerSystem<Request, Response> {
-    system: BoxedSystem<BlockingHandler<Request>, Response>,
+struct BlockingHandlerSystem<Request, Response, Streams: StreamPack> {
+    system: BoxedSystem<BlockingHandler<Request, Streams>, Response>,
     initialized: bool,
 }
 
-impl<Request, Response> HandlerTrait<Request, Response, ()> for BlockingHandlerSystem<Request, Response>
+impl<Request, Response, Streams> HandlerTrait<Request, Response, ()> for BlockingHandlerSystem<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
         let Input { session, data: request } = input.get_request()?;
@@ -172,8 +173,12 @@ where
             self.system.initialize(&mut input.world);
         }
 
-        let response = self.system.run(BlockingHandler { request }, &mut input.world);
+        let streams = Streams::make_buffer(input.source, input.world);
+
+        let response = self.system.run(BlockingHandler { request, streams: streams.clone() }, input.world);
         self.system.apply_deferred(&mut input.world);
+
+        Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
 
         input.give_response(session, response)
     }
@@ -273,20 +278,23 @@ where
     }
 }
 
-impl<Request, Response, F> AsHandler<BlockingCallbackMarker<(Request, Response)>> for F
+impl<Request, Response, Streams, F> AsHandler<BlockingCallbackMarker<(Request, Response, Streams)>> for F
 where
-    F: FnMut(BlockingHandler<Request>) -> Response + 'static + Send,
+    F: FnMut(BlockingHandler<Request, Streams>) -> Response + 'static + Send,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
-    type Streams = ();
+    type Streams = Streams;
 
     fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: HandleRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
-            let response = (self)(BlockingHandler { request });
+            let streams = Streams::make_buffer(input.source, input.world);
+            let response = (self)(BlockingHandler { request, streams: streams.clone() });
+            Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
             input.give_response(session, response)
         };
         Handler::new(CallbackHandler { callback })
@@ -335,7 +343,7 @@ where
     }
 }
 
-fn peel_blocking<Request>(In(BlockingHandler { request }): In<BlockingHandler<Request>>) -> Request {
+fn peel_blocking<Request>(In(BlockingHandler { request, .. }): In<BlockingHandler<Request>>) -> Request {
     request
 }
 
@@ -348,7 +356,7 @@ where
     type Request = Request;
     type Response = Response;
     fn into_blocking_handler(mut self) -> Handler<Self::Request, Self::Response, ()> {
-        let f = move |BlockingHandler { request }| {
+        let f = move |BlockingHandler { request, .. }| {
             (self)(request)
         };
 

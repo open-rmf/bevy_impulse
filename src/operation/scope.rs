@@ -139,7 +139,7 @@ impl ScopedSessionStatus {
         }
     }
 
-    pub(crate) fn to_finished(&mut self) -> bool {
+    fn to_finished(&mut self) -> bool {
         // Only switch it to finished if it was still ongoing. Anything else
         // should not get converted to a finished status.
         if matches!(self, Self::Ongoing) {

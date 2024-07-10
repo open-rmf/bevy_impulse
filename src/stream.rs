@@ -19,7 +19,7 @@ use bevy::prelude::{Component, Bundle, Entity, Commands, World, BuildChildren};
 
 use crossbeam::channel::{Receiver, unbounded};
 
-use std::sync::Arc;
+use std::{rc::Rc, cell::RefCell, sync::Arc};
 
 use smallvec::SmallVec;
 
@@ -30,6 +30,8 @@ use crate::{
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
+    type Container: IntoIterator<Item = Self> + Extend<Self> + Default;
+
     fn send(
         self,
         StreamRequest { session, target, world, roster, .. }: StreamRequest
@@ -125,6 +127,26 @@ pub trait Stream: 'static + Send + Sync + Sized {
     }
 }
 
+pub struct StreamBuffer<T: Stream> {
+    container: Rc<RefCell<T::Container>>,
+    target: Option<Entity>,
+}
+
+impl<T: Stream> Clone for StreamBuffer<T> {
+    fn clone(&self) -> Self {
+        Self {
+            container: Rc::clone(&self.container),
+            target: self.target.clone(),
+        }
+    }
+}
+
+impl<T: Stream> StreamBuffer<T> {
+    pub fn send(&self, data: T) {
+        self.container.borrow_mut().extend([data]);
+    }
+}
+
 pub struct StreamRequest<'a> {
     /// The node that emitted the stream
     pub source: Entity,
@@ -203,6 +225,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type StreamOutputPack;
     type Receiver;
     type Channel;
+    type Buffer: Clone;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -236,6 +259,16 @@ pub trait StreamPack: 'static + Send + Sync {
     ) -> Self::StreamStorageBundle;
 
     fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
+
+    fn make_buffer(source: Entity, world: &World) -> Self::Buffer;
+
+    fn process_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult;
 }
 
 impl<T: Stream> StreamPack for T {
@@ -245,6 +278,7 @@ impl<T: Stream> StreamPack for T {
     type StreamOutputPack = Output<Self>;
     type Receiver = Receiver<Self>;
     type Channel = StreamChannel<Self>;
+    type Buffer = StreamBuffer<Self>;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -305,6 +339,33 @@ impl<T: Stream> StreamPack for T {
         ).flatten();
         StreamChannel::new(target, Arc::clone(inner))
     }
+
+    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
+        let index = world.get::<StreamTargetStorage<Self>>(source)
+            .map(|t| t.index);
+        let target = index.map(
+            |index| world
+                .get::<StreamTargetMap>(source)
+                .map(|t| t.get(index))
+                .flatten()
+        ).flatten();
+        StreamBuffer { container: Default::default(), target }
+    }
+
+    fn process_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        let target = buffer.target;
+        for data in Rc::into_inner(buffer.container).or_broken()?.into_inner().into_iter() {
+            data.send(StreamRequest { source, session, target, world, roster })?;
+        }
+
+        Ok(())
+    }
 }
 
 impl StreamPack for () {
@@ -314,6 +375,7 @@ impl StreamPack for () {
     type StreamOutputPack = ();
     type Receiver = ();
     type Channel = ();
+    type Buffer = ();
 
     fn spawn_scope_streams(
         _: Entity,
@@ -362,6 +424,20 @@ impl StreamPack for () {
     ) -> Self::Channel {
         ()
     }
+
+    fn make_buffer(_: Entity, _: &World) -> Self::Buffer {
+        ()
+    }
+
+    fn process_buffer(
+        _: Self::Buffer,
+        _: Entity,
+        _: Entity,
+        _: &mut World,
+        _: &mut OperationRoster,
+    ) -> OperationResult {
+        Ok(())
+    }
 }
 
 impl<T1: StreamPack> StreamPack for (T1,) {
@@ -371,6 +447,7 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     type StreamOutputPack = T1::StreamOutputPack;
     type Receiver = T1::Receiver;
     type Channel = T1::Channel;
+    type Buffer = T1::Buffer;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -419,6 +496,21 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     ) -> Self::Channel {
         T1::make_channel(inner, world)
     }
+
+    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
+        T1::make_buffer(source, world)
+    }
+
+    fn process_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        T1::process_buffer(buffer, source, session, world, roster)?;
+        Ok(())
+    }
 }
 
 impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
@@ -428,6 +520,7 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack);
     type Receiver = (T1::Receiver, T2::Receiver);
     type Channel = (T1::Channel, T2::Channel);
+    type Buffer = (T1::Buffer, T2::Buffer);
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -488,6 +581,24 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
         let t2 = T2::make_channel(inner, world);
         (t1, t2)
     }
+
+    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
+        let t1 = T1::make_buffer(source, world);
+        let t2 = T2::make_buffer(source, world);
+        (t1, t2)
+    }
+
+    fn process_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        T1::process_buffer(buffer.0, source, session, world, roster)?;
+        T2::process_buffer(buffer.1, source, session, world, roster)?;
+        Ok(())
+    }
 }
 
 impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3) {
@@ -497,6 +608,7 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack, T3::StreamOutputPack);
     type Receiver = (T1::Receiver, T2::Receiver, T3::Receiver);
     type Channel = (T1::Channel, T2::Channel, T3::Channel);
+    type Buffer = (T1::Buffer, T2::Buffer, T3::Buffer);
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -562,5 +674,25 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
         let t2 = T2::make_channel(inner, world);
         let t3 = T3::make_channel(inner, world);
         (t1, t2, t3)
+    }
+
+    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
+        let t1 = T1::make_buffer(source, world);
+        let t2 = T2::make_buffer(source, world);
+        let t3 = T3::make_buffer(source, world);
+        (t1, t2, t3)
+    }
+
+    fn process_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        T1::process_buffer(buffer.0, source, session, world, roster)?;
+        T2::process_buffer(buffer.1, source, session, world, roster)?;
+        T3::process_buffer(buffer.2, source, session, world, roster)?;
+        Ok(())
     }
 }

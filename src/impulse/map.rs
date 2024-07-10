@@ -34,23 +34,25 @@ use crate::{
 /// reusable, whereas [`crate::OperateBlockingMap`] is used in workflows which
 /// need to be reusable, so it can only support FnMut.
 #[derive(Bundle)]
-pub(crate) struct ImpulseBlockingMap<F, Request, Response>
+pub(crate) struct ImpulseBlockingMap<F, Request, Response, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     f: BlockingMapOnceStorage<F>,
     target: SingleTargetStorage,
     #[bundle(ignore)]
-    _ignore: std::marker::PhantomData<(Request, Response)>,
+    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<F, Request, Response> ImpulseBlockingMap<F, Request, Response>
+impl<F, Request, Response, Streams> ImpulseBlockingMap<F, Request, Response, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
@@ -66,11 +68,12 @@ struct BlockingMapOnceStorage<F> {
     f: F,
 }
 
-impl<F, Request, Response> Impulsive for ImpulseBlockingMap<F, Request, Response>
+impl<F, Request, Response, Streams> Impulsive for ImpulseBlockingMap<F, Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    F: CallBlockingMapOnce<Request, Response> + 'static + Send + Sync,
+    Streams: StreamPack,
+    F: CallBlockingMapOnce<Request, Response, Streams> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
@@ -83,12 +86,15 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
+        let streams = Streams::make_buffer(source, world);
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let f = source_mut.take::<BlockingMapOnceStorage<F>>().or_broken()?.f;
 
-        let response = f.call(BlockingMap { request });
+        let response = f.call(BlockingMap { request, streams: streams.clone() });
+
+        Streams::process_buffer(streams, source, session, world, roster)?;
 
         world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
         Ok(())

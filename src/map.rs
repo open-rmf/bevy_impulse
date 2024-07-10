@@ -35,17 +35,18 @@ pub trait AsMap<M> {
 }
 
 /// A trait that all different ways of defining a Blocking Map must funnel into.
-pub(crate) trait CallBlockingMap<Request, Response> {
-    fn call(&mut self, input: BlockingMap<Request>) -> Response;
+pub(crate) trait CallBlockingMap<Request, Response, Streams: StreamPack> {
+    fn call(&mut self, input: BlockingMap<Request, Streams>) -> Response;
 }
 
-impl<F, Request, Response> CallBlockingMap<Request, Response> for MapDef<F>
+impl<F, Request, Response, Streams> CallBlockingMap<Request, Response, Streams> for MapDef<F>
 where
-    F: FnMut(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnMut(BlockingMap<Request, Streams>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
-    fn call(&mut self, request: BlockingMap<Request>) -> Response {
+    fn call(&mut self, request: BlockingMap<Request, Streams>) -> Response {
         (self.0)(request)
     }
 }
@@ -55,44 +56,46 @@ where
 ///
 /// Maps cannot contain Bevy Systems; they can only contain objects that
 /// implement [`FnMut`].
-pub struct BlockingMapDef<Def, Request, Response> {
+pub struct BlockingMapDef<Def, Request, Response, Streams> {
     def: Def,
-    _ignore: std::marker::PhantomData<(Request, Response)>,
+    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Def, Request, Response> ProvideOnce for BlockingMapDef<Def, Request, Response>
+impl<Def, Request, Response, Streams> ProvideOnce for BlockingMapDef<Def, Request, Response, Streams>
 where
-    Def: CallBlockingMap<Request, Response> + 'static + Send + Sync,
+    Def: CallBlockingMap<Request, Response, Streams> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
-    type Streams = ();
+    type Streams = Streams;
 
     fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddOperation::new(source, OperateBlockingMap::new(target, self.def)));
     }
 }
 
-impl<Def, Request, Response> Provider for BlockingMapDef<Def, Request, Response>
+impl<Def, Request, Response, Streams> Provider for BlockingMapDef<Def, Request, Response, Streams>
 where
-    Def: CallBlockingMap<Request, Response> + 'static + Send + Sync,
+    Def: CallBlockingMap<Request, Response, Streams> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
 
 }
 
 pub struct BlockingMapMarker;
 
-impl<F, Request, Response> AsMap<(Request, Response, BlockingMapMarker)> for F
+impl<F, Request, Response, Streams> AsMap<(Request, Response, Streams, BlockingMapMarker)> for F
 where
     F: FnMut(BlockingMap<Request>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
-    type MapType = BlockingMapDef<MapDef<F>, Request, Response>;
+    type MapType = BlockingMapDef<MapDef<F>, Request, Response, Streams>;
     fn as_map(self) -> Self::MapType {
         BlockingMapDef { def: MapDef(self), _ignore: Default::default() }
     }
@@ -104,13 +107,14 @@ pub trait IntoBlockingMap<M> {
     fn into_blocking_map(self) -> Self::MapType;
 }
 
-impl<F, Request, Response> IntoBlockingMap<(Request, Response)> for F
+impl<F, Request, Response, Streams> IntoBlockingMap<(Request, Response, Streams)> for F
 where
     F: FnMut(Request) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
-    type MapType = BlockingMapDef<BlockingMapAdapter<F>, Request, Response>;
+    type MapType = BlockingMapDef<BlockingMapAdapter<F>, Request, Response, Streams>;
     fn into_blocking_map(self) -> Self::MapType {
         BlockingMapDef { def: BlockingMapAdapter(self), _ignore: Default::default() }
     }
@@ -118,11 +122,11 @@ where
 
 pub struct BlockingMapAdapter<F>(F);
 
-impl<F, Request, Response> CallBlockingMap<Request, Response> for BlockingMapAdapter<F>
+impl<F, Request, Response> CallBlockingMap<Request, Response, ()> for BlockingMapAdapter<F>
 where
     F: FnMut(Request) -> Response,
 {
-    fn call(&mut self, BlockingMap{ request }: BlockingMap<Request>) -> Response {
+    fn call(&mut self, BlockingMap{ request, .. }: BlockingMap<Request, ()>) -> Response {
         (self.0)(request)
     }
 }

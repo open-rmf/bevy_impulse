@@ -31,23 +31,25 @@ use bevy::{
 use std::future::Future;
 
 #[derive(Bundle)]
-pub(crate) struct OperateBlockingMap<F, Request, Response>
+pub(crate) struct OperateBlockingMap<F, Request, Response, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     storage: BlockingMapStorage<F>,
     target: SingleTargetStorage,
     #[bundle(ignore)]
-    _ignore: std::marker::PhantomData<(Request, Response)>,
+    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<F, Request, Response> OperateBlockingMap<F, Request, Response>
+impl<F, Request, Response, Streams> OperateBlockingMap<F, Request, Response, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
         Self {
@@ -63,11 +65,12 @@ struct BlockingMapStorage<F> {
     f: Option<F>,
 }
 
-impl<F, Request, Response> Operation for OperateBlockingMap<F, Request, Response>
+impl<F, Request, Response, Streams> Operation for OperateBlockingMap<F, Request, Response, Streams>
 where
-    F: CallBlockingMap<Request, Response> + 'static + Send + Sync,
+    F: CallBlockingMap<Request, Response, Streams> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.get_entity_mut(self.target.0).or_broken()?
@@ -83,14 +86,17 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
+        let streams = Streams::make_buffer(source, world);
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let mut map = source_mut.get_mut::<BlockingMapStorage<F>>().or_broken()?;
         let mut f = map.f.take().or_broken()?;
 
-        let response = f.call(BlockingMap { request });
+        let response = f.call(BlockingMap { request, streams: streams.clone() });
         map.f = Some(f);
+
+        Streams::process_buffer(streams, source, session, world, roster)?;
 
         world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
         Ok(())
