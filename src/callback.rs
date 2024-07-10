@@ -16,9 +16,9 @@
 */
 
 use crate::{
-    BlockingHandler, AsyncHandler, Channel, InnerChannel, ChannelQueue,
+    BlockingCallback, AsyncCallback, Channel, InnerChannel, ChannelQueue,
     OperationRoster, StreamPack, Input, Provider, ProvideOnce, UnhandledErrors,
-    AddOperation, OperateHandler, ManageInput, OperationError, SetupFailure,
+    AddOperation, OperateCallback, ManageInput, OperationError, SetupFailure,
     OrBroken, OperateTask, Operation, OperationSetup,
 };
 
@@ -34,50 +34,50 @@ use std::{
     future::Future,
 };
 
-/// A handler is similar to a [`Service`](crate::Service) except it is not
+/// A Callback is similar to a [`Service`](crate::Service) except it is not
 /// associated with an [`Entity`]. Instead it can be passed around and shared as an
-/// object. Cloning the Handler will produce a new reference to the same underlying
-/// instance. If the handler has any internal state (e.g. [`Local`](bevy::prelude::Local)
+/// object. Cloning the Callback will produce a new reference to the same underlying
+/// instance. If the Callback has any internal state (e.g. [`Local`](bevy::prelude::Local)
 /// parameters, change trackers, or mutable captured variables), that internal state will
 /// be shared among all its clones.
-///
-/// TODO(@mxgrey): Explain the different ways to instantiate a Handler.
-pub struct Handler<Request, Response, Streams = ()> {
-    pub(crate) inner: Arc<Mutex<InnerHandler<Request, Response, Streams>>>,
+//
+// TODO(@mxgrey): Explain the different ways to instantiate a Callback.
+pub struct Callback<Request, Response, Streams = ()> {
+    pub(crate) inner: Arc<Mutex<InnerCallback<Request, Response, Streams>>>,
 }
 
-impl<Request, Response, Streams> Clone for Handler<Request, Response, Streams> {
+impl<Request, Response, Streams> Clone for Callback<Request, Response, Streams> {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
     }
 }
 
-impl<Request, Response, Streams> Handler<Request, Response, Streams> {
-    pub fn new(handler: impl HandlerTrait<Request, Response, Streams> + 'static + Send) -> Self {
+impl<Request, Response, Streams> Callback<Request, Response, Streams> {
+    pub fn new(callback: impl CallbackTrait<Request, Response, Streams> + 'static + Send) -> Self {
         Self {
             inner: Arc::new(Mutex::new(
-                InnerHandler {
+                InnerCallback {
                     queue: VecDeque::new(),
-                    handler: Some(Box::new(handler)),
+                    callback: Some(Box::new(callback)),
                 }
             ))
         }
     }
 }
 
-pub(crate) struct InnerHandler<Request, Response, Streams> {
-    pub(crate) queue: VecDeque<PendingHandleRequest>,
-    pub(crate) handler: Option<Box<dyn HandlerTrait<Request, Response, Streams> + 'static + Send>>,
+pub(crate) struct InnerCallback<Request, Response, Streams> {
+    pub(crate) queue: VecDeque<PendingCallbackRequest>,
+    pub(crate) callback: Option<Box<dyn CallbackTrait<Request, Response, Streams> + 'static + Send>>,
 }
 
-pub struct HandleRequest<'a> {
+pub struct CallbackRequest<'a> {
     pub(crate) source: Entity,
     pub(crate) target: Entity,
     pub(crate) world: &'a mut World,
     pub(crate) roster: &'a mut OperationRoster,
 }
 
-impl<'a> HandleRequest<'a> {
+impl<'a> CallbackRequest<'a> {
     fn get_request<Request: 'static + Send + Sync>(
         &mut self
     ) -> Result<Input<Request>, OperationError> {
@@ -129,18 +129,18 @@ impl<'a> HandleRequest<'a> {
     }
 }
 
-pub struct PendingHandleRequest {
+pub struct PendingCallbackRequest {
     pub(crate) source: Entity,
     pub(crate) target: Entity,
 }
 
-impl PendingHandleRequest {
+impl PendingCallbackRequest {
     pub(crate) fn activate<'a>(
         self,
         world: &'a mut World,
         roster: &'a mut OperationRoster,
-    ) -> HandleRequest<'a> {
-        HandleRequest {
+    ) -> CallbackRequest<'a> {
+        CallbackRequest {
             source: self.source,
             target: self.target,
             world,
@@ -149,24 +149,24 @@ impl PendingHandleRequest {
     }
 }
 
-pub trait HandlerTrait<Request, Response, Streams> {
-    fn handle(&mut self, request: HandleRequest) -> Result<(), OperationError>;
+pub trait CallbackTrait<Request, Response, Streams> {
+    fn call(&mut self, request: CallbackRequest) -> Result<(), OperationError>;
 }
 
-pub struct BlockingHandlerMarker<M>(std::marker::PhantomData<M>);
+pub struct BlockingCallbackMarker<M>(std::marker::PhantomData<M>);
 
-struct BlockingHandlerSystem<Request, Response, Streams: StreamPack> {
-    system: BoxedSystem<BlockingHandler<Request, Streams>, Response>,
+struct BlockingCallbackSystem<Request, Response, Streams: StreamPack> {
+    system: BoxedSystem<BlockingCallback<Request, Streams>, Response>,
     initialized: bool,
 }
 
-impl<Request, Response, Streams> HandlerTrait<Request, Response, ()> for BlockingHandlerSystem<Request, Response, Streams>
+impl<Request, Response, Streams> CallbackTrait<Request, Response, ()> for BlockingCallbackSystem<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
+    fn call(&mut self, mut input: CallbackRequest) -> Result<(), OperationError> {
         let Input { session, data: request } = input.get_request()?;
 
         if !self.initialized {
@@ -175,7 +175,7 @@ where
 
         let streams = Streams::make_buffer(input.source, input.world);
 
-        let response = self.system.run(BlockingHandler {
+        let response = self.system.run(BlockingCallback {
             request, streams: streams.clone(), source: input.source, session,
         }, input.world);
         self.system.apply_deferred(&mut input.world);
@@ -186,21 +186,21 @@ where
     }
 }
 
-pub struct AsyncHandlerMarker<M>(std::marker::PhantomData<M>);
+pub struct AsyncCallbackMarker<M>(std::marker::PhantomData<M>);
 
-struct AsyncHandlerSystem<Request, Task, Streams: StreamPack> {
-    system: BoxedSystem<AsyncHandler<Request, Streams>, Task>,
+struct AsyncCallbackSystem<Request, Task, Streams: StreamPack> {
+    system: BoxedSystem<AsyncCallback<Request, Streams>, Task>,
     initialized: bool,
 }
 
-impl<Request, Task, Streams> HandlerTrait<Request, Task::Output, Streams> for AsyncHandlerSystem<Request, Task, Streams>
+impl<Request, Task, Streams> CallbackTrait<Request, Task::Output, Streams> for AsyncCallbackSystem<Request, Task, Streams>
 where
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    fn handle(&mut self, mut input: HandleRequest) -> Result<(), OperationError> {
+    fn call(&mut self, mut input: CallbackRequest) -> Result<(), OperationError> {
         let Input { session, data: request } = input.get_request()?;
 
         let channel = input.get_channel(session)?;
@@ -209,7 +209,7 @@ where
             self.system.initialize(&mut input.world);
         }
 
-        let task = self.system.run(AsyncHandler {
+        let task = self.system.run(AsyncCallback {
             request, channel, source: input.source, session,
         }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
@@ -218,35 +218,35 @@ where
     }
 }
 
-struct CallbackHandler<F: 'static + Send> {
+struct MapCallback<F: 'static + Send> {
     callback: F,
 }
 
-impl<Request, Response, Streams, F> HandlerTrait<Request, Response, Streams> for CallbackHandler<F>
+impl<Request, Response, Streams, F> CallbackTrait<Request, Response, Streams> for MapCallback<F>
 where
-    F: FnMut(HandleRequest) -> Result<(), OperationError> + 'static + Send,
+    F: FnMut(CallbackRequest) -> Result<(), OperationError> + 'static + Send,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: 'static + Send + Sync,
 {
-    fn handle(&mut self, request: HandleRequest) -> Result<(), OperationError> {
+    fn call(&mut self, request: CallbackRequest) -> Result<(), OperationError> {
         (self.callback)(request)
     }
 }
 
-pub struct BlockingCallbackMarker<M>(std::marker::PhantomData<M>);
-pub struct AsyncCallbackMarker<M>(std::marker::PhantomData<M>);
+pub struct BlockingMapCallbackMarker<M>(std::marker::PhantomData<M>);
+pub struct AsyncMapCallbackMarker<M>(std::marker::PhantomData<M>);
 
-pub trait AsHandler<M> {
+pub trait AsCallback<M> {
     type Request;
     type Response;
     type Streams;
-    fn as_handler(self) -> Handler<Self::Request, Self::Response, Self::Streams>;
+    fn as_callback(self) -> Callback<Self::Request, Self::Response, Self::Streams>;
 }
 
-impl<Request, Response, M, Sys> AsHandler<BlockingHandlerMarker<(Request, Response, M)>> for Sys
+impl<Request, Response, M, Sys> AsCallback<BlockingCallbackMarker<(Request, Response, M)>> for Sys
 where
-    Sys: IntoSystem<BlockingHandler<Request>, Response, M>,
+    Sys: IntoSystem<BlockingCallback<Request>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -254,17 +254,17 @@ where
     type Response = Response;
     type Streams = ();
 
-    fn as_handler(self) -> Handler<Self::Request, Self::Response, Self::Streams> {
-        Handler::new(BlockingHandlerSystem {
+    fn as_callback(self) -> Callback<Self::Request, Self::Response, Self::Streams> {
+        Callback::new(BlockingCallbackSystem {
             system: Box::new(IntoSystem::into_system(self)),
             initialized: false,
         })
     }
 }
 
-impl<Request, Task, Streams, M, Sys> AsHandler<AsyncHandlerMarker<(Request, Task, Streams, M)>> for Sys
+impl<Request, Task, Streams, M, Sys> AsCallback<AsyncCallbackMarker<(Request, Task, Streams, M)>> for Sys
 where
-    Sys: IntoSystem<AsyncHandler<Request, Streams>, Task, M>,
+    Sys: IntoSystem<AsyncCallback<Request, Streams>, Task, M>,
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -274,17 +274,17 @@ where
     type Response = Task::Output;
     type Streams = Streams;
 
-    fn as_handler(self) -> Handler<Self::Request, Self::Response, Self::Streams> {
-        Handler::new(AsyncHandlerSystem {
+    fn as_callback(self) -> Callback<Self::Request, Self::Response, Self::Streams> {
+        Callback::new(AsyncCallbackSystem {
             system: Box::new(IntoSystem::into_system(self)),
             initialized: false,
         })
     }
 }
 
-impl<Request, Response, Streams, F> AsHandler<BlockingCallbackMarker<(Request, Response, Streams)>> for F
+impl<Request, Response, Streams, F> AsCallback<BlockingMapCallbackMarker<(Request, Response, Streams)>> for F
 where
-    F: FnMut(BlockingHandler<Request, Streams>) -> Response + 'static + Send,
+    F: FnMut(BlockingCallback<Request, Streams>) -> Response + 'static + Send,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
@@ -293,23 +293,23 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
-        let callback = move |mut input: HandleRequest| {
+    fn as_callback(mut self) -> Callback<Self::Request, Self::Response, Self::Streams> {
+        let callback = move |mut input: CallbackRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
             let streams = Streams::make_buffer(input.source, input.world);
-            let response = (self)(BlockingHandler {
+            let response = (self)(BlockingCallback {
                 request, streams: streams.clone(), source: input.source, session,
             });
             Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
             input.give_response(session, response)
         };
-        Handler::new(CallbackHandler { callback })
+        Callback::new(MapCallback { callback })
     }
 }
 
-impl<Request, Task, Streams, F> AsHandler<AsyncCallbackMarker<(Request, Task, Streams)>> for F
+impl<Request, Task, Streams, F> AsCallback<AsyncMapCallbackMarker<(Request, Task, Streams)>> for F
 where
-    F: FnMut(AsyncHandler<Request, Streams>) -> Task + 'static + Send,
+    F: FnMut(AsyncCallback<Request, Streams>) -> Task + 'static + Send,
     Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -319,26 +319,26 @@ where
     type Response = Task::Output;
     type Streams = Streams;
 
-    fn as_handler(mut self) -> Handler<Self::Request, Self::Response, Self::Streams> {
-        let callback = move |mut input: HandleRequest| {
+    fn as_callback(mut self) -> Callback<Self::Request, Self::Response, Self::Streams> {
+        let callback = move |mut input: CallbackRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
             let channel = input.get_channel(session)?;
-            let task = (self)(AsyncHandler {
+            let task = (self)(AsyncCallback {
                 request, channel, source: input.source, session,
             });
             input.give_task(session, task)
         };
-        Handler::new(CallbackHandler { callback })
+        Callback::new(MapCallback { callback })
     }
 }
 
-pub trait IntoBlockingHandler<M> {
+pub trait IntoBlockingCallback<M> {
     type Request;
     type Response;
-    fn into_blocking_handler(self) -> Handler<Self::Request, Self::Response, ()>;
+    fn into_blocking_callback(self) -> Callback<Self::Request, Self::Response, ()>;
 }
 
-impl<Request, Response, M, Sys> IntoBlockingHandler<BlockingHandlerMarker<(Request, Response, M)>> for Sys
+impl<Request, Response, M, Sys> IntoBlockingCallback<BlockingCallbackMarker<(Request, Response, M)>> for Sys
 where
     Sys: IntoSystem<Request, Response, M>,
     Request: 'static + Send + Sync,
@@ -346,16 +346,16 @@ where
 {
     type Request = Request;
     type Response = Response;
-    fn into_blocking_handler(self) -> Handler<Self::Request, Self::Response, ()> {
-        peel_blocking.pipe(self).as_handler()
+    fn into_blocking_callback(self) -> Callback<Self::Request, Self::Response, ()> {
+        peel_blocking.pipe(self).as_callback()
     }
 }
 
-fn peel_blocking<Request>(In(BlockingHandler { request, .. }): In<BlockingHandler<Request>>) -> Request {
+fn peel_blocking<Request>(In(BlockingCallback { request, .. }): In<BlockingCallback<Request>>) -> Request {
     request
 }
 
-impl<Request, Response, F> IntoBlockingHandler<BlockingCallbackMarker<(Request, Response)>> for F
+impl<Request, Response, F> IntoBlockingCallback<BlockingMapCallbackMarker<(Request, Response)>> for F
 where
     F: FnMut(Request) -> Response + 'static + Send,
     Request: 'static + Send + Sync,
@@ -363,22 +363,22 @@ where
 {
     type Request = Request;
     type Response = Response;
-    fn into_blocking_handler(mut self) -> Handler<Self::Request, Self::Response, ()> {
-        let f = move |BlockingHandler { request, .. }| {
+    fn into_blocking_callback(mut self) -> Callback<Self::Request, Self::Response, ()> {
+        let f = move |BlockingCallback { request, .. }| {
             (self)(request)
         };
 
-        f.as_handler()
+        f.as_callback()
     }
 }
 
-pub trait IntoAsyncHandler<M> {
+pub trait IntoAsyncCallback<M> {
     type Request;
     type Response;
-    fn into_async_handler(self) -> Handler<Self::Request, Self::Response, ()>;
+    fn into_async_callback(self) -> Callback<Self::Request, Self::Response, ()>;
 }
 
-impl<Request, Task, M, Sys> IntoAsyncHandler<AsyncHandlerMarker<(Request, Task, (), M)>> for Sys
+impl<Request, Task, M, Sys> IntoAsyncCallback<AsyncCallbackMarker<(Request, Task, (), M)>> for Sys
 where
     Sys: IntoSystem<Request, Task, M>,
     Task: Future + 'static + Send,
@@ -387,16 +387,16 @@ where
 {
     type Request = Request;
     type Response = Task::Output;
-    fn into_async_handler(self) -> Handler<Self::Request, Self::Response, ()> {
-        peel_async.pipe(self).as_handler()
+    fn into_async_callback(self) -> Callback<Self::Request, Self::Response, ()> {
+        peel_async.pipe(self).as_callback()
     }
 }
 
-fn peel_async<Request>(In(AsyncHandler { request, .. }): In<AsyncHandler<Request, ()>>) -> Request {
+fn peel_async<Request>(In(AsyncCallback { request, .. }): In<AsyncCallback<Request, ()>>) -> Request {
     request
 }
 
-impl<Request, Task, F> IntoAsyncHandler<AsyncCallbackMarker<(Request, Task, ())>> for F
+impl<Request, Task, F> IntoAsyncCallback<AsyncMapCallbackMarker<(Request, Task, ())>> for F
 where
     F: FnMut(Request) -> Task + 'static + Send,
     Task: Future + 'static + Send,
@@ -405,16 +405,16 @@ where
 {
     type Request = Request;
     type Response = Task::Output;
-    fn into_async_handler(mut self) -> Handler<Self::Request, Self::Response, ()> {
-        let f = move |AsyncHandler { request, .. }| {
+    fn into_async_callback(mut self) -> Callback<Self::Request, Self::Response, ()> {
+        let f = move |AsyncCallback { request, .. }| {
             (self)(request)
         };
 
-        f.as_handler()
+        f.as_callback()
     }
 }
 
-impl<Request, Response, Streams> ProvideOnce for Handler<Request, Response, Streams>
+impl<Request, Response, Streams> ProvideOnce for Callback<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -425,11 +425,11 @@ where
     type Streams = Streams;
 
     fn connect(self, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
-        commands.add(AddOperation::new(source, OperateHandler::new(self, target)));
+        commands.add(AddOperation::new(source, OperateCallback::new(self, target)));
     }
 }
 
-impl<Request, Response, Streams> Provider for Handler<Request, Response, Streams>
+impl<Request, Response, Streams> Provider for Callback<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,

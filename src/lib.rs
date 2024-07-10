@@ -21,6 +21,9 @@ pub use buffer::*;
 pub mod builder;
 pub use builder::*;
 
+pub mod callback;
+pub use callback::*;
+
 pub mod cancel;
 pub use cancel::*;
 
@@ -41,9 +44,6 @@ pub use errors::*;
 
 pub mod flush;
 pub use flush::*;
-
-pub mod handler;
-pub use handler::*;
 
 pub mod impulse;
 pub use impulse::*;
@@ -145,7 +145,7 @@ pub type InBlockingService<Request, Streams = ()> = In<BlockingService<Request, 
 /// specify its input request type. Being async means it must return a
 /// `Future<Output=Response>` which will be processed by a task pool.
 ///
-/// This comes with a Channel that allows your Future to interact with Bevy's
+/// This comes with a [`Channel`] that allows your Future to interact with Bevy's
 /// ECS asynchronously while it is polled from inside the task pool.
 #[non_exhaustive]
 pub struct AsyncService<Request, Streams: StreamPack = ()> {
@@ -166,11 +166,11 @@ pub struct AsyncService<Request, Streams: StreamPack = ()> {
 /// Use this to reduce backet noise when you need `In<AsyncService<R, S>>`.
 pub type InAsyncService<Request, Streams = ()> = In<AsyncService<Request, Streams>>;
 
-/// Use BlockingHandler to indicate that your system is meant to define a
-/// blocking [`Handler`]. Handlers are different from services because they are
+/// Use BlockingCallback to indicate that your system is meant to define a
+/// blocking [`Callback`]. Callbacks are different from services because they are
 /// not associated with any entity.
 #[non_exhaustive]
-pub struct BlockingHandler<Request, Streams: StreamPack = ()> {
+pub struct BlockingCallback<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
@@ -181,12 +181,12 @@ pub struct BlockingHandler<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
-/// Use AsyncHandler to indicate that your system or function is meant to define
-/// an async [`Handler`]. An async handler is not associated with any entity,
+/// Use AsyncCallback to indicate that your system or function is meant to define
+/// an async [`Callback`]. An async callback is not associated with any entity,
 /// and it must return a [`Future<Output=Response>`](std::future::Future) that
 /// will be polled by the async task pool.
 #[non_exhaustive]
-pub struct AsyncHandler<Request, Streams: StreamPack = ()> {
+pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The channel that allows querying and syncing with the world while the
@@ -226,12 +226,4 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
 pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     pub request: Request,
     pub channel: Channel<Streams>,
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-
-    }
 }

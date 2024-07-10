@@ -20,7 +20,7 @@ use bevy::prelude::{Entity, Commands};
 /// The `Provider` trait encapsulates the idea of providing a response to a
 /// request. There are three different provider types with different advantages:
 /// - [`Service`](crate::Service)
-/// - [`Handler`](crate::Handler)
+/// - [`Callback`](crate::Callback)
 /// - [`AsyncMap`](crate::AsyncMap)
 /// - [`BlockingMap`](crate::BlockingMap)
 ///

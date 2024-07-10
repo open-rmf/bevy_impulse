@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    Operation, SingleTargetStorage, Handler, HandleRequest, PendingHandleRequest,
+    Operation, SingleTargetStorage, Callback, CallbackRequest, PendingCallbackRequest,
     StreamPack, SingleInputStorage, OperationResult, OrBroken, InputBundle,
     OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
     OperationReachability, ReachabilityResult, OperationError,
@@ -25,21 +25,21 @@ use crate::{
 
 use bevy::prelude::{Entity, Component};
 
-pub(crate) struct OperateHandler<Request, Response, Streams> {
-    handler: Handler<Request, Response, Streams>,
+pub(crate) struct OperateCallback<Request, Response, Streams> {
+    callback: Callback<Request, Response, Streams>,
     target: Entity,
 }
 
-impl<Request, Response, Streams> OperateHandler<Request, Response, Streams> {
+impl<Request, Response, Streams> OperateCallback<Request, Response, Streams> {
     pub(crate) fn new(
-        handler: Handler<Request, Response, Streams>,
+        callback: Callback<Request, Response, Streams>,
         target: Entity,
     ) -> Self {
-        Self { handler, target }
+        Self { callback, target }
     }
 }
 
-impl<Request, Response, Streams> Operation for OperateHandler<Request, Response, Streams>
+impl<Request, Response, Streams> Operation for OperateCallback<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -51,7 +51,7 @@ where
 
         world.entity_mut(source).insert((
             InputBundle::<Request>::new(),
-            HandlerStorage { handler: self.handler },
+            CallbackStorage { callback: self.callback },
             SingleTargetStorage::new(self.target),
             ActiveTasksStorage::default(),
         ));
@@ -63,36 +63,36 @@ where
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let handler = source_mut.get_mut::<HandlerStorage<Request, Response, Streams>>()
-            .or_broken()?.handler.clone();
+        let callback = source_mut.get_mut::<CallbackStorage<Request, Response, Streams>>()
+            .or_broken()?.callback.clone();
 
-        let mut handler_impl = {
-            let mut inner = handler.inner.lock().or_broken()?;
-            match inner.handler.take() {
-                Some(handler_impl) => handler_impl,
+        let mut callback_impl = {
+            let mut inner = callback.inner.lock().or_broken()?;
+            match inner.callback.take() {
+                Some(callback_impl) => callback_impl,
                 None => {
-                    // The handler implementation is not available, so queue up
+                    // The callback implementation is not available, so queue up
                     // this request.
-                    inner.queue.push_back(PendingHandleRequest { source, target });
+                    inner.queue.push_back(PendingCallbackRequest { source, target });
                     return Ok(());
                 }
             }
         };
 
-        // The handler implementation is available, so run it immediately
+        // The callback implementation is available, so run it immediately
         // for this operation.
-        let r = handler_impl.handle(HandleRequest { source, target, world, roster });
+        let r = callback_impl.call(CallbackRequest { source, target, world, roster });
 
         loop {
             // Empty out the queue in case that was filled up at all from doing the handling
-            let mut inner = handler.inner.lock().or_broken()?;
+            let mut inner = callback.inner.lock().or_broken()?;
             if let Some(pending) = inner.queue.pop_front() {
                 let source = pending.source;
-                if let Err(OperationError::Broken(backtrace)) = handler_impl.handle(pending.activate(world, roster)) {
+                if let Err(OperationError::Broken(backtrace)) = callback_impl.call(pending.activate(world, roster)) {
                     try_emit_broken(source, backtrace, world, roster);
                 }
             } else {
-                inner.handler = Some(handler_impl);
+                inner.callback = Some(callback_impl);
                 break;
             }
         }
@@ -118,6 +118,6 @@ where
 }
 
 #[derive(Component)]
-struct HandlerStorage<Request, Response, Streams> {
-    handler: Handler<Request, Response, Streams>,
+struct CallbackStorage<Request, Response, Streams> {
+    callback: Callback<Request, Response, Streams>,
 }

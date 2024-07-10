@@ -128,6 +128,9 @@ pub trait Stream: 'static + Send + Sync + Sized {
 }
 
 pub struct StreamBuffer<T: Stream> {
+    // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
+    // no heap allocation is needed each time a stream is used in a blocking
+    // function.
     container: Rc<RefCell<T::Container>>,
     target: Option<Entity>,
 }
