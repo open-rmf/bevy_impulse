@@ -21,9 +21,9 @@ use bevy::prelude::Entity;
 
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
-    ForkClone, StreamPack, Provider, ProvideOnce,
+    ForkClone, StreamPack, Provider, ProvideOnce, Scope,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
-    ForkTargetStorage, StreamTargetMap,
+    ForkTargetStorage, StreamTargetMap, ScopeSettings,
     make_result_branching, make_cancel_filter_on_err,
     make_option_branching, make_cancel_filter_on_none,
 };
@@ -213,6 +213,42 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Task::Output: 'static + Send + Sync,
     {
         self.then_node(f.into_async_map())
+    }
+
+    /// Build a workflow scope to be used as an element in this chain.
+    ///
+    /// If you want to connect to the stream outputs, use
+    /// [`Self::then_scope_node`] instead.
+    #[must_use]
+    pub fn then_scope<Response, Streams>(
+        self,
+        settings: ScopeSettings,
+        build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder),
+    ) -> Chain<'w, 's, 'a, 'b, Response>
+    where
+        Response: 'static + Send + Sync,
+        Streams: StreamPack,
+    {
+        self.builder.create_scope_impl::<T, Response, Streams>(
+            self.target, settings, build,
+        ).output.chain(self.builder)
+    }
+
+    /// From the current target in the chain, build a [scoped](Scope) workflow
+    /// and then get back a node that represents that scoped workflow.
+    #[must_use]
+    pub fn then_scope_node<Response, Streams>(
+        self,
+        settings: ScopeSettings,
+        build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder),
+    ) -> Node<T, Response, Streams>
+    where
+        Response: 'static + Send + Sync,
+        Streams: StreamPack,
+    {
+        self.builder.create_scope_impl::<T, Response, Streams>(
+            self.target, settings, build,
+        )
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
