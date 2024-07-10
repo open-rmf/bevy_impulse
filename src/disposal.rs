@@ -66,6 +66,10 @@ impl Disposal {
     ) -> Disposal {
         Supplanted { supplanted_at_node, supplanted_by_node, supplanting_session }.into()
     }
+
+    pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
+        Filtered { filtered_at_node, reason }.into()
+    }
 }
 
 #[derive(Debug)]

@@ -40,8 +40,8 @@ use smallvec::SmallVec;
 mod branching;
 pub(crate) use branching::*;
 
-mod cancel_filter;
-pub(crate) use cancel_filter::*;
+mod filter;
+pub(crate) use filter::*;
 
 mod fork_clone;
 pub(crate) use fork_clone::*;

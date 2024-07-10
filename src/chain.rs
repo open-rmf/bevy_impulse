@@ -19,16 +19,18 @@ use std::future::Future;
 
 use bevy::prelude::Entity;
 
+use smallvec::SmallVec;
+
+use std::error::Error;
+
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
     ForkClone, StreamPack, Provider, ProvideOnce, Scope,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
-    ForkTargetStorage, StreamTargetMap, ScopeSettings,
-    make_result_branching, make_cancel_filter_on_err,
-    make_option_branching, make_cancel_filter_on_none,
+    ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
+    CreateDisposalFilter,
+    make_result_branching, make_option_branching,
 };
-
-use smallvec::SmallVec;
 
 pub mod fork_clone_builder;
 pub use fork_clone_builder::*;
@@ -272,21 +274,21 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.then(filter_provider).cancel_on_none()
     }
 
-    // /// Same as [`Chain::cancellation_filter`] but the chain will be disposed
-    // /// instead of cancelled, so the workflow may continue if the termination
-    // /// node can still be reached.
-    // pub fn disposal_filter<ThenResponse, F>(
-    //     self,
-    //     filter_provider: F,
-    // ) -> Chain<'w, 's, 'a, ThenResponse>
-    // where
-    //     ThenResponse: 'static + Send + Sync,
-    //     F: Provider<Request = Response, Response = Option<ThenResponse>>,
-    //     F::Response: 'static + Send + Sync,
-    //     F::Streams: StreamPack,
-    // {
-    //     self.cancellation_filter(filter_provider).dispose_on_cancel()
-    // }
+    /// Same as [`Chain::cancellation_filter`] but the chain will be disposed
+    /// instead of cancelled, so the workflow may continue if the termination
+    /// node can still be reached.
+    pub fn disposal_filter<ThenResponse, F>(
+        self,
+        filter_provider: F,
+    ) -> Chain<'w, 's, 'a, 'b, ThenResponse>
+    where
+        ThenResponse: 'static + Send + Sync,
+        F: Provider<Request = T, Response = Option<ThenResponse>>,
+        F::Response: 'static + Send + Sync,
+        F::Streams: StreamPack,
+    {
+        self.then(filter_provider).dispose_on_none()
+    }
 
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different impulse chains: one
@@ -517,47 +519,98 @@ where
         (u, v)
     }
 
-    // /// If the result contains an [`Err`] value then the chain will be cancelled
-    // /// from this link onwards. The next link in the chain will receive a `T` if
-    // /// the chain is not cancelled.
-    // ///
-    // /// Note that when cancelling in this way, you will lose the `E` data inside
-    // /// of the [`Err`] variant. If you want to divert the execution flow during
-    // /// an [`Err`] result but still want to access the `E` data, then you can
-    // /// use `Chain::branch_for_err` or `Chain::branch_result_zip` instead.
-    // ///
-    // /// ```
-    // /// use bevy_impulse::{*, testing::*};
-    // /// let mut context = TestingContext::minimal_plugins();
-    // /// let mut promise = context.build(|commands| {
-    // ///     commands
-    // ///     .provide("hello")
-    // ///     .map_block(produce_err)
-    // ///     .cancel_on_err()
-    // ///     .take()
-    // /// });
-    // ///
-    // /// context.run_while_pending(&mut promise);
-    // /// assert!(promise.peek().is_cancelled());
-    // /// ```
-    // pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, T> {
-    //     let source = self.target;
-    //     let target = self.commands.spawn(UnusedTarget).id();
+    /// If the result contains an [`Err`] value then the entire scope that
+    /// contains this operation will be immediately cancelled. If the scope is
+    /// within a node of an outer workflow, then the node will emit a disposal
+    /// for its outer workflow. Otherwise if this is the root scope of a workflow
+    /// then the whole workflow is immediately cancelled. This effect will happen
+    /// even if the scope is set to be uninterruptible.
+    ///
+    /// This operation only works for results with an [`Err`] variant that
+    /// implements the [`Error`] trait. If your [`Err`] variant does not implement
+    /// that trait, then you can use [`Self::cancel_on_quiet_err`] instead.
+    ///
+    /// ```
+    /// use bevy_impulse::{*, testing::*};
+    /// let mut context = TestingContext::minimal_plugins();
+    /// let mut promise = context.build(|commands| {
+    ///     commands
+    ///     .provide("hello")
+    ///     .map_block(produce_err)
+    ///     .cancel_on_err()
+    ///     .take()
+    /// });
+    ///
+    /// context.run_while_pending(&mut promise);
+    /// assert!(promise.peek().is_cancelled());
+    /// ```
+    #[must_use]
+    pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        E: Error,
+    {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
 
-    //     self.commands.add(AddOperation::new(
-    //         source,
-    //         make_cancel_filter_on_err::<T, E>(target),
-    //     ));
+        self.builder.commands.add(AddOperation::new(
+            source,
+            CreateCancelFilter::on_err::<T, E>(target),
+        ));
 
-    //     Chain::new(self.scope, target, self.commands)
-    // }
+        Chain::new(target, self.builder)
+    }
 
-    // /// If the result contains an [`Err`] value then the chain will be disposed
-    // /// from this link onwards. Disposal means that the chain will terminate at
-    // /// this point but no cancellation behavior will be triggered.
-    // pub fn dispose_on_err(self) -> Chain<'w, 's, 'a, T> {
-    //     self.cancel_on_err().dispose_on_cancel()
-    // }
+    /// Same as [`Self::cancel_on_err`] except it also works for [`Err`] variants
+    /// that do not implement [`Error`]. The catch is that their error message
+    /// will not be included in the [`Filtered`](crate::Filtered) information
+    /// that gets propagated outward.
+    #[must_use]
+    pub fn cancel_on_quiet_err(self) -> Chain<'w, 's, 'a, 'b, T> {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+
+        self.builder.commands.add(AddOperation::new(
+            source,
+            CreateCancelFilter::on_quiet_err::<T, E>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// If the output contains an [`Err`] value then the output will be disposed.
+    ///
+    /// Disposal means that the node that the output is connected to will simply
+    /// not be triggered, but the workflow is not necessarily cancelled. If a
+    /// disposal makes it impossible for the workflow to terminate, then the
+    /// workflow will be cancelled immediately.
+    #[must_use]
+    pub fn dispose_on_err(self) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        E: Error,
+    {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+
+        self.builder.commands.add(AddOperation::new(
+            source,
+            CreateDisposalFilter::on_err::<T, E>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    #[must_use]
+    pub fn dispose_on_quiet_err(self) -> Chain<'w, 's, 'a, 'b, T> {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+
+        self.builder.commands.add(AddOperation::new(
+            source,
+            CreateDisposalFilter::on_quiet_err::<T, E>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
 }
 
 impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, Option<T>>
@@ -626,7 +679,26 @@ where
 
         self.builder.commands.add(AddOperation::new(
             source,
-            make_cancel_filter_on_none::<T>(target),
+            CreateCancelFilter::on_none::<T>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// If the output contains [`None`] value then the output will be disposed.
+    ///
+    /// Disposal means that the node that the output is connected to will simply
+    /// not be triggered, but the workflow is not necessarily cancelled. If a
+    /// disposal makes it impossible for the workflow to terminate, then the
+    /// workflow will be cancelled immediately.
+    #[must_use]
+    pub fn dispose_on_none(self) -> Chain<'w, 's, 'a, 'b, T> {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+
+        self.builder.commands.add(AddOperation::new(
+            source,
+            CreateDisposalFilter::on_none::<T>(target),
         ));
 
         Chain::new(target, self.builder)
