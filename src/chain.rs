@@ -231,8 +231,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
+        let exit_scope = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.create_scope_impl::<T, Response, Streams>(
-            self.target, settings, build,
+            self.target, exit_scope, settings, build,
         ).output.chain(self.builder)
     }
 
@@ -248,8 +249,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
+        let exit_scope = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.create_scope_impl::<T, Response, Streams>(
-            self.target, settings, build,
+            self.target, exit_scope, settings, build,
         )
     }
 

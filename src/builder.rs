@@ -123,7 +123,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Streams: StreamPack,
     {
         let scope_id = self.commands.spawn(()).id();
-        self.create_scope_impl(scope_id, settings, build)
+        let exit_scope = self.commands.spawn(UnusedTarget).id();
+        self.create_scope_impl(scope_id, exit_scope, settings, build)
     }
 
     /// It is possible for a scope to be cancelled before it terminates. Even a
@@ -152,32 +153,21 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<T, (), ()>, &mut Builder),
     ) {
         let cancelling_scope_id = self.commands.spawn(()).id();
-        let cancelling_operation = OperateScope::<T, (), ()>::new(
-            cancelling_scope_id, Some(self.finish_scope_cancel), settings, self.commands,
+        let _ = self.create_scope_impl::<T, (), ()>(
+            cancelling_scope_id,
+            self.finish_scope_cancel,
+            settings,
+            build,
         );
-        self.commands.add(AddOperation::new(cancelling_scope_id, cancelling_operation));
 
         let begin_cancel = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
             begin_cancel,
             BeginCancel::<T>::new(self.scope, from_buffer.source, cancelling_scope_id),
         ));
-        let mut builder = Builder {
-            scope: cancelling_scope_id,
-            finish_scope_cancel: cancelling_operation.finish_cancel(),
-            commands: self.commands,
-        };
-
-        let scope = Scope {
-            input: Output::new(cancelling_scope_id, cancelling_operation.enter_scope()),
-            terminate: InputSlot::new(cancelling_scope_id, cancelling_operation.terminal()),
-            streams: (),
-        };
-
-        build(scope, &mut builder);
     }
 
-    /// Get the scope that this builder is building for
+    /// Get the scope that this builder is building for.
     pub fn scope(&self) -> Entity {
         self.scope
     }
@@ -191,6 +181,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub(crate) fn create_scope_impl<Request, Response, Streams>(
         &mut self,
         scope_id: Entity,
+        exit_scope: Entity,
         settings: ScopeSettings,
         build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
     ) -> Node<Request, Response, Streams>
@@ -199,10 +190,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
-        let exit_scope = self.commands.spawn(UnusedTarget).id();
         let operation = OperateScope::<Request, Response, Streams>::new(
             scope_id, Some(exit_scope), settings, self.commands,
         );
+        let enter_scope = operation.enter_scope();
+        let finish_scope_cancel = operation.finish_cancel();
+        let terminal = operation.terminal();
         self.commands.add(AddOperation::new(scope_id, operation));
 
         let (stream_in, stream_out) = Streams::spawn_scope_streams(
@@ -213,13 +206,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let mut builder = Builder {
             scope: scope_id,
-            finish_scope_cancel: operation.finish_cancel(),
+            finish_scope_cancel,
             commands: self.commands,
         };
 
         let scope = Scope {
-            input: Output::new(scope_id, operation.enter_scope()),
-            terminate: InputSlot::new(scope_id, operation.terminal()),
+            input: Output::new(scope_id, enter_scope),
+            terminate: InputSlot::new(scope_id, terminal),
             streams: stream_in,
         };
 

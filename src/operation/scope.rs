@@ -61,6 +61,8 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
     exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
     finish_cancel: Entity,
+    /// Settings for the scope
+    settings: ScopeSettings,
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
@@ -71,12 +73,11 @@ impl<Request, Response, Streams> Clone for OperateScope<Request, Response, Strea
             terminal: self.terminal,
             exit_scope: self.exit_scope,
             finish_cancel: self.finish_cancel,
+            settings: self.settings.clone(),
             _ignore: Default::default(),
         }
     }
 }
-
-impl<Request, Response, Streams> Copy for OperateScope<Request, Response, Streams> {}
 
 impl<Request, Response, Streams> OperateScope<Request, Response, Streams> {
     pub(crate) fn terminal(&self) -> Entity {
@@ -108,21 +109,34 @@ impl ScopedSession {
 }
 
 #[derive(Component)]
+struct ScopeSettingsStorage(ScopeSettings);
+
+#[derive(Component)]
 pub(crate) enum ScopedSessionStatus {
     Ongoing,
     Finished,
+    /// The scope was asked to cleanup from an external source, but it has an
+    /// uninterruptible setting. We are waiting for a termination or internal
+    /// cancel to trigger before doing a cleanup.
+    DeferredCleanup,
+    /// The scope has already begun the cleanup process
     Cleanup,
     Cancelled(Cancellation),
 }
 
 impl ScopedSessionStatus {
-    fn to_cleanup(&mut self) -> bool {
+    fn to_cleanup(&mut self, uninterruptible: bool) -> bool {
         if matches!(self, Self::Cleanup) {
             return false;
         }
 
-        *self = Self::Cleanup;
-        true
+        if uninterruptible {
+            *self = Self::DeferredCleanup;
+            return false;
+        } else {
+            *self = Self::Cleanup;
+            return true;
+        }
     }
 
     pub(crate) fn to_finished(&mut self) -> bool {
@@ -132,11 +146,19 @@ impl ScopedSessionStatus {
             *self = Self::Finished;
             return true;
         }
+
+        if matches!(self, Self::DeferredCleanup) {
+            // We've been waiting for the scope to finish before beginning
+            // cleanup because the scope is uninterruptible.
+            *self = Self::Cleanup;
+            return true;
+        }
+
         false
     }
 
     fn to_cancelled(&mut self, cancellation: Cancellation) -> bool {
-        if matches!(self, Self::Ongoing) {
+        if matches!(self, Self::Ongoing | Self::DeferredCleanup) {
             *self = Self::Cancelled(cancellation);
             return true;
         }
@@ -169,7 +191,6 @@ where
         source_mut.insert((
             InputBundle::<Request>::new(),
             ScopeEntryStorage(self.enter_scope),
-            FinishedStagingStorage(self.terminal),
             ScopeContents::new(),
             ScopedSessionStorage::default(),
             TerminalStorage(self.terminal),
@@ -178,6 +199,7 @@ where
             FinalizeScopeCleanup(Self::finalize_scope_cleanup),
             BeginCancelStorage::default(),
             FinishCancelStorage(self.finish_cancel),
+            ScopeSettingsStorage(self.settings),
         ));
 
         if let Some(exit_scope) = self.exit_scope {
@@ -218,6 +240,9 @@ where
         OperationCleanup { source, session, world, roster }: OperationCleanup
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let uninterruptible = source_mut.get::<ScopeSettingsStorage>().or_broken()?.0
+            .is_uninterruptible();
+
         let pairs: SmallVec<[_; 16]> = source_mut
             .get_mut::<ScopedSessionStorage>()
             .or_broken()?
@@ -225,7 +250,7 @@ where
             .iter_mut()
             .filter(|pair| pair.parent_session == session)
             .filter_map(|p| {
-                if p.status.to_cleanup() {
+                if p.status.to_cleanup(uninterruptible) {
                     Some(p.scoped_session)
                 } else {
                     None
@@ -241,7 +266,7 @@ where
 
         for scoped_session in pairs {
             let source_ref = world.get_entity(source).or_broken()?;
-            let staging_node = source_ref.get::<FinishedStagingStorage>().or_broken()?.0;
+            let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
             let nodes = source_ref.get::<ScopeContents>().or_broken()?.nodes().clone();
             for node in nodes {
                 OperationCleanup { source: node, session: scoped_session, world, roster }.clean();
@@ -249,7 +274,7 @@ where
 
             // OperateScope::cleanup gets called when the entire scope is being cancelled
             // so we need to clear out the staging node as well.
-            OperationCleanup { source: staging_node, session: scoped_session, world, roster }.clean();
+            OperationCleanup { source: terminal, session: scoped_session, world, roster }.clean();
         }
 
         Ok(())
@@ -261,7 +286,6 @@ where
         }
 
         let source_ref = reachability.world.get_entity(reachability.source).or_broken()?;
-        let staging = source_ref.get::<FinishedStagingStorage>().or_broken()?.0;
 
         if let Some(pair) = source_ref
             .get::<ScopedSessionStorage>().or_broken()?
@@ -272,12 +296,8 @@ where
                 pair.scoped_session,
                 reachability.source,
                 reachability.world,
-                &mut visited
+                &mut visited,
             );
-
-            if scoped_reachability.check_upstream(staging)? {
-                return Ok(true);
-            }
 
             let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
             if scoped_reachability.check_upstream(terminal)? {
@@ -343,6 +363,7 @@ where
             terminal,
             exit_scope,
             finish_cancel,
+            settings,
             _ignore: Default::default(),
         };
 
@@ -478,8 +499,14 @@ where
                 // so we'll return a broken error here.
                 None.or_broken()?;
             }
+            ScopedSessionStatus::DeferredCleanup => {
+                // We shouldn't be in this function if the session is in a
+                // deferred cleanup state. We should be waiting for a finish
+                // or a cancellation to occur.
+                None.or_broken()?;
+            }
             ScopedSessionStatus::Finished => {
-                let staging = source_mut.get::<FinishedStagingStorage>().or_broken()?.0;
+                let terminal = source_mut.get::<TerminalStorage>().or_broken()?.0;
                 let (target, blocker) = source_mut.get_mut::<ExitTargetStorage>()
                     .and_then(|mut storage| storage.map.remove(&scoped_session))
                     .map(|exit| (exit.target, exit.blocker))
@@ -491,7 +518,7 @@ where
                     .or_broken()?;
 
                 let response = clean.world
-                    .get_mut::<Staging<Response>>(staging).or_broken()?.0
+                    .get_mut::<Staging<Response>>(terminal).or_broken()?.0
                     .remove(&clean.session).or_broken()?;
                 clean.world.get_entity_mut(target).or_broken()?.give_input(
                     pair.parent_session, response, clean.roster,
@@ -564,15 +591,6 @@ pub struct FinalizeScopeCleanup(pub(crate) fn(OperationCleanup) -> OperationResu
 #[derive(Component)]
 struct ScopeEntryStorage(Entity);
 
-#[derive(Component)]
-pub struct FinishedStagingStorage(Entity);
-
-impl FinishedStagingStorage {
-    pub fn get(&self) -> Entity {
-        self.0
-    }
-}
-
 pub(crate) struct Terminate<T> {
     _ignore: std::marker::PhantomData<T>,
 }
@@ -600,6 +618,7 @@ where
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
+            SingleInputStorage::empty(),
             Staging::<T>::new(),
         ));
         Ok(())
@@ -651,13 +670,17 @@ where
         Ok(())
     }
 
-    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<T>()? {
             return Ok(true);
         }
 
         let staging = reachability.world.get::<Staging<T>>(reachability.source).or_broken()?;
-        Ok(staging.0.contains_key(&reachability.session))
+        if staging.0.contains_key(&reachability.session) {
+            return Ok(true);
+        }
+
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 

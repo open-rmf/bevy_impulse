@@ -153,7 +153,7 @@ pub enum DeliverySettings {
 }
 
 /// Settings which determine how the top-level scope of the workflow behaves.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ScopeSettings {
     /// Should we prevent the scope from being interrupted (e.g. cancelled)?
     /// False by default, meaning by default scopes can be cancelled or
@@ -198,18 +198,21 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         let scope = OperateScope::<Request, Response, Streams>::new(
             scope_id, None, settings.scope, self,
         );
+        let enter_scope = scope.enter_scope();
+        let finish_scope_cancel = scope.finish_cancel();
+        let terminal = scope.terminal();
         self.add(AddOperation::new(scope_id, scope));
         let mut builder = Builder {
             scope: scope_id,
-            finish_scope_cancel: scope.finish_cancel(),
+            finish_scope_cancel,
             commands: self
         };
 
         let streams = Streams::spawn_workflow_streams(&mut builder);
 
         let scope = Scope {
-            input: Output::new(scope_id, scope.enter_scope()),
-            terminate: InputSlot::new(scope_id, scope.terminal()),
+            input: Output::new(scope_id, enter_scope),
+            terminate: InputSlot::new(scope_id, terminal),
             streams,
         };
 
