@@ -744,26 +744,34 @@ mod tests {
             .input
             .chain(builder)
             .map_block(add)
+            .map_block(print_debug(format!("line {}", line!())))
             .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
                 scope
                 .input
                 .chain(builder)
+                .map_block(print_debug(format!("line {}", line!())))
                 .fork_clone_zip((
                     |chain: Chain<f64>| {
                         chain
+                        .map_block(print_debug(format!("line {}", line!())))
                         .map_block(|value|
                             WaitRequest {
                                 duration: Duration::from_secs_f64(value),
                                 value,
                             }
                         )
+                        .map_block(print_debug(format!("line {}", line!())))
                         .map_async(wait)
+                        .map_block(print_debug(format!("line {}", line!())))
                         .connect(scope.terminate);
                     },
                     |chain: Chain<f64>| {
                         chain
+                        .map_block(print_debug(format!("line {}", line!())))
                         .map_block(|a| (a, a))
+                        .map_block(print_debug(format!("line {}", line!())))
                         .map_block(add)
+                        .map_block(print_debug(format!("line {}", line!())))
                         .connect(scope.terminate);
                     }
                 ));
@@ -782,7 +790,7 @@ mod tests {
         context.run_with_conditions(
             &mut promise,
             FlushConditions::new()
-            .with_update_count(5),
+            .with_update_count(100),
         );
 
         dbg!(context.get_unhandled_errors());

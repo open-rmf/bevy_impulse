@@ -251,7 +251,7 @@ pub fn to_uppercase(value: String) -> String {
     value.to_uppercase()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct WaitRequest<Value> {
     pub duration: std::time::Duration,
     pub value: Value
@@ -269,7 +269,7 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
 
 /// Use this to add a blocking map to the chain that simply prints a debug
 /// message and then passes the data along.
-pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl FnOnce(T) -> T {
+pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl Fn(T) -> T {
     move |value| {
         println!("{header}: {value:?}");
         value
