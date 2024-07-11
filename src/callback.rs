@@ -18,8 +18,8 @@
 use crate::{
     BlockingCallback, AsyncCallback, Channel, InnerChannel, ChannelQueue,
     OperationRoster, StreamPack, Input, Provider, ProvideOnce,
-    AddOperation, OperateCallback, ManageInput, OperationError, SetupFailure,
-    OrBroken, OperateTask, Operation, OperationSetup,
+    AddOperation, OperateCallback, ManageInput, OperationError,
+    OrBroken, OperateTask,
 };
 
 use bevy::{

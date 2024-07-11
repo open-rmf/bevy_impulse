@@ -89,7 +89,7 @@ where
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
-            dbg!(self.target),
+            self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
         let mut map = StreamTargetMap::default();
@@ -107,7 +107,7 @@ where
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
-            dbg!(self.target),
+            self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
         response_promise
@@ -327,39 +327,115 @@ impl<T> Default for Collection<T> {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
-    use std::time::Duration;
+    use std::time::{Instant, Duration};
 
     #[test]
-    fn test_provide() {
+    fn test_blocking_map() {
         let mut context = TestingContext::minimal_plugins();
 
         let mut promise = context.build(|commands| {
-            commands.provide("hello".to_owned()).take_response()
+            commands
+            .request("hello".to_owned(), to_uppercase.into_blocking_map())
+            .take_response()
         });
-        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+
+        context.run_while_pending(&mut promise);
+        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request("hello".to_owned(), to_uppercase.into_blocking_map_once())
+            .take_response()
+        });
+
+        context.run_while_pending(&mut promise);
+        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.build(|commands| {
+            commands
+            .provide("hello".to_owned())
+            .map_block(to_uppercase)
+            .take_response()
+        });
+
+        context.run_while_pending(&mut promise);
+        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.build(|commands| {
+            commands
+            .provide("hello".to_owned())
+            .map_block(|request| request.to_uppercase())
+            .take_response()
+        });
+
+        context.run_while_pending(&mut promise);
+        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(context.no_unhandled_errors());
     }
 
     #[test]
     fn test_async_map() {
         let mut context = TestingContext::minimal_plugins();
 
+        let request = WaitRequest {
+            duration: Duration::from_secs_f64(0.001),
+            value: "hello".to_owned(),
+        };
+
+        let conditions = FlushConditions::new()
+            .with_timeout(Duration::from_secs_f64(5.0));
+
         let mut promise = context.build(|commands| {
             commands
-            .request(
-                WaitRequest {
-                    duration: Duration::from_secs_f64(0.001),
-                    value: "hello".to_owned(),
-                },
-                wait.into_async_map(),
-            )
+            .request(request.clone(), wait.into_async_map())
             .take_response()
         });
 
-        context.run_with_conditions(
-            &mut promise,
-            FlushConditions::new()
-            .with_timeout(Duration::from_secs_f64(5.0)),
-        );
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
         assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(request.clone(), wait.into_async_map_once())
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.build(|commands| {
+            commands
+            .provide(request.clone())
+            .map_async(wait)
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.build(|commands| {
+            commands
+            .provide(request.clone())
+            .map_async(|request| {
+                async move {
+                    let t = Instant::now();
+                    while t.elapsed() < request.duration {
+                        // Busy wait
+                    }
+                    request.value
+                }
+            })
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
     }
 }

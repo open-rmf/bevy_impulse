@@ -190,7 +190,7 @@ where
 
         let task_source = world.spawn(()).id();
         OperateTask::new(
-            dbg!(task_source), session, source, dbg!(target), task, None, sender
+            task_source, session, source, target, task, None, sender,
         ).add(world, roster);
         Ok(())
     }

@@ -131,7 +131,14 @@ fn collect_from_channels(
         // TODO(@mxgrey): Make sure this works for services which are spawned by
         // providers that are being flushed.
         for (e, mut hook) in new_service_query.iter_mut(world) {
-            hook.lifecycle = Some(ServiceLifecycle::new(e, lifecycles.sender.clone()));
+            if hook.lifecycle.is_none() {
+                // Check if the lifecycle is none, because collect_from_channels
+                // can be run multiple times per flush, in which case we will
+                // iterate over the query again, and end up dropping the lifecycle
+                // managers that we just created. When that happens, the service
+                // gets treated as despawned prematurely.
+                hook.lifecycle = Some(ServiceLifecycle::new(e, lifecycles.sender.clone()));
+            }
         }
     });
 

@@ -160,6 +160,7 @@ impl<T: Stream> StreamChannel<T> {
 mod tests {
     use crate::{*, testing::*};
     use bevy::ecs::system::EntityCommands;
+    use std::time::Duration;
 
     #[test]
     fn test_channel_request() {
@@ -192,8 +193,14 @@ mod tests {
                     repeat,
                 ).take().response
             });
-            context.run_while_pending(&mut promise);
+
+            context.run_with_conditions(
+                &mut promise,
+                FlushConditions::new().with_timeout(Duration::from_secs(5)),
+            );
+
             assert!(promise.peek().is_available());
+            assert!(context.no_unhandled_errors());
         }
 
         let count = context.app.world.get::<RunCount>(hello.provider()).unwrap().0;

@@ -210,6 +210,7 @@ pub fn to_uppercase(value: String) -> String {
     value.to_uppercase()
 }
 
+#[derive(Clone, Copy)]
 pub struct WaitRequest<Value> {
     pub duration: std::time::Duration,
     pub value: Value
