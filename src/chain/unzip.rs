@@ -46,6 +46,7 @@ impl<A: 'static + Send + Sync> Unzippable for (A,) {
         let result = Output::new(builder.scope, targets[0]);
 
         builder.commands.add(AddOperation::new(
+            Some(output.scope()),
             output.id(),
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -89,6 +90,7 @@ impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
         );
 
         builder.commands.add(AddOperation::new(
+            Some(output.scope()),
             output.id(),
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));
@@ -148,6 +150,7 @@ where
         );
 
         builder.commands.add(AddOperation::new(
+            Some(output.scope()),
             output.id(),
             ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
         ));

@@ -71,7 +71,7 @@ where
     type Response = Response;
     type Streams = ();
 
-    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
+    fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddImpulse::new(source, ImpulseBlockingMap::new(target, self.def)));
     }
 }
@@ -168,7 +168,7 @@ where
     type Response = Task::Output;
     type Streams = Streams;
 
-    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
+    fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddImpulse::new(source, ImpulseAsyncMap::new(target, self.def)));
     }
 }

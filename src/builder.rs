@@ -15,12 +15,14 @@
  *
 */
 
-use bevy::prelude::{Entity, Commands};
+use bevy::prelude::{Entity, Commands, BuildChildren};
+
+use std::future::Future;
 
 use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
-    ScopeSettings, BeginCancel,
+    ScopeSettings, BeginCancel, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
 };
 
 pub(crate) mod connect;
@@ -58,7 +60,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        provider.connect(source, target, self.commands);
+        provider.connect(Some(self.scope), source, target, self.commands);
 
         let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
@@ -70,6 +72,31 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             output: Output::new(self.scope, target),
             streams,
         }
+    }
+
+    /// Create a [node](Node) that provides a [blocking map](crate::BlockingMap).
+    pub fn create_map_block<T, U>(
+        &mut self,
+        f: impl FnMut(T) -> U + 'static + Send + Sync,
+    ) -> Node<T, U, ()>
+    where
+        T: 'static + Send + Sync,
+        U: 'static + Send + Sync,
+    {
+        self.create_node(f.into_blocking_map())
+    }
+
+    /// Create a [node](Node) that provides an [async map](crate::AsyncMap).
+    pub fn create_map_async<T, Task>(
+        &mut self,
+        f: impl FnMut(T) -> Task + 'static + Send + Sync,
+    ) -> Node<T, Task::Output, ()>
+    where
+        T: 'static + Send + Sync,
+        Task: Future + 'static + Send + Sync,
+        Task::Output: 'static + Send + Sync,
+    {
+        self.create_node(f.into_async_map())
     }
 
     /// Connect the output of one into the input slot of another node.
@@ -94,6 +121,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ) -> Buffer<T> {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
+            Some(self.scope),
             source,
             OperateBuffer::<T>::new(settings),
         ));
@@ -160,8 +188,9 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             build,
         );
 
-        let begin_cancel = self.commands.spawn(()).id();
+        let begin_cancel = self.commands.spawn(()).set_parent(self.scope).id();
         self.commands.add(AddOperation::new(
+            None,
             begin_cancel,
             BeginCancel::<T>::new(self.scope, from_buffer.source, cancelling_scope_id),
         ));
@@ -190,13 +219,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
-        let operation = OperateScope::<Request, Response, Streams>::new(
-            scope_id, Some(exit_scope), settings, self.commands,
+        let ScopeEndpoints {
+            terminal,
+            enter_scope,
+            finish_scope_cancel
+        } = OperateScope::<Request, Response, Streams>::add(
+            Some(self.scope()), scope_id, Some(exit_scope), settings, self.commands,
         );
-        let enter_scope = operation.enter_scope();
-        let finish_scope_cancel = operation.finish_cancel();
-        let terminal = operation.terminal();
-        self.commands.add(AddOperation::new(scope_id, operation));
 
         let (stream_in, stream_out) = Streams::spawn_scope_streams(
             scope_id,

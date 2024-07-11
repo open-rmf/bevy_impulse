@@ -16,14 +16,16 @@
 */
 
 use bevy::{
-    prelude::{Commands, World},
+    prelude::{Commands, World, BuildChildren},
     ecs::system::CommandQueue,
 };
 
 use crate::{
-    Service, InputSlot, Output, StreamPack, AddOperation, OperateScope,
-    WorkflowService, Builder,
+    Service, InputSlot, Output, StreamPack, OperateScope, DeliveryChoice,
+    WorkflowService, Builder, ServiceBundle, WorkflowStorage, ScopeEndpoints,
 };
+
+mod internal;
 
 /// Trait to allow workflows to be spawned from a [`Commands`] or a [`World`].
 pub trait SpawnWorkflow {
@@ -63,7 +65,7 @@ pub trait SpawnWorkflow {
 /// type or that the [`Scope::terminate`] field has an [`InputSlot`] type. From
 /// the perspective inside of the scope, the scope's input would be received as
 /// an output, and the scope's output would be passed into an input slot.
-pub struct Scope<Request, Response, Streams: StreamPack> {
+pub struct Scope<Request, Response, Streams: StreamPack = ()> {
     /// The data entering the scope. The workflow of the scope must be built
     /// out from here.
     pub input: Output<Request>,
@@ -195,13 +197,14 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         Streams: StreamPack,
     {
         let scope_id = self.spawn(()).id();
-        let scope = OperateScope::<Request, Response, Streams>::new(
-            scope_id, None, settings.scope, self,
+        let ScopeEndpoints {
+            terminal,
+            enter_scope,
+            finish_scope_cancel,
+        } = OperateScope::<Request, Response, Streams>::add(
+            None, scope_id, None, settings.scope, self,
         );
-        let enter_scope = scope.enter_scope();
-        let finish_scope_cancel = scope.finish_cancel();
-        let terminal = scope.terminal();
-        self.add(AddOperation::new(scope_id, scope));
+
         let mut builder = Builder {
             scope: scope_id,
             finish_scope_cancel,
@@ -218,7 +221,16 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
 
         build(scope, &mut builder);
 
-        WorkflowService::<Request, Response, Streams>::cast(scope_id)
+        let mut service = self.spawn((
+            ServiceBundle::<WorkflowService<Request, Response, Streams>>::new(),
+            WorkflowStorage::new(scope_id),
+            Streams::StreamAvailableBundle::default(),
+        ));
+        settings.delivery.apply_entity_commands::<Request>(&mut service);
+        let service = service.id();
+        self.entity(scope_id).set_parent(service);
+
+        WorkflowService::<Request, Response, Streams>::cast(service)
     }
 }
 
@@ -238,5 +250,49 @@ impl SpawnWorkflow for World {
         let service = commands.spawn_workflow(settings, build);
         command_queue.apply(self);
         service
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn test_simple_workflows() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope
+            .input
+            .chain(builder)
+            .map_block(add)
+            .connect(scope.terminate);
+        });
+
+        let mut promise = context.build(|commands|
+            commands
+            .request((2.0, 2.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.peek().available().is_some_and(|v| *v == 4.0));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            let add_node = builder.create_map_block(add);
+            builder.connect(scope.input, add_node.input);
+            builder.connect(add_node.output, scope.terminate);
+        });
+
+        let mut promise = context.build(|commands|
+            commands
+            .request((3.0, 3.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.peek().available().is_some_and(|v| *v == 6.0));
+        assert!(context.no_unhandled_errors());
     }
 }

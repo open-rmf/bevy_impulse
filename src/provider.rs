@@ -38,5 +38,5 @@ pub trait ProvideOnce {
 
     /// Take a request from a source (stream target information will also be
     /// extracted from the source) and connect it to a target.
-    fn connect(self, source: Entity, target: Entity, commands: &mut Commands);
+    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands);
 }

@@ -418,8 +418,8 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
-        commands.add(AddOperation::new(source, OperateCallback::new(self, target)));
+    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
+        commands.add(AddOperation::new(scope, source, OperateCallback::new(self, target)));
     }
 }
 

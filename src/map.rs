@@ -72,8 +72,8 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(source, OperateBlockingMap::new(target, self.def)));
+    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
+        commands.add(AddOperation::new(scope, source, OperateBlockingMap::new(target, self.def)));
     }
 }
 
@@ -184,8 +184,8 @@ where
     type Response = Task::Output;
     type Streams = Streams;
 
-    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(source, OperateAsyncMap::new(target, self.def)));
+    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
+        commands.add(AddOperation::new(scope, source, OperateAsyncMap::new(target, self.def)));
     }
 }
 

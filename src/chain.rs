@@ -73,7 +73,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// [1]: crate::Scope
     #[must_use]
     pub fn output(self) -> Output<T> {
-        Output::new(self.builder.scope, self.target)
+        Output::new(self.scope(), self.target)
     }
 
     /// Connect this output into an input slot.
@@ -81,7 +81,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Pass a [terminate](crate::Scope::terminate) into this function to
     /// end a chain.
     pub fn connect(self, input: InputSlot<T>) {
-        let output = Output::new(self.builder.scope, self.target);
+        let output = Output::new(self.scope(), self.target);
         self.builder.connect(output, input)
     }
 
@@ -98,7 +98,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        provider.connect(source, target, self.builder.commands);
+        provider.connect(Some(self.builder.scope), source, target, self.builder.commands);
         Chain::new(target, self.builder)
     }
 
@@ -115,7 +115,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        provider.connect(source, target, self.builder.commands);
+        provider.connect(Some(self.scope()), source, target, self.builder.commands);
 
         let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
@@ -325,15 +325,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// output by this function. If all of the builders output [`Dangling`] then
     /// you can easily continue chaining more operations like `join` and `race`
     /// from the [`ZippedChains`] trait.
-    #[must_use]
-    pub fn fork_clone_zip<Builder: ForkCloneBuilder<T>>(
+    pub fn fork_clone_zip<Build: ForkCloneBuilder<T>>(
         self,
-        builder: Builder,
-    ) -> Builder::Outputs
+        build: Build,
+    ) -> Build::Outputs
     where
         T: Clone,
     {
-        builder.build_fork_clone(self.target, self.builder)
+        build.build_fork_clone(Output::new(self.scope(), self.target), self.builder)
     }
 
     /// Similar to [`Chain::fork_clone_zip`], except you provide only one
@@ -358,6 +357,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         );
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             ForkClone::<T>::new(ForkTargetStorage::from_iter(targets)),
         ));
@@ -391,6 +391,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         targets.0.reserve(number_forks);
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             ForkClone::<T>::new(targets.clone())
         ));
@@ -450,7 +451,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
-            source, Noop::<T>::new(target),
+            Some(self.scope()), source, Noop::<T>::new(target),
         ));
         Chain::new(target, self.builder)
     }
@@ -510,6 +511,7 @@ where
         let target_err = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             make_result_branching::<T, E>(
                 ForkTargetStorage::from_iter([target_ok, target_err])
@@ -555,6 +557,7 @@ where
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             CreateCancelFilter::on_err::<T, E>(target),
         ));
@@ -572,6 +575,7 @@ where
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             CreateCancelFilter::on_quiet_err::<T, E>(target),
         ));
@@ -594,6 +598,7 @@ where
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             CreateDisposalFilter::on_err::<T, E>(target),
         ));
@@ -607,6 +612,7 @@ where
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             CreateDisposalFilter::on_quiet_err::<T, E>(target),
         ));
@@ -660,6 +666,7 @@ where
         let target_none = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             make_option_branching::<T>(
                 ForkTargetStorage::from_iter([target_some, target_none])
@@ -680,6 +687,7 @@ where
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             CreateCancelFilter::on_none::<T>(target),
         ));
@@ -699,6 +707,7 @@ where
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
             source,
             CreateDisposalFilter::on_none::<T>(target),
         ));
@@ -722,159 +731,132 @@ impl<'w, 's, 'a, 'b, Response: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, Resp
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::{*, testing::*};
-//     use std::time::Duration;
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
 
-//     #[test]
-//     fn test_async_map() {
-//         let mut context = TestingContext::minimal_plugins();
+    #[test]
+    fn test_race() {
+        let mut context = TestingContext::minimal_plugins();
 
-//         let mut promise = context.build(|commands| {
-//             commands
-//             .request(
-//                 WaitRequest {
-//                     duration: Duration::from_secs_f64(0.001),
-//                     value: "hello".to_owned(),
-//                 },
-//                 wait.into_async_map(),
-//             )
-//             .take_response()
-//         });
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope
+            .input
+            .chain(builder)
+            .map_block(add)
+            .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
+                scope
+                .input
+                .chain(builder)
+                .fork_clone_zip((
+                    |chain: Chain<f64>| {
+                        chain
+                        .map_block(|value|
+                            WaitRequest {
+                                duration: Duration::from_secs_f64(value),
+                                value,
+                            }
+                        )
+                        .map_async(wait)
+                        .connect(scope.terminate);
+                    },
+                    |chain: Chain<f64>| {
+                        chain
+                        .map_block(|a| (a, a))
+                        .map_block(add)
+                        .connect(scope.terminate);
+                    }
+                ));
+            })
+            .map_block(|a| (a, a))
+            .map_block(add)
+            .connect(scope.terminate);
+        });
 
-//         context.run_with_conditions(
-//             &mut promise,
-//             FlushConditions::new()
-//             .with_timeout(Duration::from_secs_f64(5.0)),
-//         );
+        let mut promise = context.build(|commands|
+            commands
+            .request((2.0, 2.0), workflow)
+            .take_response()
+        );
 
-//         assert!(promise.peek().available().is_some_and(|v| v == "hello"));
-//     }
+        context.run_with_conditions(
+            &mut promise,
+            FlushConditions::new()
+            .with_update_count(5),
+        );
 
-//     #[test]
-//     fn test_race_zip() {
-//         let mut context = TestingContext::minimal_plugins();
+        dbg!(context.get_unhandled_errors());
 
-//         let mut promise = context.build(|commands| {
-//             commands
-//             .request((2.0, 3.0), add.into_blocking_map())
-//             .fork_clone_zip((
-//                 |chain: Chain<f64>| {
-//                     chain
-//                     .map_block(|value|
-//                         WaitRequest {
-//                             duration: std::time::Duration::from_secs_f64(value),
-//                             value,
-//                         }
-//                     )
-//                     .map_async(wait)
-//                     .output() // 5.0
-//                 },
-//                 |chain: Chain<f64>| {
-//                     chain
-//                     .map_block(|a| (a, a))
-//                     .map_block(add)
-//                     .output() // 10.0
-//                 }
-//             ))
-//             .race_zip(
-//                 commands,
-//                 (
-//                     |chain: Chain<f64>| {
-//                         chain
-//                         .map_block(|a| (a, a))
-//                         .map_block(add)
-//                         .output() // 10.0
-//                     },
-//                     |chain: Chain<f64>| {
-//                         chain
-//                         .map_block(|a| (a, a))
-//                         .map_block(add)
-//                         .output() // 20.0
-//                     }
-//                 ),
-//             )
-//             .bundle()
-//             .race_bundle(commands)
-//             .take()
-//         });
+        dbg!(promise.peek());
+        assert_eq!(promise.peek().available().copied(), Some(20.0));
+    }
 
-//         context.run_with_conditions(
-//             &mut promise,
-//             FlushConditions::new()
-//             .with_update_count(5),
-//         );
-//         assert_eq!(promise.peek().available().copied(), Some(20.0));
-//     }
+    // #[test]
+    // fn test_unzip() {
+    //     let mut context = TestingContext::minimal_plugins();
 
-//     #[test]
-//     fn test_unzip() {
-//         let mut context = TestingContext::minimal_plugins();
+    //     let mut promise = context.build(|commands| {
+    //         commands
+    //         .request((2.0, 3.0), add.into_blocking_map())
+    //         .map_block(|v| (v, 2.0*v))
+    //         .unzip_build((
+    //             |chain: Chain<f64>| {
+    //                 chain
+    //                 .map_block(|v| (v, 10.0))
+    //                 .map_block(add)
+    //                 .dangle()
+    //             },
+    //             |chain: Chain<f64>| {
+    //                 chain
+    //                 .map_block(|value|
+    //                     WaitRequest{
+    //                         duration: std::time::Duration::from_secs_f64(0.01),
+    //                         value,
+    //                     }
+    //                 )
+    //                 .map_async(wait)
+    //                 .dangle()
+    //             }
+    //         ))
+    //         .bundle()
+    //         .race_bundle(commands)
+    //         .take()
+    //     });
 
-//         let mut promise = context.build(|commands| {
-//             commands
-//             .request((2.0, 3.0), add.into_blocking_map())
-//             .map_block(|v| (v, 2.0*v))
-//             .unzip_build((
-//                 |chain: Chain<f64>| {
-//                     chain
-//                     .map_block(|v| (v, 10.0))
-//                     .map_block(add)
-//                     .dangle()
-//                 },
-//                 |chain: Chain<f64>| {
-//                     chain
-//                     .map_block(|value|
-//                         WaitRequest{
-//                             duration: std::time::Duration::from_secs_f64(0.01),
-//                             value,
-//                         }
-//                     )
-//                     .map_async(wait)
-//                     .dangle()
-//                 }
-//             ))
-//             .bundle()
-//             .race_bundle(commands)
-//             .take()
-//         });
+    //     context.run_while_pending(&mut promise);
+    //     assert_eq!(promise.peek().available().copied(), Some(15.0));
+    // }
 
-//         context.run_while_pending(&mut promise);
-//         assert_eq!(promise.peek().available().copied(), Some(15.0));
-//     }
+    // #[test]
+    // fn test_dispose_on_cancel() {
+    //     let mut context = TestingContext::minimal_plugins();
 
-//     #[test]
-//     fn test_dispose_on_cancel() {
-//         let mut context = TestingContext::minimal_plugins();
+    //     let mut promise = context.build(|commands| {
+    //         commands
+    //         .provide("hello")
+    //         .map_block(produce_err)
+    //         .cancel_on_err()
+    //         .dispose_on_cancel()
+    //         .take()
+    //     });
 
-//         let mut promise = context.build(|commands| {
-//             commands
-//             .provide("hello")
-//             .map_block(produce_err)
-//             .cancel_on_err()
-//             .dispose_on_cancel()
-//             .take()
-//         });
+    //     context.run_while_pending(&mut promise);
+    //     assert!(promise.peek().is_disposed());
 
-//         context.run_while_pending(&mut promise);
-//         assert!(promise.peek().is_disposed());
+    //     // If we flip the order of cancel_on_err and dispose_on_cancel then the
+    //     // outcome should be a cancellation instead of a disposal, because the
+    //     // disposal was requested for a part of the chain that did not get
+    //     // cancelled.
+    //     let mut promise = context.build(|commands| {
+    //         commands
+    //         .provide("hello")
+    //         .map_block(produce_err)
+    //         .dispose_on_cancel()
+    //         .cancel_on_err()
+    //         .take()
+    //     });
 
-//         // If we flip the order of cancel_on_err and dispose_on_cancel then the
-//         // outcome should be a cancellation instead of a disposal, because the
-//         // disposal was requested for a part of the chain that did not get
-//         // cancelled.
-//         let mut promise = context.build(|commands| {
-//             commands
-//             .provide("hello")
-//             .map_block(produce_err)
-//             .dispose_on_cancel()
-//             .cancel_on_err()
-//             .take()
-//         });
-
-//         context.run_while_pending(&mut promise);
-//         assert!(promise.peek().is_cancelled());
-//     }
-// }
+    //     context.run_while_pending(&mut promise);
+    //     assert!(promise.peek().is_cancelled());
+    // }
+}

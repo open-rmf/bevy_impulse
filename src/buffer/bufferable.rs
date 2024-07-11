@@ -42,7 +42,9 @@ pub trait Bufferable {
         let buffers = self.as_buffer(builder);
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(join, Join::new(buffers, target)));
+        builder.commands.add(AddOperation::new(
+            Some(builder.scope()), join, Join::new(buffers, target)
+        ));
 
         Output::new(builder.scope, target)
     }
@@ -139,7 +141,9 @@ pub trait IterBufferable {
         let buffers = self.as_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(join, Join::new(buffers, target)));
+        builder.commands.add(AddOperation::new(
+            Some(builder.scope()), join, Join::new(buffers, target),
+        ));
 
         Output::new(builder.scope, target)
     }

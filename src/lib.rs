@@ -200,9 +200,8 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
 }
 
 /// Use BlockingMap to indicate that your function is meant to define a blocking
-/// [`Map`]. A Map is not associated with any entity, it cannot be a Bevy System,
-/// and it can only be used once, making it suitable for functions that only
-/// implement [`FnOnce`].
+/// [`Map`]. A Map is not associated with any entity, and it cannot be a Bevy
+/// System. These limited traits allow them to be processed more efficiently.
 #[non_exhaustive]
 pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     /// The input data of the request
@@ -216,14 +215,21 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
 }
 
 /// Use AsyncMap to indicate that your function is meant to define an async
-/// [`Map`]. A Map is not associated with any entity, it cannot be a Bevy System,
-/// and it can only be used once, making it suitable for functions that only
-/// implement [`FnOnce`].
+/// [`Map`]. A Map is not associated with any entity, and it cannot be a Bevy
+/// System. These limited traits allow them to be processed more efficiently.
 ///
 /// An async Map must return a [`Future<Output=Response>`](std::future::Future)
 /// that will be polled by the async task pool.
 #[non_exhaustive]
 pub struct AsyncMap<Request, Streams: StreamPack = ()> {
+    /// The input data of the request
     pub request: Request,
+    /// The channel that allows querying and syncing with the world while the
+    /// service runs asynchronously. Use the [`Channel::streams`] method to
+    /// send stream output data from the service.
     pub channel: Channel<Streams>,
+    /// The node in a workflow or impulse chain that asked for the callback
+    pub source: Entity,
+    /// The unique session ID for the workflow
+    pub session: Entity,
 }

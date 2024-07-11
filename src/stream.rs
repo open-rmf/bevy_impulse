@@ -55,7 +55,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
     ) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(source, RedirectScopeStream::<Self>::new(target)));
+        commands.add(AddOperation::new(Some(in_scope), source, RedirectScopeStream::<Self>::new(target)));
         (
             InputSlot::new(in_scope, source),
             Output::new(out_scope, target),
@@ -66,7 +66,9 @@ pub trait Stream: 'static + Send + Sync + Sized {
         builder: &mut Builder,
     ) -> InputSlot<Self> {
         let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(source, RedirectWorkflowStream::<Self>::new()));
+        builder.commands.add(AddOperation::new(
+            Some(builder.scope()), source, RedirectWorkflowStream::<Self>::new()),
+        );
         InputSlot::new(builder.scope, source)
     }
 
@@ -225,7 +227,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
     type StreamStorageBundle: Bundle;
     type StreamInputPack;
-    type StreamOutputPack;
+    type StreamOutputPack: std::fmt::Debug;
     type Receiver;
     type Channel;
     type Buffer: Clone;

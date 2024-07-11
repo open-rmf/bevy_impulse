@@ -183,7 +183,9 @@ where
         let channel = InnerChannel::new(source, session, sender.clone());
         let channel = channel.into_specific(&world)?;
 
-        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap { request, channel }));
+        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap {
+            request, channel, source, session,
+        }));
         world.get_entity_mut(source).or_broken()?
             .get_mut::<AsyncMapStorage<F>>().or_broken()?
             .f = Some(f);

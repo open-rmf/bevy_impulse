@@ -25,6 +25,7 @@ use backtrace::Backtrace;
 use crate::{
     SingleInputStorage, SingleTargetStorage, ForkTargetStorage, StreamTargetMap,
     OperationResult, OperationError, OrBroken, UnhandledErrors, ConnectionFailure,
+    ScopeEntryStorage, EntryForScope,
 };
 
 /// If two nodes have been created, they will each have a unique source and a
@@ -32,7 +33,7 @@ use crate::{
 /// the target of one to no longer be unique - we instead want it to be the
 /// source entity of the other. This [`Command`] redirects the target information
 /// of the sending node to target the source entity of the receiving node.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Connect {
     pub(crate) original_target: Entity,
     pub(crate) new_target: Entity,
@@ -53,10 +54,24 @@ impl Command for Connect {
 }
 
 fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
-    let old_inputs = world.get::<SingleInputStorage>(connect.original_target)
-        .or_broken()?.get().clone();
+    if let Some(EntryForScope(scope)) = world.get(connect.original_target) {
+        // The original target was the entry point of a scope, so we need to
+        // handle it a bit differently. Instead of modifying target and input
+        // storage components, we need to modify EntryForScope and
+        // ScopeEntryStorage components.
+        let scope = *scope;
+        world.get_entity_mut(connect.new_target).or_broken()?.insert(EntryForScope(scope));
+        world.get_entity_mut(scope).or_broken()?.insert(ScopeEntryStorage(connect.new_target));
 
-    for input in old_inputs {
+        world.despawn(connect.original_target);
+        return Ok(());
+    }
+
+    let old_inputs = world.get_entity_mut(connect.original_target).or_broken()?
+        .take::<SingleInputStorage>().or_broken()?
+        .take();
+
+    for input in old_inputs.into_iter() {
         let mut input_mut = world.get_entity_mut(input).or_broken()?;
 
         if let Some(mut target) = input_mut.get_mut::<SingleTargetStorage>() {
@@ -86,6 +101,8 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
                 .insert(SingleInputStorage::new(input));
         }
     }
+
+    world.despawn(connect.original_target);
 
     Ok(())
 }

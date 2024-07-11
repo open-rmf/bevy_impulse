@@ -350,8 +350,8 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(source, OperateService::new(self, target)));
+    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
+        commands.add(AddOperation::new(scope, source, OperateService::new(self, target)));
     }
 }
 

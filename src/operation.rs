@@ -22,7 +22,7 @@ use crate::{
 };
 
 use bevy::{
-    prelude::{Entity, World, Component},
+    prelude::{Entity, World, Component, BuildWorldChildren},
     ecs::system::Command,
 };
 
@@ -91,6 +91,10 @@ impl SingleInputStorage {
 
     pub fn get(&self) -> &SmallVec<[Entity; 8]> {
         &self.0
+    }
+
+    pub fn take(self) -> SmallVec<[Entity; 8]> {
+        self.0
     }
 
     pub(crate) fn add(&mut self, input: Entity) {
@@ -541,13 +545,14 @@ impl<T> OrBroken for Option<T> {
 }
 
 pub(crate) struct AddOperation<Op: Operation> {
+    scope: Option<Entity>,
     source: Entity,
     operation: Op,
 }
 
 impl<Op: Operation> AddOperation<Op> {
-    pub(crate) fn new(source: Entity, operation: Op) -> Self {
-        Self { source, operation }
+    pub(crate) fn new(scope: Option<Entity>, source: Entity, operation: Op) -> Self {
+        Self { scope, source, operation }
     }
 }
 
@@ -559,12 +564,26 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
                 .push(SetupFailure { broken_node: self.source, error });
         }
 
-        world.entity_mut(self.source)
+        let mut source_mut = world.entity_mut(self.source);
+        source_mut
             .insert((
                 OperationExecuteStorage(perform_operation::<Op>),
                 OperationCleanupStorage(Op::cleanup),
                 OperationReachabiilityStorage(Op::is_reachable),
             ));
+        if let Some(scope) = self.scope {
+            source_mut.insert(ScopeStorage::new(scope)).set_parent(scope);
+            match world.get_mut::<ScopeContents>(scope).or_broken() {
+                Ok(mut contents) => {
+                    contents.add_node(self.source);
+                }
+                Err(error) => {
+                    world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .setup
+                        .push(SetupFailure { broken_node: self.source, error });
+                }
+            }
+        }
     }
 }
 

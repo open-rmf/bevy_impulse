@@ -128,7 +128,7 @@ where
         // We should automatically delete the previous step in the chain once
         // this one is finished.
         self.commands.entity(source).set_parent(target);
-        provider.connect(source, target, self.commands);
+        provider.connect(None, source, target, self.commands);
         Impulse {
             source,
             target,

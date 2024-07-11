@@ -38,7 +38,7 @@ use smallvec::SmallVec;
 use crate::{
     OperationRoster, Blocker, ManageInput, ChannelQueue, UnhandledErrors,
     OperationSetup, OperationRequest, OperationResult, Operation, AddOperation,
-    OrBroken, OperationCleanup, ChannelItem, OperationError, Broken,
+    OrBroken, OperationCleanup, ChannelItem, OperationError, Broken, ScopeStorage,
     OperationReachability, ReachabilityResult, emit_disposal, Disposal,
 };
 
@@ -96,7 +96,8 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
 
     pub(crate) fn add(self, world: &mut World, roster: &mut OperationRoster) {
         let source = self.source;
-        AddOperation::new(source, self).apply(world);
+        let scope = world.get::<ScopeStorage>(source).map(|s| s.get());
+        AddOperation::new(scope, source, self).apply(world);
         roster.queue(source);
     }
 }

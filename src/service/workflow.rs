@@ -28,10 +28,16 @@ use crate::{
 use bevy::prelude::{Entity, World, Component};
 
 #[derive(Component, Clone, Copy)]
-struct WorkflowStorage {
+pub(crate) struct WorkflowStorage {
     /// The entity that stores the scope operation that encapsulates the entire
     /// workflow.
     scope: Entity,
+}
+
+impl WorkflowStorage {
+    pub(crate) fn new(scope: Entity) -> Self {
+        Self { scope }
+    }
 }
 
 pub(crate) struct WorkflowService<Request, Response, Streams> {

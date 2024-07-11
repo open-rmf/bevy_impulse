@@ -28,7 +28,7 @@ use crate::{
 
 use backtrace::Backtrace;
 
-use bevy::prelude::{Component, Entity, World, Commands};
+use bevy::prelude::{Component, Entity, World, Commands, BuildChildren};
 
 use smallvec::SmallVec;
 
@@ -60,37 +60,16 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
     /// The target that the output of this scope should be fed to
     exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
-    finish_cancel: Entity,
+    finish_scope_cancel: Entity,
     /// Settings for the scope
     settings: ScopeSettings,
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Request, Response, Streams> Clone for OperateScope<Request, Response, Streams> {
-    fn clone(&self) -> Self {
-        Self {
-            enter_scope: self.enter_scope,
-            terminal: self.terminal,
-            exit_scope: self.exit_scope,
-            finish_cancel: self.finish_cancel,
-            settings: self.settings.clone(),
-            _ignore: Default::default(),
-        }
-    }
-}
-
-impl<Request, Response, Streams> OperateScope<Request, Response, Streams> {
-    pub(crate) fn terminal(&self) -> Entity {
-        self.terminal
-    }
-
-    pub(crate) fn enter_scope(&self) -> Entity {
-        self.enter_scope
-    }
-
-    pub(crate) fn finish_cancel(&self) -> Entity {
-        self.finish_cancel
-    }
+pub(crate) struct ScopeEndpoints {
+    pub(crate) terminal: Entity,
+    pub(crate) enter_scope: Entity,
+    pub(crate) finish_scope_cancel: Entity,
 }
 
 pub(crate) struct ScopedSession {
@@ -198,7 +177,7 @@ where
             ValidateScopeReachability(Self::validate_scope_reachability),
             FinalizeScopeCleanup(Self::finalize_scope_cleanup),
             BeginCancelStorage::default(),
-            FinishCancelStorage(self.finish_cancel),
+            FinishCancelStorage(self.finish_scope_cancel),
             ScopeSettingsStorage(self.settings),
         ));
 
@@ -338,36 +317,52 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    pub(crate) fn new(
+    pub(crate) fn add(
+        parent_scope: Option<Entity>,
         scope_id: Entity,
         exit_scope: Option<Entity>,
         settings: ScopeSettings,
         commands: &mut Commands,
-    ) -> Self {
-        let enter_scope = commands.spawn(()).id();
+    ) -> ScopeEndpoints {
+        let enter_scope = commands.spawn(EntryForScope(scope_id)).id();
+        let terminal = commands.spawn(()).set_parent(scope_id).id();
+        let finish_scope_cancel = commands.spawn(()).set_parent(scope_id).id();
 
-        let terminal = commands.spawn(()).id();
-        commands.add(AddOperation::new(
-            terminal,
-            Terminate::<Response>::new()
-        ));
-
-        let finish_cancel = commands.spawn(()).id();
-        commands.add(AddOperation::new(
-            finish_cancel,
-            FinishCancel { from_scope: scope_id },
-        ));
-
-        let scope = OperateScope {
+        let scope = OperateScope::<Request, Response, Streams> {
             enter_scope,
             terminal,
             exit_scope,
-            finish_cancel,
+            finish_scope_cancel,
             settings,
             _ignore: Default::default(),
         };
 
-        scope
+        // Note: We need to make sure the scope object gets set up before any of
+        // its endpoints, otherwise the ScopeContents component will be missing
+        // during setup.
+        commands.add(AddOperation::new(parent_scope, scope_id, scope));
+
+        commands.add(AddOperation::new(
+            // We do not consider the terminal node to be "inside" the scope,
+            // otherwise it will get cleaned up prematurely
+            None,
+            terminal,
+            Terminate::<Response>::new(scope_id),
+        ));
+
+        commands.add(AddOperation::new(
+            // We do not consider the finish cancel node to be "inside" the
+            // scope, otherwise it will get cleaned up prematurely
+            None,
+            finish_scope_cancel,
+            FinishCancel { from_scope: scope_id },
+        ));
+
+        ScopeEndpoints {
+            finish_scope_cancel,
+            terminal,
+            enter_scope,
+        }
     }
 
     fn receive_cancel(
@@ -485,6 +480,7 @@ where
     }
 
     fn finalize_scope_cleanup(clean: OperationCleanup) -> OperationResult {
+        let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(clean.source).or_broken()?;
         let mut pairs = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
         let scoped_session = clean.session;
@@ -493,6 +489,8 @@ where
         ).or_not_ready()?;
         let pair = pairs.0.remove(index);
         let parent_session = pair.parent_session;
+        let terminal = source_mut.get::<TerminalStorage>().or_broken()?.0;
+
         match pair.status {
             ScopedSessionStatus::Ongoing => {
                 // We shouldn't be in this function if the session is still ongoing
@@ -506,7 +504,6 @@ where
                 None.or_broken()?;
             }
             ScopedSessionStatus::Finished => {
-                let terminal = source_mut.get::<TerminalStorage>().or_broken()?.0;
                 let (target, blocker) = source_mut.get_mut::<ExitTargetStorage>()
                     .and_then(|mut storage| storage.map.remove(&scoped_session))
                     .map(|exit| (exit.target, exit.blocker))
@@ -532,17 +529,27 @@ where
                 clean.world.despawn(clean.session);
             }
             ScopedSessionStatus::Cleanup => {
+                let mut clean = clean.for_node(terminal);
+                clean.cleanup_inputs::<Response>()?;
+                let mut staging = clean.world.get_mut::<Staging<Response>>(clean.source).or_broken()?;
+                staging.0.retain(|session, _| *session != clean.session);
+
                 let status = CancelStatus::Cleanup;
                 Self::begin_cancellation_workflows(
                     CancelledSession { parent_session, status },
-                    clean,
+                    clean.for_node(source),
                 )?;
             }
             ScopedSessionStatus::Cancelled(cancellation) => {
+                let mut clean = clean.for_node(terminal);
+                clean.cleanup_inputs::<Response>()?;
+                let mut staging = clean.world.get_mut::<Staging<Response>>(clean.source).or_broken()?;
+                staging.0.retain(|session, _| *session != clean.session);
+
                 let status = CancelStatus::Cancelled(cancellation);
                 Self::begin_cancellation_workflows(
                     CancelledSession { parent_session, status },
-                    clean,
+                    clean.for_node(source),
                 )?;
             }
         }
@@ -589,15 +596,19 @@ pub struct ValidateScopeReachability(pub(crate) fn(OperationCleanup) -> Operatio
 pub struct FinalizeScopeCleanup(pub(crate) fn(OperationCleanup) -> OperationResult);
 
 #[derive(Component)]
-struct ScopeEntryStorage(Entity);
+pub(crate) struct ScopeEntryStorage(pub(crate) Entity);
+
+#[derive(Component)]
+pub(crate) struct EntryForScope(pub(crate) Entity);
 
 pub(crate) struct Terminate<T> {
+    scope: Entity,
     _ignore: std::marker::PhantomData<T>,
 }
 
 impl<T> Terminate<T> {
-    pub(crate) fn new() -> Self {
-        Self { _ignore: Default::default() }
+    pub(crate) fn new(scope: Entity) -> Self {
+        Self { scope, _ignore: Default::default() }
     }
 }
 
@@ -620,6 +631,7 @@ where
             InputBundle::<T>::new(),
             SingleInputStorage::empty(),
             Staging::<T>::new(),
+            ScopeStorage::new(self.scope),
         ));
         Ok(())
     }
@@ -659,15 +671,10 @@ where
         cleanup_entire_scope(clean)
     }
 
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>()?;
-        let mut staging = clean.world.get_mut::<Staging<T>>(clean.source).or_broken()?;
-        staging.0.retain(|session, _| *session != clean.session);
-        // We don't call clean.notify_cleaned() here because the staging operation
-        // is not considered to be a node inside the workspace so we don't want
-        // to register it as a node that has been cleaned; that would throw off
-        // the equality check that sees whether all nodes have cleaned up.
-        Ok(())
+    fn cleanup(_: OperationCleanup) -> OperationResult {
+        // This should never get called. Terminate should never exist as a
+        // node that's inside of a scope.
+        Err(OperationError::Broken(Some(Backtrace::new())))
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
@@ -694,12 +701,22 @@ impl<T> Staging<T> {
     }
 }
 
+impl<T> std::fmt::Debug for Staging<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
+}
+
 
 /// The scope that the node exists inside of.
 #[derive(Component, Clone, Copy)]
 pub struct ScopeStorage(Entity);
 
 impl ScopeStorage {
+    pub fn new(scope: Entity) -> Self {
+        Self(scope)
+    }
+
     pub fn get(&self) -> Entity {
         self.0
     }

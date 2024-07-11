@@ -172,7 +172,9 @@ where
         let channel = InnerChannel::new(source, session, sender.clone());
         let channel = channel.into_specific(&world)?;
 
-        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap { request, channel }));
+        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap {
+            request, channel, source, session,
+        }));
 
         let task_source = world.spawn(()).id();
         OperateTask::new(task_source, session, source, target, task, None, sender)

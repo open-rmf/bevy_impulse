@@ -24,8 +24,11 @@ pub use bevy::{
     ecs::system::CommandQueue,
 };
 
+pub use std::time::Duration;
+
 use crate::{
     Promise, Service, InAsyncService, InBlockingService, UnhandledErrors,
+    Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings,
     flush_impulses,
 };
 
@@ -76,6 +79,37 @@ impl TestingContext {
         u
     }
 
+    /// Build a simple workflow with a single input and output, and no streams
+    /// or settings.
+    pub fn build_io_workflow<Request, Response>(
+        &mut self,
+        f: impl FnOnce(Scope<Request, Response, ()>, &mut Builder),
+    ) -> Service<Request, Response, ()>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
+        self.build(move |commands| {
+            commands.spawn_workflow(WorkflowSettings::default(), f)
+        })
+    }
+
+    /// Build any kind of workflow with any settings.
+    pub fn build_workflow<Request, Response, Streams>(
+        &mut self,
+        settings: WorkflowSettings,
+        f: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+    ) -> Service<Request, Response, Streams>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+        Streams: StreamPack,
+    {
+        self.build(move |commands| {
+            commands.spawn_workflow(settings, f)
+        })
+    }
+
     pub fn run_while_pending<T>(
         &mut self,
         promise: &mut Promise<T>,
@@ -86,8 +120,9 @@ impl TestingContext {
     pub fn run_with_conditions<T>(
         &mut self,
         promise: &mut Promise<T>,
-        conditions: FlushConditions,
+        conditions: impl Into<FlushConditions>,
     ) -> bool {
+        let conditions = conditions.into();
         let t_initial = std::time::Instant::now();
         let mut count = 0;
         while promise.peek().is_pending() {
@@ -130,6 +165,12 @@ impl TestingContext {
 pub struct FlushConditions {
     pub timeout: Option<std::time::Duration>,
     pub update_count: Option<usize>,
+}
+
+impl From<Duration> for FlushConditions {
+    fn from(value: Duration) -> Self {
+        Self::new().with_timeout(value)
+    }
 }
 
 impl FlushConditions {

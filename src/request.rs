@@ -97,7 +97,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             .set_parent(target)
             .id();
 
-        provider.connect(source, target, self);
+        provider.connect(None, source, target, self);
 
         self.add(InputCommand { session: source, target: source, data: request });
 

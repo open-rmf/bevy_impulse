@@ -23,6 +23,7 @@ use crate::{
 };
 
 /// A collection of all the inputs and outputs for a node within a workflow.
+#[derive(Debug)]
 #[must_use]
 pub struct Node<Request, Response, Streams: StreamPack> {
     /// The input slot for the node. Connect outputs into this slot to trigger
@@ -50,6 +51,15 @@ pub struct InputSlot<Request> {
     _ignore: std::marker::PhantomData<Request>,
 }
 
+impl<Request> std::fmt::Debug for InputSlot<Request> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(format!("Input<{}>", std::any::type_name::<Request>()).as_str())
+            .field("scope", &self.scope)
+            .field("source", &self.source)
+            .finish()
+    }
+}
+
 impl<Request> InputSlot<Request> {
     pub fn id(&self) -> Entity {
         self.source
@@ -71,6 +81,15 @@ pub struct Output<Response> {
     scope: Entity,
     target: Entity,
     _ignore: std::marker::PhantomData<Response>,
+}
+
+impl<Response> std::fmt::Debug for Output<Response> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(format!("Output<{}>", std::any::type_name::<Response>()).as_str())
+            .field("scope", &self.scope)
+            .field("targret", &self.target)
+            .finish()
+    }
 }
 
 impl<Response: 'static + Send + Sync> Output<Response> {
@@ -98,6 +117,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
     {
         assert_eq!(self.scope, builder.scope);
         builder.commands.add(AddOperation::new(
+            Some(self.scope),
             self.target,
             ForkClone::<Response>::new(ForkTargetStorage::new()),
         ));

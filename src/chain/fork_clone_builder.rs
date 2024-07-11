@@ -15,10 +15,9 @@
  *
 */
 
-use bevy::prelude::Entity;
-
 use crate::{
     Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage, Builder,
+    Output,
 };
 
 pub trait ForkCloneBuilder<Response> {
@@ -26,7 +25,7 @@ pub trait ForkCloneBuilder<Response> {
 
     fn build_fork_clone(
         self,
-        source: Entity,
+        source: Output<Response>,
         builder: &mut Builder,
     ) -> Self::Outputs;
 }
@@ -41,14 +40,15 @@ where
 
     fn build_fork_clone(
         self,
-        source: Entity,
+        source: Output<R>,
         builder: &mut Builder,
     ) -> Self::Outputs {
         let target_0 = builder.commands.spawn(UnusedTarget).id();
         let target_1 = builder.commands.spawn(UnusedTarget).id();
 
         builder.commands.add(AddOperation::new(
-            source,
+            Some(source.scope()),
+            source.id(),
             ForkClone::<R>::new(
                 ForkTargetStorage::from_iter([target_0, target_1])
             )
@@ -71,7 +71,7 @@ where
 
     fn build_fork_clone(
         self,
-        source: Entity,
+        source: Output<R>,
         builder: &mut Builder,
     ) -> Self::Outputs {
         let target_0 = builder.commands.spawn(UnusedTarget).id();
@@ -79,7 +79,8 @@ where
         let target_2 = builder.commands.spawn(UnusedTarget).id();
 
         builder.commands.add(AddOperation::new(
-            source,
+            Some(source.scope()),
+            source.id(),
             ForkClone::<R>::new(
                 ForkTargetStorage::from_iter([target_0, target_1, target_2])
             )
