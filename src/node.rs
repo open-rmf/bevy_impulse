@@ -19,7 +19,7 @@ use bevy::prelude::Entity;
 
 use crate::{
     StreamPack, Chain, Builder, UnusedTarget, AddBranchToForkClone, ForkClone,
-    AddOperation, ForkTargetStorage,
+    AddOperation, ForkTargetStorage, SingleInputStorage,
 };
 
 /// A collection of all the inputs and outputs for a node within a workflow.
@@ -87,7 +87,7 @@ impl<Response> std::fmt::Debug for Output<Response> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(format!("Output<{}>", std::any::type_name::<Response>()).as_str())
             .field("scope", &self.scope)
-            .field("targret", &self.target)
+            .field("target", &self.target)
             .finish()
     }
 }
@@ -151,7 +151,10 @@ pub struct ForkCloneOutput<Response> {
 impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
     pub fn clone_output(&self, builder: &mut Builder) -> Output<Response> {
         assert_eq!(self.scope, builder.scope);
-        let target = builder.commands.spawn(UnusedTarget).id();
+        let target = builder.commands.spawn((
+            SingleInputStorage::new(self.id()),
+            UnusedTarget,
+        )).id();
         builder.commands.add(AddBranchToForkClone {
             source: self.source,
             target,

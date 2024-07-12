@@ -144,7 +144,7 @@ impl From<SmallVec<[Entity; 8]>> for FunnelInputStorage {
 }
 
 /// Keep track of the target for a link in a impulse chain
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug)]
 pub struct SingleTargetStorage(Entity);
 
 impl SingleTargetStorage {
@@ -327,9 +327,19 @@ pub struct OperationCleanup<'a> {
 impl<'a> OperationCleanup<'a> {
 
     pub fn clean(&mut self) {
-        let Some(cleanup) = self.world.get::<OperationCleanupStorage>(self.source) else {
+        let Some(source_ref) = self.world.get_entity(self.source) else {
+            dbg!(self.source);
             return;
         };
+        // let Some(cleanup) = self.world.get::<OperationCleanupStorage>(self.source) else {
+        //     dbg!(self.source);
+        //     return;
+        // };
+        let Some(cleanup) = source_ref.get::<OperationCleanupStorage>() else {
+            dbg!(self.source);
+            return;
+        };
+
         let cleanup = cleanup.0;
         if let Err(error) = cleanup(OperationCleanup {
             source: self.source,
@@ -359,11 +369,14 @@ impl<'a> OperationCleanup<'a> {
     }
 
     pub fn notify_cleaned(&mut self) -> OperationResult {
+        dbg!(self.source);
         let source_mut = self.world.get_entity_mut(self.source).or_broken()?;
         let scope = source_mut.get::<ScopeStorage>().or_not_ready()?.get();
+        dbg!(scope);
         let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
         let mut scope_contents = scope_mut.get_mut::<ScopeContents>().or_broken()?;
         if scope_contents.register_cleanup_of_node(self.session, self.source) {
+            dbg!();
             self.roster.cleanup_finished(
                 CleanupFinished { scope, session: self.session }
             );
@@ -565,6 +578,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
         }
 
         let mut source_mut = world.entity_mut(self.source);
+        dbg!(self.source);
         source_mut
             .insert((
                 OperationExecuteStorage(perform_operation::<Op>),

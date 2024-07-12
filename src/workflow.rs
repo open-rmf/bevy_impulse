@@ -295,4 +295,79 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| *v == 6.0));
         assert!(context.no_unhandled_errors());
     }
+
+    #[test]
+    fn test_fork_clone() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            let fork = scope.input.fork_clone(builder);
+            let branch_a = fork.clone_output(builder);
+            let branch_b = fork.clone_output(builder);
+            builder.connect(branch_a, scope.terminate);
+            builder.connect(branch_b, scope.terminate);
+        });
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(5.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.peek().available().is_some_and(|v| *v == 5.0));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+            .fork_clone_zip((
+                |chain: Chain<f64>| chain.connect(scope.terminate),
+                |chain: Chain<f64>| chain.connect(scope.terminate),
+            ));
+        });
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(3.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.peek().available().is_some_and(|v| *v == 3.0));
+        assert!(context.no_unhandled_errors());
+
+        let start = std::time::Instant::now();
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+            .fork_clone_zip((
+                |chain: Chain<f64>| chain
+                    .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(10.0*t), value: 10.0*t })
+                    .map(|r: AsyncMap<WaitRequest<f64>>| {
+                        dbg!(r.source);
+                        wait(r.request)
+                    })
+                    .connect(scope.terminate),
+                |chain: Chain<f64>| chain
+                    .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(t/100.0), value: t/100.0 })
+                    .map(|r: AsyncMap<WaitRequest<f64>>| {
+                        dbg!(r.source);
+                        wait(r.request)
+                    })
+                    .connect(scope.terminate),
+            ));
+        });
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(1.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs_f64(0.5));
+        dbg!(context.get_unhandled_errors());
+        dbg!(promise.peek());
+        println!("Elapsed time: {}", start.elapsed().as_secs_f64());
+        assert!(promise.peek().available().is_some_and(|v| *v == 0.01));
+        assert!(context.no_unhandled_errors());
+    }
 }

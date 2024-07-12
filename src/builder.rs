@@ -23,6 +23,7 @@ use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
     ScopeSettings, BeginCancel, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
+    AsMap, ProvideOnce,
 };
 
 pub(crate) mod connect;
@@ -97,6 +98,29 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Task::Output: 'static + Send + Sync,
     {
         self.create_node(f.into_async_map())
+    }
+
+    /// Create a map (either a [blocking map][1] or an
+    /// [async map][2]) by providing a function that takes [`BlockingMap`][1] or
+    /// [AsyncMap][2] as its only argument.
+    ///
+    /// [1]: crate::BlockingMap
+    /// [2]: crate::AsyncMap
+    pub fn create_map<M, F: AsMap<M>>(
+        &mut self,
+        f: F
+    ) -> Node<
+        <F::MapType as ProvideOnce>::Request,
+        <F::MapType as ProvideOnce>::Response,
+        <F::MapType as ProvideOnce>::Streams,
+    >
+    where
+        F::MapType: Provider,
+        <F::MapType as ProvideOnce>::Request: 'static + Send + Sync,
+        <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
+        <F::MapType as ProvideOnce>::Streams: StreamPack,
+    {
+        self.create_node(f.as_map())
     }
 
     /// Connect the output of one into the input slot of another node.

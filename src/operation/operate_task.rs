@@ -79,6 +79,8 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
     blocker: Option<Blocker>,
     sender: CbSender<ChannelItem>,
     disposal: Option<Disposal>,
+    being_cleaned: bool,
+    finished_normally: bool,
 }
 
 impl<Response: 'static + Send + Sync> OperateTask<Response> {
@@ -91,53 +93,67 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
         blocker: Option<Blocker>,
         sender: CbSender<ChannelItem>,
     ) -> Self {
-        Self { source, session, node, target, task: Some(task), blocker, sender, disposal: None }
+        Self {
+            source,
+            session,
+            node,
+            target,
+            task: Some(task),
+            blocker,
+            sender,
+            disposal: None,
+            being_cleaned: false,
+            finished_normally: false,
+        }
     }
 
     pub(crate) fn add(self, world: &mut World, roster: &mut OperationRoster) {
         let source = self.source;
         let scope = world.get::<ScopeStorage>(source).map(|s| s.get());
-        AddOperation::new(scope, source, self).apply(world);
+        let mut source_mut = world.entity_mut(source);
+        source_mut.set_parent(self.node);
+        if let Some(scope) = scope {
+            source_mut.insert(ScopeStorage::new(scope));
+        }
+
+        AddOperation::new(None, source, self).apply(world);
         roster.queue(source);
     }
 }
 
 impl<Response: 'static + Send + Sync> Drop for OperateTask<Response> {
     fn drop(&mut self) {
-        let Some(task) = self.task.take() else {
-            // This task operation has already been emptied, nothing to do here
+        println!(" ==== DROPPING TASK: {:?}:\n{:?}", self.source, backtrace::Backtrace::new());
+        if self.finished_normally {
+            // The task finished normally so no special action needs to be taken
+            dbg!(self.source);
             return;
-        };
+        }
 
         let source = self.source;
         let session = self.session;
         let node = self.node;
+        let task = self.task.take();
         let unblock = self.blocker.take();
         let sender = self.sender.clone();
         let disposal = self.disposal.take();
+        let being_cleaned = self.being_cleaned;
 
         AsyncComputeTaskPool::get().spawn(async move {
-            task.cancel().await;
+            let mut disposed = false;
+            if let Some(task) = task {
+                disposed = true;
+                task.cancel().await;
+            }
             sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                if let Some(unblock) = unblock {
-                    roster.unblock(unblock);
-                }
+                cleanup_task::<Response>(session, source, node, unblock, being_cleaned, world, roster);
 
-                if let Some(mut node_mut) = world.get_entity_mut(node) {
-                    if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
-                        active_tasks.list.retain(|ActiveTask { task_id: id, .. }| {
-                            *id != source
-                        });
-                    }
+                if disposed {
+                    let disposal = disposal.unwrap_or_else(|| {
+                        Disposal::task_despawned(source, node)
+                    });
+                    emit_disposal(node, session, disposal, world, roster);
                 }
-
-                if world.get_entity(source).is_some() {
-                    world.despawn(source);
-                }
-                let disposal = disposal.unwrap_or_else(|| {
-                    Disposal::task_despawned(source, node)
-                });
-                emit_disposal(node, session, disposal, world, roster);
             }))
         }).detach();
     }
@@ -177,6 +193,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let target = operation.target;
         let session = operation.session;
         let node = operation.node;
+        let being_cleaned = operation.being_cleaned;
         // We take out unblock here just in case the entity gets despawned and/or
         // the OperateTask component gets dropped before we reach the end of the
         // function.
@@ -198,12 +215,9 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         ) {
             Poll::Ready(result) => {
                 // Task has finished
-                if let Some(unblock) = unblock {
-                    roster.unblock(unblock);
-                }
-
+                world.get_mut::<OperateTask<Response>>(source).or_broken()?.finished_normally = true;
                 let r = world.entity_mut(target).give_input(session, result, roster);
-                world.despawn(source);
+                cleanup_task::<Response>(session, source, node, unblock, being_cleaned, world, roster);
                 r?;
             }
             Poll::Pending => {
@@ -242,47 +256,18 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
         let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_broken()?;
+        operation.being_cleaned = true;
         let node = operation.node;
-        let task = operation.task.take().or_broken()?;
+        let task = operation.task.take();
         let unblock = operation.blocker.take();
         let sender = operation.sender.clone();
+        dbg!(source, node);
         AsyncComputeTaskPool::get().spawn(async move {
-            task.cancel().await;
+            if let Some(task) = task {
+                task.cancel().await;
+            }
             if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                if let Some(unblock) = unblock {
-                    roster.unblock(unblock);
-                }
-
-                if let Some(mut node_mut) = world.get_entity_mut(node) {
-                    if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
-                        let mut cleanup_ready = true;
-                        active_tasks.list.retain(|ActiveTask { task_id: id, session: r }| {
-                            if *id == source {
-                                return false;
-                            }
-
-                            if *r == session {
-                                // The node has another active task related to this
-                                // session so its cleanup is not finished yet.
-                                cleanup_ready = false;
-                            }
-                            true
-                        });
-
-                        if cleanup_ready {
-                            let mut cleanup = OperationCleanup {
-                                source: node, session, world, roster
-                            };
-                            if let Err(OperationError::Broken(backtrace)) = cleanup.notify_cleaned() {
-                                world.get_resource_or_insert_with(|| UnhandledErrors::default())
-                                    .broken
-                                    .push(Broken { node, backtrace });
-                            }
-                        }
-                    };
-                };
-
-                world.despawn(source);
+                cleanup_task::<Response>(session, source, node, unblock, true, world, roster);
             })) {
                 eprintln!("Failed to send a command to cleanup a task: {err}");
             }
@@ -296,6 +281,55 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
             .get_entity(reachability.source).or_broken()?
             .get::<OperateTask<Response>>().or_broken()?.session;
         Ok(session == reachability.session)
+    }
+}
+
+fn cleanup_task<Response>(
+    session: Entity,
+    source: Entity,
+    node: Entity,
+    unblock: Option<Blocker>,
+    being_cleaned: bool,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) {
+    if let Some(unblock) = unblock {
+        roster.unblock(unblock);
+    }
+
+    if let Some(mut node_mut) = world.get_entity_mut(node) {
+        if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
+            let mut cleanup_ready = true;
+            active_tasks.list.retain(|ActiveTask { task_id: id, session: r }| {
+                if *id == source {
+                    return false;
+                }
+
+                if *r == session {
+                    // The node has another active task related to this
+                    // session so its cleanup is not finished yet.
+                    cleanup_ready = false;
+                }
+                true
+            });
+
+            if being_cleaned && cleanup_ready {
+                // We are notifying about the cleanup on behalf of the node that
+                // created this task, so we set initialize as source: node
+                let mut cleanup = OperationCleanup {
+                    source: node, session, world, roster
+                };
+                if let Err(OperationError::Broken(backtrace)) = cleanup.notify_cleaned() {
+                    world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .broken
+                        .push(Broken { node, backtrace });
+                }
+            }
+        };
+    };
+
+    if world.get_entity(source).is_some() {
+        world.despawn(source);
     }
 }
 
@@ -327,23 +361,27 @@ pub struct ActiveTask {
 
 impl ActiveTasksStorage {
     pub fn cleanup(mut cleaner: OperationCleanup) -> OperationResult {
+        let source = cleaner.source;
         let source_ref = cleaner.world.get_entity(cleaner.source).or_broken()?;
         let active_tasks = source_ref.get::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
         for ActiveTask { task_id: id, session } in &active_tasks.list {
             if *session == cleaner.session {
+                dbg!(source, *id, *session);
                 to_cleanup.push(*id);
                 cleanup_ready = false;
             }
         }
 
         for task_id in to_cleanup {
+            dbg!(source, task_id);
             cleaner = cleaner.for_node(task_id);
             cleaner.clean();
         }
 
         if cleanup_ready {
+            dbg!(source);
             cleaner.notify_cleaned()?;
         }
 
