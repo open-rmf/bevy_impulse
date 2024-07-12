@@ -420,7 +420,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// `unzip_build` allows you to split it into multiple chains (one for each
     /// tuple element) and apply a separate builder function to each chain. You
     /// will be passed back the zipped output of all the builder functions.
-    #[must_use]
     pub fn unzip_build<Build>(self, build: Build) -> Build::ReturnType
     where
         Build: UnzipBuilder<T>
@@ -795,41 +794,50 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    // #[test]
-    // fn test_unzip() {
-    //     let mut context = TestingContext::minimal_plugins();
+    #[test]
+    fn test_unzip() {
+        let mut context = TestingContext::minimal_plugins();
 
-    //     let mut promise = context.build(|commands| {
-    //         commands
-    //         .request((2.0, 3.0), add.into_blocking_map())
-    //         .map_block(|v| (v, 2.0*v))
-    //         .unzip_build((
-    //             |chain: Chain<f64>| {
-    //                 chain
-    //                 .map_block(|v| (v, 10.0))
-    //                 .map_block(add)
-    //                 .dangle()
-    //             },
-    //             |chain: Chain<f64>| {
-    //                 chain
-    //                 .map_block(|value|
-    //                     WaitRequest{
-    //                         duration: std::time::Duration::from_secs_f64(0.01),
-    //                         value,
-    //                     }
-    //                 )
-    //                 .map_async(wait)
-    //                 .dangle()
-    //             }
-    //         ))
-    //         .bundle()
-    //         .race_bundle(commands)
-    //         .take()
-    //     });
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+            .map_block(add)
+            .map_block(|v| (v, 2.0*v))
+            .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
+                scope.input.chain(builder)
+                .unzip_build((
+                    |chain: Chain<f64>| {
+                        chain
+                        .map_block(|v| (v, 10.0))
+                        .map_block(add)
+                        .connect(scope.terminate);
+                    },
+                    |chain: Chain<f64>| {
+                        chain
+                        .map_block(|value|
+                            WaitRequest{
+                                duration: std::time::Duration::from_secs_f64(0.01),
+                                value,
+                            }
+                        )
+                        .map_async(wait)
+                        .connect(scope.terminate);
+                    },
+                ));
+            })
+            .connect(scope.terminate);
+        });
 
-    //     context.run_while_pending(&mut promise);
-    //     assert_eq!(promise.peek().available().copied(), Some(15.0));
-    // }
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request((2.0, 3.0), workflow)
+            .take_response()
+        });
+
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.peek().available().copied(), Some(15.0));
+        assert!(context.no_unhandled_errors());
+    }
 
     // #[test]
     // fn test_dispose_on_cancel() {
