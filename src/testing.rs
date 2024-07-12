@@ -24,7 +24,7 @@ pub use bevy::{
     ecs::system::CommandQueue,
 };
 
-pub use std::time::Duration;
+pub use std::time::{Duration, Instant};
 
 use crate::{
     Promise, Service, InAsyncService, InBlockingService, UnhandledErrors,
@@ -262,8 +262,15 @@ pub struct WaitRequest<Value> {
 #[cfg(test)]
 pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
     use async_std::future;
-    let never = future::pending::<()>();
-    let _ = future::timeout(request.duration, never);
+    let start = Instant::now();
+    let mut elapsed = start.elapsed();
+    while elapsed < request.duration {
+        let never = future::pending::<()>();
+        let timeout = request.duration - elapsed;
+        dbg!(request.duration, elapsed, timeout);
+        let _ = future::timeout(timeout, never).await;
+        elapsed = start.elapsed();
+    }
     request.value
 }
 

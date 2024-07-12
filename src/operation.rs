@@ -182,6 +182,9 @@ pub(crate) struct UnusedTarget;
 pub struct OperationRoster {
     /// Operation sources that should be triggered
     pub(crate) queue: VecDeque<Entity>,
+    /// Tasks that should be awoken. If the task is already despawned, then
+    /// it should not be considered an error.
+    pub(crate) awake: VecDeque<Entity>,
     /// Operation sources that should be cancelled
     pub(crate) cancel: VecDeque<Cancel>,
     /// Async services that should pull their next item
@@ -201,6 +204,10 @@ impl OperationRoster {
         self.queue.push_back(source);
     }
 
+    pub fn awake(&mut self, source: Entity) {
+        self.awake.push_back(source);
+    }
+
     pub fn cancel(&mut self, source: Cancel) {
         self.cancel.push_back(source);
     }
@@ -218,8 +225,11 @@ impl OperationRoster {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.queue.is_empty() && self.cancel.is_empty()
-        && self.unblock.is_empty() && self.disposed.is_empty()
+        self.queue.is_empty()
+        && self.awake.is_empty()
+        && self.cancel.is_empty()
+        && self.unblock.is_empty()
+        && self.disposed.is_empty()
         && self.cleanup_finished.is_empty()
     }
 
@@ -620,6 +630,15 @@ pub fn execute_operation(request: OperationRequest) {
                 node: request.source,
                 backtrace: Some(Backtrace::new())
             });
+        return;
+    };
+    let operator = operator.0;
+    operator(request);
+}
+
+pub fn awaken_task(request: OperationRequest) {
+    let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
+        // If the task is not available, we just accept that it has despawned.
         return;
     };
     let operator = operator.0;

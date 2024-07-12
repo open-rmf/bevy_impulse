@@ -343,14 +343,14 @@ mod tests {
                 |chain: Chain<f64>| chain
                     .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(10.0*t), value: 10.0*t })
                     .map(|r: AsyncMap<WaitRequest<f64>>| {
-                        dbg!(r.source);
+                        dbg!(r.source, r.request.value);
                         wait(r.request)
                     })
                     .connect(scope.terminate),
                 |chain: Chain<f64>| chain
                     .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(t/100.0), value: t/100.0 })
                     .map(|r: AsyncMap<WaitRequest<f64>>| {
-                        dbg!(r.source);
+                        dbg!(r.source, r.request.value);
                         wait(r.request)
                     })
                     .connect(scope.terminate),

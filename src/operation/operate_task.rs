@@ -123,10 +123,8 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
 
 impl<Response: 'static + Send + Sync> Drop for OperateTask<Response> {
     fn drop(&mut self) {
-        println!(" ==== DROPPING TASK: {:?}:\n{:?}", self.source, backtrace::Backtrace::new());
         if self.finished_normally {
             // The task finished normally so no special action needs to be taken
-            dbg!(self.source);
             return;
         }
 
@@ -187,8 +185,20 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_broken()?;
+        // It's possible for a task to get into the roster after it has despawned
+        // so we'll just exit early when that happens. However this should not
+        // actually be possible because the OperationExecuteStorage must still be
+        // accessible in order to be inside this function.
+        let mut source_mut = world.get_entity_mut(source).or_not_ready()?;
+        // If the task has been stopped / cancelled then OperateTask will have
+        // been removed, even if it has not despawned yet.
+        let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_not_ready()?;
+        if operation.being_cleaned {
+            // The operation is being cleaned up, so the task will not be
+            // available and there will be nothing for us to do here. We should
+            // simply return immediately.
+            return Ok(());
+        }
         let mut task = operation.task.take().or_broken()?;
         let target = operation.target;
         let session = operation.session;
@@ -215,8 +225,9 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         ) {
             Poll::Ready(result) => {
                 // Task has finished
-                world.get_mut::<OperateTask<Response>>(source).or_broken()?.finished_normally = true;
+                println!(" == READY: {source:?}");
                 let r = world.entity_mut(target).give_input(session, result, roster);
+                world.get_mut::<OperateTask<Response>>(source).or_broken()?.finished_normally = true;
                 cleanup_task::<Response>(session, source, node, unblock, being_cleaned, world, roster);
                 r?;
             }
@@ -264,7 +275,9 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         dbg!(source, node);
         AsyncComputeTaskPool::get().spawn(async move {
             if let Some(task) = task {
+                dbg!(source, node);
                 task.cancel().await;
+                dbg!(source, node);
             }
             if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
                 cleanup_task::<Response>(session, source, node, unblock, true, world, roster);
@@ -316,6 +329,7 @@ fn cleanup_task<Response>(
             if being_cleaned && cleanup_ready {
                 // We are notifying about the cleanup on behalf of the node that
                 // created this task, so we set initialize as source: node
+                dbg!(source, node);
                 let mut cleanup = OperationCleanup {
                     source: node, session, world, roster
                 };
@@ -331,6 +345,8 @@ fn cleanup_task<Response>(
     if world.get_entity(source).is_some() {
         world.despawn(source);
     }
+
+    roster.purge(source);
 }
 
 #[derive(Component, Clone, Copy)]

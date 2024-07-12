@@ -36,7 +36,7 @@ use crate::{
     UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel, MiscellaneousFailure,
     OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished, OperationCleanup,
     UnhandledErrors, UnusedTargetDrop, ValidateScopeReachability, OperationError,
-    execute_operation, dispose_for_despawned_service,
+    execute_operation, awaken_task, dispose_for_despawned_service,
 };
 
 #[derive(Resource, Default)]
@@ -90,6 +90,11 @@ pub fn flush_impulses(
 
         while let Some(source) = roster.queue.pop_front() {
             execute_operation(OperationRequest { source, world, roster: &mut roster });
+            garbage_cleanup(world, &mut roster);
+        }
+
+        while let Some(source) = roster.awake.pop_front() {
+            awaken_task(OperationRequest { source, world, roster: &mut roster });
             garbage_cleanup(world, &mut roster);
         }
 
@@ -152,7 +157,7 @@ fn collect_from_channels(
         .receiver
         .try_iter()
     {
-        roster.queue(wakeable);
+        roster.awake(wakeable);
     }
 
     let mut unused_targets_state: SystemState<Query<(Entity, &Detached), With<UnusedTarget>>> =
