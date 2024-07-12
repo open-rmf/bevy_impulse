@@ -225,7 +225,6 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         ) {
             Poll::Ready(result) => {
                 // Task has finished
-                println!(" == READY: {source:?}");
                 let r = world.entity_mut(target).give_input(session, result, roster);
                 world.get_mut::<OperateTask<Response>>(source).or_broken()?.finished_normally = true;
                 cleanup_task::<Response>(session, source, node, unblock, being_cleaned, world, roster);
@@ -272,19 +271,18 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let task = operation.task.take();
         let unblock = operation.blocker.take();
         let sender = operation.sender.clone();
-        dbg!(source, node);
-        AsyncComputeTaskPool::get().spawn(async move {
-            if let Some(task) = task {
-                dbg!(source, node);
+        if let Some(task) = task {
+            AsyncComputeTaskPool::get().spawn(async move {
                 task.cancel().await;
-                dbg!(source, node);
-            }
-            if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                cleanup_task::<Response>(session, source, node, unblock, true, world, roster);
-            })) {
-                eprintln!("Failed to send a command to cleanup a task: {err}");
-            }
-        }).detach();
+                if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+                    cleanup_task::<Response>(session, source, node, unblock, true, world, roster);
+                })) {
+                    eprintln!("Failed to send a command to cleanup a task: {err}");
+                }
+            }).detach();
+        } else {
+            cleanup_task::<Response>(session, source, node, unblock, true, clean.world, clean.roster);
+        }
 
         Ok(())
     }
@@ -329,7 +327,6 @@ fn cleanup_task<Response>(
             if being_cleaned && cleanup_ready {
                 // We are notifying about the cleanup on behalf of the node that
                 // created this task, so we set initialize as source: node
-                dbg!(source, node);
                 let mut cleanup = OperationCleanup {
                     source: node, session, world, roster
                 };
@@ -378,26 +375,23 @@ pub struct ActiveTask {
 impl ActiveTasksStorage {
     pub fn cleanup(mut cleaner: OperationCleanup) -> OperationResult {
         let source = cleaner.source;
-        let source_ref = cleaner.world.get_entity(cleaner.source).or_broken()?;
+        let source_ref = cleaner.world.get_entity(source).or_broken()?;
         let active_tasks = source_ref.get::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
         for ActiveTask { task_id: id, session } in &active_tasks.list {
             if *session == cleaner.session {
-                dbg!(source, *id, *session);
                 to_cleanup.push(*id);
                 cleanup_ready = false;
             }
         }
 
         for task_id in to_cleanup {
-            dbg!(source, task_id);
             cleaner = cleaner.for_node(task_id);
             cleaner.clean();
         }
 
         if cleanup_ready {
-            dbg!(source);
             cleaner.notify_cleaned()?;
         }
 

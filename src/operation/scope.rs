@@ -426,7 +426,6 @@ where
                 continue;
             };
 
-            dbg!(&cancellation);
             if pair.status.to_cancelled(cancellation.clone()) {
                 cleanup_entire_scope(OperationCleanup {
                     source, session: scoped_session, world, roster,
@@ -469,7 +468,6 @@ where
             .find(|pair| pair.scoped_session == scoped_session)
             .or_not_ready()?;
 
-        dbg!(&disposals);
         if pair.status.to_cancelled(Unreachability {
             scope: clean.source,
             session: pair.parent_session,
@@ -482,7 +480,6 @@ where
     }
 
     fn finalize_scope_cleanup(clean: OperationCleanup) -> OperationResult {
-        dbg!();
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(clean.source).or_broken()?;
         let mut pairs = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
@@ -507,7 +504,6 @@ where
                 None.or_broken()?;
             }
             ScopedSessionStatus::Finished => {
-                dbg!();
                 let (target, blocker) = source_mut.get_mut::<ExitTargetStorage>()
                     .and_then(|mut storage| storage.map.remove(&scoped_session))
                     .map(|exit| (exit.target, exit.blocker))
@@ -522,7 +518,7 @@ where
                     .get_mut::<Staging<Response>>(terminal).or_broken()?.0
                     .remove(&clean.session).or_broken()?;
 
-                clean.world.get_entity_mut(dbg!(target)).or_broken()?.give_input(
+                clean.world.get_entity_mut(target).or_broken()?.give_input(
                     pair.parent_session, response, clean.roster,
                 )?;
 
@@ -534,7 +530,6 @@ where
                 clean.world.despawn(clean.session);
             }
             ScopedSessionStatus::Cleanup => {
-                dbg!();
                 let mut clean = clean.for_node(terminal);
                 clean.cleanup_inputs::<Response>()?;
                 let mut staging = clean.world.get_mut::<Staging<Response>>(clean.source).or_broken()?;
@@ -547,7 +542,6 @@ where
                 )?;
             }
             ScopedSessionStatus::Cancelled(cancellation) => {
-                dbg!();
                 let mut clean = clean.for_node(terminal);
                 clean.cleanup_inputs::<Response>()?;
                 let mut staging = clean.world.get_mut::<Staging<Response>>(clean.source).or_broken()?;
@@ -753,7 +747,6 @@ impl ScopeContents {
             cleanup.insert(index, node);
         }
 
-        dbg!(&self.nodes, &cleanup);
         self.nodes == *cleanup
     }
 

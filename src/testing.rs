@@ -267,7 +267,6 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
     while elapsed < request.duration {
         let never = future::pending::<()>();
         let timeout = request.duration - elapsed;
-        dbg!(request.duration, elapsed, timeout);
         let _ = future::timeout(timeout, never).await;
         elapsed = start.elapsed();
     }

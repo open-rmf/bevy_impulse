@@ -67,27 +67,20 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         return Ok(());
     }
 
-    println!("Connecting {:?} to {:?}", connect.original_target, connect.new_target);
-
     let old_inputs = world.get_entity_mut(connect.original_target).or_broken()?
         .take::<SingleInputStorage>().or_broken()?
         .take();
 
-    dbg!(&old_inputs);
-
     for input in old_inputs.into_iter() {
-        dbg!(input);
         let mut input_mut = world.get_entity_mut(input).or_broken()?;
 
         if let Some(mut target) = input_mut.get_mut::<SingleTargetStorage>() {
             target.set(connect.new_target);
-            dbg!(&target);
         }
 
         if let Some(mut targets) = input_mut.get_mut::<ForkTargetStorage>() {
             for target in &mut targets.0 {
                 if *target == connect.original_target {
-                    dbg!(&target, connect.new_target);
                     *target = connect.new_target;
                 }
             }
@@ -96,7 +89,6 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         if let Some(mut targets) = input_mut.get_mut::<StreamTargetMap>() {
             for target in &mut targets.map {
                 if *target == connect.original_target {
-                    dbg!(&target, connect.new_target);
                     *target = connect.new_target;
                 }
             }

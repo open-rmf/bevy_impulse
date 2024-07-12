@@ -186,9 +186,7 @@ impl<'w> ManageInput for EntityMut<'w> {
         session: Entity,
         data: T,
     ) -> Result<(), OperationError> {
-        dbg!(self.id());
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        dbg!(session);
         storage.reverse_queue.insert(0, Input { session, data });
         Ok(())
     }

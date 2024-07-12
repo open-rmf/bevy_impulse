@@ -740,44 +740,42 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.build_io_workflow(|scope, builder| {
-            scope
-            .input
-            .chain(builder)
+            scope.input.chain(builder)
+            // (2.0, 2.0)
             .map_block(add)
-            .map_block(print_debug(format!("line {}", line!())))
+            // 4.0
             .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
-                scope
-                .input
-                .chain(builder)
-                .map_block(print_debug(format!("line {}", line!())))
+                scope.input.chain(builder)
+                // 4.0
                 .fork_clone_zip((
                     |chain: Chain<f64>| {
-                        chain
-                        .map_block(print_debug(format!("line {}", line!())))
-                        .map_block(|value|
+                        // 4.0
+                        chain.map_block(|value|
                             WaitRequest {
                                 duration: Duration::from_secs_f64(value),
                                 value,
                             }
                         )
-                        .map_block(print_debug(format!("line {}", line!())))
                         .map_async(wait)
-                        .map_block(print_debug(format!("line {}", line!())))
+                        // 4.0
                         .connect(scope.terminate);
                     },
                     |chain: Chain<f64>| {
-                        chain
-                        .map_block(print_debug(format!("line {}", line!())))
-                        .map_block(|a| (a, a))
-                        .map_block(print_debug(format!("line {}", line!())))
+                        // 4.0
+                        chain.map_block(|a| (a, a))
+                        // (4.0, 4.0)
                         .map_block(add)
-                        .map_block(print_debug(format!("line {}", line!())))
+                        // 8.0
                         .connect(scope.terminate);
                     }
                 ));
             })
+            // This should be won by the 8.0 branch because it does not wait,
+            // while the 4.0 branch should wait for 4.0s.
             .map_block(|a| (a, a))
+            // (8.0, 8.0)
             .map_block(add)
+            // 16.0
             .connect(scope.terminate);
         });
 
@@ -793,10 +791,8 @@ mod tests {
             .with_update_count(100),
         );
 
-        dbg!(context.get_unhandled_errors());
-
-        dbg!(promise.peek());
-        assert_eq!(promise.peek().available().copied(), Some(20.0));
+        assert_eq!(promise.peek().available().copied(), Some(16.0));
+        assert!(context.no_unhandled_errors());
     }
 
     // #[test]
