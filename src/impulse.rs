@@ -23,7 +23,7 @@ use std::future::Future;
 
 use crate::{
     Promise, ProvideOnce, StreamPack, IntoBlockingMapOnce, IntoAsyncMapOnce,
-    AsMapOnce, UnusedTarget, StreamTargetMap,
+    AsMapOnce, UnusedTarget, StreamTargetMap, Cancellable,
 };
 
 mod detach;
@@ -127,7 +127,9 @@ where
 
         // We should automatically delete the previous step in the chain once
         // this one is finished.
-        self.commands.entity(source).set_parent(target);
+        self.commands.entity(source)
+            .insert(Cancellable::new(cancel_impulse))
+            .set_parent(target);
         provider.connect(None, source, target, self.commands);
         Impulse {
             source,
@@ -136,7 +138,6 @@ where
             _ignore: Default::default(),
         }
     }
-
 
     /// Apply a one-time callback whose input is the Response of the current
     /// target. The output of the map will become the Response of the returned

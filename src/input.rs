@@ -338,7 +338,7 @@ impl<T: 'static + Send + Sync> Command for InputCommand<T> {
                     backtrace: Some(Backtrace::new()),
                 });
                 let cancel = Cancel {
-                    source: self.target,
+                    origin: self.target,
                     target: self.session,
                     session: Some(self.session),
                     cancellation: Cancellation::from_cause(cause)

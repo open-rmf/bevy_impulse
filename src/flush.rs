@@ -108,7 +108,7 @@ fn garbage_cleanup(world: &mut World, roster: &mut OperationRoster) {
     }
 
     while let Some(cancel) = roster.cancel.pop_front() {
-        cancel.trigger(world, roster);
+        dbg!(cancel).trigger(world, roster);
     }
 }
 

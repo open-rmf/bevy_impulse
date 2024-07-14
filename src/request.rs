@@ -21,7 +21,7 @@ use std::future::Future;
 
 use crate::{
     UnusedTarget, StreamPack, ProvideOnce, IntoBlockingMapOnce, IntoAsyncMap,
-    Impulse, Detached, InputCommand,
+    Impulse, Detached, InputCommand, Cancellable, cancel_impulse,
 };
 
 /// Extensions for creating impulse chains by making a request to a provider or
@@ -91,7 +91,8 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             UnusedTarget,
         )).id();
 
-        let source = self.spawn(())
+        let source = self
+            .spawn(Cancellable::new(cancel_impulse))
             // We set the parent of this source to the target so that when the
             // target gets despawned, this will also be despawned.
             .set_parent(target)

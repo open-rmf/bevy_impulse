@@ -128,7 +128,7 @@ impl From<Broken> for CancellationCause {
 #[derive(Debug, Clone)]
 pub struct Cancel {
     /// The entity that triggered the cancellation
-    pub(crate) source: Entity,
+    pub(crate) origin: Entity,
     /// The target of the cancellation
     pub(crate) target: Entity,
     /// The session which is being cancelled for the target
@@ -138,6 +138,11 @@ pub struct Cancel {
 }
 
 impl Cancel {
+    pub(crate) fn for_target(mut self, target: Entity) -> Self {
+        self.target = target;
+        self
+    }
+
     pub(crate) fn trigger(
         self,
         world: &mut World,
@@ -267,7 +272,7 @@ pub fn try_emit_broken(
         .push(CancelFailure {
             error: OperationError::Broken(Some(Backtrace::new())),
             cancel: Cancel {
-                source,
+                origin: source,
                 target: source,
                 session: None,
                 cancellation: Broken { node: source, backtrace }.into(),
@@ -287,16 +292,16 @@ fn try_emit_cancel(
         // The cancellation is happening inside a scope, so we should cancel
         // the scope
         let scope = scope.get();
-        roster.cancel(Cancel { source, target: scope, session, cancellation });
+        roster.cancel(Cancel { origin: source, target: scope, session, cancellation });
     } else if let Some(session) = session {
         // The cancellation is not happening inside a scope, so we should tell
         // the session itself to cancel.
-        roster.cancel(Cancel { source, target: session, session: Some(session), cancellation });
+        roster.cancel(Cancel { origin: source, target: session, session: Some(session), cancellation });
     } else {
         return Err(CancelFailure::new(
             OperationError::Broken(Some(Backtrace::new())),
             Cancel {
-                source,
+                origin: source,
                 target: source,
                 session,
                 cancellation,

@@ -146,7 +146,7 @@ where
                 // This workflow is already running and we need to stop it at the
                 // scope level
                 roster.cancel(Cancel {
-                    source,
+                    origin: source,
                     target: workflow.scope,
                     session: Some(stop.session),
                     cancellation: Cancellation::supplanted(

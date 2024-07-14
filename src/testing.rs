@@ -217,6 +217,10 @@ pub fn spawn_cube(
     Ok(entity)
 }
 
+pub fn duplicate<T: Clone>(value: T) -> (T, T) {
+    (value.clone(), value)
+}
+
 pub fn double(value: f64) -> f64 {
     2.0*value
 }
@@ -282,10 +286,16 @@ pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl Fn(T) -> T {
     }
 }
 
-/// Use this to add a blocking map to the chain that simply produces an error.
+/// Use this to create a blocking map that simply produces an error.
 /// Used for testing special operations for the [`Result`] type.
 pub fn produce_err<T>(_: T) -> Result<T, ()> {
     Err(())
+}
+
+/// Use this to create a blocking map that simply produces [`None`].
+/// Used for testing special operations for the [`Option`] type.
+pub fn produce_none<T>(_: T) -> Option<T> {
+    None
 }
 
 pub struct RepeatRequest {

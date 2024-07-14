@@ -326,7 +326,8 @@ where
     ) -> ScopeEndpoints {
         let enter_scope = commands.spawn(EntryForScope(scope_id)).id();
         let terminal = commands.spawn(()).set_parent(scope_id).id();
-        let finish_scope_cancel = commands.spawn(()).set_parent(scope_id).id();
+        let finish_scope_cancel = commands.spawn(FinishCancelForScope(scope_id))
+            .set_parent(scope_id).id();
 
         let scope = OperateScope::<Request, Response, Streams> {
             enter_scope,
@@ -367,7 +368,7 @@ where
 
     fn receive_cancel(
         OperationCancel {
-            cancel: Cancel { source: _origin, target: source, session, cancellation },
+            cancel: Cancel { origin: _origin, target: source, session, cancellation },
             world,
             roster
         }: OperationCancel,
@@ -599,8 +600,13 @@ pub struct FinalizeScopeCleanup(pub(crate) fn(OperationCleanup) -> OperationResu
 #[derive(Component)]
 pub(crate) struct ScopeEntryStorage(pub(crate) Entity);
 
+/// Store the scope entity for the first node within a scope
 #[derive(Component)]
 pub(crate) struct EntryForScope(pub(crate) Entity);
+
+/// Store the scope entity for the FinishCancel operation within a scope
+#[derive(Component)]
+struct FinishCancelForScope(Entity);
 
 pub(crate) struct Terminate<T> {
     scope: Entity,
@@ -915,7 +921,7 @@ impl Operation for FinishCancel {
 impl FinishCancel {
     fn receive_cancel(
         OperationCancel {
-            cancel: Cancel { source: _origin, target: source, session, cancellation },
+            cancel: Cancel { origin: _origin, target: source, session, cancellation },
             world,
             roster
         }: OperationCancel,
@@ -1003,7 +1009,7 @@ impl FinishCancel {
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
+        let scope = source_mut.get::<FinishCancelForScope>().or_broken()?.0;
         let mut awaiting = source_mut.get_mut::<AwaitingCancelStorage>().or_broken()?;
         let a = awaiting.0.get(index).or_broken()?;
         let parent_session = a.cancelled.parent_session;

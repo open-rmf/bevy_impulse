@@ -237,6 +237,22 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         ).output.chain(self.builder)
     }
 
+    /// Simplified version of [`Self::then_scope`] limited to a simple input and
+    /// output. This does not support streams and only uses default scope
+    /// settings.
+    ///
+    /// Unlike `then_scope`, this function can infer the types for the generics
+    /// so you don't need to explicitly specify them.
+    pub fn then_io_scope<Response>(
+        self,
+        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder),
+    ) -> Chain<'w, 's, 'a, 'b, Response>
+    where
+        Response: 'static + Send + Sync,
+    {
+        self.then_scope(ScopeSettings::default(), build)
+    }
+
     /// From the current target in the chain, build a [scoped](Scope) workflow
     /// and then get back a node that represents that scoped workflow.
     #[must_use]
@@ -253,6 +269,22 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.builder.create_scope_impl::<T, Response, Streams>(
             self.target, exit_scope, settings, build,
         )
+    }
+
+    /// Simplified version of [`Self::then_scope_node`] limited to a simple
+    /// input and output. This does not support streams and only uses default
+    /// scope settings.
+    ///
+    /// Unlike `then_scope_node`, this function can infer the types for the
+    /// generics so you don't need to explicitly specify them.
+    pub fn then_io_scope_node<Response>(
+        self,
+        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder),
+    ) -> Node<T, Response, ()>
+    where
+        Response: 'static + Send + Sync,
+    {
+        self.then_scope_node(ScopeSettings::default(), build)
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
@@ -839,36 +871,38 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    // #[test]
-    // fn test_dispose_on_cancel() {
-    //     let mut context = TestingContext::minimal_plugins();
+    #[test]
+    fn test_cancel_on_none() {
+        let mut context = TestingContext::minimal_plugins();
 
-    //     let mut promise = context.build(|commands| {
-    //         commands
-    //         .provide("hello")
-    //         .map_block(produce_err)
-    //         .cancel_on_err()
-    //         .dispose_on_cancel()
-    //         .take()
-    //     });
+        dbg!();
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+                .map_block(duplicate)
+                .map_block(print_debug(format!("{}", line!())))
+                .map_block(add)
+                .map_block(print_debug(format!("{}", line!())))
+                .map_block(produce_none)
+                .map_block(print_debug(format!("{}", line!())))
+                .cancel_on_none()
+                .map_block(print_debug(format!("{}", line!())))
+                .map_block(duplicate)
+                .map_block(print_debug(format!("{}", line!())))
+                .map_block(add)
+                .map_block(print_debug(format!("{}", line!())))
+                .connect(scope.terminate);
+        });
 
-    //     context.run_while_pending(&mut promise);
-    //     assert!(promise.peek().is_disposed());
+        dbg!();
+        let mut promise = context.build(|commands| {
+            commands
+            .request(2.0, workflow)
+            .take_response()
+        });
 
-    //     // If we flip the order of cancel_on_err and dispose_on_cancel then the
-    //     // outcome should be a cancellation instead of a disposal, because the
-    //     // disposal was requested for a part of the chain that did not get
-    //     // cancelled.
-    //     let mut promise = context.build(|commands| {
-    //         commands
-    //         .provide("hello")
-    //         .map_block(produce_err)
-    //         .dispose_on_cancel()
-    //         .cancel_on_err()
-    //         .take()
-    //     });
-
-    //     context.run_while_pending(&mut promise);
-    //     assert!(promise.peek().is_cancelled());
-    // }
+        dbg!();
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        dbg!(context.get_unhandled_errors());
+        assert!(promise.peek().is_cancelled());
+    }
 }

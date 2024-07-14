@@ -89,7 +89,7 @@ fn perform_impulse<I: Impulsive>(
                 .push(CancelFailure {
                     error: OperationError::Broken(Some(Backtrace::new())),
                     cancel: Cancel {
-                        source,
+                        origin: source,
                         target: source,
                         session: None,
                         cancellation: Broken { node: source, backtrace }.into(),
@@ -100,12 +100,14 @@ fn perform_impulse<I: Impulsive>(
     }
 }
 
-fn cancel_impulse(
+pub(crate) fn cancel_impulse(
     OperationCancel { cancel, world, roster }: OperationCancel,
 ) -> OperationResult {
+    dbg!(cancel.origin);
     // We cancel an impulse by travelling to its terminal and
-    let mut terminal = cancel.source;
+    let mut terminal = dbg!(cancel.target);
     loop {
+        dbg!(terminal);
         let Some(target) = world.get::<SingleTargetStorage>(terminal) else {
             break;
         };
@@ -113,7 +115,9 @@ fn cancel_impulse(
     }
 
     if let Some(on_cancel) = world.get::<OnTerminalCancelled>(terminal) {
+        dbg!(terminal);
         let on_cancel = on_cancel.0;
+        let cancel = cancel.for_target(terminal);
         match on_cancel(OperationCancel { cancel: cancel.clone(), world, roster }) {
             Ok(()) | Err(OperationError::NotReady) => {
                 // Do nothing
@@ -128,6 +132,8 @@ fn cancel_impulse(
                 });
             }
         }
+    } else {
+        dbg!(terminal);
     }
 
     if let Some(terminal_mut) = world.get_entity_mut(terminal) {
