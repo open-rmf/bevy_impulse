@@ -52,14 +52,14 @@ pub(crate) fn make_option_branching<T>(
     }
 }
 
-#[derive(Component)]
-struct BranchingActivatorStorage<F: 'static + Send + Sync>(F);
+#[derive(Component, Clone, Copy)]
+struct BranchingActivatorStorage<F: 'static + Send + Sync + Copy>(F);
 
 impl<InputT, Outputs, F> Operation for Branching<InputT, Outputs, F>
 where
     InputT: 'static + Send + Sync,
     Outputs: Branchable,
-    F: FnOnce(InputT) -> Outputs::Activation + 'static + Send + Sync,
+    F: Fn(InputT) -> Outputs::Activation + Copy + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
@@ -79,7 +79,7 @@ where
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: input } = source_mut.take_input::<InputT>()?;
-        let BranchingActivatorStorage::<F>(activator) = source_mut.take().or_broken()?;
+        let BranchingActivatorStorage::<F>(activator) = source_mut.get().copied().or_broken()?;
 
         let activation = activator(input);
         Outputs::activate(session, activation, source, world, roster)

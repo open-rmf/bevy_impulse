@@ -56,8 +56,8 @@ pub trait RequestExt<'w, 's> {
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack;
 
-    /// Call this on [`Commands`] to begin building an impulse chain from a value
-    /// without calling any provider.
+    /// Call this on [`Commands`] to begin building an impulse chain from a
+    /// value without calling any provider.
     fn provide<'a, T: 'static + Send + Sync>(
         &'a mut self,
         value: T,

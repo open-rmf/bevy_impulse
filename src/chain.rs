@@ -453,7 +453,7 @@ where
     ) -> Chain<'w, 's, 'a, 'b, T> {
         Chain::<Result<T, E>>::new(
             self.target, self.builder,
-        ).branch_result_zip(
+        ).fork_result(
             |chain| chain.output(),
             build_err,
         ).0.chain(self.builder)
@@ -466,8 +466,7 @@ where
     ///
     /// The outputs of both builder functions will be zipped as the return value
     /// of this function.
-    #[must_use]
-    pub fn branch_result_zip<U, V>(
+    pub fn fork_result<U, V>(
         self,
         build_ok: impl FnOnce(Chain<T>) -> U,
         build_err: impl FnOnce(Chain<E>) -> V,
@@ -844,7 +843,6 @@ mod tests {
             .connect(scope.terminate);
         });
 
-
         let mut promise = context.command(|commands| {
             commands
             .request((2.0, 3.0), workflow)
@@ -921,6 +919,46 @@ mod tests {
         let mut promise = context.command(|commands| {
             commands
             .request(2.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<Result<f64, Result<f64, TestError>>, f64>, builder| {
+                scope.input.chain(builder)
+                    .fork_result(
+                        |chain| chain.connect(scope.terminate),
+                        |chain|
+                            chain.dispose_on_err().connect(scope.terminate)
+                    );
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(Ok(1.0), workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().available().is_some_and(|v| *v == 1.0));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(Err(Ok(5.0)), workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().available().is_some_and(|v| *v == 5.0));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(Err(Err(TestError)), workflow)
             .take_response()
         });
 
