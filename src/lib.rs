@@ -85,28 +85,17 @@ pub mod testing;
 
 use bevy::prelude::{Entity, In};
 
-/// Use BlockingService to indicate that your system is a blocking service and
-/// to specify its input request type. For example:
+/// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///
-/// ```
-/// use bevy::prelude::*;
-/// use bevy_impulse::*;
+/// A blocking service will have exclusive world access while it runs, which
+/// means no other system will be able to run simultaneously. Each service is
+/// associated with its own unique entity which can be used to store state or
+/// configuration parameters.
 ///
-/// #[derive(Component, Resource)]
-/// struct Precision(i32);
-///
-/// fn rounding_service(
-///     In(input): InBlockingService<f64>,
-///     global_precision: Res<Precision>,
-/// ) -> f64 {
-///     (input.request * 10_f64.powi(global_precision.0)).floor() * 10_f64.powi(-global_precision.0)
-/// }
-/// ```
-///
-/// The systems of more complex services might need to know what entity is
-/// providing the service, e.g. if the service provider is configured with
-/// additional components that need to be queried when a request comes in. For
-/// that you can check the `provider` field of `BlockingService`:
+/// Some services might need to know what entity is providing the service, e.g.
+/// if the service provider is configured with additional components that need
+/// to be queried when a request comes in. For that you can check the `provider`
+/// field of `BlockingService`:
 ///
 /// ```
 /// use bevy::prelude::*;
@@ -141,9 +130,9 @@ pub struct BlockingService<Request, Streams: StreamPack = ()> {
 /// Use this to reduce bracket noise when you need `In<BlockingService<R>>`.
 pub type InBlockingService<Request, Streams = ()> = In<BlockingService<Request, Streams>>;
 
-/// Use AsyncService to indicate that your system is an async service and to
-/// specify its input request type. Being async means it must return a
-/// `Future<Output=Response>` which will be processed by a task pool.
+/// Use AsyncService to indicate that your system is an async [`Service`]. Being
+/// async means it must return a [`Future<Output=Response>`](std::future::Future)
+/// which will be processed by a task pool.
 ///
 /// This comes with a [`Channel`] that allows your Future to interact with Bevy's
 /// ECS asynchronously while it is polled from inside the task pool.
@@ -169,6 +158,10 @@ pub type InAsyncService<Request, Streams = ()> = In<AsyncService<Request, Stream
 /// Use BlockingCallback to indicate that your system is meant to define a
 /// blocking [`Callback`]. Callbacks are different from services because they are
 /// not associated with any entity.
+///
+/// Alternatively any Bevy system with an input of `In<Request>` can be converted
+/// into a blocking callback by applying
+/// [`.into_blocking_callback()`](crate::IntoBlockingCallback).
 #[non_exhaustive]
 pub struct BlockingCallback<Request, Streams: StreamPack = ()> {
     /// The input data of the request
@@ -199,9 +192,9 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
-/// Use BlockingMap to indicate that your function is meant to define a blocking
-/// [`Map`]. A Map is not associated with any entity, and it cannot be a Bevy
-/// System. These limited traits allow them to be processed more efficiently.
+/// Use `BlockingMap`` to indicate that your function is a blocking map. A map
+/// is not associated with any entity, and it cannot be a Bevy System. These
+/// restrictions allow them to be processed more efficiently.
 #[non_exhaustive]
 pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     /// The input data of the request
@@ -214,11 +207,11 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
-/// Use AsyncMap to indicate that your function is meant to define an async
-/// [`Map`]. A Map is not associated with any entity, and it cannot be a Bevy
-/// System. These limited traits allow them to be processed more efficiently.
+/// Use AsyncMap to indicate that your function is an async map. A Map is not
+/// associated with any entity, and it cannot be a Bevy System. These
+/// restrictions allow them to be processed more efficiently.
 ///
-/// An async Map must return a [`Future<Output=Response>`](std::future::Future)
+/// An async map must return a [`Future<Output=Response>`](std::future::Future)
 /// that will be polled by the async task pool.
 #[non_exhaustive]
 pub struct AsyncMap<Request, Streams: StreamPack = ()> {

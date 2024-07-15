@@ -127,8 +127,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         }
     }
 
-    /// Apply a one-time map whose input is a [`BlockingMap`](crate::BlockingMap)
-    /// or an [`AsyncMap`](crate::AsyncMap).
+    /// Apply a function whose input is [`BlockingMap<T>`](crate::BlockingMap)
+    /// or [`AsyncMap<T>`](crate::AsyncMap).
     #[must_use]
     pub fn map<M, F: AsMap<M>>(
         self,
@@ -156,7 +156,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.then_node(f.as_map())
     }
 
-    /// Apply a map whose input is the Response of the current Chain. The
+    /// Apply a function whose input is the Response of the current Chain. The
     /// output of the map will be the Response of the returned Chain.
     ///
     /// This takes in a regular blocking function rather than an async function,
