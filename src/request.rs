@@ -33,12 +33,11 @@ pub trait RequestExt<'w, 's> {
     /// ```
     /// use bevy_impulse::{*, testing::*};
     /// let mut context = TestingContext::headless_plugins();
-    /// let mut promise = context.build(|commands| {
-    ///     let request = SpawnCube { position: Vec3::ZERO, size: 0.1 };
+    /// let mut promise = context.command(|commands| {
     ///     let service = commands.spawn_service(spawn_cube.into_blocking_service());
     ///
     ///     commands
-    ///     .request(request, service)
+    ///     .request(SpawnCube { position: Vec3::ZERO, size: 0.1 }, service)
     ///     .take()
     ///     .response
     /// });

@@ -501,7 +501,7 @@ where
     /// that trait, then you can use [`Self::cancel_on_quiet_err`] instead.
     ///
     /// ```
-    /// use crate::{*, testing::*};
+    /// use bevy_impulse::{*, testing::*};
     ///
     /// let mut context = TestingContext::minimal_plugins();
     ///
