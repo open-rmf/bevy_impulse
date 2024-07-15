@@ -334,7 +334,7 @@ mod tests {
     fn test_blocking_map() {
         let mut context = TestingContext::minimal_plugins();
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request("hello".to_owned(), to_uppercase.into_blocking_map())
             .take_response()
@@ -344,7 +344,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request("hello".to_owned(), to_uppercase.into_blocking_map_once())
             .take_response()
@@ -354,7 +354,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .provide("hello".to_owned())
             .map_block(to_uppercase)
@@ -365,7 +365,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .provide("hello".to_owned())
             .map_block(|request| request.to_uppercase())
@@ -389,7 +389,7 @@ mod tests {
         let conditions = FlushConditions::new()
             .with_timeout(Duration::from_secs_f64(5.0));
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(request.clone(), wait.into_async_map())
             .take_response()
@@ -399,7 +399,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(request.clone(), wait.into_async_map_once())
             .take_response()
@@ -409,7 +409,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .provide(request.clone())
             .map_async(wait)
@@ -420,7 +420,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .provide(request.clone())
             .map_async(|request| {

@@ -23,7 +23,7 @@ use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
     ScopeSettings, BeginCancel, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
-    AsMap, ProvideOnce,
+    AsMap, ProvideOnce, ScopeSettingsStorage,
 };
 
 pub(crate) mod connect;
@@ -164,19 +164,34 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// through the workflow of the scope with a unique session ID. Even if
     /// multiple values are sent in from the same session, they will each be
     /// assigned their own unique session ID while inside of this scope.
-    pub fn create_scope<Request, Response, Streams>(
+    pub fn create_scope<Request, Response, Streams, Settings>(
         &mut self,
-        settings: ScopeSettings,
-        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> Settings,
     ) -> Node<Request, Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        Settings: Into<ScopeSettings>,
     {
         let scope_id = self.commands.spawn(()).id();
         let exit_scope = self.commands.spawn(UnusedTarget).id();
-        self.create_scope_impl(scope_id, exit_scope, settings, build)
+        self.create_scope_impl(scope_id, exit_scope, build)
+    }
+
+    /// Alternative to [`Self::create_scope`] for pure input/output scopes (i.e.
+    /// there are no output streams). Using this signature should allow the
+    /// compiler to infer all the generic arguments when there are no streams.
+    pub fn create_io_scope<Request, Response, Settings>(
+        &mut self,
+        build: impl FnOnce(Scope<Request, Response, ()>, &mut Builder) -> Settings,
+    ) -> Node<Request, Response, ()>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        self.create_scope::<Request, Response, (), Settings>(build)
     }
 
     /// It is possible for a scope to be cancelled before it terminates. Even a
@@ -198,17 +213,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     //
     // TODO(@mxgrey): Consider offering a setting to choose between whether each
     // buffer item gets its own session or whether they share a session.
-    pub fn on_cancel<T: 'static + Send + Sync>(
+    pub fn on_cancel<T, Settings>(
         &mut self,
         from_buffer: Buffer<T>,
-        settings: ScopeSettings,
-        build: impl FnOnce(Scope<T, (), ()>, &mut Builder),
-    ) {
+        build: impl FnOnce(Scope<T, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        T: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
         let cancelling_scope_id = self.commands.spawn(()).id();
-        let _ = self.create_scope_impl::<T, (), ()>(
+        let _ = self.create_scope_impl::<T, (), (), Settings>(
             cancelling_scope_id,
             self.finish_scope_cancel,
-            settings,
             build,
         );
 
@@ -231,24 +248,24 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Used internally to create scopes in different ways.
-    pub(crate) fn create_scope_impl<Request, Response, Streams>(
+    pub(crate) fn create_scope_impl<Request, Response, Streams, Settings>(
         &mut self,
         scope_id: Entity,
         exit_scope: Entity,
-        settings: ScopeSettings,
-        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> Settings,
     ) -> Node<Request, Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        Settings: Into<ScopeSettings>,
     {
         let ScopeEndpoints {
             terminal,
             enter_scope,
             finish_scope_cancel
         } = OperateScope::<Request, Response, Streams>::add(
-            Some(self.scope()), scope_id, Some(exit_scope), settings, self.commands,
+            Some(self.scope()), scope_id, Some(exit_scope), self.commands,
         );
 
         let (stream_in, stream_out) = Streams::spawn_scope_streams(
@@ -269,7 +286,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             streams: stream_in,
         };
 
-        build(scope, &mut builder);
+        let settings = build(scope, &mut builder).into();
+        self.commands.entity(scope_id).insert(ScopeSettingsStorage(settings));
 
         Node {
             input: InputSlot::new(self.scope, scope_id),

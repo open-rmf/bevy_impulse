@@ -220,18 +220,18 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If you want to connect to the stream outputs, use
     /// [`Self::then_scope_node`] instead.
     #[must_use]
-    pub fn then_scope<Response, Streams>(
+    pub fn then_scope<Response, Streams, Settings>(
         self,
-        settings: ScopeSettings,
-        build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder) -> Settings,
     ) -> Chain<'w, 's, 'a, 'b, Response>
     where
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        Settings: Into<ScopeSettings>,
     {
         let exit_scope = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.create_scope_impl::<T, Response, Streams>(
-            self.target, exit_scope, settings, build,
+        self.builder.create_scope_impl::<T, Response, Streams, Settings>(
+            self.target, exit_scope, build,
         ).output.chain(self.builder)
     }
 
@@ -241,31 +241,32 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// Unlike `then_scope`, this function can infer the types for the generics
     /// so you don't need to explicitly specify them.
-    pub fn then_io_scope<Response>(
+    pub fn then_io_scope<Response, Settings>(
         self,
-        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder),
+        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder) -> Settings,
     ) -> Chain<'w, 's, 'a, 'b, Response>
     where
         Response: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
     {
-        self.then_scope(ScopeSettings::default(), build)
+        self.then_scope(build)
     }
 
     /// From the current target in the chain, build a [scoped](Scope) workflow
     /// and then get back a node that represents that scoped workflow.
     #[must_use]
-    pub fn then_scope_node<Response, Streams>(
+    pub fn then_scope_node<Response, Streams, Settings>(
         self,
-        settings: ScopeSettings,
-        build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder) -> Settings,
     ) -> Node<T, Response, Streams>
     where
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        Settings: Into<ScopeSettings>,
     {
         let exit_scope = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.create_scope_impl::<T, Response, Streams>(
-            self.target, exit_scope, settings, build,
+        self.builder.create_scope_impl::<T, Response, Streams, Settings>(
+            self.target, exit_scope, build,
         )
     }
 
@@ -275,14 +276,15 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// Unlike `then_scope_node`, this function can infer the types for the
     /// generics so you don't need to explicitly specify them.
-    pub fn then_io_scope_node<Response>(
+    pub fn then_io_scope_node<Response, Settings>(
         self,
-        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder),
+        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder) -> Settings,
     ) -> Node<T, Response, ()>
     where
         Response: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
     {
-        self.then_scope_node(ScopeSettings::default(), build)
+        self.then_scope_node(build)
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
@@ -499,14 +501,21 @@ where
     /// that trait, then you can use [`Self::cancel_on_quiet_err`] instead.
     ///
     /// ```
-    /// use bevy_impulse::{*, testing::*};
+    /// use crate::{*, testing::*};
+    ///
     /// let mut context = TestingContext::minimal_plugins();
-    /// let mut promise = context.build(|commands| {
+    ///
+    /// let workflow = context.spawn_io_workflow(|scope, builder| {
+    ///     scope.input.chain(builder)
+    ///         .map_block(produce_err)
+    ///         .cancel_on_err()
+    ///         .connect(scope.terminate);
+    /// });
+    ///
+    /// let mut promise = context.command(|commands| {
     ///     commands
-    ///     .provide("hello")
-    ///     .map_block(produce_err)
-    ///     .cancel_on_err()
-    ///     .take()
+    ///     .request("hello", workflow)
+    ///     .take_response()
     /// });
     ///
     /// context.run_while_pending(&mut promise);
@@ -703,49 +712,41 @@ mod tests {
     fn test_join() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
-                .map(print_debug(format!("{}", line!())))
                 // (2.0, 2.0)
                 .unzip_build((
                     |chain: Chain<f64>| chain
                         // 2.0
-                        .map(print_debug(format!("{}", line!())))
                         .map_block(|value|
                             WaitRequest {
                                 duration: Duration::from_secs_f64(value/100.0),
                                 value,
                             }
                         )
-                        .map(print_debug(format!("{}", line!())))
                         .map_async(wait)
-                        .map(print_debug(format!("{}", line!())))
                         // 2.0
                         .output(),
                     |chain: Chain<f64>| chain
                         // 2.0
                         .map_block(|value| 2.0*value)
-                        .map(print_debug(format!("{}", line!())))
                         // 4.0
                         .output(),
                 ))
                 .join(builder)
-                .map(print_debug(format!("{}", line!())))
                 // (2.0, 4.0)
                 .map_block(add)
-                .map(print_debug(format!("{}", line!())))
                 // 6.0
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.build(|commands|
+        let mut promise = context.command(|commands|
             commands
             .request((2.0, 2.0), workflow)
             .take_response()
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        dbg!(promise.peek());
         assert!(promise.peek().available().is_some_and(|value| *value == 6.0));
         assert!(context.no_unhandled_errors());
     }
@@ -754,12 +755,12 @@ mod tests {
     fn test_race() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
             // (2.0, 2.0)
             .map_block(add)
             // 4.0
-            .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
+            .then_io_scope(|scope, builder| {
                 scope.input.chain(builder)
                 // 4.0
                 .fork_clone((
@@ -794,7 +795,7 @@ mod tests {
             .connect(scope.terminate);
         });
 
-        let mut promise = context.build(|commands|
+        let mut promise = context.command(|commands|
             commands
             .request((2.0, 2.0), workflow)
             .take_response()
@@ -814,11 +815,11 @@ mod tests {
     fn test_unzip() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
             .map_block(add)
             .map_block(|v| (v, 2.0*v))
-            .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
+            .then_io_scope(|scope, builder| {
                 scope.input.chain(builder)
                 .unzip_build((
                     |chain: Chain<f64>| {
@@ -844,7 +845,7 @@ mod tests {
         });
 
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request((2.0, 3.0), workflow)
             .take_response()
@@ -859,38 +860,28 @@ mod tests {
     fn test_cancel_on_special_case() {
         let mut context = TestingContext::minimal_plugins();
 
-        dbg!();
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
                 .map_block(duplicate)
-                .map(print_debug(format!("{}", line!())))
                 .map_block(add)
-                .map(print_debug(format!("{}", line!())))
                 .map_block(produce_none)
-                .map(print_debug(format!("{}", line!())))
                 .cancel_on_none()
-                .map(print_debug(format!("{}", line!())))
                 .map_block(duplicate)
-                .map(print_debug(format!("{}", line!())))
                 .map_block(add)
-                .map(print_debug(format!("{}", line!())))
                 .connect(scope.terminate);
         });
 
-        dbg!();
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(2.0, workflow)
             .take_response()
         });
 
-        dbg!();
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        dbg!(context.get_unhandled_errors());
         assert!(promise.peek().is_cancelled());
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
                 .map_block(duplicate)
                 .map_block(add)
@@ -901,7 +892,7 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(2.0, workflow)
             .take_response()
@@ -916,7 +907,7 @@ mod tests {
     fn test_disposal() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
                 .map_block(duplicate)
                 .map_block(add)
@@ -927,14 +918,13 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(2.0, workflow)
             .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        dbg!(promise.peek());
         assert!(promise.peek().is_cancelled());
         assert!(context.no_unhandled_errors());
     }

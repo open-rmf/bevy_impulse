@@ -103,11 +103,9 @@ fn perform_impulse<I: Impulsive>(
 pub(crate) fn cancel_impulse(
     OperationCancel { cancel, world, roster }: OperationCancel,
 ) -> OperationResult {
-    dbg!(cancel.origin);
     // We cancel an impulse by travelling to its terminal and
-    let mut terminal = dbg!(cancel.target);
+    let mut terminal = cancel.target;
     loop {
-        dbg!(terminal);
         let Some(target) = world.get::<SingleTargetStorage>(terminal) else {
             break;
         };
@@ -115,7 +113,6 @@ pub(crate) fn cancel_impulse(
     }
 
     if let Some(on_cancel) = world.get::<OnTerminalCancelled>(terminal) {
-        dbg!(terminal);
         let on_cancel = on_cancel.0;
         let cancel = cancel.for_target(terminal);
         match on_cancel(OperationCancel { cancel: cancel.clone(), world, roster }) {
@@ -132,8 +129,6 @@ pub(crate) fn cancel_impulse(
                 });
             }
         }
-    } else {
-        dbg!(terminal);
     }
 
     if let Some(terminal_mut) = world.get_entity_mut(terminal) {

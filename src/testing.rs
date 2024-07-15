@@ -24,6 +24,8 @@ pub use bevy::{
     ecs::system::CommandQueue,
 };
 
+use thiserror::Error as ThisError;
+
 pub use std::time::{Duration, Instant};
 
 use crate::{
@@ -71,7 +73,7 @@ impl TestingContext {
         TestingContext { app }
     }
 
-    pub fn build<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
+    pub fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
         let mut command_queue = CommandQueue::default();
         let mut commands = Commands::new(&mut command_queue, &self.app.world);
         let u = f(&mut commands);
@@ -81,32 +83,33 @@ impl TestingContext {
 
     /// Build a simple workflow with a single input and output, and no streams
     /// or settings.
-    pub fn build_io_workflow<Request, Response>(
+    pub fn spawn_io_workflow<Request, Response, Settings>(
         &mut self,
-        f: impl FnOnce(Scope<Request, Response, ()>, &mut Builder),
+        f: impl FnOnce(Scope<Request, Response, ()>, &mut Builder) -> Settings,
     ) -> Service<Request, Response, ()>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
+        Settings: Into<WorkflowSettings>,
     {
-        self.build(move |commands| {
-            commands.spawn_workflow(WorkflowSettings::default(), f)
+        self.command(move |commands| {
+            commands.spawn_workflow(f)
         })
     }
 
     /// Build any kind of workflow with any settings.
-    pub fn build_workflow<Request, Response, Streams>(
+    pub fn spawn_workflow<Request, Response, Streams, Settings>(
         &mut self,
-        settings: WorkflowSettings,
-        f: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+        f: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> Settings,
     ) -> Service<Request, Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        Settings: Into<WorkflowSettings>,
     {
-        self.build(move |commands| {
-            commands.spawn_workflow(settings, f)
+        self.command(move |commands| {
+            commands.spawn_workflow(f)
         })
     }
 
@@ -294,10 +297,14 @@ pub fn print_debug<T: std::fmt::Debug>(
     }
 }
 
+#[derive(ThisError, Debug)]
+#[error("This error is for testing purposes only")]
+pub struct TestError;
+
 /// Use this to create a blocking map that simply produces an error.
 /// Used for testing special operations for the [`Result`] type.
-pub fn produce_err<T>(_: T) -> Result<T, ()> {
-    Err(())
+pub fn produce_err<T>(_: T) -> Result<T, TestError> {
+    Err(TestError)
 }
 
 /// Use this to create a blocking map that simply produces [`None`].

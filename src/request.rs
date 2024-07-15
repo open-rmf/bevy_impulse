@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn simple_spawn() {
         let mut context = TestingContext::headless_plugins();
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             let request = SpawnCube { position: Vec3::ZERO, size: 0.1 };
             let service = commands.spawn_service(spawn_cube.into_blocking_service());
 
@@ -165,7 +165,7 @@ mod tests {
         use std::time::Duration;
 
         let mut context = TestingContext::minimal_plugins();
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             let future = async {
                 let never = future::pending::<()>();
                 let _ = future::timeout(Duration::from_secs_f32(0.01), never);

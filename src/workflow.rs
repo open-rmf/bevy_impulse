@@ -23,6 +23,7 @@ use bevy::{
 use crate::{
     Service, InputSlot, Output, StreamPack, OperateScope, DeliveryChoice,
     WorkflowService, Builder, ServiceBundle, WorkflowStorage, ScopeEndpoints,
+    ScopeSettingsStorage,
 };
 
 mod internal;
@@ -35,28 +36,15 @@ pub trait SpawnWorkflow {
     /// should behave
     /// * `build` - A function that takes in a [`Scope`] and a [`Builder`] to
     /// build the workflow
-    fn spawn_workflow<Request, Response, Streams>(
+    fn spawn_workflow<Request, Response, Streams, W>(
         &mut self,
-        settings: WorkflowSettings,
-        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> W,
     ) -> Service<Request, Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
-        Streams: StreamPack;
-
-    /// Spawn a workflow with default settings.
-    fn spawn_workflow_default<Request, Response, Streams>(
-        &mut self,
-        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
-    ) -> Service<Request, Response, Streams>
-    where
-        Request: 'static + Send + Sync,
-        Response: 'static + Send + Sync,
-        Streams: StreamPack
-    {
-        self.spawn_workflow(WorkflowSettings::new(), build)
-    }
+        Streams: StreamPack,
+        W: Into<WorkflowSettings>;
 }
 
 /// A view of a scope's inputs and outputs from inside of the scope.
@@ -132,6 +120,26 @@ impl WorkflowSettings {
     }
 }
 
+impl From<()> for WorkflowSettings {
+    fn from(_: ()) -> Self {
+        WorkflowSettings::default()
+    }
+}
+
+impl From<ScopeSettings> for WorkflowSettings {
+    fn from(value: ScopeSettings) -> Self {
+        WorkflowSettings::new()
+        .with_scope(value)
+    }
+}
+
+impl From<DeliverySettings> for WorkflowSettings {
+    fn from(value: DeliverySettings) -> Self {
+        WorkflowSettings::new()
+        .with_delivery(value)
+    }
+}
+
 /// Settings which determine how the workflow delivers its requests: in serial
 /// (handling one request at a time) or in parallel (allowing multiple requests
 /// at a time).
@@ -185,16 +193,22 @@ impl ScopeSettings {
     }
 }
 
+impl From<()> for ScopeSettings {
+    fn from(_: ()) -> Self {
+        ScopeSettings::default()
+    }
+}
+
 impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
-    fn spawn_workflow<Request, Response, Streams>(
+    fn spawn_workflow<Request, Response, Streams, Settings>(
         &mut self,
-        settings: WorkflowSettings,
-        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> Settings,
     ) -> Service<Request, Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        Settings: Into<WorkflowSettings>,
     {
         let scope_id = self.spawn(()).id();
         let ScopeEndpoints {
@@ -202,7 +216,7 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
             enter_scope,
             finish_scope_cancel,
         } = OperateScope::<Request, Response, Streams>::add(
-            None, scope_id, None, settings.scope, self,
+            None, scope_id, None, self,
         );
 
         let mut builder = Builder {
@@ -219,7 +233,7 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
             streams,
         };
 
-        build(scope, &mut builder);
+        let settings: WorkflowSettings = build(scope, &mut builder).into();
 
         let mut service = self.spawn((
             ServiceBundle::<WorkflowService<Request, Response, Streams>>::new(),
@@ -228,26 +242,28 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
         ));
         settings.delivery.apply_entity_commands::<Request>(&mut service);
         let service = service.id();
-        self.entity(scope_id).set_parent(service);
+        self.entity(scope_id)
+            .insert(ScopeSettingsStorage(settings.scope))
+            .set_parent(service);
 
         WorkflowService::<Request, Response, Streams>::cast(service)
     }
 }
 
 impl SpawnWorkflow for World {
-    fn spawn_workflow<Request, Response, Streams>(
+    fn spawn_workflow<Request, Response, Streams, W>(
         &mut self,
-        settings: WorkflowSettings,
-        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder),
+        build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> W,
     ) -> Service<Request, Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
         Streams: StreamPack,
+        W: Into<WorkflowSettings>,
     {
         let mut command_queue = CommandQueue::default();
         let mut commands = Commands::new(&mut command_queue, self);
-        let service = commands.spawn_workflow(settings, build);
+        let service = commands.spawn_workflow(build);
         command_queue.apply(self);
         service
     }
@@ -261,7 +277,7 @@ mod tests {
     fn test_simple_workflows() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope
             .input
             .chain(builder)
@@ -269,7 +285,7 @@ mod tests {
             .connect(scope.terminate);
         });
 
-        let mut promise = context.build(|commands|
+        let mut promise = context.command(|commands|
             commands
             .request((2.0, 2.0), workflow)
             .take_response()
@@ -279,13 +295,13 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| *v == 4.0));
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             let add_node = builder.create_map_block(add);
             builder.connect(scope.input, add_node.input);
             builder.connect(add_node.output, scope.terminate);
         });
 
-        let mut promise = context.build(|commands|
+        let mut promise = context.command(|commands|
             commands
             .request((3.0, 3.0), workflow)
             .take_response()
@@ -300,7 +316,7 @@ mod tests {
     fn test_fork_clone() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             let fork = scope.input.fork_clone(builder);
             let branch_a = fork.clone_output(builder);
             let branch_b = fork.clone_output(builder);
@@ -308,7 +324,7 @@ mod tests {
             builder.connect(branch_b, scope.terminate);
         });
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(5.0, workflow)
             .take_response()
@@ -318,7 +334,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| *v == 5.0));
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
             .fork_clone((
                 |chain: Chain<f64>| chain.connect(scope.terminate),
@@ -326,7 +342,7 @@ mod tests {
             ));
         });
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(3.0, workflow)
             .take_response()
@@ -336,7 +352,7 @@ mod tests {
         assert!(promise.peek().available().is_some_and(|v| *v == 3.0));
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.build_io_workflow(|scope, builder| {
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
             .fork_clone((
                 |chain: Chain<f64>| chain
@@ -354,7 +370,7 @@ mod tests {
             ));
         });
 
-        let mut promise = context.build(|commands| {
+        let mut promise = context.command(|commands| {
             commands
             .request(1.0, workflow)
             .take_response()

@@ -61,8 +61,6 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
     exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
     finish_scope_cancel: Entity,
-    /// Settings for the scope
-    settings: ScopeSettings,
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
@@ -88,7 +86,7 @@ impl ScopedSession {
 }
 
 #[derive(Component)]
-struct ScopeSettingsStorage(ScopeSettings);
+pub(crate) struct ScopeSettingsStorage(pub(crate) ScopeSettings);
 
 #[derive(Component)]
 pub(crate) enum ScopedSessionStatus {
@@ -178,7 +176,6 @@ where
             FinalizeScopeCleanup(Self::finalize_scope_cleanup),
             BeginCancelStorage::default(),
             FinishCancelStorage(self.finish_scope_cancel),
-            ScopeSettingsStorage(self.settings),
         ));
 
         if let Some(exit_scope) = self.exit_scope {
@@ -321,7 +318,6 @@ where
         parent_scope: Option<Entity>,
         scope_id: Entity,
         exit_scope: Option<Entity>,
-        settings: ScopeSettings,
         commands: &mut Commands,
     ) -> ScopeEndpoints {
         let enter_scope = commands.spawn(EntryForScope(scope_id)).id();
@@ -334,7 +330,6 @@ where
             terminal,
             exit_scope,
             finish_scope_cancel,
-            settings,
             _ignore: Default::default(),
         };
 

@@ -166,7 +166,7 @@ mod tests {
     fn test_channel_request() {
         let mut context = TestingContext::minimal_plugins();
 
-        let (hello, repeat) = context.build(|commands| {
+        let (hello, repeat) = context.command(|commands| {
             let hello = commands.spawn_service(
                 say_hello
                 .with(|entity_cmds: &mut EntityCommands| {
@@ -187,7 +187,7 @@ mod tests {
         });
 
         for _ in 0..5 {
-            let mut promise = context.build(|commands| {
+            let mut promise = context.command(|commands| {
                 commands.request(
                     RepeatRequest { service: hello, count: 5 },
                     repeat,
