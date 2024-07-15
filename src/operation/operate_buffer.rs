@@ -30,7 +30,7 @@ use crate::{
     BufferStorage, Operation, OperationSetup, OperationRequest, OperationResult,
     OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
-    UnhandledErrors, MiscellaneousFailure,
+    UnhandledErrors, MiscellaneousFailure, InputBundle,
 };
 
 #[derive(Bundle)]
@@ -55,6 +55,7 @@ where
             self,
             ForkTargetStorage::new(),
             SingleInputStorage::empty(),
+            InputBundle::<T>::new(),
         ));
 
         Ok(())

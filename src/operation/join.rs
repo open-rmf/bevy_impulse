@@ -49,6 +49,8 @@ where
         world.get_entity_mut(self.target).or_broken()?
             .insert(SingleInputStorage::new(source));
 
+        self.buffers.listen(source, world)?;
+
         world.entity_mut(source).insert((
             FunnelInputStorage::from(self.buffers.as_input()),
             BufferStorage(self.buffers),

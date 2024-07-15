@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 
 use crate::{
     Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
-    UnusedTarget, AddOperation,
+    UnusedTarget, AddOperation, Chain,
 };
 
 pub trait Bufferable {
@@ -30,10 +30,10 @@ pub trait Bufferable {
     fn as_buffer(self, builder: &mut Builder) -> Self::BufferType;
 
     /// Join these bufferable workflow elements.
-    fn join(
+    fn join<'w, 's, 'a, 'b>(
         self,
-        builder: &mut Builder,
-    ) -> Output<<Self::BufferType as Buffered>::Item>
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, <Self::BufferType as Buffered>::Item>
     where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
@@ -46,7 +46,7 @@ pub trait Bufferable {
             Some(builder.scope()), join, Join::new(buffers, target)
         ));
 
-        Output::new(builder.scope, target)
+        Output::new(builder.scope, target).chain(builder)
     }
 }
 

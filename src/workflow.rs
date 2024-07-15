@@ -69,7 +69,7 @@ pub struct Scope<Request, Response, Streams: StreamPack = ()> {
     /// The data entering the scope. The workflow of the scope must be built
     /// out from here.
     pub input: Output<Request>,
-    /// The slot that the final output of the scope must feed into. Once you
+    /// The slot that the final output of the scope must connect into. Once you
     /// provide an input into this slot, the entire session of the scope will
     /// wind down. The input will be passed out of the scope once all
     /// uninterruptible data flows within the scope have finished.
@@ -320,7 +320,7 @@ mod tests {
 
         let workflow = context.build_io_workflow(|scope, builder| {
             scope.input.chain(builder)
-            .fork_clone_zip((
+            .fork_clone((
                 |chain: Chain<f64>| chain.connect(scope.terminate),
                 |chain: Chain<f64>| chain.connect(scope.terminate),
             ));
@@ -338,7 +338,7 @@ mod tests {
 
         let workflow = context.build_io_workflow(|scope, builder| {
             scope.input.chain(builder)
-            .fork_clone_zip((
+            .fork_clone((
                 |chain: Chain<f64>| chain
                     .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(10.0*t), value: 10.0*t })
                     .map(|r: AsyncMap<WaitRequest<f64>>| {

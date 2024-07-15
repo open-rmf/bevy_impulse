@@ -21,6 +21,7 @@ use smallvec::SmallVec;
 
 use crate::{
     Buffer, CloneFromBuffer, OperationError, OrBroken, InspectInput, ManageInput,
+    OperationResult, ForkTargetStorage,
 };
 
 pub trait Buffered: Clone {
@@ -36,6 +37,12 @@ pub trait Buffered: Clone {
         session: Entity,
         world: &mut World,
     ) -> Result<Self::Item, OperationError>;
+
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult;
 
     fn as_input(&self) -> SmallVec<[Entity; 8]>;
 }
@@ -54,6 +61,20 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     ) -> Result<Self::Item, OperationError> {
         world.get_entity_mut(self.source).or_broken()?
             .pull_from_buffer::<T>(session)
+    }
+
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        let mut targets = world
+            .get_mut::<ForkTargetStorage>(self.source)
+            .or_broken()?;
+        targets.0.push(listener);
+        targets.0.sort();
+        targets.0.dedup();
+        Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
@@ -79,6 +100,20 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     ) -> Result<Self::Item, OperationError> {
         world.get_entity(self.source).or_broken()?
             .clone_from_buffer(session)
+    }
+
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        let mut targets = world
+            .get_mut::<ForkTargetStorage>(self.source)
+            .or_broken()?;
+        targets.0.push(listener);
+        targets.0.sort();
+        targets.0.dedup();
+        Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
@@ -111,6 +146,16 @@ where
         let t0 = self.0.pull(session, world)?;
         let t1 = self.1.pull(session, world)?;
         Ok((t0, t1))
+    }
+
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        self.0.listen(listener, world)?;
+        self.1.listen(listener, world)?;
+        Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
@@ -149,6 +194,17 @@ where
         let t1 = self.1.pull(session, world)?;
         let t2 = self.2.pull(session, world)?;
         Ok((t0, t1, t2))
+    }
+
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        self.0.listen(listener, world)?;
+        self.1.listen(listener, world)?;
+        self.2.listen(listener, world)?;
+        Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
@@ -190,6 +246,17 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         }).collect()
     }
 
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.listen(listener, world)?;
+        }
+        Ok(())
+    }
+
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         self.iter().flat_map(|buffer| buffer.as_input()).collect()
     }
@@ -221,6 +288,17 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         self.iter().map(|buffer| {
             buffer.pull(session, world)
         }).collect()
+    }
+
+    fn listen(
+        &self,
+        listener: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.listen(listener, world)?;
+        }
+        Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {

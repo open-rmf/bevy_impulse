@@ -28,7 +28,7 @@ pub use std::time::{Duration, Instant};
 
 use crate::{
     Promise, Service, InAsyncService, InBlockingService, UnhandledErrors,
-    Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings,
+    Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
     flush_impulses,
 };
 
@@ -279,10 +279,18 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
 
 /// Use this to add a blocking map to the chain that simply prints a debug
 /// message and then passes the data along.
-pub fn print_debug<T: std::fmt::Debug>(header: String) -> impl Fn(T) -> T {
-    move |value| {
-        println!("{header}: {value:?}");
-        value
+pub fn print_debug<T: std::fmt::Debug>(
+    header: String
+) -> impl Fn(BlockingMap<T>) -> T {
+    move |input| {
+        println!(
+            "[source: {:?}, session: {:?}] {}: {:?}",
+            input.source,
+            input.session,
+            header,
+            input.request,
+        );
+        input.request
     }
 }
 

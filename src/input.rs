@@ -264,7 +264,7 @@ impl<'a> InspectInput for EntityMut<'a> {
         session: Entity,
     ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&session).or_broken()?.len())
+        Ok(buffer.reverse_queues.get(&session).map(|q| q.len()).unwrap_or(0))
     }
 
     fn has_input<T: 'static + Send + Sync>(
@@ -293,7 +293,7 @@ impl<'a> InspectInput for EntityRef<'a> {
         session: Entity,
     ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
-        Ok(buffer.reverse_queues.get(&session).or_broken()?.len())
+        Ok(buffer.reverse_queues.get(&session).map(|q| q.len()).unwrap_or(0))
     }
 
     fn has_input<T: 'static + Send + Sync>(

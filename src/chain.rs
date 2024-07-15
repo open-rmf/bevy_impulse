@@ -19,13 +19,11 @@ use std::future::Future;
 
 use bevy::prelude::Entity;
 
-use smallvec::SmallVec;
-
 use std::error::Error;
 
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
-    ForkClone, StreamPack, Provider, ProvideOnce, Scope,
+    StreamPack, Provider, ProvideOnce, Scope,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter,
@@ -325,15 +323,15 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// When the response is delivered, we will make a clone of it and
-    /// simultaneously pass that clone along two different impulse chains: one
-    /// determined by the `build` map provided to this function and the
+    /// simultaneously pass that clone along two different branches chains: one
+    /// determined by the `build` function passed into this function and the
     /// other determined by the [`Chain`] that gets returned by this function.
     ///
     /// This can only be applied when `Response` can be cloned.
     ///
-    /// See also [`Chain::fork_clone_zip`]
+    /// See also [`Chain::fork_clone`]
     #[must_use]
-    pub fn fork_clone(
+    pub fn fork_clone_branch(
         self,
         build: impl FnOnce(Chain<T>),
     ) -> Chain<'w, 's, 'a, 'b, T>
@@ -341,7 +339,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         T: Clone,
     {
         Chain::<T>::new(self.target, self.builder)
-            .fork_clone_zip((
+            .fork_clone((
                 |chain: Chain<T>| chain.output(),
                 build,
             )).0
@@ -353,11 +351,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// determined by a different element of the tuple that gets passed in as
     /// a builder.
     ///
-    /// The outputs of the individual chain builders will be zipped into one
-    /// output by this function. If all of the builders output [`Dangling`] then
-    /// you can easily continue chaining more operations like `join` and `race`
-    /// from the [`ZippedChains`] trait.
-    pub fn fork_clone_zip<Build: ForkCloneBuilder<T>>(
+    /// The return values of the individual chain builders will be zipped into
+    /// one tuple return value by this function. If all of the builders return
+    /// [`Output`] then you can easily continue chaining more operations using
+    /// [`join`](crate::Bufferable::join), or destructure them into individual
+    /// outputs that you can continue to build with.
+    pub fn fork_clone<Build: ForkCloneBuilder<T>>(
         self,
         build: Build,
     ) -> Build::Outputs
@@ -365,72 +364,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         T: Clone,
     {
         build.build_fork_clone(Output::new(self.scope(), self.target), self.builder)
-    }
-
-    /// Similar to [`Chain::fork_clone_zip`], except you provide only one
-    /// builder function and indicate a number of forks to produce. Each fork
-    /// will be produced using the same builder, and the output of this method
-    /// will be the bundled output of each build.
-    ///
-    /// If your function outputs [`Dangling`] then you can easily continue
-    /// chaining more operations like `join` and `race` from the [`BundledChains`]
-    /// trait.
-    #[must_use]
-    pub fn fork_clone_bundle<const N: usize, U>(
-        self,
-        mut build: impl FnMut(Chain<T>) -> U,
-    ) -> [U; N]
-    where
-        T: Clone,
-    {
-        let source = self.target;
-        let targets: [Entity; N] = core::array::from_fn(
-            |_| self.builder.commands.spawn(UnusedTarget).id()
-        );
-
-        self.builder.commands.add(AddOperation::new(
-            Some(self.scope()),
-            source,
-            ForkClone::<T>::new(ForkTargetStorage::from_iter(targets)),
-        ));
-
-        let output = targets.map(
-            |target| build(Chain::new(target, self.builder))
-        );
-
-        output
-    }
-
-    /// Same as [`Chain::fork_clone_bundle`] but you can create a number of
-    /// forks determined at runtime instead of compile time.
-    ///
-    /// This function still takes a constant integer argument which can be
-    /// thought of as a size hint that would allow the operation to avoid some
-    /// heap allocations if it is greater than or equal to the number of forks
-    /// that are actually produced. This value should be kept somewhat modest,
-    /// like 8 - 16, to avoid excessively large stack frames.
-    #[must_use]
-    pub fn fork_clone_bundle_vec<const N: usize, U>(
-        self,
-        number_forks: usize,
-        mut build: impl FnMut(Chain<T>) -> U,
-    ) -> SmallVec<[U; N]>
-    where
-        T: Clone,
-    {
-        let source = self.target;
-        let mut targets = ForkTargetStorage::new();
-        targets.0.reserve(number_forks);
-
-        self.builder.commands.add(AddOperation::new(
-            Some(self.scope()),
-            source,
-            ForkClone::<T>::new(targets.clone())
-        ));
-
-        targets.0.into_iter().map(
-            |target| build(Chain::new(target, self.builder))
-        ).collect()
     }
 
     /// If you have a `Chain<(A, B, C, ...)>` with a tuple response then
@@ -451,7 +384,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If you have a `Chain<(A, B, C, ...)>` with a tuple response then
     /// `unzip_build` allows you to split it into multiple chains (one for each
     /// tuple element) and apply a separate builder function to each chain. You
-    /// will be passed back the zipped output of all the builder functions.
+    /// will be passed back the zipped return values of all the builder functions.
     pub fn unzip_build<Build>(self, build: Build) -> Build::ReturnType
     where
         Build: UnzipBuilder<T>
@@ -767,6 +700,57 @@ mod tests {
     use crate::{*, testing::*};
 
     #[test]
+    fn test_join() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+                .map(print_debug(format!("{}", line!())))
+                // (2.0, 2.0)
+                .unzip_build((
+                    |chain: Chain<f64>| chain
+                        // 2.0
+                        .map(print_debug(format!("{}", line!())))
+                        .map_block(|value|
+                            WaitRequest {
+                                duration: Duration::from_secs_f64(value/100.0),
+                                value,
+                            }
+                        )
+                        .map(print_debug(format!("{}", line!())))
+                        .map_async(wait)
+                        .map(print_debug(format!("{}", line!())))
+                        // 2.0
+                        .output(),
+                    |chain: Chain<f64>| chain
+                        // 2.0
+                        .map_block(|value| 2.0*value)
+                        .map(print_debug(format!("{}", line!())))
+                        // 4.0
+                        .output(),
+                ))
+                .join(builder)
+                .map(print_debug(format!("{}", line!())))
+                // (2.0, 4.0)
+                .map_block(add)
+                .map(print_debug(format!("{}", line!())))
+                // 6.0
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.build(|commands|
+            commands
+            .request((2.0, 2.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        dbg!(promise.peek());
+        assert!(promise.peek().available().is_some_and(|value| *value == 6.0));
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
     fn test_race() {
         let mut context = TestingContext::minimal_plugins();
 
@@ -778,7 +762,7 @@ mod tests {
             .then_scope::<_, ()>(ScopeSettings::default(), |scope, builder| {
                 scope.input.chain(builder)
                 // 4.0
-                .fork_clone_zip((
+                .fork_clone((
                     |chain: Chain<f64>| {
                         // 4.0
                         chain.map_block(|value|
@@ -872,24 +856,24 @@ mod tests {
     }
 
     #[test]
-    fn test_cancel_on_none() {
+    fn test_cancel_on_special_case() {
         let mut context = TestingContext::minimal_plugins();
 
         dbg!();
         let workflow = context.build_io_workflow(|scope, builder| {
             scope.input.chain(builder)
                 .map_block(duplicate)
-                .map_block(print_debug(format!("{}", line!())))
+                .map(print_debug(format!("{}", line!())))
                 .map_block(add)
-                .map_block(print_debug(format!("{}", line!())))
+                .map(print_debug(format!("{}", line!())))
                 .map_block(produce_none)
-                .map_block(print_debug(format!("{}", line!())))
+                .map(print_debug(format!("{}", line!())))
                 .cancel_on_none()
-                .map_block(print_debug(format!("{}", line!())))
+                .map(print_debug(format!("{}", line!())))
                 .map_block(duplicate)
-                .map_block(print_debug(format!("{}", line!())))
+                .map(print_debug(format!("{}", line!())))
                 .map_block(add)
-                .map_block(print_debug(format!("{}", line!())))
+                .map(print_debug(format!("{}", line!())))
                 .connect(scope.terminate);
         });
 
@@ -904,5 +888,54 @@ mod tests {
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         dbg!(context.get_unhandled_errors());
         assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+                .map_block(duplicate)
+                .map_block(add)
+                .map_block(produce_err)
+                .cancel_on_quiet_err()
+                .map_block(duplicate)
+                .map_block(add)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(2.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_disposal() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.build_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+                .map_block(duplicate)
+                .map_block(add)
+                .map_block(produce_none)
+                .dispose_on_none()
+                .map_block(duplicate)
+                .map_block(add)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.build(|commands| {
+            commands
+            .request(2.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        dbg!(promise.peek());
+        assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
     }
 }
