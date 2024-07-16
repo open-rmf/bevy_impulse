@@ -17,7 +17,7 @@
 
 use crate::{
     AsyncService, AsyncServiceInput, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
-    InnerChannel, ChannelQueue, OperationRoster, Blocker,
+    Channel, ChannelQueue, OperationRoster, Blocker,
     StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
     OperationError, OrBroken, ManageInput, Input, OperateTask,
     SingleTargetStorage, dispose_for_despawned_service,
@@ -220,8 +220,9 @@ where
     };
 
     let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-    let channel = InnerChannel::new(source, session, sender.clone()).into_specific(world)?;
-    let job = service.run(AsyncService { request, channel, provider, source, session }, world);
+    let channel = Channel::new(source, session, sender.clone());
+    let streams = channel.for_streams::<Streams>(world)?;
+    let job = service.run(AsyncService { request, streams, channel, provider, source, session }, world);
     service.apply_deferred(world);
 
     if let Some(mut service_storage) = world.get_mut::<AsyncServiceStorage<Request, Streams, Task>>(provider) {

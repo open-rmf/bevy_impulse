@@ -754,7 +754,7 @@ mod tests {
                 |In(input): AsyncServiceInput<u32, StreamOf<u32>>| {
                     async move {
                         for i in 0..input.request {
-                            input.channel.streams.send(StreamOf(i));
+                            input.streams.send(StreamOf(i));
                         }
                         return input.request;
                     }
@@ -779,7 +779,7 @@ mod tests {
             |In(input): AsyncCallbackInput<u32, StreamOf<u32>>| {
                 async move {
                     for i in 0..input.request {
-                        input.channel.streams.send(StreamOf(i));
+                        input.streams.send(StreamOf(i));
                     }
                     return input.request;
                 }
@@ -787,5 +787,29 @@ mod tests {
         ).as_callback();
 
         test_counting_stream(count_async_callback, &mut context);
+
+        let count_blocking_map = (
+            |input: BlockingMap<u32, StreamOf<u32>>| {
+                for i in 0..input.request {
+                    input.streams.send(StreamOf(i));
+                }
+                return input.request;
+            }
+        ).as_map();
+
+        test_counting_stream(count_blocking_map, &mut context);
+
+        let count_async_map = (
+            |input: AsyncMap<u32, StreamOf<u32>>| {
+                async move {
+                    for i in 0..input.request {
+                        input.streams.send(StreamOf(i));
+                    }
+                    return input.request;
+                }
+            }
+        ).as_map();
+
+        test_counting_stream(count_async_map, &mut context);
     }
 }

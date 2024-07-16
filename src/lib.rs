@@ -105,7 +105,7 @@ use bevy::prelude::{Entity, In};
 /// struct Precision(i32);
 ///
 /// fn rounding_service(
-///     In(BlockingService{request, provider, ..}): InBlockingService<f64>,
+///     In(BlockingService{request, provider, ..}): BlockingServiceInput<f64>,
 ///     service_precision: Query<&Precision>,
 ///     global_precision: Res<Precision>,
 /// ) -> f64 {
@@ -140,10 +140,13 @@ pub type BlockingServiceInput<Request, Streams = ()> = In<BlockingService<Reques
 pub struct AsyncService<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
+    /// Stream channels that will let you send stream information. This will
+    /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
+    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
+    pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously. Use the [`Channel::streams`] method to
-    /// send stream output data from the service.
-    pub channel: Channel<Streams>,
+    /// service runs asynchronously.
+    pub channel: Channel,
     /// The entity providing the service
     pub provider: Entity,
     /// The node in a workflow or impulse chain that asked for the service
@@ -185,10 +188,13 @@ pub type BlockingCallbackInput<Request, Streams = ()> = In<BlockingCallback<Requ
 pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
+    /// Stream channels that will let you send stream information. This will
+    /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
+    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
+    pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously. Use the [`Channel::streams`] method to
-    /// send stream output data from the service.
-    pub channel: Channel<Streams>,
+    /// service runs asynchronously.
+    pub channel: Channel,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
@@ -213,9 +219,6 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
-/// Use this to reduce the bracket noise when you need `In<`[`BlockingMap<R, S>`]`>`.
-pub type BlockingMapInput<Request, Streams = ()> = In<BlockingMap<Request, Streams>>;
-
 /// Use AsyncMap to indicate that your function is an async map. A Map is not
 /// associated with any entity, and it cannot be a Bevy System. These
 /// restrictions allow them to be processed more efficiently.
@@ -226,15 +229,15 @@ pub type BlockingMapInput<Request, Streams = ()> = In<BlockingMap<Request, Strea
 pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
+    /// Stream channels that will let you send stream information. This will
+    /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
+    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
+    pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously. Use the [`Channel::streams`] method to
-    /// send stream output data from the service.
-    pub channel: Channel<Streams>,
+    /// service runs asynchronously.
+    pub channel: Channel,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
 }
-
-/// Use this to reduce bracket noise when you need `In<`[`AsyncMap<R, S>`]`>`.
-pub type AsyncMapInput<Request, Streams = ()> = In<AsyncMap<Request, Streams>>;

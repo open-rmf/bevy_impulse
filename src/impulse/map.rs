@@ -25,7 +25,7 @@ use std::future::Future;
 use crate::{
     Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
     InputBundle, OperationResult, OrBroken, Input, ManageInput,
-    ChannelQueue, BlockingMap, AsyncMap, InnerChannel, OperateTask, ActiveTasksStorage,
+    ChannelQueue, BlockingMap, AsyncMap, Channel, OperateTask, ActiveTasksStorage,
     CallBlockingMapOnce, CallAsyncMapOnce,
 };
 
@@ -169,11 +169,11 @@ where
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let f = source_mut.take::<AsyncMapOnceStorage<F>>().or_broken()?.f;
 
-        let channel = InnerChannel::new(source, session, sender.clone());
-        let channel = channel.into_specific(&world)?;
+        let channel = Channel::new(source, session, sender.clone());
+        let streams = channel.for_streams::<Streams>(&world)?;
 
         let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap {
-            request, channel, source, session,
+            request, streams, channel, source, session,
         }));
 
         let task_source = world.spawn(()).id();

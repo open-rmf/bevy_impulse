@@ -91,9 +91,10 @@ pub struct BlockingMapMarker;
 
 impl<F, Request, Response, Streams> AsMap<(Request, Response, Streams, BlockingMapMarker)> for F
 where
-    F: FnMut(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnMut(BlockingMap<Request, Streams>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type MapType = BlockingMapDef<MapDef<F>, Request, Response, Streams>;
     fn as_map(self) -> Self::MapType {

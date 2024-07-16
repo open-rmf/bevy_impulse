@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    BlockingCallback, AsyncCallback, Channel, InnerChannel, ChannelQueue,
+    BlockingCallback, AsyncCallback, Channel, ChannelQueue,
     OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateCallback, ManageInput, OperationError,
     OrBroken, OperateTask,
@@ -141,10 +141,11 @@ impl<'a> CallbackRequest<'a> {
     fn get_channel<Streams: StreamPack>(
         &mut self,
         session: Entity,
-    ) -> Result<Channel<Streams>, OperationError> {
+    ) -> Result<(Channel, Streams::Channel), OperationError> {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let channel = InnerChannel::new(self.source, session, sender);
-        channel.into_specific(&self.world)
+        let channel = Channel::new(self.source, session, sender);
+        let streams = channel.for_streams::<Streams>(&self.world)?;
+        Ok((channel, streams))
     }
 }
 
@@ -222,14 +223,14 @@ where
     fn call(&mut self, mut input: CallbackRequest) -> Result<(), OperationError> {
         let Input { session, data: request } = input.get_request()?;
 
-        let channel = input.get_channel(session)?;
+        let (channel, streams) = input.get_channel::<Streams>(session)?;
 
         if !self.initialized {
             self.system.initialize(&mut input.world);
         }
 
         let task = self.system.run(AsyncCallback {
-            request, channel, source: input.source, session,
+            request, streams, channel, source: input.source, session,
         }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
@@ -342,9 +343,9 @@ where
     fn as_callback(mut self) -> Callback<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: CallbackRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
-            let channel = input.get_channel(session)?;
+            let (channel, streams) = input.get_channel::<Streams>(session)?;
             let task = (self)(AsyncCallback {
-                request, channel, source: input.source, session,
+                request, streams, channel, source: input.source, session,
             });
             input.give_task(session, task)
         };

@@ -30,16 +30,11 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct Channel<Streams: StreamPack = ()> {
-    /// Stream channels that will let you send stream information. This will
-    /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
-    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+pub struct Channel {
     inner: Arc<InnerChannel>,
-    _ignore: std::marker::PhantomData<Streams>,
 }
 
-impl<Streams: StreamPack> Channel<Streams> {
+impl Channel {
     pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response>
     where
         P::Request: 'static + Send + Sync,
@@ -70,6 +65,23 @@ impl<Streams: StreamPack> Channel<Streams> {
 
         promise
     }
+
+    pub(crate) fn for_streams<Streams: StreamPack>(
+        &self,
+        world: &World,
+    ) -> Result<Streams::Channel, OperationError> {
+        Ok(Streams::make_channel(&self.inner, world))
+    }
+
+    pub(crate) fn new(
+        source: Entity,
+        session: Entity,
+        sender: CbSender<ChannelItem>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(InnerChannel { source, session, sender }),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -86,23 +98,6 @@ impl InnerChannel {
 
     pub fn sender(&self) -> &CbSender<ChannelItem> {
         &self.sender
-    }
-
-    pub(crate) fn into_specific<Streams: StreamPack>(
-        self,
-        world: &World,
-    ) -> Result<Channel<Streams>, OperationError> {
-        let inner = Arc::new(self);
-        let streams = Streams::make_channel(&inner, world);
-        Ok(Channel { inner, streams, _ignore: Default::default() })
-    }
-
-    pub(crate) fn new(
-        source: Entity,
-        session: Entity,
-        sender: CbSender<ChannelItem>,
-    ) -> Self {
-        InnerChannel { source, session, sender }
     }
 }
 
