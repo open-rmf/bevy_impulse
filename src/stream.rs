@@ -717,21 +717,6 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
 mod tests {
     use crate::{*, testing::*};
 
-    fn test_counting_stream(
-        provider: impl Provider<Request = u32, Response = u32, Streams = StreamOf<u32>>,
-        context: &mut TestingContext,
-    ) {
-        let mut recipient = context.command(|commands| {
-            commands.request(10, provider).take()
-        });
-
-        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.peek().available().is_some_and(|v| *v == 10));
-        let stream: Vec<u32> = recipient.streams.into_iter().map(|v| v.0).collect();
-        assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        assert!(context.no_unhandled_errors());
-    }
-
     #[test]
     fn test_single_stream() {
         let mut context = TestingContext::minimal_plugins();
@@ -811,5 +796,191 @@ mod tests {
         ).as_map();
 
         test_counting_stream(count_async_map, &mut context);
+    }
+
+    fn test_counting_stream(
+        provider: impl Provider<Request = u32, Response = u32, Streams = StreamOf<u32>>,
+        context: &mut TestingContext,
+    ) {
+        let mut recipient = context.command(|commands| {
+            commands.request(10, provider).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.peek().available().is_some_and(|v| *v == 10));
+        let stream: Vec<u32> = recipient.streams.into_iter().map(|v| v.0).collect();
+        assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert!(context.no_unhandled_errors());
+    }
+
+    type FormatStreams = (StreamOf<u32>, StreamOf<i32>, StreamOf<f32>);
+    #[test]
+    fn test_tuple_stream() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let parse_blocking_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<String, FormatStreams>| {
+                    impl_formatting_streams_blocking(input.request, input.streams);
+                }
+            )
+        });
+
+        test_formatting_stream(parse_blocking_srv, &mut context);
+
+        let parse_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<String, FormatStreams>| {
+                    async move {
+                        impl_formatting_streams_async(input.request, input.streams);
+                    }
+                }
+            )
+        });
+
+        test_formatting_stream(parse_async_srv, &mut context);
+
+        let parse_blocking_callback = (
+            |In(input): BlockingCallbackInput<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            }
+        ).as_callback();
+
+        test_formatting_stream(parse_blocking_callback, &mut context);
+
+        let parse_async_callback = (
+            |In(input): AsyncCallbackInput<String, FormatStreams>| {
+                async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                }
+            }
+        ).as_callback();
+
+        test_formatting_stream(parse_async_callback, &mut context);
+
+        let parse_blocking_map = (
+            |input: BlockingMap<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            }
+        ).as_map();
+
+        test_formatting_stream(parse_blocking_map, &mut context);
+
+        let parse_async_map = (
+            |input: AsyncMap<String, FormatStreams>| {
+                async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                }
+            }
+        ).as_map();
+
+        test_formatting_stream(parse_async_map, &mut context);
+    }
+
+    fn impl_formatting_streams_blocking(
+        request: String,
+        streams: <FormatStreams as StreamPack>::Buffer,
+    ) {
+        if let Ok(value) = request.parse::<u32>() {
+            streams.0.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<i32>() {
+            streams.1.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<f32>() {
+            streams.2.send(StreamOf(value));
+        }
+    }
+
+    fn impl_formatting_streams_async(
+        request: String,
+        streams: <FormatStreams as StreamPack>::Channel,
+    ) {
+        if let Ok(value) = request.parse::<u32>() {
+            streams.0.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<i32>() {
+            streams.1.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<f32>() {
+            streams.2.send(StreamOf(value));
+        }
+    }
+
+    fn test_formatting_stream(
+        provider: impl Provider<Request = String, Response = (), Streams = FormatStreams> + Clone,
+        context: &mut TestingContext,
+    ) {
+        let mut recipient = context.command(|commands| {
+            commands.request("5".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.peek().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, [5]);
+        assert_eq!(outcome.stream_i32, [5]);
+        assert_eq!(outcome.stream_f32, [5.0]);
+
+        let mut recipient = context.command(|commands| {
+            commands.request("-2".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.peek().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert!(outcome.stream_u32.is_empty());
+        assert_eq!(outcome.stream_i32, [-2]);
+        assert_eq!(outcome.stream_f32, [-2.0]);
+
+        let mut recipient = context.command(|commands| {
+            commands.request("6.7".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.peek().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert!(outcome.stream_u32.is_empty());
+        assert!(outcome.stream_i32.is_empty());
+        assert_eq!(outcome.stream_f32, [6.7]);
+
+        let mut recipient = context.command(|commands| {
+            commands.request("hello".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.peek().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert!(outcome.stream_u32.is_empty());
+        assert!(outcome.stream_i32.is_empty());
+        assert!(outcome.stream_f32.is_empty());
+    }
+
+    struct FormatOutcome {
+        stream_u32: Vec<u32>,
+        stream_i32: Vec<i32>,
+        stream_f32: Vec<f32>,
+    }
+
+    impl From<Recipient<(), FormatStreams>> for FormatOutcome {
+        fn from(recipient: Recipient<(), FormatStreams>) -> Self {
+            Self {
+                stream_u32: recipient.streams.0.into_iter().map(|v| v.0).collect(),
+                stream_i32: recipient.streams.1.into_iter().map(|v| v.0).collect(),
+                stream_f32: recipient.streams.2.into_iter().map(|v| v.0).collect()
+            }
+        }
     }
 }
