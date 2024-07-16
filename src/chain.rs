@@ -204,8 +204,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Build a workflow scope to be used as an element in this chain.
     ///
-    /// If you want to connect to the stream outputs, use
-    /// [`Self::then_scope_node`] instead.
+    /// If you want to connect to the stream outputs or be able to loop back
+    /// to the input of this scope, use [`Self::then_scope_node`] instead.
     #[must_use]
     pub fn then_scope<Response, Streams, Settings>(
         self,
@@ -223,14 +223,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Simplified version of [`Self::then_scope`] limited to a simple input and
-    /// output. This does not support streams and only uses default scope
-    /// settings.
+    /// output.
     ///
     /// Unlike `then_scope`, this function can infer the types for the generics
     /// so you don't need to explicitly specify them.
     pub fn then_io_scope<Response, Settings>(
         self,
-        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder) -> Settings,
+        build: impl FnOnce(Scope<T, Response>, &mut Builder) -> Settings,
     ) -> Chain<'w, 's, 'a, 'b, Response>
     where
         Response: 'static + Send + Sync,
@@ -258,14 +257,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Simplified version of [`Self::then_scope_node`] limited to a simple
-    /// input and output. This does not support streams and only uses default
-    /// scope settings.
+    /// input and output.
     ///
     /// Unlike `then_scope_node`, this function can infer the types for the
     /// generics so you don't need to explicitly specify them.
     pub fn then_io_scope_node<Response, Settings>(
         self,
-        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder) -> Settings,
+        build: impl FnOnce(Scope<T, Response>, &mut Builder) -> Settings,
     ) -> Node<T, Response, ()>
     where
         Response: 'static + Send + Sync,
@@ -275,12 +273,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
-    /// If the filter returns [`None`] then a cancellation is triggered.
-    /// Otherwise the chain continues with the value given inside [`Some`].
+    /// If the filter returns [`None`] then a [`Cancellation`](crate::Cancellation)
+    /// is triggered. Otherwise the chain continues with the value that was
+    /// inside [`Some`].
     ///
     /// This is conceptually similar to [`Iterator::filter_map`]. You can also
-    /// use [`Chain::disposal_filter`] to dispose the remainder of the chain
-    /// instead of cancelling it.
+    /// use [`Chain::disposal_filter`] to dispose of the value instead of
+    /// cancelling the entire scope.
     #[must_use]
     pub fn cancellation_filter<ThenResponse, F>(
         self,
@@ -313,14 +312,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different branches chains: one
-    /// determined by the `build` function passed into this function and the
-    /// other determined by the [`Chain`] that gets returned by this function.
+    /// determined by the `build` function passed into this operation and the
+    /// other determined by the [`Chain`] that gets returned.
     ///
     /// This can only be applied when `Response` can be cloned.
     ///
     /// See also [`Chain::fork_clone`]
     #[must_use]
-    pub fn fork_clone_branch(
+    pub fn branch_clone(
         self,
         build: impl FnOnce(Chain<T>),
     ) -> Chain<'w, 's, 'a, 'b, T>
@@ -601,7 +600,7 @@ where
     ) -> Chain<'w, 's, 'a, 'b, T> {
         Chain::<Option<T>>::new(
             self.target, self.builder,
-        ).branch_option_zip(
+        ).fork_option(
             |chain| chain.output(),
             build_none,
         ).0.chain(self.builder)
@@ -614,8 +613,7 @@ where
     ///
     /// The outputs of both builder functions will be zipped as the return value
     /// of this function.
-    #[must_use]
-    pub fn branch_option_zip<U, V>(
+    pub fn fork_option<U, V>(
         self,
         build_some: impl FnOnce(Chain<T>) -> U,
         build_none: impl FnOnce(Chain<()>) -> V,

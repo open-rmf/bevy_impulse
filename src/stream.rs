@@ -725,14 +725,15 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
 
 /// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
 /// based on what streams they provide. If a stream is required, you should wrap
-/// it in [`Require`]. If a stream is optional, then wrap it in [`Option`].
+/// the stream type in [`Require`]. If a stream is optional, then wrap it in
+/// [`Option`].
 ///
 /// The service you receive will appear as though it provides all the stream
 /// types wrapped in both your `Require` and `Option` filters, but it might not
 /// actually provide any of the streams that were wrapped in `Option`. A service
 /// that does not actually provide the optional stream can be treated as if it
 /// does provide the stream, except it will never actually send out any of that
-/// stream data.
+/// optional stream data.
 ///
 /// ```
 /// use bevy_impulse::{*, testing::*};
