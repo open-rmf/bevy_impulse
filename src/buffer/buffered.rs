@@ -16,6 +16,7 @@
 */
 
 use bevy::prelude::{Entity, World};
+use bevy::utils::all_tuples;
 
 use smallvec::SmallVec;
 
@@ -121,100 +122,63 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     }
 }
 
-impl<T0, T1> Buffered for (T0, T1)
-where
-    T0: Buffered,
-    T1: Buffered,
-{
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
-        Ok([
-            self.0.buffered_count(session, world)?,
-            self.1.buffered_count(session, world)?,
-        ].iter().copied().min().unwrap_or(0))
-    }
+macro_rules! impl_buffered_for_tuple {
+    ($($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: Buffered),*> Buffered for ($($T,)*)
+        {
+            fn buffered_count(
+                &self,
+                session: Entity,
+                world: &World,
+            ) -> Result<usize, OperationError> {
+                let ($($T,)*) = self;
+                Ok([
+                    $(
+                        $T.buffered_count(session, world)?,
+                    )*
+                ].iter().copied().min().unwrap_or(0))
+            }
 
-    type Item = (T0::Item, T1::Item);
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        let t0 = self.0.pull(session, world)?;
-        let t1 = self.1.pull(session, world)?;
-        Ok((t0, t1))
-    }
+            type Item = ($($T::Item),*);
+            fn pull(
+                &self,
+                session: Entity,
+                world: &mut World,
+            ) -> Result<Self::Item, OperationError> {
+                let ($($T,)*) = self;
+                Ok(($(
+                    $T.pull(session, world)?,
+                )*))
+            }
 
-    fn listen(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.listen(listener, world)?;
-        self.1.listen(listener, world)?;
-        Ok(())
-    }
+            fn listen(
+                &self,
+                listener: Entity,
+                world: &mut World,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.listen(listener, world)?;
+                )*
+                Ok(())
+            }
 
-    fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        let mut inputs = SmallVec::new();
-        inputs.extend(self.0.as_input());
-        inputs.extend(self.1.as_input());
-        inputs
+            fn as_input(&self) -> SmallVec<[Entity; 8]> {
+                let mut inputs = SmallVec::new();
+                let ($($T,)*) = self;
+                $(
+                    inputs.extend($T.as_input());
+                )*
+                inputs
+            }
+        }
     }
 }
 
-impl<T0, T1, T2> Buffered for (T0, T1, T2)
-where
-    T0: Buffered,
-    T1: Buffered,
-    T2: Buffered,
-{
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
-        Ok([
-            self.0.buffered_count(session, world)?,
-            self.1.buffered_count(session, world)?,
-            self.2.buffered_count(session, world)?,
-        ].iter().copied().min().unwrap_or(0))
-    }
-
-    type Item = (T0::Item, T1::Item, T2::Item);
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        let t0 = self.0.pull(session, world)?;
-        let t1 = self.1.pull(session, world)?;
-        let t2 = self.2.pull(session, world)?;
-        Ok((t0, t1, t2))
-    }
-
-    fn listen(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.listen(listener, world)?;
-        self.1.listen(listener, world)?;
-        self.2.listen(listener, world)?;
-        Ok(())
-    }
-
-    fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        let mut inputs = SmallVec::new();
-        inputs.extend(self.0.as_input());
-        inputs.extend(self.1.as_input());
-        inputs.extend(self.2.as_input());
-        inputs
-    }
-}
+// Implements the `Buffered` trait for all tuples between size 2 and 15
+// (inclusive) made of types that implement `Buffered`
+all_tuples!(impl_buffered_for_tuple, 2, 15, T);
 
 impl<T: Buffered, const N: usize> Buffered for [T; N] {
     fn buffered_count(

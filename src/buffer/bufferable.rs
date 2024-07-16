@@ -15,6 +15,7 @@
  *
 */
 
+use bevy::utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
@@ -76,36 +77,26 @@ impl<T: 'static + Send + Sync> Bufferable for Output<T> {
     }
 }
 
-impl<T0, T1> Bufferable for (T0, T1)
-where
-    T0: Bufferable,
-    T1: Bufferable,
-{
-    type BufferType = (T0::BufferType, T1::BufferType);
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        (
-            self.0.as_buffer(builder),
-            self.1.as_buffer(builder),
-        )
+macro_rules! impl_bufferable_for_tuple {
+    ($($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: Bufferable),*> Bufferable for ($($T,)*)
+        {
+            type BufferType = ($($T::BufferType,)*);
+            fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
+                let ($($T,)*) = self;
+                ($(
+                    $T.as_buffer(builder),
+                )*)
+            }
+
+        }
     }
 }
 
-impl<T0, T1, T2> Bufferable for (T0, T1, T2)
-where
-    T0: Bufferable,
-    T1: Bufferable,
-    T2: Bufferable,
-{
-    type BufferType = (T0::BufferType, T1::BufferType, T2::BufferType);
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        (
-            self.0.as_buffer(builder),
-            self.1.as_buffer(builder),
-            self.2.as_buffer(builder),
-        )
-    }
-}
-
+// Implements the `Bufferable` trait for all tuples between size 2 and 15
+// (inclusive) made of types that implement `Bufferable`
+all_tuples!(impl_bufferable_for_tuple, 2, 15, T);
 
 impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
     type BufferType = [T::BufferType; N];
