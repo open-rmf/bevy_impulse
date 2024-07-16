@@ -84,7 +84,20 @@ impl<T: 'static + Send + Sync> InputBundle<T> {
 }
 
 pub trait ManageInput {
+    /// Give an input to this node. The node will be queued up to immediately
+    /// process the input.
     fn give_input<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+        data: T,
+        roster: &mut OperationRoster,
+    ) -> Result<(), OperationError>;
+
+    /// Same as [`Self::give_input`], but the wakeup for this node will be
+    /// deferred until after the [`ChannelQueue`](crate::ChannelQueue) is flushed.
+    /// This is used for async output to ensure that all async operations are
+    /// finished being processed before the final output gets processed.
+    fn defer_input<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
         data: T,
@@ -178,6 +191,17 @@ impl<'w> ManageInput for EntityMut<'w> {
     ) -> Result<(), OperationError> {
         unsafe { self.sneak_input(session, data)?; }
         roster.queue(self.id());
+        Ok(())
+    }
+
+    fn defer_input<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+        data: T,
+        roster: &mut OperationRoster,
+    ) -> Result<(), OperationError> {
+        unsafe { self.sneak_input(session, data)?; }
+        roster.defer(self.id());
         Ok(())
     }
 

@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    AsyncService, InAsyncService, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
+    AsyncService, AsyncServiceInput, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
     InnerChannel, ChannelQueue, OperationRoster, Blocker,
     StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
     OperationError, OrBroken, ManageInput, Input, OperateTask,
@@ -358,6 +358,6 @@ where
     }
 }
 
-fn peel_async<Request>(In(AsyncService { request, .. }): InAsyncService<Request>) -> Request {
+fn peel_async<Request>(In(AsyncService { request, .. }): AsyncServiceInput<Request>) -> Request {
     request
 }

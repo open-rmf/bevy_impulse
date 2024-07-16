@@ -29,7 +29,7 @@ use thiserror::Error as ThisError;
 pub use std::time::{Duration, Instant};
 
 use crate::{
-    Promise, Service, InAsyncService, InBlockingService, UnhandledErrors,
+    Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
     flush_impulses,
 };
@@ -328,7 +328,7 @@ pub struct Name(pub Box<str>);
 pub struct RunCount(pub usize);
 
 pub fn say_hello(
-    In(input): InBlockingService<()>,
+    In(input): BlockingServiceInput<()>,
     salutation_query: Query<Option<&Salutation>>,
     name_query: Query<Option<&Name>>,
     mut run_count: Query<Option<&mut RunCount>>,
@@ -353,7 +353,7 @@ pub fn say_hello(
 }
 
 pub fn repeat_service(
-    In(input): InAsyncService<RepeatRequest>,
+    In(input): AsyncServiceInput<RepeatRequest>,
     mut run_count: Query<Option<&mut RunCount>>,
 ) -> impl std::future::Future<Output=()> + 'static + Send + Sync {
     if let Ok(Some(mut count)) = run_count.get_mut(input.provider) {

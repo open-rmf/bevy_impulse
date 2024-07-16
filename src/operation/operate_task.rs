@@ -224,8 +224,10 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
             &mut Context::from_waker(&waker_ref(&waker))
         ) {
             Poll::Ready(result) => {
-                // Task has finished
-                let r = world.entity_mut(target).give_input(session, result, roster);
+                // Task has finished. We will defer its input until after the
+                // ChannelQueue has been processed so that any streams from this
+                // task will be delivered before the final output.
+                let r = world.entity_mut(target).defer_input(session, result, roster);
                 world.get_mut::<OperateTask<Response>>(source).or_broken()?.finished_normally = true;
                 cleanup_task::<Response>(session, source, node, unblock, being_cleaned, world, roster);
                 r?;

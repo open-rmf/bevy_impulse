@@ -31,8 +31,11 @@ use crate::{
 
 #[derive(Clone)]
 pub struct Channel<Streams: StreamPack = ()> {
+    /// Stream channels that will let you send stream information. This will
+    /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
+    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
+    pub streams: Streams::Channel,
     inner: Arc<InnerChannel>,
-    streams: Streams::Channel,
     _ignore: std::marker::PhantomData<Streams>,
 }
 
@@ -66,13 +69,6 @@ impl<Streams: StreamPack> Channel<Streams> {
         )).ok();
 
         promise
-    }
-
-    /// Get stream channels that will let you send stream information. This will
-    /// usually be one [`StreamChannel`] or a (possibly nested) tuple of
-    /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub fn streams(&self) -> &Streams::Channel {
-        &self.streams
     }
 }
 

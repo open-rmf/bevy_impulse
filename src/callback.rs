@@ -179,7 +179,7 @@ struct BlockingCallbackSystem<Request, Response, Streams: StreamPack> {
     initialized: bool,
 }
 
-impl<Request, Response, Streams> CallbackTrait<Request, Response, ()> for BlockingCallbackSystem<Request, Response, Streams>
+impl<Request, Response, Streams> CallbackTrait<Request, Response, Streams> for BlockingCallbackSystem<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -263,15 +263,16 @@ pub trait AsCallback<M> {
     fn as_callback(self) -> Callback<Self::Request, Self::Response, Self::Streams>;
 }
 
-impl<Request, Response, M, Sys> AsCallback<BlockingCallbackMarker<(Request, Response, M)>> for Sys
+impl<Request, Response, Streams, M, Sys> AsCallback<BlockingCallbackMarker<(Request, Response, Streams, M)>> for Sys
 where
-    Sys: IntoSystem<BlockingCallback<Request>, Response, M>,
+    Sys: IntoSystem<BlockingCallback<Request, Streams>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type Request = Request;
     type Response = Response;
-    type Streams = ();
+    type Streams = Streams;
 
     fn as_callback(self) -> Callback<Self::Request, Self::Response, Self::Streams> {
         Callback::new(BlockingCallbackSystem {

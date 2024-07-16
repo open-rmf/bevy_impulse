@@ -15,7 +15,9 @@
  *
 */
 
-use bevy::prelude::{Component, Bundle, Entity, Commands, World, BuildChildren};
+use bevy::prelude::{
+    Component, Bundle, Entity, Commands, World, BuildChildren, Deref, DerefMut,
+};
 
 use crossbeam::channel::{Receiver, unbounded};
 
@@ -129,6 +131,15 @@ pub trait Stream: 'static + Send + Sync + Sized {
     }
 }
 
+/// A simple newtype wrapper that turns any suitable data structure
+/// (`'static + Send + Sync`) into a stream.
+#[derive(Clone, Copy, Debug, Deref, DerefMut)]
+pub struct StreamOf<T>(pub T);
+
+impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
+    type Container = SmallVec<[StreamOf<T>; 16]>;
+}
+
 pub struct StreamBuffer<T: Stream> {
     // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
     // no heap allocation is needed each time a stream is used in a blocking
@@ -146,7 +157,7 @@ impl<T: Stream> Clone for StreamBuffer<T> {
     }
 }
 
-impl<T: Stream> StreamBuffer<T> {
+impl<T: Stream + std::fmt::Debug> StreamBuffer<T> {
     pub fn send(&self, data: T) {
         self.container.borrow_mut().extend([data]);
     }
@@ -699,5 +710,82 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
         T2::process_buffer(buffer.1, source, session, world, roster)?;
         T3::process_buffer(buffer.2, source, session, world, roster)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    fn test_counting_stream(
+        provider: impl Provider<Request = u32, Response = u32, Streams = StreamOf<u32>>,
+        context: &mut TestingContext,
+    ) {
+        let mut recipient = context.command(|commands| {
+            commands.request(10, provider).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.peek().available().is_some_and(|v| *v == 10));
+        let stream: Vec<u32> = recipient.streams.into_iter().map(|v| v.0).collect();
+        assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_single_stream() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let count_blocking_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<u32, StreamOf<u32>>| {
+                    for i in 0..input.request {
+                        input.streams.send(StreamOf(i));
+                    }
+                    return input.request;
+                }
+            )
+        });
+
+        test_counting_stream(count_blocking_srv, &mut context);
+
+        let count_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<u32, StreamOf<u32>>| {
+                    async move {
+                        for i in 0..input.request {
+                            input.channel.streams.send(StreamOf(i));
+                        }
+                        return input.request;
+                    }
+                }
+            )
+        });
+
+        test_counting_stream(count_async_srv, &mut context);
+
+        let count_blocking_callback = (
+            |In(input): BlockingCallbackInput<u32, StreamOf<u32>>| {
+                for i in 0..input.request {
+                    input.streams.send(StreamOf(i));
+                }
+                return input.request;
+            }
+        ).as_callback();
+
+        test_counting_stream(count_blocking_callback, &mut context);
+
+        let count_async_callback = (
+            |In(input): AsyncCallbackInput<u32, StreamOf<u32>>| {
+                async move {
+                    for i in 0..input.request {
+                        input.channel.streams.send(StreamOf(i));
+                    }
+                    return input.request;
+                }
+            }
+        ).as_callback();
+
+        test_counting_stream(count_async_callback, &mut context);
     }
 }

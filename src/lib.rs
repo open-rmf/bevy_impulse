@@ -128,7 +128,7 @@ pub struct BlockingService<Request, Streams: StreamPack = ()> {
 }
 
 /// Use this to reduce bracket noise when you need `In<BlockingService<R>>`.
-pub type InBlockingService<Request, Streams = ()> = In<BlockingService<Request, Streams>>;
+pub type BlockingServiceInput<Request, Streams = ()> = In<BlockingService<Request, Streams>>;
 
 /// Use AsyncService to indicate that your system is an async [`Service`]. Being
 /// async means it must return a [`Future<Output=Response>`](std::future::Future)
@@ -152,8 +152,8 @@ pub struct AsyncService<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
-/// Use this to reduce backet noise when you need `In<AsyncService<R, S>>`.
-pub type InAsyncService<Request, Streams = ()> = In<AsyncService<Request, Streams>>;
+/// Use this to reduce backet noise when you need `In<`[`AsyncService<R, S>`]`>`.
+pub type AsyncServiceInput<Request, Streams = ()> = In<AsyncService<Request, Streams>>;
 
 /// Use BlockingCallback to indicate that your system is meant to define a
 /// blocking [`Callback`]. Callbacks are different from services because they are
@@ -174,6 +174,9 @@ pub struct BlockingCallback<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
+/// Use this to reduce bracket noise when you need `In<`[`BlockingCallback<R, S>`]`>`.
+pub type BlockingCallbackInput<Request, Streams = ()> = In<BlockingCallback<Request, Streams>>;
+
 /// Use AsyncCallback to indicate that your system or function is meant to define
 /// an async [`Callback`]. An async callback is not associated with any entity,
 /// and it must return a [`Future<Output=Response>`](std::future::Future) that
@@ -192,6 +195,9 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
+/// Use this to reduce bracket noise when you need `In<`[`AsyncCallback<R, S>`]`>`.
+pub type AsyncCallbackInput<Request, Streams = ()> = In<AsyncCallback<Request, Streams>>;
+
 /// Use `BlockingMap`` to indicate that your function is a blocking map. A map
 /// is not associated with any entity, and it cannot be a Bevy System. These
 /// restrictions allow them to be processed more efficiently.
@@ -206,6 +212,9 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     /// The unique session ID for the workflow
     pub session: Entity,
 }
+
+/// Use this to reduce the bracket noise when you need `In<`[`BlockingMap<R, S>`]`>`.
+pub type BlockingMapInput<Request, Streams = ()> = In<BlockingMap<Request, Streams>>;
 
 /// Use AsyncMap to indicate that your function is an async map. A Map is not
 /// associated with any entity, and it cannot be a Bevy System. These
@@ -226,3 +235,6 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// The unique session ID for the workflow
     pub session: Entity,
 }
+
+/// Use this to reduce bracket noise when you need `In<`[`AsyncMap<R, S>`]`>`.
+pub type AsyncMapInput<Request, Streams = ()> = In<AsyncMap<Request, Streams>>;
