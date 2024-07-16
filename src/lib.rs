@@ -15,6 +15,49 @@
  *
 */
 
+//! `bevy_impulse` is an extension to the [Bevy](https://bevyengine.org) game
+//! engine that allows you to transform [bevy systems](https://bevyengine.org/learn/quick-start/getting-started/ecs/)
+//! into services and workflows that can be used for reactive service-oriented
+//! programming.
+//!
+//! ## Services
+//!
+//! One primitive of reactive programming is a [service](https://en.wikipedia.org/wiki/Service_(systems_architecture)).
+//! In `bevy_impulse`, a service is a bevy system that is associated with an
+//! entity and can be created using [`Commands::spawn_service`](SpawnServicesExt::spawn_service)
+//! or [`App::add_service`](AddServicesExt::add_service).
+//!
+//! When you [spawn](SpawnServicesExt::spawn_service) a service you will
+//! immediately receive a [`Service`] object which can be used to refer to it.
+//! If you do not want to hang onto the service object, you can find previously
+//! spawned services later using the [`ServiceDiscovery`] system parameter.
+//!
+//! ## Workflows
+//!
+//! For complex async workflows, a single bevy system may not be sufficient.
+//! You can instead build workflows using [`Command::spawn_workflow`](SpawnWorkflow::spawn_workflow).
+//! A workflow lets you create a graph of [nodes](Node) where each node is a
+//! service with an input, an output, and possibly streams.
+//!
+//! There are various operations that can be performed between nodes, such as
+//! forking and joining. These operations are built using [`Chain`].
+//!
+//! When you spawn your workflow, you will receive a [`Service`] object that
+//! lets you use the workflow as if it's an ordinary service.
+//!
+//! ## Impulses
+//!
+//! Services and workflows are reusable building blocks for creating a reactive
+//! application. In order to actually run them, call [`Commands::request`](RequestExt::request)
+//! which will provide you with an [`Impulse`]. An impulse is a one-time-use
+//! reaction to a request which you can chain to subsequent reactions using
+//! [`Impulse::then`]. Any impulse chain that you create will only run exactly
+//! once.
+//!
+//! Once you've finished creating your chain, use [`Impulse::detach`] to let it
+//! run freely, or use [`Impulse::take`] to receive a [`Promise`] of the final
+//! result.
+
 pub mod buffer;
 pub use buffer::*;
 
@@ -32,9 +75,6 @@ pub use chain::*;
 
 pub mod channel;
 pub use channel::*;
-
-pub mod discovery;
-pub use discovery::*;
 
 pub mod disposal;
 pub use disposal::*;

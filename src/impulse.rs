@@ -66,18 +66,19 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    /// Keep executing out the impulse chain up to here even if a downstream
+    /// Keep executing the impulse chain up to here even if a downstream
     /// dependent was dropped. If you continue building the chain from this
-    /// point then the later impulses will not be affected by this use of
-    /// detached.
+    /// point, then the later impulses will not be affected by this use of
+    /// `.detach()` and may be dropped.
     ///
     /// Downstream dependencies get dropped in the following situations:
-    /// - [`Self::take`] or [`Self::take_response`]: The promise containing the response is dropped.
-    /// - [`Self::store`], [`Self::push`], or [`Self::insert`]: The target entity of the operation is despawned.
-    /// - [`Self::send_event`]: This will never be dropped, effectively making it detached automatically.
-    /// - Not using any of the above: The dependency will immediately be dropped during a flush.
-    ///   If you do not use detach in this scenario, then the chain will be immediately dropped
-    ///   without being run at all. This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors).
+    ///
+    /// | Operation                                                 | Drop condition                                        |
+    /// |-----------------------------------------------------------|-------------------------------------------------------|
+    /// | [`Self::take`] <br> [`Self::take_response`]               | The promise containing the final response is dropped. |
+    /// | [`Self::store`] <br> [`Self::push`] <br> [`Self::insert`] | The target entity of the operation is despawned.      |
+    /// | [`Self::detach`] <br> [`Self::send_event`]                | This will never be dropped                            |
+    /// | Using none of the above                                   | The impulse will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
         self.commands.add(Detach { target: self.target });
         self
@@ -341,7 +342,7 @@ mod tests {
         });
 
         context.run_while_pending(&mut promise);
-        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(promise.take().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -351,7 +352,7 @@ mod tests {
         });
 
         context.run_while_pending(&mut promise);
-        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(promise.take().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -362,7 +363,7 @@ mod tests {
         });
 
         context.run_while_pending(&mut promise);
-        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(promise.take().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -373,7 +374,7 @@ mod tests {
         });
 
         context.run_while_pending(&mut promise);
-        assert!(promise.peek().available().is_some_and(|v| v == "HELLO"));
+        assert!(promise.take().available().is_some_and(|v| v == "HELLO"));
         assert!(context.no_unhandled_errors());
     }
 
@@ -396,7 +397,7 @@ mod tests {
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -406,7 +407,7 @@ mod tests {
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -417,7 +418,7 @@ mod tests {
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -436,7 +437,7 @@ mod tests {
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.peek().available().is_some_and(|v| v == "hello"));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
     }
 }

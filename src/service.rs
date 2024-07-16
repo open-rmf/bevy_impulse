@@ -34,6 +34,9 @@ pub use builder::ServiceBuilder;
 pub(crate) mod delivery;
 pub(crate) use delivery::*;
 
+pub mod discovery;
+pub use discovery::*;
+
 pub(crate) mod internal;
 pub(crate) use internal::*;
 

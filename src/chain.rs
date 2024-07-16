@@ -36,23 +36,12 @@ pub use fork_clone_builder::*;
 pub mod unzip;
 pub use unzip::*;
 
-/// After submitting a service request, use [`Chain`] to describe how
-/// the response should be handled. At a minimum, for the response to be
-/// delivered, you must choose one of:
-/// - `.detach()`: Let the service run to completion and then discard the
-///   response data.
-/// - `.take()`: As long as the [`Promise`] or one of its clones is alive,
-///   the service will continue running to completion and you will be able to
-///   view the response (or take the response, but only once). If all clones of
-///   the [`Promise`] are dropped before the service is delivered, it will
-///   be cancelled.
-/// - `.detach_and_take()`: As long as the [`Promise`] or one of its clones is
-///   alive, you will be able to view the response (or take the response, but
-///   only once). The service will run to completion even if every clone of the
-///   [`Promise`] is dropped.
+/// Chain operations onto the output of a workflow node.
 ///
-/// If you do not select one of the above then the service request will be
-/// cancelled without ever attempting to run.
+/// Make sure to use [`Self::connect`] when you're done chaining so that the
+/// final output of the chain gets connected into another node. If the final
+/// output of the chain is meant to be the final output of your workflow then
+/// you should connect it to [`Scope::terminate`].
 #[must_use]
 pub struct Chain<'w, 's, 'a, 'b, T> {
     target: Entity,
@@ -65,10 +54,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// use this to resume building this chain later.
     ///
     /// Note that if you do not connect some path of your workflow into the
-    /// `terminate` slot of your [`Scope`][1] then the workflow will not be able
+    /// `terminate` slot of your [`Scope`] then the workflow will not be able
     /// to run.
-    ///
-    /// [1]: crate::Scope
     #[must_use]
     pub fn output(self) -> Output<T> {
         Output::new(self.scope(), self.target)
@@ -410,7 +397,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
     /// a new link (entity) into the chain.
-    /// [1]: https://en.wikipedia.org/wiki/NOP_(code)
+    /// [1]: `<https://en.wikipedia.org/wiki/NOP_(code)>`
     #[must_use]
     pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
@@ -746,7 +733,7 @@ mod tests {
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.peek().available().is_some_and(|value| *value == 6.0));
+        assert!(promise.take().available().is_some_and(|value| value == 6.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -806,7 +793,7 @@ mod tests {
             .with_update_count(100),
         );
 
-        assert_eq!(promise.peek().available().copied(), Some(16.0));
+        assert_eq!(promise.take().available(), Some(16.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -850,7 +837,7 @@ mod tests {
         });
 
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.peek().available().copied(), Some(15.0));
+        assert_eq!(promise.take().available(), Some(15.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -943,7 +930,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.peek().available().is_some_and(|v| *v == 1.0));
+        assert!(promise.take().available().is_some_and(|v| v == 1.0));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -953,7 +940,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.peek().available().is_some_and(|v| *v == 5.0));
+        assert!(promise.take().available().is_some_and(|v| v == 5.0));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {

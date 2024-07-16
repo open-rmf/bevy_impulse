@@ -15,8 +15,12 @@
  *
 */
 
-use bevy::prelude::{
-    Component, Bundle, Entity, Commands, World, BuildChildren, Deref, DerefMut,
+use bevy::{
+    prelude::{
+        Component, Bundle, Entity, Commands, World, BuildChildren, Deref,
+        DerefMut, With,
+    },
+    ecs::query::ReadOnlyWorldQuery,
 };
 
 use crossbeam::channel::{Receiver, unbounded};
@@ -236,6 +240,7 @@ impl StreamTargetMap {
 
 pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
+    type StreamFilter: ReadOnlyWorldQuery;
     type StreamStorageBundle: Bundle;
     type StreamInputPack;
     type StreamOutputPack: std::fmt::Debug;
@@ -289,6 +294,7 @@ pub trait StreamPack: 'static + Send + Sync {
 
 impl<T: Stream> StreamPack for T {
     type StreamAvailableBundle = StreamAvailable<Self>;
+    type StreamFilter = With<StreamAvailable<Self>>;
     type StreamStorageBundle = StreamTargetStorage<Self>;
     type StreamInputPack = InputSlot<Self>;
     type StreamOutputPack = Output<Self>;
@@ -386,6 +392,7 @@ impl<T: Stream> StreamPack for T {
 
 impl StreamPack for () {
     type StreamAvailableBundle = ();
+    type StreamFilter = ();
     type StreamStorageBundle = ();
     type StreamInputPack = ();
     type StreamOutputPack = ();
@@ -458,6 +465,7 @@ impl StreamPack for () {
 
 impl<T1: StreamPack> StreamPack for (T1,) {
     type StreamAvailableBundle = T1::StreamAvailableBundle;
+    type StreamFilter = T1::StreamFilter;
     type StreamStorageBundle = T1::StreamStorageBundle;
     type StreamInputPack = T1::StreamInputPack;
     type StreamOutputPack = T1::StreamOutputPack;
@@ -531,6 +539,7 @@ impl<T1: StreamPack> StreamPack for (T1,) {
 
 impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
     type StreamAvailableBundle = (T1::StreamAvailableBundle, T2::StreamAvailableBundle);
+    type StreamFilter = (T1::StreamFilter, T2::StreamFilter);
     type StreamStorageBundle = (T1::StreamStorageBundle, T2::StreamStorageBundle);
     type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack);
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack);
@@ -619,6 +628,7 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
 
 impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3) {
     type StreamAvailableBundle = (T1::StreamAvailableBundle, T2::StreamAvailableBundle, T3::StreamAvailableBundle);
+    type StreamFilter = (T1::StreamFilter, T2::StreamFilter, T3::StreamFilter);
     type StreamStorageBundle = (T1::StreamStorageBundle, T2::StreamStorageBundle, T3::StreamStorageBundle);
     type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack, T3::StreamInputPack);
     type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack, T3::StreamOutputPack);
@@ -711,6 +721,75 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
         T3::process_buffer(buffer.2, source, session, world, roster)?;
         Ok(())
     }
+}
+
+/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
+/// based on what streams they provide. If a stream is required, you should wrap
+/// it in [`Require`]. If a stream is optional, then wrap it in [`Option`].
+///
+/// The service you receive will appear as though it provides all the stream
+/// types wrapped in both your `Require` and `Option` filters, but it might not
+/// actually provide any of the streams that were wrapped in `Option`. A service
+/// that does not actually provide the optional stream can be treated as if it
+/// does provide the stream, except it will never actually send out any of that
+/// stream data.
+///
+/// ```
+/// use bevy_impulse::{*, testing::*};
+///
+/// fn service_discovery_system(
+///     discover: ServiceDiscovery<
+///         f32,
+///         f32,
+///         (
+///             Require<(StreamOf<f32>, StreamOf<u32>)>,
+///             Option<(StreamOf<String>, StreamOf<u8>)>,
+///         )
+///     >
+/// ) {
+///     let service: Service<
+///         f32,
+///         f32,
+///         (
+///             (StreamOf<f32>, StreamOf<u32>),
+///             (StreamOf<String>, StreamOf<u8>),
+///         )
+///     > = discover.iter().next().unwrap();
+/// }
+/// ```
+pub trait StreamFilter {
+    type Filter: ReadOnlyWorldQuery;
+    type Pack: StreamPack;
+}
+
+/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to indicate that a
+/// certain pack of streams is required.
+///
+/// For streams that are optional, wrap them in [`Option`] instead.
+///
+/// See [`StreamFilter`] for a usage example.
+pub struct Require<T> {
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl StreamFilter for () {
+    type Filter = ();
+    type Pack = ();
+}
+
+impl<T: StreamPack> StreamFilter for Require<T> {
+    type Filter = T::StreamFilter;
+    type Pack = T;
+}
+
+impl<T: StreamPack> StreamFilter for Option<T> {
+    type Filter = ();
+    type Pack = T;
+}
+
+impl<T0: StreamFilter, T1: StreamFilter> StreamFilter for (T0, T1) {
+    type Filter = (T0::Filter, T1::Filter);
+    type Pack = (T0::Pack, T1::Pack);
 }
 
 #[cfg(test)]
@@ -807,7 +886,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.peek().available().is_some_and(|v| *v == 10));
+        assert!(recipient.response.take().available().is_some_and(|v| v == 10));
         let stream: Vec<u32> = recipient.streams.into_iter().map(|v| v.0).collect();
         assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         assert!(context.no_unhandled_errors());
@@ -920,7 +999,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.peek().available().is_some());
+        assert!(recipient.response.take().available().is_some());
         assert!(context.no_unhandled_errors());
 
         let outcome: FormatOutcome = recipient.into();
@@ -933,7 +1012,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.peek().available().is_some());
+        assert!(recipient.response.take().available().is_some());
         assert!(context.no_unhandled_errors());
 
         let outcome: FormatOutcome = recipient.into();
@@ -946,7 +1025,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.peek().available().is_some());
+        assert!(recipient.response.take().available().is_some());
         assert!(context.no_unhandled_errors());
 
         let outcome: FormatOutcome = recipient.into();
@@ -959,7 +1038,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.peek().available().is_some());
+        assert!(recipient.response.take().available().is_some());
         assert!(context.no_unhandled_errors());
 
         let outcome: FormatOutcome = recipient.into();

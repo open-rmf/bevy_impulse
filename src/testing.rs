@@ -366,3 +366,6 @@ pub fn repeat_service(
         }
     }
 }
+
+#[derive(Component)]
+pub struct TestComponent;
