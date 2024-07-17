@@ -238,8 +238,9 @@ where
 
     let task = AsyncComputeTaskPool::get().spawn(job);
 
-    OperateTask::new(task_id, session, source, target, task, blocker, sender)
-        .add(world, roster);
+    OperateTask::<_, Streams>::new(
+        task_id, session, source, target, task, blocker, sender,
+    ).add(world, roster);
     Ok(())
 }
 

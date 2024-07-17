@@ -39,7 +39,7 @@ use crate::{
     OperationRoster, Blocker, ManageInput, ChannelQueue, UnhandledErrors,
     OperationSetup, OperationRequest, OperationResult, Operation, AddOperation,
     OrBroken, OperationCleanup, ChannelItem, OperationError, Broken, ScopeStorage,
-    OperationReachability, ReachabilityResult, emit_disposal, Disposal,
+    OperationReachability, ReachabilityResult, emit_disposal, Disposal, StreamPack,
 };
 
 struct JobWaker {
@@ -70,7 +70,7 @@ impl WakeQueue {
 }
 
 #[derive(Component)]
-pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
+pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPack> {
     source: Entity,
     session: Entity,
     node: Entity,
@@ -81,9 +81,10 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync> {
     disposal: Option<Disposal>,
     being_cleaned: bool,
     finished_normally: bool,
+    _ignore: std::marker::PhantomData<Streams>,
 }
 
-impl<Response: 'static + Send + Sync> OperateTask<Response> {
+impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response, Streams> {
     pub(crate) fn new(
         source: Entity,
         session: Entity,
@@ -104,6 +105,7 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
             disposal: None,
             being_cleaned: false,
             finished_normally: false,
+            _ignore: Default::default(),
         }
     }
 
@@ -121,7 +123,11 @@ impl<Response: 'static + Send + Sync> OperateTask<Response> {
     }
 }
 
-impl<Response: 'static + Send + Sync> Drop for OperateTask<Response> {
+impl<Response, Streams> Drop for OperateTask<Response, Streams>
+where
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
     fn drop(&mut self) {
         if self.finished_normally {
             // The task finished normally so no special action needs to be taken
@@ -157,7 +163,11 @@ impl<Response: 'static + Send + Sync> Drop for OperateTask<Response> {
     }
 }
 
-impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
+impl<Response, Streams> Operation for OperateTask<Response, Streams>
+where
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         let wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
         let waker = Arc::new(JobWaker {
@@ -172,7 +182,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
             .insert((
                 self,
                 JobWakerStorage(waker),
-                StopTask(stop_task::<Response>),
+                StopTask(stop_task::<Response, Streams>),
             ))
             .set_parent(node);
 
@@ -192,7 +202,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let mut source_mut = world.get_entity_mut(source).or_not_ready()?;
         // If the task has been stopped / cancelled then OperateTask will have
         // been removed, even if it has not despawned yet.
-        let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_not_ready()?;
+        let mut operation = source_mut.get_mut::<OperateTask<Response, Streams>>().or_not_ready()?;
         if operation.being_cleaned {
             // The operation is being cleaned up, so the task will not be
             // available and there will be nothing for us to do here. We should
@@ -228,13 +238,35 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                 // ChannelQueue has been processed so that any streams from this
                 // task will be delivered before the final output.
                 let r = world.entity_mut(target).defer_input(session, result, roster);
-                world.get_mut::<OperateTask<Response>>(source).or_broken()?.finished_normally = true;
+                world.get_mut::<OperateTask<Response, Streams>>(source).or_broken()?.finished_normally = true;
                 cleanup_task::<Response>(session, source, node, unblock, being_cleaned, world, roster);
+
+                if Streams::has_streams() {
+                    if let Some(scope) = world.get::<ScopeStorage>(node) {
+                        // When an async task with any number of streams >= 1 is
+                        // finished, we should always do a disposal notification
+                        // to force a reachability check. Normally there are
+                        // specific events that prompt us to check reachability,
+                        // but if a reachability test occurred while the async
+                        // node was running and the reachability depends on a
+                        // stream which may or may not have been emitted, then
+                        // the reachability test may have concluded with a false
+                        // positive, and it needs to be rechecked now that the
+                        // async node has finished.
+                        //
+                        // TODO(@mxgrey): Make this more efficient, e.g. only
+                        // trigger this disposal if we detected that a
+                        // reachability test happened while this task was
+                        // running.
+                        roster.disposed(scope.get(), session);
+                    }
+                }
+
                 r?;
             }
             Poll::Pending => {
                 // Task is still running
-                if let Some(mut operation) = world.get_mut::<OperateTask<Response>>(source) {
+                if let Some(mut operation) = world.get_mut::<OperateTask<Response, Streams>>(source) {
                     operation.task = Some(task);
                     operation.blocker = unblock;
                     world.entity_mut(source).insert(JobWakerStorage(waker));
@@ -249,7 +281,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
                             || ChannelQueue::default()
                         ).sender.clone();
 
-                        let operation = OperateTask::new(
+                        let operation = OperateTask::<_, Streams>::new(
                             source, session, node, target, task, unblock, sender,
                         );
 
@@ -267,7 +299,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
         let session = clean.session;
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
-        let mut operation = source_mut.get_mut::<OperateTask<Response>>().or_broken()?;
+        let mut operation = source_mut.get_mut::<OperateTask<Response, Streams>>().or_broken()?;
         operation.being_cleaned = true;
         let node = operation.node;
         let task = operation.task.take();
@@ -292,7 +324,7 @@ impl<Response: 'static + Send + Sync> Operation for OperateTask<Response> {
     fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
         let session = reachability.world
             .get_entity(reachability.source).or_broken()?
-            .get::<OperateTask<Response>>().or_broken()?.session;
+            .get::<OperateTask<Response, Streams>>().or_broken()?.session;
         Ok(session == reachability.session)
     }
 }
@@ -351,13 +383,13 @@ fn cleanup_task<Response>(
 #[derive(Component, Clone, Copy)]
 pub(crate) struct StopTask(pub(crate) fn(OperationRequest, Disposal) -> OperationResult);
 
-fn stop_task<Response: 'static + Send + Sync>(
+fn stop_task<Response: 'static + Send + Sync, Streams: StreamPack>(
     OperationRequest { source, world, .. }: OperationRequest,
     disposal: Disposal,
 ) -> OperationResult {
     let mut operation = world
         .get_entity_mut(source).or_broken()?
-        .take::<OperateTask<Response>>().or_broken()?;
+        .take::<OperateTask<Response, Streams>>().or_broken()?;
 
     operation.disposal = Some(disposal);
     drop(operation);

@@ -129,7 +129,7 @@ impl<'a> CallbackRequest<'a> {
         Ok(())
     }
 
-    fn give_task<Task: Future + 'static + Send>(
+    fn give_task<Task: Future + 'static + Send, Streams: StreamPack>(
         &mut self,
         session: Entity,
         task: Task,
@@ -140,7 +140,7 @@ impl<'a> CallbackRequest<'a> {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
         let task = AsyncComputeTaskPool::get().spawn(task);
         let task_id = self.world.spawn(()).id();
-        OperateTask::new(task_id, session, self.source, self.target, task, None, sender)
+        OperateTask::<_, Streams>::new(task_id, session, self.source, self.target, task, None, sender)
             .add(self.world, self.roster);
         Ok(())
     }
@@ -244,7 +244,7 @@ where
         }, &mut input.world);
         self.system.apply_deferred(&mut input.world);
 
-        input.give_task(session, task)
+        input.give_task::<_, Streams>(session, task)
     }
 }
 
@@ -361,7 +361,7 @@ where
             let task = (self)(AsyncCallback {
                 request, streams, channel, source: input.source, session,
             });
-            input.give_task(session, task)
+            input.give_task::<_, Streams>(session, task)
         };
         Callback::new(MapCallback { callback })
     }

@@ -292,6 +292,9 @@ pub trait StreamPack: 'static + Send + Sync {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult;
+
+    /// Are there actually any streams in the pack?
+    fn has_streams() -> bool;
 }
 
 impl<T: Stream> StreamPack for T {
@@ -397,6 +400,10 @@ impl<T: Stream> StreamPack for T {
 
         Ok(())
     }
+
+    fn has_streams() -> bool {
+        true
+    }
 }
 
 impl StreamPack for () {
@@ -470,6 +477,10 @@ impl StreamPack for () {
         _: &mut OperationRoster,
     ) -> OperationResult {
         Ok(())
+    }
+
+    fn has_streams() -> bool {
+        false
     }
 }
 
@@ -545,6 +556,10 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     ) -> OperationResult {
         T1::process_buffer(buffer, source, session, unused, world, roster)?;
         Ok(())
+    }
+
+    fn has_streams() -> bool {
+        T1::has_streams()
     }
 }
 
@@ -692,6 +707,14 @@ macro_rules! impl_streampack_for_tuple {
                     $T::process_buffer($T, source, session, unused, world, roster)?;
                 )*
                 Ok(())
+            }
+
+            fn has_streams() -> bool {
+                let mut has_streams = true;
+                $(
+                    has_streams = has_streams || $T::has_streams();
+                )*
+                has_streams
             }
         }
     }

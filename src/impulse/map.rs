@@ -182,8 +182,9 @@ where
         }));
 
         let task_source = world.spawn(()).id();
-        OperateTask::new(task_source, session, source, target, task, None, sender)
-            .add(world, roster);
+        OperateTask::<_, Streams>::new(
+            task_source, session, source, target, task, None, sender,
+        ).add(world, roster);
         Ok(())
     }
 }
