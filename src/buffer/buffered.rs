@@ -176,9 +176,9 @@ macro_rules! impl_buffered_for_tuple {
     }
 }
 
-// Implements the `Buffered` trait for all tuples between size 2 and 15
+// Implements the `Buffered` trait for all tuples between size 2 and 12
 // (inclusive) made of types that implement `Buffered`
-all_tuples!(impl_buffered_for_tuple, 2, 15, T);
+all_tuples!(impl_buffered_for_tuple, 2, 12, T);
 
 impl<T: Buffered, const N: usize> Buffered for [T; N] {
     fn buffered_count(
