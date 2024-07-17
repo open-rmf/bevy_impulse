@@ -382,13 +382,35 @@ mod tests {
     }
 
     #[test]
-    fn test_reachability_with_unused_streams() {
+    fn test_stream_reachability() {
         let mut context = TestingContext::minimal_plugins();
 
+        // Test for streams from a blocking node
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let stream_node = builder.create_map(|_: BlockingMap<(), StreamOf<u32>>| {
                 // Do nothing. The purpose of this node is to just return without
                 // sending off any streams.
+            });
+
+            builder.connect(scope.input, stream_node.input);
+            stream_node.streams.chain(builder)
+                .inner()
+                .map_block(|value| 2 * value)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request((), workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+
+        // Test for streams from an async node
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let stream_node = builder.create_map(|_: AsyncMap<(), StreamOf<u32>>| {
+                async { /* Do nothing */}
             });
 
             builder.connect(scope.input, stream_node.input);

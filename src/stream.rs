@@ -291,6 +291,9 @@ pub trait StreamPack: 'static + Send + Sync {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult;
+
+    /// Are there actually any streams in the pack?
+    fn has_streams() -> bool;
 }
 
 impl<T: Stream> StreamPack for T {
@@ -396,6 +399,10 @@ impl<T: Stream> StreamPack for T {
 
         Ok(())
     }
+
+    fn has_streams() -> bool {
+        true
+    }
 }
 
 impl StreamPack for () {
@@ -469,6 +476,10 @@ impl StreamPack for () {
         _: &mut OperationRoster,
     ) -> OperationResult {
         Ok(())
+    }
+
+    fn has_streams() -> bool {
+        false
     }
 }
 
@@ -544,6 +555,10 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     ) -> OperationResult {
         T1::process_buffer(buffer, source, session, unused, world, roster)?;
         Ok(())
+    }
+
+    fn has_streams() -> bool {
+        T1::has_streams()
     }
 }
 
@@ -634,6 +649,11 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
         T1::process_buffer(buffer.0, source, session, unused, world, roster)?;
         T2::process_buffer(buffer.1, source, session, unused, world, roster)?;
         Ok(())
+    }
+
+    fn has_streams() -> bool {
+        T1::has_streams()
+        || T2::has_streams()
     }
 }
 
@@ -732,6 +752,12 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
         T2::process_buffer(buffer.1, source, session, unused, world, roster)?;
         T3::process_buffer(buffer.2, source, session, unused, world, roster)?;
         Ok(())
+    }
+
+    fn has_streams() -> bool {
+        T1::has_streams()
+        || T2::has_streams()
+        || T3::has_streams()
     }
 }
 

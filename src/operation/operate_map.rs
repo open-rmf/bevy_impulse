@@ -199,7 +199,7 @@ where
             .f = Some(f);
 
         let task_source = world.spawn(()).id();
-        OperateTask::new(
+        OperateTask::<_, Streams>::new(
             task_source, session, source, target, task, None, sender,
         ).add(world, roster);
         Ok(())
