@@ -94,9 +94,9 @@ macro_rules! impl_bufferable_for_tuple {
     }
 }
 
-// Implements the `Bufferable` trait for all tuples between size 2 and 15
+// Implements the `Bufferable` trait for all tuples between size 2 and 12
 // (inclusive) made of types that implement `Bufferable`
-all_tuples!(impl_bufferable_for_tuple, 2, 15, T);
+all_tuples!(impl_bufferable_for_tuple, 2, 12, T);
 
 impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
     type BufferType = [T::BufferType; N];
