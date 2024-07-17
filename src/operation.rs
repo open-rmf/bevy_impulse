@@ -627,12 +627,16 @@ struct OperationReachabiilityStorage(
 
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
-        request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
-            .broken
-            .push(Broken {
-                node: request.source,
-                backtrace: Some(Backtrace::new())
-            });
+        if request.world.get::<UnusedTarget>(request.source).is_none() {
+            // The node does not have an operation and is not an unused target,
+            // so this is broken somehow.
+            request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .broken
+                .push(Broken {
+                    node: request.source,
+                    backtrace: Some(Backtrace::new())
+                });
+        }
         return;
     };
     let operator = operator.0;

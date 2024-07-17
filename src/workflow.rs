@@ -403,7 +403,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        dbg!(promise.peek());
         assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
     }
 }
