@@ -19,7 +19,7 @@ use crate::{
     BlockingCallback, AsyncCallback, Channel, ChannelQueue,
     OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateCallback, ManageInput, OperationError,
-    OrBroken, OperateTask,
+    OrBroken, OperateTask, UnusedStreams, ManageDisposal,
 };
 
 use bevy::{
@@ -115,10 +115,17 @@ impl<'a> CallbackRequest<'a> {
         &mut self,
         session: Entity,
         response: Response,
+        unused_streams: UnusedStreams,
     ) -> Result<(), OperationError> {
+        if !unused_streams.streams.is_empty() {
+            self.world.get_entity_mut(self.source).or_broken()?
+                .emit_disposal(session, unused_streams.into(), self.roster);
+        }
+
         self.world
             .get_entity_mut(self.target).or_broken()?
             .give_input(session, response, self.roster)?;
+
         Ok(())
     }
 
@@ -200,9 +207,12 @@ where
         }, input.world);
         self.system.apply_deferred(&mut input.world);
 
-        Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
+        let mut unused_streams = UnusedStreams::new(input.source);
+        Streams::process_buffer(
+            streams, input.source, session, &mut unused_streams, input.world, input.roster
+        )?;
 
-        input.give_response(session, response)
+        input.give_response(session, response, unused_streams)
     }
 }
 
@@ -321,8 +331,12 @@ where
             let response = (self)(BlockingCallback {
                 request, streams: streams.clone(), source: input.source, session,
             });
-            Streams::process_buffer(streams, input.source, session, input.world, input.roster)?;
-            input.give_response(session, response)
+
+            let mut unused_streams = UnusedStreams::new(input.source);
+            Streams::process_buffer(
+                streams, input.source, session, &mut unused_streams, input.world, input.roster
+            )?;
+            input.give_response(session, response, unused_streams)
         };
         Callback::new(MapCallback { callback })
     }

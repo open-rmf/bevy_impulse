@@ -26,7 +26,7 @@ use crate::{
     Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
     InputBundle, OperationResult, OrBroken, Input, ManageInput,
     ChannelQueue, BlockingMap, AsyncMap, Channel, OperateTask, ActiveTasksStorage,
-    CallBlockingMapOnce, CallAsyncMapOnce,
+    CallBlockingMapOnce, CallAsyncMapOnce, UnusedStreams,
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
@@ -94,7 +94,12 @@ where
 
         let response = f.call(BlockingMap { request, streams: streams.clone(), source, session });
 
-        Streams::process_buffer(streams, source, session, world, roster)?;
+        let mut unused_streams = UnusedStreams::new(source);
+        Streams::process_buffer(
+            streams, source, session, &mut unused_streams, world, roster
+        )?;
+        // Note: We do not need to emit a disposal for any unused streams since
+        // this is only used for impulses, not workflows.
 
         world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
         Ok(())

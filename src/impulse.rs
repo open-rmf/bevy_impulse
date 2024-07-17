@@ -124,6 +124,7 @@ where
         let target = self.commands.spawn((
             Detached::default(),
             UnusedTarget,
+            ImpulseMarker,
         )).id();
 
         // We should automatically delete the previous step in the chain once
