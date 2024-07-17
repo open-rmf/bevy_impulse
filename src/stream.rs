@@ -710,7 +710,7 @@ macro_rules! impl_streampack_for_tuple {
             }
 
             fn has_streams() -> bool {
-                let mut has_streams = true;
+                let mut has_streams = false;
                 $(
                     has_streams = has_streams || $T::has_streams();
                 )*
