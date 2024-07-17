@@ -296,3 +296,171 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn test_fork_clone() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let fork = scope.input.fork_clone(builder);
+            let branch_a = fork.clone_output(builder);
+            let branch_b = fork.clone_output(builder);
+            builder.connect(branch_a, scope.terminate);
+            builder.connect(branch_b, scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(5.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.take().available().is_some_and(|v| v == 5.0));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+            .fork_clone((
+                |chain: Chain<f64>| chain.connect(scope.terminate),
+                |chain: Chain<f64>| chain.connect(scope.terminate),
+            ));
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(3.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.take().available().is_some_and(|v| v == 3.0));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+            .fork_clone((
+                |chain: Chain<f64>| chain
+                    .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(10.0*t), value: 10.0*t })
+                    .map(|r: AsyncMap<WaitRequest<f64>>| {
+                        wait(r.request)
+                    })
+                    .connect(scope.terminate),
+                |chain: Chain<f64>| chain
+                    .map_block(|t| WaitRequest { duration: Duration::from_secs_f64(t/100.0), value: t/100.0 })
+                    .map(|r: AsyncMap<WaitRequest<f64>>| {
+                        wait(r.request)
+                    })
+                    .connect(scope.terminate),
+            ));
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(1.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs_f64(0.5));
+        assert!(promise.take().available().is_some_and(|v| v == 0.01));
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_stream_reachability() {
+        let mut context = TestingContext::minimal_plugins();
+
+        // Test for streams from a blocking node
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let stream_node = builder.create_map(|_: BlockingMap<(), StreamOf<u32>>| {
+                // Do nothing. The purpose of this node is to just return without
+                // sending off any streams.
+            });
+
+            builder.connect(scope.input, stream_node.input);
+            stream_node.streams.chain(builder)
+                .inner()
+                .map_block(|value| 2 * value)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request((), workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+
+        // Test for streams from an async node
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let stream_node = builder.create_map(|_: AsyncMap<(), StreamOf<u32>>| {
+                async { /* Do nothing */ }
+            });
+
+            builder.connect(scope.input, stream_node.input);
+            stream_node.streams.chain(builder)
+                .inner()
+                .map_block(|value| 2 * value)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request((), workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+    }
+
+    use crossbeam::channel::unbounded;
+
+    #[test]
+    fn test_on_cancel() {
+        let (sender, receiver) = unbounded();
+
+        let mut context = TestingContext::minimal_plugins();
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+
+            let input = scope.input.fork_clone(builder);
+
+            let buffer = builder.create_buffer(BufferSettings::default());
+            let input_to_buffer = input.clone_output(builder);
+            builder.connect(input_to_buffer, buffer.input_slot());
+
+            let none_node = builder.create_map_block(produce_none);
+            let input_to_node = input.clone_output(builder);
+            builder.connect(input_to_node, none_node.input);
+            none_node.output.chain(builder)
+                .cancel_on_none()
+                .connect(scope.terminate);
+
+            // The chain coming out of the none_node will result in the scope
+            // being cancelled. After that, this scope should run, and the value
+            // that went into the buffer should get sent over the channel.
+            builder.on_cancel(buffer, |scope, builder| {
+                scope.input.chain(builder)
+                    .map_block(move |value| {
+                        sender.send(value).ok();
+                    })
+                    .connect(scope.terminate);
+            });
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request(5, workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.peek().is_cancelled());
+        let channel_output = receiver.try_recv().unwrap();
+        assert_eq!(channel_output, 5);
+        assert!(context.no_unhandled_errors());
+        assert!(context.confirm_buffers_empty().is_ok());
+    }
+}

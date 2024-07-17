@@ -23,7 +23,7 @@ use crate::{
     Cancellable, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
-    ScopeSettings, StreamTargetMap,
+    ScopeSettings, StreamTargetMap, ClearBufferFn,
 };
 
 use backtrace::Backtrace;
@@ -475,7 +475,7 @@ where
         Ok(())
     }
 
-    fn finalize_scope_cleanup(clean: OperationCleanup) -> OperationResult {
+    fn finalize_scope_cleanup(mut clean: OperationCleanup) -> OperationResult {
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(clean.source).or_broken()?;
         let mut pairs = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
@@ -513,6 +513,8 @@ where
                 let response = clean.world
                     .get_mut::<Staging<Response>>(terminal).or_broken()?.0
                     .remove(&clean.session).or_broken()?;
+
+                clear_scope_buffers(source, scoped_session, &mut clean.world)?;
 
                 clean.world.get_entity_mut(target).or_broken()?.give_input(
                     pair.parent_session, response, clean.roster,
@@ -1008,6 +1010,7 @@ impl FinishCancel {
         let mut awaiting = source_mut.get_mut::<AwaitingCancelStorage>().or_broken()?;
         let a = awaiting.0.get(index).or_broken()?;
         let parent_session = a.cancelled.parent_session;
+        let scoped_session = a.scoped_session;
         if !a.cancelled.status.is_cleanup() {
             // We can remove this right away since it's a cancellation.
             let a = awaiting.0.remove(index);
@@ -1058,8 +1061,25 @@ impl FinishCancel {
                 .notify_cleaned()?;
         }
 
+        clear_scope_buffers(scope, scoped_session, world)?;
+
         Ok(())
     }
+}
+
+fn clear_scope_buffers(
+    scope: Entity,
+    session: Entity,
+    world: &mut World,
+) -> OperationResult {
+    let nodes = world.get::<ScopeContents>(scope).or_broken()?.nodes.clone();
+    for node in nodes {
+        if let Some(clear_buffer) = world.get::<ClearBufferFn>(node) {
+            let clear_buffer = clear_buffer.0;
+            clear_buffer(node, session, world)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Component)]

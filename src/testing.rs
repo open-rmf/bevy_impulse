@@ -31,6 +31,7 @@ pub use std::time::{Duration, Instant};
 use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
+    GetBufferedSessionsFn,
     flush_impulses,
 };
 
@@ -161,6 +162,27 @@ impl TestingContext {
 
     pub fn get_unhandled_errors(&self) -> Option<&UnhandledErrors> {
         self.app.world.get_resource::<UnhandledErrors>()
+    }
+
+    // Check that all buffers in the world are empty
+    pub fn confirm_buffers_empty(&mut self) -> Result<(), Vec<Entity>> {
+        let mut query = self.app.world.query::<(Entity, &GetBufferedSessionsFn)>();
+        let buffers: Vec<_> = query.iter(&self.app.world)
+            .map(|(e, get_sessions)| (e, get_sessions.0))
+            .collect();
+
+        let mut non_empty_buffers = Vec::new();
+        for (e, get_sessions) in buffers {
+            if !get_sessions(e, &self.app.world).is_ok_and(|s| s.is_empty()) {
+                non_empty_buffers.push(e);
+            }
+        }
+
+        if non_empty_buffers.is_empty() {
+            Ok(())
+        } else {
+            Err(non_empty_buffers)
+        }
     }
 }
 

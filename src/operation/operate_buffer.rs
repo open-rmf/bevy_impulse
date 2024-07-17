@@ -16,7 +16,7 @@
 */
 
 use bevy::{
-    prelude::{Bundle, Entity, World},
+    prelude::{Bundle, Entity, World, Component},
     ecs::system::Command,
 };
 
@@ -26,11 +26,14 @@ use anyhow::anyhow;
 
 use backtrace::Backtrace;
 
+use smallvec::SmallVec;
+
 use crate::{
     BufferStorage, Operation, OperationSetup, OperationRequest, OperationResult,
     OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
-    UnhandledErrors, MiscellaneousFailure, InputBundle,
+    UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
+    InspectInput,
 };
 
 #[derive(Bundle)]
@@ -56,6 +59,7 @@ where
             ForkTargetStorage::new(),
             SingleInputStorage::empty(),
             InputBundle::<T>::new(),
+            BufferBundle::new::<T>(),
         ));
 
         Ok(())
@@ -123,4 +127,71 @@ impl OnNewBufferValue {
                 backtrace: Some(Backtrace::new()),
             });
     }
+}
+
+#[derive(Bundle)]
+struct BufferBundle {
+    clear: ClearBufferFn,
+    size: CheckBufferSizeFn,
+    sessions: GetBufferedSessionsFn,
+}
+
+impl BufferBundle {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self {
+            clear: ClearBufferFn::new::<T>(),
+            size: CheckBufferSizeFn::new::<T>(),
+            sessions: GetBufferedSessionsFn::new::<T>(),
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct ClearBufferFn(pub fn(Entity, Entity, &mut World) -> OperationResult);
+
+impl ClearBufferFn {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self(clear_buffer::<T>)
+    }
+}
+
+fn clear_buffer<T: 'static + Send + Sync>(
+    source: Entity,
+    session: Entity,
+    world: &mut World,
+) -> OperationResult {
+    world.get_entity_mut(source).or_broken()?.clear_buffer::<T>(session)
+}
+
+#[derive(Component)]
+pub struct CheckBufferSizeFn(pub fn(Entity, Entity, &World) -> Result<usize, OperationError>);
+
+impl CheckBufferSizeFn {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self(check_buffer_size::<T>)
+    }
+}
+
+fn check_buffer_size<T: 'static + Send + Sync>(
+    source: Entity,
+    session: Entity,
+    world: &World,
+) -> Result<usize, OperationError> {
+    world.get_entity(source).or_broken()?.buffered_count::<T>(session)
+}
+
+#[derive(Component)]
+pub struct GetBufferedSessionsFn(pub fn(Entity, &World) -> Result<SmallVec<[Entity; 16]>, OperationError>);
+
+impl GetBufferedSessionsFn {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self(get_buffered_sessions::<T>)
+    }
+}
+
+fn get_buffered_sessions<T: 'static + Send + Sync>(
+    source: Entity,
+    world: &World,
+) -> Result<SmallVec<[Entity; 16]>, OperationError> {
+    world.get_entity(source).or_broken()?.buffered_sessions::<T>()
 }
