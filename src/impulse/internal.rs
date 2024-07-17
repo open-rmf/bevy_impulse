@@ -42,6 +42,9 @@ pub(crate) trait Impulsive {
     fn execute(request: OperationRequest) -> OperationResult;
 }
 
+#[derive(Component)]
+pub(crate) struct ImpulseMarker;
+
 pub(crate) struct AddImpulse<I: Impulsive> {
     source: Entity,
     impulse: I,
@@ -64,6 +67,7 @@ impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
             .insert((
                 OperationExecuteStorage(perform_impulse::<I>),
                 Cancellable::new(cancel_impulse),
+                ImpulseMarker,
             ))
             .remove::<UnusedTarget>();
     }

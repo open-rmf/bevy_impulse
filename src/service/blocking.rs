@@ -18,7 +18,7 @@
 use crate::{
     BlockingService, BlockingServiceInput, IntoService, ServiceTrait, ServiceRequest,
     Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
-    OrBroken, dispose_for_despawned_service,
+    UnusedStreams, ManageDisposal, OrBroken, dispose_for_despawned_service,
     service::builder::BlockingChosen,
 };
 
@@ -115,7 +115,9 @@ where
             request, streams: streams.clone(), provider, source, session,
         }, world);
         service.apply_deferred(world);
-        Streams::process_buffer(streams, source, session, world, roster)?;
+
+        let mut unused_streams = UnusedStreams::new(source);
+        Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>() {
@@ -129,6 +131,11 @@ where
             // Apparently the service was despawned by the service itself.
             // But we can still deliver the response to the target, so we will
             // not consider this to be cancelled.
+        }
+
+        if !unused_streams.streams.is_empty() {
+            world.get_entity_mut(source).or_broken()?
+                .emit_disposal(session, unused_streams.into(), roster);
         }
 
         world.get_entity_mut(target).or_broken()?

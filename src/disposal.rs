@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
-    DisposalFailure,
+    DisposalFailure, ImpulseMarker,
 };
 
 #[derive(Debug, Clone)]
@@ -100,6 +100,10 @@ pub enum DisposalCause {
 
     /// A scope was cancelled so its output has been disposed.
     Scope(Cancellation),
+
+    /// One or more streams from a node never emitted any signal. This can lead
+    /// to unexpected
+    UnusedStreams(UnusedStreams)
 }
 
 /// A variant of [`DisposalCause`]
@@ -196,7 +200,6 @@ impl From<TaskDespawned> for DisposalCause {
         Self::TaskDespawned(value)
     }
 }
-
 /// A variant of [`DisposalCause`]
 #[derive(Debug)]
 pub struct PoisonedMutexDisposal {
@@ -207,6 +210,26 @@ pub struct PoisonedMutexDisposal {
 impl From<PoisonedMutexDisposal> for DisposalCause {
     fn from(value: PoisonedMutexDisposal) -> Self {
         Self::PoisonedMutex(value)
+    }
+}
+
+#[derive(Debug)]
+pub struct UnusedStreams {
+    /// The node which did not use all its streams
+    pub node: Entity,
+    /// The streams which went unused.
+    pub streams: Vec<&'static str>,
+}
+
+impl UnusedStreams {
+    pub fn new(node: Entity) -> Self {
+        Self { node, streams: Default::default() }
+    }
+}
+
+impl From<UnusedStreams> for DisposalCause {
+    fn from(value: UnusedStreams) -> Self {
+        Self::UnusedStreams(value)
     }
 }
 
@@ -233,15 +256,19 @@ impl<'w> ManageDisposal for EntityMut<'w> {
         roster: &mut OperationRoster,
     ) {
         let Some(scope) = self.get::<ScopeStorage>() else {
-            let broken_node = self.id();
-            self.world_scope(|world| {
-                world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .disposals
-                .push(DisposalFailure {
-                    disposal, broken_node, backtrace: Some(Backtrace::new())
+            if !self.contains::<ImpulseMarker>() {
+                // If the emitting node does not have a scope as not part of an
+                // impulse chain, then something is broken.
+                let broken_node = self.id();
+                self.world_scope(|world| {
+                    world
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .disposals
+                    .push(DisposalFailure {
+                        disposal, broken_node, backtrace: Some(Backtrace::new())
+                    });
                 });
-            });
+            }
             return;
         };
         let scope = scope.get();

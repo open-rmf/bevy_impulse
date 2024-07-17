@@ -27,7 +27,8 @@ use crate::{
     SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
-    OperationReachability, ReachabilityResult, InputBundle,
+    OperationReachability, ReachabilityResult, InputBundle, UnusedStreams,
+    ManageDisposal,
 };
 
 #[derive(Bundle)]
@@ -96,7 +97,14 @@ where
         let response = f.call(BlockingMap { request, streams: streams.clone(), source, session });
         map.f = Some(f);
 
-        Streams::process_buffer(streams, source, session, world, roster)?;
+        let mut unused_streams = UnusedStreams::new(source);
+        Streams::process_buffer(
+            streams, source, session, &mut unused_streams, world, roster
+        )?;
+        if !unused_streams.streams.is_empty() {
+            world.get_entity_mut(source).or_broken()?
+                .emit_disposal(session, unused_streams.into(), roster);
+        }
 
         world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
         Ok(())

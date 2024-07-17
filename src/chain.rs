@@ -23,7 +23,7 @@ use std::error::Error;
 
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder,
-    StreamPack, Provider, ProvideOnce, Scope,
+    StreamPack, Provider, ProvideOnce, Scope, StreamOf,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter,
@@ -414,6 +414,17 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     pub fn target(&self) -> Entity {
         self.target
+    }
+}
+
+impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, StreamOf<T>>
+where
+    T: 'static + Send + Sync,
+{
+    /// When the output value is wrapped in a [`StreamOf`] container, this will
+    /// strip it out of that wrapper.
+    pub fn inner(self) -> Chain<'w, 's, 'a, 'b, T> {
+        self.map_block(|v| v.0)
     }
 }
 

@@ -32,7 +32,7 @@ use smallvec::SmallVec;
 use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
-    InnerChannel, TakenStream, StreamChannel, Push, Builder,
+    InnerChannel, TakenStream, StreamChannel, Push, Builder, UnusedStreams,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -287,6 +287,7 @@ pub trait StreamPack: 'static + Send + Sync {
         buffer: Self::Buffer,
         source: Entity,
         session: Entity,
+        unused: &mut UnusedStreams,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult;
@@ -378,12 +379,19 @@ impl<T: Stream> StreamPack for T {
         buffer: Self::Buffer,
         source: Entity,
         session: Entity,
+        unused: &mut UnusedStreams,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
         let target = buffer.target;
+        let mut was_unused = true;
         for data in Rc::into_inner(buffer.container).or_broken()?.into_inner().into_iter() {
+            was_unused = false;
             data.send(StreamRequest { source, session, target, world, roster })?;
+        }
+
+        if was_unused {
+            unused.streams.push(std::any::type_name::<Self>());
         }
 
         Ok(())
@@ -456,6 +464,7 @@ impl StreamPack for () {
         _: Self::Buffer,
         _: Entity,
         _: Entity,
+        _: &mut UnusedStreams,
         _: &mut World,
         _: &mut OperationRoster,
     ) -> OperationResult {
@@ -529,10 +538,11 @@ impl<T1: StreamPack> StreamPack for (T1,) {
         buffer: Self::Buffer,
         source: Entity,
         session: Entity,
+        unused: &mut UnusedStreams,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        T1::process_buffer(buffer, source, session, world, roster)?;
+        T1::process_buffer(buffer, source, session, unused, world, roster)?;
         Ok(())
     }
 }
@@ -617,11 +627,12 @@ impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
         buffer: Self::Buffer,
         source: Entity,
         session: Entity,
+        unused: &mut UnusedStreams,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        T1::process_buffer(buffer.0, source, session, world, roster)?;
-        T2::process_buffer(buffer.1, source, session, world, roster)?;
+        T1::process_buffer(buffer.0, source, session, unused, world, roster)?;
+        T2::process_buffer(buffer.1, source, session, unused, world, roster)?;
         Ok(())
     }
 }
@@ -713,12 +724,13 @@ impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3)
         buffer: Self::Buffer,
         source: Entity,
         session: Entity,
+        unused: &mut UnusedStreams,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        T1::process_buffer(buffer.0, source, session, world, roster)?;
-        T2::process_buffer(buffer.1, source, session, world, roster)?;
-        T3::process_buffer(buffer.2, source, session, world, roster)?;
+        T1::process_buffer(buffer.0, source, session, unused, world, roster)?;
+        T2::process_buffer(buffer.1, source, session, unused, world, roster)?;
+        T3::process_buffer(buffer.2, source, session, unused, world, roster)?;
         Ok(())
     }
 }

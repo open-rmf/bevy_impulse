@@ -380,4 +380,30 @@ mod tests {
         assert!(promise.take().available().is_some_and(|v| v == 0.01));
         assert!(context.no_unhandled_errors());
     }
+
+    #[test]
+    fn test_reachability_with_unused_streams() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let stream_node = builder.create_map(|_: BlockingMap<(), StreamOf<u32>>| {
+                // Do nothing. The purpose of this node is to just return without
+                // sending off any streams.
+            });
+
+            builder.connect(scope.input, stream_node.input);
+            stream_node.streams.chain(builder)
+                .inner()
+                .map_block(|value| 2 * value)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request((), workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        dbg!(promise.peek());
+        assert!(promise.peek().is_cancelled());
+    }
 }

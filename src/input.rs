@@ -32,7 +32,7 @@ use backtrace::Backtrace;
 use crate::{
     OperationRoster, OperationError, OrBroken,
     DeferredRoster, Cancel, Cancellation, CancellationCause, Broken,
-    BufferSettings, RetentionPolicy, ForkTargetStorage,
+    BufferSettings, RetentionPolicy, ForkTargetStorage, UnusedTarget,
 };
 
 /// Typical container for input data accompanied by its session information.
@@ -210,8 +210,18 @@ impl<'w> ManageInput for EntityMut<'w> {
         session: Entity,
         data: T,
     ) -> Result<(), OperationError> {
-        let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        storage.reverse_queue.insert(0, Input { session, data });
+        if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
+            storage.reverse_queue.insert(0, Input { session, data });
+        } else if !self.contains::<UnusedTarget>() {
+            // If the input is being fed to an unused target then we can
+            // generally ignore it, although it may indicate a bug in the user's
+            // workflow because workflow branches that end in an unused target
+            // will be spuriously dropped when the scope terminates.
+
+            // However in this case, the target is not unused but also does not
+            // have the correct input storage type. This indicates
+            None.or_broken()?;
+        }
         Ok(())
     }
 
