@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    BlockingService, InBlockingService, IntoService, ServiceTrait, ServiceRequest,
+    BlockingService, BlockingServiceInput, IntoService, ServiceTrait, ServiceRequest,
     Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
     OrBroken, dispose_for_despawned_service,
     service::builder::BlockingChosen,
@@ -51,7 +51,7 @@ where
 {
     type Request = Request;
     type Response = Response;
-    type Streams = ();
+    type Streams = Streams;
     type DefaultDeliver = BlockingChosen;
 
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
@@ -179,6 +179,6 @@ where
     }
 }
 
-fn peel_blocking<Request>(In(BlockingService { request, .. }): InBlockingService<Request>) -> Request {
+fn peel_blocking<Request>(In(BlockingService { request, .. }): BlockingServiceInput<Request>) -> Request {
     request
 }

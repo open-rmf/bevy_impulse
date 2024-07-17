@@ -226,7 +226,7 @@ impl<T> PromiseState<T> {
         }
     }
 
-    pub fn available(&self) -> Option<&T> {
+    pub fn available(self) -> Option<T> {
         match self {
             Self::Available(value) => Some(value),
             _ => None,
@@ -440,7 +440,7 @@ mod tests {
             assert!(outer_sender.send(inner_promise).is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Flatten, Inner, Outer
@@ -455,7 +455,7 @@ mod tests {
             assert!(inner_sender.send("hello").is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(outer_sender.send(inner_promise).is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Outer, Flatten, Inner
@@ -471,7 +471,7 @@ mod tests {
 
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Inner, Flatten, Outer
@@ -486,7 +486,7 @@ mod tests {
 
             assert!(flat_promise.peek().is_pending());
             assert!(outer_sender.send(inner_promise).is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Outer, Inner, Flatten
@@ -502,7 +502,7 @@ mod tests {
                 outer_promise.flatten()
             };
 
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Inner, Outer, Flatten
@@ -515,7 +515,7 @@ mod tests {
                 outer_promise.flatten()
             };
 
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
     }
 
@@ -550,7 +550,7 @@ mod tests {
             assert!(mid_sender.send(inner_promise).is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Flatten, Outer, Flatten, Mid, Inner
@@ -565,7 +565,7 @@ mod tests {
             assert!(mid_sender.send(inner_promise).is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Outer, Flatten, Flatten, Mid, Inner
@@ -577,7 +577,7 @@ mod tests {
             assert!(mid_sender.send(inner_promise).is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Outer, Mid, Flatten, Flatten, Inner
@@ -589,7 +589,7 @@ mod tests {
             let mut flat_promise = outer_promise.flatten().flatten();
             assert!(flat_promise.peek().is_pending());
             assert!(inner_sender.send("hello").is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Outer, Mid, Inner, Flatten, Flatten
@@ -600,7 +600,7 @@ mod tests {
             assert!(mid_sender.send(inner_promise).is_ok());
             assert!(inner_sender.send("hello").is_ok());
             let mut flat_promise = outer_promise.flatten().flatten();
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Mid, Flatten, Flatten, Inner, Outer
@@ -612,7 +612,7 @@ mod tests {
             assert!(inner_sender.send("hello").is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(outer_sender.send(mid_promise).is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
 
         // Inner, Flatten, Flatten, Outer, Mid
@@ -624,7 +624,7 @@ mod tests {
             assert!(outer_sender.send(mid_promise).is_ok());
             assert!(flat_promise.peek().is_pending());
             assert!(mid_sender.send(inner_promise).is_ok());
-            assert_eq!(flat_promise.peek().available().copied(), Some("hello"));
+            assert_eq!(flat_promise.take().available(), Some("hello"));
         }
     }
 }

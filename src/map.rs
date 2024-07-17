@@ -25,6 +25,7 @@ use bevy::prelude::{Entity, Commands};
 use std::future::Future;
 
 /// A newtype to indicate that the map definition is given directly by F.
+#[derive(Clone, Copy)]
 pub struct MapDef<F>(F);
 
 /// Convert an [`FnMut`] that takes in a [`BlockingMap`] or an [`AsyncMap`] into
@@ -61,6 +62,15 @@ pub struct BlockingMapDef<Def, Request, Response, Streams> {
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
+impl<Def: Clone, Request, Response, Streams> Clone for BlockingMapDef<Def, Request, Response, Streams> {
+    fn clone(&self) -> Self {
+        Self {
+            def: self.def.clone(),
+            _ignore: Default::default(),
+        }
+    }
+}
+
 impl<Def, Request, Response, Streams> ProvideOnce for BlockingMapDef<Def, Request, Response, Streams>
 where
     Def: CallBlockingMap<Request, Response, Streams> + 'static + Send + Sync,
@@ -91,9 +101,10 @@ pub struct BlockingMapMarker;
 
 impl<F, Request, Response, Streams> AsMap<(Request, Response, Streams, BlockingMapMarker)> for F
 where
-    F: FnMut(BlockingMap<Request>) -> Response + 'static + Send + Sync,
+    F: FnMut(BlockingMap<Request, Streams>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     type MapType = BlockingMapDef<MapDef<F>, Request, Response, Streams>;
     fn as_map(self) -> Self::MapType {
@@ -170,6 +181,15 @@ where
 pub struct AsyncMapDef<Def, Request, Task, Streams> {
     def: Def,
     _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
+}
+
+impl<Def: Clone, Request, Task, Streams> Clone for AsyncMapDef<Def, Request, Task, Streams> {
+    fn clone(&self) -> Self {
+        Self {
+            def: self.def.clone(),
+            _ignore: Default::default(),
+        }
+    }
 }
 
 impl<Def, Request, Task, Streams> ProvideOnce for AsyncMapDef<Def, Request, Task, Streams>

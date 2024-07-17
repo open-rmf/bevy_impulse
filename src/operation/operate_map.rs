@@ -23,7 +23,7 @@ use bevy::{
 use std::future::Future;
 
 use crate::{
-    BlockingMap, AsyncMap, Operation, ChannelQueue, InnerChannel,
+    BlockingMap, AsyncMap, Operation, ChannelQueue, Channel,
     SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
@@ -180,11 +180,11 @@ where
         let mut f = source_mut.get_mut::<AsyncMapStorage<F>>().or_broken()?
             .f.take().or_broken()?;
 
-        let channel = InnerChannel::new(source, session, sender.clone());
-        let channel = channel.into_specific(&world)?;
+        let channel = Channel::new(source, session, sender.clone());
+        let streams = channel.for_streams::<Streams>(&world)?;
 
         let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap {
-            request, channel, source, session,
+            request, streams, channel, source, session,
         }));
         world.get_entity_mut(source).or_broken()?
             .get_mut::<AsyncMapStorage<F>>().or_broken()?

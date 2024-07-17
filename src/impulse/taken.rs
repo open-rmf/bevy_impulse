@@ -92,7 +92,6 @@ impl<T: 'static + Send + Sync> Impulsive for TakenStream<T> {
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let stream = source_mut.get::<TakenStream<T>>().or_broken()?;
         stream.sender.send(data).ok();
-        source_mut.despawn_recursive();
         Ok(())
     }
 }

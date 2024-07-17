@@ -36,23 +36,12 @@ pub use fork_clone_builder::*;
 pub mod unzip;
 pub use unzip::*;
 
-/// After submitting a service request, use [`Chain`] to describe how
-/// the response should be handled. At a minimum, for the response to be
-/// delivered, you must choose one of:
-/// - `.detach()`: Let the service run to completion and then discard the
-///   response data.
-/// - `.take()`: As long as the [`Promise`] or one of its clones is alive,
-///   the service will continue running to completion and you will be able to
-///   view the response (or take the response, but only once). If all clones of
-///   the [`Promise`] are dropped before the service is delivered, it will
-///   be cancelled.
-/// - `.detach_and_take()`: As long as the [`Promise`] or one of its clones is
-///   alive, you will be able to view the response (or take the response, but
-///   only once). The service will run to completion even if every clone of the
-///   [`Promise`] is dropped.
+/// Chain operations onto the output of a workflow node.
 ///
-/// If you do not select one of the above then the service request will be
-/// cancelled without ever attempting to run.
+/// Make sure to use [`Self::connect`] when you're done chaining so that the
+/// final output of the chain gets connected into another node. If the final
+/// output of the chain is meant to be the final output of your workflow then
+/// you should connect it to [`Scope::terminate`].
 #[must_use]
 pub struct Chain<'w, 's, 'a, 'b, T> {
     target: Entity,
@@ -65,10 +54,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// use this to resume building this chain later.
     ///
     /// Note that if you do not connect some path of your workflow into the
-    /// `terminate` slot of your [`Scope`][1] then the workflow will not be able
+    /// `terminate` slot of your [`Scope`] then the workflow will not be able
     /// to run.
-    ///
-    /// [1]: crate::Scope
     #[must_use]
     pub fn output(self) -> Output<T> {
         Output::new(self.scope(), self.target)
@@ -217,8 +204,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Build a workflow scope to be used as an element in this chain.
     ///
-    /// If you want to connect to the stream outputs, use
-    /// [`Self::then_scope_node`] instead.
+    /// If you want to connect to the stream outputs or be able to loop back
+    /// to the input of this scope, use [`Self::then_scope_node`] instead.
     #[must_use]
     pub fn then_scope<Response, Streams, Settings>(
         self,
@@ -236,14 +223,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Simplified version of [`Self::then_scope`] limited to a simple input and
-    /// output. This does not support streams and only uses default scope
-    /// settings.
+    /// output.
     ///
     /// Unlike `then_scope`, this function can infer the types for the generics
     /// so you don't need to explicitly specify them.
     pub fn then_io_scope<Response, Settings>(
         self,
-        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder) -> Settings,
+        build: impl FnOnce(Scope<T, Response>, &mut Builder) -> Settings,
     ) -> Chain<'w, 's, 'a, 'b, Response>
     where
         Response: 'static + Send + Sync,
@@ -271,14 +257,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Simplified version of [`Self::then_scope_node`] limited to a simple
-    /// input and output. This does not support streams and only uses default
-    /// scope settings.
+    /// input and output.
     ///
     /// Unlike `then_scope_node`, this function can infer the types for the
     /// generics so you don't need to explicitly specify them.
     pub fn then_io_scope_node<Response, Settings>(
         self,
-        build: impl FnOnce(Scope<T, Response, ()>, &mut Builder) -> Settings,
+        build: impl FnOnce(Scope<T, Response>, &mut Builder) -> Settings,
     ) -> Node<T, Response, ()>
     where
         Response: 'static + Send + Sync,
@@ -288,12 +273,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
-    /// If the filter returns [`None`] then a cancellation is triggered.
-    /// Otherwise the chain continues with the value given inside [`Some`].
+    /// If the filter returns [`None`] then a [`Cancellation`](crate::Cancellation)
+    /// is triggered. Otherwise the chain continues with the value that was
+    /// inside [`Some`].
     ///
     /// This is conceptually similar to [`Iterator::filter_map`]. You can also
-    /// use [`Chain::disposal_filter`] to dispose the remainder of the chain
-    /// instead of cancelling it.
+    /// use [`Chain::disposal_filter`] to dispose of the value instead of
+    /// cancelling the entire scope.
     #[must_use]
     pub fn cancellation_filter<ThenResponse, F>(
         self,
@@ -326,14 +312,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// When the response is delivered, we will make a clone of it and
     /// simultaneously pass that clone along two different branches chains: one
-    /// determined by the `build` function passed into this function and the
-    /// other determined by the [`Chain`] that gets returned by this function.
+    /// determined by the `build` function passed into this operation and the
+    /// other determined by the [`Chain`] that gets returned.
     ///
     /// This can only be applied when `Response` can be cloned.
     ///
     /// See also [`Chain::fork_clone`]
     #[must_use]
-    pub fn fork_clone_branch(
+    pub fn branch_clone(
         self,
         build: impl FnOnce(Chain<T>),
     ) -> Chain<'w, 's, 'a, 'b, T>
@@ -410,7 +396,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
     /// a new link (entity) into the chain.
-    /// [1]: https://en.wikipedia.org/wiki/NOP_(code)
+    /// [1]: `<https://en.wikipedia.org/wiki/NOP_(code)>`
     #[must_use]
     pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
@@ -614,7 +600,7 @@ where
     ) -> Chain<'w, 's, 'a, 'b, T> {
         Chain::<Option<T>>::new(
             self.target, self.builder,
-        ).branch_option_zip(
+        ).fork_option(
             |chain| chain.output(),
             build_none,
         ).0.chain(self.builder)
@@ -627,8 +613,7 @@ where
     ///
     /// The outputs of both builder functions will be zipped as the return value
     /// of this function.
-    #[must_use]
-    pub fn branch_option_zip<U, V>(
+    pub fn fork_option<U, V>(
         self,
         build_some: impl FnOnce(Chain<T>) -> U,
         build_none: impl FnOnce(Chain<()>) -> V,
@@ -746,7 +731,7 @@ mod tests {
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.peek().available().is_some_and(|value| *value == 6.0));
+        assert!(promise.take().available().is_some_and(|value| value == 6.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -806,7 +791,7 @@ mod tests {
             .with_update_count(100),
         );
 
-        assert_eq!(promise.peek().available().copied(), Some(16.0));
+        assert_eq!(promise.take().available(), Some(16.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -850,7 +835,7 @@ mod tests {
         });
 
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.peek().available().copied(), Some(15.0));
+        assert_eq!(promise.take().available(), Some(15.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -943,7 +928,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.peek().available().is_some_and(|v| *v == 1.0));
+        assert!(promise.take().available().is_some_and(|v| v == 1.0));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {
@@ -953,7 +938,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.peek().available().is_some_and(|v| *v == 5.0));
+        assert!(promise.take().available().is_some_and(|v| v == 5.0));
         assert!(context.no_unhandled_errors());
 
         let mut promise = context.command(|commands| {

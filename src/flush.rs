@@ -125,6 +125,8 @@ fn collect_from_channels(
         (item)(world, roster);
     }
 
+    roster.process_deferals();
+
     world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
     world.resource_scope::<ServiceLifecycleChannel, ()>(|world, lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.

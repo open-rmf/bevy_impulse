@@ -185,6 +185,10 @@ pub struct OperationRoster {
     /// Tasks that should be awoken. If the task is already despawned, then
     /// it should not be considered an error.
     pub(crate) awake: VecDeque<Entity>,
+    /// Operation sources that should be triggered after the next ChannelQueue
+    /// flush. This is for the final outputs of polled tasks, to make sure their
+    /// stream data gets flushed before their final output is flushed.
+    pub(crate) deferred_queue: VecDeque<Entity>,
     /// Operation sources that should be cancelled
     pub(crate) cancel: VecDeque<Cancel>,
     /// Async services that should pull their next item
@@ -208,6 +212,10 @@ impl OperationRoster {
         self.awake.push_back(source);
     }
 
+    pub fn defer(&mut self, source: Entity) {
+        self.deferred_queue.push_back(source);
+    }
+
     pub fn cancel(&mut self, source: Cancel) {
         self.cancel.push_back(source);
     }
@@ -227,6 +235,7 @@ impl OperationRoster {
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
         && self.awake.is_empty()
+        && self.deferred_queue.is_empty()
         && self.cancel.is_empty()
         && self.unblock.is_empty()
         && self.disposed.is_empty()
@@ -245,6 +254,13 @@ impl OperationRoster {
     /// despawned entity from needlessly tripping errors.
     pub fn purge(&mut self, target: Entity) {
         self.queue.retain(|e| *e != target);
+    }
+
+    /// Move all items from the deferred queue into the immediate queue
+    pub fn process_deferals(&mut self) {
+        for e in self.deferred_queue.drain(..) {
+            self.queue.push_back(e);
+        }
     }
 }
 

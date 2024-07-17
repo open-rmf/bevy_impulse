@@ -15,8 +15,14 @@
  *
 */
 
-use bevy::prelude::{Component, Bundle, Entity, Commands, World, BuildChildren};
-use bevy::utils::all_tuples;
+use bevy::{
+    prelude::{
+        Component, Bundle, Entity, Commands, World, BuildChildren, Deref,
+        DerefMut, With,
+    },
+    ecs::query::ReadOnlyWorldQuery,
+    utils::all_tuples,
+};
 
 use crossbeam::channel::{Receiver, unbounded};
 
@@ -130,6 +136,15 @@ pub trait Stream: 'static + Send + Sync + Sized {
     }
 }
 
+/// A simple newtype wrapper that turns any suitable data structure
+/// (`'static + Send + Sync`) into a stream.
+#[derive(Clone, Copy, Debug, Deref, DerefMut)]
+pub struct StreamOf<T>(pub T);
+
+impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
+    type Container = SmallVec<[StreamOf<T>; 16]>;
+}
+
 pub struct StreamBuffer<T: Stream> {
     // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
     // no heap allocation is needed each time a stream is used in a blocking
@@ -147,7 +162,7 @@ impl<T: Stream> Clone for StreamBuffer<T> {
     }
 }
 
-impl<T: Stream> StreamBuffer<T> {
+impl<T: Stream + std::fmt::Debug> StreamBuffer<T> {
     pub fn send(&self, data: T) {
         self.container.borrow_mut().extend([data]);
     }
@@ -226,6 +241,7 @@ impl StreamTargetMap {
 
 pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
+    type StreamFilter: ReadOnlyWorldQuery;
     type StreamStorageBundle: Bundle;
     type StreamInputPack;
     type StreamOutputPack: std::fmt::Debug;
@@ -279,6 +295,7 @@ pub trait StreamPack: 'static + Send + Sync {
 
 impl<T: Stream> StreamPack for T {
     type StreamAvailableBundle = StreamAvailable<Self>;
+    type StreamFilter = With<StreamAvailable<Self>>;
     type StreamStorageBundle = StreamTargetStorage<Self>;
     type StreamInputPack = InputSlot<Self>;
     type StreamOutputPack = Output<Self>;
@@ -376,6 +393,7 @@ impl<T: Stream> StreamPack for T {
 
 impl StreamPack for () {
     type StreamAvailableBundle = ();
+    type StreamFilter = ();
     type StreamStorageBundle = ();
     type StreamInputPack = ();
     type StreamOutputPack = ();
@@ -448,6 +466,7 @@ impl StreamPack for () {
 
 impl<T1: StreamPack> StreamPack for (T1,) {
     type StreamAvailableBundle = T1::StreamAvailableBundle;
+    type StreamFilter = T1::StreamFilter;
     type StreamStorageBundle = T1::StreamStorageBundle;
     type StreamInputPack = T1::StreamInputPack;
     type StreamOutputPack = T1::StreamOutputPack;
@@ -519,12 +538,12 @@ impl<T1: StreamPack> StreamPack for (T1,) {
     }
 }
 
-
 macro_rules! impl_streampack_for_tuple {
     ($($T:ident),*) => {
         #[allow(non_snake_case)]
         impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
             type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
+            type StreamFilter = ($($T::StreamFilter,)*);
             type StreamStorageBundle = ($($T::StreamStorageBundle,)*);
             type StreamInputPack = ($($T::StreamInputPack,)*);
             type StreamOutputPack = ($($T::StreamOutputPack,)*);
@@ -670,3 +689,349 @@ macro_rules! impl_streampack_for_tuple {
 // Implements the `StreamPack` trait for all tuples between size 2 and 12
 // (inclusive) made of types that implement `StreamPack`
 all_tuples!(impl_streampack_for_tuple, 2, 12, T);
+
+/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
+/// based on what streams they provide. If a stream is required, you should wrap
+/// the stream type in [`Require`]. If a stream is optional, then wrap it in
+/// [`Option`].
+///
+/// The service you receive will appear as though it provides all the stream
+/// types wrapped in both your `Require` and `Option` filters, but it might not
+/// actually provide any of the streams that were wrapped in `Option`. A service
+/// that does not actually provide the optional stream can be treated as if it
+/// does provide the stream, except it will never actually send out any of that
+/// optional stream data.
+///
+/// ```
+/// use bevy_impulse::{*, testing::*};
+///
+/// fn service_discovery_system(
+///     discover: ServiceDiscovery<
+///         f32,
+///         f32,
+///         (
+///             Require<(StreamOf<f32>, StreamOf<u32>)>,
+///             Option<(StreamOf<String>, StreamOf<u8>)>,
+///         )
+///     >
+/// ) {
+///     let service: Service<
+///         f32,
+///         f32,
+///         (
+///             (StreamOf<f32>, StreamOf<u32>),
+///             (StreamOf<String>, StreamOf<u8>),
+///         )
+///     > = discover.iter().next().unwrap();
+/// }
+/// ```
+pub trait StreamFilter {
+    type Filter: ReadOnlyWorldQuery;
+    type Pack: StreamPack;
+}
+
+/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to indicate that a
+/// certain pack of streams is required.
+///
+/// For streams that are optional, wrap them in [`Option`] instead.
+///
+/// See [`StreamFilter`] for a usage example.
+pub struct Require<T> {
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T: StreamPack> StreamFilter for Require<T> {
+    type Filter = T::StreamFilter;
+    type Pack = T;
+}
+
+impl<T: StreamPack> StreamFilter for Option<T> {
+    type Filter = ();
+    type Pack = T;
+}
+
+macro_rules! impl_streamfilter_for_tuple {
+    ($($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: StreamFilter),*> StreamFilter for ($($T,)*) {
+            type Filter = ($($T::Filter,)*);
+            type Pack = ($($T::Pack,)*);
+        }
+    }
+}
+
+// Implements the `StreamFilter` trait for all tuples between size 0 and 12
+// (inclusive) made of types that implement `StreamFilter`
+all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn test_single_stream() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let count_blocking_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<u32, StreamOf<u32>>| {
+                    for i in 0..input.request {
+                        input.streams.send(StreamOf(i));
+                    }
+                    return input.request;
+                }
+            )
+        });
+
+        test_counting_stream(count_blocking_srv, &mut context);
+
+        let count_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<u32, StreamOf<u32>>| {
+                    async move {
+                        for i in 0..input.request {
+                            input.streams.send(StreamOf(i));
+                        }
+                        return input.request;
+                    }
+                }
+            )
+        });
+
+        test_counting_stream(count_async_srv, &mut context);
+
+        let count_blocking_callback = (
+            |In(input): BlockingCallbackInput<u32, StreamOf<u32>>| {
+                for i in 0..input.request {
+                    input.streams.send(StreamOf(i));
+                }
+                return input.request;
+            }
+        ).as_callback();
+
+        test_counting_stream(count_blocking_callback, &mut context);
+
+        let count_async_callback = (
+            |In(input): AsyncCallbackInput<u32, StreamOf<u32>>| {
+                async move {
+                    for i in 0..input.request {
+                        input.streams.send(StreamOf(i));
+                    }
+                    return input.request;
+                }
+            }
+        ).as_callback();
+
+        test_counting_stream(count_async_callback, &mut context);
+
+        let count_blocking_map = (
+            |input: BlockingMap<u32, StreamOf<u32>>| {
+                for i in 0..input.request {
+                    input.streams.send(StreamOf(i));
+                }
+                return input.request;
+            }
+        ).as_map();
+
+        test_counting_stream(count_blocking_map, &mut context);
+
+        let count_async_map = (
+            |input: AsyncMap<u32, StreamOf<u32>>| {
+                async move {
+                    for i in 0..input.request {
+                        input.streams.send(StreamOf(i));
+                    }
+                    return input.request;
+                }
+            }
+        ).as_map();
+
+        test_counting_stream(count_async_map, &mut context);
+    }
+
+    fn test_counting_stream(
+        provider: impl Provider<Request = u32, Response = u32, Streams = StreamOf<u32>>,
+        context: &mut TestingContext,
+    ) {
+        let mut recipient = context.command(|commands| {
+            commands.request(10, provider).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some_and(|v| v == 10));
+        let stream: Vec<u32> = recipient.streams.into_iter().map(|v| v.0).collect();
+        assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert!(context.no_unhandled_errors());
+    }
+
+    type FormatStreams = (StreamOf<u32>, StreamOf<i32>, StreamOf<f32>);
+    #[test]
+    fn test_tuple_stream() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let parse_blocking_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<String, FormatStreams>| {
+                    impl_formatting_streams_blocking(input.request, input.streams);
+                }
+            )
+        });
+
+        test_formatting_stream(parse_blocking_srv, &mut context);
+
+        let parse_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<String, FormatStreams>| {
+                    async move {
+                        impl_formatting_streams_async(input.request, input.streams);
+                    }
+                }
+            )
+        });
+
+        test_formatting_stream(parse_async_srv, &mut context);
+
+        let parse_blocking_callback = (
+            |In(input): BlockingCallbackInput<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            }
+        ).as_callback();
+
+        test_formatting_stream(parse_blocking_callback, &mut context);
+
+        let parse_async_callback = (
+            |In(input): AsyncCallbackInput<String, FormatStreams>| {
+                async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                }
+            }
+        ).as_callback();
+
+        test_formatting_stream(parse_async_callback, &mut context);
+
+        let parse_blocking_map = (
+            |input: BlockingMap<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            }
+        ).as_map();
+
+        test_formatting_stream(parse_blocking_map, &mut context);
+
+        let parse_async_map = (
+            |input: AsyncMap<String, FormatStreams>| {
+                async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                }
+            }
+        ).as_map();
+
+        test_formatting_stream(parse_async_map, &mut context);
+    }
+
+    fn impl_formatting_streams_blocking(
+        request: String,
+        streams: <FormatStreams as StreamPack>::Buffer,
+    ) {
+        if let Ok(value) = request.parse::<u32>() {
+            streams.0.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<i32>() {
+            streams.1.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<f32>() {
+            streams.2.send(StreamOf(value));
+        }
+    }
+
+    fn impl_formatting_streams_async(
+        request: String,
+        streams: <FormatStreams as StreamPack>::Channel,
+    ) {
+        if let Ok(value) = request.parse::<u32>() {
+            streams.0.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<i32>() {
+            streams.1.send(StreamOf(value));
+        }
+
+        if let Ok(value) = request.parse::<f32>() {
+            streams.2.send(StreamOf(value));
+        }
+    }
+
+    fn test_formatting_stream(
+        provider: impl Provider<Request = String, Response = (), Streams = FormatStreams> + Clone,
+        context: &mut TestingContext,
+    ) {
+        let mut recipient = context.command(|commands| {
+            commands.request("5".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, [5]);
+        assert_eq!(outcome.stream_i32, [5]);
+        assert_eq!(outcome.stream_f32, [5.0]);
+
+        let mut recipient = context.command(|commands| {
+            commands.request("-2".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert!(outcome.stream_u32.is_empty());
+        assert_eq!(outcome.stream_i32, [-2]);
+        assert_eq!(outcome.stream_f32, [-2.0]);
+
+        let mut recipient = context.command(|commands| {
+            commands.request("6.7".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert!(outcome.stream_u32.is_empty());
+        assert!(outcome.stream_i32.is_empty());
+        assert_eq!(outcome.stream_f32, [6.7]);
+
+        let mut recipient = context.command(|commands| {
+            commands.request("hello".to_owned(), provider.clone()).take()
+        });
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: FormatOutcome = recipient.into();
+        assert!(outcome.stream_u32.is_empty());
+        assert!(outcome.stream_i32.is_empty());
+        assert!(outcome.stream_f32.is_empty());
+    }
+
+    struct FormatOutcome {
+        stream_u32: Vec<u32>,
+        stream_i32: Vec<i32>,
+        stream_f32: Vec<f32>,
+    }
+
+    impl From<Recipient<(), FormatStreams>> for FormatOutcome {
+        fn from(recipient: Recipient<(), FormatStreams>) -> Self {
+            Self {
+                stream_u32: recipient.streams.0.into_iter().map(|v| v.0).collect(),
+                stream_i32: recipient.streams.1.into_iter().map(|v| v.0).collect(),
+                stream_f32: recipient.streams.2.into_iter().map(|v| v.0).collect()
+            }
+        }
+    }
+}

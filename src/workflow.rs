@@ -292,7 +292,7 @@ mod tests {
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
-        assert!(promise.peek().available().is_some_and(|v| *v == 4.0));
+        assert!(promise.take().available().is_some_and(|v| v == 4.0));
         assert!(context.no_unhandled_errors());
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
@@ -308,7 +308,7 @@ mod tests {
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
-        assert!(promise.peek().available().is_some_and(|v| *v == 6.0));
+        assert!(promise.take().available().is_some_and(|v| v == 6.0));
         assert!(context.no_unhandled_errors());
     }
 
@@ -331,7 +331,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
-        assert!(promise.peek().available().is_some_and(|v| *v == 5.0));
+        assert!(promise.take().available().is_some_and(|v| v == 5.0));
         assert!(context.no_unhandled_errors());
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
@@ -349,7 +349,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
-        assert!(promise.peek().available().is_some_and(|v| *v == 3.0));
+        assert!(promise.take().available().is_some_and(|v| v == 3.0));
         assert!(context.no_unhandled_errors());
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
@@ -377,7 +377,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs_f64(0.5));
-        assert!(promise.peek().available().is_some_and(|v| *v == 0.01));
+        assert!(promise.take().available().is_some_and(|v| v == 0.01));
         assert!(context.no_unhandled_errors());
     }
 }

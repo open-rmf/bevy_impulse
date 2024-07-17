@@ -34,6 +34,9 @@ pub use builder::ServiceBuilder;
 pub(crate) mod delivery;
 pub(crate) use delivery::*;
 
+pub mod discovery;
+pub use discovery::*;
+
 pub(crate) mod internal;
 pub(crate) use internal::*;
 
@@ -365,7 +368,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BlockingService, InBlockingService, AsyncService, InAsyncService};
+    use crate::{BlockingService, BlockingServiceInput, AsyncService, AsyncServiceInput};
     use bevy::{
         prelude::*,
         ecs::world::EntityMut,
@@ -485,7 +488,7 @@ mod tests {
     }
 
     fn sys_async_service(
-        In(AsyncService{ request, .. }): InAsyncService<String>,
+        In(AsyncService{ request, .. }): AsyncServiceInput<String>,
         people: Query<&TestPeople>,
     ) -> impl Future<Output=u64> {
         let mut matching_people = Vec::new();
@@ -507,7 +510,7 @@ mod tests {
     }
 
     fn sys_blocking_service(
-        In(BlockingService{ request, provider, .. }): InBlockingService<String>,
+        In(BlockingService{ request, provider, .. }): BlockingServiceInput<String>,
         people: Query<&TestPeople>,
         multipliers: Query<&Multiplier>,
     ) -> u64 {
