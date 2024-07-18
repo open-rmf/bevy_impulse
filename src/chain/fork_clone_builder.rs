@@ -15,9 +15,7 @@
  *
 */
 
-use bevy::prelude::Entity;
 use bevy::utils::all_tuples;
-use smallvec::SmallVec;
 
 use crate::{
     Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage, Builder,
@@ -45,18 +43,19 @@ macro_rules! impl_forkclonebuilder_for_tuple {
                 source: Output<R>,
                 builder: &mut Builder,
             ) -> Self::Outputs {
-                let mut targets = SmallVec::<[Entity; 8]>::new();
-                let ($($F,)*) = self;
-                let u =
-                (
+                let targets =
+                [
                     $(
                         {
-                            let target = builder.commands.spawn(UnusedTarget).id();
-                            targets.push(target);
-                            ($F)(Chain::new(target, builder))
+                            // Variable is only used to make sure this cycle is repeated once
+                            // for each instance of the $T type, but the type itself is not
+                            // used.
+                            #[allow(unused)]
+                            let $F = std::marker::PhantomData::<$F>;
+                            builder.commands.spawn(UnusedTarget).id()
                         },
                     )*
-                );
+                ];
 
                 builder.commands.add(AddOperation::new(
                     Some(source.scope()),
@@ -65,7 +64,20 @@ macro_rules! impl_forkclonebuilder_for_tuple {
                         ForkTargetStorage::from_iter(targets)
                     )
                 ));
-                u
+                let ($($F,)*) = self;
+                // The compiler throws a warning when implementing this for
+                // tuple sizes that wouldn't use the result of the first _idx = _idx + 1
+                // so we add a leading underscore to suppress the warning
+                let mut _idx = 0;
+                (
+                    $(
+                        {
+                            let res = ($F)(Chain::new(targets[_idx], builder));
+                            _idx = _idx + 1;
+                            res
+                        },
+                    )*
+                )
             }
         }
     }
