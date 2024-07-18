@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use backtrace::Backtrace;
 
 use crate::{
-    OperationRoster, OperationError, OrBroken,
+    OperationRoster, OperationError, OrBroken, OperationResult,
     DeferredRoster, Cancel, Cancellation, CancellationCause, Broken,
     BufferSettings, RetentionPolicy, ForkTargetStorage, UnusedTarget,
 };
@@ -147,6 +147,11 @@ pub trait ManageInput {
         session: Entity,
     ) -> Result<SmallVec<[T; 16]>, OperationError>;
 
+    fn clear_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+    ) -> OperationResult;
+
     fn cleanup_inputs<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
@@ -180,6 +185,10 @@ pub trait InspectInput {
     ) -> Result<Option<T>, OperationError>
     where
         T: Clone;
+
+    fn buffered_sessions<T: 'static + Send + Sync>(
+        &self,
+    ) -> Result<SmallVec<[Entity; 16]>, OperationError>;
 }
 
 impl<'w> ManageInput for EntityMut<'w> {
@@ -276,10 +285,52 @@ impl<'w> ManageInput for EntityMut<'w> {
         Ok(buffer.consume(session))
     }
 
+    fn clear_buffer<T: 'static + Send + Sync>(
+        &mut self,
+        session: Entity,
+    ) -> OperationResult {
+        let mut buffer = self.get_mut::<BufferStorage<T>>().or_broken()?;
+        buffer.reverse_queues.remove(&session);
+        Ok(())
+    }
+
     fn cleanup_inputs<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
     ) {
+        if self.contains::<BufferStorage<T>>() {
+            // Buffers are handled in a special way because the data of some
+            // buffers will be used during cancellation. Therefore we do not
+            // want to just delete their contents, but instead store them in the
+            // buffer storage until the scope gives the signal to clear all
+            // buffer data after all the cancellation workflows are finished.
+            if let Some(mut inputs) = self.get_mut::<InputStorage<T>>() {
+                // Pull out only the data that
+                let remaining_indices: SmallVec<[usize; 16]> = inputs.reverse_queue
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, input)|
+                        if input.session == session { Some(i) } else { None }
+                    )
+                    .collect();
+
+                let mut reverse_remaining: SmallVec<[T; 16]> = SmallVec::new();
+                for i in remaining_indices.into_iter().rev() {
+                    reverse_remaining.push(inputs.reverse_queue.remove(i).data);
+                }
+
+                // INVARIANT: Earlier in this function we checked that the
+                // entity contains this component, and we have not removed it
+                // since then.
+                let mut buffer = self.get_mut::<BufferStorage<T>>().unwrap();
+                for data in reverse_remaining.into_iter().rev() {
+                    buffer.push(session, data);
+                }
+            }
+
+            return;
+        }
+
         if let Some(mut inputs) = self.get_mut::<InputStorage<T>>() {
             inputs.reverse_queue.retain(
                 |Input { session: r, .. }| *r != session
@@ -319,6 +370,18 @@ impl<'a> InspectInput for EntityMut<'a> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
         Ok(buffer.reverse_queues.get(&session).map(|q| q.last().cloned()).flatten())
     }
+
+    fn buffered_sessions<T: 'static + Send + Sync>(
+        &self,
+    ) -> Result<SmallVec<[Entity; 16]>, OperationError> {
+        let sessions = self.get::<BufferStorage<T>>().or_broken()?
+            .reverse_queues
+            .iter()
+            .map(|(e, _)| *e)
+            .collect();
+
+        Ok(sessions)
+    }
 }
 
 impl<'a> InspectInput for EntityRef<'a> {
@@ -347,6 +410,18 @@ impl<'a> InspectInput for EntityRef<'a> {
     {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
         Ok(buffer.reverse_queues.get(&session).map(|q| q.last().cloned()).flatten())
+    }
+
+    fn buffered_sessions<T: 'static + Send + Sync>(
+        &self,
+    ) -> Result<SmallVec<[Entity; 16]>, OperationError> {
+        let sessions = self.get::<BufferStorage<T>>().or_broken()?
+            .reverse_queues
+            .iter()
+            .map(|(e, _)| *e)
+            .collect();
+
+        Ok(sessions)
     }
 }
 
