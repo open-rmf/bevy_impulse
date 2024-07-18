@@ -15,6 +15,10 @@
  *
 */
 
+use bevy::prelude::Entity;
+use bevy::utils::all_tuples;
+use smallvec::SmallVec;
+
 use crate::{
     Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage, Builder,
     Output,
@@ -30,65 +34,43 @@ pub trait ForkCloneBuilder<Response> {
     ) -> Self::Outputs;
 }
 
-impl<R, F0, U0, F1, U1> ForkCloneBuilder<R> for (F0, F1)
-where
-    R: 'static + Send + Sync + Clone,
-    F0: FnOnce(Chain<R>) -> U0,
-    F1: FnOnce(Chain<R>) -> U1,
-{
-    type Outputs = (U0, U1);
+macro_rules! impl_forkclonebuilder_for_tuple {
+    ($(($F:ident, $U:ident)),*) => {
+        #[allow(non_snake_case)]
+        impl<R: 'static + Send + Sync + Clone, $($F: FnOnce(Chain<R>) -> $U),*, $($U),*> ForkCloneBuilder<R> for ($($F,)*)
+        {
+            type Outputs = ($($U,)*);
+            fn build_fork_clone(
+                self,
+                source: Output<R>,
+                builder: &mut Builder,
+            ) -> Self::Outputs {
+                let mut targets = SmallVec::<[Entity; 8]>::new();
+                let ($($F,)*) = self;
+                let u =
+                (
+                    $(
+                        {
+                            let target = builder.commands.spawn(UnusedTarget).id();
+                            targets.push(target);
+                            ($F)(Chain::new(target, builder))
+                        },
+                    )*
+                );
 
-    fn build_fork_clone(
-        self,
-        source: Output<R>,
-        builder: &mut Builder,
-    ) -> Self::Outputs {
-        let target_0 = builder.commands.spawn(UnusedTarget).id();
-        let target_1 = builder.commands.spawn(UnusedTarget).id();
-
-        builder.commands.add(AddOperation::new(
-            Some(source.scope()),
-            source.id(),
-            ForkClone::<R>::new(
-                ForkTargetStorage::from_iter([target_0, target_1])
-            )
-        ));
-
-        let u_0 = (self.0)(Chain::new(target_0, builder));
-        let u_1 = (self.1)(Chain::new(target_1, builder));
-        (u_0, u_1)
+                builder.commands.add(AddOperation::new(
+                    Some(source.scope()),
+                    source.id(),
+                    ForkClone::<R>::new(
+                        ForkTargetStorage::from_iter(targets)
+                    )
+                ));
+                u
+            }
+        }
     }
 }
 
-impl<R, F0, U0, F1, U1, F2, U2> ForkCloneBuilder<R> for (F0, F1, F2)
-where
-    R: 'static + Send + Sync + Clone,
-    F0: FnOnce(Chain<R>) -> U0,
-    F1: FnOnce(Chain<R>) -> U1,
-    F2: FnOnce(Chain<R>) -> U2,
-{
-    type Outputs = (U0, U1, U2);
-
-    fn build_fork_clone(
-        self,
-        source: Output<R>,
-        builder: &mut Builder,
-    ) -> Self::Outputs {
-        let target_0 = builder.commands.spawn(UnusedTarget).id();
-        let target_1 = builder.commands.spawn(UnusedTarget).id();
-        let target_2 = builder.commands.spawn(UnusedTarget).id();
-
-        builder.commands.add(AddOperation::new(
-            Some(source.scope()),
-            source.id(),
-            ForkClone::<R>::new(
-                ForkTargetStorage::from_iter([target_0, target_1, target_2])
-            )
-        ));
-
-        let u_0 = (self.0)(Chain::new(target_0, builder));
-        let u_1 = (self.1)(Chain::new(target_1, builder));
-        let u_2 = (self.2)(Chain::new(target_2, builder));
-        (u_0, u_1, u_2)
-    }
-}
+// Implements the `ForkCloneBUilder` trait for all tuples between size 2 and 15
+// (inclusive)
+all_tuples!(impl_forkclonebuilder_for_tuple, 2, 15, F, U);
