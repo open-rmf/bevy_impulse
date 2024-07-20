@@ -24,14 +24,24 @@ use crossbeam::channel::Sender as CbSender;
 pub(crate) struct BufferAccessLifecycle {
     scope: Entity,
     session: Entity,
-    channel: CbSender<ChannelItem>,
+    sender: CbSender<ChannelItem>,
+}
+
+impl BufferAccessLifecycle {
+    pub(crate) fn new(
+        scope: Entity,
+        session: Entity,
+        sender: CbSender<ChannelItem>,
+    ) -> Self {
+        Self { scope, session, sender }
+    }
 }
 
 impl Drop for BufferAccessLifecycle {
     fn drop(&mut self) {
         let scope = self.scope;
         let session = self.session;
-        if let Err(err) = self.channel.send(
+        if let Err(err) = self.sender.send(
             Box::new(move |_: &mut World, roster: &mut OperationRoster| {
                 roster.disposed(scope, session);
             })

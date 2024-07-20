@@ -26,7 +26,7 @@ use crate::{
     StreamPack, Provider, ProvideOnce, Scope, StreamOf,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
-    CreateDisposalFilter,
+    CreateDisposalFilter, Bufferable, BufferKeys, OperateBufferAccess,
     make_result_branching, make_option_branching,
 };
 
@@ -270,6 +270,30 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Settings: Into<ScopeSettings>,
     {
         self.then_scope_node(build)
+    }
+
+    /// Combine the output with access to some buffers. The input must be one or
+    /// more buffers (for multiple buffers, combine them into a tuple or an
+    /// [`Iterator`]).
+    pub fn with_access<B>(
+        self,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self.builder);
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
+        ));
+
+        Chain::new(target, self.builder)
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].

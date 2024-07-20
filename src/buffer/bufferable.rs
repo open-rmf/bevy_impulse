@@ -22,6 +22,8 @@ use crate::{
     UnusedTarget, AddOperation, Chain,
 };
 
+pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
+
 pub trait Bufferable {
     type BufferType: Buffered;
 

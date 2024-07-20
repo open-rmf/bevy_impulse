@@ -29,9 +29,11 @@ use std::{
     ops::RangeBounds,
 };
 
+use crossbeam::channel::Sender as CbSender;
+
 use crate::{
     Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot,
-    NotifyBufferUpdate,
+    NotifyBufferUpdate, ChannelItem,
 };
 
 mod buffer_access_lifecycle;
@@ -160,16 +162,14 @@ impl<T: Clone> Copy for CloneFromBuffer<T> {}
 /// This key can unlock access to the contents of a buffer by passing it into
 /// [`BufferAccess`] or [`BufferAccessMut`].
 ///
-/// To obtain a `BufferKey`, use [`Output::with_access`][1],
-/// [`Chain::with_access`][2], or [`select`][3].
+/// To obtain a `BufferKey`, use [`Chain::with_access`][1], or [`select`][2].
 ///
-/// [1]: crate::Output::with_access
-/// [2]: crate::Chain::with_access
-/// [3]: crate::Buffered::select
+/// [1]: crate::Chain::with_access
+/// [2]: crate::Bufferable::select
 pub struct BufferKey<T> {
     buffer: Entity,
     session: Entity,
-    _lifecycle: Arc<BufferAccessLifecycle>,
+    lifecycle: Arc<BufferAccessLifecycle>,
     _ignore: std::marker::PhantomData<T>,
 }
 
@@ -178,9 +178,35 @@ impl<T> Clone for BufferKey<T> {
         Self {
             buffer: self.buffer,
             session: self.session,
-            _lifecycle: Arc::clone(&self._lifecycle),
+            lifecycle: Arc::clone(&self.lifecycle),
             _ignore: Default::default(),
         }
+    }
+}
+
+impl<T> BufferKey<T> {
+    /// The buffer ID of this key.
+    pub fn id(&self) -> Entity {
+        self.buffer
+    }
+
+    /// The session that this key belongs to.
+    pub fn session(&self) -> Entity {
+        self.session
+    }
+
+    pub(crate) fn is_in_use(&self) -> bool {
+        Arc::strong_count(&self.lifecycle) > 1
+    }
+
+    pub(crate) fn new(
+        scope: Entity,
+        buffer: Entity,
+        session: Entity,
+        sender: CbSender<ChannelItem>,
+    ) -> BufferKey<T> {
+        let lifecycle = Arc::new(BufferAccessLifecycle::new(scope, session, sender));
+        BufferKey { buffer, session, lifecycle, _ignore: Default::default() }
     }
 }
 

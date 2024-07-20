@@ -102,11 +102,13 @@ impl InnerChannel {
 }
 
 pub(crate) type ChannelItem = Box<dyn FnOnce(&mut World, &mut OperationRoster) + Send>;
+pub(crate) type ChannelSender = CbSender<ChannelItem>;
+pub(crate) type ChannelReceiver = CbReceiver<ChannelItem>;
 
 #[derive(Resource)]
 pub(crate) struct ChannelQueue {
-    pub(crate) sender: CbSender<ChannelItem>,
-    pub(crate) receiver: CbReceiver<ChannelItem>,
+    pub(crate) sender: ChannelSender,
+    pub(crate) receiver: ChannelReceiver,
 }
 
 impl ChannelQueue {

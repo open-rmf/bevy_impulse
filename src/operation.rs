@@ -58,6 +58,9 @@ pub(crate) use noop::*;
 mod operate_buffer;
 pub use operate_buffer::*;
 
+mod operate_buffer_access;
+pub use operate_buffer_access::*;
+
 mod operate_callback;
 pub(crate) use operate_callback::*;
 

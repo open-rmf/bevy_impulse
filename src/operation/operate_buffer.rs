@@ -33,7 +33,7 @@ use crate::{
     OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
-    Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken,
+    Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
 };
 
 #[derive(Bundle)]
@@ -60,6 +60,7 @@ where
             SingleInputStorage::empty(),
             InputBundle::<T>::new(),
             BufferBundle::new::<T>(),
+            BufferAccessors::default(),
         ));
 
         Ok(())
