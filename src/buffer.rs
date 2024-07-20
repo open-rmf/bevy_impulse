@@ -31,7 +31,7 @@ use std::{
 
 use crate::{
     Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot,
-    DisposalCommand,
+    NotifyBufferUpdate,
 };
 
 mod buffer_access_lifecycle;
@@ -169,7 +169,6 @@ impl<T: Clone> Copy for CloneFromBuffer<T> {}
 pub struct BufferKey<T> {
     buffer: Entity,
     session: Entity,
-    scope: Entity,
     _lifecycle: Arc<BufferAccessLifecycle>,
     _ignore: std::marker::PhantomData<T>,
 }
@@ -179,7 +178,6 @@ impl<T> Clone for BufferKey<T> {
         Self {
             buffer: self.buffer,
             session: self.session,
-            scope: self.scope,
             _lifecycle: Arc::clone(&self._lifecycle),
             _ignore: Default::default(),
         }
@@ -236,12 +234,15 @@ where
     pub fn get_mut<'a>(
         &'a mut self,
         key: &BufferKey<T>,
+        source: Option<Entity>,
     ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
-        let scope = key.scope;
+        let buffer = key.buffer;
         let session = key.session;
         self.query
             .get_mut(key.buffer)
-            .map(|storage| BufferMut::new(storage, scope, session, &mut self.commands))
+            .map(|storage| BufferMut::new(
+                storage, buffer, session, source, &mut self.commands,
+            ))
     }
 }
 
@@ -291,8 +292,9 @@ where
     T: 'static + Send + Sync,
 {
     storage: Mut<'a, BufferStorage<T>>,
-    scope: Entity,
+    buffer: Entity,
     session: Entity,
+    source: Option<Entity>,
     commands: &'a mut Commands<'w, 's>,
     modified: bool,
 }
@@ -372,11 +374,12 @@ where
 
     fn new(
         storage: Mut<'a, BufferStorage<T>>,
-        scope: Entity,
+        buffer: Entity,
         session: Entity,
+        source: Option<Entity>,
         commands: &'a mut Commands<'w, 's>,
     ) -> Self {
-        Self { storage, scope, session, commands, modified: false }
+        Self { storage, buffer, session, source, commands, modified: false }
     }
 }
 
@@ -386,7 +389,9 @@ where
 {
     fn drop(&mut self) {
         if self.modified {
-            self.commands.add(DisposalCommand::new(self.scope, self.session));
+            self.commands.add(NotifyBufferUpdate::new(
+                self.buffer, self.session, self.source,
+            ));
         }
     }
 }

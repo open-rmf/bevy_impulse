@@ -33,7 +33,7 @@ use crate::{
     OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
-    Input, ManageBuffer, InspectBuffer,
+    Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken,
 };
 
 #[derive(Bundle)]
@@ -204,4 +204,39 @@ fn get_buffered_sessions<T: 'static + Send + Sync>(
     world: &World,
 ) -> Result<SmallVec<[Entity; 16]>, OperationError> {
     world.get_entity(source).or_broken()?.buffered_sessions::<T>()
+}
+
+pub(crate) struct NotifyBufferUpdate {
+    buffer: Entity,
+    session: Entity,
+    source: Option<Entity>,
+}
+
+impl NotifyBufferUpdate {
+    pub(crate) fn new(buffer: Entity, session: Entity, source: Option<Entity>) -> Self {
+        Self { buffer, session, source }
+    }
+}
+
+impl Command for NotifyBufferUpdate {
+    fn apply(self, world: &mut World) {
+        world.get_resource_or_insert_with(|| DeferredRoster::default());
+        let r = world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
+            let targets = world.get::<ForkTargetStorage>(self.buffer).or_broken()?.0.clone();
+            for target in targets {
+                if !self.source.is_some_and(|source| source != target) {
+                    world.get_entity_mut(target).or_broken()?
+                        .give_input(self.session, (), &mut deferred.0)?;
+                }
+            }
+
+            Ok(())
+        });
+
+        if let Err(OperationError::Broken(backtrace)) = r {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .broken
+                .push(Broken { node: self.buffer, backtrace });
+        }
+    }
 }

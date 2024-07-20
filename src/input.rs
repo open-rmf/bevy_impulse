@@ -242,7 +242,6 @@ impl<'a> InspectInput for EntityMut<'a> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
         Ok(inputs.contains_session(session))
     }
-
 }
 
 impl<'a> InspectInput for EntityRef<'a> {
