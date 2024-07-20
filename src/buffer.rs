@@ -15,15 +15,39 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy::{
+    prelude::{Entity, Query, Commands},
+    ecs::{
+        system::SystemParam,
+        change_detection::Mut,
+        query::QueryEntityError,
+    }
+};
 
-use crate::{Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot};
+use std::{
+    sync::Arc,
+    ops::RangeBounds,
+};
+
+use crate::{
+    Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot,
+    DisposalCommand,
+};
+
+mod buffer_access_lifecycle;
+pub(crate) use buffer_access_lifecycle::*;
+
+mod buffer_storage;
+pub(crate) use buffer_storage::*;
 
 mod buffered;
 pub use buffered::*;
 
 mod bufferable;
 pub use bufferable::*;
+
+mod manage_buffer;
+pub use manage_buffer::*;
 
 /// A buffer is a special type of node within a workflow that is able to store
 /// and release data. When a session is finished, the buffered data from the
@@ -132,3 +156,237 @@ impl<T: Clone> Clone for CloneFromBuffer<T> {
 }
 
 impl<T: Clone> Copy for CloneFromBuffer<T> {}
+
+/// This key can unlock access to the contents of a buffer by passing it into
+/// [`BufferAccess`] or [`BufferAccessMut`].
+///
+/// To obtain a `BufferKey`, use [`Output::with_access`][1],
+/// [`Chain::with_access`][2], or [`select`][3].
+///
+/// [1]: crate::Output::with_access
+/// [2]: crate::Chain::with_access
+/// [3]: crate::Buffered::select
+pub struct BufferKey<T> {
+    buffer: Entity,
+    session: Entity,
+    scope: Entity,
+    _lifecycle: Arc<BufferAccessLifecycle>,
+    _ignore: std::marker::PhantomData<T>,
+}
+
+impl<T> Clone for BufferKey<T> {
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer,
+            session: self.session,
+            scope: self.scope,
+            _lifecycle: Arc::clone(&self._lifecycle),
+            _ignore: Default::default(),
+        }
+    }
+}
+
+/// This system parameter lets you get read-only access to a buffer that exists
+/// within a workflow. Use a [`BufferKey`] to unlock the access.
+///
+/// See [`BufferAccessMut`] for mutable access.
+#[derive(SystemParam)]
+pub struct BufferAccess<'w, 's, T>
+where
+    T: 'static + Send + Sync,
+{
+    query: Query<'w, 's, &'static BufferStorage<T>>,
+}
+
+impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
+    pub fn get<'a>(
+        &'a self,
+        key: &BufferKey<T>,
+    ) -> Result<BufferView<'a, T>, QueryEntityError> {
+        let session = key.session;
+        self.query.get(key.buffer).map(|storage| BufferView { storage, session })
+    }
+}
+
+/// This system parameter lets you get mutable access to a buffer that exists
+/// within a workflow. Use a [`BufferKey`] to unlock the access.
+///
+/// See [`BufferAccess`] for read-only access.
+#[derive(SystemParam)]
+pub struct BufferAccessMut<'w, 's, T>
+where
+    T: 'static + Send + Sync,
+{
+    query: Query<'w, 's, &'static mut BufferStorage<T>>,
+    commands: Commands<'w, 's>,
+}
+
+impl<'w, 's, T> BufferAccessMut<'w, 's, T>
+where
+    T: 'static + Send + Sync,
+{
+    pub fn get<'a>(
+        &'a self,
+        key: &BufferKey<T>,
+    ) -> Result<BufferView<'a, T>, QueryEntityError> {
+        let session = key.session;
+        self.query.get(key.buffer).map(|storage| BufferView { storage, session })
+    }
+
+    pub fn get_mut<'a>(
+        &'a mut self,
+        key: &BufferKey<T>,
+    ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
+        let scope = key.scope;
+        let session = key.session;
+        self.query
+            .get_mut(key.buffer)
+            .map(|storage| BufferMut::new(storage, scope, session, &mut self.commands))
+    }
+}
+
+/// Access to view a buffer that exists inside a workflow.
+pub struct BufferView<'a, T>
+where
+    T: 'static + Send + Sync,
+{
+    storage: &'a BufferStorage<T>,
+    session: Entity,
+}
+
+impl<'a, T> BufferView<'a, T>
+where
+    T: 'static + Send + Sync,
+{
+    /// Iterate over the contents in the buffer
+    pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
+        self.storage.iter(self.session)
+    }
+
+    /// Clone the oldest item in the buffer.
+    pub fn clone_oldest(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.storage.clone_oldest(self.session)
+    }
+
+    /// Clone the newest item in the buffer.
+    pub fn clone_newest(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.storage.clone_newest(self.session)
+    }
+
+    /// How many items are in the buffer?
+    pub fn len(&self) -> usize {
+        self.storage.count(self.session)
+    }
+}
+
+/// Access to mutate a buffer that exists inside a workflow.
+pub struct BufferMut<'w, 's, 'a, T>
+where
+    T: 'static + Send + Sync,
+{
+    storage: Mut<'a, BufferStorage<T>>,
+    scope: Entity,
+    session: Entity,
+    commands: &'a mut Commands<'w, 's>,
+    modified: bool,
+}
+
+impl<'w, 's, 'a, T> BufferMut<'w, 's, 'a, T>
+where
+    T: 'static + Send + Sync,
+{
+    /// Iterate over the contents in the buffer.
+    pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
+        self.storage.iter(self.session)
+    }
+
+    /// Clone the oldest item in the buffer.
+    pub fn clone_oldest(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.storage.clone_oldest(self.session)
+    }
+
+    /// Clone the newest item in the buffer.
+    pub fn clone_newest(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.storage.clone_newest(self.session)
+    }
+
+    /// How many items are in the buffer?
+    pub fn len(&self) -> usize {
+        self.storage.count(self.session)
+    }
+
+    /// Iterate over mutable borrows of the contents in the buffer.
+    pub fn iter_mut<'b>(&'b mut self) -> IterBufferMut<'b, T> {
+        self.modified = true;
+        self.storage.iter_mut(self.session)
+    }
+
+    /// Drain items out of the buffer
+    pub fn drain<'b, R>(&'b mut self, range: R) -> DrainBuffer<'b, T>
+    where
+        R: RangeBounds<usize>,
+    {
+        self.modified = true;
+        self.storage.drain(self.session, range)
+    }
+
+    /// Pull the oldest item from the buffer
+    pub fn pull(&mut self) -> Option<T> {
+        self.modified = true;
+        self.storage.pull(self.session)
+    }
+
+    /// Pull the item that was most recently put into the buffer (instead of
+    /// the oldest, which is what [`Self::pull`] gives).
+    pub fn pull_newest(&mut self) -> Option<T> {
+        self.modified = true;
+        self.storage.pull_newest(self.session)
+    }
+
+    /// Push a new value into the buffer. If the buffer is at its limit, this
+    /// will return the value that needed to be removed.
+    pub fn push(&mut self, value: T) -> Option<T> {
+        self.modified = true;
+        self.storage.push(self.session, value)
+    }
+
+    /// Push a value into the buffer as if it is the oldest value of the buffer.
+    /// If the buffer is at its limit, this will return the value that needed to
+    /// be removed.
+    pub fn push_as_oldest(&mut self, value: T) -> Option<T> {
+        self.modified = true;
+        self.storage.push_as_oldest(self.session, value)
+    }
+
+    fn new(
+        storage: Mut<'a, BufferStorage<T>>,
+        scope: Entity,
+        session: Entity,
+        commands: &'a mut Commands<'w, 's>,
+    ) -> Self {
+        Self { storage, scope, session, commands, modified: false }
+    }
+}
+
+impl<'w, 's, 'a, T> Drop for BufferMut<'w, 's, 'a, T>
+where
+    T: 'static + Send + Sync,
+{
+    fn drop(&mut self) {
+        if self.modified {
+            self.commands.add(DisposalCommand::new(self.scope, self.session));
+        }
+    }
+}

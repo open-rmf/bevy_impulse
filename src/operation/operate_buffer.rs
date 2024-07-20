@@ -33,7 +33,7 @@ use crate::{
     OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
-    InspectInput,
+    Input, ManageBuffer, InspectBuffer,
 };
 
 #[derive(Bundle)]
@@ -68,8 +68,18 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        world.get_entity_mut(source).or_broken()?
-            .transfer_to_buffer::<T>(roster)
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, data } = source_mut.take_input::<T>()?;
+        let mut buffer = source_mut.get_mut::<BufferStorage<T>>().or_broken()?;
+        buffer.push(session, data);
+
+        let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
+        for target in targets {
+            world.get_entity_mut(target).or_broken()?
+                .give_input(session, (), roster)?;
+        }
+
+        Ok(())
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {

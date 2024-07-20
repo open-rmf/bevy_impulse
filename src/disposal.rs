@@ -17,7 +17,10 @@
 
 use bevy::{
     prelude::{Entity, Component, World},
-    ecs::world::{EntityMut, EntityRef},
+    ecs::{
+        system::Command,
+        world::{EntityMut, EntityRef},
+    }
 };
 
 use backtrace::Backtrace;
@@ -28,7 +31,7 @@ use std::collections::HashMap;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
-    DisposalFailure, ImpulseMarker,
+    DisposalFailure, ImpulseMarker, DeferredRoster,
 };
 
 #[derive(Debug, Clone)]
@@ -336,4 +339,22 @@ pub fn emit_disposal(
 struct DisposalStorage {
     /// A map from a session to all the disposals that occurred for the session
     disposals: HashMap<Entity, Vec<Disposal>>,
+}
+
+pub(crate) struct DisposalCommand {
+    scope: Entity,
+    session: Entity,
+}
+
+impl DisposalCommand {
+    pub(crate) fn new(scope: Entity, session: Entity) -> Self {
+        Self { scope, session }
+    }
+}
+
+impl Command for DisposalCommand {
+    fn apply(self, world: &mut World) {
+        world.get_resource_or_insert_with(|| DeferredRoster::default()).0
+            .disposed(self.scope, self.session);
+    }
 }

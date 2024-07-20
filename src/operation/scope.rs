@@ -20,7 +20,7 @@ use crate::{
     OperationReachability, ReachabilityResult, OperationSetup, StreamPack,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
-    Cancellable, OperationRoster, ManageCancellation,
+    Cancellable, OperationRoster, ManageCancellation, ManageBuffer,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
     ScopeSettings, StreamTargetMap, ClearBufferFn,

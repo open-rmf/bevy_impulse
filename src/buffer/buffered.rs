@@ -20,8 +20,8 @@ use bevy::prelude::{Entity, World};
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectInput, ManageInput,
-    OperationResult, ForkTargetStorage,
+    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer,
+    ManageBuffer, OperationResult, ForkTargetStorage,
 };
 
 pub trait Buffered: Clone {
@@ -99,7 +99,8 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         world: &mut World,
     ) -> Result<Self::Item, OperationError> {
         world.get_entity(self.source).or_broken()?
-            .clone_from_buffer(session)
+            .try_clone_from_buffer(session)
+            .and_then(|r| r.or_broken())
     }
 
     fn listen(
