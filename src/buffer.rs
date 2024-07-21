@@ -162,10 +162,10 @@ impl<T: Clone> Copy for CloneFromBuffer<T> {}
 /// This key can unlock access to the contents of a buffer by passing it into
 /// [`BufferAccess`] or [`BufferAccessMut`].
 ///
-/// To obtain a `BufferKey`, use [`Chain::with_access`][1], or [`select`][2].
+/// To obtain a `BufferKey`, use [`Chain::with_access`][1], or [`listen`][2].
 ///
 /// [1]: crate::Chain::with_access
-/// [2]: crate::Bufferable::select
+/// [2]: crate::Bufferable::listen
 pub struct BufferKey<T> {
     buffer: Entity,
     session: Entity,

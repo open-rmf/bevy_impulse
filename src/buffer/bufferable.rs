@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 
 use crate::{
     Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
-    UnusedTarget, AddOperation, Chain,
+    UnusedTarget, AddOperation, Chain, Listen,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
@@ -31,7 +31,12 @@ pub trait Bufferable {
     /// buffers already.
     fn as_buffer(self, builder: &mut Builder) -> Self::BufferType;
 
-    /// Join these bufferable workflow elements.
+    /// Join these bufferable workflow elements. Each time every buffer contains
+    /// at least one element, this will pull the oldest element from each buffer
+    /// and join them into a tuple that gets sent to the target.
+    ///
+    /// If you need a more general way to get access to one or more buffers,
+    /// use [`listen`](Self::listen) instead.
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
@@ -41,14 +46,43 @@ pub trait Bufferable {
         Self::BufferType: 'static + Send + Sync,
         <Self::BufferType as Buffered>::Item: 'static + Send + Sync,
     {
+        let scope = builder.scope();
         let buffers = self.as_buffer(builder);
+        buffers.verify_scope(scope);
+
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(builder.scope()), join, Join::new(buffers, target)
+            Some(scope), join, Join::new(buffers, target)
         ));
 
-        Output::new(builder.scope, target).chain(builder)
+        Output::new(scope, target).chain(builder)
+    }
+
+    /// Create an operation that will output buffer keys each time any one of
+    /// the buffers is modified.
+    fn listen<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<Self>>
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+    {
+        let scope = builder.scope();
+        let buffers = self.as_buffer(builder);
+        buffers.verify_scope(scope);
+
+        let listen = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
+            Some(scope),
+            listen,
+            Listen::new(buffers, target),
+        ));
+
+        Output::new(scope, target).chain(builder)
     }
 }
 

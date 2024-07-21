@@ -34,6 +34,7 @@ use crate::{
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
     Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
+    SingleTargetStorage,
 };
 
 #[derive(Bundle)]
@@ -90,6 +91,10 @@ where
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        if BufferAccessors::is_reachable(&mut reachability)? {
             return Ok(true);
         }
 
@@ -223,12 +228,31 @@ impl Command for NotifyBufferUpdate {
     fn apply(self, world: &mut World) {
         world.get_resource_or_insert_with(|| DeferredRoster::default());
         let r = world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
-            let targets = world.get::<ForkTargetStorage>(self.buffer).or_broken()?.0.clone();
+            // We filter out targets that will feed directly into the source of
+            // the update. This will cover the usual use case of a provider that
+            // is directly connected to a .listen(), but it will not be able to
+            // filter accessors that make changes further down the workflow.
+            let targets: SmallVec<[_; 16]> = world
+                .get::<ForkTargetStorage>(self.buffer).or_broken()?.0
+                .iter()
+                .filter_map(|t| {
+                    let Some(filter_source) = self.source else {
+                        return Some(*t);
+                    };
+
+                    if let Some(downstream) = world.get::<SingleTargetStorage>(*t) {
+                        if downstream.get() == filter_source {
+                            return None
+                        }
+                    }
+
+                    Some(*t)
+                })
+                .collect();
+
             for target in targets {
-                if !self.source.is_some_and(|source| source != target) {
-                    world.get_entity_mut(target).or_broken()?
-                        .give_input(self.session, (), &mut deferred.0)?;
-                }
+                world.get_entity_mut(target).or_broken()?
+                    .give_input(self.session, (), &mut deferred.0)?;
             }
 
             Ok(())

@@ -273,8 +273,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Combine the output with access to some buffers. The input must be one or
-    /// more buffers (for multiple buffers, combine them into a tuple or an
-    /// [`Iterator`]).
+    /// more buffers. For multiple buffers, combine them into a tuple or an
+    /// [`Iterator`]. Tuples of buffers can be nested inside each other.
+    ///
+    /// Other [outputs](Output) can also be passed in as buffers. Those outputs
+    /// will be transformed into a buffer with default buffer settings.
+    ///
+    /// To obtain a set of buffer keys each time a buffer is modified, use
+    /// [`listen`](crate::Bufferable::listen).
     pub fn with_access<B>(
         self,
         buffers: B,

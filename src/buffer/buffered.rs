@@ -25,6 +25,8 @@ use crate::{
 };
 
 pub trait Buffered: Clone {
+    fn verify_scope(&self, scope: Entity);
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -38,7 +40,7 @@ pub trait Buffered: Clone {
         world: &mut World,
     ) -> Result<Self::Item, OperationError>;
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
@@ -47,7 +49,7 @@ pub trait Buffered: Clone {
     fn as_input(&self) -> SmallVec<[Entity; 8]>;
 
     type Key: Clone;
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
@@ -64,6 +66,10 @@ pub trait Buffered: Clone {
 }
 
 impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         world.get_entity(self.source).or_broken()?
             .buffered_count::<T>(session)
@@ -79,7 +85,7 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
             .pull_from_buffer::<T>(session)
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
@@ -98,7 +104,7 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     }
 
     type Key = BufferKey<T>;
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
@@ -128,6 +134,10 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
 }
 
 impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -148,7 +158,7 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
             .and_then(|r| r.or_broken())
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
@@ -167,7 +177,7 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     }
 
     type Key = BufferKey<T>;
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
@@ -201,6 +211,11 @@ where
     T0: Buffered,
     T1: Buffered,
 {
+    fn verify_scope(&self, scope: Entity) {
+        self.0.verify_scope(scope);
+        self.1.verify_scope(scope);
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -223,13 +238,13 @@ where
         Ok((t0, t1))
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult {
-        self.0.listen(listener, world)?;
-        self.1.listen(listener, world)?;
+        self.0.add_listener(listener, world)?;
+        self.1.add_listener(listener, world)?;
         Ok(())
     }
 
@@ -241,13 +256,13 @@ where
     }
 
     type Key = (T0::Key, T1::Key);
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
     ) -> OperationResult {
-        self.0.access(accessor, world)?;
-        self.1.access(accessor, world)?;
+        self.0.add_accessor(accessor, world)?;
+        self.1.add_accessor(accessor, world)?;
         Ok(())
     }
 
@@ -274,6 +289,12 @@ where
     T1: Buffered,
     T2: Buffered,
 {
+    fn verify_scope(&self, scope: Entity) {
+        self.0.verify_scope(scope);
+        self.1.verify_scope(scope);
+        self.2.verify_scope(scope);
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -298,14 +319,14 @@ where
         Ok((t0, t1, t2))
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult {
-        self.0.listen(listener, world)?;
-        self.1.listen(listener, world)?;
-        self.2.listen(listener, world)?;
+        self.0.add_listener(listener, world)?;
+        self.1.add_listener(listener, world)?;
+        self.2.add_listener(listener, world)?;
         Ok(())
     }
 
@@ -318,14 +339,14 @@ where
     }
 
     type Key = (T0::Key, T1::Key, T2::Key);
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
     ) -> OperationResult {
-        self.0.access(accessor, world)?;
-        self.1.access(accessor, world)?;
-        self.2.access(accessor, world)?;
+        self.0.add_accessor(accessor, world)?;
+        self.1.add_accessor(accessor, world)?;
+        self.2.add_accessor(accessor, world)?;
         Ok(())
     }
 
@@ -349,6 +370,12 @@ where
 }
 
 impl<T: Buffered, const N: usize> Buffered for [T; N] {
+    fn verify_scope(&self, scope: Entity) {
+        for buffer in self.iter() {
+            buffer.verify_scope(scope);
+        }
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -378,13 +405,13 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         }).collect()
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult {
         for buffer in self {
-            buffer.listen(listener, world)?;
+            buffer.add_listener(listener, world)?;
         }
         Ok(())
     }
@@ -394,13 +421,13 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
     }
 
     type Key = SmallVec<[T::Key; N]>;
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
     ) -> OperationResult {
         for buffer in self {
-            buffer.access(accessor, world)?;
+            buffer.add_accessor(accessor, world)?;
         }
         Ok(())
     }
@@ -430,6 +457,12 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
 }
 
 impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
+    fn verify_scope(&self, scope: Entity) {
+        for buffer in self.iter() {
+            buffer.verify_scope(scope);
+        }
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -457,13 +490,13 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         }).collect()
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult {
         for buffer in self {
-            buffer.listen(listener, world)?;
+            buffer.add_listener(listener, world)?;
         }
         Ok(())
     }
@@ -473,13 +506,13 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
     }
 
     type Key = SmallVec<[T::Key; N]>;
-    fn access(
+    fn add_accessor(
         &self,
         accessor: Entity,
         world: &mut World,
     ) -> OperationResult {
         for buffer in self {
-            buffer.access(accessor, world)?;
+            buffer.add_accessor(accessor, world)?;
         }
         Ok(())
     }

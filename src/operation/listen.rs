@@ -15,59 +15,32 @@
  *
 */
 
-use bevy::prelude::{Entity, Component, World};
+use bevy::prelude::Entity;
 
-use std::collections::{
-    HashMap, hash_map::Entry,
-};
-
-use smallvec::SmallVec;
+use std::collections::hash_map::Entry;
 
 use crate::{
     Operation, OperationRequest, OperationReachability, OperationResult,
     Buffered, OperationSetup, InputBundle, SingleTargetStorage, OrBroken,
     SingleInputStorage, Input, ManageInput, ChannelQueue, ScopeStorage,
-    OperationCleanup, ReachabilityResult,
+    OperationCleanup, ReachabilityResult, BufferKeyUsage, BufferAccessStorage,
+    FunnelInputStorage,
+    buffer_key_usage,
 };
 
-pub(crate) struct OperateBufferAccess<T, B>
-where
-    T: 'static + Send + Sync,
-    B: Buffered,
-{
+pub(crate) struct Listen<B> {
     buffers: B,
     target: Entity,
-    _ignore: std::marker::PhantomData<(T, B)>,
 }
 
-impl<T, B> OperateBufferAccess<T, B>
-where
-    T: 'static + Send + Sync,
-    B: Buffered,
-{
+impl<B> Listen<B> {
     pub(crate) fn new(buffers: B, target: Entity) -> Self {
-        Self { buffers, target, _ignore: Default::default() }
+        Self { buffers, target }
     }
 }
 
-#[derive(Component)]
-pub struct BufferKeyUsage(pub(crate) fn(Entity, Entity, &World) -> ReachabilityResult);
-
-#[derive(Component)]
-pub(crate) struct BufferAccessStorage<B: Buffered> {
-    pub(crate) buffers: B,
-    pub(crate) keys: HashMap<Entity, B::Key>,
-}
-
-impl<B: Buffered> BufferAccessStorage<B> {
-    pub(crate) fn new(buffers: B) -> Self {
-        Self { buffers, keys: HashMap::new() }
-    }
-}
-
-impl<T, B> Operation for OperateBufferAccess<T, B>
+impl<B> Operation for Listen<B>
 where
-    T: 'static + Send + Sync,
     B: Buffered + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
@@ -76,8 +49,11 @@ where
             .insert(SingleInputStorage::new(source));
 
         self.buffers.add_accessor(source, world)?;
+        self.buffers.add_listener(source, world)?;
+
         world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
+            InputBundle::<()>::new(),
+            FunnelInputStorage::from(self.buffers.as_input()),
             BufferAccessStorage::new(self.buffers),
             SingleTargetStorage::new(self.target),
             BufferKeyUsage(buffer_key_usage::<B>),
@@ -89,8 +65,8 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let Input { session, data } = world.get_entity_mut(source).or_broken()?
-            .take_input::<T>()?;
+        let Input { session, .. } = world.get_entity_mut(source).or_broken()?
+            .take_input::<()>()?;
 
         let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
         let sender = world
@@ -110,73 +86,22 @@ where
 
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
         world.get_entity_mut(target).or_broken()?.give_input(
-            session, (data, keys), roster,
+            session, keys, roster,
         )
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>()?;
+        clean.cleanup_inputs::<()>()?;
         clean.world.get_mut::<BufferAccessStorage<B>>(clean.source).or_broken()?
             .keys.remove(&clean.session);
         clean.notify_cleaned()
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        if r.has_input::<T>()? {
+        if r.has_input::<()>()? {
             return Ok(true);
         }
 
         SingleInputStorage::is_reachable(&mut r)
-    }
-}
-
-pub(crate) fn buffer_key_usage<B>(
-    accessor: Entity,
-    session: Entity,
-    world: &World,
-) -> ReachabilityResult
-where
-    B: Buffered + 'static + Send + Sync,
-    B::Key: 'static + Send + Sync,
-{
-    let key = world.get::<BufferAccessStorage<B>>(accessor).or_broken()?
-        .keys.get(&session);
-    if let Some(key) = key {
-        if B::is_key_in_use(key) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-/// Buffer access nodes are siblings nodes in a workflow which can access the
-/// buffer, potentially in a mutable way. Their outputs do not get fed to the
-/// buffer, so they are not considered input nodes, but they may modify the
-/// contents of the buffer, which includes pushing new data, so they affect
-/// the reachability of the buffer.
-#[derive(Component, Default)]
-pub(crate) struct BufferAccessors(pub(crate) SmallVec<[Entity; 8]>);
-
-impl BufferAccessors {
-    pub(crate) fn is_reachable(r: &mut OperationReachability) -> ReachabilityResult {
-        let Some(accessors) = r.world.get::<Self>(r.source) else {
-            return Ok(false);
-        };
-
-        for accessor in &accessors.0 {
-            let usage = r.world.get::<BufferKeyUsage>(*accessor).or_broken()?.0;
-            if usage(*accessor, r.session, r.world)? {
-                return Ok(true);
-            }
-        }
-
-        for accessor in &accessors.0 {
-            if r.check_upstream(*accessor)? {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
     }
 }
