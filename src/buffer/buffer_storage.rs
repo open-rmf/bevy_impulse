@@ -45,12 +45,28 @@ pub(crate) struct BufferStorage<T> {
 }
 
 impl<T> BufferStorage<T> {
+    pub(crate) fn force_push(&mut self, session: Entity, value: T) -> Option<T> {
+        Self::impl_push(
+            self.reverse_queues.entry(session).or_default(),
+            self.settings.retention(),
+            value,
+        )
+    }
+
     pub(crate) fn push(&mut self, session: Entity, value: T) -> Option<T> {
         let Some(reverse_queue) = self.reverse_queues.get_mut(&session) else {
             return Some(value);
         };
 
-        let replaced = match self.settings.retention() {
+        Self::impl_push(reverse_queue, self.settings.retention(), value)
+    }
+
+    pub(crate) fn impl_push(
+        reverse_queue: &mut SmallVec<[T; 16]>,
+        retention: RetentionPolicy,
+        value: T,
+    ) -> Option<T> {
+        let replaced = match retention {
             RetentionPolicy::KeepFirst(n) => {
                 if reverse_queue.len() >= n {
                     // We're at the limit for inputs in this queue so just send
@@ -168,18 +184,46 @@ impl<T> BufferStorage<T> {
         }
     }
 
-    pub(crate) fn clone_oldest(&self, session: Entity) -> Option<T>
-    where
-        T: Clone,
-    {
-        self.reverse_queues.get(&session).map(|q| q.last().cloned()).flatten()
+    pub(crate) fn oldest(&self, session: Entity) -> Option<&T> {
+        self.reverse_queues.get(&session).map(|q| q.last()).flatten()
     }
 
-    pub(crate) fn clone_newest(&self, session: Entity) -> Option<T>
-    where
-        T: Clone,
-    {
-        self.reverse_queues.get(&session).map(|q| q.first().cloned()).flatten()
+    pub(crate) fn newest(&self, session: Entity) -> Option<&T> {
+        self.reverse_queues.get(&session).map(|q| q.first()).flatten()
+    }
+
+    pub(crate) fn get(&self, session: Entity, index: usize) -> Option<&T> {
+        let Some(reverse_queue) = self.reverse_queues.get(&session) else {
+            return None;
+        };
+
+        let len = reverse_queue.len();
+        if len >= index {
+            return None;
+        }
+
+        reverse_queue.get(len - index - 1)
+    }
+
+    pub(crate) fn oldest_mut(&mut self, session: Entity) -> Option<&mut T> {
+        self.reverse_queues.get_mut(&session).map(|q| q.last_mut()).flatten()
+    }
+
+    pub(crate) fn newest_mut(&mut self, session: Entity) -> Option<&mut T> {
+        self.reverse_queues.get_mut(&session).map(|q| q.first_mut()).flatten()
+    }
+
+    pub(crate) fn get_mut(&mut self, session: Entity, index: usize) -> Option<&mut T> {
+        let Some(reverse_queue) = self.reverse_queues.get_mut(&session) else {
+            return None;
+        };
+
+        let len = reverse_queue.len();
+        if len >= index {
+            return None;
+        }
+
+        reverse_queue.get_mut(len - index - 1)
     }
 
     pub(crate) fn active_sessions(&self) -> SmallVec<[Entity; 16]> {

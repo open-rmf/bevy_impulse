@@ -60,6 +60,7 @@ pub trait Buffered: Clone {
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError>;
 
@@ -130,9 +131,10 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
-        Ok(BufferKey::new(scope, self.source, session, sender.clone()))
+        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone()))
     }
 
     fn ensure_active_session(
@@ -213,9 +215,10 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
-        Ok(BufferKey::new(scope, self.source, session, sender.clone()))
+        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone()))
     }
 
     fn ensure_active_session(
@@ -297,10 +300,11 @@ where
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
-        let t0 = self.0.create_key(scope, session, sender)?;
-        let t1 = self.1.create_key(scope, session, sender)?;
+        let t0 = self.0.create_key(scope, session, accessor, sender)?;
+        let t1 = self.1.create_key(scope, session, accessor, sender)?;
         Ok((t0, t1))
     }
 
@@ -391,11 +395,12 @@ where
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
-        let t0 = self.0.create_key(scope, session, sender)?;
-        let t1 = self.1.create_key(scope, session, sender)?;
-        let t2 = self.2.create_key(scope, session, sender)?;
+        let t0 = self.0.create_key(scope, session, accessor, sender)?;
+        let t1 = self.1.create_key(scope, session, accessor, sender)?;
+        let t2 = self.2.create_key(scope, session, accessor, sender)?;
         Ok((t0, t1, t2))
     }
 
@@ -484,11 +489,12 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
         let mut keys = SmallVec::new();
         for buffer in self {
-            keys.push(buffer.create_key(scope, session, sender)?);
+            keys.push(buffer.create_key(scope, session, accessor, sender)?);
         }
         Ok(keys)
     }
@@ -581,11 +587,12 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         &self,
         scope: Entity,
         session: Entity,
+        accessor: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
         let mut keys = SmallVec::new();
         for buffer in self {
-            keys.push(buffer.create_key(scope, session, sender)?);
+            keys.push(buffer.create_key(scope, session, accessor, sender)?);
         }
         Ok(keys)
     }

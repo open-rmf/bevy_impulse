@@ -34,7 +34,6 @@ use crate::{
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
     Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
-    SingleTargetStorage,
 };
 
 #[derive(Bundle)]
@@ -73,7 +72,7 @@ where
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
         let mut buffer = source_mut.get_mut::<BufferStorage<T>>().or_broken()?;
-        buffer.push(session, data);
+        buffer.force_push(session, data);
 
         let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
         for target in targets {
@@ -215,12 +214,17 @@ fn get_buffered_sessions<T: 'static + Send + Sync>(
 pub(crate) struct NotifyBufferUpdate {
     buffer: Entity,
     session: Entity,
-    source: Option<Entity>,
+    /// This field is used to prevent notifications from going to the accessor
+    /// that produced the key which was used for modification. That way users
+    /// don't end up with unintentional infinite loops in their workflow. If
+    /// this is set to None then that means the user wants to allow closed loops
+    /// and is taking responsibility for managing it.
+    accessor: Option<Entity>,
 }
 
 impl NotifyBufferUpdate {
-    pub(crate) fn new(buffer: Entity, session: Entity, source: Option<Entity>) -> Self {
-        Self { buffer, session, source }
+    pub(crate) fn new(buffer: Entity, session: Entity, accessor: Option<Entity>) -> Self {
+        Self { buffer, session, accessor }
     }
 }
 
@@ -228,26 +232,14 @@ impl Command for NotifyBufferUpdate {
     fn apply(self, world: &mut World) {
         world.get_resource_or_insert_with(|| DeferredRoster::default());
         let r = world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
-            // We filter out targets that will feed directly into the source of
-            // the update. This will cover the usual use case of a provider that
-            // is directly connected to a .listen(), but it will not be able to
-            // filter accessors that make changes further down the workflow.
+            // We filter out the target that produced the key that was used to
+            // make the modification. This prevents unintentional infinite loops
+            // from forming in the workflow.
             let targets: SmallVec<[_; 16]> = world
                 .get::<ForkTargetStorage>(self.buffer).or_broken()?.0
                 .iter()
-                .filter_map(|t| {
-                    let Some(filter_source) = self.source else {
-                        return Some(*t);
-                    };
-
-                    if let Some(downstream) = world.get::<SingleTargetStorage>(*t) {
-                        if downstream.get() == filter_source {
-                            return None
-                        }
-                    }
-
-                    Some(*t)
-                })
+                .filter(|t| !self.accessor.is_some_and(|a| a == **t))
+                .cloned()
                 .collect();
 
             for target in targets {

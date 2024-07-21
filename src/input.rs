@@ -219,7 +219,7 @@ impl<'w> ManageInput for EntityMut<'w> {
                 // since then.
                 let mut buffer = self.get_mut::<BufferStorage<T>>().unwrap();
                 for data in reverse_remaining.into_iter().rev() {
-                    buffer.push(session, data);
+                    buffer.force_push(session, data);
                 }
             }
 

@@ -169,6 +169,7 @@ impl<T: Clone> Copy for CloneFromBuffer<T> {}
 pub struct BufferKey<T> {
     buffer: Entity,
     session: Entity,
+    accessor: Entity,
     lifecycle: Arc<BufferAccessLifecycle>,
     _ignore: std::marker::PhantomData<T>,
 }
@@ -178,6 +179,7 @@ impl<T> Clone for BufferKey<T> {
         Self {
             buffer: self.buffer,
             session: self.session,
+            accessor: self.accessor,
             lifecycle: Arc::clone(&self.lifecycle),
             _ignore: Default::default(),
         }
@@ -203,10 +205,11 @@ impl<T> BufferKey<T> {
         scope: Entity,
         buffer: Entity,
         session: Entity,
+        accessor: Entity,
         sender: CbSender<ChannelItem>,
     ) -> BufferKey<T> {
         let lifecycle = Arc::new(BufferAccessLifecycle::new(scope, session, sender));
-        BufferKey { buffer, session, lifecycle, _ignore: Default::default() }
+        BufferKey { buffer, session, accessor, lifecycle, _ignore: Default::default() }
     }
 }
 
@@ -260,14 +263,14 @@ where
     pub fn get_mut<'a>(
         &'a mut self,
         key: &BufferKey<T>,
-        source: Option<Entity>,
     ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
         let buffer = key.buffer;
         let session = key.session;
+        let accessor = key.accessor;
         self.query
             .get_mut(key.buffer)
             .map(|storage| BufferMut::new(
-                storage, buffer, session, source, &mut self.commands,
+                storage, buffer, session, accessor, &mut self.commands,
             ))
     }
 }
@@ -290,20 +293,20 @@ where
         self.storage.iter(self.session)
     }
 
-    /// Clone the oldest item in the buffer.
-    pub fn clone_oldest(&self) -> Option<T>
-    where
-        T: Clone,
-    {
-        self.storage.clone_oldest(self.session)
+    /// Borrow the oldest item in the buffer.
+    pub fn oldest(&self) -> Option<&T> {
+        self.storage.oldest(self.session)
     }
 
-    /// Clone the newest item in the buffer.
-    pub fn clone_newest(&self) -> Option<T>
-    where
-        T: Clone,
-    {
-        self.storage.clone_newest(self.session)
+    /// Borrow the newest item in the buffer.
+    pub fn newest(&self) -> Option<&T> {
+        self.storage.newest(self.session)
+    }
+
+    /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
+    /// with the highest index being the newest item in the buffer.
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.storage.get(self.session, index)
     }
 
     /// How many items are in the buffer?
@@ -320,7 +323,7 @@ where
     storage: Mut<'a, BufferStorage<T>>,
     buffer: Entity,
     session: Entity,
-    source: Option<Entity>,
+    accessor: Option<Entity>,
     commands: &'a mut Commands<'w, 's>,
     modified: bool,
 }
@@ -329,25 +332,44 @@ impl<'w, 's, 'a, T> BufferMut<'w, 's, 'a, T>
 where
     T: 'static + Send + Sync,
 {
+    /// When you make a modification using this `BufferMut`, anything listening
+    /// to the buffer will be notified about the update. This can create
+    /// unintentional infinite loops where a node in the workflow wakes itself
+    /// up every time it runs because of a modification it makes to a buffer.
+    ///
+    /// By default this closed loop is disabled by keeping track of which
+    /// listener created the key that's being used to modify the buffer, and
+    /// then skipping that listener when notifying about the modification.
+    ///
+    /// In some cases a key can be used far downstream of the listener. In that
+    /// case, there may be nodes downstream of the listener that do want to be
+    /// woken up by the modification. Use this function to allow that closed
+    /// loop to happen. It will be up to you to prevent the closed loop from
+    /// being a problem.
+    pub fn allow_closed_loops(mut self) -> Self {
+        self.accessor = None;
+        self
+    }
+
     /// Iterate over the contents in the buffer.
     pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
         self.storage.iter(self.session)
     }
 
-    /// Clone the oldest item in the buffer.
-    pub fn clone_oldest(&self) -> Option<T>
-    where
-        T: Clone,
-    {
-        self.storage.clone_oldest(self.session)
+    /// Look at the oldest item in the buffer.
+    pub fn oldest(&self) -> Option<&T> {
+        self.storage.oldest(self.session)
     }
 
-    /// Clone the newest item in the buffer.
-    pub fn clone_newest(&self) -> Option<T>
-    where
-        T: Clone,
-    {
-        self.storage.clone_newest(self.session)
+    /// Look at the newest item in the buffer.
+    pub fn newest(&self) -> Option<&T> {
+        self.storage.newest(self.session)
+    }
+
+    /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
+    /// with the highest index being the newest item in the buffer.
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.storage.get(self.session, index)
     }
 
     /// How many items are in the buffer?
@@ -359,6 +381,25 @@ where
     pub fn iter_mut<'b>(&'b mut self) -> IterBufferMut<'b, T> {
         self.modified = true;
         self.storage.iter_mut(self.session)
+    }
+
+    /// Modify the oldest item in the buffer.
+    pub fn oldest_mut(&mut self) -> Option<&mut T> {
+        self.modified = true;
+        self.storage.oldest_mut(self.session)
+    }
+
+    /// Modify the newest item in the buffer.
+    pub fn newest_mut(&mut self) -> Option<&mut T> {
+        self.modified = true;
+        self.storage.newest_mut(self.session)
+    }
+
+    /// Modify an item in the buffer. Index 0 is the oldest item in the buffer
+    /// with the highest index being the newest item in the buffer.
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.modified = true;
+        self.storage.get_mut(self.session, index)
     }
 
     /// Drain items out of the buffer
@@ -402,10 +443,10 @@ where
         storage: Mut<'a, BufferStorage<T>>,
         buffer: Entity,
         session: Entity,
-        source: Option<Entity>,
+        accessor: Entity,
         commands: &'a mut Commands<'w, 's>,
     ) -> Self {
-        Self { storage, buffer, session, source, commands, modified: false }
+        Self { storage, buffer, session, accessor: Some(accessor), commands, modified: false }
     }
 }
 
@@ -416,7 +457,7 @@ where
     fn drop(&mut self) {
         if self.modified {
             self.commands.add(NotifyBufferUpdate::new(
-                self.buffer, self.session, self.source,
+                self.buffer, self.session, self.accessor,
             ));
         }
     }

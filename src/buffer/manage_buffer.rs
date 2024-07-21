@@ -54,7 +54,7 @@ impl<'w> InspectBuffer for EntityRef<'w> {
         session: Entity,
     ) -> Result<Option<T>, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
-        Ok(buffer.clone_oldest(session))
+        Ok(buffer.oldest(session).cloned())
     }
 
     fn buffered_sessions<T: 'static + Send + Sync>(
