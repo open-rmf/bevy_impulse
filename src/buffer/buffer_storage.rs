@@ -46,7 +46,10 @@ pub(crate) struct BufferStorage<T> {
 
 impl<T> BufferStorage<T> {
     pub(crate) fn push(&mut self, session: Entity, value: T) -> Option<T> {
-        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        let Some(reverse_queue) = self.reverse_queues.get_mut(&session) else {
+            return Some(value);
+        };
+
         let replaced = match self.settings.retention() {
             RetentionPolicy::KeepFirst(n) => {
                 if reverse_queue.len() >= n {
@@ -77,7 +80,10 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn push_as_oldest(&mut self, session: Entity, value: T) -> Option<T> {
-        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        let Some(reverse_queue) = self.reverse_queues.get_mut(&session) else {
+            return Some(value);
+        };
+
         let replaced = match self.settings.retention() {
             RetentionPolicy::KeepFirst(n) => {
                 if n > 0 && reverse_queue.len() >= n {
@@ -103,11 +109,11 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn pull(&mut self, session: Entity) -> Option<T> {
-        self.reverse_queues.entry(session).or_default().pop()
+        self.reverse_queues.get_mut(&session)?.pop()
     }
 
     pub(crate) fn pull_newest(&mut self, session: Entity) -> Option<T> {
-        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        let reverse_queue = self.reverse_queues.get_mut(&session)?;
         if reverse_queue.is_empty() {
             return None;
         }
@@ -116,7 +122,10 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn consume(&mut self, session: Entity) -> SmallVec<[T; 16]> {
-        let reverse_queue = self.reverse_queues.entry(session).or_default();
+        let Some(reverse_queue) = self.reverse_queues.get_mut(&session) else {
+            return SmallVec::new();
+        };
+
         let mut result = SmallVec::new();
         std::mem::swap(reverse_queue, &mut result);
         result.reverse();
@@ -178,6 +187,10 @@ impl<T> BufferStorage<T> {
             .iter()
             .map(|(e, _)| *e)
             .collect()
+    }
+
+    pub(crate) fn ensure_session(&mut self, session: Entity) {
+        self.reverse_queues.entry(session).or_default();
     }
 
     pub(crate) fn new(settings: BufferSettings) -> Self {

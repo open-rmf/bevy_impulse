@@ -17,15 +17,12 @@
 
 use bevy::prelude::Entity;
 
-use std::collections::hash_map::Entry;
-
 use crate::{
     Operation, OperationRequest, OperationReachability, OperationResult,
     Buffered, OperationSetup, InputBundle, SingleTargetStorage, OrBroken,
-    SingleInputStorage, Input, ManageInput, ChannelQueue, ScopeStorage,
-    OperationCleanup, ReachabilityResult, BufferKeyUsage, BufferAccessStorage,
-    FunnelInputStorage,
-    buffer_key_usage,
+    SingleInputStorage, Input, ManageInput, OperationCleanup, ReachabilityResult,
+    BufferKeyUsage, BufferAccessStorage, FunnelInputStorage,
+    buffer_key_usage, get_access_keys,
 };
 
 pub(crate) struct Listen<B> {
@@ -68,21 +65,7 @@ where
         let Input { session, .. } = world.get_entity_mut(source).or_broken()?
             .take_input::<()>()?;
 
-        let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
-        let sender = world
-            .get_resource_or_insert_with(|| ChannelQueue::default())
-            .sender.clone();
-
-        let mut storage = world.get_mut::<BufferAccessStorage<B>>(source).or_broken()?;
-        let s = storage.as_mut();
-        let keys = match s.keys.entry(source) {
-            Entry::Occupied(occupied) => occupied.get().clone(),
-            Entry::Vacant(vacant) => {
-                vacant.insert(
-                    s.buffers.create_key(scope, session, &sender)?
-                ).clone()
-            }
-        };
+        let keys = get_access_keys::<B>(source, session, world)?;
 
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
         world.get_entity_mut(target).or_broken()?.give_input(

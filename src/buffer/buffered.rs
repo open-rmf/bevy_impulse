@@ -22,6 +22,7 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer, ChannelSender,
     ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
+    BufferStorage,
 };
 
 pub trait Buffered: Clone {
@@ -61,6 +62,12 @@ pub trait Buffered: Clone {
         session: Entity,
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError>;
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult;
 
     fn is_key_in_use(key: &Self::Key) -> bool;
 }
@@ -126,6 +133,16 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
         Ok(BufferKey::new(scope, self.source, session, sender.clone()))
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
+            .ensure_session(session);
+        Ok(())
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -199,6 +216,16 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         sender: &ChannelSender,
     ) -> Result<Self::Key, OperationError> {
         Ok(BufferKey::new(scope, self.source, session, sender.clone()))
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
+            .ensure_session(session);
+        Ok(())
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -275,6 +302,16 @@ where
         let t0 = self.0.create_key(scope, session, sender)?;
         let t1 = self.1.create_key(scope, session, sender)?;
         Ok((t0, t1))
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        self.0.ensure_active_session(session, world)?;
+        self.1.ensure_active_session(session, world)?;
+        Ok(())
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -362,6 +399,17 @@ where
         Ok((t0, t1, t2))
     }
 
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        self.0.ensure_active_session(session, world)?;
+        self.1.ensure_active_session(session, world)?;
+        self.2.ensure_active_session(session, world)?;
+        Ok(())
+    }
+
     fn is_key_in_use(key: &Self::Key) -> bool {
         T0::is_key_in_use(&key.0)
         || T1::is_key_in_use(&key.1)
@@ -443,6 +491,18 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
             keys.push(buffer.create_key(scope, session, sender)?);
         }
         Ok(keys)
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.ensure_active_session(session, world)?;
+        }
+
+        Ok(())
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -528,6 +588,18 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
             keys.push(buffer.create_key(scope, session, sender)?);
         }
         Ok(keys)
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.ensure_active_session(session, world)?;
+        }
+
+        Ok(())
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {

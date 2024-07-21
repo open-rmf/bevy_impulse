@@ -59,8 +59,13 @@ pub trait Bufferable {
         Output::new(scope, target).chain(builder)
     }
 
-    /// Create an operation that will output buffer keys each time any one of
-    /// the buffers is modified.
+    /// Create an operation that will output buffer access keys each time any
+    /// one of the buffers is modified. This can be used to create a node in a
+    /// workflow that wakes up every time one or more buffers change, and then
+    /// operates on those buffers.
+    ///
+    /// For an operation that simply joins the contents of two or more outputs
+    /// or buffers, use [`join`](Self::join) instead.
     fn listen<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,

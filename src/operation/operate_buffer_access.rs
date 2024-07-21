@@ -27,7 +27,7 @@ use crate::{
     Operation, OperationRequest, OperationReachability, OperationResult,
     Buffered, OperationSetup, InputBundle, SingleTargetStorage, OrBroken,
     SingleInputStorage, Input, ManageInput, ChannelQueue, ScopeStorage,
-    OperationCleanup, ReachabilityResult,
+    OperationCleanup, ReachabilityResult, OperationError,
 };
 
 pub(crate) struct OperateBufferAccess<T, B>
@@ -92,21 +92,7 @@ where
         let Input { session, data } = world.get_entity_mut(source).or_broken()?
             .take_input::<T>()?;
 
-        let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
-        let sender = world
-            .get_resource_or_insert_with(|| ChannelQueue::default())
-            .sender.clone();
-
-        let mut storage = world.get_mut::<BufferAccessStorage<B>>(source).or_broken()?;
-        let s = storage.as_mut();
-        let keys = match s.keys.entry(source) {
-            Entry::Occupied(occupied) => occupied.get().clone(),
-            Entry::Vacant(vacant) => {
-                vacant.insert(
-                    s.buffers.create_key(scope, session, &sender)?
-                ).clone()
-            }
-        };
+        let keys = get_access_keys::<B>(source, session, world)?;
 
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
         world.get_entity_mut(target).or_broken()?.give_input(
@@ -128,6 +114,44 @@ where
 
         SingleInputStorage::is_reachable(&mut r)
     }
+}
+
+pub(crate) fn get_access_keys<B>(
+    source: Entity,
+    session: Entity,
+    world: &mut World,
+) -> Result<B::Key, OperationError>
+where
+    B: Buffered + 'static + Send + Sync,
+    B::Key: 'static + Send + Sync,
+{
+    let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
+    let sender = world
+        .get_resource_or_insert_with(|| ChannelQueue::default())
+        .sender.clone();
+
+    let mut storage = world.get_mut::<BufferAccessStorage<B>>(source).or_broken()?;
+    let s = storage.as_mut();
+    let mut made_key = false;
+    let keys = match s.keys.entry(source) {
+        Entry::Occupied(occupied) => occupied.get().clone(),
+        Entry::Vacant(vacant) => {
+            made_key = true;
+            vacant.insert(
+                s.buffers.create_key(scope, session, &sender)?
+            ).clone()
+        }
+    };
+
+    if made_key {
+        // If we needed to make a new key for this session then we should
+        // ensure that the session is active in the buffer before we send
+        // off the keys.
+        let buffers = s.buffers.clone();
+        buffers.ensure_active_session(session, world)?;
+    }
+
+    Ok(keys)
 }
 
 pub(crate) fn buffer_key_usage<B>(
