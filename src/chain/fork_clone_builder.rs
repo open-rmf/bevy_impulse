@@ -83,6 +83,6 @@ macro_rules! impl_forkclonebuilder_for_tuple {
     }
 }
 
-// Implements the `ForkCloneBUilder` trait for all tuples between size 2 and 15
+// Implements the `ForkCloneBUilder` trait for all tuples between size 2 and 12
 // (inclusive)
-all_tuples!(impl_forkclonebuilder_for_tuple, 2, 15, F, U);
+all_tuples!(impl_forkclonebuilder_for_tuple, 2, 12, F, U);
