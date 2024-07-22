@@ -43,7 +43,7 @@ impl<T> Promise<T> {
     /// This will never block, but it might provide a state that is out of date.
     ///
     /// To borrow a view of the most current state at the cost of synchronizing
-    /// you can use [`peek`].
+    /// you can use [`Self::peek`].
     pub fn sneak_peek(&self) -> &PromiseState<T> {
         &self.state
     }
@@ -53,7 +53,7 @@ impl<T> Promise<T> {
     ///
     /// This requires a mutable reference to the promise because it may try to
     /// update the current state if needed. To peek at that last known state
-    /// without trying to synchronize you can use [`sneak_peek()`].
+    /// without trying to synchronize you can use [`Self::sneak_peek()`].
     pub fn peek(&mut self) -> &PromiseState<T> {
         self.update();
         &self.state
@@ -72,7 +72,7 @@ impl<T> Promise<T> {
     /// of the mutable methods.
     ///
     /// To both wait for a result and update the Promise's internal state once
-    /// it is available, use [`wait_mut`].
+    /// it is available, use [`Self::wait_mut`].
     pub fn wait(&self) -> &Self {
         if !self.state.is_pending() {
             // The result arrived and ownership has been transferred to this
@@ -136,9 +136,9 @@ impl<T> Promise<T> {
     }
 
     /// Update the internal state of the promise if it is still pending. This
-    /// will automatically be done by [`peek`] and [`take`] so there is no
-    /// need to call this explicitly unless you want a specific timing for when
-    /// to synchronize the internal state.
+    /// will automatically be done by [`Self::peek`] and [`Self::take`] so there
+    /// is no need to call this explicitly unless you want a specific timing for
+    /// when to synchronize the internal state.
     pub fn update(&mut self) {
         if self.state.is_pending() {
             match self.target.inner.lock() {

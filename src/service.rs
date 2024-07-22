@@ -54,7 +54,7 @@ pub(crate) use workflow::*;
 ///
 /// To use a provider, call [`bevy::prelude::Commands`]`.`[`request(provider, request)`][3].
 ///
-/// [1]: AddservicesExt::add_service
+/// [1]: crate::AddServicesExt::add_service
 /// [2]: SpawnServicesExt::spawn_service
 /// [3]: crate::RequestExt::request
 #[derive(Debug, PartialEq, Eq)]
@@ -111,7 +111,7 @@ define_label!(
     /// A strongly-typed class of labels used to tag delivery instructions that
     /// are related to each other.
     DeliveryLabel,
-    /// Strongly-typed identifier for a [`RequestLabel`].
+    /// Strongly-typed identifier for a [`DeliveryLabel`].
     DeliveryLabelId,
 );
 
@@ -154,7 +154,7 @@ pub struct DeliveryInstructions {
 impl DeliveryInstructions {
     /// Begin building a label for a request. You do not need to call this
     /// function explicitly. You can instead use `.preempt()` or `.ensure()`
-    /// directly on a `RequestLabel` instance.
+    /// directly on a [`DeliveryLabel`] instance.
     pub fn new(label: impl DeliveryLabel) -> Self {
         Self {
             label: label.as_label(),
@@ -227,7 +227,7 @@ impl<L: DeliveryLabel> From<L> for DeliveryInstructions {
 }
 
 /// Allow anything that can be converted into [`DeliveryInstructions`] to have
-/// access to the [`preempt`] and [`ensure`] methods.
+/// access to the [`Self::preempt`] and [`Self::ensure`] methods.
 pub trait AsDeliveryInstructions {
     /// Instruct the delivery to have [preemptive behavior][1].
     ///

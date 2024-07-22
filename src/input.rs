@@ -32,8 +32,8 @@ use crate::{
     Cancel, Cancellation, CancellationCause, Broken, UnusedTarget,
 };
 
-/// Typical container for input data accompanied by its session information.
-/// This defines the elements of [`InputStorage`].
+/// This contains data that has been provided as input into an operation, along
+/// with an indication of what session the data belongs to.
 pub struct Input<T> {
     pub session: Entity,
     pub data: T,
@@ -91,9 +91,9 @@ pub trait ManageInput {
     ) -> Result<(), OperationError>;
 
     /// Same as [`Self::give_input`], but the wakeup for this node will be
-    /// deferred until after the [`ChannelQueue`](crate::ChannelQueue) is flushed.
-    /// This is used for async output to ensure that all async operations are
-    /// finished being processed before the final output gets processed.
+    /// deferred until after the async updates are flushed. This is used for
+    /// async task output to ensure that all async operations, such as streams,
+    /// are finished being processed before the final output gets processed.
     fn defer_input<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,

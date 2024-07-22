@@ -53,7 +53,7 @@ pub(crate) use store::*;
 mod taken;
 pub(crate) use taken::*;
 
-/// Impulses can be chained as a simple sequence of [providers](Provider).
+/// Impulses can be chained as a simple sequence of [providers](crate::Provider).
 pub struct Impulse<'w, 's, 'a, Response, Streams> {
     pub(crate) source: Entity,
     pub(crate) target: Entity,
@@ -272,7 +272,7 @@ where
     /// [`Self::detach`] before calling this.
     ///
     /// If the response is not a bundle then you can store it in an entity using
-    /// [`Self::store`] or [`Self::append`]. Alternatively you can transform it
+    /// [`Self::store`] or [`Self::push`]. Alternatively you can transform it
     /// into a bundle using [`Self::map_block`] or [`Self::map_async`].
     pub fn insert(self, target: Entity) {
         self.commands.add(AddImpulse::new(

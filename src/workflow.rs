@@ -154,10 +154,10 @@ pub enum DeliverySettings {
     Serial,
 
     /// The workflow can run any number of sessions at a time. If multiple
-    /// requests with the same [`RequestLabelId`][1] try to run at the same time,
+    /// requests with the same [`DeliveryLabelId`][1] try to run at the same time,
     /// those requests will follow the serial delivery behavior.
     ///
-    /// [1]: crate::RequestLabelId
+    /// [1]: crate::DeliveryLabelId
     #[default]
     Parallel,
 }

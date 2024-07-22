@@ -59,8 +59,8 @@ impl<Srv, With, Also> ServiceBuilder<Srv, (), With, Also> {
     }
 
     /// Allow the service to run in parallel. Requests that shared the same
-    /// RequestLabel will still be run in serial or interrupt each other
-    /// depending on settings.
+    /// [`DeliveryLabel`](crate::DeliveryLabel) will still be run in serial or
+    /// interrupt each other depending on settings.
     pub fn parallel(self) -> ServiceBuilder<Srv, ParallelChosen, With, Also> {
         ServiceBuilder {
             service: self.service,
