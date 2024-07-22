@@ -17,6 +17,7 @@
 
 use bevy::utils::all_tuples;
 
+use itertools::Itertools;
 use smallvec::SmallVec;
 
 use crate::{
@@ -36,7 +37,7 @@ pub trait Unzippable: Sized {
 }
 
 macro_rules! impl_unzippable_for_tuple {
-    ($($T:ident),*) => {
+    ($(($T:ident, $D:ident)),*) => {
         #[allow(non_snake_case)]
         impl<$($T: 'static + Send + Sync),*> Unzippable for ($($T,)*)
         {
@@ -75,20 +76,12 @@ macro_rules! impl_unzippable_for_tuple {
                     .get_entity_mut(source).or_broken()?
                     .take_input::<Self>()?;
 
-                // Targets is cloned to avoid borrow checker issues when
-                // doing a mutable borrow of the world later
-                let targets = world.get::<ForkTargetStorage>(source).or_broken()?.clone();
-                // The compiler throws a warning when implementing this for
-                // tuple sizes that wouldn't use the result of the first _idx = _idx + 1
-                // so we add a leading underscore to suppress the warning
-                let mut _idx = 0;
+                let ($($D,)*) = world.get::<ForkTargetStorage>(source).or_broken()?.0.iter().copied().next_tuple().or_broken()?;
                 let ($($T,)*) = inputs;
                 $(
-                    let target = *targets.0.get(_idx).or_broken()?;
-                    if let Some(mut t_mut) = world.get_entity_mut(target) {
+                    if let Some(mut t_mut) = world.get_entity_mut($D) {
                         t_mut.give_input(session, $T, roster)?;
                     }
-                    _idx = _idx + 1;
                 )*
                 Ok(())
             }
@@ -102,9 +95,10 @@ macro_rules! impl_unzippable_for_tuple {
     }
 }
 
-// Implements the `Unzippable` trait for all tuples between size 1 and 15
+// Implements the `Unzippable` trait for all tuples between size 1 and 12
 // (inclusive) made of 'static lifetime types that are `Send` and `Sync`
-all_tuples!(impl_unzippable_for_tuple, 1, 15, T);
+// D is a dummy type
+all_tuples!(impl_unzippable_for_tuple, 1, 12, T, D);
 
 /// A trait for constructs that are able to perform a forking unzip of an
 /// unzippable chain. An unzippable chain is one whose response type contains a
@@ -134,5 +128,5 @@ macro_rules! impl_unzipbuilder_for_tuple {
     }
 }
 
-// Implements the `UnzipBuilder` trait for all tuples between size 1 and 15
-all_tuples!(impl_unzipbuilder_for_tuple, 2, 15, A, F, U);
+// Implements the `UnzipBuilder` trait for all tuples between size 1 and 12
+all_tuples!(impl_unzipbuilder_for_tuple, 2, 12, A, F, U);
