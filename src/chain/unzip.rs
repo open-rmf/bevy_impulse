@@ -15,8 +15,9 @@
  *
 */
 
-use bevy::prelude::{Entity, Commands};
+use bevy::utils::all_tuples;
 
+use itertools::Itertools;
 use smallvec::SmallVec;
 
 use crate::{
@@ -29,174 +30,75 @@ pub trait Unzippable: Sized {
     type Unzipped;
     fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped;
 
-    fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]>;
-
     fn distribute_values(request: OperationRequest) -> OperationResult;
 
     type Prepended<T>;
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
 }
 
-impl<A: 'static + Send + Sync> Unzippable for (A,) {
-    type Unzipped = Output<A>;
-    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
-        assert_eq!(output.scope(), builder.scope());
-        let targets = Self::make_targets(builder.commands);
+macro_rules! impl_unzippable_for_tuple {
+    ($(($T:ident, $D:ident)),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: 'static + Send + Sync),*> Unzippable for ($($T,)*)
+        {
+            type Unzipped = ($(Output<$T>,)*);
+            fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
+                assert_eq!(output.scope(), builder.scope());
+                let mut targets = SmallVec::new();
+                let result =
+                    (
+                        $(
+                            {
+                                // Variable is only used to make sure this cycle is repeated once
+                                // for each instance of the $T type, but the type itself is not
+                                // used.
+                                #[allow(unused)]
+                                let $T = std::marker::PhantomData::<$T>;
+                                let target = builder.commands.spawn(UnusedTarget).id();
+                                targets.push(target);
+                                Output::new(builder.scope, target)
+                            },
+                        )*
+                    );
 
-        let result = Output::new(builder.scope, targets[0]);
+                builder.commands.add(AddOperation::new(
+                    Some(output.scope()),
+                    output.id(),
+                    ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
+                ));
+                result
+            }
 
-        builder.commands.add(AddOperation::new(
-            Some(output.scope()),
-            output.id(),
-            ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
-        ));
-        result
-    }
+            fn distribute_values(
+                OperationRequest { source, world, roster }: OperationRequest,
+            ) -> OperationResult {
+                let Input { session, data: inputs } = world
+                    .get_entity_mut(source).or_broken()?
+                    .take_input::<Self>()?;
 
-    fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([commands.spawn(UnusedTarget).id()])
-    }
+                let ($($D,)*) = world.get::<ForkTargetStorage>(source).or_broken()?.0.iter().copied().next_tuple().or_broken()?;
+                let ($($T,)*) = inputs;
+                $(
+                    if let Some(mut t_mut) = world.get_entity_mut($D) {
+                        t_mut.give_input(session, $T, roster)?;
+                    }
+                )*
+                Ok(())
+            }
 
-    fn distribute_values(
-        OperationRequest { source, world, roster }: OperationRequest
-    ) -> OperationResult {
-        let Input { session, data: inputs } = world
-            .get_entity_mut(source).or_broken()?
-            .take_input::<Self>()?;
-
-        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
-        let target = (targets.0)[0];
-        if let Some(mut t_mut) = world.get_entity_mut(target) {
-            t_mut.give_input(session, inputs.0, roster)?;
+            type Prepended<T> = (T, $($T,)*);
+            fn prepend<T>(self, value: T) -> Self::Prepended<T> {
+                let ($($T,)*) = self;
+                (value, $($T,)*)
+            }
         }
-        Ok(())
-    }
-
-    type Prepended<T> = (T, A);
-    fn prepend<T>(self, value: T) -> Self::Prepended<T> {
-        (value, self.0)
     }
 }
 
-impl<A: 'static + Send + Sync, B: 'static + Send + Sync> Unzippable for (A, B) {
-    type Unzipped = (Output<A>, Output<B>);
-    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
-        assert_eq!(output.scope(), builder.scope());
-        let targets = Self::make_targets(builder.commands);
-
-        let result = (
-            Output::new(builder.scope, targets[0]),
-            Output::new(builder.scope, targets[1]),
-        );
-
-        builder.commands.add(AddOperation::new(
-            Some(output.scope()),
-            output.id(),
-            ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
-        ));
-        result
-    }
-
-    fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([
-            commands.spawn(UnusedTarget).id(),
-            commands.spawn(UnusedTarget).id(),
-        ])
-    }
-
-    fn distribute_values(
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let Input { session, data: inputs } = world
-            .get_entity_mut(source).or_broken()?
-            .take_input::<Self>()?;
-
-        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
-        let target_0 = *targets.0.get(0).or_broken()?;
-        let target_1 = *targets.0.get(1).or_broken()?;
-
-        if let Some(mut t_mut) = world.get_entity_mut(target_0) {
-            t_mut.give_input(session, inputs.0, roster)?;
-        }
-
-        if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.give_input(session, inputs.1, roster)?;
-        }
-
-        Ok(())
-    }
-
-    type Prepended<T> = (T, A, B);
-    fn prepend<T>(self, value: T) -> Self::Prepended<T> {
-        (value, self.0, self.1)
-    }
-}
-
-impl<A, B, C> Unzippable for (A, B, C)
-where
-    A: 'static + Send + Sync,
-    B: 'static + Send + Sync,
-    C: 'static + Send + Sync,
-{
-    type Unzipped = (Output<A>, Output<B>, Output<C>);
-    fn unzip_output(output: Output<Self>, builder: &mut Builder) -> Self::Unzipped {
-        assert_eq!(output.scope(), builder.scope());
-        let targets = Self::make_targets(builder.commands);
-
-        let result = (
-            Output::new(builder.scope, targets[0]),
-            Output::new(builder.scope, targets[1]),
-            Output::new(builder.scope, targets[2]),
-        );
-
-        builder.commands.add(AddOperation::new(
-            Some(output.scope()),
-            output.id(),
-            ForkUnzip::<Self>::new(ForkTargetStorage(targets)),
-        ));
-        result
-    }
-
-    fn make_targets(commands: &mut Commands) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([
-            commands.spawn(UnusedTarget).id(),
-            commands.spawn(UnusedTarget).id(),
-            commands.spawn(UnusedTarget).id(),
-        ])
-    }
-
-    fn distribute_values(
-        OperationRequest { source, world, roster }: OperationRequest,
-    ) -> OperationResult {
-        let Input { session, data: inputs } = world
-            .get_entity_mut(source).or_broken()?
-            .take_input::<Self>()?;
-
-        let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
-        let target_0 = *targets.0.get(0).or_broken()?;
-        let target_1 = *targets.0.get(1).or_broken()?;
-        let target_2 = *targets.0.get(2).or_broken()?;
-
-        if let Some(mut t_mut) = world.get_entity_mut(target_0) {
-            t_mut.give_input(session, inputs.0, roster)?;
-        }
-
-        if let Some(mut t_mut) = world.get_entity_mut(target_1) {
-            t_mut.give_input(session, inputs.1, roster)?;
-        }
-
-        if let Some(mut t_mut) = world.get_entity_mut(target_2) {
-            t_mut.give_input(session, inputs.2, roster)?;
-        }
-
-        Ok(())
-    }
-
-    type Prepended<T> = (T, A, B, C);
-    fn prepend<T>(self, value: T) -> Self::Prepended<T> {
-        (value, self.0, self.1, self.2)
-    }
-}
+// Implements the `Unzippable` trait for all tuples between size 1 and 12
+// (inclusive) made of 'static lifetime types that are `Send` and `Sync`
+// D is a dummy type
+all_tuples!(impl_unzippable_for_tuple, 1, 12, T, D);
 
 /// A trait for constructs that are able to perform a forking unzip of an
 /// unzippable chain. An unzippable chain is one whose response type contains a
@@ -206,37 +108,25 @@ pub trait UnzipBuilder<Z> {
     fn unzip_build(self, output: Output<Z>, builder: &mut Builder) -> Self::ReturnType;
 }
 
-impl<A, Fa, Ua, B, Fb, Ub> UnzipBuilder<(A, B)> for (Fa, Fb)
-where
-    A: 'static + Send + Sync,
-    B: 'static + Send + Sync,
-    Fa: FnOnce(Chain<A>) -> Ua,
-    Fb: FnOnce(Chain<B>) -> Ub,
-{
-    type ReturnType = (Ua, Ub);
-    fn unzip_build(self, output: Output<(A, B)>, builder: &mut Builder) -> Self::ReturnType {
-        let outputs = <(A, B)>::unzip_output(output, builder);
-        let u_a = (self.0)(outputs.0.chain(builder));
-        let u_b = (self.1)(outputs.1.chain(builder));
-        (u_a, u_b)
+macro_rules! impl_unzipbuilder_for_tuple {
+    ($(($A:ident, $F:ident, $U:ident)),*) => {
+        #[allow(non_snake_case)]
+        impl<$($A: 'static + Send + Sync),*, $($F: FnOnce(Chain<$A>) -> $U),*, $($U),*> UnzipBuilder<($($A,)*)> for ($($F,)*)
+        {
+            type ReturnType = ($($U),*);
+            fn unzip_build(self, output: Output<($($A,)*)>, builder: &mut Builder) -> Self::ReturnType {
+                let outputs = <($($A),*)>::unzip_output(output, builder);
+                let ($($A,)*) = outputs;
+                let ($($F,)*) = self;
+                (
+                    $(
+                        ($F)($A.chain(builder)),
+                    )*
+                )
+            }
+        }
     }
 }
 
-impl<A, Fa, Ua, B, Fb, Ub, C, Fc, Uc> UnzipBuilder<(A, B, C)> for (Fa, Fb, Fc)
-where
-    A: 'static + Send + Sync,
-    B: 'static + Send + Sync,
-    C: 'static + Send + Sync,
-    Fa: FnOnce(Chain<A>) -> Ua,
-    Fb: FnOnce(Chain<B>) -> Ub,
-    Fc: FnOnce(Chain<C>) -> Uc,
-{
-    type ReturnType = (Ua, Ub, Uc);
-    fn unzip_build(self, output: Output<(A, B, C)>, builder: &mut Builder) -> Self::ReturnType {
-        let outputs = <(A, B, C)>::unzip_output(output, builder);
-        let u_a = (self.0)(outputs.0.chain(builder));
-        let u_b = (self.1)(outputs.1.chain(builder));
-        let u_c = (self.2)(outputs.2.chain(builder));
-        (u_a, u_b, u_c)
-    }
-}
+// Implements the `UnzipBuilder` trait for all tuples between size 1 and 12
+all_tuples!(impl_unzipbuilder_for_tuple, 2, 12, A, F, U);

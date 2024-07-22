@@ -15,7 +15,10 @@
  *
 */
 
-use bevy::prelude::{Entity, World};
+use bevy::{
+    prelude::{Entity, World},
+    utils::all_tuples,
+};
 
 use smallvec::SmallVec;
 
@@ -236,191 +239,115 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     }
 }
 
-impl<T0, T1> Buffered for (T0, T1)
-where
-    T0: Buffered,
-    T1: Buffered,
-{
-    fn verify_scope(&self, scope: Entity) {
-        self.0.verify_scope(scope);
-        self.1.verify_scope(scope);
-    }
+macro_rules! impl_buffered_for_tuple {
+    ($(($T:ident, $K:ident)),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: Buffered),*> Buffered for ($($T,)*)
+        {
+            fn verify_scope(&self, scope: Entity) {
+                let ($($T,)*) = self;
+                $(
+                    $T.verify_scope(scope);
+                )*
+            }
 
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
-        Ok([
-            self.0.buffered_count(session, world)?,
-            self.1.buffered_count(session, world)?,
-        ].iter().copied().min().unwrap_or(0))
-    }
+            fn buffered_count(
+                &self,
+                session: Entity,
+                world: &World,
+            ) -> Result<usize, OperationError> {
+                let ($($T,)*) = self;
+                Ok([
+                    $(
+                        $T.buffered_count(session, world)?,
+                    )*
+                ].iter().copied().min().unwrap_or(0))
+            }
 
-    type Item = (T0::Item, T1::Item);
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        let t0 = self.0.pull(session, world)?;
-        let t1 = self.1.pull(session, world)?;
-        Ok((t0, t1))
-    }
+            type Item = ($($T::Item),*);
+            fn pull(
+                &self,
+                session: Entity,
+                world: &mut World,
+            ) -> Result<Self::Item, OperationError> {
+                let ($($T,)*) = self;
+                Ok(($(
+                    $T.pull(session, world)?,
+                )*))
+            }
 
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.add_listener(listener, world)?;
-        self.1.add_listener(listener, world)?;
-        Ok(())
-    }
+            fn add_listener(
+                &self,
+                listener: Entity,
+                world: &mut World,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.add_listener(listener, world)?;
+                )*
+                Ok(())
+            }
 
-    fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        let mut inputs = SmallVec::new();
-        inputs.extend(self.0.as_input());
-        inputs.extend(self.1.as_input());
-        inputs
-    }
+            fn as_input(&self) -> SmallVec<[Entity; 8]> {
+                let mut inputs = SmallVec::new();
+                let ($($T,)*) = self;
+                $(
+                    inputs.extend($T.as_input());
+                )*
+                inputs
+            }
 
-    type Key = (T0::Key, T1::Key);
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.add_accessor(accessor, world)?;
-        self.1.add_accessor(accessor, world)?;
-        Ok(())
-    }
+            type Key = ($($T::Key), *);
+            fn add_accessor(
+                &self,
+                accessor: Entity,
+                world: &mut World,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.add_accessor(accessor, world)?;
+                )*
+                Ok(())
+            }
 
-    fn create_key(
-        &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-    ) -> Result<Self::Key, OperationError> {
-        let t0 = self.0.create_key(scope, session, accessor, sender)?;
-        let t1 = self.1.create_key(scope, session, accessor, sender)?;
-        Ok((t0, t1))
-    }
+            fn create_key(
+                &self,
+                scope: Entity,
+                session: Entity,
+                accessor: Entity,
+                sender: &ChannelSender,
+            ) -> Result<Self::Key, OperationError> {
+                let ($($T,)*) = self;
+                Ok(($(
+                    $T.create_key(scope, session, accessor, sender)?,
+                )*))
+            }
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.ensure_active_session(session, world)?;
-        self.1.ensure_active_session(session, world)?;
-        Ok(())
-    }
+            fn ensure_active_session(
+                &self,
+                session: Entity,
+                world: &mut World,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.ensure_active_session(session, world)?;
+                )*
+                Ok(())
+            }
 
-    fn is_key_in_use(key: &Self::Key) -> bool {
-        T0::is_key_in_use(&key.0)
-        || T1::is_key_in_use(&key.1)
+            fn is_key_in_use(key: &Self::Key) -> bool {
+                let ($($K,)*) = key;
+                false $(
+                    || $T::is_key_in_use($K)
+                )*
+            }
+        }
     }
 }
 
-impl<T0, T1, T2> Buffered for (T0, T1, T2)
-where
-    T0: Buffered,
-    T1: Buffered,
-    T2: Buffered,
-{
-    fn verify_scope(&self, scope: Entity) {
-        self.0.verify_scope(scope);
-        self.1.verify_scope(scope);
-        self.2.verify_scope(scope);
-    }
-
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
-        Ok([
-            self.0.buffered_count(session, world)?,
-            self.1.buffered_count(session, world)?,
-            self.2.buffered_count(session, world)?,
-        ].iter().copied().min().unwrap_or(0))
-    }
-
-    type Item = (T0::Item, T1::Item, T2::Item);
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        let t0 = self.0.pull(session, world)?;
-        let t1 = self.1.pull(session, world)?;
-        let t2 = self.2.pull(session, world)?;
-        Ok((t0, t1, t2))
-    }
-
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.add_listener(listener, world)?;
-        self.1.add_listener(listener, world)?;
-        self.2.add_listener(listener, world)?;
-        Ok(())
-    }
-
-    fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        let mut inputs = SmallVec::new();
-        inputs.extend(self.0.as_input());
-        inputs.extend(self.1.as_input());
-        inputs.extend(self.2.as_input());
-        inputs
-    }
-
-    type Key = (T0::Key, T1::Key, T2::Key);
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.add_accessor(accessor, world)?;
-        self.1.add_accessor(accessor, world)?;
-        self.2.add_accessor(accessor, world)?;
-        Ok(())
-    }
-
-    fn create_key(
-        &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-    ) -> Result<Self::Key, OperationError> {
-        let t0 = self.0.create_key(scope, session, accessor, sender)?;
-        let t1 = self.1.create_key(scope, session, accessor, sender)?;
-        let t2 = self.2.create_key(scope, session, accessor, sender)?;
-        Ok((t0, t1, t2))
-    }
-
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        self.0.ensure_active_session(session, world)?;
-        self.1.ensure_active_session(session, world)?;
-        self.2.ensure_active_session(session, world)?;
-        Ok(())
-    }
-
-    fn is_key_in_use(key: &Self::Key) -> bool {
-        T0::is_key_in_use(&key.0)
-        || T1::is_key_in_use(&key.1)
-        || T2::is_key_in_use(&key.2)
-    }
-}
+// Implements the `Buffered` trait for all tuples between size 2 and 12
+// (inclusive) made of types that implement `Buffered`
+all_tuples!(impl_buffered_for_tuple, 2, 12, T, K);
 
 impl<T: Buffered, const N: usize> Buffered for [T; N] {
     fn verify_scope(&self, scope: Entity) {

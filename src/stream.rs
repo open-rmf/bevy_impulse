@@ -21,6 +21,7 @@ use bevy::{
         DerefMut, With,
     },
     ecs::query::ReadOnlyWorldQuery,
+    utils::all_tuples,
 };
 
 use crossbeam::channel::{Receiver, unbounded};
@@ -483,283 +484,166 @@ impl StreamPack for () {
     }
 }
 
-impl<T1: StreamPack> StreamPack for (T1,) {
-    type StreamAvailableBundle = T1::StreamAvailableBundle;
-    type StreamFilter = T1::StreamFilter;
-    type StreamStorageBundle = T1::StreamStorageBundle;
-    type StreamInputPack = T1::StreamInputPack;
-    type StreamOutputPack = T1::StreamOutputPack;
-    type Receiver = T1::Receiver;
-    type Channel = T1::Channel;
-    type Buffer = T1::Buffer;
+macro_rules! impl_streampack_for_tuple {
+    ($($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
+            type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
+            type StreamFilter = ($($T::StreamFilter,)*);
+            type StreamStorageBundle = ($($T::StreamStorageBundle,)*);
+            type StreamInputPack = ($($T::StreamInputPack,)*);
+            type StreamOutputPack = ($($T::StreamOutputPack,)*);
+            type Receiver = ($($T::Receiver,)*);
+            type Channel = ($($T::Channel,)*);
+            type Buffer = ($($T::Buffer,)*);
 
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (
-        Self::StreamInputPack,
-        Self::StreamOutputPack,
-    ) {
-        T1::spawn_scope_streams(in_scope, out_scope, commands)
-    }
+            fn spawn_scope_streams(
+                in_scope: Entity,
+                out_scope: Entity,
+                commands: &mut Commands,
+            ) -> (
+                Self::StreamInputPack,
+                Self::StreamOutputPack,
+            ) {
+                let ($($T,)*) = (
+                    $(
+                        $T::spawn_scope_streams(in_scope, out_scope, commands),
+                    )*
+                );
+                // Now unpack the tuples
+                (
+                    (
+                        $(
+                            $T.0,
+                        )*
+                    ),
+                    (
+                        $(
+                            $T.1,
+                        )*
+                    )
+                )
+            }
 
-    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
-        T1::spawn_workflow_streams(builder)
-    }
+            fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
+                (
+                    $($T::spawn_workflow_streams(builder),
+                    )*
+                 )
+            }
 
-    fn spawn_node_streams(
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::StreamOutputPack,
-    ) {
-        T1::spawn_node_streams(map, builder)
-    }
+            fn spawn_node_streams(
+                map: &mut StreamTargetMap,
+                builder: &mut Builder,
+            ) -> (
+                Self::StreamStorageBundle,
+                Self::StreamOutputPack,
+            ) {
+                let ($($T,)*) = (
+                    $(
+                        $T::spawn_node_streams(map, builder),
+                    )*
+                );
+                // Now unpack the tuples
+                (
+                    (
+                        $(
+                            $T.0,
+                        )*
+                    ),
+                    (
+                        $(
+                            $T.1,
+                        )*
+                    )
+                )
+            }
 
-    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::Receiver,
-    ) {
-        T1::take_streams(source, map, builder)
-    }
+            fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
+                Self::StreamStorageBundle,
+                Self::Receiver,
+            ) {
+                let ($($T,)*) = (
+                    $(
+                        $T::take_streams(source, map, builder),
+                    )*
+                );
+                // Now unpack the tuples
+                (
+                    (
+                        $(
+                            $T.0,
+                        )*
+                    ),
+                    (
+                        $(
+                            $T.1,
+                        )*
+                    )
+                )
+            }
 
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Self::StreamStorageBundle {
-        T1::collect_streams(source, target, map, commands)
-    }
+            fn collect_streams(
+                source: Entity,
+                target: Entity,
+                map: &mut StreamTargetMap,
+                commands: &mut Commands,
+            ) -> Self::StreamStorageBundle {
+                (
+                    $(
+                        $T::collect_streams(source, target, map, commands),
+                    )*
+                )
+            }
 
-    fn make_channel(
-        inner: &Arc<InnerChannel>,
-        world: &World,
-    ) -> Self::Channel {
-        T1::make_channel(inner, world)
-    }
+            fn make_channel(
+                inner: &Arc<InnerChannel>,
+                world: &World,
+            ) -> Self::Channel {
+                (
+                    $(
+                        $T::make_channel(inner, world),
+                    )*
+                )
+            }
 
-    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
-        T1::make_buffer(source, world)
-    }
+            fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
+                (
+                    $(
+                        $T::make_buffer(source, world),
+                    )*
+                )
+            }
 
-    fn process_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        T1::process_buffer(buffer, source, session, unused, world, roster)?;
-        Ok(())
-    }
+            fn process_buffer(
+                buffer: Self::Buffer,
+                source: Entity,
+                session: Entity,
+                unused: &mut UnusedStreams,
+                world: &mut World,
+                roster: &mut OperationRoster,
+            ) -> OperationResult {
+                let ($($T,)*) = buffer;
+                $(
+                    $T::process_buffer($T, source, session, unused, world, roster)?;
+                )*
+                Ok(())
+            }
 
-    fn has_streams() -> bool {
-        T1::has_streams()
-    }
-}
-
-impl<T1: StreamPack, T2: StreamPack> StreamPack for (T1, T2) {
-    type StreamAvailableBundle = (T1::StreamAvailableBundle, T2::StreamAvailableBundle);
-    type StreamFilter = (T1::StreamFilter, T2::StreamFilter);
-    type StreamStorageBundle = (T1::StreamStorageBundle, T2::StreamStorageBundle);
-    type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack);
-    type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack);
-    type Receiver = (T1::Receiver, T2::Receiver);
-    type Channel = (T1::Channel, T2::Channel);
-    type Buffer = (T1::Buffer, T2::Buffer);
-
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (
-        Self::StreamInputPack,
-        Self::StreamOutputPack,
-    ) {
-        let t1 = T1::spawn_scope_streams(in_scope, out_scope, commands);
-        let t2 = T2::spawn_scope_streams(in_scope, out_scope, commands);
-        ((t1.0, t2.0), (t1.1, t2.1))
-    }
-
-    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
-        let t1 = T1::spawn_workflow_streams(builder);
-        let t2 = T2::spawn_workflow_streams(builder);
-        (t1, t2)
-    }
-
-    fn spawn_node_streams(
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::StreamOutputPack,
-    ) {
-        let t1 = T1::spawn_node_streams(map, builder);
-        let t2 = T2::spawn_node_streams(map, builder);
-        ((t1.0, t2.0), (t1.1, t2.1))
-    }
-
-    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::Receiver,
-    ) {
-        let t1 = T1::take_streams(source, map, builder);
-        let t2 = T2::take_streams(source, map, builder);
-        ((t1.0, t2.0), (t1.1, t2.1))
-    }
-
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Self::StreamStorageBundle {
-        let t1 = T1::collect_streams(source, target, map, commands);
-        let t2 = T2::collect_streams(source, target, map, commands);
-        (t1, t2)
-    }
-
-    fn make_channel(
-        inner: &Arc<InnerChannel>,
-        world: &World,
-    ) -> Self::Channel {
-        let t1 = T1::make_channel(inner, world);
-        let t2 = T2::make_channel(inner, world);
-        (t1, t2)
-    }
-
-    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
-        let t1 = T1::make_buffer(source, world);
-        let t2 = T2::make_buffer(source, world);
-        (t1, t2)
-    }
-
-    fn process_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        T1::process_buffer(buffer.0, source, session, unused, world, roster)?;
-        T2::process_buffer(buffer.1, source, session, unused, world, roster)?;
-        Ok(())
-    }
-
-    fn has_streams() -> bool {
-        T1::has_streams()
-        || T2::has_streams()
+            fn has_streams() -> bool {
+                let mut has_streams = false;
+                $(
+                    has_streams = has_streams || $T::has_streams();
+                )*
+                has_streams
+            }
+        }
     }
 }
 
-impl<T1: StreamPack, T2: StreamPack, T3: StreamPack> StreamPack for (T1, T2, T3) {
-    type StreamAvailableBundle = (T1::StreamAvailableBundle, T2::StreamAvailableBundle, T3::StreamAvailableBundle);
-    type StreamFilter = (T1::StreamFilter, T2::StreamFilter, T3::StreamFilter);
-    type StreamStorageBundle = (T1::StreamStorageBundle, T2::StreamStorageBundle, T3::StreamStorageBundle);
-    type StreamInputPack = (T1::StreamInputPack, T2::StreamInputPack, T3::StreamInputPack);
-    type StreamOutputPack = (T1::StreamOutputPack, T2::StreamOutputPack, T3::StreamOutputPack);
-    type Receiver = (T1::Receiver, T2::Receiver, T3::Receiver);
-    type Channel = (T1::Channel, T2::Channel, T3::Channel);
-    type Buffer = (T1::Buffer, T2::Buffer, T3::Buffer);
-
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (
-        Self::StreamInputPack,
-        Self::StreamOutputPack,
-    ) {
-        let t1 = T1::spawn_scope_streams(in_scope, out_scope, commands);
-        let t2 = T2::spawn_scope_streams(in_scope, out_scope, commands);
-        let t3 = T3::spawn_scope_streams(in_scope, out_scope, commands);
-        ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
-    }
-
-    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
-        let t1 = T1::spawn_workflow_streams(builder);
-        let t2 = T2::spawn_workflow_streams(builder);
-        let t3 = T3::spawn_workflow_streams(builder);
-        (t1, t2, t3)
-    }
-
-    fn spawn_node_streams(
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::StreamOutputPack,
-    ) {
-        let t1 = T1::spawn_node_streams(map, builder);
-        let t2 = T2::spawn_node_streams(map, builder);
-        let t3 = T3::spawn_node_streams(map, builder);
-        ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
-    }
-
-    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::Receiver,
-    ) {
-        let t1 = T1::take_streams(source, map, builder);
-        let t2 = T2::take_streams(source, map, builder);
-        let t3 = T3::take_streams(source, map, builder);
-        ((t1.0, t2.0, t3.0), (t1.1, t2.1, t3.1))
-    }
-
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Self::StreamStorageBundle {
-        let t1 = T1::collect_streams(source, target, map, commands);
-        let t2 = T2::collect_streams(source, target, map, commands);
-        let t3 = T3::collect_streams(source, target, map, commands);
-        (t1, t2, t3)
-    }
-
-    fn make_channel(
-        inner: &Arc<InnerChannel>,
-        world: &World,
-    ) -> Self::Channel {
-        let t1 = T1::make_channel(inner, world);
-        let t2 = T2::make_channel(inner, world);
-        let t3 = T3::make_channel(inner, world);
-        (t1, t2, t3)
-    }
-
-    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
-        let t1 = T1::make_buffer(source, world);
-        let t2 = T2::make_buffer(source, world);
-        let t3 = T3::make_buffer(source, world);
-        (t1, t2, t3)
-    }
-
-    fn process_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        T1::process_buffer(buffer.0, source, session, unused, world, roster)?;
-        T2::process_buffer(buffer.1, source, session, unused, world, roster)?;
-        T3::process_buffer(buffer.2, source, session, unused, world, roster)?;
-        Ok(())
-    }
-
-    fn has_streams() -> bool {
-        T1::has_streams()
-        || T2::has_streams()
-        || T3::has_streams()
-    }
-}
+// Implements the `StreamPack` trait for all tuples between size 1 and 12
+// (inclusive) made of types that implement `StreamPack`
+all_tuples!(impl_streampack_for_tuple, 1, 12, T);
 
 /// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
 /// based on what streams they provide. If a stream is required, you should wrap
@@ -811,11 +695,6 @@ pub struct Require<T> {
     _ignore: std::marker::PhantomData<T>,
 }
 
-impl StreamFilter for () {
-    type Filter = ();
-    type Pack = ();
-}
-
 impl<T: StreamPack> StreamFilter for Require<T> {
     type Filter = T::StreamFilter;
     type Pack = T;
@@ -826,10 +705,19 @@ impl<T: StreamPack> StreamFilter for Option<T> {
     type Pack = T;
 }
 
-impl<T0: StreamFilter, T1: StreamFilter> StreamFilter for (T0, T1) {
-    type Filter = (T0::Filter, T1::Filter);
-    type Pack = (T0::Pack, T1::Pack);
+macro_rules! impl_streamfilter_for_tuple {
+    ($($T:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<$($T: StreamFilter),*> StreamFilter for ($($T,)*) {
+            type Filter = ($($T::Filter,)*);
+            type Pack = ($($T::Pack,)*);
+        }
+    }
 }
+
+// Implements the `StreamFilter` trait for all tuples between size 0 and 12
+// (inclusive) made of types that implement `StreamFilter`
+all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
 mod tests {
