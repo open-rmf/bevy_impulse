@@ -647,6 +647,8 @@ mod tests {
     fn test_buffer_key_lifecycle() {
         let mut context = TestingContext::minimal_plugins();
 
+        // Test a workflow where each node in a long chain repeatedly accesses
+        // a buffer and might be the one to push a value into it.
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer::<Register>(BufferSettings::keep_all());
 
@@ -668,6 +670,45 @@ mod tests {
                 .then(decrement_register_cb.clone())
                 .with_access(buffer)
                 .then(async_decrement_register_cb);
+        });
+
+        run_register_test(workflow, 0, true, &mut context);
+        run_register_test(workflow, 1, true, &mut context);
+        run_register_test(workflow, 2, true, &mut context);
+        run_register_test(workflow, 3, true, &mut context);
+        run_register_test(workflow, 4, false, &mut context);
+        run_register_test(workflow, 5, false, &mut context);
+        run_register_test(workflow, 6, false, &mut context);
+
+        // Test a workflow where only one buffer accessor node is used, but the
+        // key is passed through a long chain in the workflow, with a disposal
+        // being forced as well.
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer::<Register>(BufferSettings::keep_all());
+
+            // The only path to termination is from listening to the buffer.
+            builder.listen(buffer)
+                .then(pull_register_from_buffer.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+
+            let decrement_register_and_pass_keys_cb = decrement_register_and_pass_keys.into_blocking_callback();
+            let async_decrement_register_and_pass_keys_cb = async_decrement_register_and_pass_keys.as_callback();
+            let (loose_end, dead_end): (_, Output<Option<Register>>) = scope.input.chain(builder)
+                .with_access(buffer)
+                .then(decrement_register_and_pass_keys_cb.clone())
+                .then(async_decrement_register_and_pass_keys_cb.clone())
+                .dispose_on_none()
+                .map_block(|v| (v, None))
+                .unzip();
+
+            // Force the workflow to trigger a disposal while the key is still in flight
+            let _ = dead_end.chain(builder).dispose_on_none();
+
+            let _ = loose_end.chain(builder)
+                .then(async_decrement_register_and_pass_keys_cb)
+                .dispose_on_none()
+                .then(decrement_register_and_pass_keys_cb);
         });
 
         run_register_test(workflow, 0, true, &mut context);
@@ -701,7 +742,7 @@ mod tests {
     }
 
     // We use this struct to keep track of operations that have occurred in the
-    // test workflow. Values from in_slot get moved to out_slot until out_slot
+    // test workflow. Values from in_slot get moved to out_slot until in_slot
     // reaches 0, then the whole struct gets put into a buffer where a listener
     // will then send it to the terminal node.
     #[derive(Clone, Copy, Debug)]
@@ -741,13 +782,38 @@ mod tests {
         register
     }
 
+    fn decrement_register_and_pass_keys(
+        In((mut register, key)): In<(Register, BufferKey<Register>)>,
+        mut access: BufferAccessMut<Register>,
+    ) -> (Register, BufferKey<Register>) {
+        if register.in_slot == 0 {
+            access.get_mut(&key).unwrap().push(register);
+            return (register, key);
+        }
+
+        register.in_slot -= 1;
+        register.out_slot += 1;
+        (register, key)
+    }
+
     fn async_decrement_register(
         In(input): In<AsyncCallback<(Register, BufferKey<Register>)>>,
     ) -> impl Future<Output = Option<Register>> {
         async move {
             input.channel.query(
                 input.request,
-                decrement_register.into_blocking_callback()
+                decrement_register.into_blocking_callback(),
+            ).await.available()
+        }
+    }
+
+    fn async_decrement_register_and_pass_keys(
+        In(input): In<AsyncCallback<(Register, BufferKey<Register>)>>,
+    ) -> impl Future<Output = Option<(Register, BufferKey<Register>)>> {
+        async move {
+            input.channel.query(
+                input.request,
+                decrement_register_and_pass_keys.into_blocking_callback(),
             ).await.available()
         }
     }
