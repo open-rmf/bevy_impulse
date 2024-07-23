@@ -105,9 +105,34 @@ pub struct BufferSettings {
 }
 
 impl BufferSettings {
+    /// Define new buffer settings
+    pub fn new(retention: RetentionPolicy) -> Self {
+        Self { retention }
+    }
+
+    /// Create `BufferSettings` with a retention policy of [`RetentionPolicy::KeepLast`]`(n)`.
+    pub fn keep_last(n: usize) -> Self {
+        Self::new(RetentionPolicy::KeepLast(n))
+    }
+
+    /// Create `BufferSettings` with a retention policy of [`RetentionPolicy::KeepFirst`]`(n)`.
+    pub fn keep_first(n: usize) -> Self {
+        Self::new(RetentionPolicy::KeepFirst(n))
+    }
+
+    /// Create `BufferSettings` with a retention policy of [`RetentionPolicy::KeepAll`].
+    pub fn keep_all() -> Self {
+        Self::new(RetentionPolicy::KeepAll)
+    }
+
     /// Get the retention policy for the buffer.
     pub fn retention(&self) -> RetentionPolicy {
         self.retention
+    }
+
+    /// Modify the retention policy for the buffer.
+    pub fn retention_mut(&mut self) -> &mut RetentionPolicy {
+        &mut self.retention
     }
 }
 
@@ -313,6 +338,11 @@ where
     pub fn len(&self) -> usize {
         self.storage.count(self.session)
     }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Access to mutate a buffer that exists inside a workflow.
@@ -375,6 +405,11 @@ where
     /// How many items are in the buffer?
     pub fn len(&self) -> usize {
         self.storage.count(self.session)
+    }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Iterate over mutable borrows of the contents in the buffer.
@@ -460,5 +495,132 @@ where
                 self.buffer, self.session, self.accessor,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn test_buffer_key_access() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let add_buffers_cb = add_buffers.into_blocking_callback();
+        let add_from_buffer_srv = add_from_buffer.into_blocking_callback();
+        let multiply_buffers_cb = multiply_buffers.into_blocking_callback();
+
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<(f64, f64), f64>, builder| {
+                scope.input.chain(builder)
+                    .unzip()
+                    .listen(builder)
+                    .then(multiply_buffers_cb)
+                    .connect(scope.terminate);
+            }
+        );
+
+        let mut promise = context.command(|commands|
+            commands
+            .request((2.0, 3.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|value| value == 6.0));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<(f64, f64), f64>, builder| {
+                scope.input.chain(builder)
+                    .unzip()
+                    .listen(builder)
+                    .then(add_buffers_cb)
+                    .dispose_on_none()
+                    .connect(scope.terminate);
+            }
+        );
+
+        let mut promise = context.command(|commands|
+            commands
+            .request((4.0, 5.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|value| value == 9.0));
+
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<(f64, f64), Result<f64, f64>>, builder| {
+                let (branch_to_add, branch_to_buffer) = scope.input.chain(builder).unzip();
+                let buffer = builder.create_buffer::<f64>(BufferSettings::keep_first(10));
+                builder.connect(branch_to_buffer, buffer.input_slot());
+
+                let add_node = branch_to_add.chain(builder)
+                    .with_access(buffer)
+                    .then_node(add_from_buffer_srv.clone());
+
+                add_node.output.chain(builder)
+                    .fork_result(
+                        // If the buffer had an item in it, we send it to another
+                        // node that tries to pull a second time (we expect the
+                        // buffer to be empty this second time) and then
+                        // terminates.
+                        |chain| chain
+                            .with_access(buffer)
+                            .then(add_from_buffer_srv)
+                            .connect(scope.terminate),
+                        // If the buffer was empty, keep looping back until there
+                        // is a value available.
+                        |chain| chain
+                            .with_access(buffer)
+                            .connect(add_node.input),
+                    );
+            }
+        );
+
+        let mut promise = context.command(|commands|
+            commands
+            .request((2.0, 3.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|value| value.is_err_and(|n| n == 5.0)));
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn add_from_buffer(
+        In((lhs, key)): In<(f64, BufferKey<f64>)>,
+        mut access: BufferAccessMut<f64>,
+        // access: BufferAccess<f64>,
+    ) -> Result<f64, f64> {
+        let rhs = access.get_mut(&key).map_err(|_| lhs)?.pull().ok_or(lhs)?;
+        Ok(lhs + rhs)
+    }
+
+    fn multiply_buffers(
+        In((key_a, key_b)): In<(BufferKey<f64>, BufferKey<f64>)>,
+        access: BufferAccess<f64>,
+    ) -> f64 {
+        *access.get(&key_a).unwrap().oldest().unwrap()
+        * *access.get(&key_b).unwrap().oldest().unwrap()
+    }
+
+    fn add_buffers(
+        In((key_a, key_b)): In<(BufferKey<f64>, BufferKey<f64>)>,
+        mut access: BufferAccessMut<f64>,
+    ) -> Option<f64> {
+        if access.get(&key_a).unwrap().is_empty() {
+            return None;
+        }
+
+        if access.get(&key_b).unwrap().is_empty() {
+            return None;
+        }
+
+        let rhs = access.get_mut(&key_a).unwrap().pull().unwrap();
+        let lhs = access.get_mut(&key_b).unwrap().pull().unwrap();
+        Some(rhs + lhs)
     }
 }
