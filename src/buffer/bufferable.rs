@@ -24,6 +24,7 @@ use crate::{
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
+pub type BufferItem<B> = <<B as Bufferable>::BufferType as Buffered>::Item;
 
 pub trait Bufferable {
     type BufferType: Buffered;
@@ -41,11 +42,11 @@ pub trait Bufferable {
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, <Self::BufferType as Buffered>::Item>
+    ) -> Chain<'w, 's, 'a, 'b, BufferItem<Self>>
     where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
-        <Self::BufferType as Buffered>::Item: 'static + Send + Sync,
+        BufferItem<Self>: 'static + Send + Sync,
     {
         let scope = builder.scope();
         let buffers = self.as_buffer(builder);

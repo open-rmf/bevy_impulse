@@ -23,7 +23,8 @@ use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
     ScopeSettings, BeginCancel, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
-    AsMap, ProvideOnce, ScopeSettingsStorage,
+    AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
+    Chain,
 };
 
 pub(crate) mod connect;
@@ -192,6 +193,30 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Settings: Into<ScopeSettings>,
     {
         self.create_scope::<Request, Response, (), Settings>(build)
+    }
+
+    /// Alternative way of calling [`Bufferable::join`]
+    pub fn join<'b, B: Bufferable>(
+        &'b mut self,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, BufferItem<B>>
+    where
+        B::BufferType: 'static + Send + Sync,
+        BufferItem<B>: 'static + Send + Sync,
+    {
+        buffers.join(self)
+    }
+
+    /// Alternative way of calling [`Bufferable::listen`].
+    pub fn listen<'b, B: Bufferable>(
+        &'b mut self,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
+    where
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+    {
+        buffers.listen(self)
     }
 
     /// It is possible for a scope to be cancelled before it terminates. Even a

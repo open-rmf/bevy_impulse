@@ -17,8 +17,9 @@
 
 use bevy::prelude::{Entity, Component, World};
 
-use std::collections::{
-    HashMap, hash_map::Entry,
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    sync::Arc,
 };
 
 use smallvec::SmallVec;
@@ -133,13 +134,14 @@ where
     let mut storage = world.get_mut::<BufferAccessStorage<B>>(source).or_broken()?;
     let s = storage.as_mut();
     let mut made_key = false;
-    let keys = match s.keys.entry(source) {
-        Entry::Occupied(occupied) => occupied.get().clone(),
+    let keys = match s.keys.entry(session) {
+        Entry::Occupied(occupied) => B::deep_clone_key(occupied.get()),
         Entry::Vacant(vacant) => {
             made_key = true;
-            vacant.insert(
-                s.buffers.create_key(scope, session, source, &sender)?
-            ).clone()
+            let new_key = vacant.insert(
+                s.buffers.create_key(scope, session, source, &sender, &Arc::new(()))?
+            );
+            B::deep_clone_key(new_key)
         }
     };
 

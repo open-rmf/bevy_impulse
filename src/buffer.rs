@@ -223,7 +223,7 @@ impl<T> BufferKey<T> {
     }
 
     pub(crate) fn is_in_use(&self) -> bool {
-        Arc::strong_count(&self.lifecycle) > 1
+        self.lifecycle.is_in_use()
     }
 
     pub(crate) fn new(
@@ -232,9 +232,26 @@ impl<T> BufferKey<T> {
         session: Entity,
         accessor: Entity,
         sender: CbSender<ChannelItem>,
+        tracker: Arc<()>,
     ) -> BufferKey<T> {
-        let lifecycle = Arc::new(BufferAccessLifecycle::new(scope, session, sender));
+        let lifecycle = Arc::new(BufferAccessLifecycle::new(
+            scope, buffer, session, accessor, sender, tracker,
+        ));
         BufferKey { buffer, session, accessor, lifecycle, _ignore: Default::default() }
+    }
+
+    // We do a deep clone of the key when distributing it to decouple the
+    // lifecycle of the keys that we send out from the key that's held by the
+    // accessor node.
+    //
+    // The key instance held by the accessor node will never be dropped until
+    // the session is cleaned up, so the keys that we send out into the workflow
+    // need to have their own independent lifecycles or else we won't detect
+    // when the workflow has dropped them.
+    pub(crate) fn deep_clone(&self) -> Self {
+        let mut deep = self.clone();
+        deep.lifecycle = Arc::new(self.lifecycle.as_ref().clone());
+        deep
     }
 }
 
@@ -501,21 +518,22 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
+    use std::future::Future;
 
     #[test]
     fn test_buffer_key_access() {
         let mut context = TestingContext::minimal_plugins();
 
-        let add_buffers_cb = add_buffers.into_blocking_callback();
-        let add_from_buffer_srv = add_from_buffer.into_blocking_callback();
-        let multiply_buffers_cb = multiply_buffers.into_blocking_callback();
+        let add_buffers_by_pull_cb = add_buffers_by_pull.into_blocking_callback();
+        let add_from_buffer_cb = add_from_buffer.into_blocking_callback();
+        let multiply_buffers_by_copy_cb = multiply_buffers_by_copy.into_blocking_callback();
 
         let workflow = context.spawn_io_workflow(
             |scope: Scope<(f64, f64), f64>, builder| {
                 scope.input.chain(builder)
                     .unzip()
                     .listen(builder)
-                    .then(multiply_buffers_cb)
+                    .then(multiply_buffers_by_copy_cb)
                     .connect(scope.terminate);
             }
         );
@@ -535,7 +553,7 @@ mod tests {
                 scope.input.chain(builder)
                     .unzip()
                     .listen(builder)
-                    .then(add_buffers_cb)
+                    .then(add_buffers_by_pull_cb)
                     .dispose_on_none()
                     .connect(scope.terminate);
             }
@@ -549,18 +567,19 @@ mod tests {
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|value| value == 9.0));
+        assert!(context.no_unhandled_errors());
 
         let workflow = context.spawn_io_workflow(
             |scope: Scope<(f64, f64), Result<f64, f64>>, builder| {
-                let (branch_to_add, branch_to_buffer) = scope.input.chain(builder).unzip();
+                let (branch_to_adder, branch_to_buffer) = scope.input.chain(builder).unzip();
                 let buffer = builder.create_buffer::<f64>(BufferSettings::keep_first(10));
                 builder.connect(branch_to_buffer, buffer.input_slot());
 
-                let add_node = branch_to_add.chain(builder)
+                let adder_node = branch_to_adder.chain(builder)
                     .with_access(buffer)
-                    .then_node(add_from_buffer_srv.clone());
+                    .then_node(add_from_buffer_cb.clone());
 
-                add_node.output.chain(builder)
+                adder_node.output.chain(builder)
                     .fork_result(
                         // If the buffer had an item in it, we send it to another
                         // node that tries to pull a second time (we expect the
@@ -568,13 +587,13 @@ mod tests {
                         // terminates.
                         |chain| chain
                             .with_access(buffer)
-                            .then(add_from_buffer_srv)
+                            .then(add_from_buffer_cb)
                             .connect(scope.terminate),
                         // If the buffer was empty, keep looping back until there
                         // is a value available.
                         |chain| chain
                             .with_access(buffer)
-                            .connect(add_node.input),
+                            .connect(adder_node.input),
                     );
             }
         );
@@ -599,7 +618,7 @@ mod tests {
         Ok(lhs + rhs)
     }
 
-    fn multiply_buffers(
+    fn multiply_buffers_by_copy(
         In((key_a, key_b)): In<(BufferKey<f64>, BufferKey<f64>)>,
         access: BufferAccess<f64>,
     ) -> f64 {
@@ -607,7 +626,7 @@ mod tests {
         * *access.get(&key_b).unwrap().oldest().unwrap()
     }
 
-    fn add_buffers(
+    fn add_buffers_by_pull(
         In((key_a, key_b)): In<(BufferKey<f64>, BufferKey<f64>)>,
         mut access: BufferAccessMut<f64>,
     ) -> Option<f64> {
@@ -622,5 +641,114 @@ mod tests {
         let rhs = access.get_mut(&key_a).unwrap().pull().unwrap();
         let lhs = access.get_mut(&key_b).unwrap().pull().unwrap();
         Some(rhs + lhs)
+    }
+
+    #[test]
+    fn test_buffer_key_lifecycle() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer::<Register>(BufferSettings::keep_all());
+
+            // The only path to termination is from listening to the buffer.
+            builder.listen(buffer)
+                .then(pull_register_from_buffer.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+
+            let decrement_register_cb = decrement_register.into_blocking_callback();
+            let async_decrement_register_cb = async_decrement_register.as_callback();
+            let _ = scope.input.chain(builder)
+                .with_access(buffer)
+                .then(decrement_register_cb.clone())
+                .with_access(buffer)
+                .then(async_decrement_register_cb.clone())
+                .dispose_on_none()
+                .with_access(buffer)
+                .then(decrement_register_cb.clone())
+                .with_access(buffer)
+                .then(async_decrement_register_cb);
+        });
+
+        run_register_test(workflow, 0, true, &mut context);
+        run_register_test(workflow, 1, true, &mut context);
+        run_register_test(workflow, 2, true, &mut context);
+        run_register_test(workflow, 3, true, &mut context);
+        run_register_test(workflow, 4, false, &mut context);
+        run_register_test(workflow, 5, false, &mut context);
+        run_register_test(workflow, 6, false, &mut context);
+    }
+
+    fn run_register_test(
+        workflow: Service<Register, Register>,
+        initial_value: u64,
+        expect_success: bool,
+        context: &mut TestingContext,
+    ) {
+        let mut promise = context.command(|commands|
+            commands
+            .request(Register::new(initial_value), workflow)
+            .take_response()
+        );
+
+        context.run_while_pending(&mut promise);
+        if expect_success {
+            assert!(promise.take().available().is_some_and(|r| r.finished_with(initial_value)));
+        } else {
+            assert!(promise.take().is_cancelled());
+        }
+        assert!(context.no_unhandled_errors());
+    }
+
+    // We use this struct to keep track of operations that have occurred in the
+    // test workflow. Values from in_slot get moved to out_slot until out_slot
+    // reaches 0, then the whole struct gets put into a buffer where a listener
+    // will then send it to the terminal node.
+    #[derive(Clone, Copy, Debug)]
+    struct Register {
+        in_slot: u64,
+        out_slot: u64,
+    }
+
+    impl Register {
+        fn new(start_from: u64) -> Self {
+            Self { in_slot: start_from, out_slot: 0 }
+        }
+
+        fn finished_with(&self, out_slot: u64) -> bool {
+            self.in_slot == 0 && self.out_slot == out_slot
+        }
+    }
+
+    fn pull_register_from_buffer(
+        In(key): In<BufferKey<Register>>,
+        mut access: BufferAccessMut<Register>,
+    ) -> Option<Register> {
+        access.get_mut(&key).ok()?.pull()
+    }
+
+    fn decrement_register(
+        In((mut register, key)): In<(Register, BufferKey<Register>)>,
+        mut access: BufferAccessMut<Register>,
+    ) -> Register {
+        if register.in_slot == 0 {
+            access.get_mut(&key).unwrap().push(register);
+            return register;
+        }
+
+        register.in_slot -= 1;
+        register.out_slot += 1;
+        register
+    }
+
+    fn async_decrement_register(
+        In(input): In<AsyncCallback<(Register, BufferKey<Register>)>>,
+    ) -> impl Future<Output = Option<Register>> {
+        async move {
+            input.channel.query(
+                input.request,
+                decrement_register.into_blocking_callback()
+            ).await.available()
+        }
     }
 }

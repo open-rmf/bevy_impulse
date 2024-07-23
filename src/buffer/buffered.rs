@@ -22,10 +22,12 @@ use bevy::{
 
 use smallvec::SmallVec;
 
+use std::sync::Arc;
+
 use crate::{
     Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer, ChannelSender,
     ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
-    BufferStorage,
+    BufferStorage, SingleInputStorage,
 };
 
 pub trait Buffered: Clone {
@@ -65,6 +67,7 @@ pub trait Buffered: Clone {
         session: Entity,
         accessor: Entity,
         sender: &ChannelSender,
+        tracker: &Arc<()>,
     ) -> Result<Self::Key, OperationError>;
 
     fn ensure_active_session(
@@ -72,6 +75,8 @@ pub trait Buffered: Clone {
         session: Entity,
         world: &mut World,
     ) -> OperationResult;
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key;
 
     fn is_key_in_use(key: &Self::Key) -> bool;
 }
@@ -104,9 +109,17 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         let mut targets = world
             .get_mut::<ForkTargetStorage>(self.source)
             .or_broken()?;
-        targets.0.push(listener);
-        targets.0.sort();
-        targets.0.dedup();
+        if !targets.0.contains(&listener) {
+            targets.0.push(listener);
+        }
+
+        if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
+            input_storage.add(self.source);
+        } else {
+            world.get_entity_mut(listener).or_broken()?
+                .insert(SingleInputStorage::new(self.source));
+        }
+
         Ok(())
     }
 
@@ -136,8 +149,9 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         session: Entity,
         accessor: Entity,
         sender: &ChannelSender,
+        tracker: &Arc<()>,
     ) -> Result<Self::Key, OperationError> {
-        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone()))
+        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone(), tracker.clone()))
     }
 
     fn ensure_active_session(
@@ -148,6 +162,10 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
             .ensure_session(session);
         Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -188,9 +206,16 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         let mut targets = world
             .get_mut::<ForkTargetStorage>(self.source)
             .or_broken()?;
-        targets.0.push(listener);
-        targets.0.sort();
-        targets.0.dedup();
+        if !targets.0.contains(&listener) {
+            targets.0.push(listener);
+        }
+
+        if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
+            input_storage.add(self.source);
+        } else {
+            world.get_entity_mut(listener).or_broken()?
+                .insert(SingleInputStorage::new(self.source));
+        }
         Ok(())
     }
 
@@ -220,8 +245,9 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         session: Entity,
         accessor: Entity,
         sender: &ChannelSender,
+        tracker: &Arc<()>,
     ) -> Result<Self::Key, OperationError> {
-        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone()))
+        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone(), tracker.clone()))
     }
 
     fn ensure_active_session(
@@ -232,6 +258,10 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
             .ensure_session(session);
         Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -316,10 +346,11 @@ macro_rules! impl_buffered_for_tuple {
                 session: Entity,
                 accessor: Entity,
                 sender: &ChannelSender,
+                tracker: &Arc<()>,
             ) -> Result<Self::Key, OperationError> {
                 let ($($T,)*) = self;
                 Ok(($(
-                    $T.create_key(scope, session, accessor, sender)?,
+                    $T.create_key(scope, session, accessor, sender, tracker)?,
                 )*))
             }
 
@@ -333,6 +364,13 @@ macro_rules! impl_buffered_for_tuple {
                     $T.ensure_active_session(session, world)?;
                 )*
                 Ok(())
+            }
+
+            fn deep_clone_key(key: &Self::Key) -> Self::Key {
+                let ($($K,)*) = key;
+                ($(
+                    $T::deep_clone_key($K),
+                )*)
             }
 
             fn is_key_in_use(key: &Self::Key) -> bool {
@@ -418,10 +456,11 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         session: Entity,
         accessor: Entity,
         sender: &ChannelSender,
+        tracker: &Arc<()>,
     ) -> Result<Self::Key, OperationError> {
         let mut keys = SmallVec::new();
         for buffer in self {
-            keys.push(buffer.create_key(scope, session, accessor, sender)?);
+            keys.push(buffer.create_key(scope, session, accessor, sender, tracker)?);
         }
         Ok(keys)
     }
@@ -436,6 +475,14 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         }
 
         Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        let mut keys = SmallVec::new();
+        for k in key {
+            keys.push(T::deep_clone_key(k));
+        }
+        keys
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
@@ -516,10 +563,11 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         session: Entity,
         accessor: Entity,
         sender: &ChannelSender,
+        tracker: &Arc<()>,
     ) -> Result<Self::Key, OperationError> {
         let mut keys = SmallVec::new();
         for buffer in self {
-            keys.push(buffer.create_key(scope, session, accessor, sender)?);
+            keys.push(buffer.create_key(scope, session, accessor, sender, tracker)?);
         }
         Ok(keys)
     }
@@ -534,6 +582,14 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         }
 
         Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        let mut keys = SmallVec::new();
+        for k in key {
+            keys.push(T::deep_clone_key(k));
+        }
+        keys
     }
 
     fn is_key_in_use(key: &Self::Key) -> bool {
