@@ -330,17 +330,75 @@ mod tests {
     fn test_disconnected_workflow() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.spawn_io_workflow(|_: Scope<(), ()>, _| {
+        let workflow = context.spawn_io_workflow(|_, _| {
             // Do nothing. Totally empty workflow.
         });
+        // Test this repeatedly because we cache the result after the first time.
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
 
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let node = builder.create_map_block(|v| v);
+            builder.connect(scope.input, node.input);
+            // Create a tight infinite loop that will never reach the terminal
+            builder.connect(node.output, node.input);
+        });
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let _ = scope.input.chain(builder)
+                .map_block(|v| v)
+                .fork_clone((
+                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).output(),
+                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).output(),
+                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).output(),
+                ));
+
+            // Create an exit node that never connects to the scope's input.
+            let exit_node = builder.create_map_block(|v| v);
+            builder.connect(exit_node.output, scope.terminate);
+        });
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let entry_buffer = builder.create_buffer::<()>(BufferSettings::keep_all());
+            let _ = scope.input.chain(builder)
+                .map_block(|v| v)
+                .fork_clone((
+                    |chain: Chain<()>| chain.map_block(|v| v).connect(entry_buffer.input_slot()),
+                    |chain: Chain<()>| chain.map_block(|v| v).connect(entry_buffer.input_slot()),
+                    |chain: Chain<()>| chain.map_block(|v| v).connect(entry_buffer.input_slot()),
+                ));
+
+            // Create an exit buffer with no relationship to the entry buffer
+            // which is the only thing that connects to the terminal node.
+            let exit_buffer = builder.create_buffer::<()>(BufferSettings::keep_all());
+            builder.listen(exit_buffer)
+                .map_block(|_| ())
+                .connect(scope.terminate);
+        });
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+        check_unreachable(workflow, 1, &mut context);
+    }
+
+    fn check_unreachable(
+        workflow: Service<(), ()>,
+        flush_cycles: usize,
+        context: &mut TestingContext,
+    ) {
         let mut promise = context.command(|commands|
             commands
             .request((), workflow)
             .take_response()
         );
 
-        context.run_with_conditions(&mut promise, 1);
+        context.run_with_conditions(&mut promise, flush_cycles);
         assert!(promise.take().cancellation().is_some_and(
             |c| matches!(*c.cause, CancellationCause::Unreachable(_))
         ));
