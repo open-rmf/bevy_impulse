@@ -127,7 +127,7 @@ where
 
     let (request, blocker) = match update {
         DeliveryUpdate::Immediate { blocking, request } => {
-            let serve_next = serve_next_workflow_request::<Request>;
+            let serve_next = serve_next_workflow_request::<Request, Response, Streams>;
             let blocker = blocking.map(|label| Blocker {
                 provider,
                 source,
@@ -161,7 +161,7 @@ where
     };
 
     let input = Input { session: parent_session, data: request };
-    begin_workflow::<Request>(
+    begin_workflow::<Request, Response, Streams>(
         input,
         source,
         target,
@@ -173,7 +173,7 @@ where
     )
 }
 
-fn begin_workflow<Request>(
+fn begin_workflow<Request, Response, Streams>(
     input: Input<Request>,
     source: Entity,
     target: Entity,
@@ -185,20 +185,28 @@ fn begin_workflow<Request>(
 ) -> OperationResult
 where
     Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     let mut exit_target = world.get_mut::<ExitTargetStorage>(scope).or_broken()?;
     let parent_session = input.session;
     exit_target.map.insert(scoped_session, ExitTarget { target, source, parent_session, blocker });
-    begin_scope(input, scoped_session, OperationRequest { source: scope, world, roster })
+    begin_scope::<Request, Response, Streams>(
+        input,
+        scoped_session,
+        OperationRequest { source: scope, world, roster },
+    )
 }
 
-fn serve_next_workflow_request<Request>(
+fn serve_next_workflow_request<Request, Response, Streams>(
     unblock: Blocker,
     world: &mut World,
     roster: &mut OperationRoster,
 )
 where
     Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
     let Blocker { provider, label, .. } = unblock;
     let Some(workflow) = world.get::<WorkflowStorage>(provider) else {
@@ -208,7 +216,7 @@ where
 
     loop {
         let Some(Deliver { request, task_id: scoped_session, blocker }) = pop_next_delivery::<Request>(
-            provider, label, serve_next_workflow_request::<Request>, world,
+            provider, label, serve_next_workflow_request::<Request, Response, Streams>, world,
         ) else {
             // No more deliveries to pop, so we should return
             return;
@@ -224,7 +232,7 @@ where
         };
         let target = target.get();
 
-        if begin_workflow(
+        if begin_workflow::<Request, Response, Streams>(
             Input { session: parent_session, data: request },
             source,
             target,

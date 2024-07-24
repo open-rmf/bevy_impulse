@@ -59,6 +59,13 @@ impl Disposal {
         DisposedBranch { branched_at_node, disposed_for_target, reason }.into()
     }
 
+    pub fn buffer_key(
+        accessor_node: Entity,
+        key_for_buffer: Entity,
+    ) -> Disposal {
+        DisposedBufferKey { accessor_node, key_for_buffer }.into()
+    }
+
     pub fn supplanted(
         supplanted_at_node: Entity,
         supplanted_by_node: Entity,
@@ -84,6 +91,9 @@ pub enum DisposalCause {
 
     /// A node disposed of one of its output branches.
     Branching(DisposedBranch),
+
+    /// A buffer key was disposed, so a buffer will no longer be able to update.
+    BufferKey(DisposedBufferKey),
 
     /// A [`Service`](crate::Service) provider needed by the chain was despawned
     /// or had a critical component removed. The entity provided in the variant
@@ -168,6 +178,19 @@ pub struct DisposedBranch {
 impl From<DisposedBranch> for DisposalCause {
     fn from(value: DisposedBranch) -> Self {
         Self::Branching(value)
+    }
+}
+
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct DisposedBufferKey {
+    pub accessor_node: Entity,
+    pub key_for_buffer: Entity,
+}
+
+impl From<DisposedBufferKey> for DisposalCause {
+    fn from(value: DisposedBufferKey) -> Self {
+        Self::BufferKey(value)
     }
 }
 

@@ -33,7 +33,7 @@ use crate::{
     OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
-    InspectInput,
+    Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
 };
 
 #[derive(Bundle)]
@@ -60,6 +60,7 @@ where
             SingleInputStorage::empty(),
             InputBundle::<T>::new(),
             BufferBundle::new::<T>(),
+            BufferAccessors::default(),
         ));
 
         Ok(())
@@ -68,8 +69,18 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        world.get_entity_mut(source).or_broken()?
-            .transfer_to_buffer::<T>(roster)
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, data } = source_mut.take_input::<T>()?;
+        let mut buffer = source_mut.get_mut::<BufferStorage<T>>().or_broken()?;
+        buffer.force_push(session, data);
+
+        let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
+        for target in targets {
+            world.get_entity_mut(target).or_broken()?
+                .give_input(session, (), roster)?;
+        }
+
+        Ok(())
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
@@ -79,6 +90,10 @@ where
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if reachability.has_input::<T>()? {
+            return Ok(true);
+        }
+
+        if BufferAccessors::is_reachable(&mut reachability)? {
             return Ok(true);
         }
 
@@ -194,4 +209,51 @@ fn get_buffered_sessions<T: 'static + Send + Sync>(
     world: &World,
 ) -> Result<SmallVec<[Entity; 16]>, OperationError> {
     world.get_entity(source).or_broken()?.buffered_sessions::<T>()
+}
+
+pub(crate) struct NotifyBufferUpdate {
+    buffer: Entity,
+    session: Entity,
+    /// This field is used to prevent notifications from going to the accessor
+    /// that produced the key which was used for modification. That way users
+    /// don't end up with unintentional infinite loops in their workflow. If
+    /// this is set to None then that means the user wants to allow closed loops
+    /// and is taking responsibility for managing it.
+    accessor: Option<Entity>,
+}
+
+impl NotifyBufferUpdate {
+    pub(crate) fn new(buffer: Entity, session: Entity, accessor: Option<Entity>) -> Self {
+        Self { buffer, session, accessor }
+    }
+}
+
+impl Command for NotifyBufferUpdate {
+    fn apply(self, world: &mut World) {
+        world.get_resource_or_insert_with(|| DeferredRoster::default());
+        let r = world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
+            // We filter out the target that produced the key that was used to
+            // make the modification. This prevents unintentional infinite loops
+            // from forming in the workflow.
+            let targets: SmallVec<[_; 16]> = world
+                .get::<ForkTargetStorage>(self.buffer).or_broken()?.0
+                .iter()
+                .filter(|t| !self.accessor.is_some_and(|a| a == **t))
+                .cloned()
+                .collect();
+
+            for target in targets {
+                world.get_entity_mut(target).or_broken()?
+                    .give_input(self.session, (), &mut deferred.0)?;
+            }
+
+            Ok(())
+        });
+
+        if let Err(OperationError::Broken(backtrace)) = r {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .broken
+                .push(Broken { node: self.buffer, backtrace });
+        }
+    }
 }

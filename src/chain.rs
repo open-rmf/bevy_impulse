@@ -17,16 +17,18 @@
 
 use std::future::Future;
 
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, In};
+
+use smallvec::SmallVec;
 
 use std::error::Error;
 
 use crate::{
-    UnusedTarget, AddOperation, Node, InputSlot, Builder,
+    UnusedTarget, AddOperation, Node, InputSlot, Builder, IntoBlockingCallback,
     StreamPack, Provider, ProvideOnce, Scope, StreamOf,
-    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
+    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop, BufferAccessMut,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
-    CreateDisposalFilter,
+    CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     make_result_branching, make_option_branching,
 };
 
@@ -147,8 +149,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// output of the map will be the Response of the returned Chain.
     ///
     /// This takes in a regular blocking function rather than an async function,
-    /// so while the function is executing, it will block all systems from
-    /// running, similar to how [`Commands`] are flushed.
+    /// so while the function is executing, it will block all systems and all
+    /// other workflows from running.
     #[must_use]
     pub fn map_block<U>(
         self,
@@ -270,6 +272,36 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Settings: Into<ScopeSettings>,
     {
         self.then_scope_node(build)
+    }
+
+    /// Combine the output with access to some buffers. The input must be one or
+    /// more buffers. For multiple buffers, combine them into a tuple or an
+    /// [`Iterator`]. Tuples of buffers can be nested inside each other.
+    ///
+    /// Other [outputs](Output) can also be passed in as buffers. Those outputs
+    /// will be transformed into a buffer with default buffer settings.
+    ///
+    /// To obtain a set of buffer keys each time a buffer is modified, use
+    /// [`listen`](crate::Bufferable::listen).
+    pub fn with_access<B>(
+        self,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self.builder);
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
+        ));
+
+        Chain::new(target, self.builder)
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
@@ -396,6 +428,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
     /// a new link (entity) into the chain.
+    ///
     /// [1]: `<https://en.wikipedia.org/wiki/NOP_(code)>`
     #[must_use]
     pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
@@ -434,15 +467,10 @@ where
     E: 'static + Send + Sync,
 {
     /// Build a chain that activates if the response is an [`Err`]. If the
-    /// response is [`Ok`] then the branch built by this function will be disposed,
-    /// which means it gets dropped without triggering any cancellation behavior.
+    /// response is [`Ok`] then this branch will not be activated.
     ///
     /// This function returns a chain that will be activated if the result was
     /// [`Ok`] so you can continue building your response to the [`Ok`] case.
-    ///
-    /// You should make sure to [`detach`](Chain::detach) the chain inside your
-    /// builder or else it will be disposed during the first flush, even if an
-    /// [`Err`] value arrives.
     #[must_use]
     pub fn branch_for_err(
         self,
@@ -595,15 +623,10 @@ where
     T: 'static + Send + Sync,
 {
     /// Build a chain that activates if the response is [`None`]. If the response
-    /// is [`Some`] then the branch built by this function will be disposed,
-    /// which means it gets dropped without triggering any cancellation behavior.
+    /// is [`Some`] then the branch built by this function will not be activated.
     ///
     /// This function returns a chain that will be activated if the result was
     /// [`Some`] so you can continue building your response to the [`Some`] case.
-    ///
-    /// You should make sure to [`detach`](Chain::detach) the chain inside this
-    /// builder or else it will be disposed during the first flush, even if a
-    /// [`None`] value arrives.
     #[must_use]
     pub fn branch_for_none(
         self,
@@ -684,7 +707,30 @@ where
     }
 }
 
-impl<'w, 's, 'a, 'b, Response: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, Response> {
+impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, BufferKey<T>>
+where
+    T: 'static + Send + Sync,
+{
+    pub fn consume_buffer<const N: usize>(self) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        self.then(consume_buffer.into_blocking_callback())
+    }
+}
+
+fn consume_buffer<const N: usize, T>(
+    In(key): In<BufferKey<T>>,
+    mut access: BufferAccessMut<T>,
+) -> SmallVec<[T; N]>
+where
+    T: 'static + Send + Sync,
+{
+    let Ok(mut buffer) = access.get_mut(&key) else {
+        return SmallVec::new();
+    };
+
+    buffer.drain(..).collect()
+}
+
+impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Used internally to create a [`Chain`] that can accept a label
     /// and hook into streams.
     pub(crate) fn new(

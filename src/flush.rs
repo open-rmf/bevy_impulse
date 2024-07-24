@@ -49,7 +49,7 @@ pub struct FlushParameters {
     ///
     /// Use this limit to prevent the flush from blocking for too long in those
     /// scenarios. If the flush loops beyond this limit, anything remaining in
-    /// the roster will be moved into the [`DeferredRoster`] to be processed
+    /// the roster will be moved into a deferred roster which will be processed
     /// during the next flush.
     ///
     /// A value of `None` means the flush can loop indefinitely (this is the default).

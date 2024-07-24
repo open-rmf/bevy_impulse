@@ -20,8 +20,12 @@ use smallvec::SmallVec;
 
 use crate::{
     Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
-    UnusedTarget, AddOperation, Chain,
+    UnusedTarget, AddOperation, Chain, Listen, Scope, ScopeSettings,
+    CleanupWorkflowConditions,
 };
+
+pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
+pub type BufferItem<B> = <<B as Bufferable>::BufferType as Buffered>::Item;
 
 pub trait Bufferable {
     type BufferType: Buffered;
@@ -30,24 +34,124 @@ pub trait Bufferable {
     /// buffers already.
     fn as_buffer(self, builder: &mut Builder) -> Self::BufferType;
 
-    /// Join these bufferable workflow elements.
+    /// Join these bufferable workflow elements. Each time every buffer contains
+    /// at least one element, this will pull the oldest element from each buffer
+    /// and join them into a tuple that gets sent to the target.
+    ///
+    /// If you need a more general way to get access to one or more buffers,
+    /// use [`listen`](Self::listen) instead.
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, <Self::BufferType as Buffered>::Item>
+    ) -> Chain<'w, 's, 'a, 'b, BufferItem<Self>>
     where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
-        <Self::BufferType as Buffered>::Item: 'static + Send + Sync,
+        BufferItem<Self>: 'static + Send + Sync,
     {
+        let scope = builder.scope();
         let buffers = self.as_buffer(builder);
+        buffers.verify_scope(scope);
+
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(builder.scope()), join, Join::new(buffers, target)
+            Some(scope), join, Join::new(buffers, target)
         ));
 
-        Output::new(builder.scope, target).chain(builder)
+        Output::new(scope, target).chain(builder)
+    }
+
+    /// Create an operation that will output buffer access keys each time any
+    /// one of the buffers is modified. This can be used to create a node in a
+    /// workflow that wakes up every time one or more buffers change, and then
+    /// operates on those buffers.
+    ///
+    /// For an operation that simply joins the contents of two or more outputs
+    /// or buffers, use [`join`](Self::join) instead.
+    fn listen<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<Self>>
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+    {
+        let scope = builder.scope();
+        let buffers = self.as_buffer(builder);
+        buffers.verify_scope(scope);
+
+        let listen = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
+            Some(scope),
+            listen,
+            Listen::new(buffers, target),
+        ));
+
+        Output::new(scope, target).chain(builder)
+    }
+
+    /// Alternative way to call [`Builder::on_cleanup`].
+    fn on_cleanup<'w, 's, 'a, Settings>(
+        self,
+        builder: &mut Builder<'w, 's, 'a>,
+        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        builder.on_cleanup(self, build)
+    }
+
+    /// Alternative way to call [`Builder::on_cancel`].
+    fn on_cancel<'w, 's, 'a, Settings>(
+        self,
+        builder: &mut Builder<'w, 's, 'a>,
+        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        builder.on_cancel(self, build)
+    }
+
+    /// Alternative way to call [`Builder::on_terminate`].
+    fn on_terminate<'w, 's, 'a, Settings>(
+        self,
+        builder: &mut Builder<'w, 's, 'a>,
+        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        builder.on_terminate(self, build)
+    }
+
+    /// Alternative way to call [`Builder::on_cleanup_if`].
+    fn on_cleanup_if<'w, 's, 'a, Settings>(
+        self,
+        builder: &mut Builder<'w, 's, 'a>,
+        conditions: CleanupWorkflowConditions,
+        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        builder.on_cleanup_if(conditions, self, build)
     }
 }
 

@@ -94,7 +94,7 @@ pub enum CancellationCause {
     /// `bevy_impulse` itself, and you encouraged to open an issue with a minimal
     /// reproducible example.
     ///
-    /// The entity provided in [`BrokenLink`] is the link where the breakage was
+    /// The entity provided in [`Broken`] is the link where the breakage was
     /// detected.
     Broken(Broken),
 }
@@ -123,8 +123,7 @@ impl From<Broken> for CancellationCause {
     }
 }
 
-/// Passed into the [`OperationRoster`](crate::OperationRoster) to pass a cancel
-/// signal into the target.
+/// Passed into the [`OperationRoster`] to pass a cancel  signal into the target.
 #[derive(Debug, Clone)]
 pub struct Cancel {
     /// The entity that triggered the cancellation

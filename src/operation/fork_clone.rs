@@ -62,7 +62,7 @@ impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: input } = source_mut.take_input::<T>()?;
-        let ForkTargetStorage(targets) = source_mut.take().or_broken()?;
+        let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
 
         let mut send_value = |value: T, target: Entity| -> Result<(), OperationError> {
             world

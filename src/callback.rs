@@ -198,6 +198,7 @@ where
 
         if !self.initialized {
             self.system.initialize(&mut input.world);
+            self.initialized = true;
         }
 
         let streams = Streams::make_buffer(input.source, input.world);

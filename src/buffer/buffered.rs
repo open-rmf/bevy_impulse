@@ -15,17 +15,22 @@
  *
 */
 
-use bevy::prelude::{Entity, World};
-use bevy::utils::all_tuples;
+use bevy::{
+    prelude::{Entity, World},
+    utils::all_tuples,
+};
 
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectInput, ManageInput,
-    OperationResult, ForkTargetStorage,
+    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer,
+    ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
+    BufferStorage, SingleInputStorage, BufferKeyBuilder,
 };
 
 pub trait Buffered: Clone {
+    fn verify_scope(&self, scope: Entity);
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -39,16 +44,42 @@ pub trait Buffered: Clone {
         world: &mut World,
     ) -> Result<Self::Item, OperationError>;
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult;
 
     fn as_input(&self) -> SmallVec<[Entity; 8]>;
+
+    type Key: Clone;
+    fn add_accessor(
+        &self,
+        accessor: Entity,
+        world: &mut World,
+    ) -> OperationResult;
+
+    fn create_key(
+        &self,
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key;
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult;
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key;
+
+    fn is_key_in_use(key: &Self::Key) -> bool;
 }
 
 impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         world.get_entity(self.source).or_broken()?
             .buffered_count::<T>(session)
@@ -64,7 +95,7 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
             .pull_from_buffer::<T>(session)
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
@@ -72,18 +103,71 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         let mut targets = world
             .get_mut::<ForkTargetStorage>(self.source)
             .or_broken()?;
-        targets.0.push(listener);
-        targets.0.sort();
-        targets.0.dedup();
+        if !targets.0.contains(&listener) {
+            targets.0.push(listener);
+        }
+
+        if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
+            input_storage.add(self.source);
+        } else {
+            world.get_entity_mut(listener).or_broken()?
+                .insert(SingleInputStorage::new(self.source));
+        }
+
         Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         SmallVec::from_iter([self.source])
     }
+
+    type Key = BufferKey<T>;
+    fn add_accessor(
+        &self,
+        accessor: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        let mut accessors = world
+            .get_mut::<BufferAccessors>(self.source)
+            .or_broken()?;
+
+        accessors.0.push(accessor);
+        accessors.0.sort();
+        accessors.0.dedup();
+        Ok(())
+    }
+
+    fn create_key(
+        &self,
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
+        builder.build(self.source)
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
+            .ensure_session(session);
+        Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        key.is_in_use()
+    }
 }
 
 impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -100,10 +184,11 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         world: &mut World,
     ) -> Result<Self::Item, OperationError> {
         world.get_entity(self.source).or_broken()?
-            .clone_from_buffer(session)
+            .try_clone_from_buffer(session)
+            .and_then(|r| r.or_broken())
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
@@ -111,22 +196,77 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         let mut targets = world
             .get_mut::<ForkTargetStorage>(self.source)
             .or_broken()?;
-        targets.0.push(listener);
-        targets.0.sort();
-        targets.0.dedup();
+        if !targets.0.contains(&listener) {
+            targets.0.push(listener);
+        }
+
+        if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
+            input_storage.add(self.source);
+        } else {
+            world.get_entity_mut(listener).or_broken()?
+                .insert(SingleInputStorage::new(self.source));
+        }
         Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         SmallVec::from_iter([self.source])
     }
+
+    type Key = BufferKey<T>;
+    fn add_accessor(
+        &self,
+        accessor: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        let mut accessors = world
+            .get_mut::<BufferAccessors>(self.source)
+            .or_broken()?;
+
+        accessors.0.push(accessor);
+        accessors.0.sort();
+        accessors.0.dedup();
+        Ok(())
+    }
+
+    fn create_key(
+        &self,
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
+        builder.build(self.source)
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
+            .ensure_session(session);
+        Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        key.is_in_use()
+    }
 }
 
 macro_rules! impl_buffered_for_tuple {
-    ($($T:ident),*) => {
+    ($(($T:ident, $K:ident)),*) => {
         #[allow(non_snake_case)]
         impl<$($T: Buffered),*> Buffered for ($($T,)*)
         {
+            fn verify_scope(&self, scope: Entity) {
+                let ($($T,)*) = self;
+                $(
+                    $T.verify_scope(scope);
+                )*
+            }
+
             fn buffered_count(
                 &self,
                 session: Entity,
@@ -152,14 +292,14 @@ macro_rules! impl_buffered_for_tuple {
                 )*))
             }
 
-            fn listen(
+            fn add_listener(
                 &self,
                 listener: Entity,
                 world: &mut World,
             ) -> OperationResult {
                 let ($($T,)*) = self;
                 $(
-                    $T.listen(listener, world)?;
+                    $T.add_listener(listener, world)?;
                 )*
                 Ok(())
             }
@@ -172,15 +312,70 @@ macro_rules! impl_buffered_for_tuple {
                 )*
                 inputs
             }
+
+            type Key = ($($T::Key), *);
+            fn add_accessor(
+                &self,
+                accessor: Entity,
+                world: &mut World,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.add_accessor(accessor, world)?;
+                )*
+                Ok(())
+            }
+
+            fn create_key(
+                &self,
+                builder: &BufferKeyBuilder,
+            ) -> Self::Key {
+                let ($($T,)*) = self;
+                ($(
+                    $T.create_key(builder),
+                )*)
+            }
+
+            fn ensure_active_session(
+                &self,
+                session: Entity,
+                world: &mut World,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.ensure_active_session(session, world)?;
+                )*
+                Ok(())
+            }
+
+            fn deep_clone_key(key: &Self::Key) -> Self::Key {
+                let ($($K,)*) = key;
+                ($(
+                    $T::deep_clone_key($K),
+                )*)
+            }
+
+            fn is_key_in_use(key: &Self::Key) -> bool {
+                let ($($K,)*) = key;
+                false $(
+                    || $T::is_key_in_use($K)
+                )*
+            }
         }
     }
 }
 
 // Implements the `Buffered` trait for all tuples between size 2 and 12
 // (inclusive) made of types that implement `Buffered`
-all_tuples!(impl_buffered_for_tuple, 2, 12, T);
+all_tuples!(impl_buffered_for_tuple, 2, 12, T, K);
 
 impl<T: Buffered, const N: usize> Buffered for [T; N] {
+    fn verify_scope(&self, scope: Entity) {
+        for buffer in self.iter() {
+            buffer.verify_scope(scope);
+        }
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -210,13 +405,13 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         }).collect()
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult {
         for buffer in self {
-            buffer.listen(listener, world)?;
+            buffer.add_listener(listener, world)?;
         }
         Ok(())
     }
@@ -224,9 +419,68 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         self.iter().flat_map(|buffer| buffer.as_input()).collect()
     }
+
+    type Key = SmallVec<[T::Key; N]>;
+    fn add_accessor(
+        &self,
+        accessor: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.add_accessor(accessor, world)?;
+        }
+        Ok(())
+    }
+
+    fn create_key(
+        &self,
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
+        let mut keys = SmallVec::new();
+        for buffer in self {
+            keys.push(buffer.create_key(builder));
+        }
+        keys
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.ensure_active_session(session, world)?;
+        }
+
+        Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        let mut keys = SmallVec::new();
+        for k in key {
+            keys.push(T::deep_clone_key(k));
+        }
+        keys
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        for k in key {
+            if T::is_key_in_use(k) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 
 impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
+    fn verify_scope(&self, scope: Entity) {
+        for buffer in self.iter() {
+            buffer.verify_scope(scope);
+        }
+    }
+
     fn buffered_count(
         &self,
         session: Entity,
@@ -254,18 +508,71 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         }).collect()
     }
 
-    fn listen(
+    fn add_listener(
         &self,
         listener: Entity,
         world: &mut World,
     ) -> OperationResult {
         for buffer in self {
-            buffer.listen(listener, world)?;
+            buffer.add_listener(listener, world)?;
         }
         Ok(())
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         self.iter().flat_map(|buffer| buffer.as_input()).collect()
+    }
+
+    type Key = SmallVec<[T::Key; N]>;
+    fn add_accessor(
+        &self,
+        accessor: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.add_accessor(accessor, world)?;
+        }
+        Ok(())
+    }
+
+    fn create_key(
+        &self,
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
+        let mut keys = SmallVec::new();
+        for buffer in self {
+            keys.push(buffer.create_key(builder));
+        }
+        keys
+    }
+
+    fn ensure_active_session(
+        &self,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.ensure_active_session(session, world)?;
+        }
+
+        Ok(())
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        let mut keys = SmallVec::new();
+        for k in key {
+            keys.push(T::deep_clone_key(k));
+        }
+        keys
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        for k in key {
+            if T::is_key_in_use(k) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
