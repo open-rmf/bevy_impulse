@@ -22,12 +22,10 @@ use bevy::{
 
 use smallvec::SmallVec;
 
-use std::sync::Arc;
-
 use crate::{
-    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer, ChannelSender,
+    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer,
     ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
-    BufferStorage, SingleInputStorage,
+    BufferStorage, SingleInputStorage, BufferKeyBuilder,
 };
 
 pub trait Buffered: Clone {
@@ -63,12 +61,8 @@ pub trait Buffered: Clone {
 
     fn create_key(
         &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-        tracker: &Arc<()>,
-    ) -> Result<Self::Key, OperationError>;
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key;
 
     fn ensure_active_session(
         &self,
@@ -145,13 +139,9 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
 
     fn create_key(
         &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-        tracker: &Arc<()>,
-    ) -> Result<Self::Key, OperationError> {
-        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone(), tracker.clone()))
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
+        builder.build(self.source)
     }
 
     fn ensure_active_session(
@@ -241,13 +231,9 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
 
     fn create_key(
         &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-        tracker: &Arc<()>,
-    ) -> Result<Self::Key, OperationError> {
-        Ok(BufferKey::new(scope, self.source, session, accessor, sender.clone(), tracker.clone()))
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
+        builder.build(self.source)
     }
 
     fn ensure_active_session(
@@ -342,16 +328,12 @@ macro_rules! impl_buffered_for_tuple {
 
             fn create_key(
                 &self,
-                scope: Entity,
-                session: Entity,
-                accessor: Entity,
-                sender: &ChannelSender,
-                tracker: &Arc<()>,
-            ) -> Result<Self::Key, OperationError> {
+                builder: &BufferKeyBuilder,
+            ) -> Self::Key {
                 let ($($T,)*) = self;
-                Ok(($(
-                    $T.create_key(scope, session, accessor, sender, tracker)?,
-                )*))
+                ($(
+                    $T.create_key(builder),
+                )*)
             }
 
             fn ensure_active_session(
@@ -452,17 +434,13 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
 
     fn create_key(
         &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-        tracker: &Arc<()>,
-    ) -> Result<Self::Key, OperationError> {
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
         let mut keys = SmallVec::new();
         for buffer in self {
-            keys.push(buffer.create_key(scope, session, accessor, sender, tracker)?);
+            keys.push(buffer.create_key(builder));
         }
-        Ok(keys)
+        keys
     }
 
     fn ensure_active_session(
@@ -559,17 +537,13 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
 
     fn create_key(
         &self,
-        scope: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: &ChannelSender,
-        tracker: &Arc<()>,
-    ) -> Result<Self::Key, OperationError> {
+        builder: &BufferKeyBuilder,
+    ) -> Self::Key {
         let mut keys = SmallVec::new();
         for buffer in self {
-            keys.push(buffer.create_key(scope, session, accessor, sender, tracker)?);
+            keys.push(buffer.create_key(builder));
         }
-        Ok(keys)
+        keys
     }
 
     fn ensure_active_session(

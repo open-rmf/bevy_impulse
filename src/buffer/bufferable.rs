@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 
 use crate::{
     Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
-    UnusedTarget, AddOperation, Chain, Listen,
+    UnusedTarget, AddOperation, Chain, Listen, Scope, ScopeSettings,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
@@ -90,6 +90,21 @@ pub trait Bufferable {
         ));
 
         Output::new(scope, target).chain(builder)
+    }
+
+    /// Alternative way to call [`Builder::on_cancel`]
+    fn on_cancel<'w, 's, 'a, Settings>(
+        self,
+        builder: &mut Builder<'w, 's, 'a>,
+        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        Self: Sized,
+        Self::BufferType: 'static + Send + Sync,
+        BufferKeys<Self>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        builder.on_cancel(self, build)
     }
 }
 

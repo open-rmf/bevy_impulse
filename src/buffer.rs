@@ -29,15 +29,15 @@ use std::{
     ops::RangeBounds,
 };
 
-use crossbeam::channel::Sender as CbSender;
-
 use crate::{
-    Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot,
-    NotifyBufferUpdate, ChannelItem,
+    Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot, NotifyBufferUpdate,
 };
 
 mod buffer_access_lifecycle;
 pub(crate) use buffer_access_lifecycle::*;
+
+mod buffer_key_builder;
+pub(crate) use buffer_key_builder::*;
 
 mod buffer_storage;
 pub(crate) use buffer_storage::*;
@@ -195,7 +195,7 @@ pub struct BufferKey<T> {
     buffer: Entity,
     session: Entity,
     accessor: Entity,
-    lifecycle: Arc<BufferAccessLifecycle>,
+    lifecycle: Option<Arc<BufferAccessLifecycle>>,
     _ignore: std::marker::PhantomData<T>,
 }
 
@@ -205,7 +205,7 @@ impl<T> Clone for BufferKey<T> {
             buffer: self.buffer,
             session: self.session,
             accessor: self.accessor,
-            lifecycle: Arc::clone(&self.lifecycle),
+            lifecycle: self.lifecycle.as_ref().map(|l| Arc::clone(l)),
             _ignore: Default::default(),
         }
     }
@@ -223,21 +223,7 @@ impl<T> BufferKey<T> {
     }
 
     pub(crate) fn is_in_use(&self) -> bool {
-        self.lifecycle.is_in_use()
-    }
-
-    pub(crate) fn new(
-        scope: Entity,
-        buffer: Entity,
-        session: Entity,
-        accessor: Entity,
-        sender: CbSender<ChannelItem>,
-        tracker: Arc<()>,
-    ) -> BufferKey<T> {
-        let lifecycle = Arc::new(BufferAccessLifecycle::new(
-            scope, buffer, session, accessor, sender, tracker,
-        ));
-        BufferKey { buffer, session, accessor, lifecycle, _ignore: Default::default() }
+        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
     }
 
     // We do a deep clone of the key when distributing it to decouple the
@@ -250,7 +236,7 @@ impl<T> BufferKey<T> {
     // when the workflow has dropped them.
     pub(crate) fn deep_clone(&self) -> Self {
         let mut deep = self.clone();
-        deep.lifecycle = Arc::new(self.lifecycle.as_ref().clone());
+        deep.lifecycle = self.lifecycle.as_ref().map(|l| Arc::new(l.as_ref().clone()));
         deep
     }
 }

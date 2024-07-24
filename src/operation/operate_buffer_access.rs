@@ -28,7 +28,7 @@ use crate::{
     Operation, OperationRequest, OperationReachability, OperationResult,
     Buffered, OperationSetup, InputBundle, SingleTargetStorage, OrBroken,
     SingleInputStorage, Input, ManageInput, ChannelQueue, ScopeStorage,
-    OperationCleanup, ReachabilityResult, OperationError,
+    OperationCleanup, ReachabilityResult, OperationError, BufferKeyBuilder,
 };
 
 pub(crate) struct OperateBufferAccess<T, B>
@@ -138,9 +138,10 @@ where
         Entry::Occupied(occupied) => B::deep_clone_key(occupied.get()),
         Entry::Vacant(vacant) => {
             made_key = true;
-            let new_key = vacant.insert(
-                s.buffers.create_key(scope, session, source, &sender, &Arc::new(()))?
+            let builder = BufferKeyBuilder::with_tracking(
+                scope, session, source, sender, Arc::new(()),
             );
+            let new_key = vacant.insert(s.buffers.create_key(&builder));
             B::deep_clone_key(new_key)
         }
     };

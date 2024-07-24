@@ -17,16 +17,18 @@
 
 use std::future::Future;
 
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, In};
+
+use smallvec::SmallVec;
 
 use std::error::Error;
 
 use crate::{
-    UnusedTarget, AddOperation, Node, InputSlot, Builder,
+    UnusedTarget, AddOperation, Node, InputSlot, Builder, IntoBlockingCallback,
     StreamPack, Provider, ProvideOnce, Scope, StreamOf,
-    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
+    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop, BufferAccessMut,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
-    CreateDisposalFilter, Bufferable, BufferKeys, OperateBufferAccess,
+    CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     make_result_branching, make_option_branching,
 };
 
@@ -705,7 +707,30 @@ where
     }
 }
 
-impl<'w, 's, 'a, 'b, Response: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, Response> {
+impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, BufferKey<T>>
+where
+    T: 'static + Send + Sync,
+{
+    pub fn consume_buffer<const N: usize>(self) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        self.then(consume_buffer.into_blocking_callback())
+    }
+}
+
+fn consume_buffer<const N: usize, T>(
+    In(key): In<BufferKey<T>>,
+    mut access: BufferAccessMut<T>,
+) -> SmallVec<[T; N]>
+where
+    T: 'static + Send + Sync,
+{
+    let Ok(mut buffer) = access.get_mut(&key) else {
+        return SmallVec::new();
+    };
+
+    buffer.drain(..).collect()
+}
+
+impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Used internally to create a [`Chain`] that can accept a label
     /// and hook into streams.
     pub(crate) fn new(

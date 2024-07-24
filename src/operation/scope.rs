@@ -20,10 +20,11 @@ use crate::{
     OperationReachability, ReachabilityResult, OperationSetup, StreamPack,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     Cancellation, Unreachability, InspectDisposals, execute_operation,
-    Cancellable, OperationRoster, ManageCancellation, ManageBuffer,
+    Cancellable, OperationRoster, ManageCancellation,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
     ScopeSettings, StreamTargetMap, ClearBufferFn, UnusedTarget, CleanupFinished,
+    Buffered, BufferKeyBuilder,
 };
 
 use backtrace::Backtrace;
@@ -856,22 +857,22 @@ impl CancelStatus {
     }
 }
 
-pub(crate) struct BeginCancel<T> {
+pub(crate) struct BeginCancel<B> {
     from_scope: Entity,
-    buffer: Entity,
+    buffer: B,
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
 }
 
-impl<T> BeginCancel<T> {
-    pub(crate) fn new(from_scope: Entity, buffer: Entity, target: Entity) -> Self {
-        Self { from_scope, buffer, target, _ignore: Default::default() }
+impl<B> BeginCancel<B> {
+    pub(crate) fn new(from_scope: Entity, buffer: B, target: Entity) -> Self {
+        Self { from_scope, buffer, target }
     }
 }
 
-impl<T> Operation for BeginCancel<T>
+impl<B> Operation for BeginCancel<B>
 where
-    T: 'static + Send + Sync,
+    B: Buffered + 'static + Send + Sync,
+    B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.get_entity_mut(self.target).or_broken()?
@@ -896,25 +897,25 @@ where
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session: scoped_session, .. } = source_mut.take_input::<()>()?;
-        let input = source_mut.get::<CancelInputBufferStorage>().or_broken()?.0;
+        let buffers = source_mut.get::<CancelInputBufferStorage<B>>().or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let from_scope = source_mut.get::<CancelFromScope>().or_broken()?.0;
+
+        let key_builder = BufferKeyBuilder::without_tracking(
+            from_scope, scoped_session, source
+        );
+
+        let keys = buffers.0.create_key(&key_builder);
+
+        let cancellation_session = world.spawn(ParentSession(scoped_session)).id();
+        world.get_entity_mut(target).or_broken()?
+            .give_input(cancellation_session, keys, roster)?;
+
         let finish_cancel = world.get::<FinishCancelStorage>(from_scope).or_broken()?.0;
-
-        let buffer = world.get_entity_mut(input)
-            .or_broken()?
-            .consume_buffer::<T>(scoped_session)?;
-
-        for data in buffer {
-            let cancellation_session = world.spawn(ParentSession(scoped_session)).id();
-            world.get_entity_mut(target).or_broken()?
-                .give_input(cancellation_session, data, roster)?;
-
-            world.get_entity_mut(finish_cancel).or_broken()?
-                .get_mut::<AwaitingCancelStorage>().or_broken()?.0.iter_mut()
-                .find(|a| a.scoped_session == scoped_session).or_broken()?
-                .cancellation_sessions.push(cancellation_session);
-        }
+        world.get_entity_mut(finish_cancel).or_broken()?
+            .get_mut::<AwaitingCancelStorage>().or_broken()?.0.iter_mut()
+            .find(|a| a.scoped_session == scoped_session).or_broken()?
+            .cancellation_sessions.push(cancellation_session);
 
         Ok(())
     }
@@ -925,13 +926,8 @@ where
         Err(OperationError::Broken(Some(Backtrace::new())))
     }
 
-    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        if r.has_input::<()>()? {
-            return Ok(true);
-        }
-
-        let input = r.world().get::<CancelInputBufferStorage>(r.source()).or_broken()?.0;
-        r.check_upstream(input)
+    fn is_reachable(r: OperationReachability) -> ReachabilityResult {
+        r.has_input::<()>()
     }
 }
 
@@ -1159,7 +1155,7 @@ fn clear_scope_buffers(
 }
 
 #[derive(Component)]
-struct CancelInputBufferStorage(Entity);
+struct CancelInputBufferStorage<B>(B);
 
 #[derive(Component)]
 struct CancelFromScope(Entity);

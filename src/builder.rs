@@ -238,27 +238,30 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     //
     // TODO(@mxgrey): Consider offering a setting to choose between whether each
     // buffer item gets its own session or whether they share a session.
-    pub fn on_cancel<T, Settings>(
+    pub fn on_cancel<B, Settings>(
         &mut self,
-        from_buffer: Buffer<T>,
-        build: impl FnOnce(Scope<T, (), ()>, &mut Builder) -> Settings,
+        from_buffers: B,
+        build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     )
     where
-        T: 'static + Send + Sync,
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
         Settings: Into<ScopeSettings>,
     {
         let cancelling_scope_id = self.commands.spawn(()).id();
-        let _ = self.create_scope_impl::<T, (), (), Settings>(
+        let _ = self.create_scope_impl::<BufferKeys<B>, (), (), Settings>(
             cancelling_scope_id,
             self.finish_scope_cancel,
             build,
         );
 
         let begin_cancel = self.commands.spawn(()).set_parent(self.scope).id();
+        let buffers = from_buffers.as_buffer(self);
         self.commands.add(AddOperation::new(
             None,
             begin_cancel,
-            BeginCancel::<T>::new(self.scope, from_buffer.source, cancelling_scope_id),
+            BeginCancel::<B::BufferType>::new(self.scope, buffers, cancelling_scope_id),
         ));
     }
 
@@ -549,8 +552,11 @@ mod tests {
             // that went into the buffer should get sent over the channel.
             builder.on_cancel(buffer, |scope, builder| {
                 scope.input.chain(builder)
-                    .map_block(move |value| {
-                        sender.send(value).ok();
+                    .consume_buffer::<8>()
+                    .map_block(move |values| {
+                        for value in values {
+                            sender.send(value).ok();
+                        }
                     })
                     .connect(scope.terminate);
             });
@@ -564,6 +570,7 @@ mod tests {
         assert!(promise.peek().is_cancelled());
         let channel_output = receiver.try_recv().unwrap();
         assert_eq!(channel_output, 5);
+        assert!(receiver.try_recv().is_err());
         assert!(context.no_unhandled_errors());
         assert!(context.confirm_buffers_empty().is_ok());
     }

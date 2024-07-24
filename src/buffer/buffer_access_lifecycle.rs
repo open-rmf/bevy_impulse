@@ -60,23 +60,25 @@ impl BufferAccessLifecycle {
 
 impl Drop for BufferAccessLifecycle {
     fn drop(&mut self) {
-        let scope = self.scope;
-        let accessor = self.accessor;
-        let session = self.session;
-        let buffer = self.buffer;
-        if let Err(err) = self.sender.send(
-            Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                let disposal = Disposal::buffer_key(accessor, buffer);
-                emit_disposal(accessor, session, disposal, world, roster);
-            })
-        ) {
-            eprintln!(
-                "Failed to send disposal notice for dropped buffer key in \
-                scope [{:?}] for session [{:?}]: {}",
-                scope,
-                session,
-                err,
-            );
+        if self.is_in_use() {
+            let scope = self.scope;
+            let accessor = self.accessor;
+            let session = self.session;
+            let buffer = self.buffer;
+            if let Err(err) = self.sender.send(
+                Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+                    let disposal = Disposal::buffer_key(accessor, buffer);
+                    emit_disposal(accessor, session, disposal, world, roster);
+                })
+            ) {
+                eprintln!(
+                    "Failed to send disposal notice for dropped buffer key in \
+                    scope [{:?}] for session [{:?}]: {}",
+                    scope,
+                    session,
+                    err,
+                );
+            }
         }
     }
 }
