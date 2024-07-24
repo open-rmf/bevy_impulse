@@ -22,7 +22,7 @@ use std::future::Future;
 use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
-    ScopeSettings, BeginCancel, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
+    ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain,
 };
@@ -219,27 +219,105 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         buffers.listen(self)
     }
 
-    /// It is possible for a scope to be cancelled before it terminates. Even a
-    /// scope which is marked as uninterruptible will still experience a
+    /// This method allows you to define a cleanup workflow that branches off of
+    /// this scope that will activate during the scope's cleanup phase. The
+    /// input to the cleanup workflow will be a key to access to one or more
+    /// buffers from the parent scope.
+    ///
+    /// Each different cleanup workflow that you define using this function will
+    /// be given its own unique session ID when it gets run. You can define any
+    /// number of cleanup workflows.
+    ///
+    /// The parent scope will only finish its cleanup phase after all cleanup
+    /// workflows for the scope have finished, either by terminating or by being
+    /// cancelled themselves.
+    ///
+    /// Cleanup workflows that you define with this function will always be run
+    /// no matter how the scope finished. If you want a cleanup workflow that
+    /// only runs when the scope is cancelled, use [`Self::on_cancel`]. If you
+    /// want a cleanup workflow that only runs when the scope terminates
+    /// successfully, then use [`Self::on_terminate`]. For easier runtime
+    /// flexibility you can also use [`Self::on_cleanup_if`].
+    pub fn on_cleanup<B, Settings>(
+        &mut self,
+        from_buffers: B,
+        build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        self.on_cleanup_if(
+            CleanupWorkflowConditions::always_if(true, true),
+            from_buffers,
+            build,
+        )
+    }
+
+    /// Define a cleanup workflow that only gets run if the scope was cancelled.
+    ///
+    /// When the scope gets dropped before it terminates (i.e. the parent scope
+    /// finished while this scope was active, and this scope is interruptible)
+    /// that also counts as cancelled.
+    ///
+    /// A scope which is set to be uninterruptible will still experience a
     /// cancellation if its terminal node becomes unreachable.
     ///
-    /// This method allows you to define a workflow that branches off of this
-    /// scope that will active if and only if the scope gets cancelled. The
-    /// workflow will be activated once for each item in the buffer, and each
-    /// activation will have its own session.
-    ///
-    /// If you only want this cancellation workflow to activate once per
-    /// cancelled session, then you should use a buffer that has a limit of one
-    /// item.
-    ///
-    /// The cancelled scope will only finish its cleanup after all cancellation
-    /// workflows for the cancelled scope have finished, either by terminating
-    /// or by being cancelled themselves.
-    //
-    // TODO(@mxgrey): Consider offering a setting to choose between whether each
-    // buffer item gets its own session or whether they share a session.
+    /// If you want a cleanup workflow that only runs when the scope terminates
+    /// successfully then use [`Self::on_terminate`]. If you want a cleanup
+    /// workflow that always runs when the scope is finished, then use
+    /// [`Self::on_cleanup`].
     pub fn on_cancel<B, Settings>(
         &mut self,
+        from_buffers: B,
+        build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        self.on_cleanup_if(
+            CleanupWorkflowConditions::always_if(false, true),
+            from_buffers,
+            build,
+        )
+    }
+
+    /// Define a cleanup workflow that only gets run if the scope was successfully
+    /// terminated. That means an input reached its terminal node, and now the
+    /// scope is cleaning up.
+    ///
+    /// If you want a cleanup workflow that only runs when the scope is cancelled
+    /// then use [`Self::on_cancel`]. If you want a cleanup workflow that always
+    /// runs when then scope is finished, then use [`Self::on_cleanup`].
+    pub fn on_terminate<B, Settings>(
+        &mut self,
+        from_buffers: B,
+        build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
+    )
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+        Settings: Into<ScopeSettings>,
+    {
+        self.on_cleanup_if(
+            CleanupWorkflowConditions::always_if(true, false),
+            from_buffers,
+            build,
+        )
+    }
+
+    /// Define a sub-workflow that will be run when this workflow is being cleaned
+    /// up if the conditions are met. A workflow enters the cleanup stage when
+    /// its terminal node is reached or if it gets cancelled.
+    pub fn on_cleanup_if<B, Settings>(
+        &mut self,
+        conditions: CleanupWorkflowConditions,
         from_buffers: B,
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     )
@@ -261,7 +339,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.commands.add(AddOperation::new(
             None,
             begin_cancel,
-            BeginCancel::<B::BufferType>::new(self.scope, buffers, cancelling_scope_id),
+            BeginCleanupWorkflow::<B::BufferType>::new(
+                self.scope, buffers, cancelling_scope_id,
+                conditions.run_on_terminate, conditions.run_on_cancel,
+            ),
         ));
     }
 
@@ -322,6 +403,23 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             output: Output::new(self.scope, exit_scope),
             streams: stream_out,
         }
+    }
+}
+
+/// This struct is used to describe when a cleanup workflow should run. Currently
+/// this is only two simple booleans, but in the future it could potentially
+/// contain systems that make decisions at runtime, so for now we encapsulate
+/// the idea of cleanup conditions in this struct so we enhance the capabilities
+/// later without breaking API.
+#[derive(Clone)]
+pub struct CleanupWorkflowConditions {
+    run_on_terminate: bool,
+    run_on_cancel: bool,
+}
+
+impl CleanupWorkflowConditions {
+    pub fn always_if(run_on_terminate: bool, run_on_cancel: bool) -> Self {
+        CleanupWorkflowConditions { run_on_terminate, run_on_cancel }
     }
 }
 
@@ -528,12 +626,11 @@ mod tests {
     use crossbeam::channel::unbounded;
 
     #[test]
-    fn test_on_cancel() {
-        let (sender, receiver) = unbounded();
-
+    fn test_on_cleanup() {
         let mut context = TestingContext::minimal_plugins();
-        let workflow = context.spawn_io_workflow(|scope, builder| {
 
+        let (sender, receiver) = unbounded();
+        let workflow = context.spawn_io_workflow(|scope, builder| {
             let input = scope.input.fork_clone(builder);
 
             let buffer = builder.create_buffer(BufferSettings::default());
@@ -555,7 +652,7 @@ mod tests {
                     .consume_buffer::<8>()
                     .map_block(move |values| {
                         for value in values {
-                            sender.send(value).ok();
+                            sender.send(value).unwrap();
                         }
                     })
                     .connect(scope.terminate);
@@ -571,6 +668,95 @@ mod tests {
         let channel_output = receiver.try_recv().unwrap();
         assert_eq!(channel_output, 5);
         assert!(receiver.try_recv().is_err());
+        assert!(context.no_unhandled_errors());
+        assert!(context.confirm_buffers_empty().is_ok());
+
+        let (cancel_sender, cancel_receiver) = unbounded();
+        let (terminate_sender, terminate_receiver) = unbounded();
+        let (cleanup_sender, cleanup_receiver) = unbounded();
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let input = scope.input.fork_clone(builder);
+
+            let cancel_buffer = builder.create_buffer(BufferSettings::default());
+            let input_to_cancel = input.clone_output(builder);
+            builder.connect(input_to_cancel, cancel_buffer.input_slot());
+
+            let terminate_buffer = builder.create_buffer(BufferSettings::default());
+            let input_to_terminate = input.clone_output(builder);
+            builder.connect(input_to_terminate, terminate_buffer.input_slot());
+
+            let cleanup_buffer = builder.create_buffer(BufferSettings::default());
+            let input_to_cleanup = input.clone_output(builder);
+            builder.connect(input_to_cleanup, cleanup_buffer.input_slot());
+
+            let filter_node = builder.create_map_block(
+                |value: u64| if value >= 5 { Some(value) } else { None }
+            );
+            let input_to_filter_node = input.clone_output(builder);
+            builder.connect(input_to_filter_node, filter_node.input);
+            filter_node.output.chain(builder)
+                .cancel_on_none()
+                .connect(scope.terminate);
+
+            builder.on_cancel(cancel_buffer, |scope, builder| {
+                scope.input.chain(builder)
+                    .consume_buffer::<8>()
+                    .map_block(move |values| {
+                        for value in values {
+                            cancel_sender.send(value).unwrap();
+                        }
+                    })
+                    .connect(scope.terminate);
+            });
+
+            builder.on_terminate(terminate_buffer, |scope, builder| {
+                scope.input.chain(builder)
+                    .consume_buffer::<8>()
+                    .map_block(move |values| {
+                        for value in values {
+                            terminate_sender.send(value).unwrap();
+                        }
+                    })
+                    .connect(scope.terminate);
+            });
+
+            builder.on_cleanup(cleanup_buffer, |scope, builder| {
+                scope.input.chain(builder)
+                    .consume_buffer::<8>()
+                    .map_block(move |values| {
+                        for value in values {
+                            cleanup_sender.send(value).unwrap();
+                        }
+                    })
+                    .connect(scope.terminate);
+            });
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request(3, workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, 10);
+        assert!(promise.peek().is_cancelled());
+        assert_eq!(cancel_receiver.try_recv().unwrap(), 3);
+        assert!(cancel_receiver.try_recv().is_err());
+        assert_eq!(cleanup_receiver.try_recv().unwrap(), 3);
+        assert!(cleanup_receiver.try_recv().is_err());
+        assert!(terminate_receiver.try_recv().is_err());
+        assert!(context.no_unhandled_errors());
+        assert!(context.confirm_buffers_empty().is_ok());
+
+        let mut promise = context.command(|commands| {
+            commands.request(6, workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, 10);
+        assert!(promise.take().available().is_some_and(|v| v == 6));
+        assert_eq!(terminate_receiver.try_recv().unwrap(), 6);
+        assert!(terminate_receiver.try_recv().is_err());
+        assert_eq!(cleanup_receiver.try_recv().unwrap(), 6);
+        assert!(cleanup_receiver.try_recv().is_err());
+        assert!(cancel_receiver.try_recv().is_err());
         assert!(context.no_unhandled_errors());
         assert!(context.confirm_buffers_empty().is_ok());
     }
