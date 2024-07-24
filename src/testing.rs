@@ -198,6 +198,12 @@ impl From<Duration> for FlushConditions {
     }
 }
 
+impl From<usize> for FlushConditions {
+    fn from(value: usize) -> Self {
+        Self::new().with_update_count(value)
+    }
+}
+
 impl FlushConditions {
     pub fn new() -> Self {
         FlushConditions::default()

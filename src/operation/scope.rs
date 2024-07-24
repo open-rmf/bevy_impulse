@@ -23,7 +23,7 @@ use crate::{
     Cancellable, OperationRoster, ManageCancellation, ManageBuffer,
     OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
-    ScopeSettings, StreamTargetMap, ClearBufferFn,
+    ScopeSettings, StreamTargetMap, ClearBufferFn, UnusedTarget, CleanupFinished,
 };
 
 use backtrace::Backtrace;
@@ -197,19 +197,11 @@ where
             .take_input::<Request>()?;
 
         let scoped_session = world.spawn(ParentSession(input.session)).id();
-        let result = begin_scope(
+        begin_scope::<Request, Response, Streams>(
             input,
             scoped_session,
             OperationRequest { source, world, roster },
-        );
-
-        if result.is_err() {
-            // We won't be executing this scope after all, so despawn the scoped
-            // session that we created.
-            world.despawn(scoped_session);
-        }
-
-        result
+        )
     }
 
     fn cleanup(
@@ -285,7 +277,55 @@ where
     }
 }
 
-pub(crate) fn begin_scope<Request>(
+pub(crate) fn begin_scope<Request, Response, Streams>(
+    input: Input<Request>,
+    scoped_session: Entity,
+    OperationRequest { source, world, roster }: OperationRequest,
+) -> OperationResult
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    let result = begin_scope_impl(
+        input,
+        scoped_session,
+        OperationRequest { source, world, roster },
+    );
+
+    if result.is_err() {
+        // We won't be executing this scope after all, so despawn the scoped
+        // session that we created.
+        world.despawn(scoped_session);
+        return result;
+    }
+
+    if let Some(reachability) = world.get::<InitialReachability>(source) {
+        if reachability.is_invalidated() {
+            // We have found in the past that this workflow cannot reach its
+            // terminal point from its start point, so we should trigger the
+            // reachability check to begin the cancellation process right away.
+            OperateScope::<Request, Response, Streams>::validate_scope_reachability(
+                OperationCleanup { source, session: scoped_session, world, roster },
+            )?;
+        }
+    } else {
+        // We should do a one-time check to make sure the terminal node can be
+        // reached from the scope entry node. As long as this passes, we will
+        // not run it again.
+        let is_reachable = OperateScope::<Request, Response, Streams>::validate_scope_reachability(
+            OperationCleanup { source, session: scoped_session, world, roster },
+        )?;
+
+        world.get_entity_mut(source).or_broken()?.insert(
+            InitialReachability::new(is_reachable)
+        );
+    }
+
+    Ok(())
+}
+
+fn begin_scope_impl<Request>(
     Input { session: parent_session, data }: Input<Request>,
     scoped_session: Entity,
     OperationRequest { source, world, roster }: OperationRequest,
@@ -320,7 +360,11 @@ where
         exit_scope: Option<Entity>,
         commands: &mut Commands,
     ) -> ScopeEndpoints {
-        let enter_scope = commands.spawn(EntryForScope(scope_id)).id();
+        let enter_scope = commands.spawn((
+            EntryForScope(scope_id),
+            UnusedTarget,
+        )).id();
+
         let terminal = commands.spawn(()).set_parent(scope_id).id();
         let finish_scope_cancel = commands.spawn(FinishCancelForScope(scope_id))
             .set_parent(scope_id).id();
@@ -434,13 +478,13 @@ where
 
     /// Check if the terminal node of the scope can be reached. If not, cancel
     /// the scope immediately.
-    fn validate_scope_reachability(clean: OperationCleanup) -> OperationResult {
+    fn validate_scope_reachability(clean: OperationCleanup) -> ReachabilityResult {
         let scoped_session = clean.session;
         let source_ref = clean.world.get_entity(clean.source).or_broken()?;
         let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
         if check_reachability(scoped_session, terminal, clean.world)? {
             // The terminal node can still be reached, so we're done
-            return Ok(());
+            return Ok(true);
         }
 
         // The terminal node cannot be reached so we should cancel this scope.
@@ -472,7 +516,7 @@ where
             cleanup_entire_scope(clean)?;
         }
 
-        Ok(())
+        Ok(false)
     }
 
     fn finalize_scope_cleanup(mut clean: OperationCleanup) -> OperationResult {
@@ -588,8 +632,31 @@ where
     }
 }
 
+/// This component keeps track of whether the terminal node of a scope can be
+/// reached at all from its entry point. This only needs to be tested once (the
+/// first time the entry node is given its initial input), and then we can reuse
+/// the result on all future runs.
+#[derive(Component)]
+enum InitialReachability {
+    Confirmed,
+    Invalidated,
+}
+
+impl InitialReachability {
+    fn new(is_reachable: bool) -> Self {
+        match is_reachable {
+            true => Self::Confirmed,
+            false => Self::Invalidated,
+        }
+    }
+
+    fn is_invalidated(&self) -> bool {
+        matches!(self, Self::Invalidated)
+    }
+}
+
 #[derive(Component, Clone, Copy)]
-pub struct ValidateScopeReachability(pub(crate) fn(OperationCleanup) -> OperationResult);
+pub struct ValidateScopeReachability(pub(crate) fn(OperationCleanup) -> ReachabilityResult);
 
 #[derive(Component, Clone, Copy)]
 pub struct FinalizeScopeCleanup(pub(crate) fn(OperationCleanup) -> OperationResult);
@@ -620,9 +687,18 @@ fn cleanup_entire_scope(
     OperationCleanup { source, session, world, roster }: OperationCleanup
 ) -> OperationResult {
     let nodes = world.get::<ScopeContents>(source).or_broken()?.nodes().clone();
-    for node in nodes {
-        OperationCleanup { source: node, session, world, roster }.clean();
+
+    if nodes.is_empty() {
+        // There are no nodes to clean up (... meaning the workflow is totally
+        // empty and not even a valid workflow to begin with, but oh well ...)
+        // so we should immediately trigger a finished cleaning notice.
+        roster.cleanup_finished(CleanupFinished { scope: source, session });
+    } else {
+        for node in nodes {
+            OperationCleanup { source: node, session, world, roster }.clean();
+        }
     }
+
     Ok(())
 }
 

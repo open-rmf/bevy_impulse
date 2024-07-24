@@ -327,6 +327,27 @@ mod tests {
     use crate::{*, testing::*};
 
     #[test]
+    fn test_disconnected_workflow() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|_: Scope<(), ()>, _| {
+            // Do nothing. Totally empty workflow.
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request((), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().cancellation().is_some_and(
+            |c| matches!(*c.cause, CancellationCause::Unreachable(_))
+        ));
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
     fn test_fork_clone() {
         let mut context = TestingContext::minimal_plugins();
 
