@@ -2,22 +2,48 @@
 
 # Reactive Programming for Bevy
 
-Plugins that facilitate sophisticated [reactive programming](https://en.wikipedia.org/wiki/Reactive_programming) for the [bevy](https://bevyengine.org/) ECS.
+This library provides sophisticated [reactive programming](https://en.wikipedia.org/wiki/Reactive_programming) for the [bevy](https://bevyengine.org/) ECS. In addition to supporting one-shot chains of async operations, it can support reusable arbitrary workflows with parallel branches, synchronization, and cycles. These workflows can be hierarchical, so workflows can be built out of other workflows.
 
-## Key Concepts
+# Helpful Links
 
-### Topics
+ * [Bevy Engine](https://bevyengine.org/)
+ * [Bevy Cheat Book](https://bevy-cheatbook.github.io/)
+ * [Rust Book](https://doc.rust-lang.org/stable/book/)
 
-Topics are used to construct anonymous many-to-many publisher-subscriber relationships.
-Publishers produce data and associate that data with a topic (key).
-Subscribers listen for data on a topic (key) or across a range of topics (pattern or key range) and specify a callback that will be triggered when a message arrives on a relevant topic.
+# Experimenting
 
-### Services
+### Install Rust
 
-Services create one-to-one relationships between a requester and a responder.
-A service will take in request data and then asynchronously provide a response at a later time.
-The requester provides a callback that will be triggered once the response is available.
+Follow [official guidelines](https://www.rust-lang.org/tools/install) to install the Rust language.
 
-Additionally we support output streams for services.
-While running, services can stream out data which may be related to progress of the service or other information that may be relevant to the requester.
-The requester can subscribe to these streams by providing a separate callback for each stream type.
+### Get source code
+
+```
+$ git clone https://github.com/open-rmf/bevy_impulse
+```
+
+### Build
+
+To build the library simply go to the root directory of the repo and run
+
+```
+$ cargo build
+```
+
+### Test
+
+The library's tests can be run with
+
+```
+$ cargo test
+```
+
+### View Documentation
+
+Like most Rust projects, the library documentation is written into the source code and can be built and viewed with
+
+```
+$ cargo doc --open
+```
+
+After the first release of the library, the documentation will be hosted on docs.rs. We will update this README with a link to that documentation once it is ready.
