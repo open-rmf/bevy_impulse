@@ -103,8 +103,7 @@ where
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<T>()?;
-        clean.world.get_mut::<BufferAccessStorage<B>>(clean.source).or_broken()?
-            .keys.remove(&clean.session);
+        clean.cleanup_buffer_access::<B>()?;
         clean.notify_cleaned()
     }
 

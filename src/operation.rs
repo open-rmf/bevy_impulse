@@ -16,8 +16,7 @@
 */
 
 use crate::{
-    DeliveryLabelId, Cancel, ManageInput, InspectInput, UnhandledErrors,
-    Broken, ManageDisposal, SetupFailure, MiscellaneousFailure,
+    DeliveryLabelId, Cancel, InspectInput, UnhandledErrors, Broken, SetupFailure,
     try_emit_broken,
 };
 
@@ -39,6 +38,9 @@ use smallvec::SmallVec;
 
 mod branching;
 pub(crate) use branching::*;
+
+mod cleanup;
+pub(crate) use cleanup::*;
 
 mod filter;
 pub(crate) use filter::*;
@@ -202,7 +204,7 @@ pub struct OperationRoster {
     /// Remove these entities as they are no longer needed
     pub(crate) disposed: Vec<DisposalNotice>,
     /// Tell a scope to attempt cleanup
-    pub(crate) cleanup_finished: Vec<CleanupFinished>,
+    pub(crate) cleanup_finished: Vec<Cleanup>,
 }
 
 impl OperationRoster {
@@ -234,7 +236,7 @@ impl OperationRoster {
         self.disposed.push(DisposalNotice { scope, session });
     }
 
-    pub fn cleanup_finished(&mut self, cleanup: CleanupFinished) {
+    pub fn cleanup_finished(&mut self, cleanup: Cleanup) {
         self.cleanup_finished.push(cleanup);
     }
 
@@ -275,31 +277,6 @@ impl OperationRoster {
 pub struct DisposalNotice {
     pub scope: Entity,
     pub session: Entity,
-}
-
-/// Notify the scope manager that the request may be finished with cleanup
-pub struct CleanupFinished {
-    scope: Entity,
-    session: Entity,
-}
-
-impl CleanupFinished {
-    pub(crate) fn trigger(self, world: &mut World, roster: &mut OperationRoster) {
-        let Some(FinalizeScopeCleanup(f)) = world.get::<FinalizeScopeCleanup>(self.scope).copied() else {
-            return;
-        };
-        if let Err(OperationError::Broken(backtrace)) = (f)(OperationCleanup { source: self.scope, session: self.session, world, roster }) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
-                .miscellaneous
-                .push(MiscellaneousFailure {
-                    error: Arc::new(anyhow!(
-                        "Failed to finalize scope after cleanup: scope {:?}, session {:?}",
-                        self.scope, self.session,
-                    )),
-                    backtrace,
-                })
-        }
-    }
 }
 
 pub(crate) struct Blocker {
@@ -349,66 +326,6 @@ impl<'a> OperationRequest<'a> {
     }
 }
 
-pub struct OperationCleanup<'a> {
-    pub source: Entity,
-    pub session: Entity,
-    pub world: &'a mut World,
-    pub roster: &'a mut OperationRoster,
-}
-
-impl<'a> OperationCleanup<'a> {
-
-    pub fn clean(&mut self) {
-        let Some(cleanup) = self.world.get::<OperationCleanupStorage>(self.source) else {
-            return;
-        };
-
-        let cleanup = cleanup.0;
-        if let Err(error) = cleanup(OperationCleanup {
-            source: self.source,
-            session: self.session,
-            world: self.world,
-            roster: self.roster
-        }) {
-            self.world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .operations
-                .push(error);
-        }
-    }
-
-    pub fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
-        self.world.get_entity_mut(self.source)
-            .or_broken()?
-            .cleanup_inputs::<T>(self.session);
-        Ok(())
-    }
-
-    pub fn cleanup_disposals(&mut self) -> OperationResult {
-        self.world.get_entity_mut(self.source)
-            .or_broken()?
-            .clear_disposals(self.session);
-        Ok(())
-    }
-
-    pub fn notify_cleaned(&mut self) -> OperationResult {
-        let source_mut = self.world.get_entity_mut(self.source).or_broken()?;
-        let scope = source_mut.get::<ScopeStorage>().or_not_ready()?.get();
-        let mut scope_mut = self.world.get_entity_mut(scope).or_broken()?;
-        let mut scope_contents = scope_mut.get_mut::<ScopeContents>().or_broken()?;
-        if scope_contents.register_cleanup_of_node(self.session, self.source) {
-            self.roster.cleanup_finished(
-                CleanupFinished { scope, session: self.session }
-            );
-        }
-        Ok(())
-    }
-
-    pub fn for_node(self, source: Entity) -> Self {
-        Self { source, ..self }
-    }
-}
-
 pub struct OperationReachability<'a> {
     source: Entity,
     session: Entity,
@@ -442,7 +359,7 @@ impl<'a> OperationReachability<'a> {
         }
 
         let reachabiility = self.world.get_entity(source).or_broken()?
-            .get::<OperationReachabiilityStorage>().or_broken()?.0;
+            .get::<OperationReachabilityStorage>().or_broken()?.0;
 
         let is_reachable = reachabiility(OperationReachability {
             source,
@@ -602,11 +519,11 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
             .insert((
                 OperationExecuteStorage(perform_operation::<Op>),
                 OperationCleanupStorage(Op::cleanup),
-                OperationReachabiilityStorage(Op::is_reachable),
+                OperationReachabilityStorage(Op::is_reachable),
             ));
         if let Some(scope) = self.scope {
             source_mut.insert(ScopeStorage::new(scope)).set_parent(scope);
-            match world.get_mut::<ScopeContents>(scope).or_broken() {
+            match world.get_mut::<CleanupContents>(scope).or_broken() {
                 Ok(mut contents) => {
                     contents.add_node(self.source);
                 }
@@ -624,10 +541,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
 pub(crate) struct OperationExecuteStorage(pub(crate) fn(OperationRequest));
 
 #[derive(Component)]
-struct OperationCleanupStorage(fn(OperationCleanup) -> OperationResult);
-
-#[derive(Component)]
-struct OperationReachabiilityStorage(
+struct OperationReachabilityStorage(
     fn(OperationReachability) -> ReachabilityResult
 );
 

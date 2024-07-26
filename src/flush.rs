@@ -36,6 +36,7 @@ use crate::{
     UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel, MiscellaneousFailure,
     OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished, OperationCleanup,
     UnhandledErrors, UnusedTargetDrop, ValidateScopeReachability, OperationError,
+    Cleanup, ValidationRequest,
     execute_operation, awaken_task, dispose_for_despawned_service,
 };
 
@@ -211,8 +212,10 @@ fn collect_from_channels(
         };
 
         let validate = validate.0;
-        let cleanup = OperationCleanup { source, session, world, roster };
-        if let Err(OperationError::Broken(backtrace)) = validate(cleanup) {
+        // let cleanup = Cleanup { cleaner:  }
+        // let cleanup_op = OperationCleanup { source, session, world, roster };
+        let req = ValidationRequest { source, session, world, roster };
+        if let Err(OperationError::Broken(backtrace)) = validate(req) {
             world.get_resource_or_insert_with(|| UnhandledErrors::default())
                 .miscellaneous
                 .push(MiscellaneousFailure {
