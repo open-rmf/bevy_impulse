@@ -123,6 +123,9 @@ pub use workflow::*;
 
 pub mod testing;
 
+pub mod trim;
+pub use trim::*;
+
 use bevy::prelude::{Entity, In};
 
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].

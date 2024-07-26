@@ -78,6 +78,9 @@ pub(crate) use operate_service::*;
 mod operate_task;
 pub(crate) use operate_task::*;
 
+mod operate_trim;
+pub use operate_trim::*;
+
 mod scope;
 pub use scope::*;
 
