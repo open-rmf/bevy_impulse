@@ -243,6 +243,7 @@ fn drop_target(
 
     let (q_children, q_detached) = search_state.get(world);
     loop {
+        let mut move_up_chain = false;
         if let Ok(children) = q_children.get(impulse) {
             for child in children {
                 let Ok(detached) = q_detached.get(*child) else {
@@ -262,14 +263,17 @@ fn drop_target(
                         dropped_impulses.push(impulse);
                     }
                     roster.purge(impulse);
+                    move_up_chain = true;
                     impulse = *child;
                     continue;
                 }
             }
         }
 
-        // There is nothing further to include in the drop
-        break;
+        if !move_up_chain {
+            // There is nothing further to include in the drop
+            break;
+        }
     }
 
     if let Some(detached_impulse) = detached_impulse {

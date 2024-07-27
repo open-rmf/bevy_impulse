@@ -183,5 +183,6 @@ mod tests {
             FlushConditions::new().with_timeout(Duration::from_secs_f32(5.0)),
         );
         assert_eq!(promise.response.take().available(), Some("hello"));
+        assert!(context.no_unhandled_errors());
     }
 }

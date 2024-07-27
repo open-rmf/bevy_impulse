@@ -67,11 +67,11 @@ where
     Streams: StreamPack,
 {
     /// Keep executing the impulse chain up to here even if a downstream
-    /// dependent was dropped. If you continue building the chain from this
+    /// dependent gets dropped. If you continue building the chain from this
     /// point, then the later impulses will not be affected by this use of
-    /// `.detach()` and may be dropped.
+    /// `.detach()` and may be dropped if its downstream dependent gets dropped.
     ///
-    /// Downstream dependencies get dropped in the following situations:
+    /// Dependency gets dropped in the following situations:
     ///
     /// | Operation                                                 | Drop condition                                        |
     /// |-----------------------------------------------------------|-------------------------------------------------------|
@@ -331,6 +331,36 @@ impl<T> Default for Collection<T> {
 mod tests {
     use crate::{*, testing::*};
     use std::time::{Instant, Duration};
+    use crossbeam::channel::unbounded;
+
+    #[test]
+    fn test_dropped_chain() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let (detached_sender, detached_receiver) = unbounded();
+        let (attached_sender, attached_receiver) = unbounded();
+
+        context.command(|commands| {
+            let _ = commands
+            .request("hello".to_owned(), to_uppercase.into_blocking_map())
+            .map_block(move |value| {
+                detached_sender.send(value.clone()).unwrap();
+                value
+            })
+            .detach()
+            .map_block(to_lowercase)
+            .map_block(move |value| {
+                attached_sender.send(value.clone()).unwrap();
+                value
+            })
+            .map_block(to_uppercase);
+        });
+
+        context.run(1);
+        assert_eq!(detached_receiver.try_recv().unwrap(), "HELLO");
+        assert!(attached_receiver.try_recv().is_err());
+        assert!(context.get_unhandled_errors().is_some_and(|e| e.unused_targets.len() == 1));
+    }
 
     #[test]
     fn test_blocking_map() {

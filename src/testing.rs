@@ -114,6 +114,10 @@ impl TestingContext {
         })
     }
 
+    pub fn run(&mut self, conditions: impl Into<FlushConditions>) {
+        self.run_impl::<()>(None, conditions);
+    }
+
     pub fn run_while_pending<T>(
         &mut self,
         promise: &mut Promise<T>,
@@ -126,10 +130,18 @@ impl TestingContext {
         promise: &mut Promise<T>,
         conditions: impl Into<FlushConditions>,
     ) -> bool {
+        self.run_impl(Some(promise), conditions)
+    }
+
+    fn run_impl<T>(
+        &mut self,
+        mut promise: Option<&mut Promise<T>>,
+        conditions: impl Into<FlushConditions>,
+    ) -> bool {
         let conditions = conditions.into();
         let t_initial = std::time::Instant::now();
         let mut count = 0;
-        while promise.peek().is_pending() {
+        while !promise.as_mut().is_some_and(|p| !p.peek().is_pending()) {
             if let Some(timeout) = conditions.timeout {
                 let elapsed = std::time::Instant::now() - t_initial;
                 if timeout < elapsed {
@@ -284,6 +296,10 @@ pub fn string_from_utf8<Values: IntoIterator<Item = u8>>(
 
 pub fn to_uppercase(value: String) -> String {
     value.to_uppercase()
+}
+
+pub fn to_lowercase(value: String) -> String {
+    value.to_lowercase()
 }
 
 #[derive(Clone, Copy, Debug)]
