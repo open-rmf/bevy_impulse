@@ -25,7 +25,7 @@ use std::error::Error;
 
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder, IntoBlockingCallback,
-    StreamPack, Provider, ProvideOnce, Scope, StreamOf,
+    StreamPack, Provider, ProvideOnce, Scope, StreamOf, Trim, TrimBranch,
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop, BufferAccessMut,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
@@ -410,6 +410,47 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Build: UnzipBuilder<T>
     {
         build.unzip_build(Output::<T>::new(self.scope(), self.target), self.builder)
+    }
+
+    /// Run a trimming operation when the workflow reaches this point.
+    ///
+    /// See also: [`Self::then_trim_node`], [`Builder::create_trim`].
+    pub fn then_trim(
+        self,
+        branches: impl IntoIterator<Item=TrimBranch>,
+    ) -> Chain<'w, 's, 'a, 'b, T> {
+        let branches: SmallVec<[_; 16]> = branches.into_iter().collect();
+        for branch in &branches {
+            branch.verify_scope(self.builder.scope);
+        }
+
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            Trim::<T>::new(branches, target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// Run a trimming operation when the workflow reaches this point. This will
+    /// return a [`Node`] so you can connect other inputs into the operation.
+    ///
+    /// See also: [`Self::then_trim`], [`Builder::create_trim`].
+    pub fn then_trim_node(
+        self,
+        branches: impl IntoIterator<Item = TrimBranch>,
+    ) -> Node<T, T> {
+        let source = self.target;
+        let scope = self.builder.scope;
+        let target = self.then_trim(branches).output().id();
+        Node {
+            input: InputSlot::new(scope, source),
+            output: Output::new(scope, target),
+            streams: (),
+        }
     }
 
     /// If the chain's response implements the [`Future`] trait, applying

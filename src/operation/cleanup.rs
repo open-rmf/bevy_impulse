@@ -67,9 +67,14 @@ impl<'a> OperationCleanup<'a> {
     }
 
     pub fn cleanup_disposals(&mut self) -> OperationResult {
-        self.world.get_entity_mut(self.source)
-            .or_broken()?
-            .clear_disposals(self.cleanup.session);
+        let mut source_mut = self.world.get_entity_mut(self.source)
+            .or_broken()?;
+
+        let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
+        if self.cleanup.cleaner == scope {
+            // Only erase disposals if the cleanup is being triggered by the scope
+            source_mut.clear_disposals(self.cleanup.session);
+        }
         Ok(())
     }
 
@@ -165,6 +170,22 @@ pub struct Cleanup {
 
 impl Cleanup {
     pub(crate) fn trigger(self, world: &mut World, roster: &mut OperationRoster) {
+        // Clear this cleanup_id so we're not leaking memory
+        match world.get_mut::<CleanupContents>(self.cleaner) {
+            Some(mut contents) => {
+                contents.cleanup.remove(&self.cleanup_id);
+            }
+            None => {
+                world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .miscellaneous
+                    .push(MiscellaneousFailure {
+                        error: Arc::new(anyhow!("Failed to clear cleanup tracker: {self:?}")),
+                        backtrace: Some(backtrace::Backtrace::new()),
+                    });
+            }
+        }
+
+
         let Some(FinalizeCleanup(f)) = world.get::<FinalizeCleanup>(self.cleaner).copied() else {
             return;
         };

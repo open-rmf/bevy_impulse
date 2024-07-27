@@ -22,9 +22,9 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use std::collections::HashMap;
+use smallvec::SmallVec;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
@@ -77,6 +77,10 @@ impl Disposal {
     pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
         Filtered { filtered_at_node, reason }.into()
     }
+
+    pub fn trimming(nodes: SmallVec<[Entity; 16]>) -> Self {
+        Trimming { nodes }.into()
+    }
 }
 
 #[derive(Debug)]
@@ -113,7 +117,10 @@ pub enum DisposalCause {
 
     /// One or more streams from a node never emitted any signal. This can lead
     /// to unexpected
-    UnusedStreams(UnusedStreams)
+    UnusedStreams(UnusedStreams),
+
+    /// Some nodes in the workflow were trimmed.
+    Trimming(Trimming),
 }
 
 /// A variant of [`DisposalCause`]
@@ -253,6 +260,17 @@ impl UnusedStreams {
 impl From<UnusedStreams> for DisposalCause {
     fn from(value: UnusedStreams) -> Self {
         Self::UnusedStreams(value)
+    }
+}
+
+#[derive(Debug)]
+pub struct Trimming {
+    pub nodes: SmallVec<[Entity; 16]>,
+}
+
+impl From<Trimming> for DisposalCause {
+    fn from(value: Trimming) -> Self {
+        Self::Trimming(value)
     }
 }
 

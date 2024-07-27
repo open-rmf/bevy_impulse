@@ -169,11 +169,11 @@ where
         source_mut.insert((
             InputBundle::<Request>::new(),
             ScopeEntryStorage(self.enter_scope),
-            CleanupContents::new(),
             ScopedSessionStorage::default(),
             TerminalStorage(self.terminal),
             Cancellable::new(Self::receive_cancel),
             ValidateScopeReachability(Self::validate_scope_reachability),
+            CleanupContents::new(),
             FinalizeCleanup::new(Self::begin_cleanup_workflows),
             BeginCleanupWorkflowStorage::default(),
             FinishCleanupWorkflowStorage(self.finish_scope_cancel),

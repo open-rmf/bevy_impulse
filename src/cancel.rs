@@ -55,6 +55,13 @@ impl Cancellation {
     ) -> Self {
         Supplanted { supplanted_at_node, supplanted_by_node, supplanting_session }.into()
     }
+
+    pub fn invalid_span(
+        from_point: Entity,
+        to_point: Option<Entity>,
+    ) -> Self {
+        InvalidSpan { from_point, to_point }.into()
+    }
 }
 
 impl<T: Into<CancellationCause>> From<T> for Cancellation {
@@ -80,6 +87,10 @@ pub enum CancellationCause {
     /// Depending on the label of the incoming requests, a new request might
     /// supplant an earlier one, causing the earlier request to be cancelled.
     Supplanted(Supplanted),
+
+    /// An operation that acts on nodes within a workflow was given an invalid
+    /// span to operate on.
+    InvalidSpan(InvalidSpan),
 
     /// A promise can never be delivered because the mutex inside of a [`Promise`][1]
     /// was poisoned.
@@ -199,6 +210,21 @@ impl Unreachability {
 impl From<Unreachability> for CancellationCause {
     fn from(value: Unreachability) -> Self {
         CancellationCause::Unreachable(value)
+    }
+}
+
+/// A variant of [`CancellationCause`]
+#[derive(Debug)]
+pub struct InvalidSpan {
+    /// The starting point of the span
+    pub from_point: Entity,
+    /// The ending point of the span
+    pub to_point: Option<Entity>,
+}
+
+impl From<InvalidSpan> for CancellationCause {
+    fn from(value: InvalidSpan) -> Self {
+        CancellationCause::InvalidSpan(value)
     }
 }
 

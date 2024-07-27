@@ -19,12 +19,14 @@ use bevy::prelude::{Entity, Commands, BuildChildren};
 
 use std::future::Future;
 
+use smallvec::SmallVec;
+
 use crate::{
     Provider, UnusedTarget, StreamPack, Node, InputSlot, Output, StreamTargetMap,
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
-    Chain,
+    Chain, Trim, TrimBranch,
 };
 
 pub(crate) mod connect;
@@ -344,6 +346,36 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
                 conditions.run_on_terminate, conditions.run_on_cancel,
             ),
         ));
+    }
+
+    /// Create a node that trims (cancels) other nodes in the workflow when it
+    /// gets activated. The input into the node will be passed along as output
+    /// after the trimming is confirmed to be completed.
+    pub fn create_trim<T>(
+        &mut self,
+        branches: impl IntoIterator<Item=TrimBranch>,
+    ) -> Node<T, T>
+    where
+        T: 'static + Send + Sync,
+    {
+        let branches: SmallVec<[_; 16]> = branches.into_iter().collect();
+        for branch in &branches {
+            branch.verify_scope(self.scope);
+        }
+
+        let source = self.commands.spawn(()).id();
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            Trim::<T>::new(branches, target),
+        ));
+
+        Node {
+            input: InputSlot::new(self.scope, source),
+            output: Output::new(self.scope, target),
+            streams: (),
+        }
     }
 
     /// Get the scope that this builder is building for.

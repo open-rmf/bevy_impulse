@@ -25,7 +25,7 @@ use crate::{
 /// A collection of all the inputs and outputs for a node within a workflow.
 #[derive(Debug)]
 #[must_use]
-pub struct Node<Request, Response, Streams: StreamPack> {
+pub struct Node<Request, Response, Streams: StreamPack = ()> {
     /// The input slot for the node. Connect outputs into this slot to trigger
     /// the node.
     pub input: InputSlot<Request>,

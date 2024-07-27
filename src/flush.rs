@@ -34,9 +34,8 @@ use std::sync::Arc;
 use crate::{
     ChannelQueue, WakeQueue, OperationRoster, ServiceHook, Detached, DisposalNotice,
     UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel, MiscellaneousFailure,
-    OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished, OperationCleanup,
-    UnhandledErrors, UnusedTargetDrop, ValidateScopeReachability, OperationError,
-    Cleanup, ValidationRequest,
+    OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished, UnhandledErrors,
+    UnusedTargetDrop, ValidateScopeReachability, OperationError, ValidationRequest,
     execute_operation, awaken_task, dispose_for_despawned_service,
 };
 

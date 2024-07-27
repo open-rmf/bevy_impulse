@@ -27,12 +27,7 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use std::{
-    sync::Arc,
-    collections::{VecDeque, HashMap, hash_map::Entry}
-};
-
-use anyhow::anyhow;
+use std::collections::{VecDeque, HashMap, hash_map::Entry};
 
 use smallvec::SmallVec;
 
@@ -79,7 +74,7 @@ mod operate_task;
 pub(crate) use operate_task::*;
 
 mod operate_trim;
-pub use operate_trim::*;
+pub(crate) use operate_trim::*;
 
 mod scope;
 pub use scope::*;
@@ -588,5 +583,33 @@ fn perform_operation<Op: Operation>(
         Err(OperationError::Broken(backtrace)) => {
             try_emit_broken(source, backtrace, world, roster);
         }
+    }
+}
+
+pub enum DownstreamIter<'a> {
+    Single(Option<Entity>),
+    Fork(std::slice::Iter<'a, Entity>),
+}
+
+impl<'a> Iterator for DownstreamIter<'a> {
+    type Item = Entity;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Single(iter) => iter.take(),
+            Self::Fork(iter) => iter.next().copied(),
+        }
+    }
+}
+
+pub fn downstream_of<'a>(
+    source: Entity,
+    world: &'a World,
+) -> DownstreamIter<'a> {
+    if let Some(target) = world.get::<SingleTargetStorage>(source) {
+        DownstreamIter::Single(Some(target.get()))
+    } else if let Some(fork) = world.get::<ForkTargetStorage>(source) {
+        DownstreamIter::Fork(fork.0.iter())
+    } else {
+        DownstreamIter::Single(None)
     }
 }
