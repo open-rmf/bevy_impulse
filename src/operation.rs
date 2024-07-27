@@ -17,6 +17,7 @@
 
 use crate::{
     DeliveryLabelId, Cancel, InspectInput, UnhandledErrors, Broken, SetupFailure,
+    StreamTargetMap,
     try_emit_broken,
 };
 
@@ -586,12 +587,32 @@ fn perform_operation<Op: Operation>(
     }
 }
 
-pub enum DownstreamIter<'a> {
+pub struct DownstreamIter<'a> {
+    output: DownstreamFinishIter<'a>,
+    streams: Option<std::slice::Iter<'a, Entity>>,
+}
+
+impl<'a> Iterator for DownstreamIter<'a> {
+    type Item = Entity;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(output) = self.output.next() {
+            return Some(output);
+        }
+
+        if let Some(streams) = &mut self.streams {
+            return streams.next().copied();
+        }
+
+        None
+    }
+}
+
+enum DownstreamFinishIter<'a> {
     Single(Option<Entity>),
     Fork(std::slice::Iter<'a, Entity>),
 }
 
-impl<'a> Iterator for DownstreamIter<'a> {
+impl<'a> Iterator for DownstreamFinishIter<'a> {
     type Item = Entity;
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -605,11 +626,15 @@ pub fn downstream_of<'a>(
     source: Entity,
     world: &'a World,
 ) -> DownstreamIter<'a> {
-    if let Some(target) = world.get::<SingleTargetStorage>(source) {
-        DownstreamIter::Single(Some(target.get()))
+    let output = if let Some(target) = world.get::<SingleTargetStorage>(source) {
+        DownstreamFinishIter::Single(Some(target.get()))
     } else if let Some(fork) = world.get::<ForkTargetStorage>(source) {
-        DownstreamIter::Fork(fork.0.iter())
+        DownstreamFinishIter::Fork(fork.0.iter())
     } else {
-        DownstreamIter::Single(None)
-    }
+        DownstreamFinishIter::Single(None)
+    };
+
+    let streams = world.get::<StreamTargetMap>(source).map(|s| s.map.iter());
+
+    DownstreamIter { output, streams }
 }

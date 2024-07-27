@@ -191,4 +191,8 @@ mod tests {
         assert!(promise.take().available().is_some_and(|v| v == 8.0));
         assert!(context.no_unhandled_errors());
     }
+
+    // TODO(@mxgrey): It would be goot to have a testing-only node whose entire
+    // purpose is to track when it's been told to cleanup so we can test that
+    // the right nodes in the topology are being trimmed.
 }
