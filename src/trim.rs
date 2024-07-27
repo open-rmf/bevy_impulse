@@ -42,12 +42,15 @@ impl TrimBranch {
     ///
     /// In the event of any cycles, any nodes between the scope entry point and
     /// the initial trim point will not be included.
-    pub fn downstream(from_point: TrimPoint) -> Self {
-        Self { from_point, policy: TrimPolicy::Downstream }
+    pub fn downstream(from_point: impl Into<TrimPoint>) -> Self {
+        Self { from_point: from_point.into(), policy: TrimPolicy::Downstream }
     }
 
     /// Trim the nodes that fill the span between two points.
-    pub fn between(from_point: TrimPoint, to_point: TrimPoint) -> Self {
+    pub fn between(
+        from_point: impl Into<TrimPoint>,
+        to_point: impl Into<TrimPoint>,
+    ) -> Self {
         Self::span(from_point, [to_point])
     }
 
@@ -58,13 +61,19 @@ impl TrimBranch {
     /// point without also leading to one of the endpoints will not be included.
     ///
     /// If the set of endpoints are emtpy, this behaves the same as [`Self::single_point`].
-    pub fn span(
-        from_point: TrimPoint,
-        endpoints: impl IntoIterator<Item=TrimPoint>,
-    ) -> Self {
+    pub fn span<Endpoints>(
+        from_point: impl Into<TrimPoint>,
+        endpoints: Endpoints,
+    ) -> Self
+    where
+        Endpoints: IntoIterator,
+        Endpoints::Item: Into<TrimPoint>,
+    {
         Self {
-            from_point,
-            policy: TrimPolicy::Span(endpoints.into_iter().collect()),
+            from_point: from_point.into(),
+            policy: TrimPolicy::Span(
+                endpoints.into_iter().map(|p| p.into()).collect()
+            ),
         }
     }
 
@@ -133,8 +142,53 @@ impl TrimPoint {
     }
 }
 
+impl<T> From<InputSlot<T>> for TrimPoint {
+    fn from(input: InputSlot<T>) -> Self {
+        TrimPoint::inclusive(&input)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum TrimPolicy {
     Downstream,
     Span(SmallVec<[TrimPoint; 16]>),
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn test_trimming() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let fork_input = scope.input.fork_clone(builder);
+
+            let doubler_a = builder.create_node((
+                |value| async move {
+                    2.0 * value
+                }
+            ).into_async_map());
+            fork_input.clone_chain(builder).connect(doubler_a.input);
+            builder.connect(doubler_a.output, scope.terminate);
+
+            let trim = builder.create_trim::<f64>(Some(TrimBranch::downstream(doubler_a.input)));
+            fork_input.clone_chain(builder).connect(trim.input);
+
+            let doubler_b = builder.create_node(double.into_blocking_map());
+            builder.connect(trim.output, doubler_b.input);
+            builder.connect(doubler_b.output, doubler_a.input);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(2.0, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v| v == 8.0));
+        assert!(context.no_unhandled_errors());
+    }
 }

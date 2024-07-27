@@ -158,7 +158,7 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
         let session = clean.cleanup.session;
         clean.world.get_mut::<HoldingStorage<T>>(clean.source).or_broken()?
             .map.retain(|_, input| input.session != session);
-        Ok(())
+        clean.notify_cleaned()
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
@@ -182,11 +182,12 @@ impl<T: 'static + Send + Sync> Trim<T> {
             .map.remove(&cleanup.cleanup_id).or_not_ready()?;
 
         let nodes = source_mut.get::<CleanupContents>().or_broken()?.nodes().clone();
-        source_mut.give_input(session, data, roster)?;
+        let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
 
         let disposal = Disposal::trimming(nodes);
         emit_disposal(cleanup.cleaner, cleanup.session, disposal, world, roster);
-        Ok(())
+
+        world.get_entity_mut(target).or_broken()?.give_input(session, data, roster)
     }
 }
 
@@ -229,7 +230,13 @@ fn calculate_downstream(
 ) -> Result<Result<SmallVec<[Entity; 16]>, Cancellation>, OperationError> {
     // First calculate the span from the scope entry to the initial point so we
     // can filter those nodes out while we calculate the downstream.
-    let filter = calculate_span(scope_entry, initial_point.id(), &HashSet::new(), world);
+    let filter = {
+        let mut filter = calculate_span(
+            scope_entry, initial_point.id(), &HashSet::new(), world,
+        );
+        filter.remove(&initial_point.id());
+        filter
+    };
 
     let mut visited = HashSet::new();
     let mut queue: Vec<Entity> = Vec::new();

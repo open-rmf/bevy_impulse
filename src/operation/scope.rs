@@ -703,10 +703,11 @@ where
         )
     }
 
-    fn cleanup(_: OperationCleanup) -> OperationResult {
-        // This should never get called. Terminate should never exist as a
-        // node that's inside of a scope.
-        Err(OperationError::Broken(Some(Backtrace::new())))
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        // Terminate may be called by a trim operation, but we should not heed
+        // it. Just notify the cleanup right away without doing anything. The
+        // scope cleanup process will prevent memory leaks for this operation.
+        clean.notify_cleaned()
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {

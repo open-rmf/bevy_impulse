@@ -468,7 +468,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Add a [no-op][1] to the current end of the chain.
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
-    /// a new link (entity) into the chain.
+    /// a new operation point into the workflow. That operation point could be
+    /// used as a reference point for other operations, like
+    /// [trimming](Self::then_trim).
     ///
     /// [1]: `<https://en.wikipedia.org/wiki/NOP_(code)>`
     #[must_use]
@@ -480,6 +482,18 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
             Some(self.scope()), source, Noop::<T>::new(target),
         ));
         Chain::new(target, self.builder)
+    }
+
+    /// Get a whole node that is simply a [no-op](Self::noop).
+    pub fn noop_node(self) -> Node<T, T> {
+        let source = self.target;
+        let scope = self.builder.scope;
+        let target = self.noop().output().id();
+        Node {
+            input: InputSlot::new(scope, source),
+            output: Output::new(scope, target),
+            streams: (),
+        }
     }
 
     pub fn scope(&self) -> Entity {

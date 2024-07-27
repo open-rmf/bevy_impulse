@@ -163,6 +163,14 @@ impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
         Output::new(self.scope, target)
     }
 
+    pub fn clone_chain<'w, 's, 'a, 'b>(
+        &self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Response> {
+        let output = self.clone_output(builder);
+        output.chain(builder)
+    }
+
     pub fn id(&self) -> Entity {
         self.source
     }
