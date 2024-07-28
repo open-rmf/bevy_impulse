@@ -30,22 +30,22 @@ pub(crate) struct BufferRelationStorage<B>(B);
 #[derive(Component, Clone, Copy)]
 pub(crate) struct GateActionStorage(pub(crate) GateAction);
 
-pub(crate) struct OperateDynamicGate<B, T> {
+pub(crate) struct OperateDynamicGate<T, B> {
     buffers: B,
     target: Entity,
     _ignore: std::marker::PhantomData<T>,
 }
 
-impl<B, T> OperateDynamicGate<B, T> {
+impl<B, T> OperateDynamicGate<T, B> {
     pub(crate) fn new(buffers: B, target: Entity) -> Self {
         Self { buffers, target, _ignore: Default::default() }
     }
 }
 
-impl<B, T> Operation for OperateDynamicGate<B, T>
+impl<T, B> Operation for OperateDynamicGate<T, B>
 where
-    B: Buffered + 'static + Send + Sync,
     T: 'static + Send + Sync,
+    B: Buffered + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.get_entity_mut(self.target).or_broken()?
@@ -108,14 +108,14 @@ where
     }
 }
 
-pub(crate) struct OperateStaticGate<B, T> {
+pub(crate) struct OperateStaticGate<T, B> {
     buffers: B,
     target: Entity,
     action: GateAction,
     _ignore: std::marker::PhantomData<T>,
 }
 
-impl<B, T> OperateStaticGate<B, T> {
+impl<T, B> OperateStaticGate<T, B> {
     pub(crate) fn new(
         buffers: B,
         target: Entity,
@@ -125,7 +125,7 @@ impl<B, T> OperateStaticGate<B, T> {
     }
 }
 
-impl<B, T> Operation for OperateStaticGate<B, T>
+impl<T, B> Operation for OperateStaticGate<T, B>
 where
     B: Buffered + 'static + Send + Sync,
     T: 'static + Send + Sync,

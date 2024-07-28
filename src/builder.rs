@@ -27,7 +27,7 @@ use crate::{
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, GateAction,
-    OperateStaticGate,
+    OperateStaticGate, OperateBufferAccess,
 };
 
 pub(crate) mod connect;
@@ -222,6 +222,39 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         buffers.listen(self)
     }
 
+    /// Create a node that combines its inputs with access to some buffers. You
+    /// must specify one ore more buffers to access. FOr multiple buffers,
+    /// combine then into a tuple or an [`Iterator`]. Tuples of buffers can be
+    /// nested inside each other.
+    ///
+    /// Other [outputs](Output) can also be passed in as buffers. These outputs
+    /// will be transformed into a buffer with default buffer settings.
+    pub fn create_buffer_access<'b, T, B>(
+        &'b mut self,
+        buffers: B,
+    ) -> Node<T, T>
+    where
+        T: 'static + Send + Sync,
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self);
+        let source = self.commands.spawn(()).id();
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
+        ));
+
+        Node {
+            input: InputSlot::new(self.scope, source),
+            output: Output::new(self.scope, target),
+            streams: (),
+        }
+    }
+
     /// This method allows you to define a cleanup workflow that branches off of
     /// this scope that will activate during the scope's cleanup phase. The
     /// input to the cleanup workflow will be a key to access to one or more
@@ -388,7 +421,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// gate action is finished.
     ///
     /// See [`GateAction`] to understand what happens when a gate is opened or closed.
-    pub fn create_gate<B, T>(
+    pub fn create_gate<T, B>(
         &mut self,
         buffers: B,
     ) -> Node<GateRequest<T>, T>
@@ -405,7 +438,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.commands.add(AddOperation::new(
             Some(self.scope),
             source,
-            OperateDynamicGate::<_, T>::new(buffers, target),
+            OperateDynamicGate::<T, _>::new(buffers, target),
         ));
 
         Node {
@@ -421,10 +454,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// The data sent into the node will be passed back out as input, unchanged.
     ///
     /// See [`GateAction`] to understand what happens when a gate is opened or closed.
-    pub fn create_gate_action<B, T>(
+    pub fn create_gate_action<T, B>(
         &mut self,
-        buffers: B,
         action: GateAction,
+        buffers: B,
     ) -> Node<T, T>
     where
         B: Bufferable,
@@ -439,7 +472,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.commands.add(AddOperation::new(
             Some(self.scope),
             source,
-            OperateStaticGate::<_, T>::new(buffers, target, action),
+            OperateStaticGate::<T, _>::new(buffers, target, action),
         ));
 
         Node {
@@ -458,19 +491,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
-        self.create_gate_action(buffers, GateAction::Open)
+        self.create_gate_action(GateAction::Open, buffers)
     }
 
     /// Create a gate node that always closes the gates on one or more buffers.
     ///
     /// See [`GateAction`] to understand what happens when a gate is opened or closed.
-    pub fn create_gate_close<B, T>(&mut self, buffers: B) -> Node<T, T>
+    pub fn create_gate_close<T, B>(&mut self, buffers: B) -> Node<T, T>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
-        self.create_gate_action(buffers, GateAction::Close)
+        self.create_gate_action(GateAction::Close, buffers)
     }
 
     /// Get the scope that this builder is building for.

@@ -29,6 +29,7 @@ use crate::{
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop, BufferAccessMut,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
+    GateRequest, OperateDynamicGate, OperateStaticGate, GateAction, Buffered,
     make_result_branching, make_option_branching,
 };
 
@@ -274,9 +275,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.then_scope_node(build)
     }
 
-    /// Combine the output with access to some buffers. The input must be one or
-    /// more buffers. For multiple buffers, combine them into a tuple or an
-    /// [`Iterator`]. Tuples of buffers can be nested inside each other.
+    /// Combine the output with access to some buffers. You must specify one or
+    /// more buffers to access. For multiple buffers, combine them into a tuple
+    /// or an [`Iterator`]. Tuples of buffers can be nested inside each other.
     ///
     /// Other [outputs](Output) can also be passed in as buffers. Those outputs
     /// will be transformed into a buffer with default buffer settings.
@@ -293,6 +294,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         BufferKeys<B>: 'static + Send + Sync,
     {
         let buffers = buffers.as_buffer(self.builder);
+        buffers.verify_scope(self.builder.scope);
+
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
@@ -451,6 +454,51 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
             output: Output::new(scope, target),
             streams: (),
         }
+    }
+
+    /// Apply a [gate action](GateAction) to one or more buffers at this point
+    /// in the workflow.
+    pub fn then_gate_action<B>(
+        self,
+        action: GateAction,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self.builder);
+        buffers.verify_scope(self.builder.scope);
+
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateStaticGate::<T, _>::new(buffers, target, action),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// [Open the gates](GateAction) of one or more buffers at this point in the
+    /// workflow.
+    pub fn then_gate_open<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+    {
+        self.then_gate_action(GateAction::Open, buffers)
+    }
+
+    /// [Close the gates](GateAction) of one or more buffers at this point in
+    /// the workflow.
+    pub fn then_gate_close<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+    {
+        self.then_gate_action(GateAction::Close, buffers)
     }
 
     /// If the chain's response implements the [`Future`] trait, applying
@@ -756,6 +804,30 @@ where
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_none::<T>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+}
+
+impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, GateRequest<T>>
+where
+    T: 'static + Send + Sync,
+{
+    pub fn then_gate<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self.builder);
+        buffers.verify_scope(self.builder.scope);
+
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateDynamicGate::<T, _>::new(buffers, target),
         ));
 
         Chain::new(target, self.builder)
