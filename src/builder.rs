@@ -26,7 +26,8 @@ use crate::{
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
-    Chain, Trim, TrimBranch,
+    Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, GateAction,
+    OperateStaticGate,
 };
 
 pub(crate) mod connect;
@@ -338,6 +339,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let begin_cancel = self.commands.spawn(()).set_parent(self.scope).id();
         let buffers = from_buffers.as_buffer(self);
+        buffers.verify_scope(self.scope);
         self.commands.add(AddOperation::new(
             None,
             begin_cancel,
@@ -376,6 +378,99 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             output: Output::new(self.scope, target),
             streams: (),
         }
+    }
+
+    /// Create a gate node that can open and close the gates on one or more
+    /// buffers. Feed a [`GateRequest`] into the node and all the associated
+    /// buffers will be opened or closed based on the action inside the request.
+    ///
+    /// The data inside the request will be passed along as output once the
+    /// gate action is finished.
+    ///
+    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    pub fn create_gate<B, T>(
+        &mut self,
+        buffers: B,
+    ) -> Node<GateRequest<T>, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        T: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self);
+        buffers.verify_scope(self.scope);
+
+        let source = self.commands.spawn(()).id();
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateDynamicGate::<_, T>::new(buffers, target),
+        ));
+
+        Node {
+            input: InputSlot::new(self.scope, source),
+            output: Output::new(self.scope, target),
+            streams: (),
+        }
+    }
+
+    /// Create a gate node that always opens or always closes the gates on one
+    /// or more buffers.
+    ///
+    /// The data sent into the node will be passed back out as input, unchanged.
+    ///
+    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    pub fn create_gate_action<B, T>(
+        &mut self,
+        buffers: B,
+        action: GateAction,
+    ) -> Node<T, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        T: 'static + Send + Sync,
+    {
+        let buffers = buffers.as_buffer(self);
+        buffers.verify_scope(self.scope);
+
+        let source = self.commands.spawn(()).id();
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateStaticGate::<_, T>::new(buffers, target, action),
+        ));
+
+        Node {
+            input: InputSlot::new(self.scope, source),
+            output: Output::new(self.scope, target),
+            streams: (),
+        }
+    }
+
+    /// Create a gate node that always opens the gates on one or more buffers.
+    ///
+    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    pub fn create_gate_open<B, T>(&mut self, buffers: B) -> Node<T, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        T: 'static + Send + Sync,
+    {
+        self.create_gate_action(buffers, GateAction::Open)
+    }
+
+    /// Create a gate node that always closes the gates on one or more buffers.
+    ///
+    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    pub fn create_gate_close<B, T>(&mut self, buffers: B) -> Node<T, T>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        T: 'static + Send + Sync,
+    {
+        self.create_gate_action(buffers, GateAction::Close)
     }
 
     /// Get the scope that this builder is building for.

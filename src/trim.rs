@@ -165,15 +165,16 @@ mod tests {
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let fork_input = scope.input.fork_clone(builder);
 
+            let noop = fork_input.clone_chain(builder).noop_node();
             let doubler_a = builder.create_node((
                 |value| async move {
                     2.0 * value
                 }
             ).into_async_map());
-            fork_input.clone_chain(builder).connect(doubler_a.input);
+            builder.connect(noop.output, doubler_a.input);
             builder.connect(doubler_a.output, scope.terminate);
 
-            let trim = builder.create_trim::<f64>(Some(TrimBranch::downstream(doubler_a.input)));
+            let trim = builder.create_trim::<f64>(Some(TrimBranch::downstream(noop.input)));
             fork_input.clone_chain(builder).connect(trim.input);
 
             let doubler_b = builder.create_node(double.into_blocking_map());

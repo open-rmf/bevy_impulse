@@ -15,6 +15,12 @@
  *
 */
 
+use bevy::prelude::{Component, Entity, World};
+
+use smallvec::SmallVec;
+
+use std::collections::{HashMap, hash_map::Entry, HashSet};
+
 use crate::{
     Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
     OperationReachability, ReachabilityResult, OperationSetup, SingleInputStorage,
@@ -23,13 +29,6 @@ use crate::{
     FinalizeCleanup, FinalizeCleanupRequest, ScopeStorage, ScopeEntryStorage,
     downstream_of, emit_disposal,
 };
-
-use bevy::prelude::{Component, Entity, World};
-
-use smallvec::SmallVec;
-
-use std::collections::{HashMap, hash_map::Entry, HashSet};
-
 
 pub(crate) struct Trim<T> {
     /// The branches to be trimmed, as defined by the user.
@@ -184,7 +183,7 @@ impl<T: 'static + Send + Sync> Trim<T> {
         let nodes = source_mut.get::<CleanupContents>().or_broken()?.nodes().clone();
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
 
-        let disposal = Disposal::trimming(nodes);
+        let disposal = Disposal::trimming(cleanup.cleaner, nodes);
         emit_disposal(cleanup.cleaner, cleanup.session, disposal, world, roster);
 
         world.get_entity_mut(target).or_broken()?.give_input(session, data, roster)

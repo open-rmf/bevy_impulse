@@ -20,7 +20,7 @@ use bevy::{
     ecs::system::Command,
 };
 
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 
 use anyhow::anyhow;
 
@@ -34,6 +34,7 @@ use crate::{
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
     Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
+    GateActionStorage, GateAction, OperationRoster,
 };
 
 #[derive(Bundle)]
@@ -61,6 +62,8 @@ where
             InputBundle::<T>::new(),
             BufferBundle::new::<T>(),
             BufferAccessors::default(),
+            RelatedGateNodes::default(),
+            GateState::default(),
         ));
 
         Ok(())
@@ -73,6 +76,10 @@ where
         let Input { session, data } = source_mut.take_input::<T>()?;
         let mut buffer = source_mut.get_mut::<BufferStorage<T>>().or_broken()?;
         buffer.force_push(session, data);
+
+        if source_mut.get::<GateState>().or_broken()?.is_closed(session) {
+            return Ok(());
+        }
 
         let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
         for target in targets {
@@ -89,6 +96,12 @@ where
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
+        if !RelatedGateNodes::is_opening_reachable(&mut reachability)? {
+            // If this gate is closed and will never be able to open again, then
+            // this buffer is considered unreachable for its listeners.
+            return Ok(false);
+        }
+
         if reachability.has_input::<T>()? {
             return Ok(true);
         }
@@ -98,6 +111,79 @@ where
         }
 
         SingleInputStorage::is_reachable(&mut reachability)
+    }
+}
+
+#[derive(Component, Debug, Default)]
+pub struct GateState {
+    map: HashMap<Entity, GateAction>,
+}
+
+impl GateState {
+    pub fn apply(
+        buffer: Entity,
+        session: Entity,
+        action: GateAction,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        let mut states = world.get_mut::<GateState>(buffer).or_broken()?;
+        let state = states.map.entry(session).or_insert(GateAction::Open);
+        if *state == action {
+            // No change needed
+            return Ok(());
+        }
+
+        *state = action;
+        if state.is_open() {
+            // The gate has opened up, so we should immediately wake up all
+            // listeners.
+            let targets = world.get::<ForkTargetStorage>(buffer)
+                .or_broken()?.0.clone();
+
+            for target in targets {
+                world.get_entity_mut(target).or_broken()?
+                    .give_input(session, (), roster)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl GateState {
+    fn is_closed(&self, session: Entity) -> bool {
+        self.map.get(&session).unwrap_or(&GateAction::Open).is_close()
+    }
+}
+
+#[derive(Component, Default)]
+pub(crate) struct RelatedGateNodes(pub(crate) SmallVec<[Entity; 8]>);
+
+impl RelatedGateNodes {
+    fn is_opening_reachable(r: &mut OperationReachability) -> ReachabilityResult {
+        let source_ref = r.world.get_entity(r.source).or_broken()?;
+        let gate_state = source_ref.get::<GateState>().or_broken()?;
+        if !gate_state.is_closed(r.session) {
+            // The gate on the buffer is already open so nothing to worry about
+            // here.
+            return Ok(true);
+        }
+
+        let Some(gate_nodes) = source_ref.get::<Self>() else {
+            return Ok(false);
+        };
+
+        for gate in &gate_nodes.0 {
+            let action = r.world.get::<GateActionStorage>(*gate).or_broken()?.0;
+            if action.is_open() {
+                if r.check_upstream(*gate)? {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
     }
 }
 
@@ -230,25 +316,36 @@ impl NotifyBufferUpdate {
 
 impl Command for NotifyBufferUpdate {
     fn apply(self, world: &mut World) {
-        world.get_resource_or_insert_with(|| DeferredRoster::default());
-        let r = world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
-            // We filter out the target that produced the key that was used to
-            // make the modification. This prevents unintentional infinite loops
-            // from forming in the workflow.
-            let targets: SmallVec<[_; 16]> = world
-                .get::<ForkTargetStorage>(self.buffer).or_broken()?.0
-                .iter()
-                .filter(|t| !self.accessor.is_some_and(|a| a == **t))
-                .cloned()
-                .collect();
+        let r = match world.get::<GateState>(self.buffer) {
+            Some(gate_state) => {
+                if gate_state.is_closed(self.session) {
+                    return;
+                }
 
-            for target in targets {
-                world.get_entity_mut(target).or_broken()?
-                    .give_input(self.session, (), &mut deferred.0)?;
+                world.get_resource_or_insert_with(|| DeferredRoster::default());
+                world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
+                    // We filter out the target that produced the key that was used to
+                    // make the modification. This prevents unintentional infinite loops
+                    // from forming in the workflow.
+                    let targets: SmallVec<[_; 16]> = world
+                        .get::<ForkTargetStorage>(self.buffer).or_broken()?.0
+                        .iter()
+                        .filter(|t| !self.accessor.is_some_and(|a| a == **t))
+                        .cloned()
+                        .collect();
+
+                    for target in targets {
+                        world.get_entity_mut(target).or_broken()?
+                            .give_input(self.session, (), &mut deferred.0)?;
+                    }
+
+                    Ok(())
+                })
             }
-
-            Ok(())
-        });
+            None => {
+                None.or_broken()
+            }
+        };
 
         if let Err(OperationError::Broken(backtrace)) = r {
             world.get_resource_or_insert_with(|| UnhandledErrors::default())

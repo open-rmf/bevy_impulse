@@ -85,6 +85,9 @@ pub use errors::*;
 pub mod flush;
 pub use flush::*;
 
+pub mod gate;
+pub use gate::*;
+
 pub mod impulse;
 pub use impulse::*;
 

@@ -25,7 +25,8 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer,
     ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
-    BufferStorage, SingleInputStorage, BufferKeyBuilder,
+    BufferStorage, SingleInputStorage, BufferKeyBuilder, GateAction, GateState,
+    OperationRoster,
 };
 
 pub trait Buffered: Clone {
@@ -48,6 +49,14 @@ pub trait Buffered: Clone {
         &self,
         listener: Entity,
         world: &mut World,
+    ) -> OperationResult;
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: GateAction,
+        world: &mut World,
+        roster: &mut OperationRoster,
     ) -> OperationResult;
 
     fn as_input(&self) -> SmallVec<[Entity; 8]>;
@@ -115,6 +124,16 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         }
 
         Ok(())
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: GateAction,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        GateState::apply(self.source, session, action, world, roster)
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
@@ -209,6 +228,16 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         Ok(())
     }
 
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: GateAction,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        GateState::apply(self.source, session, action, world, roster)
+    }
+
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         SmallVec::from_iter([self.source])
     }
@@ -300,6 +329,20 @@ macro_rules! impl_buffered_for_tuple {
                 let ($($T,)*) = self;
                 $(
                     $T.add_listener(listener, world)?;
+                )*
+                Ok(())
+            }
+
+            fn gate_action(
+                &self,
+                session: Entity,
+                action: GateAction,
+                world: &mut World,
+                roster: &mut OperationRoster,
+            ) -> OperationResult {
+                let ($($T,)*) = self;
+                $(
+                    $T.gate_action(session, action, world, roster)?;
                 )*
                 Ok(())
             }
@@ -416,6 +459,19 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         Ok(())
     }
 
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: GateAction,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.gate_action(session, action, world, roster)?;
+        }
+        Ok(())
+    }
+
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
         self.iter().flat_map(|buffer| buffer.as_input()).collect()
     }
@@ -515,6 +571,19 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
     ) -> OperationResult {
         for buffer in self {
             buffer.add_listener(listener, world)?;
+        }
+        Ok(())
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: GateAction,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.gate_action(session, action, world, roster)?;
         }
         Ok(())
     }

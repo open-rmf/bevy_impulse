@@ -65,6 +65,9 @@ pub use operate_buffer_access::*;
 mod operate_callback;
 pub(crate) use operate_callback::*;
 
+mod operate_gate;
+pub(crate) use operate_gate::*;
+
 mod operate_map;
 pub(crate) use operate_map::*;
 

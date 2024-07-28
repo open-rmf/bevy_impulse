@@ -78,8 +78,15 @@ impl Disposal {
         Filtered { filtered_at_node, reason }.into()
     }
 
-    pub fn trimming(nodes: SmallVec<[Entity; 16]>) -> Self {
-        Trimming { nodes }.into()
+    pub fn trimming(trimmer: Entity, nodes: SmallVec<[Entity; 16]>) -> Self {
+        Trimming { trimmer, nodes }.into()
+    }
+
+    pub fn closed_gate(
+        gate_node: Entity,
+        closed_buffers: SmallVec<[Entity; 8]>,
+    ) -> Self {
+        ClosedGate { gate_node, closed_buffers }.into()
     }
 }
 
@@ -121,6 +128,9 @@ pub enum DisposalCause {
 
     /// Some nodes in the workflow were trimmed.
     Trimming(Trimming),
+
+    /// A gate was closed, which cut off the ability of a workflow to proceed.
+    ClosedGate(ClosedGate),
 }
 
 /// A variant of [`DisposalCause`]
@@ -243,6 +253,7 @@ impl From<PoisonedMutexDisposal> for DisposalCause {
     }
 }
 
+/// A variant of [`DisposalCause`]
 #[derive(Debug)]
 pub struct UnusedStreams {
     /// The node which did not use all its streams
@@ -263,14 +274,31 @@ impl From<UnusedStreams> for DisposalCause {
     }
 }
 
+/// A variant of [`DisposalCause`]
 #[derive(Debug)]
 pub struct Trimming {
+    pub trimmer: Entity,
     pub nodes: SmallVec<[Entity; 16]>,
 }
 
 impl From<Trimming> for DisposalCause {
     fn from(value: Trimming) -> Self {
         Self::Trimming(value)
+    }
+}
+
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct ClosedGate {
+    /// The gate node which triggered the closing
+    pub gate_node: Entity,
+    /// The buffers which were closed by the gate node
+    pub closed_buffers: SmallVec<[Entity; 8]>,
+}
+
+impl From<ClosedGate> for DisposalCause {
+    fn from(value: ClosedGate) -> Self {
+        Self::ClosedGate(value)
     }
 }
 
