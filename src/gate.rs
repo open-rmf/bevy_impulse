@@ -72,3 +72,48 @@ pub struct GateRequest<T> {
     /// completed.
     pub data: T,
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[test]
+    fn test_gate_actions() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let fork_input = scope.input.fork_clone(builder);
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+
+            fork_input.clone_chain(builder)
+                .then_gate_close(buffer)
+                .connect(buffer.input_slot());
+
+            builder.listen(buffer)
+                .consume_buffer::<8>()
+                .connect(scope.terminate);
+
+            let _ = fork_input.clone_chain(builder)
+                .with_access(buffer)
+                .then(push_value.into_blocking_callback())
+                .then_gate_open(buffer);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(2, workflow)
+            .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| v.len() == 2));
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn push_value(
+        In((value, key)): In<(i32, BufferKey<i32>)>,
+        mut access: BufferAccessMut<i32>,
+    ) {
+        access.get_mut(&key).unwrap().push(value);
+    }
+}
