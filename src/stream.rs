@@ -986,6 +986,18 @@ mod tests {
         ).as_map();
 
         test_formatting_stream(parse_async_map, &mut context);
+
+        let mut parse_continuous_srv = None;
+        context.app.add_continuous_service(
+            Update,
+            impl_formatting_streams_continuous
+            .also(|_: &mut App, service: Service<String, (), FormatStreams>| {
+                parse_continuous_srv = Some(service);
+            }),
+        );
+        let parse_continuous_srv = parse_continuous_srv.unwrap();
+
+        test_formatting_stream(parse_continuous_srv, &mut context);
     }
 
     fn impl_formatting_streams_blocking(
@@ -1020,6 +1032,27 @@ mod tests {
         if let Ok(value) = request.parse::<f32>() {
             streams.2.send(StreamOf(value));
         }
+    }
+
+    fn impl_formatting_streams_continuous(
+        In(ContinuousService { key }): In<ContinuousService<String, (), FormatStreams>>,
+        mut param: ContinuousQuery<String, (), FormatStreams>,
+    ) {
+        param.get_mut(&key).unwrap().for_each(|order| {
+            if let Ok(value) = order.request().parse::<u32>() {
+                order.streams().0.send(StreamOf(value));
+            }
+
+            if let Ok(value) = order.request().parse::<i32>() {
+                order.streams().1.send(StreamOf(value));
+            }
+
+            if let Ok(value) = order.request().parse::<f32>() {
+                order.streams().2.send(StreamOf(value));
+            }
+
+            order.respond(());
+        });
     }
 
     fn test_formatting_stream(

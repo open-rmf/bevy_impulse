@@ -15,91 +15,111 @@
  *
 */
 
-use crate::{Service, IntoService, Delivery, stream::*};
+use crate::{Service, IntoService, IntoContinuousService, Delivery, stream::*};
 
 use bevy::{
     prelude::App,
     ecs::{
         world::EntityMut,
-        system::{Commands, EntityCommands}
+        system::{Commands, EntityCommands},
+        schedule::{ScheduleLabel, SystemConfigs},
     }
 };
 
 use super::traits::*;
 
-pub struct ServiceBuilder<Srv, Deliver, With, Also> {
+pub struct ServiceBuilder<Srv, Deliver, With, Also, Configure> {
     service: Srv,
     deliver: Deliver,
     with: With,
     also: Also,
+    configure: Configure,
 }
 
-impl<Srv, Deliver: Default> ServiceBuilder<Srv, Deliver, (), ()> {
+impl<Srv, Deliver: Default> ServiceBuilder<Srv, Deliver, (), (), ()> {
     pub(crate) fn new(service: Srv) -> Self {
         Self {
             service,
             deliver: Deliver::default(),
             with: (),
             also: (),
+            configure: (),
         }
     }
 }
 
-impl<Srv, With, Also> ServiceBuilder<Srv, (), With, Also> {
+impl<Srv, With, Also, Configure> ServiceBuilder<Srv, (), With, Also, Configure> {
     /// Make this service always fulfill requests in serial. The system that
     /// provides the service will not be executed until any prior run of this
     /// service is finished (delivered or cancelled).
-    pub fn serial(self) -> ServiceBuilder<Srv, SerialChosen, With, Also> {
+    pub fn serial(self) -> ServiceBuilder<Srv, SerialChosen, With, Also, Configure> {
         ServiceBuilder {
             service: self.service,
             deliver: SerialChosen,
             with: self.with,
             also: self.also,
+            configure: self.configure,
         }
     }
 
     /// Allow the service to run in parallel. Requests that shared the same
     /// [`DeliveryLabel`](crate::DeliveryLabel) will still be run in serial or
     /// interrupt each other depending on settings.
-    pub fn parallel(self) -> ServiceBuilder<Srv, ParallelChosen, With, Also> {
+    pub fn parallel(self) -> ServiceBuilder<Srv, ParallelChosen, With, Also, Configure> {
         ServiceBuilder {
             service: self.service,
             deliver: ParallelChosen,
             with: self.with,
             also: self.also,
+            configure: self.configure,
         }
     }
 }
 
-impl<Srv, Deliver> ServiceBuilder<Srv, Deliver, (), ()> {
-    pub fn with<With>(self, with: With) -> ServiceBuilder<Srv, Deliver, With, ()> {
+impl<Srv, Deliver, Configure> ServiceBuilder<Srv, Deliver, (), (), Configure> {
+    pub fn with<With>(self, with: With) -> ServiceBuilder<Srv, Deliver, With, (), Configure> {
         ServiceBuilder {
             service: self.service,
             deliver: self.deliver,
             with,
             also: self.also,
+            configure: self.configure,
         }
     }
 }
 
-impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, ()> {
-    pub fn also<Also>(self, also: Also) -> ServiceBuilder<Srv, Deliver, With, Also> {
+impl<Srv, Deliver, With, Configure> ServiceBuilder<Srv, Deliver, With, (), Configure> {
+    pub fn also<Also>(self, also: Also) -> ServiceBuilder<Srv, Deliver, With, Also, Configure> {
         ServiceBuilder {
             service: self.service,
             deliver: self.deliver,
             with: self.with,
             also,
+            configure: self.configure,
         }
     }
 }
 
-impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also>
-where
-    Deliver: DeliveryChoice,
-{
+impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
+    pub fn configure<M, Configure>(self, configure: Configure) -> ServiceBuilder<Srv, Deliver, With, Also, Configure>
+    where
+        Srv: IntoContinuousService<M>,
+    {
+        ServiceBuilder {
+            service: self.service,
+            deliver: self.deliver,
+            with: self.with,
+            also: self.also,
+            configure,
+        }
+    }
+}
+
+impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
     pub(crate) fn add_service<M>(self, app: &mut App)
     where
         Srv: IntoService<M>,
+        Deliver: DeliveryChoice,
         With: WithEntityMut,
         Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
         Srv::Request: 'static + Send + Sync,
@@ -116,7 +136,38 @@ where
     }
 }
 
-impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, ()>
+impl<Srv, Deliver, With, Also, Configure> ServiceBuilder<Srv, Deliver, With, Also, Configure>
+where
+    Deliver: DeliveryChoice,
+{
+    pub(crate) fn add_continuous_service<M>(
+        self,
+        schedule: impl ScheduleLabel,
+        app: &mut App,
+    )
+    where
+        Srv: IntoContinuousService<M>,
+        Deliver: DeliveryChoice,
+        With: WithEntityMut,
+        Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
+        Configure: ConfigureContinuousService,
+        Srv::Request: 'static + Send + Sync,
+        Srv::Response: 'static + Send + Sync,
+        Srv::Streams: StreamPack,
+    {
+        let mut entity_mut = app.world.spawn(());
+        let provider = entity_mut.id();
+        let config = self.service.into_system_config(&mut entity_mut);
+        let config = self.configure.apply(config);
+        self.deliver.apply_entity_mut::<Srv::Request>(&mut entity_mut);
+        self.with.apply(entity_mut);
+        let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(provider);
+        app.add_systems(schedule, config);
+        self.also.apply(app, service);
+    }
+}
+
+impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, (), ()>
 where
     Deliver: DeliveryChoice,
 {
@@ -140,13 +191,28 @@ where
 
 pub struct BuilderMarker<M>(std::marker::PhantomData<M>);
 
-impl<M, Srv: IntoService<M>, Deliver, With, Also> IntoServiceBuilder<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also> {
+impl<M, Srv: IntoService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also, Configure> {
     type Service = Srv;
     type Deliver = Deliver;
     type With = With;
     type Also = Also;
+    type Configure = Configure;
 
-    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also> {
+    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure> {
+        self
+    }
+}
+
+pub struct ContinuousBuilderMarker<M>(std::marker::PhantomData<M>);
+
+impl<M, Srv: IntoContinuousService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<ContinuousBuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also, Configure> {
+    type Service = Srv;
+    type Deliver = Deliver;
+    type With = With;
+    type Also = Also;
+    type Configure = Configure;
+
+    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure> {
         self
     }
 }
@@ -158,8 +224,9 @@ impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Deliver = Srv::DefaultDeliver;
     type With = ();
     type Also = ();
+    type Configure = ();
 
-    fn into_service_builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), ()> {
+    fn into_service_builder(self) -> ServiceBuilder<Srv, Srv::DefaultDeliver, (), (), ()> {
         ServiceBuilder::new(self)
     }
 }
@@ -170,12 +237,30 @@ where
 {
     type Service = Srv;
     type Deliver = Srv::DefaultDeliver;
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, ()> {
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, (), ()> {
         self.into_service_builder().with(with)
     }
 
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::Deliver, (), Also> {
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::Deliver, (), Also, ()> {
         self.into_service_builder().also(also)
+    }
+}
+
+impl<M, Srv> QuickContinuousServiceBuild<IntoBuilderMarker<M>> for Srv
+where
+    Srv: IntoContinuousService<M>,
+{
+    type Service = Srv;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, (), With, (), ()> {
+        self.into_service_builder().with(with)
+    }
+
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, (), (), Also, ()> {
+        self.into_service_builder().also(also)
+    }
+
+    fn configure<Configure>(self, configure: Configure) -> ServiceBuilder<Self::Service, (), (), (), Configure> {
+        self.into_service_builder().configure(configure)
     }
 }
 
@@ -286,5 +371,20 @@ where
 impl<Request, Response, Streams> AlsoAdd<Request, Response, Streams> for () {
     fn apply<'w>(self, _: &mut App, _: Service<Request, Response, Streams>) {
         // Do nothing
+    }
+}
+
+impl<T> ConfigureContinuousService for T
+where
+    T: FnOnce(SystemConfigs) -> SystemConfigs
+{
+    fn apply(self, config: SystemConfigs) -> SystemConfigs {
+        (self)(config)
+    }
+}
+
+impl ConfigureContinuousService for () {
+    fn apply(self, config: SystemConfigs) -> SystemConfigs {
+        config
     }
 }

@@ -17,7 +17,11 @@
 
 use bevy::{
     prelude::{Component, Entity, Local, Query, Commands, World, BuildWorldChildren},
-    ecs::system::{SystemParam, Command},
+    ecs::{
+        system::{SystemParam, Command, IntoSystem},
+        world::EntityMut,
+        schedule::{SystemConfigs, IntoSystemConfigs}
+    }
 };
 
 use smallvec::SmallVec;
@@ -29,7 +33,8 @@ use crate::{
     DeferredRoster, UnhandledErrors, OperationRoster, Broken, Input, ServiceRequest,
     StreamTargetMap, ScopeStorage, Blocker, ServiceBundle, ServiceTrait,
     OperationRequest, DeliveryInstructions, Delivery, DeliveryUpdate, Deliver,
-    SingleTargetStorage, Disposal, DeliveryOrder,
+    SingleTargetStorage, Disposal, DeliveryOrder, IntoContinuousService,
+    ContinuousService, IntoServiceBuilder, ServiceBuilder,
     dispose_for_despawned_service, insert_new_order, pop_next_delivery,
     emit_disposal,
 };
@@ -37,6 +42,12 @@ use crate::{
 pub struct ContinuousServiceKey<Request, Response, Streams> {
     provider: Entity,
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+}
+
+impl<Request, Response, Streams> ContinuousServiceKey<Request, Response, Streams> {
+    fn new(provider: Entity) -> Self {
+        Self { provider, _ignore: Default::default() }
+    }
 }
 
 impl<Request, Response, Streams> ContinuousServiceKey<Request, Response, Streams> {
@@ -378,6 +389,12 @@ struct ContinuousQueueStorage<Request> {
     inner: SmallVec<[ContinuousOrder<Request>; 16]>,
 }
 
+impl<Request> ContinuousQueueStorage<Request> {
+    fn new() -> Self {
+        Self { inner: Default::default() }
+    }
+}
+
 struct ContinuousOrder<Request> {
     data: Request,
     session: Entity,
@@ -412,7 +429,7 @@ where
             let mut remove: SmallVec<[(usize, Entity); 16]> = SmallVec::new();
             for DeliverResponse { provider, source, session, data, index, task_id } in self.responses {
                 remove.push((index, provider));
-                let r = try_give_response(provider, session, data, world, &mut *deferred);
+                let r = try_give_response(source, session, data, world, &mut *deferred);
                 if let Err(OperationError::Broken(backtrace)) = r {
                     world.get_resource_or_insert_with(|| UnhandledErrors::default())
                         .broken
@@ -457,13 +474,14 @@ where
 }
 
 fn try_give_response<Response: 'static + Send + Sync>(
-    provider: Entity,
+    source: Entity,
     session: Entity,
     data: Response,
     world: &mut World,
     roster: &mut OperationRoster,
 ) -> OperationResult {
-    world.get_entity_mut(provider).or_broken()?
+    let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
+    world.get_entity_mut(target).or_broken()?
         .give_input(session, data, roster)
 }
 
@@ -646,5 +664,43 @@ where
 
         // The next delivery has begun so we can return
         return;
+    }
+}
+
+impl<Request, Response, Streams, M, Sys> IntoContinuousService<(Request, Response, Streams, M)> for Sys
+where
+    Sys: IntoSystem<ContinuousService<Request, Response, Streams>, (), M>,
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    type Request = Request;
+    type Response = Response;
+    type Streams = Streams;
+
+    fn into_system_config<'w>(self, entity_mut: &mut EntityMut<'w>) -> SystemConfigs {
+        let provider = entity_mut.insert((
+            ContinuousQueueStorage::<Request>::new(),
+            ServiceBundle::<ContinuousServiceImpl<Request, Response, Streams>>::new(),
+        )).id();
+        let continuous_key = move || ContinuousService { key: ContinuousServiceKey::new(provider) };
+        continuous_key.pipe(self).into_configs()
+    }
+}
+
+pub struct IntoContinuousServiceBuilderMarker<M>(std::marker::PhantomData<M>);
+
+impl<M, Srv> IntoServiceBuilder<IntoContinuousServiceBuilderMarker<M>> for Srv
+where
+    Srv: IntoContinuousService<M>,
+{
+    type Service = Srv;
+    type Deliver = ();
+    type With = ();
+    type Also = ();
+    type Configure = ();
+
+    fn into_service_builder(self) -> ServiceBuilder<Self::Service, (), (), (), ()> {
+        ServiceBuilder::new(self)
     }
 }

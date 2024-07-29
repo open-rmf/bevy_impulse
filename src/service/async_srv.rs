@@ -352,10 +352,10 @@ where
     Srv: IntoService<M> + IsAsyncService<M>,
 {
     type Service = Srv;
-    fn serial(self) -> ServiceBuilder<Srv, SerialChosen, (), ()> {
+    fn serial(self) -> ServiceBuilder<Srv, SerialChosen, (), (), ()> {
         ServiceBuilder::new(self)
     }
-    fn parallel(self) -> ServiceBuilder<Srv, ParallelChosen, (), ()> {
+    fn parallel(self) -> ServiceBuilder<Srv, ParallelChosen, (), (), ()> {
         ServiceBuilder::new(self)
     }
 }

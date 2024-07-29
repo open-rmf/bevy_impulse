@@ -25,6 +25,7 @@ use bevy::{
     ecs::{
         world::EntityMut,
         system::EntityCommands,
+        schedule::SystemConfigs,
     },
 };
 
@@ -45,6 +46,14 @@ pub trait IntoService<M> {
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
 }
 
+pub trait IntoContinuousService<M> {
+    type Request;
+    type Response;
+    type Streams;
+
+    fn into_system_config<'w>(self, entity_mut: &mut EntityMut<'w>) -> SystemConfigs;
+}
+
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
 pub trait IntoServiceBuilder<M> {
@@ -52,7 +61,8 @@ pub trait IntoServiceBuilder<M> {
     type Deliver;
     type With;
     type Also;
-    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also>;
+    type Configure;
+    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure>;
 }
 
 /// This trait allows users to immediately begin building a service off of a suitable system
@@ -60,16 +70,23 @@ pub trait IntoServiceBuilder<M> {
 pub trait QuickServiceBuild<M> {
     type Service;
     type Deliver;
-    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, ()>;
-    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::Deliver, (), Also>;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, Self::Deliver, With, (), ()>;
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, Self::Deliver, (), Also, ()>;
+}
+
+pub trait QuickContinuousServiceBuild<M> {
+    type Service;
+    fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, (), With, (), ()>;
+    fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, (), (), Also, ()>;
+    fn configure<Configure>(self, configure: Configure) -> ServiceBuilder<Self::Service, (), (), (), Configure>;
 }
 
 /// This trait allows async service systems to be converted into a builder
 /// by specifying whether it should have serial or parallel service delivery.
 pub trait ChooseAsyncServiceDelivery<M> {
     type Service;
-    fn serial(self) -> ServiceBuilder<Self::Service, SerialChosen, (), ()>;
-    fn parallel(self) -> ServiceBuilder<Self::Service, ParallelChosen, (), ()>;
+    fn serial(self) -> ServiceBuilder<Self::Service, SerialChosen, (), (), ()>;
+    fn parallel(self) -> ServiceBuilder<Self::Service, ParallelChosen, (), (), ()>;
 }
 
 /// This trait is used to set the delivery mode of a service.
@@ -98,4 +115,8 @@ pub trait WithEntityCommands {
 /// provider while adding it to an App.
 pub trait AlsoAdd<Request, Response, Streams> {
     fn apply<'w>(self, app: &mut App, provider: Service<Request, Response, Streams>);
+}
+
+pub trait ConfigureContinuousService {
+    fn apply(self, config: SystemConfigs) -> SystemConfigs;
 }

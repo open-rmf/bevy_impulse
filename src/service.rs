@@ -19,6 +19,7 @@ use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
 use bevy::{
     prelude::{Entity, App, Commands, Component},
+    ecs::schedule::ScheduleLabel,
     utils::define_label,
 };
 
@@ -271,7 +272,7 @@ impl<T: Into<DeliveryInstructions>> AsDeliveryInstructions for T {
 /// any system.
 pub trait SpawnServicesExt<'w, 's> {
     /// Call this with Commands to create a new async service from any system.
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=()>>(
+    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
         &'a mut self,
         builder: B,
     ) -> Service<
@@ -289,7 +290,7 @@ pub trait SpawnServicesExt<'w, 's> {
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=()>>(
+    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
         &'a mut self,
         builder: B,
     ) -> Service<
@@ -313,37 +314,83 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
 /// configuring an App.
 pub trait AddServicesExt {
     /// Call this on an App to create a service that is available immediately.
-    fn add_service<M1, M2, B: IntoServiceBuilder<M1>>(&mut self, builder: B) -> &mut Self
+    fn add_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(&mut self, builder: B) -> &mut Self
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityMut,
         B::Also: AlsoAdd<
-                <B::Service as IntoService<M2>>::Request,
-                <B::Service as IntoService<M2>>::Response,
-                <B::Service as IntoService<M2>>::Streams
-            >,
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams
+        >,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: StreamPack;
 }
 
 impl AddServicesExt for App {
-    fn add_service<M1, M2, B: IntoServiceBuilder<M1>>(&mut self, builder: B) -> &mut Self
+    fn add_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(&mut self, builder: B) -> &mut Self
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityMut,
         B::Also: AlsoAdd<
-                <B::Service as IntoService<M2>>::Request,
-                <B::Service as IntoService<M2>>::Response,
-                <B::Service as IntoService<M2>>::Streams
-            >,
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams
+        >,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack
+        <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
         builder.into_service_builder().add_service(self);
+        self
+    }
+}
+
+pub trait AddContinuousServicesExt {
+    fn add_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        builder: B,
+    ) -> &mut Self
+    where
+        B::Service: IntoContinuousService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+            <B::Service as IntoContinuousService<M2>>::Request,
+            <B::Service as IntoContinuousService<M2>>::Response,
+            <B::Service as IntoContinuousService<M2>>::Streams,
+        >,
+        B::Configure: ConfigureContinuousService,
+        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
+}
+
+impl AddContinuousServicesExt for App {
+    fn add_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        builder: B,
+    ) -> &mut Self
+    where
+        B::Service: IntoContinuousService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+            <B::Service as IntoContinuousService<M2>>::Request,
+            <B::Service as IntoContinuousService<M2>>::Response,
+            <B::Service as IntoContinuousService<M2>>::Streams,
+        >,
+        B::Configure: ConfigureContinuousService,
+        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
+    {
+        builder.into_service_builder().add_continuous_service(schedule, self);
         self
     }
 }
