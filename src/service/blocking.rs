@@ -15,19 +15,19 @@
  *
 */
 
-use crate::{
-    BlockingService, BlockingServiceInput, IntoService, ServiceTrait, ServiceRequest,
-    Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
-    UnusedStreams, ManageDisposal, OrBroken, dispose_for_despawned_service,
-    service::builder::BlockingChosen,
-};
-
 use bevy::{
     prelude::{Component, In},
     ecs::{
         world::EntityMut,
         system::{IntoSystem, BoxedSystem, EntityCommands},
     }
+};
+
+use crate::{
+    BlockingService, BlockingServiceInput, IntoService, ServiceTrait, ServiceRequest,
+    Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
+    UnusedStreams, ManageDisposal, OrBroken, dispose_for_despawned_service,
+    service::service_builder::BlockingChosen, make_stream_buffer_from_world,
 };
 
 pub struct Blocking<M>(std::marker::PhantomData<M>);
@@ -110,7 +110,7 @@ where
             return Ok(());
         };
 
-        let streams = Streams::make_buffer(source, world);
+        let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
         let response = service.run(BlockingService {
             request, streams: streams.clone(), provider, source, session,
         }, world);

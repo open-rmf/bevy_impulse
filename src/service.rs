@@ -28,8 +28,11 @@ pub use async_srv::*;
 mod blocking;
 pub use blocking::*;
 
-mod builder;
-pub use builder::ServiceBuilder;
+mod continuous;
+pub use continuous::*;
+
+mod service_builder;
+pub use service_builder::ServiceBuilder;
 
 pub(crate) mod delivery;
 pub(crate) use delivery::*;

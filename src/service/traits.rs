@@ -17,7 +17,7 @@
 
 use crate::{
     ServiceBuilder, Service, ServiceRequest, OperationResult,
-    service::builder::{SerialChosen, ParallelChosen},
+    service::service_builder::{SerialChosen, ParallelChosen},
 };
 
 use bevy::{

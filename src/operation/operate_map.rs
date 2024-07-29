@@ -28,7 +28,7 @@ use crate::{
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
     OperationReachability, ReachabilityResult, InputBundle, UnusedStreams,
-    ManageDisposal,
+    ManageDisposal, make_stream_buffer_from_world,
 };
 
 #[derive(Bundle)]
@@ -87,7 +87,7 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest
     ) -> OperationResult {
-        let streams = Streams::make_buffer(source, world);
+        let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;

@@ -20,7 +20,7 @@ use bevy::{
         Component, Bundle, Entity, Commands, World, BuildChildren, Deref,
         DerefMut, With,
     },
-    ecs::query::ReadOnlyWorldQuery,
+    ecs::query::{ReadOnlyWorldQuery, WorldQuery},
     utils::all_tuples,
 };
 
@@ -34,6 +34,7 @@ use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
     InnerChannel, TakenStream, StreamChannel, Push, Builder, UnusedStreams,
+    OperationError,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -239,6 +240,10 @@ impl StreamTargetMap {
     }
 }
 
+/// The `StreamPack` trait defines the interface for a pack of streams. Each
+/// [`Provider`](crate::Provider) can provide zero, one, or more streams of data
+/// that may be sent out while it's running. The `StreamPack` allows those
+/// streams to be packed together as one generic argument.
 pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
     type StreamFilter: ReadOnlyWorldQuery;
@@ -248,6 +253,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type Receiver;
     type Channel;
     type Buffer: Clone;
+    type TargetIndexQuery: ReadOnlyWorldQuery;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -282,7 +288,10 @@ pub trait StreamPack: 'static + Send + Sync {
 
     fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
 
-    fn make_buffer(source: Entity, world: &World) -> Self::Buffer;
+    fn make_buffer<'a>(
+        target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'a>,
+        target_map: Option<&StreamTargetMap>,
+    ) -> Self::Buffer;
 
     fn process_buffer(
         buffer: Self::Buffer,
@@ -306,6 +315,7 @@ impl<T: Stream> StreamPack for T {
     type Receiver = Receiver<Self>;
     type Channel = StreamChannel<Self>;
     type Buffer = StreamBuffer<Self>;
+    type TargetIndexQuery = Option<&'static StreamTargetStorage<Self>>;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -367,15 +377,14 @@ impl<T: Stream> StreamPack for T {
         StreamChannel::new(target, Arc::clone(inner))
     }
 
-    fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
-        let index = world.get::<StreamTargetStorage<Self>>(source)
-            .map(|t| t.index);
-        let target = index.map(
-            |index| world
-                .get::<StreamTargetMap>(source)
-                .map(|t| t.get(index))
-                .flatten()
-        ).flatten();
+    fn make_buffer<'a>(
+        target_index: Option<&'a StreamTargetStorage<Self>>,
+        target_map: Option<&StreamTargetMap>,
+    ) -> Self::Buffer {
+        let target = target_index
+            .map(|s| target_map.map(|t| t.map.get(s.index))
+            ).flatten().flatten().copied();
+
         StreamBuffer { container: Default::default(), target }
     }
 
@@ -415,6 +424,7 @@ impl StreamPack for () {
     type Receiver = ();
     type Channel = ();
     type Buffer = ();
+    type TargetIndexQuery = ();
 
     fn spawn_scope_streams(
         _: Entity,
@@ -464,7 +474,10 @@ impl StreamPack for () {
         ()
     }
 
-    fn make_buffer(_: Entity, _: &World) -> Self::Buffer {
+    fn make_buffer(
+        _: Self::TargetIndexQuery,
+        _: Option<&StreamTargetMap>,
+    ) -> Self::Buffer {
         ()
     }
 
@@ -485,7 +498,7 @@ impl StreamPack for () {
 }
 
 macro_rules! impl_streampack_for_tuple {
-    ($($T:ident),*) => {
+    ($(($T:ident, $I:ident)),*) => {
         #[allow(non_snake_case)]
         impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
             type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
@@ -496,6 +509,7 @@ macro_rules! impl_streampack_for_tuple {
             type Receiver = ($($T::Receiver,)*);
             type Channel = ($($T::Channel,)*);
             type Buffer = ($($T::Buffer,)*);
+            type TargetIndexQuery = ($($T::TargetIndexQuery,)*);
 
             fn spawn_scope_streams(
                 in_scope: Entity,
@@ -607,10 +621,14 @@ macro_rules! impl_streampack_for_tuple {
                 )
             }
 
-            fn make_buffer(source: Entity, world: &World) -> Self::Buffer {
+            fn make_buffer<'a>(
+                target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'a>,
+                target_map: Option<&StreamTargetMap>,
+            ) -> Self::Buffer {
+                let ($($I,)*) = target_index;
                 (
                     $(
-                        $T::make_buffer(source, world),
+                        $T::make_buffer($I, target_map),
                     )*
                 )
             }
@@ -643,7 +661,19 @@ macro_rules! impl_streampack_for_tuple {
 
 // Implements the `StreamPack` trait for all tuples between size 1 and 12
 // (inclusive) made of types that implement `StreamPack`
-all_tuples!(impl_streampack_for_tuple, 1, 12, T);
+all_tuples!(impl_streampack_for_tuple, 1, 12, T, I);
+
+pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
+    source: Entity,
+    world: &mut World,
+) -> Result<Streams::Buffer, OperationError> {
+    let mut stream_query = world.query::<(
+        Streams::TargetIndexQuery,
+        Option<&'static StreamTargetMap>,
+    )>();
+    let (target_indices, target_map) = stream_query.get(world, source).or_broken()?;
+    Ok(Streams::make_buffer(target_indices, target_map))
+}
 
 /// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
 /// based on what streams they provide. If a stream is required, you should wrap

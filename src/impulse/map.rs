@@ -26,7 +26,7 @@ use crate::{
     Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
     InputBundle, OperationResult, OrBroken, Input, ManageInput,
     ChannelQueue, BlockingMap, AsyncMap, Channel, OperateTask, ActiveTasksStorage,
-    CallBlockingMapOnce, CallAsyncMapOnce, UnusedStreams,
+    CallBlockingMapOnce, CallAsyncMapOnce, UnusedStreams, make_stream_buffer_from_world,
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
@@ -86,7 +86,7 @@ where
     fn execute(
         OperationRequest { source, world, roster }: OperationRequest,
     ) -> OperationResult {
-        let streams = Streams::make_buffer(source, world);
+        let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let Input { session, data: request } = source_mut.take_input::<Request>()?;

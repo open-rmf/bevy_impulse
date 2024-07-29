@@ -20,6 +20,7 @@ use crate::{
     OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateCallback, ManageInput, OperationError,
     OrBroken, OperateTask, UnusedStreams, ManageDisposal,
+    make_stream_buffer_from_world,
 };
 
 use bevy::{
@@ -201,7 +202,7 @@ where
             self.initialized = true;
         }
 
-        let streams = Streams::make_buffer(input.source, input.world);
+        let streams = make_stream_buffer_from_world::<Streams>(input.source, input.world)?;
 
         let response = self.system.run(BlockingCallback {
             request, streams: streams.clone(), source: input.source, session,
@@ -328,7 +329,7 @@ where
     fn as_callback(mut self) -> Callback<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: CallbackRequest| {
             let Input { session, data: request } = input.get_request::<Self::Request>()?;
-            let streams = Streams::make_buffer(input.source, input.world);
+            let streams = make_stream_buffer_from_world::<Streams>(input.source, input.world)?;
             let response = (self)(BlockingCallback {
                 request, streams: streams.clone(), source: input.source, session,
             });

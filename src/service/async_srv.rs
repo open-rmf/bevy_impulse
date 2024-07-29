@@ -21,7 +21,7 @@ use crate::{
     StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
     OperationError, OrBroken, ManageInput, Input, OperateTask,
     SingleTargetStorage, dispose_for_despawned_service,
-    service::builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
+    service::service_builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
     StopTask, UnhandledErrors, StopTaskFailure, Delivery, DeliveryInstructions,
     Deliver, DeliveryOrder, DeliveryUpdate, insert_new_order, pop_next_delivery,
     OperationResult,

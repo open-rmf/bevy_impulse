@@ -176,7 +176,7 @@ pub struct BlockingService<Request, Streams: StreamPack = ()> {
 /// Use this to reduce bracket noise when you need `In<BlockingService<R>>`.
 pub type BlockingServiceInput<Request, Streams = ()> = In<BlockingService<Request, Streams>>;
 
-/// Use AsyncService to indicate that your system is an async [`Service`]. Being
+/// Use `AsyncService` to indicate that your system is an async [`Service`]. Being
 /// async means it must return a [`Future<Output=Response>`](std::future::Future)
 /// which will be processed by a task pool.
 ///
@@ -203,6 +203,12 @@ pub struct AsyncService<Request, Streams: StreamPack = ()> {
 
 /// Use this to reduce backet noise when you need `In<`[`AsyncService<R, S>`]`>`.
 pub type AsyncServiceInput<Request, Streams = ()> = In<AsyncService<Request, Streams>>;
+
+/// Use `ContinuousService` to indicate that your system is a [`Service`] that
+/// runs incrementally inside of a schedule with each update of the Bevy ECS.
+pub struct ContinuousService<Request, Response, Streams: StreamPack = ()> {
+    key: ContinuousServiceKey<Request, Response, Streams>,
+}
 
 /// Use BlockingCallback to indicate that your system is meant to define a
 /// blocking [`Callback`]. Callbacks are different from services because they are
