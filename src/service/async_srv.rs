@@ -114,7 +114,7 @@ where
 
         let update = insert_new_order::<Request>(
             delivery.as_mut(),
-            DeliveryOrder { source, session, task_id, request, instructions }
+            DeliveryOrder { source, session, task_id, request, instructions },
         );
 
         let (request, blocker) = match update {

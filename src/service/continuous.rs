@@ -16,11 +16,8 @@
 */
 
 use bevy::{
-    prelude::{Component, In, Entity, Local, Query, Commands, World},
-    ecs::{
-        world::EntityMut,
-        system::{IntoSystem, BoxedSystem, EntityCommands, SystemParam, Command},
-    }
+    prelude::{Component, Entity, Local, Query, Commands, World, BuildWorldChildren},
+    ecs::system::{SystemParam, Command},
 };
 
 use smallvec::SmallVec;
@@ -28,10 +25,13 @@ use smallvec::SmallVec;
 use std::collections::HashMap;
 
 use crate::{
-    BlockingService, BlockingServiceInput, IntoService, ServiceTrait, ServiceRequest,
-    Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
-    UnusedStreams, ManageDisposal, OrBroken, dispose_for_despawned_service,
-    OperationResult, DeferredRoster, UnhandledErrors, OperationRoster, Broken,
+    ManageInput, OperationError, StreamPack, OrBroken, OperationResult,
+    DeferredRoster, UnhandledErrors, OperationRoster, Broken, Input, ServiceRequest,
+    StreamTargetMap, ScopeStorage, Blocker, ServiceBundle, ServiceTrait,
+    OperationRequest, DeliveryInstructions, Delivery, DeliveryUpdate, Deliver,
+    SingleTargetStorage, Disposal, DeliveryOrder,
+    dispose_for_despawned_service, insert_new_order, pop_next_delivery,
+    emit_disposal,
 };
 
 pub struct ContinuousServiceKey<Request, Response, Streams> {
@@ -64,9 +64,9 @@ where
     Streams: StreamPack,
 {
     queues: Query<'w, 's, &'static ContinuousQueueStorage<Request>>,
-    delivered: Local<'s, HashMap<Entity, HashMap<usize, (Entity, Response)>>>,
+    streams: Query<'w, 's, StreamTargetQuery<Streams>>,
+    delivered: Local<'s, HashMap<Entity, HashMap<usize, DeliverResponse<Response>>>>,
     commands: Commands<'w, 's>,
-    _ignore: std::marker::PhantomData<Streams>,
 }
 
 impl<'w, 's, Request, Response, Streams> ContinuousQuery<'w, 's, Request, Response, Streams>
@@ -95,9 +95,10 @@ where
             .ok()
             .map(|queue| ContinuousQueueMut {
                 queue,
+                provider: key.provider(),
+                streams: &self.streams,
                 delivered: self.delivered.entry(key.provider()).or_default(),
                 commands: &mut self.commands,
-                _ignore: Default::default(),
             })
     }
 }
@@ -108,7 +109,7 @@ where
     Response: 'static + Send + Sync,
 {
     queue: &'a ContinuousQueueStorage<Request>,
-    delivered: Option<&'a HashMap<usize, (Entity, Response)>>,
+    delivered: Option<&'a HashMap<usize, DeliverResponse<Response>>>,
 }
 
 impl<'a, Request, Response> ContinuousQueueView<'a, Request, Response>
@@ -154,10 +155,11 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
+    provider: Entity,
     queue: &'a ContinuousQueueStorage<Request>,
-    delivered: &'a mut HashMap<usize, (Entity, Response)>,
+    streams: &'a Query<'w, 's, StreamTargetQuery<Streams>>,
+    delivered: &'a mut HashMap<usize, DeliverResponse<Response>>,
     commands: &'a mut Commands<'w, 's>,
-    _ignore: std::marker::PhantomData<Streams>,
 }
 
 impl<'w, 's, 'a, Request, Response, Streams> ContinuousQueueMut<'w, 's, 'a, Request, Response, Streams>
@@ -192,13 +194,14 @@ where
         // INVARIANT: We have already confirmed that the index is smaller than
         // the length of the SmallVec, so it should be a valid index.
         let item = self.queue.inner.get(index).unwrap();
+        let streams = self.make_stream_buffer(item.source);
         Some(OrderMut {
             index,
-            session: item.session,
-            data: &item.data,
+            streams: Some(streams),
+            provider: self.provider,
+            request: item,
             delivered: &mut self.delivered,
             commands: &mut self.commands,
-            _ignore: Default::default(),
         })
     }
 
@@ -215,13 +218,14 @@ where
                 continue;
             }
 
+            let streams = self.make_stream_buffer(item.source);
             f(OrderMut {
                 index,
-                session: item.session,
-                data: &item.data,
+                streams: Some(streams),
+                provider: self.provider,
+                request: item,
                 delivered: &mut self.delivered,
                 commands: &mut self.commands,
-                _ignore: Default::default()
             });
         }
     }
@@ -246,19 +250,26 @@ where
                 continue;
             }
 
+            let streams = self.make_stream_buffer(item.source);
             let u = f(OrderMut {
                 index,
-                session: item.session,
-                data: &item.data,
+                streams: Some(streams),
+                provider: self.provider,
+                request: item,
                 delivered: &mut self.delivered,
                 commands: &mut self.commands,
-                _ignore: Default::default(),
             });
 
             output.push((index, u));
         }
 
         output
+    }
+
+    fn make_stream_buffer(&self, source: Entity) -> Streams::Buffer {
+        // INVARIANT: The query can't fail because all of its components are optional
+        let (target_indices, target_map) = self.streams.get(source).unwrap();
+        Streams::make_buffer(target_indices, target_map)
     }
 }
 
@@ -268,12 +279,15 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    session: Entity,
-    data: &'a Request,
+    request: &'a ContinuousOrder<Request>,
+    provider: Entity,
     index: usize,
-    delivered: &'a mut HashMap<usize, (Entity, Response)>,
+    // We use Option here so that the buffer can be taken inside the destructor.
+    // We need to take the buffer so that the data can be sent into commands and
+    // flushed later.
+    streams: Option<Streams::Buffer>,
+    delivered: &'a mut HashMap<usize, DeliverResponse<Response>>,
     commands: &'a mut Commands<'w, 's>,
-    _ignore: std::marker::PhantomData<Streams>,
 }
 
 impl<'w, 's, 'a, Request, Response, Streams> OrderMut<'w, 's, 'a, Request, Response, Streams>
@@ -284,18 +298,55 @@ where
 {
     /// Look at the request of this order.
     pub fn request(&self) -> &Request {
-        self.data
+        &self.request.data
     }
 
     /// Check the session that this order is associated with.
     pub fn session(&self) -> Entity {
-        self.session
+        self.request.session
+    }
+
+    /// Check the ID of the node that this order is associated with
+    pub fn source(&self) -> Entity {
+        self.request.source
     }
 
     /// Provide a response for this order. After calling this you will not be
     /// able to stream or give any more responses for this particular order.
     pub fn respond(self, response: Response) {
-        self.delivered.insert(self.index, (self.session, response));
+        self.delivered.insert(self.index, DeliverResponse {
+            provider: self.provider,
+            source: self.request.source,
+            session: self.request.session,
+            task_id: self.request.task_id,
+            data: response,
+            index: self.index,
+        });
+    }
+
+    /// Access the stream buffer so you can send streams from your service.
+    pub fn streams(&self) -> &Streams::Buffer {
+        // INVARIANT: This is always initialized with Some(_) and never gets
+        // taken until OrderMut is dropped, so this will always contain a valid
+        // buffer for as long as the OrderMut is not being dropped.
+        self.streams.as_ref().unwrap()
+    }
+}
+
+impl<'w, 's, 'a, Request, Response, Streams> Drop for OrderMut<'w, 's, 'a, Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    fn drop(&mut self) {
+        Streams::defer_buffer(
+            // INVARIANT: This is the only place where streams are taken
+            self.streams.take().unwrap(),
+            self.request.source,
+            self.request.session,
+            self.commands,
+        );
     }
 }
 
@@ -307,14 +358,17 @@ where
 {
     fn drop(&mut self) {
         let mut responses = SmallVec::new();
-        for (provider, delivered) in self.delivered.drain() {
-            for (_, (session, data)) in delivered {
-                responses.push(DeliverResponse { provider, session, data })
+        for (_, delivered) in self.delivered.drain() {
+            for (_, deliver) in delivered {
+                responses.push(deliver)
             }
         }
 
         if !responses.is_empty() {
-            self.commands.add(DeliverResponses { responses });
+            self.commands.add(DeliverResponses::<Request, Response, Streams> {
+                responses,
+                _ignore: Default::default(),
+            });
         }
     }
 }
@@ -327,24 +381,71 @@ struct ContinuousQueueStorage<Request> {
 struct ContinuousOrder<Request> {
     data: Request,
     session: Entity,
+    source: Entity,
+    task_id: Entity,
+    unblock: Option<Blocker>,
 }
 
-struct DeliverResponses<Response> {
+struct DeliverResponses<Request, Response, Streams> {
     responses: SmallVec<[DeliverResponse<Response>; 16]>,
+    _ignore: std::marker::PhantomData<(Request, Streams)>,
 }
 
 struct DeliverResponse<Response> {
     provider: Entity,
+    source: Entity,
     session: Entity,
+    task_id: Entity,
     data: Response,
+    index: usize,
 }
 
-impl<Response: 'static + Send + Sync> Command for DeliverResponses<Response> {
+impl<Request, Response, Streams> Command for DeliverResponses<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
     fn apply(self, world: &mut World) {
         world.get_resource_or_insert_with(|| DeferredRoster::default());
         world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
-            for DeliverResponse { provider, session, data } in self.responses {
+            let mut remove: SmallVec<[(usize, Entity); 16]> = SmallVec::new();
+            for DeliverResponse { provider, source, session, data, index, task_id } in self.responses {
+                remove.push((index, provider));
                 let r = try_give_response(provider, session, data, world, &mut *deferred);
+                if let Err(OperationError::Broken(backtrace)) = r {
+                    world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .broken
+                        .push(Broken { node: provider, backtrace });
+                }
+
+                if Streams::has_streams() {
+                    // When a continuous task with any number of streams >= 1 is
+                    // finished, we should always do a disposal notification
+                    // to force a reachability check. Normally there are specific
+                    // events that prompt us to check reachability, but if a
+                    // reachability test occurred while the continuous service
+                    // node was running and the reachability depends on a stream
+                    // which may or may not have been emitted, then the
+                    // reachability test may have concluded with a false
+                    // positive, and it needs to be rechecked now that this
+                    // node has finished.
+                    if let Some(scope) = world.get::<ScopeStorage>(source) {
+                        deferred.disposed(scope.get(), session);
+                    }
+                }
+
+                world.despawn(task_id);
+            }
+
+            // Reverse sort by index so that as we iterate forward through this,
+            // we remove the last elements first, so the earliest elements remain
+            // valid.
+            remove.sort_by(|(index_a, _), (index_b, _)|
+                index_b.cmp(index_a)
+            );
+            for (index, provider) in remove {
+                let r = try_retire_request::<Request>(provider, index, world, &mut *deferred);
                 if let Err(OperationError::Broken(backtrace)) = r {
                     world.get_resource_or_insert_with(|| UnhandledErrors::default())
                         .broken
@@ -364,4 +465,186 @@ fn try_give_response<Response: 'static + Send + Sync>(
 ) -> OperationResult {
     world.get_entity_mut(provider).or_broken()?
         .give_input(session, data, roster)
+}
+
+type StreamTargetQuery<Streams> = (
+    <Streams as StreamPack>::TargetIndexQuery,
+    Option<&'static StreamTargetMap>,
+);
+
+fn try_retire_request<Request: 'static + Send + Sync>(
+    provider: Entity,
+    index: usize,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) -> OperationResult {
+    let mut storage = world.get_mut::<ContinuousQueueStorage<Request>>(provider).or_broken()?;
+    let finished_order = storage.inner.remove(index);
+    if let Some(unblock) = finished_order.unblock {
+        let f = unblock.serve_next;
+        f(unblock, world, roster);
+    }
+
+    Ok(())
+}
+
+struct ContinuousServiceImpl<Request, Response, Streams> {
+    _ignore: std::marker::PhantomData<(Request, Response, Streams)>
+}
+
+impl<Request, Response, Streams> ServiceTrait for ContinuousServiceImpl<Request, Response, Streams>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    type Request = Request;
+    type Response = Response;
+    fn serve(
+        ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } }: ServiceRequest,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let Input { session, data: request } = source_mut.take_input::<Request>()?;
+        let instructions = source_mut.get::<DeliveryInstructions>().cloned();
+        let task_id = world.spawn(()).set_parent(source).id();
+
+        let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
+            dispose_for_despawned_service(provider, world, roster);
+            return Err(OperationError::NotReady);
+        };
+
+        let update = insert_new_order::<Request>(
+            delivery.as_mut(),
+            DeliveryOrder { source, session, task_id, request, instructions },
+        );
+
+        let (request, blocker) = match update {
+            DeliveryUpdate::Immediate { blocking, request } => {
+                let serve_next = serve_next_continuous_request::<Request, Response, Streams>;
+                let blocker = blocking.map(|label| Blocker { provider, source, session, label, serve_next });
+                (request, blocker)
+            }
+            DeliveryUpdate::Queued { cancelled, stop, label } => {
+                for cancelled in cancelled {
+                    let disposal = Disposal::supplanted(cancelled.source, source, session);
+                    emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
+                    world.despawn(cancelled.task_id);
+                }
+                if let Some(stop) = stop {
+                    // This task is already running so we need to remove it from
+                    // the queue
+                    let mut queue = world.get_mut::<ContinuousQueueStorage<Request>>(provider)
+                        .or_broken()?;
+                    // queue.inner.retain(|r| r.task_id != stop.task_id);
+                    let stopped_index = queue.inner.iter().enumerate()
+                        .find(|(_, r)| r.task_id == stop.task_id)
+                        .map(|(index, _)| index);
+
+                    // Immediately queue up an unblocking because continuous services
+                    // cancel immediately.
+                    if let Some(unblock) = stopped_index.map(|i| queue.inner.remove(i).unblock).flatten() {
+                        let f = unblock.serve_next;
+                        f(unblock, world, roster);
+                    } else {
+                        let serve_next = serve_next_continuous_request::<Request, Response, Streams>;
+                        roster.unblock(Blocker {
+                            provider, source: stop.source, session: stop.session, label, serve_next
+                        });
+                    }
+
+                    let disposal = Disposal::supplanted(stop.source, source, session);
+                    emit_disposal(source, session, disposal, world, roster);
+                }
+
+                return Ok(());
+            }
+        };
+
+        serve_continuous_request::<Request, Response, Streams>(
+            request,
+            blocker,
+            session,
+            task_id,
+            ServiceRequest {
+                provider,
+                target,
+                operation: OperationRequest { source, world, roster },
+            }
+        )
+    }
+}
+
+fn serve_continuous_request<Request, Response, Streams>(
+    request: Request,
+    blocker: Option<Blocker>,
+    session: Entity,
+    task_id: Entity,
+    ServiceRequest { provider, operation: OperationRequest { source, world, .. }, .. }: ServiceRequest,
+) -> OperationResult
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    // All we have to do is move the request into the service's active queue
+    let mut queue = world.get_mut::<ContinuousQueueStorage<Request>>(provider).or_broken()?;
+    queue.inner.push(ContinuousOrder {
+        data: request,
+        session,
+        source,
+        task_id,
+        unblock: blocker,
+    });
+
+    Ok(())
+}
+
+fn serve_next_continuous_request<Request, Response, Streams>(
+    unblock: Blocker,
+    world: &mut World,
+    roster: &mut OperationRoster,
+)
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    let Blocker { provider, label, .. } = unblock;
+    loop {
+        let Some(Deliver { request, task_id, blocker }) = pop_next_delivery::<Request>(
+            provider, label, serve_next_continuous_request::<Request, Response, Streams>, world
+        ) else {
+            // No more deliveries to pop, so we should return
+            return;
+        };
+
+        let session = blocker.session;
+        let source = blocker.source;
+
+        let Some(target) = world.get::<SingleTargetStorage>(source) else {
+            // This will not be able to run, so we should move onto the next
+            // item in the queue.
+            continue;
+        };
+        let target = target.get();
+
+        if serve_continuous_request::<Request, Response, Streams>(
+            request,
+            Some(blocker),
+            session,
+            task_id,
+            ServiceRequest {
+                provider,
+                target,
+                operation: OperationRequest { source, world, roster }
+            },
+        ).is_err() {
+            // The service did not launch so we should move onto the next item
+            // in the queue.
+            continue;
+        }
+
+        // The next delivery has begun so we can return
+        return;
+    }
 }

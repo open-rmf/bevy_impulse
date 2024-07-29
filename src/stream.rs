@@ -20,7 +20,10 @@ use bevy::{
         Component, Bundle, Entity, Commands, World, BuildChildren, Deref,
         DerefMut, With,
     },
-    ecs::query::{ReadOnlyWorldQuery, WorldQuery},
+    ecs::{
+        system::Command,
+        query::{ReadOnlyWorldQuery, WorldQuery},
+    },
     utils::all_tuples,
 };
 
@@ -34,11 +37,11 @@ use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
     InnerChannel, TakenStream, StreamChannel, Push, Builder, UnusedStreams,
-    OperationError,
+    OperationError, DeferredRoster, UnhandledErrors, Broken,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
-    type Container: IntoIterator<Item = Self> + Extend<Self> + Default;
+    type Container: IntoIterator<Item = Self> + Extend<Self> + Default + 'static + Send + Sync;
 
     fn send(
         self,
@@ -302,6 +305,13 @@ pub trait StreamPack: 'static + Send + Sync {
         roster: &mut OperationRoster,
     ) -> OperationResult;
 
+    fn defer_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        commands: &mut Commands,
+    );
+
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
 }
@@ -410,6 +420,20 @@ impl<T: Stream> StreamPack for T {
         Ok(())
     }
 
+    fn defer_buffer(
+        buffer: Self::Buffer,
+        source: Entity,
+        session: Entity,
+        commands: &mut Commands,
+    ) {
+        commands.add(SendStreams::<Self> {
+            source,
+            session,
+            container: buffer.container.take(),
+            target: buffer.target,
+        });
+    }
+
     fn has_streams() -> bool {
         true
     }
@@ -492,13 +516,22 @@ impl StreamPack for () {
         Ok(())
     }
 
+    fn defer_buffer(
+        _: Self::Buffer,
+        _: Entity,
+        _: Entity,
+        _: &mut Commands,
+    ) {
+
+    }
+
     fn has_streams() -> bool {
         false
     }
 }
 
 macro_rules! impl_streampack_for_tuple {
-    ($(($T:ident, $I:ident)),*) => {
+    ($($T:ident),*) => {
         #[allow(non_snake_case)]
         impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
             type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
@@ -625,10 +658,10 @@ macro_rules! impl_streampack_for_tuple {
                 target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'a>,
                 target_map: Option<&StreamTargetMap>,
             ) -> Self::Buffer {
-                let ($($I,)*) = target_index;
+                let ($($T,)*) = target_index;
                 (
                     $(
-                        $T::make_buffer($I, target_map),
+                        $T::make_buffer($T, target_map),
                     )*
                 )
             }
@@ -648,6 +681,18 @@ macro_rules! impl_streampack_for_tuple {
                 Ok(())
             }
 
+            fn defer_buffer(
+                buffer: Self::Buffer,
+                source: Entity,
+                session: Entity,
+                commands: &mut Commands,
+            ) {
+                let ($($T,)*) = buffer;
+                $(
+                    $T::defer_buffer($T, source, session, commands);
+                )*
+            }
+
             fn has_streams() -> bool {
                 let mut has_streams = false;
                 $(
@@ -661,7 +706,7 @@ macro_rules! impl_streampack_for_tuple {
 
 // Implements the `StreamPack` trait for all tuples between size 1 and 12
 // (inclusive) made of types that implement `StreamPack`
-all_tuples!(impl_streampack_for_tuple, 1, 12, T, I);
+all_tuples!(impl_streampack_for_tuple, 1, 12, T);
 
 pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
     source: Entity,
@@ -673,6 +718,36 @@ pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
     )>();
     let (target_indices, target_map) = stream_query.get(world, source).or_broken()?;
     Ok(Streams::make_buffer(target_indices, target_map))
+}
+
+struct SendStreams<S: Stream> {
+    container: S::Container,
+    source: Entity,
+    session: Entity,
+    target: Option<Entity>,
+}
+
+impl<S: Stream> Command for SendStreams<S> {
+    fn apply(self, world: &mut World) {
+        world.get_resource_or_insert_with(|| DeferredRoster::default());
+        world.resource_scope::<DeferredRoster, _>(|world, mut deferred| {
+            for data in self.container {
+                let r = data.send(StreamRequest {
+                    source: self.source,
+                    session: self.session,
+                    target: self.target,
+                    world,
+                    roster: &mut *deferred,
+                });
+
+                if let Err(OperationError::Broken(backtrace)) = r {
+                    world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .broken
+                        .push(Broken { node: self.source, backtrace });
+                }
+            }
+        });
+    }
 }
 
 /// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services

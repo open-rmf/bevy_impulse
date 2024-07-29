@@ -106,9 +106,6 @@ where
     }
 }
 
-
-// impl
-
 /// The key difference between this and [`crate::OperateAsyncMap`] is that
 /// this supports FnOnce since it's used for impulse chains which are not
 /// reusable, whereas [`crate::OperateAsyncMap`] is used in workflows which

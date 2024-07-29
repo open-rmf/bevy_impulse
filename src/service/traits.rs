@@ -29,6 +29,7 @@ use bevy::{
 };
 
 pub trait ServiceTrait {
+    // TODO(@mxgrey): Are we using these associated types anymore?
     type Request: 'static + Send + Sync;
     type Response: 'static + Send + Sync;
     fn serve(request: ServiceRequest) -> OperationResult;

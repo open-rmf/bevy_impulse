@@ -207,7 +207,10 @@ pub type AsyncServiceInput<Request, Streams = ()> = In<AsyncService<Request, Str
 /// Use `ContinuousService` to indicate that your system is a [`Service`] that
 /// runs incrementally inside of a schedule with each update of the Bevy ECS.
 pub struct ContinuousService<Request, Response, Streams: StreamPack = ()> {
-    key: ContinuousServiceKey<Request, Response, Streams>,
+    /// Pass this into a [`ContinuousQuery`] to access the ongoing requests for
+    /// this service. While accessing the ongoing requests, you will also be
+    /// able to send streams and responses for the requests.
+    pub key: ContinuousServiceKey<Request, Response, Streams>,
 }
 
 /// Use BlockingCallback to indicate that your system is meant to define a
