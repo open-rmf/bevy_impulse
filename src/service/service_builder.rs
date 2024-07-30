@@ -20,7 +20,7 @@ use crate::{Service, IntoService, IntoContinuousService, Delivery, stream::*};
 use bevy::{
     prelude::App,
     ecs::{
-        world::EntityMut,
+        world::EntityWorldMut,
         system::{Commands, EntityCommands},
         schedule::{ScheduleLabel, SystemConfigs},
     }
@@ -120,7 +120,7 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
     where
         Srv: IntoService<M>,
         Deliver: DeliveryChoice,
-        With: WithEntityMut,
+        With: WithEntityWorldMut,
         Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
         Srv::Request: 'static + Send + Sync,
         Srv::Response: 'static + Send + Sync,
@@ -148,7 +148,7 @@ where
     where
         Srv: IntoContinuousService<M>,
         Deliver: DeliveryChoice,
-        With: WithEntityMut,
+        With: WithEntityWorldMut,
         Also: AlsoAdd<Srv::Request, Srv::Response, Srv::Streams>,
         Configure: ConfigureContinuousService,
         Srv::Request: 'static + Send + Sync,
@@ -271,7 +271,7 @@ pub struct SerialChosen;
 
 impl DeliveryChoice for SerialChosen {
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityMut<'w>
+        self, entity_mut: &mut EntityWorldMut<'w>
     ) {
         entity_mut.insert(Delivery::<Request>::serial());
     }
@@ -290,7 +290,7 @@ pub struct ParallelChosen;
 
 impl DeliveryChoice for ParallelChosen {
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityMut<'w>
+        self, entity_mut: &mut EntityWorldMut<'w>
     ) {
         entity_mut.insert(Delivery::<Request>::parallel());
     }
@@ -316,7 +316,7 @@ impl DeliveryChoice for BlockingChosen {
     }
 
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, _: &mut EntityMut<'w>
+        self, _: &mut EntityWorldMut<'w>
     ) {
         // Do nothing
     }
@@ -329,20 +329,20 @@ impl DeliveryChoice for () {
         ParallelChosen.apply_entity_commands::<Request>(entity_commands)
     }
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityMut<'w>
+        self, entity_mut: &mut EntityWorldMut<'w>
     ) {
         ParallelChosen.apply_entity_mut::<Request>(entity_mut)
     }
 }
 
-impl<T: FnOnce(EntityMut)> WithEntityMut for T {
-    fn apply<'w>(self, entity_mut: EntityMut<'w>) {
+impl<T: FnOnce(EntityWorldMut)> WithEntityWorldMut for T {
+    fn apply<'w>(self, entity_mut: EntityWorldMut<'w>) {
         self(entity_mut);
     }
 }
 
-impl WithEntityMut for () {
-    fn apply<'w>(self, _: EntityMut<'w>) {
+impl WithEntityWorldMut for () {
+    fn apply<'w>(self, _: EntityWorldMut<'w>) {
         // Do nothing
     }
 }

@@ -31,7 +31,7 @@ use bevy::{
     prelude::{Component, In, World, Entity},
     tasks::AsyncComputeTaskPool,
     ecs::{
-        world::EntityMut,
+        world::EntityWorldMut,
         system::{IntoSystem, BoxedSystem, EntityCommands},
     }
 };
@@ -66,7 +66,7 @@ where
         ));
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
         entity_mut.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
@@ -332,7 +332,7 @@ where
         peel_async.pipe(self.0).insert_service_commands(entity_commands)
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
         peel_async.pipe(self.0).insert_service_mut(entity_mut)
     }
 }

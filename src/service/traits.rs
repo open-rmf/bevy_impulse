@@ -23,7 +23,7 @@ use crate::{
 use bevy::{
     prelude::App,
     ecs::{
-        world::EntityMut,
+        world::EntityWorldMut,
         system::EntityCommands,
         schedule::SystemConfigs,
     },
@@ -42,7 +42,7 @@ pub trait IntoService<M> {
     type Streams;
     type DefaultDeliver: Default;
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>);
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>);
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
 }
 
@@ -51,7 +51,7 @@ pub trait IntoContinuousService<M> {
     type Response;
     type Streams;
 
-    fn into_system_config<'w>(self, entity_mut: &mut EntityMut<'w>) -> SystemConfigs;
+    fn into_system_config<'w>(self, entity_mut: &mut EntityWorldMut<'w>) -> SystemConfigs;
 }
 
 /// This trait allows service systems to be converted into a builder that
@@ -92,17 +92,17 @@ pub trait ChooseAsyncServiceDelivery<M> {
 /// This trait is used to set the delivery mode of a service.
 pub trait DeliveryChoice {
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityMut<'w>,
+        self, entity_mut: &mut EntityWorldMut<'w>,
     );
     fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
         self, entity_commands: &mut EntityCommands<'w, 's, 'a>,
     );
 }
 
-/// This trait is used to accept anything that can be executed on an EntityMut,
+/// This trait is used to accept anything that can be executed on an EntityWorldMut,
 /// used when adding a service with the App interface.
-pub trait WithEntityMut {
-    fn apply<'w>(self, entity_mut: EntityMut<'w>);
+pub trait WithEntityWorldMut {
+    fn apply<'w>(self, entity_mut: EntityWorldMut<'w>);
 }
 
 /// This trait is used to accept anything that can be executed on an

@@ -18,7 +18,7 @@
 use bevy::{
     prelude::{Component, In},
     ecs::{
-        world::EntityMut,
+        world::EntityWorldMut,
         system::{IntoSystem, BoxedSystem, EntityCommands},
     }
 };
@@ -61,7 +61,7 @@ where
         ));
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
         entity_mut.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<BlockingServiceStorage<Request, Response, Streams>>::new(),
@@ -181,7 +181,7 @@ where
         peel_blocking.pipe(self.0).insert_service_commands(entity_commands)
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityMut<'w>) {
+    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
         peel_blocking.pipe(self.0).insert_service_mut(entity_mut)
     }
 }

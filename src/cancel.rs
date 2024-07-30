@@ -17,7 +17,7 @@
 
 use bevy::{
     prelude::{Entity, Component, Bundle, World},
-    ecs::world::EntityMut,
+    ecs::world::EntityWorldMut,
 };
 
 use backtrace::Backtrace;
@@ -244,7 +244,7 @@ pub trait ManageCancellation {
     );
 }
 
-impl<'w> ManageCancellation for EntityMut<'w> {
+impl<'w> ManageCancellation for EntityWorldMut<'w> {
     fn emit_cancel(
         &mut self,
         session: Entity,
@@ -307,7 +307,7 @@ pub fn try_emit_broken(
 }
 
 fn try_emit_cancel(
-    source_mut: &mut EntityMut,
+    source_mut: &mut EntityWorldMut,
     session: Option<Entity>,
     cancellation: Cancellation,
     roster: &mut OperationRoster,

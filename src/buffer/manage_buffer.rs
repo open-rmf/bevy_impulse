@@ -17,7 +17,7 @@
 
 use bevy::{
     prelude::Entity,
-    ecs::world::{EntityMut, EntityRef},
+    ecs::world::{EntityWorldMut, EntityRef},
 };
 
 use smallvec::SmallVec;
@@ -91,7 +91,7 @@ pub trait ManageBuffer {
     ) -> OperationResult;
 }
 
-impl<'w> ManageBuffer for EntityMut<'w> {
+impl<'w> ManageBuffer for EntityWorldMut<'w> {
     fn try_pull_from_buffer<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,

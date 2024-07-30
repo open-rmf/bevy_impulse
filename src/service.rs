@@ -18,9 +18,9 @@
 use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
 use bevy::{
-    prelude::{Entity, App, Commands, Component},
+    prelude::{Entity, App, Commands, Component, Deref, DerefMut},
     ecs::schedule::ScheduleLabel,
-    utils::define_label,
+    utils::{intern::Interned, define_label},
 };
 
 mod async_srv;
@@ -115,8 +115,7 @@ define_label!(
     /// A strongly-typed class of labels used to tag delivery instructions that
     /// are related to each other.
     DeliveryLabel,
-    /// Strongly-typed identifier for a [`DeliveryLabel`].
-    DeliveryLabelId,
+    DELIVERY_LABEL_INTERNER
 );
 
 /// When using a service, you can bundle in delivery instructions that affect
@@ -155,13 +154,17 @@ pub struct DeliveryInstructions {
     pub(crate) ensure: bool,
 }
 
+/// Newtype to store types that implement `DeliveryLabel`
+#[derive(Clone, Copy, Debug, Deref, DerefMut, Hash, PartialEq, Eq)]
+pub struct DeliveryLabelId(Interned<dyn DeliveryLabel>);
+
 impl DeliveryInstructions {
     /// Begin building a label for a request. You do not need to call this
     /// function explicitly. You can instead use `.preempt()` or `.ensure()`
     /// directly on a [`DeliveryLabel`] instance.
     pub fn new(label: impl DeliveryLabel) -> Self {
         Self {
-            label: label.as_label(),
+            label: DeliveryLabelId(label.intern()),
             preempt: false,
             ensure: false,
         }
@@ -318,7 +321,7 @@ pub trait AddServicesExt {
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoService<M2>>::Request,
             <B::Service as IntoService<M2>>::Response,
@@ -334,7 +337,7 @@ impl AddServicesExt for App {
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoService<M2>>::Request,
             <B::Service as IntoService<M2>>::Response,
@@ -358,7 +361,7 @@ pub trait AddContinuousServicesExt {
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoContinuousService<M2>>::Request,
             <B::Service as IntoContinuousService<M2>>::Response,
@@ -379,7 +382,7 @@ impl AddContinuousServicesExt for App {
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoContinuousService<M2>>::Request,
             <B::Service as IntoContinuousService<M2>>::Response,
@@ -421,7 +424,7 @@ mod tests {
     use crate::{BlockingService, BlockingServiceInput, AsyncService, AsyncServiceInput};
     use bevy::{
         prelude::*,
-        ecs::world::EntityMut,
+        ecs::world::EntityWorldMut,
     };
     use std::future::Future;
 
@@ -527,7 +530,7 @@ mod tests {
             .insert_resource(TestSystemRan(false))
             .add_service(
                 sys_blocking_service
-                .with(|mut entity_mut: EntityMut| {
+                .with(|mut entity_mut: EntityWorldMut| {
                     entity_mut.insert(Multiplier(2));
                 })
             )

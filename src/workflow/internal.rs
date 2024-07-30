@@ -17,7 +17,7 @@
 
 use bevy::ecs::{
     system::EntityCommands,
-    world::EntityMut,
+    world::EntityWorldMut,
 };
 
 use crate::{DeliveryChoice, DeliverySettings, Delivery};
@@ -37,7 +37,7 @@ impl DeliveryChoice for DeliverySettings {
     }
 
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityMut<'w>,
+        self, entity_mut: &mut EntityWorldMut<'w>,
     ) {
         match self {
             Self::Serial => {

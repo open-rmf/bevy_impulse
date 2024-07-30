@@ -17,7 +17,7 @@
 
 use bevy::{
     prelude::{Entity, Component, World},
-    ecs::world::{EntityMut, EntityRef},
+    ecs::world::{EntityWorldMut, EntityRef},
 };
 
 use backtrace::Backtrace;
@@ -317,7 +317,7 @@ pub trait InspectDisposals {
     fn get_disposals(&self, session: Entity) -> Option<&Vec<Disposal>>;
 }
 
-impl<'w> ManageDisposal for EntityMut<'w> {
+impl<'w> ManageDisposal for EntityWorldMut<'w> {
     fn emit_disposal(
         &mut self,
         session: Entity,
@@ -360,7 +360,7 @@ impl<'w> ManageDisposal for EntityMut<'w> {
     }
 }
 
-impl<'w> InspectDisposals for EntityMut<'w> {
+impl<'w> InspectDisposals for EntityWorldMut<'w> {
     fn get_disposals(&self, session: Entity) -> Option<&Vec<Disposal>> {
         if let Some(storage) = self.get::<DisposalStorage>() {
             return storage.disposals.get(&session);

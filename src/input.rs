@@ -18,7 +18,7 @@
 use bevy::{
     prelude::{Entity, Component, Bundle},
     ecs::{
-        world::{EntityMut, EntityRef, World},
+        world::{EntityWorldMut, EntityRef, World},
         system::Command,
     },
 };
@@ -135,7 +135,7 @@ pub trait InspectInput {
     ) -> Result<bool, OperationError>;
 }
 
-impl<'w> ManageInput for EntityMut<'w> {
+impl<'w> ManageInput for EntityWorldMut<'w> {
     fn give_input<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
@@ -234,7 +234,7 @@ impl<'w> ManageInput for EntityMut<'w> {
     }
 }
 
-impl<'a> InspectInput for EntityMut<'a> {
+impl<'a> InspectInput for EntityWorldMut<'a> {
     fn has_input<T: 'static + Send + Sync>(
         &self,
         session: Entity,

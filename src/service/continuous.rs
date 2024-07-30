@@ -19,7 +19,7 @@ use bevy::{
     prelude::{Component, Entity, Local, Query, Commands, World, BuildWorldChildren},
     ecs::{
         system::{SystemParam, Command, IntoSystem},
-        world::EntityMut,
+        world::EntityWorldMut,
         schedule::{SystemConfigs, IntoSystemConfigs}
     }
 };
@@ -678,7 +678,7 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn into_system_config<'w>(self, entity_mut: &mut EntityMut<'w>) -> SystemConfigs {
+    fn into_system_config<'w>(self, entity_mut: &mut EntityWorldMut<'w>) -> SystemConfigs {
         let provider = entity_mut.insert((
             ContinuousQueueStorage::<Request>::new(),
             ServiceBundle::<ContinuousServiceImpl<Request, Response, Streams>>::new(),
