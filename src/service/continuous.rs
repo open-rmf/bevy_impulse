@@ -448,7 +448,7 @@ where
                     // positive, and it needs to be rechecked now that this
                     // node has finished.
                     if let Some(scope) = world.get::<ScopeStorage>(source) {
-                        deferred.disposed(scope.get(), session);
+                        deferred.disposed(scope.get(), source, session);
                     }
                 }
 

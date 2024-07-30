@@ -69,7 +69,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            &mut map, self,
+            source, &mut map, self,
         );
         self.commands.entity(source).insert(bundle);
         Node {

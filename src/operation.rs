@@ -240,8 +240,8 @@ impl OperationRoster {
         self.unblock.push_back(provider);
     }
 
-    pub fn disposed(&mut self, scope: Entity, session: Entity) {
-        self.disposed.push(DisposalNotice { scope, session });
+    pub fn disposed(&mut self, scope: Entity, origin: Entity, session: Entity) {
+        self.disposed.push(DisposalNotice { source: scope, origin, session });
     }
 
     pub fn cleanup_finished(&mut self, cleanup: Cleanup) {
@@ -283,7 +283,11 @@ impl OperationRoster {
 /// Notify the scope manager that a disposal took place. This will prompt the
 /// scope to check whether it's still possible to terminate.
 pub struct DisposalNotice {
-    pub scope: Entity,
+    /// The scope that needs to handle the disposal
+    pub source: Entity,
+    /// The operation that the disposal originated from
+    pub origin: Entity,
+    /// The session that experienced a disposal
     pub session: Entity,
 }
 
@@ -649,7 +653,11 @@ pub fn downstream_of<'a>(
 }
 
 pub struct DisposalUpdate<'a> {
+    /// The operation that is being updated about the disposal
     pub source: Entity,
+    /// The operation that the disposal originated from
+    pub origin: Entity,
+    /// The session that has experienced a disposal
     pub session: Entity,
     pub world: &'a mut World,
     pub roster: &'a mut OperationRoster,

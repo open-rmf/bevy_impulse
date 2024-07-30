@@ -78,7 +78,7 @@ where
         progress.push(data);
         let len = progress.len();
 
-        if min < len && !max.is_some_and(|max| len < max) {
+        if max.is_some_and(|max| len >= max) {
             // We have obtained enough elements to send off the collection.
             let output: SmallVec<[T; N]> = progress.drain(..).collect();
             world.get_entity_mut(target).or_broken()?
@@ -140,11 +140,16 @@ impl<T, const N: usize> CollectionStorage<T, N> {
 }
 
 fn collection_disposal_listener<T, const N: usize>(
-    DisposalUpdate { source, session, world, roster }: DisposalUpdate,
+    DisposalUpdate { source, origin, session, world, roster }: DisposalUpdate,
 ) -> OperationResult
 where
     T: 'static + Send + Sync,
 {
+    if source == origin {
+        // We should ignore disposals that were produced by our own operation
+        return Ok(());
+    }
+
     if check_reachability(session, source, world)? {
         // The collection node is still reachable, so no action is needed.
         return Ok(());
@@ -167,6 +172,7 @@ fn on_unreachable_collection<T: 'static + Send + Sync, const N: usize>(
     world: &mut World,
     roster: &mut OperationRoster,
 ) -> OperationResult {
+    // if len < min || len == 0 {
     if len < min {
         // We have not reached the minimum number of entries in this
         // collection yet. Since we do not detect any more entries coming,
@@ -181,6 +187,7 @@ fn on_unreachable_collection<T: 'static + Send + Sync, const N: usize>(
     let mut collection = world.get_mut::<CollectionStorage<T, N>>(source).or_broken()?;
     let output: SmallVec<[T; N]> = collection.map.entry(session).or_default()
         .drain(..).collect();
+
     world.get_entity_mut(target).or_broken()?
         .give_input(session, output, roster)?;
     return Ok(());

@@ -405,7 +405,7 @@ impl<'w> ManageDisposal for EntityMut<'w> {
             self.insert(storage);
         }
 
-        roster.disposed(scope, session);
+        roster.disposed(scope, self.id(), session);
     }
 
     fn clear_disposals(&mut self, session: Entity) {

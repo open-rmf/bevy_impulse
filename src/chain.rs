@@ -108,7 +108,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            &mut map, self.builder,
+            source, &mut map, self.builder,
         );
         self.builder.commands.entity(source).insert((bundle, map));
         Node {
@@ -448,7 +448,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If `min` is greater than 0 then the collection will not be sent out unless
     /// it is equal to or greater than that value. Note that this means the
     /// collect operation could force the workflow into cancelling if it cannot
-    /// reach the minimum.
+    /// reach the minimum. A `min` of 0 will be treated the same as a `min` of 1
+    /// to prevent spuriously sending empty collections.
     ///
     /// If the `min` limit is satisfied and there are no remaining workflow
     /// threads that can reach this collect operation, then the collection will
@@ -458,6 +459,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         min: usize,
         max: Option<usize>,
     ) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        if let Some(max) = max {
+            assert!(0 < max);
+            assert!(min <= max);
+        }
+
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
@@ -1258,5 +1264,82 @@ mod tests {
         }
 
         Some(buffer.drain(..).collect())
+    }
+
+    #[test]
+    fn test_collect() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let node = scope.input.chain(builder).map_node(
+                |input: BlockingMap<i32, StreamOf<i32>>| {
+                    for _ in 0..input.request {
+                        input.streams.send(StreamOf(input.request));
+                    }
+                }
+            );
+
+            node.streams.chain(builder)
+                .inner()
+                .collect_all::<16>()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(8, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| {
+            v.len() == 8 && v.iter().find(|a| **a != 8).is_none()
+        }));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let node = scope.input.chain(builder).map_node(
+                |input: BlockingMap<i32, StreamOf<i32>>| {
+                    for _ in 0..input.request {
+                        input.streams.send(StreamOf(input.request));
+                    }
+                }
+            );
+
+            node.streams.chain(builder)
+                .inner()
+                .collect::<16>(4, None)
+                .connect(scope.terminate);
+        });
+
+        check_collection(0, 4, workflow, &mut context);
+        check_collection(2, 4, workflow, &mut context);
+        check_collection(3, 4, workflow, &mut context);
+        check_collection(4, 4, workflow, &mut context);
+        check_collection(5, 4, workflow, &mut context);
+        check_collection(8, 4, workflow, &mut context);
+    }
+
+    fn check_collection(
+        value: i32,
+        min: i32,
+        workflow: Service<i32, SmallVec<[i32; 16]>>,
+        context: &mut TestingContext,
+    ) {
+        let mut promise = context.command(|commands|
+            commands
+            .request(value, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        if value < min {
+            assert!(promise.take().is_cancelled());
+        } else {
+            assert!(promise.take().available().is_some_and(|v| {
+                v.len() == value as usize && v.iter().find(|a| **a != value).is_none()
+            }));
+        }
+        assert!(context.no_unhandled_errors());
     }
 }

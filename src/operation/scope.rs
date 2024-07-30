@@ -304,7 +304,7 @@ where
             // terminal point from its start point, so we should trigger the
             // reachability check to begin the cancellation process right away.
             OperateScope::<Request, Response, Streams>::validate_scope_reachability(
-                ValidationRequest { source, session: scoped_session, world, roster },
+                ValidationRequest { source, origin: source, session: scoped_session, world, roster },
             )?;
         }
     } else {
@@ -312,7 +312,7 @@ where
         // reached from the scope entry node. As long as this passes, we will
         // not run it again.
         let is_reachable = OperateScope::<Request, Response, Streams>::validate_scope_reachability(
-            ValidationRequest { source, session: scoped_session, world, roster },
+            ValidationRequest { source, origin: source, session: scoped_session, world, roster },
         )?;
 
         world.get_entity_mut(source).or_broken()?.insert(
@@ -471,7 +471,7 @@ where
     /// Check if the terminal node of the scope can be reached. If not, cancel
     /// the scope immediately.
     fn validate_scope_reachability(
-        ValidationRequest { source, session, world, roster }: ValidationRequest,
+        ValidationRequest { source, origin, session, world, roster }: ValidationRequest,
     ) -> ReachabilityResult {
         let nodes = world.get::<CleanupContents>(source).or_broken()?.nodes().clone();
         for node in nodes.iter() {
@@ -479,7 +479,7 @@ where
                 continue;
             };
             let f = disposal_listener.0;
-            f(DisposalUpdate { source: *node, session, world, roster })?;
+            f(DisposalUpdate { source: *node, origin, session, world, roster })?;
         }
 
         let scoped_session = session;
@@ -595,6 +595,7 @@ pub struct ValidateScopeReachability(pub(crate) fn(ValidationRequest) -> Reachab
 
 pub struct ValidationRequest<'a> {
     pub source: Entity,
+    pub origin: Entity,
     pub session: Entity,
     pub world: &'a mut World,
     pub roster: &'a mut OperationRoster,
@@ -1245,6 +1246,9 @@ impl<T: Stream> RedirectScopeStream<T> {
 
 impl<T: Stream> Operation for RedirectScopeStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        world.get_entity_mut(self.target).or_broken()?
+            .insert(SingleInputStorage::new(source));
+
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
             SingleTargetStorage::new(self.target),

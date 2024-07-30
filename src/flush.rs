@@ -196,7 +196,7 @@ fn collect_from_channels(
         drop_target(target, world, roster, false);
     }
 
-    while let Some(DisposalNotice { scope: source, session }) = roster.disposed.pop() {
+    while let Some(DisposalNotice { source, origin, session }) = roster.disposed.pop() {
         let Some(validate) = world.get::<ValidateScopeReachability>(source) else {
             world.get_resource_or_insert_with(|| UnhandledErrors::default())
                 .miscellaneous
@@ -211,9 +211,7 @@ fn collect_from_channels(
         };
 
         let validate = validate.0;
-        // let cleanup = Cleanup { cleaner:  }
-        // let cleanup_op = OperationCleanup { source, session, world, roster };
-        let req = ValidationRequest { source, session, world, roster };
+        let req = ValidationRequest { source, origin, session, world, roster };
         if let Err(OperationError::Broken(backtrace)) = validate(req) {
             world.get_resource_or_insert_with(|| UnhandledErrors::default())
                 .miscellaneous
