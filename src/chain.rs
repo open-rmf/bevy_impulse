@@ -1318,6 +1318,66 @@ mod tests {
         check_collection(4, 4, workflow, &mut context);
         check_collection(5, 4, workflow, &mut context);
         check_collection(8, 4, workflow, &mut context);
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let bogus_node = builder.create_map_block(|v: i32| v);
+            bogus_node.output.chain(builder)
+                .collect_all::<16>()
+                .connect(scope.terminate);
+
+            let _ = scope.input.chain(builder)
+                .map_block(|v: i32| Some(v))
+                .fork_option(
+                    |chain: Chain<i32>| chain
+                        .map_async(|v| async move { v })
+                        .collect_all::<16>()
+                        .connect(scope.terminate),
+                    |chain: Chain<()>| chain
+                        .map_block(|()| unreachable!()).output(),
+                );
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(2, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v|
+            v.len() == 1 && v.iter().find(|a| **a != 2).is_none()
+        ));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+                .map_block(|v| if v < 4 { None } else { Some(v) })
+                .dispose_on_none()
+                .collect_all::<8>()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(2, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| v.is_empty()));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(5, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v|
+            v.len() == 1 && v.iter().find(|a| **a != 5).is_none()
+        ));
+        assert!(context.no_unhandled_errors());
     }
 
     fn check_collection(

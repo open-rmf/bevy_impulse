@@ -28,7 +28,7 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use std::collections::{VecDeque, HashMap, hash_map::Entry};
+use std::collections::{VecDeque, HashSet, HashMap, hash_map::Entry};
 
 use smallvec::SmallVec;
 
@@ -635,7 +635,7 @@ impl<'a> Iterator for DownstreamFinishIter<'a> {
     }
 }
 
-pub fn downstream_of<'a>(
+pub fn immediately_downstream_of<'a>(
     source: Entity,
     world: &'a World,
 ) -> DownstreamIter<'a> {
@@ -650,6 +650,43 @@ pub fn downstream_of<'a>(
     let streams = world.get::<StreamTargetMap>(source).map(|s| s.map.iter());
 
     DownstreamIter { output, streams }
+}
+
+/// Check if the `target` operation is somewhere downstream of the `source`
+/// operation. This can be any number of generations downstream, and can account
+/// for cycles where both operations can be seen as downstream of each other.
+///
+/// If `source` and `target` are the same then this immediately returns false.
+pub fn is_downstream_of<'a>(
+    source: Entity,
+    target: Entity,
+    world: &'a World,
+) -> bool {
+    if source == target {
+        return false;
+    }
+
+    let mut queue: Vec<Entity> = Vec::new();
+    let mut visited = HashSet::new();
+    queue.push(source);
+    while let Some(top) = queue.pop() {
+        if top == target {
+            return true;
+        }
+
+        if !visited.insert(top) {
+            // We've already expanded this operation
+            continue;
+        }
+
+        for next in immediately_downstream_of(top, world) {
+            queue.push(next);
+        }
+    }
+
+    // After examining all the downstream nodes in the workflow, the target was
+    // not found, so it must not be downstream.
+    false
 }
 
 pub struct DisposalUpdate<'a> {

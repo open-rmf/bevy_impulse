@@ -26,7 +26,7 @@ use crate::{
     OperationReachability, ReachabilityResult, OperationSetup, Disposal,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     DisposalListener, DisposalUpdate, OperationRoster,
-    emit_disposal, check_reachability,
+    emit_disposal, check_reachability, is_downstream_of,
 };
 
 pub(crate) struct Collect<T, const N: usize> {
@@ -150,6 +150,12 @@ where
         return Ok(());
     }
 
+    if !is_downstream_of(origin, source, world) {
+        // We should ignore disposals that were not produced downstream of this
+        // operation
+        return Ok(());
+    }
+
     if check_reachability(session, source, world)? {
         // The collection node is still reachable, so no action is needed.
         return Ok(());
@@ -172,7 +178,6 @@ fn on_unreachable_collection<T: 'static + Send + Sync, const N: usize>(
     world: &mut World,
     roster: &mut OperationRoster,
 ) -> OperationResult {
-    // if len < min || len == 0 {
     if len < min {
         // We have not reached the minimum number of entries in this
         // collection yet. Since we do not detect any more entries coming,
