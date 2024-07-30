@@ -25,6 +25,7 @@ use crate::{
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
     ScopeSettings, StreamTargetMap, ClearBufferFn, UnusedTarget, Cleanup,
     Buffered, BufferKeyBuilder, FinalizeCleanup, FinalizeCleanupRequest,
+    DisposalListener, DisposalUpdate,
 };
 
 use backtrace::Backtrace;
@@ -472,6 +473,15 @@ where
     fn validate_scope_reachability(
         ValidationRequest { source, session, world, roster }: ValidationRequest,
     ) -> ReachabilityResult {
+        let nodes = world.get::<CleanupContents>(source).or_broken()?.nodes().clone();
+        for node in nodes.iter() {
+            let Some(disposal_listener) = world.get::<DisposalListener>(*node) else {
+                continue;
+            };
+            let f = disposal_listener.0;
+            f(DisposalUpdate { source: *node, session, world, roster })?;
+        }
+
         let scoped_session = session;
         let source_ref = world.get_entity(source).or_broken()?;
         let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
@@ -481,10 +491,8 @@ where
         }
 
         // The terminal node cannot be reached so we should cancel this scope.
-        let nodes = world.get::<CleanupContents>(source).or_broken()?.nodes();
-
         let mut disposals = Vec::new();
-        for node in nodes {
+        for node in nodes.iter() {
             if let Some(node_disposals) = world.get_entity(*node)
                 .or_broken()?
                 .get_disposals(scoped_session)

@@ -30,7 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, GateAction, Buffered,
-    Spread,
+    Spread, Collect,
     make_result_branching, make_option_branching,
 };
 
@@ -439,6 +439,49 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         Chain::new(target, self.builder)
     }
+
+    /// Collect incoming workflow threads into a container.
+    ///
+    /// If `max` is specified, the collection will always be sent out once it
+    /// reaches that maximum value.
+    ///
+    /// If `min` is greater than 0 then the collection will not be sent out unless
+    /// it is equal to or greater than that value. Note that this means the
+    /// collect operation could force the workflow into cancelling if it cannot
+    /// reach the minimum.
+    ///
+    /// If the `min` limit is satisfied and there are no remaining workflow
+    /// threads that can reach this collect operation, then the collection will
+    /// be sent out with however many elements it happens to have collected.
+    pub fn collect<const N: usize>(
+        self,
+        min: usize,
+        max: Option<usize>,
+    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            Collect::<T, N>::new(target, min, max),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// Collect all workflow threads that are moving towards this node.
+    pub fn collect_all<const N: usize>(self) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        self.collect::<N>(0, None)
+    }
+
+    /// Collect an exact number of threads that are moving towards this node.
+    pub fn collect_n<const N: usize>(self, n: usize) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        self.collect::<N>(n, Some(n))
+    }
+
+    // TODO(@mxgrey): We could offer a collect_array that always collects exactly
+    // N, defined at compile time, and outputs a fixed-size array. This will require
+    // a second implementation of Collect, or a more generic implementation of it.
 
     /// Run a trimming operation when the workflow reaches this point.
     ///

@@ -38,6 +38,9 @@ pub(crate) use branching::*;
 mod cleanup;
 pub(crate) use cleanup::*;
 
+mod collect;
+pub(crate) use collect::*;
+
 mod filter;
 pub(crate) use filter::*;
 
@@ -644,3 +647,13 @@ pub fn downstream_of<'a>(
 
     DownstreamIter { output, streams }
 }
+
+pub struct DisposalUpdate<'a> {
+    pub source: Entity,
+    pub session: Entity,
+    pub world: &'a mut World,
+    pub roster: &'a mut OperationRoster,
+}
+
+#[derive(Component)]
+pub struct DisposalListener(pub fn(DisposalUpdate) -> OperationResult);
