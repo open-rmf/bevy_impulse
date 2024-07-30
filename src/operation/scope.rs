@@ -25,7 +25,8 @@ use crate::{
     Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
     ScopeSettings, StreamTargetMap, ClearBufferFn, UnusedTarget, Cleanup,
     Buffered, BufferKeyBuilder, FinalizeCleanup, FinalizeCleanupRequest,
-    DisposalListener, DisposalUpdate,
+    DisposalListener, DisposalUpdate, CollectMarker,
+    is_downstream_of,
 };
 
 use backtrace::Backtrace;
@@ -47,6 +48,12 @@ impl ParentSession {
     pub fn get(&self) -> Entity {
         self.0
     }
+}
+
+#[derive(Component)]
+pub enum SessionStatus {
+    Active,
+    Cleaning,
 }
 
 pub(crate) struct OperateScope<Request, Response, Streams> {
@@ -198,7 +205,10 @@ where
         let input = world.get_entity_mut(source).or_broken()?
             .take_input::<Request>()?;
 
-        let scoped_session = world.spawn(ParentSession(input.session)).id();
+        let scoped_session = world.spawn((
+            ParentSession(input.session),
+            SessionStatus::Active,
+        )).id();
         begin_scope::<Request, Response, Streams>(
             input,
             scoped_session,
@@ -261,6 +271,7 @@ where
             let mut scoped_reachability = OperationReachability::new(
                 pair.scoped_session,
                 reachability.source,
+                reachability.disposed,
                 reachability.world,
                 &mut visited,
             );
@@ -299,6 +310,13 @@ where
     }
 
     if let Some(reachability) = world.get::<InitialReachability>(source) {
+        if let InitialReachability::Error(cancellation) = reachability {
+            OperateScope::<Request, Response, Streams>::cancel_one(
+                scoped_session, source, cancellation.clone(), world, roster,
+            )?;
+            return Ok(());
+        }
+
         if reachability.is_invalidated() {
             // We have found in the past that this workflow cannot reach its
             // terminal point from its start point, so we should trigger the
@@ -308,6 +326,20 @@ where
             )?;
         }
     } else {
+        let circular_collects = find_circular_collects(source, world)?;
+        if !circular_collects.is_empty() {
+            // There are circular collect operations in this workflow, making it
+            // invalid, so we will cancel this workflow without running it.
+            let cancellation = Cancellation::circular_collect(circular_collects);
+            world.get_entity_mut(source).or_broken()?.insert(
+                InitialReachability::Error(cancellation.clone())
+            );
+            OperateScope::<Request, Response, Streams>::cancel_one(
+                scoped_session, source, cancellation, world, roster,
+            )?;
+            return Ok(());
+        }
+
         // We should do a one-time check to make sure the terminal node can be
         // reached from the scope entry node. As long as this passes, we will
         // not run it again.
@@ -321,6 +353,35 @@ where
     }
 
     Ok(())
+}
+
+fn find_circular_collects(
+    scope: Entity,
+    world: &World,
+) -> Result<Vec<[Entity; 2]>, OperationError> {
+    let nodes = world.get::<CleanupContents>(scope).or_broken()?.nodes();
+    let mut conflicts = Vec::new();
+    for (i, node_i) in nodes.iter().enumerate() {
+        if world.get::<CollectMarker>(*node_i).is_none() {
+            continue;
+        }
+
+        for node_j in &nodes[i+1..] {
+            if world.get::<CollectMarker>(*node_j).is_none() {
+                continue;
+            }
+
+            if is_downstream_of(*node_i, *node_j, world) && is_downstream_of(*node_j, *node_i, world) {
+                // Both nodes are downstream of each other, which means they
+                // exist in a cycle. Both are collect operations, so these are
+                // circular connect operations, which are not allowed.
+                conflicts.push([*node_i, *node_j]);
+            }
+
+        }
+    }
+
+    Ok(conflicts)
 }
 
 fn begin_scope_impl<Request>(
@@ -485,7 +546,7 @@ where
         let scoped_session = session;
         let source_ref = world.get_entity(source).or_broken()?;
         let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
-        if check_reachability(scoped_session, terminal, world)? {
+        if check_reachability(scoped_session, terminal, Some(origin), world)? {
             // The terminal node can still be reached, so we're done
             return Ok(true);
         }
@@ -541,7 +602,19 @@ where
         awaiting.cleanup_workflow_sessions = Some(Default::default());
 
         let is_terminated = awaiting.info.status.is_terminated();
-        finish_cleanup_workflow_mut.give_input(scoped_session, CheckAwaitingSession, roster)?;
+
+        unsafe {
+            // INVARIANT: We use sneak_input here to side-step the protection of
+            // only allowing inputs for Active sessions. This current session is
+            // not active because cleaning already started for it. It's okay to
+            // use this session as input despite not being active because we are
+            // passing it to an operation that will only use it to begin a
+            // cleanup workflow.
+            finish_cleanup_workflow_mut.sneak_input(
+                scoped_session, CheckAwaitingSession, false
+            )?;
+            roster.queue(finish_cleanup);
+        }
 
         for begin in begin_cleanup_workflows {
             let run_this_workflow = (is_terminated && begin.on_terminate)
@@ -558,7 +631,7 @@ where
                 // INVARIANT: We can use sneak_input here because we execute the
                 // recipient node immediately after giving the input.
                 world.get_entity_mut(begin.source).or_broken()?
-                .sneak_input(scoped_session, ())?;
+                .sneak_input(scoped_session, (), false)?;
             }
             execute_operation(OperationRequest { source: begin.source, world, roster });
         }
@@ -574,7 +647,9 @@ where
 #[derive(Component)]
 enum InitialReachability {
     Confirmed,
+    // TODO(@mxgrey): Consider merging Invalidated into Error
     Invalidated,
+    Error(Cancellation),
 }
 
 impl InitialReachability {
@@ -656,6 +731,8 @@ fn cleanup_entire_scope(
                 OperationCleanup { source: *node, cleanup, world, roster }.clean();
             }
         }
+
+        *world.get_mut::<SessionStatus>(scoped_session).or_broken()? = SessionStatus::Cleaning;
     }
 
     Ok(())
@@ -862,7 +939,10 @@ where
 
         let keys = buffers.0.create_key(&key_builder);
 
-        let cancellation_session = world.spawn(ParentSession(scoped_session)).id();
+        let cancellation_session = world.spawn((
+            ParentSession(scoped_session),
+            SessionStatus::Active,
+        )).id();
         world.get_entity_mut(target).or_broken()?
             .give_input(cancellation_session, keys, roster)?;
 
@@ -1128,9 +1208,6 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             .or_broken()?;
 
         if terminating {
-            // let response = world
-            //     .get_mut::<Staging<T>>(terminal).or_broken()?.0
-            //     .remove(&scoped_session).or_broken()?;
             let mut staging = world
                 .get_mut::<Staging<T>>(terminal).or_broken()?;
 

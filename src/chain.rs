@@ -448,8 +448,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If `min` is greater than 0 then the collection will not be sent out unless
     /// it is equal to or greater than that value. Note that this means the
     /// collect operation could force the workflow into cancelling if it cannot
-    /// reach the minimum. A `min` of 0 will be treated the same as a `min` of 1
-    /// to prevent spuriously sending empty collections.
+    /// reach the minimum number of elements. A `min` of 0 means that if an
+    /// upstream thread is disposed and the collect node is no longer reachable
+    /// then it will fire off with an empty collection.
     ///
     /// If the `min` limit is satisfied and there are no remaining workflow
     /// threads that can reach this collect operation, then the collection will

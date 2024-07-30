@@ -18,10 +18,10 @@
 pub use bevy::{
     prelude::{
         Commands, App, Update, MinimalPlugins, DefaultPlugins, PbrBundle, Vec3,
-        In, Entity, Assets, Mesh, ResMut, Transform, Component, Query,
+        In, Entity, Assets, Mesh, ResMut, Transform, Component, Query, Local,
     },
     render::mesh::shape::Cube,
-    ecs::system::CommandQueue,
+    ecs::system::{CommandQueue, IntoSystem},
 };
 
 use thiserror::Error as ThisError;
@@ -31,7 +31,8 @@ pub use std::time::{Duration, Instant};
 use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
-    GetBufferedSessionsFn,
+    GetBufferedSessionsFn, ContinuousService, ContinuousQuery,
+    AddContinuousServicesExt,
     flush_impulses,
 };
 
@@ -196,6 +197,29 @@ impl TestingContext {
             Err(non_empty_buffers)
         }
     }
+
+    /// Create a service that passes along its inputs after a delay.
+    pub fn spawn_delay<T>(&mut self, duration: Duration) -> Service<T, T>
+    where
+        T: Clone + 'static + Send + Sync,
+    {
+        self.app.spawn_continuous_service(
+            Update,
+            move |In(input): In<ContinuousService<T, T>>, mut query: ContinuousQuery<T, T>, mut t: Local<Option<Instant>>| {
+                if let Some(order) = query.get_mut(&input.key).unwrap().get_mut(0) {
+                    if let Some(t0) = *t {
+                        if t0.elapsed() > duration {
+                            let r = order.request().clone();
+                            order.respond(r);
+                            *t = None;
+                        }
+                    } else {
+                        *t = Some(Instant::now());
+                    }
+                }
+            }
+        )
+    }
 }
 
 #[derive(Default, Clone)]
@@ -327,8 +351,9 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
 /// Use this to add a blocking map to the chain that simply prints a debug
 /// message and then passes the data along.
 pub fn print_debug<T: std::fmt::Debug>(
-    header: String
+    header: impl Into<String>,
 ) -> impl Fn(BlockingMap<T>) -> T {
+    let header = header.into();
     move |input| {
         println!(
             "[source: {:?}, session: {:?}] {}: {:?}",

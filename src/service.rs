@@ -368,6 +368,29 @@ pub trait AddContinuousServicesExt {
         <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
+
+    fn spawn_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        builder: B,
+    ) -> Service<
+        <B::Service as IntoContinuousService<M2>>::Request,
+        <B::Service as IntoContinuousService<M2>>::Response,
+        <B::Service as IntoContinuousService<M2>>::Streams,
+    >
+    where
+        B::Service: IntoContinuousService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+            <B::Service as IntoContinuousService<M2>>::Request,
+            <B::Service as IntoContinuousService<M2>>::Response,
+            <B::Service as IntoContinuousService<M2>>::Streams,
+        >,
+        B::Configure: ConfigureContinuousService,
+        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
 }
 
 impl AddContinuousServicesExt for App {
@@ -390,8 +413,34 @@ impl AddContinuousServicesExt for App {
         <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
     {
-        builder.into_service_builder().add_continuous_service(schedule, self);
+        builder.into_service_builder().spawn_continuous_service(schedule, self);
         self
+    }
+
+    fn spawn_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        builder: B,
+    ) -> Service<
+        <B::Service as IntoContinuousService<M2>>::Request,
+        <B::Service as IntoContinuousService<M2>>::Response,
+        <B::Service as IntoContinuousService<M2>>::Streams,
+    >
+    where
+        B::Service: IntoContinuousService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+            <B::Service as IntoContinuousService<M2>>::Request,
+            <B::Service as IntoContinuousService<M2>>::Response,
+            <B::Service as IntoContinuousService<M2>>::Streams,
+        >,
+        B::Configure: ConfigureContinuousService,
+        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
+    {
+        builder.into_service_builder().spawn_continuous_service(schedule, self)
     }
 }
 

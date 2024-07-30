@@ -26,7 +26,7 @@ use crate::{
     OperationReachability, ReachabilityResult, OperationSetup, Disposal,
     SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
     DisposalListener, DisposalUpdate, OperationRoster,
-    emit_disposal, check_reachability, is_downstream_of,
+    emit_disposal, is_downstream_of,
 };
 
 pub(crate) struct Collect<T, const N: usize> {
@@ -41,6 +41,9 @@ impl<T, const N: usize> Collect<T, N> {
         Self { target, min, max, _ignore: Default::default() }
     }
 }
+
+#[derive(Component)]
+pub(crate) struct CollectMarker;
 
 impl<T, const N: usize> Operation for Collect<T, N>
 where
@@ -60,6 +63,7 @@ where
             CollectionStorage::<T, N>::new(self.min, self.max),
             SingleTargetStorage::new(self.target),
             DisposalListener(collection_disposal_listener::<T, N>),
+            CollectMarker,
         ));
 
         Ok(())
@@ -88,7 +92,7 @@ where
 
         // We don't have the correct number of elements so we need to check if
         // any more threads will reach this operation.
-        if !check_reachability(session, source, world)? {
+        if !is_upstream_active::<T>(session, source, None, world)? {
             // This node is not reachable, so we need to either give an output
             // or emit a disposal.
             on_unreachable_collection::<T, N>(
@@ -98,7 +102,6 @@ where
 
         // The collection node is still reachable so we can just wait until the
         // next time it gets triggered or a disposal happens.
-
         Ok(())
     }
 
@@ -111,16 +114,34 @@ where
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
+        let source = reachability.source();
+        let session = reachability.session();
         if reachability.has_input::<T>()? {
             return Ok(true);
         }
 
-        // We ignore the contents that have already been collected because there
-        // are only two places this function should be called:
-        // 1. fn execute when we're deciding whether to dispose, send early, or wait
-        // 2. in the scope reachability validation, which will first call
-        //    collection_disposal_listener. The listener will already have determined
-        //    if we should emit a disposal or an output based on reachability.
+        // If this is being checked by a downstream collect operation that was
+        // triggered by a disposal, then it may get called before THIS collect
+        // operation has processed the disposal. In that case we need to account
+        // for whether the current contents will be sent off due to a disposal.
+        let collection = reachability.world()
+            .get::<CollectionStorage<T, N>>(source).or_broken()?;
+
+        if let Some(progress) = collection.map.get(&session) {
+            if collection.min <= progress.len() {
+                // The current progress will be emitted if a disposal is happening.
+                if let Some(disposed) = reachability.disposed {
+                    if is_downstream_of(disposed, source, reachability.world()) {
+                        // A downstream disposal occurred and the current progress
+                        // reached the minimum requirement. Either this disposal
+                        // will trigger the current progress to be released or
+                        // a future arrival / disposal will trigger it, so we
+                        // should consider this operation to be reachable.
+                        return Ok(true);
+                    }
+                }
+            }
+        }
 
         SingleInputStorage::is_reachable(&mut reachability)
     }
@@ -156,7 +177,7 @@ where
         return Ok(());
     }
 
-    if check_reachability(session, source, world)? {
+    if is_upstream_active::<T>(session, source, Some(origin), world)? {
         // The collection node is still reachable, so no action is needed.
         return Ok(());
     }
@@ -166,7 +187,31 @@ where
     let collection = source_ref.get::<CollectionStorage<T, N>>().or_broken()?;
     let min = collection.min;
     let len = collection.map.get(&session).map(|c| c.len()).unwrap_or(0);
+
     on_unreachable_collection::<T, N>(source, session, target, min, len, world, roster)
+}
+
+// Check if there is still upstream activity.
+fn is_upstream_active<T: 'static + Send + Sync>(
+    session: Entity,
+    source: Entity,
+    disposed: Option<Entity>,
+    world: &World,
+) -> ReachabilityResult {
+    let mut visited = HashMap::new();
+    visited.insert(source, false);
+    let mut r = OperationReachability {
+        source, session, disposed, world, visited: &mut visited
+    };
+
+    if r.has_input::<T>()? {
+        return Ok(true);
+    }
+
+    // NOTE: Unlike fn is_reachable, we do not check the current progress of
+    // the collection. That's why we don't reuse that function.
+
+    SingleInputStorage::is_reachable(&mut r)
 }
 
 fn on_unreachable_collection<T: 'static + Send + Sync, const N: usize>(

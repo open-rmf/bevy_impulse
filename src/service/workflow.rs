@@ -17,7 +17,7 @@
 
 use crate::{
     ServiceTrait, ServiceRequest, OperationRequest, OperationResult, StreamPack,
-    OrBroken, Input, ManageInput, DeliveryInstructions, ParentSession,
+    OrBroken, Input, ManageInput, DeliveryInstructions, ParentSession, SessionStatus,
     OperationError, Delivery, DeliveryOrder, DeliveryUpdate, Blocker,
     OperationRoster, Disposal, Cancellation, Cancel, Deliver, SingleTargetStorage,
     ExitTargetStorage, ExitTarget, Service,
@@ -68,7 +68,10 @@ where
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
         let instructions = source_mut.get::<DeliveryInstructions>().cloned();
-        let scoped_session = world.spawn(ParentSession::new(session)).id();
+        let scoped_session = world.spawn((
+            ParentSession::new(session),
+            SessionStatus::Active,
+        )).id();
 
         let result = serve_workflow_impl::<Request, Response, Streams>(
             request,

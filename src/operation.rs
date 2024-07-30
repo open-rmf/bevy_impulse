@@ -270,6 +270,7 @@ impl OperationRoster {
     /// despawned entity from needlessly tripping errors.
     pub fn purge(&mut self, target: Entity) {
         self.queue.retain(|e| *e != target);
+        self.deferred_queue.retain(|e| *e != target);
     }
 
     /// Move all items from the deferred queue into the immediate queue
@@ -341,6 +342,11 @@ impl<'a> OperationRequest<'a> {
 pub struct OperationReachability<'a> {
     source: Entity,
     session: Entity,
+    // If the reachability query was triggered by a disposal, this indicates
+    // what was disposed. This is used by the collect operation to figure out if
+    // it will emit a value in response to the disposal, which may affect the
+    // reachability calculation.
+    disposed: Option<Entity>,
     world: &'a World,
     visited: &'a mut HashMap<Entity, bool>,
 }
@@ -350,10 +356,11 @@ impl<'a> OperationReachability<'a> {
     pub fn new(
         session: Entity,
         source: Entity,
+        disposed: Option<Entity>,
         world: &'a World,
         visited: &'a mut HashMap<Entity, bool>,
     ) -> OperationReachability<'a> {
-        Self { session, source, world, visited }
+        Self { session, source, disposed, world, visited }
     }
 
     pub fn check_upstream(&mut self, source: Entity) -> ReachabilityResult {
@@ -376,6 +383,7 @@ impl<'a> OperationReachability<'a> {
         let is_reachable = reachabiility(OperationReachability {
             source,
             session: self.session,
+            disposed: self.disposed,
             world: self.world,
             visited: self.visited
         })?;
@@ -405,13 +413,14 @@ impl<'a> OperationReachability<'a> {
     }
 }
 
-pub fn check_reachability<'a>(
+pub fn check_reachability(
     session: Entity,
     source: Entity,
-    world: &'a World,
+    disposed: Option<Entity>,
+    world: &World,
 ) -> ReachabilityResult {
     let mut visited = HashMap::new();
-    let mut r = OperationReachability { source, session, world, visited: &mut visited };
+    let mut r = OperationReachability { source, session, disposed, world, visited: &mut visited };
     r.check_upstream(source)
 }
 
@@ -470,18 +479,18 @@ pub trait OrBroken: Sized {
     /// If the value is not available then we will have an operation error of
     /// broken. This includes a backtrace of the stack to help with debugging.
     fn or_broken(self) -> Result<Self::Value, OperationError> {
-        self.or_broken_impl(Some(Backtrace::new()))
+        self.or_broken_impl(true)
     }
 
     /// If the value is not available then we will have an operation error of
     /// broken. This does not include a backtrace, which makes it suitable for
     /// codebases that need to be kept hidden.
     fn or_broken_hide(self) -> Result<Self::Value, OperationError> {
-        self.or_broken_impl(None)
+        self.or_broken_impl(false)
     }
 
     /// This is what should be implemented by structs that provide this trait.
-    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<Self::Value, OperationError>;
+    fn or_broken_impl(self, with_backtrace: bool) -> Result<Self::Value, OperationError>;
 }
 
 impl<T, E> OrBroken for Result<T, E> {
@@ -490,8 +499,12 @@ impl<T, E> OrBroken for Result<T, E> {
         self.map_err(|_| OperationError::NotReady)
     }
 
-    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
-        self.map_err(|_| OperationError::Broken(backtrace))
+    fn or_broken_impl(self, with_backtrace: bool) -> Result<T, OperationError> {
+        if with_backtrace {
+            self.map_err(|_| OperationError::Broken(Some(Backtrace::new())))
+        } else {
+            self.map_err(|_| OperationError::Broken(None))
+        }
     }
 }
 
@@ -501,8 +514,12 @@ impl<T> OrBroken for Option<T> {
         self.ok_or_else(|| OperationError::NotReady)
     }
 
-    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
-        self.ok_or_else(|| OperationError::Broken(backtrace))
+    fn or_broken_impl(self, with_backtrace: bool) -> Result<T, OperationError> {
+        if with_backtrace {
+            self.ok_or_else(|| OperationError::Broken(Some(Backtrace::new())))
+        } else {
+            self.ok_or_else(|| OperationError::Broken(None))
+        }
     }
 }
 
@@ -560,14 +577,20 @@ struct OperationReachabilityStorage(
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
         if request.world.get::<UnusedTarget>(request.source).is_none() {
-            // The node does not have an operation and is not an unused target,
-            // so this is broken somehow.
-            request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
-                .broken
-                .push(Broken {
-                    node: request.source,
-                    backtrace: Some(Backtrace::new())
-                });
+            // This can happen while using the async channel to issue requests
+            // which end up getting dropped during a cleanup. In that case, the
+            // source entity will be totally despawned, so check for that before
+            // concluding that this is broken.
+            if request.world.get_entity(request.source).is_some() {
+                // The node does not have an operation and is not an unused target,
+                // so this is broken somehow.
+                request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .broken
+                    .push(Broken {
+                        node: request.source,
+                        backtrace: Some(Backtrace::new())
+                    });
+            }
         }
         return;
     };
@@ -657,10 +680,10 @@ pub fn immediately_downstream_of<'a>(
 /// for cycles where both operations can be seen as downstream of each other.
 ///
 /// If `source` and `target` are the same then this immediately returns false.
-pub fn is_downstream_of<'a>(
+pub fn is_downstream_of(
     source: Entity,
     target: Entity,
-    world: &'a World,
+    world: &World,
 ) -> bool {
     if source == target {
         return false;
