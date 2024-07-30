@@ -471,4 +471,145 @@ mod tests {
         assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
     }
+
+    use std::sync::{Arc, Mutex};
+    fn async_delayed_increment(
+        In(AsyncService{ request, .. }): AsyncServiceInput<(Arc<Mutex<u64>>, std::time::Duration)>,
+    ) -> impl std::future::Future<Output=()> {
+        use async_std::future;
+        let start = Instant::now();
+        let mut elapsed = start.elapsed();
+        async move {
+            while elapsed < request.1 {
+                dbg!("Waiting");
+                let never = future::pending::<()>();
+                let timeout = request.1 - elapsed;
+                let _ = future::timeout(timeout, never).await;
+                elapsed = start.elapsed();
+            }
+            *request.0.lock().unwrap() += 1;
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    enum TestLabel {
+        Test,
+    }
+
+    // TODO(luca) create a proc-macro for this, because library crates can't
+    // export proc macros we will need to create a new macros only crate
+    impl DeliveryLabel for TestLabel {
+        fn dyn_clone(&self) -> std::boxed::Box<dyn DeliveryLabel> {
+            Box::new(self.clone())
+        }
+
+        fn as_dyn_eq(&self) -> &dyn bevy::utils::label::DynEq {
+            self
+        }
+
+        fn dyn_hash(&self, mut state: &mut dyn std::hash::Hasher) {
+            let ty_id = std::any::TypeId::of::<Self>();
+            std::hash::Hash::hash(&ty_id, &mut state);
+            std::hash::Hash::hash(self, &mut state);
+        }
+    }
+
+
+    #[test]
+    fn test_instruction_preemption() {
+        let mut context = TestingContext::minimal_plugins();
+        let counter = Arc::new(Mutex::new(0_u64));
+        let service = context.command(|commands| {
+            commands.spawn_service(async_delayed_increment)
+        });
+        let instruction = DeliveryInstructions::new(TestLabel::Test);
+        let preempt = instruction.clone().preempt();
+        let request = (counter.clone(), Duration::from_secs_f64(2.1));
+
+        // Spawn a service that increments the variable
+        let mut promise = context.command(|commands| {
+            commands
+            .request(request.clone(), service.clone().instruct(instruction))
+            .take_response()
+        });
+
+        // Spawn a service that preempts the previous one
+        let mut preempt_promise = context.command(|commands| {
+            commands
+            .request(request.clone(), service.clone().instruct(preempt))
+            .take_response()
+        });
+
+        let conditions = FlushConditions::new()
+            .with_timeout(Duration::from_secs_f64(5.0));
+
+        dbg!(counter.lock().unwrap());
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(context.run_with_conditions(&mut preempt_promise, conditions.clone()));
+        assert!(context.no_unhandled_errors());
+        dbg!(counter.lock().unwrap());
+        assert!(*counter.lock().unwrap() == 1);
+
+        // Await both, counter should only have incremented once
+        /*
+
+        let request = WaitRequest {
+            duration: Duration::from_secs_f64(0.01),
+            value: "hello".to_owned(),
+        };
+
+        let conditions = FlushConditions::new()
+            .with_timeout(Duration::from_secs_f64(5.0));
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(request.clone(), wait.into_async_map())
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands| {
+            commands
+            .request(request.clone(), wait.into_async_map_once())
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands| {
+            commands
+            .provide(request.clone())
+            .map_async(wait)
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands| {
+            commands
+            .provide(request.clone())
+            .map_async(|request| {
+                async move {
+                    let t = Instant::now();
+                    while t.elapsed() < request.duration {
+                        // Busy wait
+                    }
+                    request.value
+                }
+            })
+            .take_response()
+        });
+
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(promise.take().available().is_some_and(|v| v == "hello"));
+        assert!(context.no_unhandled_errors());
+        */
+    }
 }
