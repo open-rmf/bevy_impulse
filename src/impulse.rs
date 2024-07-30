@@ -331,6 +331,7 @@ impl<T> Default for Collection<T> {
 mod tests {
     use crate::{*, testing::*};
     use std::time::{Instant, Duration};
+    use std::sync::{Arc, Mutex};
     use crossbeam::channel::unbounded;
 
     #[test]
@@ -470,5 +471,56 @@ mod tests {
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
         assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    enum TestLabel {
+        Test,
+    }
+
+    // TODO(luca) create a proc-macro for this, because library crates can't
+    // export proc macros we will need to create a new macros only crate
+    impl DeliveryLabel for TestLabel {
+        fn as_str(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[test]
+    fn test_instruction_preemption() {
+        let mut context = TestingContext::minimal_plugins();
+        let counter = Arc::new(Mutex::new(0_u64));
+        let service = context.command(|commands| {
+            commands.spawn_service(async_delayed_increment)
+        });
+        let instruction = DeliveryInstructions::new(TestLabel::Test);
+        let preempt = instruction.clone().preempt();
+        let request = (counter.clone(), Duration::from_secs_f64(2.1));
+
+        // Spawn a service that increments the variable
+        let mut promise = context.command(|commands| {
+            commands
+            .request(request.clone(), service.clone().instruct(instruction))
+            .take_response()
+        });
+
+        // Spawn a service that preempts the previous one
+        let mut preempt_promise = context.command(|commands| {
+            commands
+            .request(request.clone(), service.clone().instruct(preempt))
+            .take_response()
+        });
+
+        let conditions = FlushConditions::new()
+            .with_timeout(Duration::from_secs_f64(5.0));
+
+        // Await both, counter should only have incremented once
+        dbg!(counter.lock().unwrap());
+        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
+        assert!(context.run_with_conditions(&mut preempt_promise, conditions.clone()));
+        assert!(context.no_unhandled_errors());
+        dbg!(counter.lock().unwrap());
+        assert!(*counter.lock().unwrap() == 1);
+
     }
 }

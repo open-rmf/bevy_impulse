@@ -27,11 +27,12 @@ pub use bevy::{
 use thiserror::Error as ThisError;
 
 pub use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
-    GetBufferedSessionsFn,
+    GetBufferedSessionsFn, AsyncService,
     flush_impulses,
 };
 
@@ -323,6 +324,26 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
     }
     request.value
 }
+
+/// Async system that waits a certain duration before incrementing a shared variable
+pub fn async_delayed_increment(
+    In(AsyncService{ request, .. }): AsyncServiceInput<(Arc<Mutex<u64>>, std::time::Duration)>,
+) -> impl std::future::Future<Output=()> {
+    use async_std::future;
+    let start = Instant::now();
+    let mut elapsed = start.elapsed();
+    async move {
+        while elapsed < request.1 {
+            dbg!("Waiting");
+            let never = future::pending::<()>();
+            let timeout = request.1 - elapsed;
+            let _ = future::timeout(timeout, never).await;
+            elapsed = start.elapsed();
+        }
+        *request.0.lock().unwrap() += 1;
+    }
+}
+
 
 /// Use this to add a blocking map to the chain that simply prints a debug
 /// message and then passes the data along.
