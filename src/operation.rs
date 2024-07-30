@@ -83,6 +83,9 @@ pub(crate) use operate_trim::*;
 mod scope;
 pub use scope::*;
 
+mod spread;
+pub(crate) use spread::*;
+
 /// This component is given to nodes that get triggered each time any single
 /// input is provided to them. There may be multiple nodes that can feed into
 /// this node, but this node gets triggered any time any one of them provides

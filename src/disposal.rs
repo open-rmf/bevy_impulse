@@ -88,6 +88,12 @@ impl Disposal {
     ) -> Self {
         ClosedGate { gate_node, closed_buffers }.into()
     }
+
+    pub fn empty_spread(
+        spread_node: Entity,
+    ) -> Self {
+        EmptySpread { spread_node }.into()
+    }
 }
 
 #[derive(Debug)]
@@ -131,6 +137,11 @@ pub enum DisposalCause {
 
     /// A gate was closed, which cut off the ability of a workflow to proceed.
     ClosedGate(ClosedGate),
+
+    /// A spread operation was given an empty collection so there was nothing to
+    /// spread. As a result, no signal was sent out of the node after it
+    /// received a signal.
+    EmptySpread(EmptySpread),
 }
 
 /// A variant of [`DisposalCause`]
@@ -299,6 +310,19 @@ pub struct ClosedGate {
 impl From<ClosedGate> for DisposalCause {
     fn from(value: ClosedGate) -> Self {
         Self::ClosedGate(value)
+    }
+}
+
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct EmptySpread {
+    /// The node that was doing the spreading
+    pub spread_node: Entity,
+}
+
+impl From<EmptySpread> for DisposalCause {
+    fn from(value: EmptySpread) -> Self {
+        Self::EmptySpread(value)
     }
 }
 

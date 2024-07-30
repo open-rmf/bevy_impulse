@@ -30,6 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, GateAction, Buffered,
+    Spread,
     make_result_branching, make_option_branching,
 };
 
@@ -396,7 +397,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// You can also consider using `unzip_build` to continue building each
     /// chain in the tuple independently by providing a builder function for
     /// each element of the tuple.
-    #[must_use]
     pub fn unzip(self) -> T::Unzipped
     where
         T: Unzippable,
@@ -413,6 +413,31 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Build: UnzipBuilder<T>
     {
         build.unzip_build(Output::<T>::new(self.scope(), self.target), self.builder)
+    }
+
+    /// If `T` implements [`Iterator`] then you can fire off each of its elements
+    /// as a new thread within the workflow. Each thread will still have the same
+    /// session ID.
+    ///
+    /// This is similar to streams which can produce multiple outputs, which also
+    /// potentially creates multiple threads in the workflow. If the input to
+    /// the spread operator is empty, then a disposal notice will go out, and
+    /// the workflow will be cancelled if it is no longer possible to reach the
+    /// terminal node.
+    pub fn spread(self) -> Chain<'w, 's, 'a, 'b, T::Item>
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            Spread::<T>::new(target),
+        ));
+
+        Chain::new(target, self.builder)
     }
 
     /// Run a trimming operation when the workflow reaches this point.
@@ -875,6 +900,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
+    use smallvec::SmallVec;
 
     #[test]
     fn test_join() {
@@ -1134,5 +1160,60 @@ mod tests {
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.peek().is_cancelled());
         assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_spread() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+
+            scope.input.chain(builder)
+                .map_block(|value| {
+                    let mut duplicated_values: SmallVec<[i32; 16]> = SmallVec::new();
+                    for _ in 0..value {
+                        duplicated_values.push(value);
+                    }
+                    duplicated_values
+                })
+                .spread()
+                .connect(buffer.input_slot());
+
+            buffer.listen(builder)
+                .then(watch_for_quantity.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(7, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| {
+            v.len() == 7 && v.iter().find(|a| **a != 7).is_none()
+        }));
+        assert!(context.no_unhandled_errors());
+    }
+
+    // This is essentially a collect operation specific to one of our spread
+    // operation tests. We expect to gather up a number of elements equal to the
+    // integer value of those elements. We don't use the collect operation for
+    // this test so that we can test each of those operations in isolation.
+    fn watch_for_quantity(
+        In(key): In<BufferKey<i32>>,
+        mut access: BufferAccessMut<i32>,
+    ) -> Option<SmallVec<[i32; 16]>> {
+        let mut buffer = access.get_mut(&key).unwrap();
+        let expected_count = *buffer.newest()? as usize;
+        if buffer.len() < expected_count {
+            return None;
+        }
+
+        Some(buffer.drain(..).collect())
     }
 }
