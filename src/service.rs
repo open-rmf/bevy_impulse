@@ -347,7 +347,7 @@ pub trait AddServicesExt {
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoService<M2>>::Request,
             <B::Service as IntoService<M2>>::Response,
