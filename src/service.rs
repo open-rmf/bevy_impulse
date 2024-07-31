@@ -384,7 +384,7 @@ pub trait AddContinuousServicesExt {
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoContinuousService<M2>>::Request,
             <B::Service as IntoContinuousService<M2>>::Response,
@@ -432,7 +432,7 @@ impl AddContinuousServicesExt for App {
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
-        B::With: WithEntityMut,
+        B::With: WithEntityWorldMut,
         B::Also: AlsoAdd<
             <B::Service as IntoContinuousService<M2>>::Request,
             <B::Service as IntoContinuousService<M2>>::Response,
