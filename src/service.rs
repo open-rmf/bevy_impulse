@@ -329,11 +329,44 @@ pub trait AddServicesExt {
         >,
         <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: StreamPack,
+    {
+        self.spawn_service(builder);
+        self
+    }
+
+    /// Call this on an App to create a service that is available immediately.
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(
+        &mut self,
+        builder: B,
+    ) -> Service<
+        <B::Service as IntoService<M2>>::Request,
+        <B::Service as IntoService<M2>>::Response,
+        <B::Service as IntoService<M2>>::Streams,
+    >
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityMut,
+        B::Also: AlsoAdd<
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams
+        >,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: StreamPack;
 }
 
 impl AddServicesExt for App {
-    fn add_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(&mut self, builder: B) -> &mut Self
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(
+        &mut self,
+        builder: B,
+    ) -> Service<
+        <B::Service as IntoService<M2>>::Request,
+        <B::Service as IntoService<M2>>::Response,
+        <B::Service as IntoService<M2>>::Streams,
+    >
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
@@ -347,8 +380,7 @@ impl AddServicesExt for App {
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
-        builder.into_service_builder().add_service(self);
-        self
+        builder.into_service_builder().spawn_app_service(self)
     }
 }
 
