@@ -28,7 +28,7 @@ use smallvec::SmallVec;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
-    DisposalFailure, ImpulseMarker,
+    DisposalFailure, ImpulseMarker, Cancel,
 };
 
 #[derive(Debug, Clone)]
@@ -159,7 +159,7 @@ pub enum DisposalCause {
 }
 
 /// A variant of [`DisposalCause`]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Supplanted {
     /// ID of the node whose service request was supplanted
     pub supplanted_at_node: Entity,
@@ -380,7 +380,20 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
         roster: &mut OperationRoster,
     ) {
         let Some(scope) = self.get::<ScopeStorage>() else {
-            if !self.contains::<ImpulseMarker>() {
+            if self.contains::<ImpulseMarker>() {
+                // If an impulse has been supplanted, we trigger a cancellation
+                // for it. Besides supplanting, we do not generally convert a
+                // disposal into a cancellation because sometimes services will
+                // emit disposals just to trigger a reachability check, e.g. for
+                // unused streams, not because the actual result is undeliverable.
+                if let DisposalCause::Supplanted(supplanted) = disposal.cause.as_ref() {
+                    let cancellation: Cancellation = (*supplanted).into();
+                    roster.cancel(Cancel { origin: self.id(), target: session, session: Some(session), cancellation });
+                }
+                // TODO(@mxgrey): Consider whether there is a more sound way to
+                // decide whether a disposal should be converted into a
+                // cancellation for impulses.
+            } else {
                 // If the emitting node does not have a scope as not part of an
                 // impulse chain, then something is broken.
                 let broken_node = self.id();

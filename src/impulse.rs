@@ -330,8 +330,13 @@ impl<T> Default for Collection<T> {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
-    use std::time::{Instant, Duration};
+    use std::{
+        time::{Instant, Duration},
+        sync::{Arc, Mutex}
+    };
+    use smallvec::SmallVec;
     use crossbeam::channel::unbounded;
+
 
     #[test]
     fn test_dropped_chain() {
@@ -472,25 +477,6 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    use std::sync::{Arc, Mutex};
-    fn async_delayed_increment(
-        In(AsyncService{ request, .. }): AsyncServiceInput<(Arc<Mutex<u64>>, std::time::Duration)>,
-    ) -> impl std::future::Future<Output=()> {
-        use async_std::future;
-        let start = Instant::now();
-        let mut elapsed = start.elapsed();
-        async move {
-            while elapsed < request.1 {
-                dbg!("Waiting");
-                let never = future::pending::<()>();
-                let timeout = request.1 - elapsed;
-                let _ = future::timeout(timeout, never).await;
-                elapsed = start.elapsed();
-            }
-            *request.0.lock().unwrap() += 1;
-        }
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     enum TestLabel {
         Test,
@@ -514,102 +500,157 @@ mod tests {
         }
     }
 
-
     #[test]
-    fn test_instruction_preemption() {
+    fn test_delivery_instructions() {
         let mut context = TestingContext::minimal_plugins();
+        let queuing_service = context.spawn_delayed_map_with_viewer(
+            Duration::from_secs_f32(0.01),
+            |counter: &Arc<Mutex<u64>>| {
+                *counter.lock().unwrap() += 1;
+            },
+            |view: &ContinuousQueueView<_, ()>| {
+                assert!(view.len() <= 1);
+            }
+        ).instruct(TestLabel::Test);
+
+        let preempting_service = queuing_service
+            .instruct(TestLabel::Test.preempt());
+
+        // Test by queuing up a bunch of requests before preempting them all at once.
+        verify_preemption(1, queuing_service, preempting_service, &mut context);
+        verify_preemption(2, queuing_service, preempting_service, &mut context);
+        verify_preemption(3, queuing_service, preempting_service, &mut context);
+        verify_preemption(4, queuing_service, preempting_service, &mut context);
+
+        // Test by repeatedly preempting each request with the next.
+        verify_preemption(1, preempting_service, preempting_service, &mut context);
+        verify_preemption(2, preempting_service, preempting_service, &mut context);
+        verify_preemption(3, preempting_service, preempting_service, &mut context);
+        verify_preemption(4, preempting_service, preempting_service, &mut context);
+
+        // Test by queuing up a bunch of requests and making sure they all get
+        // delivered.
+        verify_queuing(2, queuing_service, &mut context);
+        verify_queuing(3, queuing_service, &mut context);
+        verify_queuing(4, queuing_service, &mut context);
+        verify_queuing(5, queuing_service, &mut context);
+
+        // Test by queuing up a mix of ensured and unensured requests, and then
+        // sending in one that preempts them all. The ensured requests should
+        // remain in the queue and execute despite the preempter. The unensured
+        // requests should all be cancelled.
+        verify_ensured([false, true, false, true], queuing_service, &mut context);
+        verify_ensured([true, false, false, false], queuing_service, &mut context);
+        verify_ensured([true, true, false, false], queuing_service, &mut context);
+        verify_ensured([false, false, true, true], queuing_service, &mut context);
+        verify_ensured([true, false, false, true], queuing_service, &mut context);
+        verify_ensured([false, false, false, false], queuing_service, &mut context);
+        verify_ensured([true, true, true, true], queuing_service, &mut context);
+    }
+
+    fn verify_preemption(
+        preemptions: usize,
+        preempted_service: Service<Arc<Mutex<u64>>, ()>,
+        preempting_service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
         let counter = Arc::new(Mutex::new(0_u64));
-        let service = context.command(|commands| {
-            commands.spawn_service(async_delayed_increment)
-        });
-        let instruction = DeliveryInstructions::new(TestLabel::Test);
-        let preempt = instruction.clone().preempt();
-        let request = (counter.clone(), Duration::from_secs_f64(2.1));
+        let mut preempted: SmallVec<[Promise<()>; 16]> = SmallVec::new();
+        for _ in 0..preemptions {
+            let promise = context.command(|commands|
+                commands
+                .request(Arc::clone(&counter), preempted_service)
+                .take_response()
+            );
+            preempted.push(promise);
+        }
 
-        // Spawn a service that increments the variable
-        let mut promise = context.command(|commands| {
+        let mut final_promise = context.command(|commands|
             commands
-            .request(request.clone(), service.clone().instruct(instruction))
+            .request(Arc::clone(&counter), preempting_service)
             .take_response()
-        });
+        );
 
-        // Spawn a service that preempts the previous one
-        let mut preempt_promise = context.command(|commands| {
-            commands
-            .request(request.clone(), service.clone().instruct(preempt))
-            .take_response()
-        });
+        for promise in &mut preempted {
+            context.run_with_conditions(promise, Duration::from_secs(2));
+            assert!(promise.take().is_cancelled());
+        }
 
-        let conditions = FlushConditions::new()
-            .with_timeout(Duration::from_secs_f64(5.0));
-
-        dbg!(counter.lock().unwrap());
-        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(context.run_with_conditions(&mut preempt_promise, conditions.clone()));
+        context.run_with_conditions(&mut final_promise, Duration::from_secs(2));
+        assert!(final_promise.take().is_available());
+        assert_eq!(*counter.lock().unwrap(), 1);
         assert!(context.no_unhandled_errors());
-        dbg!(counter.lock().unwrap());
-        assert!(*counter.lock().unwrap() == 1);
+    }
 
-        // Await both, counter should only have incremented once
-        /*
+    fn verify_queuing(
+        queue_size: usize,
+        queuing_service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
+        let counter = Arc::new(Mutex::new(0_u64));
+        let mut queued: SmallVec<[Promise<()>; 16]> = SmallVec::new();
+        for _ in 0..queue_size {
+            let promise = context.command(|commands|
+                commands
+                .request(Arc::clone(&counter), queuing_service)
+                .take_response()
+            );
+            queued.push(promise);
+        }
 
-        let request = WaitRequest {
-            duration: Duration::from_secs_f64(0.01),
-            value: "hello".to_owned(),
-        };
+        for promise in &mut queued {
+            context.run_with_conditions(promise, Duration::from_secs(2));
+            assert!(promise.take().is_available());
+        }
 
-        let conditions = FlushConditions::new()
-            .with_timeout(Duration::from_secs_f64(5.0));
-
-        let mut promise = context.command(|commands| {
-            commands
-            .request(request.clone(), wait.into_async_map())
-            .take_response()
-        });
-
-        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.take().available().is_some_and(|v| v == "hello"));
+        assert_eq!(*counter.lock().unwrap(), queue_size as u64);
         assert!(context.no_unhandled_errors());
+    }
 
-        let mut promise = context.command(|commands| {
+    fn verify_ensured(
+        queued: impl IntoIterator<Item = bool>,
+        service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
+        let counter = Arc::new(Mutex::new(0_u64));
+        let mut queued_promises: SmallVec<[(Promise<()>, bool); 16]> = SmallVec::new();
+        // This counter starts out at 1 to account for the preempting request.
+        let mut expected_count = 1;
+        for ensured in queued {
+            let srv = if ensured {
+                expected_count += 1;
+                service.instruct(TestLabel::Test.ensure())
+            } else {
+                service.instruct(TestLabel::Test)
+            };
+
+            let promise = context.command(|commands|
+                commands
+                .request(Arc::clone(&counter), srv)
+                .take_response()
+            );
+
+            queued_promises.push((promise, ensured));
+        }
+
+        let mut preempter = context.command(|commands|
             commands
-            .request(request.clone(), wait.into_async_map_once())
+            .request(Arc::clone(&counter), service.instruct(TestLabel::Test.preempt()))
             .take_response()
-        });
+        );
 
-        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.take().available().is_some_and(|v| v == "hello"));
+        for (promise, ensured) in &mut queued_promises {
+            context.run_with_conditions(promise, Duration::from_secs(2));
+            if *ensured {
+                assert!(promise.take().is_available());
+            } else {
+                assert!(promise.take().is_cancelled());
+            }
+        }
+
+        context.run_with_conditions(&mut preempter, Duration::from_secs(2));
+        assert!(preempter.take().is_available());
+        assert_eq!(*counter.lock().unwrap(), expected_count);
         assert!(context.no_unhandled_errors());
-
-        let mut promise = context.command(|commands| {
-            commands
-            .provide(request.clone())
-            .map_async(wait)
-            .take_response()
-        });
-
-        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.take().available().is_some_and(|v| v == "hello"));
-        assert!(context.no_unhandled_errors());
-
-        let mut promise = context.command(|commands| {
-            commands
-            .provide(request.clone())
-            .map_async(|request| {
-                async move {
-                    let t = Instant::now();
-                    while t.elapsed() < request.duration {
-                        // Busy wait
-                    }
-                    request.value
-                }
-            })
-            .take_response()
-        });
-
-        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(promise.take().available().is_some_and(|v| v == "hello"));
-        assert!(context.no_unhandled_errors());
-        */
     }
 }

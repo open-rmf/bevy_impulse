@@ -60,6 +60,10 @@ fn pop_next_delivery_impl<Request>(
 where
     Request: 'static + Send + Sync,
 {
+    // Assume we're no longer delivering anything for now. If there is anything
+    // to deliver then we will assign it later in this function.
+    serial.delivering = None;
+
     let Some(DeliveryOrder { source, session, task_id, request, instructions }) = serial.queue.pop_front() else {
         return None;
     };
@@ -243,14 +247,14 @@ fn insert_serial_order<Request>(
 
             !discard
         });
-    }
 
-    if delivering.instructions.as_ref().is_some_and(should_discard) {
-        stop = Some(DeliveryStoppage {
-            source: delivering.source,
-            session: delivering.session,
-            task_id: delivering.task_id,
-        });
+        if delivering.instructions.as_ref().is_some_and(should_discard) {
+            stop = Some(DeliveryStoppage {
+                source: delivering.source,
+                session: delivering.session,
+                task_id: delivering.task_id,
+            });
+        }
     }
 
     serial.queue.push_back(order);

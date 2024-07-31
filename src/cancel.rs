@@ -44,6 +44,14 @@ impl Cancellation {
         Self { cause: Arc::new(cause), while_cancelling: Default::default() }
     }
 
+    pub fn unreachable(
+        scope: Entity,
+        session: Entity,
+        disposals: Vec<Disposal>,
+    ) -> Self {
+        Unreachability { scope, session, disposals }.into()
+    }
+
     pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
         Filtered { filtered_at_node, reason }.into()
     }

@@ -32,7 +32,7 @@ use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
     GetBufferedSessionsFn, ContinuousService, ContinuousQuery,
-    AddContinuousServicesExt,
+    AddContinuousServicesExt, ContinuousQueueView,
     flush_impulses,
 };
 
@@ -203,14 +203,49 @@ impl TestingContext {
     where
         T: Clone + 'static + Send + Sync,
     {
+        self.spawn_delayed_map(duration, |t: &T| t.clone())
+    }
+
+    /// Create a service that applies a map to an input after a delay.
+    pub fn spawn_delayed_map<T, U, F>(
+        &mut self,
+        duration: Duration,
+        f: F,
+    ) -> Service<T, U>
+    where
+        T: 'static + Send + Sync,
+        U: 'static + Send + Sync,
+        F: FnMut(&T) -> U + 'static + Send + Sync,
+    {
+        self.spawn_delayed_map_with_viewer(duration, f, |_| {})
+    }
+
+    /// Create a service that applies a map to an input after a delay and allows
+    /// you to view the current set of requests.
+    pub fn spawn_delayed_map_with_viewer<T, U, F, V>(
+        &mut self,
+        duration: Duration,
+        mut f: F,
+        mut viewer: V,
+    ) -> Service<T, U>
+    where
+        T: 'static + Send + Sync,
+        U: 'static + Send + Sync,
+        F: FnMut(&T) -> U + 'static + Send + Sync,
+        V: FnMut(&ContinuousQueueView<T, U>) + 'static + Send + Sync,
+    {
         self.app.spawn_continuous_service(
             Update,
-            move |In(input): In<ContinuousService<T, T>>, mut query: ContinuousQuery<T, T>, mut t: Local<Option<Instant>>| {
+            move |In(input): In<ContinuousService<T, U>>, mut query: ContinuousQuery<T, U>, mut t: Local<Option<Instant>>| {
+                if let Some(view) = query.view(&input.key) {
+                    viewer(&view);
+                }
+
                 if let Some(order) = query.get_mut(&input.key).unwrap().get_mut(0) {
                     if let Some(t0) = *t {
                         if t0.elapsed() > duration {
-                            let r = order.request().clone();
-                            order.respond(r);
+                            let u = f(order.request());
+                            order.respond(u);
                             *t = None;
                         }
                     } else {

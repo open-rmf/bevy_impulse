@@ -132,11 +132,10 @@ where
     pub fn iter(&self) -> impl Iterator<Item=OrderView<'_, Request>> {
         self.queue.inner.iter()
             .enumerate()
-            .filter(|(i, _)| self.delivered.is_some_and(|d| d.contains_key(i)))
+            .filter(|(i, _)| !self.delivered.is_some_and(|d| d.contains_key(i)))
             .map(|(index, item)| OrderView {
                 index,
-                session: item.session,
-                data: &item.data,
+                order: item,
             })
     }
 
@@ -149,16 +148,40 @@ where
             .get(index)
             .map(|item| OrderView {
                 index,
-                session: item.session,
-                data: &item.data,
+                order: item,
             })
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.inner.len() - self.delivered.map(|d| d.len()).unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
 pub struct OrderView<'a, Request> {
-    pub session: Entity,
-    pub data: &'a Request,
-    pub index: usize,
+    order: &'a ContinuousOrder<Request>,
+    index: usize,
+}
+
+impl<'a, Request> OrderView<'a, Request> {
+    pub fn request(&self) -> &Request {
+        &self.order.data
+    }
+
+    pub fn session(&self) -> Entity {
+        self.order.session
+    }
+
+    pub fn source(&self) -> Entity {
+        self.order.source
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
 }
 
 pub struct ContinuousQueueMut<'w, 's, 'a, Request, Response, Streams>
@@ -183,10 +206,9 @@ where
     pub fn iter(&self) -> impl Iterator<Item=OrderView<'_, Request>> {
         self.queue.inner.iter()
             .enumerate()
-            .filter(|(i, _)| self.delivered.contains_key(i))
+            .filter(|(i, _)| !self.delivered.contains_key(i))
             .map(|(index, item)| OrderView {
-                session: item.session,
-                data: &item.data,
+                order: item,
                 index,
             })
     }
@@ -588,7 +610,6 @@ where
                     // the queue
                     let mut queue = world.get_mut::<ContinuousQueueStorage<Request>>(provider)
                         .or_broken()?;
-                    // queue.inner.retain(|r| r.task_id != stop.task_id);
                     let stopped_index = queue.inner.iter().enumerate()
                         .find(|(_, r)| r.task_id == stop.task_id)
                         .map(|(index, _)| index);
@@ -606,7 +627,8 @@ where
                     }
 
                     let disposal = Disposal::supplanted(stop.source, source, session);
-                    emit_disposal(source, session, disposal, world, roster);
+                    emit_disposal(stop.source, stop.session, disposal, world, roster);
+                    world.despawn(stop.task_id);
                 }
 
                 return Ok(());
