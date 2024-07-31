@@ -20,7 +20,10 @@ use bevy::{
         Entity, World, Query, QueryState, Added, With, Resource, Deref, DerefMut,
         Children, BuildWorldChildren, DespawnRecursiveExt,
     },
-    ecs::system::{SystemState, Command},
+    ecs::{
+        system::{SystemState, Command},
+        schedule::{SystemConfigs, IntoSystemConfigs},
+    },
 };
 
 use smallvec::SmallVec;
@@ -56,8 +59,11 @@ pub struct FlushParameters {
     pub flush_loop_limit: Option<usize>,
 }
 
-#[allow(private_interfaces)]
-pub fn flush_impulses(
+pub fn flush_impulses() -> SystemConfigs {
+    flush_impulses_impl.into_configs()
+}
+
+fn flush_impulses_impl(
     world: &mut World,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {

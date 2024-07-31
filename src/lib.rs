@@ -297,10 +297,17 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     pub session: Entity,
 }
 
+/// This plugin simply adds [`flush_impulses()`] to the [`Update`] schedule of your
+/// applicatation. For more fine-grained control you can call `flush_impulses`
+/// yourself and configure its relationship to other systems as you see fit.
+///
+/// If you do not have at least one usage of `flush_impulses()` somewhere in
+/// your application then workflows will not work.
+#[derive(Default)]
 pub struct ImpulsePlugin {}
 
 impl Plugin for ImpulsePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, flush_impulses);
+        app.add_systems(Update, flush_impulses());
     }
 }

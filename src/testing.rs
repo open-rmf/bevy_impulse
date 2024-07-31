@@ -47,7 +47,7 @@ impl TestingContext {
         let mut app = App::new();
         app
             .add_plugins(MinimalPlugins)
-            .add_systems(Update, flush_impulses);
+            .add_systems(Update, flush_impulses());
 
         TestingContext { app }
     }
@@ -70,7 +70,7 @@ impl TestingContext {
                 HierarchyPlugin::default(),
                 MeshPlugin,
             ))
-            .add_systems(Update, flush_impulses);
+            .add_systems(Update, flush_impulses());
 
         TestingContext { app }
     }
