@@ -524,6 +524,18 @@ mod tests {
         verify_queuing(3, queuing_service, &mut context);
         verify_queuing(4, queuing_service, &mut context);
         verify_queuing(5, queuing_service, &mut context);
+
+        // Test by queuing up a mix of ensured and unensured requests, and then
+        // sending in one that preempts them all. The ensured requests should
+        // remain in the queue and execute despite the preempter. The unensured
+        // requests should all be cancelled.
+        verify_ensured([false, true, false, true], queuing_service, &mut context);
+        verify_ensured([true, false, false, false], queuing_service, &mut context);
+        verify_ensured([true, true, false, false], queuing_service, &mut context);
+        verify_ensured([false, false, true, true], queuing_service, &mut context);
+        verify_ensured([true, false, false, true], queuing_service, &mut context);
+        verify_ensured([false, false, false, false], queuing_service, &mut context);
+        verify_ensured([true, true, true, true], queuing_service, &mut context);
     }
 
     fn verify_preemption(
@@ -578,11 +590,57 @@ mod tests {
 
         for promise in &mut queued {
             context.run_with_conditions(promise, Duration::from_secs(2));
-            dbg!(promise.peek());
             assert!(promise.take().is_available());
         }
 
         assert_eq!(*counter.lock().unwrap(), queue_size as u64);
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn verify_ensured(
+        queued: impl IntoIterator<Item = bool>,
+        service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
+        let counter = Arc::new(Mutex::new(0_u64));
+        let mut queued_promises: SmallVec<[(Promise<()>, bool); 16]> = SmallVec::new();
+        // This counter starts out at 1 to account for the preempting request.
+        let mut expected_count = 1;
+        for ensured in queued {
+            let srv = if ensured {
+                expected_count += 1;
+                service.instruct(TestLabel::Test.ensure())
+            } else {
+                service.instruct(TestLabel::Test)
+            };
+
+            let promise = context.command(|commands|
+                commands
+                .request(Arc::clone(&counter), srv)
+                .take_response()
+            );
+
+            queued_promises.push((promise, ensured));
+        }
+
+        let mut preempter = context.command(|commands|
+            commands
+            .request(Arc::clone(&counter), service.instruct(TestLabel::Test.preempt()))
+            .take_response()
+        );
+
+        for (promise, ensured) in &mut queued_promises {
+            context.run_with_conditions(promise, Duration::from_secs(2));
+            if *ensured {
+                assert!(promise.take().is_available());
+            } else {
+                assert!(promise.take().is_cancelled());
+            }
+        }
+
+        context.run_with_conditions(&mut preempter, Duration::from_secs(2));
+        assert!(preempter.take().is_available());
+        assert_eq!(*counter.lock().unwrap(), expected_count);
         assert!(context.no_unhandled_errors());
     }
 }
