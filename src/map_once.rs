@@ -136,7 +136,7 @@ where
 impl<F, Request, Task, Streams> AsMapOnce<(Request, Task, Streams, AsyncMapMarker)> for F
 where
     F: FnOnce(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -159,7 +159,7 @@ pub struct AsyncMapOnceDef<Def, Request, Task, Streams> {
 impl<Def, Request, Task, Streams> ProvideOnce for AsyncMapOnceDef<Def, Request, Task, Streams>
 where
     Def: CallAsyncMapOnce<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -182,7 +182,7 @@ impl<F, Request, Task> IntoAsyncMapOnce<(Request, Task)> for F
 where
     F: FnOnce(Request) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
 {
     type MapType = AsyncMapOnceDef<AsyncMapOnceAdapter<F>, Request, Task, ()>;
@@ -196,7 +196,7 @@ pub struct AsyncMapOnceAdapter<F>(F);
 impl<F, Request, Task> CallAsyncMapOnce<Request, Task, ()> for AsyncMapOnceAdapter<F>
 where
     F: FnOnce(Request) -> Task + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
 {
     fn call(self, AsyncMap { request, .. }: AsyncMap<Request, ()>) -> Task {
         (self.0)(request)

@@ -186,7 +186,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, 'b, Task::Output>
     where
-        Task: Future + 'static + Send + Sync,
+        Task: Future + 'static + Send,
         Task::Output: 'static + Send + Sync,
     {
         self.then(f.into_async_map())
@@ -200,7 +200,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
     ) -> Node<T, Task::Output, ()>
     where
-        Task: Future + 'static + Send + Sync,
+        Task: Future + 'static + Send,
         Task::Output: 'static + Send + Sync,
     {
         self.then_node(f.into_async_map())

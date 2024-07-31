@@ -255,6 +255,36 @@ impl TestingContext {
             }
         )
     }
+
+    #[cfg(test)]
+    pub fn spawn_async_delayed_map<T, U, F>(
+        &mut self,
+        duration: Duration,
+        f: F,
+    ) -> Service<T, U>
+    where
+        T: 'static + Send + Sync,
+        U: 'static + Send + Sync,
+        F: FnOnce(T) -> U + 'static + Send + Sync + Clone,
+    {
+        use crate::AddServicesExt;
+        self.app.spawn_service(
+            move |In(input): AsyncServiceInput<T>| {
+                let f = f.clone();
+                async move {
+                    let start = Instant::now();
+                    let mut elapsed = start.elapsed();
+                    while elapsed < duration {
+                        let never = async_std::future::pending::<()>();
+                        let timeout = duration - elapsed;
+                        let _ = async_std::future::timeout(timeout, never).await;
+                        elapsed = start.elapsed();
+                    }
+                    f(input.request)
+                }
+            }
+        )
+    }
 }
 
 #[derive(Default, Clone)]

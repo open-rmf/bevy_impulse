@@ -98,7 +98,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ) -> Node<T, Task::Output, ()>
     where
         T: 'static + Send + Sync,
-        Task: Future + 'static + Send + Sync,
+        Task: Future + 'static + Send,
         Task::Output: 'static + Send + Sync,
     {
         self.create_node(f.into_async_map())

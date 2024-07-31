@@ -387,6 +387,9 @@ fn cleanup_task<Response>(
     roster.purge(source);
 }
 
+#[derive(Component)]
+struct AlreadyStopping;
+
 #[derive(Component, Clone, Copy)]
 pub(crate) struct StopTask(pub(crate) fn(OperationRequest, Disposal) -> OperationResult);
 
@@ -394,10 +397,16 @@ fn stop_task<Response: 'static + Send + Sync, Streams: StreamPack>(
     OperationRequest { source, world, .. }: OperationRequest,
     disposal: Disposal,
 ) -> OperationResult {
-    let mut operation = world
-        .get_entity_mut(source).or_broken()?
-        .take::<OperateTask<Response, Streams>>().or_broken()?;
+    let mut source_mut = world.get_entity_mut(source).or_broken()?;
+    let Some(mut operation) = source_mut.take::<OperateTask<Response, Streams>>() else {
+        // If the task does not have an OperateTask component then it might
+        // already be cancelled. We check here if it has already been cancelled,
+        // and then return Ok if it checks out.
+        source_mut.get::<AlreadyStopping>().or_broken()?;
+        return Ok(());
+    };
 
+    source_mut.insert(AlreadyStopping);
     operation.disposal = Some(disposal);
     drop(operation);
     Ok(())
