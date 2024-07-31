@@ -259,7 +259,7 @@ where
                         // trigger this disposal if we detected that a
                         // reachability test happened while this task was
                         // running.
-                        roster.disposed(scope.get(), session);
+                        roster.disposed(scope.get(), source, session);
                     }
                 }
 

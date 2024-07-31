@@ -28,7 +28,7 @@ use bevy::{
 
 use backtrace::Backtrace;
 
-use std::collections::{VecDeque, HashMap, hash_map::Entry};
+use std::collections::{VecDeque, HashSet, HashMap, hash_map::Entry};
 
 use smallvec::SmallVec;
 
@@ -37,6 +37,9 @@ pub(crate) use branching::*;
 
 mod cleanup;
 pub(crate) use cleanup::*;
+
+mod collect;
+pub(crate) use collect::*;
 
 mod filter;
 pub(crate) use filter::*;
@@ -82,6 +85,9 @@ pub(crate) use operate_trim::*;
 
 mod scope;
 pub use scope::*;
+
+mod spread;
+pub(crate) use spread::*;
 
 /// This component is given to nodes that get triggered each time any single
 /// input is provided to them. There may be multiple nodes that can feed into
@@ -234,8 +240,8 @@ impl OperationRoster {
         self.unblock.push_back(provider);
     }
 
-    pub fn disposed(&mut self, scope: Entity, session: Entity) {
-        self.disposed.push(DisposalNotice { scope, session });
+    pub fn disposed(&mut self, scope: Entity, origin: Entity, session: Entity) {
+        self.disposed.push(DisposalNotice { source: scope, origin, session });
     }
 
     pub fn cleanup_finished(&mut self, cleanup: Cleanup) {
@@ -264,6 +270,7 @@ impl OperationRoster {
     /// despawned entity from needlessly tripping errors.
     pub fn purge(&mut self, target: Entity) {
         self.queue.retain(|e| *e != target);
+        self.deferred_queue.retain(|e| *e != target);
     }
 
     /// Move all items from the deferred queue into the immediate queue
@@ -277,7 +284,11 @@ impl OperationRoster {
 /// Notify the scope manager that a disposal took place. This will prompt the
 /// scope to check whether it's still possible to terminate.
 pub struct DisposalNotice {
-    pub scope: Entity,
+    /// The scope that needs to handle the disposal
+    pub source: Entity,
+    /// The operation that the disposal originated from
+    pub origin: Entity,
+    /// The session that experienced a disposal
     pub session: Entity,
 }
 
@@ -331,6 +342,11 @@ impl<'a> OperationRequest<'a> {
 pub struct OperationReachability<'a> {
     source: Entity,
     session: Entity,
+    // If the reachability query was triggered by a disposal, this indicates
+    // what was disposed. This is used by the collect operation to figure out if
+    // it will emit a value in response to the disposal, which may affect the
+    // reachability calculation.
+    disposed: Option<Entity>,
     world: &'a World,
     visited: &'a mut HashMap<Entity, bool>,
 }
@@ -340,10 +356,11 @@ impl<'a> OperationReachability<'a> {
     pub fn new(
         session: Entity,
         source: Entity,
+        disposed: Option<Entity>,
         world: &'a World,
         visited: &'a mut HashMap<Entity, bool>,
     ) -> OperationReachability<'a> {
-        Self { session, source, world, visited }
+        Self { session, source, disposed, world, visited }
     }
 
     pub fn check_upstream(&mut self, source: Entity) -> ReachabilityResult {
@@ -366,6 +383,7 @@ impl<'a> OperationReachability<'a> {
         let is_reachable = reachabiility(OperationReachability {
             source,
             session: self.session,
+            disposed: self.disposed,
             world: self.world,
             visited: self.visited
         })?;
@@ -395,13 +413,14 @@ impl<'a> OperationReachability<'a> {
     }
 }
 
-pub fn check_reachability<'a>(
+pub fn check_reachability(
     session: Entity,
     source: Entity,
-    world: &'a World,
+    disposed: Option<Entity>,
+    world: &World,
 ) -> ReachabilityResult {
     let mut visited = HashMap::new();
-    let mut r = OperationReachability { source, session, world, visited: &mut visited };
+    let mut r = OperationReachability { source, session, disposed, world, visited: &mut visited };
     r.check_upstream(source)
 }
 
@@ -460,18 +479,18 @@ pub trait OrBroken: Sized {
     /// If the value is not available then we will have an operation error of
     /// broken. This includes a backtrace of the stack to help with debugging.
     fn or_broken(self) -> Result<Self::Value, OperationError> {
-        self.or_broken_impl(Some(Backtrace::new()))
+        self.or_broken_impl(true)
     }
 
     /// If the value is not available then we will have an operation error of
     /// broken. This does not include a backtrace, which makes it suitable for
     /// codebases that need to be kept hidden.
     fn or_broken_hide(self) -> Result<Self::Value, OperationError> {
-        self.or_broken_impl(None)
+        self.or_broken_impl(false)
     }
 
     /// This is what should be implemented by structs that provide this trait.
-    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<Self::Value, OperationError>;
+    fn or_broken_impl(self, with_backtrace: bool) -> Result<Self::Value, OperationError>;
 }
 
 impl<T, E> OrBroken for Result<T, E> {
@@ -480,8 +499,12 @@ impl<T, E> OrBroken for Result<T, E> {
         self.map_err(|_| OperationError::NotReady)
     }
 
-    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
-        self.map_err(|_| OperationError::Broken(backtrace))
+    fn or_broken_impl(self, with_backtrace: bool) -> Result<T, OperationError> {
+        if with_backtrace {
+            self.map_err(|_| OperationError::Broken(Some(Backtrace::new())))
+        } else {
+            self.map_err(|_| OperationError::Broken(None))
+        }
     }
 }
 
@@ -491,8 +514,12 @@ impl<T> OrBroken for Option<T> {
         self.ok_or_else(|| OperationError::NotReady)
     }
 
-    fn or_broken_impl(self, backtrace: Option<Backtrace>) -> Result<T, OperationError> {
-        self.ok_or_else(|| OperationError::Broken(backtrace))
+    fn or_broken_impl(self, with_backtrace: bool) -> Result<T, OperationError> {
+        if with_backtrace {
+            self.ok_or_else(|| OperationError::Broken(Some(Backtrace::new())))
+        } else {
+            self.ok_or_else(|| OperationError::Broken(None))
+        }
     }
 }
 
@@ -550,14 +577,20 @@ struct OperationReachabilityStorage(
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
         if request.world.get::<UnusedTarget>(request.source).is_none() {
-            // The node does not have an operation and is not an unused target,
-            // so this is broken somehow.
-            request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
-                .broken
-                .push(Broken {
-                    node: request.source,
-                    backtrace: Some(Backtrace::new())
-                });
+            // This can happen while using the async channel to issue requests
+            // which end up getting dropped during a cleanup. In that case, the
+            // source entity will be totally despawned, so check for that before
+            // concluding that this is broken.
+            if request.world.get_entity(request.source).is_some() {
+                // The node does not have an operation and is not an unused target,
+                // so this is broken somehow.
+                request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .broken
+                    .push(Broken {
+                        node: request.source,
+                        backtrace: Some(Backtrace::new())
+                    });
+            }
         }
         return;
     };
@@ -625,7 +658,7 @@ impl<'a> Iterator for DownstreamFinishIter<'a> {
     }
 }
 
-pub fn downstream_of<'a>(
+pub fn immediately_downstream_of<'a>(
     source: Entity,
     world: &'a World,
 ) -> DownstreamIter<'a> {
@@ -641,3 +674,54 @@ pub fn downstream_of<'a>(
 
     DownstreamIter { output, streams }
 }
+
+/// Check if the `target` operation is somewhere downstream of the `source`
+/// operation. This can be any number of generations downstream, and can account
+/// for cycles where both operations can be seen as downstream of each other.
+///
+/// If `source` and `target` are the same then this immediately returns false.
+pub fn is_downstream_of(
+    source: Entity,
+    target: Entity,
+    world: &World,
+) -> bool {
+    if source == target {
+        return false;
+    }
+
+    let mut queue: Vec<Entity> = Vec::new();
+    let mut visited = HashSet::new();
+    queue.push(source);
+    while let Some(top) = queue.pop() {
+        if top == target {
+            return true;
+        }
+
+        if !visited.insert(top) {
+            // We've already expanded this operation
+            continue;
+        }
+
+        for next in immediately_downstream_of(top, world) {
+            queue.push(next);
+        }
+    }
+
+    // After examining all the downstream nodes in the workflow, the target was
+    // not found, so it must not be downstream.
+    false
+}
+
+pub struct DisposalUpdate<'a> {
+    /// The operation that is being updated about the disposal
+    pub source: Entity,
+    /// The operation that the disposal originated from
+    pub origin: Entity,
+    /// The session that has experienced a disposal
+    pub session: Entity,
+    pub world: &'a mut World,
+    pub roster: &'a mut OperationRoster,
+}
+
+#[derive(Component)]
+pub struct DisposalListener(pub fn(DisposalUpdate) -> OperationResult);

@@ -21,7 +21,7 @@ use crate::{
     OperationResult, OrBroken, OperationSetup, OperationRequest,
     ActiveTasksStorage, OperationReachability, ReachabilityResult,
     InputBundle, Input, ManageDisposal, Disposal, ManageInput, UnhandledErrors,
-    DisposalFailure,
+    DisposalFailure, ActiveContinuousSessions,
 };
 
 use bevy::{
@@ -89,12 +89,21 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
         if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
+        if ActiveContinuousSessions::contains_session(&reachability)? {
+            return Ok(true);
+        }
         SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
 #[derive(Component)]
 pub(crate) struct ProviderStorage(Entity);
+
+impl ProviderStorage {
+    pub(crate) fn get(&self) -> Entity {
+        self.0
+    }
+}
 
 pub(crate) fn dispose_for_despawned_service(
     despawned_service: Entity,

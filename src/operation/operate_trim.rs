@@ -27,7 +27,7 @@ use crate::{
     SingleTargetStorage, OrBroken, OperationCleanup, Cancellation, ManageCancellation,
     Disposal, OperationError, Cleanup, TrimBranch, TrimPoint, TrimPolicy, CleanupContents,
     FinalizeCleanup, FinalizeCleanupRequest, ScopeStorage, ScopeEntryStorage,
-    downstream_of, emit_disposal,
+    immediately_downstream_of, emit_disposal,
 };
 
 pub(crate) struct Trim<T> {
@@ -247,7 +247,7 @@ fn calculate_downstream(
         }
 
         if visited.insert(top) {
-            for next in downstream_of(top, world) {
+            for next in immediately_downstream_of(top, world) {
                 queue.push(next);
             }
         }
@@ -329,7 +329,7 @@ fn calculate_span(
             continue;
         }
 
-        for next in downstream_of(top, world) {
+        for next in immediately_downstream_of(top, world) {
             if filter.contains(&next) {
                 // Don't expand towards this node since it's part of the
                 // filtered set.

@@ -27,7 +27,7 @@ use crate::{
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, GateAction,
-    OperateStaticGate, OperateBufferAccess,
+    OperateStaticGate, OperateBufferAccess, Collect,
 };
 
 pub(crate) mod connect;
@@ -69,7 +69,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
         let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            &mut map, self,
+            source, &mut map, self,
         );
         self.commands.entity(source).insert(bundle);
         Node {
@@ -229,8 +229,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ///
     /// Other [outputs](Output) can also be passed in as buffers. These outputs
     /// will be transformed into a buffer with default buffer settings.
-    pub fn create_buffer_access<'b, T, B>(
-        &'b mut self,
+    pub fn create_buffer_access<T, B>(
+        &mut self,
         buffers: B,
     ) -> Node<T, T>
     where
@@ -253,6 +253,68 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             output: Output::new(self.scope, target),
             streams: (),
         }
+    }
+
+    /// Collect incoming workflow threads into a container.
+    ///
+    /// If `max` is specified, the collection will always be sent out once it
+    /// reaches that maximum value.
+    ///
+    /// If `min` is greater than 0 then the collection will not be sent out unless
+    /// it is equal to or greater than that value. Note that this means the
+    /// collect operation could force the workflow into cancelling if it cannot
+    /// reach the minimum number of elements. A `min` of 0 means that if an
+    /// upstream thread is disposed and the collect node is no longer reachable
+    /// then it will fire off with an empty collection.
+    ///
+    /// If the `min` limit is satisfied and there are no remaining workflow
+    /// threads that can reach this collect operation, then the collection will
+    /// be sent out with however many elements it happens to have collected.
+    pub fn create_collect<T, const N: usize>(
+        &mut self,
+        min: usize,
+        max: Option<usize>,
+    ) -> Node<T, SmallVec<[T; N]>>
+    where
+        T: 'static + Send + Sync,
+    {
+        if let Some(max) = max {
+            assert!(0 < max);
+            assert!(min <= max);
+        }
+
+        let source = self.commands.spawn(()).id();
+        let target = self.commands.spawn(UnusedTarget).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            Collect::<T, N>::new(target, min, max),
+        ));
+
+        Node {
+            input: InputSlot::new(self.scope, source),
+            output: Output::new(self.scope, target),
+            streams: (),
+        }
+    }
+
+    /// Collect all workflow threads that are moving towards this node.
+    pub fn create_collect_all<T, const N: usize>(&mut self) -> Node<T, SmallVec<[T; N]>>
+    where
+        T: 'static + Send + Sync,
+    {
+        self.create_collect(0, None)
+    }
+
+    /// Collect an exact number of threads that are moving towards this node.
+    pub fn create_collect_n<T, const N: usize>(
+        &mut self,
+        n: usize,
+    ) -> Node<T, SmallVec<[T; N]>>
+    where
+        T: 'static + Send + Sync,
+    {
+        self.create_collect(n, Some(n))
     }
 
     /// This method allows you to define a cleanup workflow that branches off of
@@ -586,6 +648,7 @@ impl CleanupWorkflowConditions {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
+    use smallvec::SmallVec;
 
     #[test]
     fn test_disconnected_workflow() {
@@ -919,5 +982,137 @@ mod tests {
         assert!(cancel_receiver.try_recv().is_err());
         assert!(context.no_unhandled_errors());
         assert!(context.confirm_buffers_empty().is_ok());
+    }
+
+    #[test]
+    fn test_double_collection() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let delay = context.spawn_delay(Duration::from_secs_f32(0.01));
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            // We make the later collect node first so that its disposal update
+            // gets triggered first. If we don't implement collect correctly
+            // then the later collect may think it's unreachable and send out
+            // its collection prematurely. This test is checking for that edge
+            // case.
+            let later_collect = builder.create_collect_all::<i32, 8>();
+            let earlier_collect = builder.create_collect_all::<i32, 8>();
+
+            scope.input.chain(builder)
+                .spread()
+                .then(delay)
+                .map_block(|v| if v <= 4 { Some(v) } else { None })
+                .dispose_on_none()
+                .connect(earlier_collect.input);
+
+            earlier_collect.output.chain(builder)
+                .spread()
+                .connect(later_collect.input);
+
+            later_collect.output.chain(builder)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request([1, 2, 3, 4, 5], workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(5));
+        assert!(promise.take().available().is_some_and(|v| &v[..] == [1, 2, 3, 4]));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            // We create a circular dependency between two collect operations.
+            // This makes it impossible to determine which should fire when the
+            // upstream is exhausted because both collect operations are upstream
+            // of each other. This workflow should be cancelled before it even
+            // starts.
+            let earlier_collect = builder.create_collect_all::<i32, 8>();
+            let later_collect = builder.create_collect_all::<i32, 8>();
+
+            scope.input.chain(builder)
+                .spread()
+                .then(delay)
+                .connect(earlier_collect.input);
+
+            earlier_collect.output.chain(builder)
+                .spread()
+                .connect(later_collect.input);
+
+            later_collect.output.chain(builder)
+                .spread()
+                .fork_clone((
+                    |chain: Chain<i32>| chain.connect(earlier_collect.input),
+                    |chain: Chain<i32>| chain.connect(scope.terminate),
+                ));
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request([1, 2, 3, 4, 5], workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().is_cancelled());
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            // We create a circulaur dependency between two collect operations,
+            // but this time one of those collect operations is scoped, and that
+            // disambiguates the behavior of the collect operations. We should
+            // get the intuitive workflow output from this.
+            let earlier_collect = builder.create_collect_all::<i32, 8>();
+
+            scope.input.chain(builder)
+                .spread()
+                .then(delay)
+                .map_block(|v| if v <= 4 { Some(v) } else { None })
+                .dispose_on_none()
+                .connect(earlier_collect.input);
+
+            let _ = earlier_collect.output.chain(builder)
+                .then_io_scope(|scope, builder| {
+                    scope.input.chain(builder)
+                        .spread()
+                        .collect_all::<8>()
+                        .connect(scope.terminate);
+                })
+                .fork_clone((
+                    |chain: Chain<_>| chain
+                        .spread()
+                        .connect(earlier_collect.input),
+                    |chain: Chain<_>| chain
+                        .connect(scope.terminate),
+                ));
+        });
+
+        check_collections(workflow, [1, 2, 3, 4], [1, 2, 3, 4], &mut context);
+        check_collections(workflow, [1, 2, 3, 4, 5, 6], [1, 2, 3, 4], &mut context);
+        check_collections(workflow, [1, 8, 2, 7, 3, 6], [1, 2, 3], &mut context);
+        check_collections(workflow, [8, 7, 6, 5, 4, 3, 2, 1], [4, 3, 2, 1], &mut context);
+        check_collections(workflow, [6, 7, 8, 9, 10], [], &mut context);
+    }
+
+    fn check_collections(
+        workflow: Service<SmallVec<[i32; 8]>, SmallVec<[i32; 8]>>,
+        input: impl IntoIterator<Item = i32>,
+        expectation: impl IntoIterator<Item = i32>,
+        context: &mut TestingContext,
+    ) {
+        let input: SmallVec<[i32; 8]> = SmallVec::from_iter(input);
+        let expectation: SmallVec<[i32; 8]> = SmallVec::from_iter(expectation);
+        let mut promise = context.command(|commands|
+            commands
+            .request(input, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v| v == expectation));
+        assert!(context.no_unhandled_errors());
     }
 }

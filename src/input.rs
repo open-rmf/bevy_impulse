@@ -29,7 +29,7 @@ use backtrace::Backtrace;
 
 use crate::{
     OperationRoster, OperationError, OrBroken, BufferStorage, DeferredRoster,
-    Cancel, Cancellation, CancellationCause, Broken, UnusedTarget,
+    Cancel, Cancellation, CancellationCause, Broken, UnusedTarget, SessionStatus,
 };
 
 /// This contains data that has been provided as input into an operation, along
@@ -109,7 +109,8 @@ pub trait ManageInput {
         &mut self,
         session: Entity,
         data: T,
-    ) -> Result<(), OperationError>;
+        only_if_active: bool,
+    ) -> Result<bool, OperationError>;
 
     /// Get an input that is ready to be taken, or else produce an error.
     fn take_input<T: 'static + Send + Sync>(
@@ -142,8 +143,9 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        unsafe { self.sneak_input(session, data)?; }
-        roster.queue(self.id());
+        if unsafe { self.sneak_input(session, data, true)? } {
+            roster.queue(self.id());
+        }
         Ok(())
     }
 
@@ -153,8 +155,9 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        unsafe { self.sneak_input(session, data)?; }
-        roster.defer(self.id());
+        if unsafe { self.sneak_input(session, data, true)? } {
+            roster.defer(self.id());
+        }
         Ok(())
     }
 
@@ -162,7 +165,23 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         &mut self,
         session: Entity,
         data: T,
-    ) -> Result<(), OperationError> {
+        only_if_active: bool,
+    ) -> Result<bool, OperationError> {
+        if only_if_active {
+            let active_session = if let Some(session_status) = self.world().get::<SessionStatus>(session) {
+                matches!(session_status, SessionStatus::Active)
+            } else {
+                false
+            };
+
+            if !active_session {
+                // The session being sent is not active, either it is being cleaned
+                // or already despawned. Therefore we should not propogate any inputs
+                // related to it.
+                return Ok(false);
+            }
+        }
+
         if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
@@ -175,7 +194,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
             // have the correct input storage type. This indicates
             None.or_broken()?;
         }
-        Ok(())
+        Ok(true)
     }
 
     fn take_input<T: 'static + Send + Sync>(&mut self) -> Result<Input<T>, OperationError> {

@@ -34,7 +34,8 @@ use crate::{
     StreamTargetMap, ScopeStorage, Blocker, ServiceBundle, ServiceTrait,
     OperationRequest, DeliveryInstructions, Delivery, DeliveryUpdate, Deliver,
     SingleTargetStorage, Disposal, DeliveryOrder, IntoContinuousService,
-    ContinuousService, IntoServiceBuilder, ServiceBuilder,
+    ContinuousService, IntoServiceBuilder, ServiceBuilder, OperationReachability,
+    ReachabilityResult, ProviderStorage,
     dispose_for_despawned_service, insert_new_order, pop_next_delivery,
     emit_disposal,
 };
@@ -68,7 +69,7 @@ impl<Request, Response, Streams> Clone for ContinuousServiceKey<Request, Respons
 impl<Request, Response, Streams> Copy for ContinuousServiceKey<Request, Response, Streams> {}
 
 #[derive(SystemParam)]
-pub struct ContinuousQuery<'w, 's, Request, Response, Streams>
+pub struct ContinuousQuery<'w, 's, Request, Response, Streams = ()>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -308,6 +309,9 @@ where
     Streams: StreamPack,
 {
     /// Look at the request of this order.
+    // TODO(@mxgrey): Consider offering a take_request that allows the user to
+    // fully take ownership of the request data. That would force us to change
+    // this function to return an Option<&Request>.
     pub fn request(&self) -> &Request {
         &self.request.data
     }
@@ -393,6 +397,37 @@ impl<Request> ContinuousQueueStorage<Request> {
     fn new() -> Self {
         Self { inner: Default::default() }
     }
+
+    fn contains_session(
+        provider: Entity,
+        session: Entity,
+        world: &World,
+    ) -> ReachabilityResult
+    where
+        Request: 'static + Send + Sync,
+    {
+        let Some(queue) = world.get_entity(provider).or_broken()?.get::<Self>() else {
+            return Ok(false);
+        };
+
+        Ok(queue.inner.iter().find(|order| order.session == session).is_some())
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct ActiveContinuousSessions(
+    fn(Entity, Entity, &World) -> ReachabilityResult
+);
+
+impl ActiveContinuousSessions {
+    pub(crate) fn contains_session(r: &OperationReachability) -> ReachabilityResult {
+        let provider = r.world().get::<ProviderStorage>(r.source()).or_broken()?.get();
+        let Some(active) = r.world().get::<ActiveContinuousSessions>(provider) else {
+            return Ok(false);
+        };
+        let f = active.0;
+        f(provider, r.session(), r.world())
+    }
 }
 
 struct ContinuousOrder<Request> {
@@ -448,7 +483,7 @@ where
                     // positive, and it needs to be rechecked now that this
                     // node has finished.
                     if let Some(scope) = world.get::<ScopeStorage>(source) {
-                        deferred.disposed(scope.get(), session);
+                        deferred.disposed(scope.get(), source, session);
                     }
                 }
 
@@ -681,6 +716,7 @@ where
     fn into_system_config<'w>(self, entity_mut: &mut EntityWorldMut<'w>) -> SystemConfigs {
         let provider = entity_mut.insert((
             ContinuousQueueStorage::<Request>::new(),
+            ActiveContinuousSessions(ContinuousQueueStorage::<Request>::contains_session),
             ServiceBundle::<ContinuousServiceImpl<Request, Response, Streams>>::new(),
         )).id();
         let continuous_key = move || ContinuousService { key: ContinuousServiceKey::new(provider) };

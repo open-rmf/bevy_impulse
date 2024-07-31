@@ -43,13 +43,24 @@ pub struct Node<Request, Response, Streams: StreamPack = ()> {
 /// connect the output of a node to this, as long as the types match.
 ///
 /// Any number of node outputs can be connected to one input slot.
-#[derive(Clone, Copy)]
 #[must_use]
 pub struct InputSlot<Request> {
     scope: Entity,
     source: Entity,
     _ignore: std::marker::PhantomData<Request>,
 }
+
+impl<T> Clone for InputSlot<T> {
+    fn clone(&self) -> Self {
+        Self {
+            scope: self.scope,
+            source: self.source,
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<T> Copy for InputSlot<T> {}
 
 impl<Request> std::fmt::Debug for InputSlot<Request> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
