@@ -140,11 +140,11 @@ impl<Srv, Deliver, With, Also, Configure> ServiceBuilder<Srv, Deliver, With, Als
 where
     Deliver: DeliveryChoice,
 {
-    pub(crate) fn add_continuous_service<M>(
+    pub(crate) fn spawn_continuous_service<M>(
         self,
         schedule: impl ScheduleLabel,
         app: &mut App,
-    )
+    ) -> Service<Srv::Request, Srv::Response, Srv::Streams>
     where
         Srv: IntoContinuousService<M>,
         Deliver: DeliveryChoice,
@@ -164,6 +164,7 @@ where
         let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(provider);
         app.add_systems(schedule, config);
         self.also.apply(app, service);
+        service
     }
 }
 

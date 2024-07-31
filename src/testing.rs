@@ -18,21 +18,21 @@
 pub use bevy::{
     prelude::{
         Commands, App, Update, MinimalPlugins, DefaultPlugins, PbrBundle, Vec3,
-        In, Entity, Assets, Mesh, ResMut, Transform, Component, Query,
+        In, Entity, Assets, Mesh, ResMut, Transform, Component, Query, Local,
     },
     render::mesh::shape::Cube,
-    ecs::system::CommandQueue,
+    ecs::system::{CommandQueue, IntoSystem},
 };
 
 use thiserror::Error as ThisError;
 
 pub use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
 
 use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
-    GetBufferedSessionsFn, AsyncService,
+    GetBufferedSessionsFn, ContinuousService, ContinuousQuery,
+    AddContinuousServicesExt, ContinuousQueueView,
     flush_impulses,
 };
 
@@ -197,6 +197,64 @@ impl TestingContext {
             Err(non_empty_buffers)
         }
     }
+
+    /// Create a service that passes along its inputs after a delay.
+    pub fn spawn_delay<T>(&mut self, duration: Duration) -> Service<T, T>
+    where
+        T: Clone + 'static + Send + Sync,
+    {
+        self.spawn_delayed_map(duration, |t: &T| t.clone())
+    }
+
+    /// Create a service that applies a map to an input after a delay.
+    pub fn spawn_delayed_map<T, U, F>(
+        &mut self,
+        duration: Duration,
+        f: F,
+    ) -> Service<T, U>
+    where
+        T: 'static + Send + Sync,
+        U: 'static + Send + Sync,
+        F: FnMut(&T) -> U + 'static + Send + Sync,
+    {
+        self.spawn_delayed_map_with_viewer(duration, f, |_| {})
+    }
+
+    /// Create a service that applies a map to an input after a delay and allows
+    /// you to view the current set of requests.
+    pub fn spawn_delayed_map_with_viewer<T, U, F, V>(
+        &mut self,
+        duration: Duration,
+        mut f: F,
+        mut viewer: V,
+    ) -> Service<T, U>
+    where
+        T: 'static + Send + Sync,
+        U: 'static + Send + Sync,
+        F: FnMut(&T) -> U + 'static + Send + Sync,
+        V: FnMut(&ContinuousQueueView<T, U>) + 'static + Send + Sync,
+    {
+        self.app.spawn_continuous_service(
+            Update,
+            move |In(input): In<ContinuousService<T, U>>, mut query: ContinuousQuery<T, U>, mut t: Local<Option<Instant>>| {
+                if let Some(view) = query.view(&input.key) {
+                    viewer(&view);
+                }
+
+                if let Some(order) = query.get_mut(&input.key).unwrap().get_mut(0) {
+                    if let Some(t0) = *t {
+                        if t0.elapsed() > duration {
+                            let u = f(order.request());
+                            order.respond(u);
+                            *t = None;
+                        }
+                    } else {
+                        *t = Some(Instant::now());
+                    }
+                }
+            }
+        )
+    }
 }
 
 #[derive(Default, Clone)]
@@ -325,31 +383,12 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
     request.value
 }
 
-/// Async system that waits a certain duration before incrementing a shared variable
-pub fn async_delayed_increment(
-    In(AsyncService{ request, .. }): AsyncServiceInput<(Arc<Mutex<u64>>, std::time::Duration)>,
-) -> impl std::future::Future<Output=()> {
-    use async_std::future;
-    let start = Instant::now();
-    let mut elapsed = start.elapsed();
-    async move {
-        while elapsed < request.1 {
-            dbg!("Waiting");
-            let never = future::pending::<()>();
-            let timeout = request.1 - elapsed;
-            let _ = future::timeout(timeout, never).await;
-            elapsed = start.elapsed();
-        }
-        *request.0.lock().unwrap() += 1;
-    }
-}
-
-
 /// Use this to add a blocking map to the chain that simply prints a debug
 /// message and then passes the data along.
 pub fn print_debug<T: std::fmt::Debug>(
-    header: String
+    header: impl Into<String>,
 ) -> impl Fn(BlockingMap<T>) -> T {
+    let header = header.into();
     move |input| {
         println!(
             "[source: {:?}, session: {:?}] {}: {:?}",

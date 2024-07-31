@@ -30,6 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, GateAction, Buffered,
+    Spread, Collect,
     make_result_branching, make_option_branching,
 };
 
@@ -107,7 +108,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         let mut map = StreamTargetMap::default();
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            &mut map, self.builder,
+            source, &mut map, self.builder,
         );
         self.builder.commands.entity(source).insert((bundle, map));
         Node {
@@ -396,7 +397,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// You can also consider using `unzip_build` to continue building each
     /// chain in the tuple independently by providing a builder function for
     /// each element of the tuple.
-    #[must_use]
     pub fn unzip(self) -> T::Unzipped
     where
         T: Unzippable,
@@ -414,6 +414,81 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     {
         build.unzip_build(Output::<T>::new(self.scope(), self.target), self.builder)
     }
+
+    /// If `T` implements [`Iterator`] then you can fire off each of its elements
+    /// as a new thread within the workflow. Each thread will still have the same
+    /// session ID.
+    ///
+    /// This is similar to streams which can produce multiple outputs, which also
+    /// potentially creates multiple threads in the workflow. If the input to
+    /// the spread operator is empty, then a disposal notice will go out, and
+    /// the workflow will be cancelled if it is no longer possible to reach the
+    /// terminal node.
+    pub fn spread(self) -> Chain<'w, 's, 'a, 'b, T::Item>
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            Spread::<T>::new(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// Collect incoming workflow threads into a container.
+    ///
+    /// If `max` is specified, the collection will always be sent out once it
+    /// reaches that maximum value.
+    ///
+    /// If `min` is greater than 0 then the collection will not be sent out unless
+    /// it is equal to or greater than that value. Note that this means the
+    /// collect operation could force the workflow into cancelling if it cannot
+    /// reach the minimum number of elements. A `min` of 0 means that if an
+    /// upstream thread is disposed and the collect node is no longer reachable
+    /// then it will fire off with an empty collection.
+    ///
+    /// If the `min` limit is satisfied and there are no remaining workflow
+    /// threads that can reach this collect operation, then the collection will
+    /// be sent out with however many elements it happens to have collected.
+    pub fn collect<const N: usize>(
+        self,
+        min: usize,
+        max: Option<usize>,
+    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        if let Some(max) = max {
+            assert!(0 < max);
+            assert!(min <= max);
+        }
+
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            Collect::<T, N>::new(target, min, max),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// Collect all workflow threads that are moving towards this node.
+    pub fn collect_all<const N: usize>(self) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        self.collect::<N>(0, None)
+    }
+
+    /// Collect an exact number of threads that are moving towards this node.
+    pub fn collect_n<const N: usize>(self, n: usize) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
+        self.collect::<N>(n, Some(n))
+    }
+
+    // TODO(@mxgrey): We could offer a collect_array that always collects exactly
+    // N, defined at compile time, and outputs a fixed-size array. This will require
+    // a second implementation of Collect, or a more generic implementation of it.
 
     /// Run a trimming operation when the workflow reaches this point.
     ///
@@ -875,6 +950,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
+    use smallvec::SmallVec;
 
     #[test]
     fn test_join() {
@@ -1133,6 +1209,198 @@ mod tests {
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.peek().is_cancelled());
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_spread() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+
+            scope.input.chain(builder)
+                .map_block(|value| {
+                    let mut duplicated_values: SmallVec<[i32; 16]> = SmallVec::new();
+                    for _ in 0..value {
+                        duplicated_values.push(value);
+                    }
+                    duplicated_values
+                })
+                .spread()
+                .connect(buffer.input_slot());
+
+            buffer.listen(builder)
+                .then(watch_for_quantity.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(7, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| {
+            v.len() == 7 && v.iter().find(|a| **a != 7).is_none()
+        }));
+        assert!(context.no_unhandled_errors());
+    }
+
+    // This is essentially a collect operation specific to one of our spread
+    // operation tests. We expect to gather up a number of elements equal to the
+    // integer value of those elements. We don't use the collect operation for
+    // this test so that we can test each of those operations in isolation.
+    fn watch_for_quantity(
+        In(key): In<BufferKey<i32>>,
+        mut access: BufferAccessMut<i32>,
+    ) -> Option<SmallVec<[i32; 16]>> {
+        let mut buffer = access.get_mut(&key).unwrap();
+        let expected_count = *buffer.newest()? as usize;
+        if buffer.len() < expected_count {
+            return None;
+        }
+
+        Some(buffer.drain(..).collect())
+    }
+
+    #[test]
+    fn test_collect() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let node = scope.input.chain(builder).map_node(
+                |input: BlockingMap<i32, StreamOf<i32>>| {
+                    for _ in 0..input.request {
+                        input.streams.send(StreamOf(input.request));
+                    }
+                }
+            );
+
+            node.streams.chain(builder)
+                .inner()
+                .collect_all::<16>()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(8, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| {
+            v.len() == 8 && v.iter().find(|a| **a != 8).is_none()
+        }));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let node = scope.input.chain(builder).map_node(
+                |input: BlockingMap<i32, StreamOf<i32>>| {
+                    for _ in 0..input.request {
+                        input.streams.send(StreamOf(input.request));
+                    }
+                }
+            );
+
+            node.streams.chain(builder)
+                .inner()
+                .collect::<16>(4, None)
+                .connect(scope.terminate);
+        });
+
+        check_collection(0, 4, workflow, &mut context);
+        check_collection(2, 4, workflow, &mut context);
+        check_collection(3, 4, workflow, &mut context);
+        check_collection(4, 4, workflow, &mut context);
+        check_collection(5, 4, workflow, &mut context);
+        check_collection(8, 4, workflow, &mut context);
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let bogus_node = builder.create_map_block(|v: i32| v);
+            bogus_node.output.chain(builder)
+                .collect_all::<16>()
+                .connect(scope.terminate);
+
+            let _ = scope.input.chain(builder)
+                .map_block(|v: i32| Some(v))
+                .fork_option(
+                    |chain: Chain<i32>| chain
+                        .map_async(|v| async move { v })
+                        .collect_all::<16>()
+                        .connect(scope.terminate),
+                    |chain: Chain<()>| chain
+                        .map_block(|()| unreachable!()).output(),
+                );
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(2, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v|
+            v.len() == 1 && v.iter().find(|a| **a != 2).is_none()
+        ));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            scope.input.chain(builder)
+                .map_block(|v| if v < 4 { None } else { Some(v) })
+                .dispose_on_none()
+                .collect_all::<8>()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(2, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| v.is_empty()));
+        assert!(context.no_unhandled_errors());
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(5, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v|
+            v.len() == 1 && v.iter().find(|a| **a != 5).is_none()
+        ));
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn check_collection(
+        value: i32,
+        min: i32,
+        workflow: Service<i32, SmallVec<[i32; 16]>>,
+        context: &mut TestingContext,
+    ) {
+        let mut promise = context.command(|commands|
+            commands
+            .request(value, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        if value < min {
+            assert!(promise.take().is_cancelled());
+        } else {
+            assert!(promise.take().available().is_some_and(|v| {
+                v.len() == value as usize && v.iter().find(|a| **a != value).is_none()
+            }));
+        }
         assert!(context.no_unhandled_errors());
     }
 }

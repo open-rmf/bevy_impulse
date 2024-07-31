@@ -28,7 +28,7 @@ use smallvec::SmallVec;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
-    DisposalFailure, ImpulseMarker,
+    DisposalFailure, ImpulseMarker, Cancel,
 };
 
 #[derive(Debug, Clone)]
@@ -88,6 +88,20 @@ impl Disposal {
     ) -> Self {
         ClosedGate { gate_node, closed_buffers }.into()
     }
+
+    pub fn empty_spread(
+        spread_node: Entity,
+    ) -> Self {
+        EmptySpread { spread_node }.into()
+    }
+
+    pub fn deficient_collection(
+        collect_node: Entity,
+        min: usize,
+        actual: usize,
+    ) -> Self {
+        DeficientCollection { collect_node, min, actual }.into()
+    }
 }
 
 #[derive(Debug)]
@@ -131,10 +145,21 @@ pub enum DisposalCause {
 
     /// A gate was closed, which cut off the ability of a workflow to proceed.
     ClosedGate(ClosedGate),
+
+    /// A spread operation was given an empty collection so there was nothing to
+    /// spread. As a result, no signal was sent out of the node after it
+    /// received a signal.
+    EmptySpread(EmptySpread),
+
+    /// A collect operation has a minimum number of entries, and it appears the
+    /// workflow will not be able to meet that minimum, so a disposal notice has
+    /// been sent out to indicate that the workflow is blocked up on the
+    /// collection.
+    DeficientCollection(DeficientCollection),
 }
 
 /// A variant of [`DisposalCause`]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Supplanted {
     /// ID of the node whose service request was supplanted
     pub supplanted_at_node: Entity,
@@ -302,6 +327,36 @@ impl From<ClosedGate> for DisposalCause {
     }
 }
 
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct EmptySpread {
+    /// The node that was doing the spreading
+    pub spread_node: Entity,
+}
+
+impl From<EmptySpread> for DisposalCause {
+    fn from(value: EmptySpread) -> Self {
+        Self::EmptySpread(value)
+    }
+}
+
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct DeficientCollection {
+    /// The node that is doing the collection
+    pub collect_node: Entity,
+    /// The minimum required size of the collection
+    pub min: usize,
+    /// The actual size of the collection when it became unreachable
+    pub actual: usize,
+}
+
+impl From<DeficientCollection> for DisposalCause {
+    fn from(value: DeficientCollection) -> Self {
+        Self::DeficientCollection(value)
+    }
+}
+
 pub trait ManageDisposal {
     fn emit_disposal(
         &mut self,
@@ -325,7 +380,20 @@ impl<'w> ManageDisposal for EntityMut<'w> {
         roster: &mut OperationRoster,
     ) {
         let Some(scope) = self.get::<ScopeStorage>() else {
-            if !self.contains::<ImpulseMarker>() {
+            if self.contains::<ImpulseMarker>() {
+                // If an impulse has been supplanted, we trigger a cancellation
+                // for it. Besides supplanting, we do not generally convert a
+                // disposal into a cancellation because sometimes services will
+                // emit disposals just to trigger a reachability check, e.g. for
+                // unused streams, not because the actual result is undeliverable.
+                if let DisposalCause::Supplanted(supplanted) = disposal.cause.as_ref() {
+                    let cancellation: Cancellation = (*supplanted).into();
+                    roster.cancel(Cancel { origin: self.id(), target: session, session: Some(session), cancellation });
+                }
+                // TODO(@mxgrey): Consider whether there is a more sound way to
+                // decide whether a disposal should be converted into a
+                // cancellation for impulses.
+            } else {
                 // If the emitting node does not have a scope as not part of an
                 // impulse chain, then something is broken.
                 let broken_node = self.id();
@@ -350,7 +418,7 @@ impl<'w> ManageDisposal for EntityMut<'w> {
             self.insert(storage);
         }
 
-        roster.disposed(scope, session);
+        roster.disposed(scope, self.id(), session);
     }
 
     fn clear_disposals(&mut self, session: Entity) {

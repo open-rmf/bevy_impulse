@@ -21,7 +21,8 @@ use std::future::Future;
 
 use crate::{
     UnusedTarget, StreamPack, ProvideOnce, IntoBlockingMapOnce, IntoAsyncMap,
-    Impulse, Detached, InputCommand, Cancellable, ImpulseMarker, cancel_impulse,
+    Impulse, Detached, InputCommand, Cancellable, ImpulseMarker, SessionStatus,
+    cancel_impulse,
 };
 
 /// Extensions for creating impulse chains by making a request to a provider or
@@ -95,6 +96,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             .spawn((
                 Cancellable::new(cancel_impulse),
                 ImpulseMarker,
+                SessionStatus::Active,
             ))
             // We set the parent of this source to the target so that when the
             // target gets despawned, this will also be despawned.
@@ -102,7 +104,6 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             .id();
 
         provider.connect(None, source, target, self);
-
         self.add(InputCommand { session: source, target: source, data: request });
 
         Impulse {

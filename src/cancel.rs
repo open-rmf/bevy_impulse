@@ -44,6 +44,14 @@ impl Cancellation {
         Self { cause: Arc::new(cause), while_cancelling: Default::default() }
     }
 
+    pub fn unreachable(
+        scope: Entity,
+        session: Entity,
+        disposals: Vec<Disposal>,
+    ) -> Self {
+        Unreachability { scope, session, disposals }.into()
+    }
+
     pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
         Filtered { filtered_at_node, reason }.into()
     }
@@ -61,6 +69,12 @@ impl Cancellation {
         to_point: Option<Entity>,
     ) -> Self {
         InvalidSpan { from_point, to_point }.into()
+    }
+
+    pub fn circular_collect(
+        conflicts: Vec<[Entity; 2]>,
+    ) -> Self {
+        CircularCollect { conflicts }.into()
     }
 }
 
@@ -91,6 +105,17 @@ pub enum CancellationCause {
     /// An operation that acts on nodes within a workflow was given an invalid
     /// span to operate on.
     InvalidSpan(InvalidSpan),
+
+    /// There is a circular dependency between two or more collect operations.
+    /// This will lead to problems with calculating reachability within the
+    /// workflow and is likely to make the collect operations fail to behave as
+    /// intended.
+    ///
+    /// If you need to have collect operations happen in a cycle, you can avoid
+    /// this automatic cancellation by putting one or more of the offending
+    /// collect operations into a scope that excludes the other collect
+    /// operations while including the branches that it needs to collect from.
+    CircularCollect(CircularCollect),
 
     /// A promise can never be delivered because the mutex inside of a [`Promise`][1]
     /// was poisoned.
@@ -225,6 +250,18 @@ pub struct InvalidSpan {
 impl From<InvalidSpan> for CancellationCause {
     fn from(value: InvalidSpan) -> Self {
         CancellationCause::InvalidSpan(value)
+    }
+}
+
+/// A variant of [`CancellationCause`]
+#[derive(Debug)]
+pub struct CircularCollect {
+    pub conflicts: Vec<[Entity; 2]>,
+}
+
+impl From<CircularCollect> for CancellationCause {
+    fn from(value: CircularCollect) -> Self {
+        CancellationCause::CircularCollect(value)
     }
 }
 

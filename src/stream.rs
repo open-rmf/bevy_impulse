@@ -37,7 +37,7 @@ use crate::{
     InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
     AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
     InnerChannel, TakenStream, StreamChannel, Push, Builder, UnusedStreams,
-    OperationError, DeferredRoster, UnhandledErrors, Broken,
+    OperationError, DeferredRoster, UnhandledErrors, Broken, SingleInputStorage,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -66,7 +66,12 @@ pub trait Stream: 'static + Send + Sync + Sized {
     ) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(Some(in_scope), source, RedirectScopeStream::<Self>::new(target)));
+        commands.add(AddOperation::new(
+            Some(in_scope),
+            source,
+            RedirectScopeStream::<Self>::new(target),
+        ));
+
         (
             InputSlot::new(in_scope, source),
             Output::new(out_scope, target),
@@ -84,13 +89,18 @@ pub trait Stream: 'static + Send + Sync + Sized {
     }
 
     fn spawn_node_stream(
+        source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
     ) -> (
         StreamTargetStorage<Self>,
         Output<Self>,
     ) {
-        let target = builder.commands.spawn(UnusedTarget).id();
+        let target = builder.commands.spawn((
+            SingleInputStorage::new(source),
+            UnusedTarget,
+        )).id();
+
         let index = map.add(target);
         (
             StreamTargetStorage::new(index),
@@ -169,6 +179,10 @@ impl<T: Stream> Clone for StreamBuffer<T> {
 impl<T: Stream + std::fmt::Debug> StreamBuffer<T> {
     pub fn send(&self, data: T) {
         self.container.borrow_mut().extend([data]);
+    }
+
+    pub fn target(&self) -> Option<Entity> {
+        self.target
     }
 }
 
@@ -270,6 +284,7 @@ pub trait StreamPack: 'static + Send + Sync {
     fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack;
 
     fn spawn_node_streams(
+        source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
     ) -> (
@@ -343,13 +358,14 @@ impl<T: Stream> StreamPack for T {
     }
 
     fn spawn_node_streams(
+        source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
     ) -> (
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     ) {
-        T::spawn_node_stream(map, builder)
+        T::spawn_node_stream(source, map, builder)
     }
 
     fn take_streams(
@@ -466,6 +482,7 @@ impl StreamPack for () {
     }
 
     fn spawn_node_streams(
+        _: Entity,
         _: &mut StreamTargetMap,
         _: &mut Builder,
     ) -> (
@@ -580,6 +597,7 @@ macro_rules! impl_streampack_for_tuple {
             }
 
             fn spawn_node_streams(
+                source: Entity,
                 map: &mut StreamTargetMap,
                 builder: &mut Builder,
             ) -> (
@@ -588,7 +606,7 @@ macro_rules! impl_streampack_for_tuple {
             ) {
                 let ($($T,)*) = (
                     $(
-                        $T::spawn_node_streams(map, builder),
+                        $T::spawn_node_streams(source, map, builder),
                     )*
                 );
                 // Now unpack the tuples

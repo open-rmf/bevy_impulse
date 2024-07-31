@@ -330,9 +330,13 @@ impl<T> Default for Collection<T> {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
-    use std::time::{Instant, Duration};
-    use std::sync::{Arc, Mutex};
+    use std::{
+        time::{Instant, Duration},
+        sync::{Arc, Mutex}
+    };
+    use smallvec::SmallVec;
     use crossbeam::channel::unbounded;
+
 
     #[test]
     fn test_dropped_chain() {
@@ -487,40 +491,98 @@ mod tests {
     }
 
     #[test]
-    fn test_instruction_preemption() {
+    fn test_delivery_instructions() {
         let mut context = TestingContext::minimal_plugins();
+        let queuing_service = context.spawn_delayed_map_with_viewer(
+            Duration::from_secs_f32(0.01),
+            |counter: &Arc<Mutex<u64>>| {
+                *counter.lock().unwrap() += 1;
+            },
+            |view: &ContinuousQueueView<_, ()>| {
+                assert!(view.len() <= 1);
+            }
+        ).instruct(TestLabel::Test);
+
+        let preempting_service = queuing_service
+            .instruct(TestLabel::Test.preempt());
+
+        // Test by queuing up a bunch of requests before preempting them all at once.
+        verify_preemption(1, queuing_service, preempting_service, &mut context);
+        verify_preemption(2, queuing_service, preempting_service, &mut context);
+        verify_preemption(3, queuing_service, preempting_service, &mut context);
+        verify_preemption(4, queuing_service, preempting_service, &mut context);
+
+        // Test by repeatedly preempting each request with the next.
+        verify_preemption(1, preempting_service, preempting_service, &mut context);
+        verify_preemption(2, preempting_service, preempting_service, &mut context);
+        verify_preemption(3, preempting_service, preempting_service, &mut context);
+        verify_preemption(4, preempting_service, preempting_service, &mut context);
+
+        // Test by queuing up a bunch of requests and making sure they all get
+        // delivered.
+        verify_queuing(2, queuing_service, &mut context);
+        verify_queuing(3, queuing_service, &mut context);
+        verify_queuing(4, queuing_service, &mut context);
+        verify_queuing(5, queuing_service, &mut context);
+    }
+
+    fn verify_preemption(
+        preemptions: usize,
+        preempted_service: Service<Arc<Mutex<u64>>, ()>,
+        preempting_service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
         let counter = Arc::new(Mutex::new(0_u64));
-        let service = context.command(|commands| {
-            commands.spawn_service(async_delayed_increment)
-        });
-        let instruction = DeliveryInstructions::new(TestLabel::Test);
-        let preempt = instruction.clone().preempt();
-        let request = (counter.clone(), Duration::from_secs_f64(2.1));
+        let mut preempted: SmallVec<[Promise<()>; 16]> = SmallVec::new();
+        for _ in 0..preemptions {
+            let promise = context.command(|commands|
+                commands
+                .request(Arc::clone(&counter), preempted_service)
+                .take_response()
+            );
+            preempted.push(promise);
+        }
 
-        // Spawn a service that increments the variable
-        let mut promise = context.command(|commands| {
+        let mut final_promise = context.command(|commands|
             commands
-            .request(request.clone(), service.clone().instruct(instruction))
+            .request(Arc::clone(&counter), preempting_service)
             .take_response()
-        });
+        );
 
-        // Spawn a service that preempts the previous one
-        let mut preempt_promise = context.command(|commands| {
-            commands
-            .request(request.clone(), service.clone().instruct(preempt))
-            .take_response()
-        });
+        for promise in &mut preempted {
+            context.run_with_conditions(promise, Duration::from_secs(2));
+            assert!(promise.take().is_cancelled());
+        }
 
-        let conditions = FlushConditions::new()
-            .with_timeout(Duration::from_secs_f64(5.0));
-
-        // Await both, counter should only have incremented once
-        dbg!(counter.lock().unwrap());
-        assert!(context.run_with_conditions(&mut promise, conditions.clone()));
-        assert!(context.run_with_conditions(&mut preempt_promise, conditions.clone()));
+        context.run_with_conditions(&mut final_promise, Duration::from_secs(2));
+        assert!(final_promise.take().is_available());
+        assert_eq!(*counter.lock().unwrap(), 1);
         assert!(context.no_unhandled_errors());
-        dbg!(counter.lock().unwrap());
-        assert!(*counter.lock().unwrap() == 1);
+    }
 
+    fn verify_queuing(
+        queue_size: usize,
+        queuing_service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
+        let counter = Arc::new(Mutex::new(0_u64));
+        let mut queued: SmallVec<[Promise<()>; 16]> = SmallVec::new();
+        for _ in 0..queue_size {
+            let promise = context.command(|commands|
+                commands
+                .request(Arc::clone(&counter), queuing_service)
+                .take_response()
+            );
+            queued.push(promise);
+        }
+
+        for promise in &mut queued {
+            context.run_with_conditions(promise, Duration::from_secs(2));
+            dbg!(promise.peek());
+            assert!(promise.take().is_available());
+        }
+
+        assert_eq!(*counter.lock().unwrap(), queue_size as u64);
+        assert!(context.no_unhandled_errors());
     }
 }

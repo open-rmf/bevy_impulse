@@ -21,7 +21,7 @@ use crate::{
     OperationResult, OrBroken, OperationSetup, OperationRequest,
     ActiveTasksStorage, OperationReachability, ReachabilityResult,
     InputBundle, Input, ManageDisposal, Disposal, ManageInput, UnhandledErrors,
-    DisposalFailure,
+    DisposalFailure, ActiveContinuousSessions, DeliveryInstructions,
 };
 
 use bevy::{
@@ -35,17 +35,19 @@ use backtrace::Backtrace;
 
 pub(crate) struct OperateService<Request> {
     provider: Entity,
+    instructions: Option<DeliveryInstructions>,
     target: Entity,
     _ignore: std::marker::PhantomData<Request>,
 }
 
 impl<Request: 'static + Send + Sync> OperateService<Request> {
     pub(crate) fn new<Response, Streams>(
-        provider: Service<Request, Response, Streams>,
+        service: Service<Request, Response, Streams>,
         target: Entity,
     ) -> Self {
         Self {
-            provider: provider.provider(),
+            provider: service.provider(),
+            instructions: service.instructions().copied(),
             target,
             _ignore: Default::default(),
         }
@@ -64,6 +66,9 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
             ActiveTasksStorage::default(),
             DisposeForUnavailableService(dispose_for_unavailable_service::<Request>),
         ));
+        if let Some(instructions) = self.instructions {
+            world.entity_mut(source).insert(instructions);
+        }
         Ok(())
     }
 
@@ -89,12 +94,21 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
         if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
+        if ActiveContinuousSessions::contains_session(&reachability)? {
+            return Ok(true);
+        }
         SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 
 #[derive(Component)]
 pub(crate) struct ProviderStorage(Entity);
+
+impl ProviderStorage {
+    pub(crate) fn get(&self) -> Entity {
+        self.0
+    }
+}
 
 pub(crate) fn dispose_for_despawned_service(
     despawned_service: Entity,
