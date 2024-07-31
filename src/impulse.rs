@@ -169,7 +169,7 @@ where
         f: impl FnOnce(Response) -> Task + 'static + Send + Sync,
     ) -> Impulse<'w, 's, 'a, Task::Output, ()>
     where
-        Task: Future + 'static + Send + Sync,
+        Task: Future + 'static + Send,
         Task::Output: 'static + Send + Sync,
     {
         self.then(f.into_async_map_once())

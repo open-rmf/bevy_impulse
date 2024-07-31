@@ -150,7 +150,7 @@ impl<F, Request, Task, Streams> CallAsyncMap<Request, Task, Streams> for MapDef<
 where
     F: FnMut(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send + Sync,
+    Task: 'static + Send,
     Streams: StreamPack,
 {
     fn call(&mut self, input: AsyncMap<Request, Streams>) -> Task {
@@ -163,7 +163,7 @@ pub struct AsyncMapMarker;
 impl<F, Request, Task, Streams> AsMap<(Request, Task, Streams, AsyncMapMarker)> for F
 where
     F: FnMut(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -195,7 +195,7 @@ impl<Def: Clone, Request, Task, Streams> Clone for AsyncMapDef<Def, Request, Tas
 impl<Def, Request, Task, Streams> ProvideOnce for AsyncMapDef<Def, Request, Task, Streams>
 where
     Def: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -212,7 +212,7 @@ where
 impl<Def, Request, Task, Streams> Provider for AsyncMapDef<Def, Request, Task, Streams>
 where
     Def: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -229,7 +229,7 @@ impl<F, Request, Task> IntoAsyncMap<(Request, Task)> for F
 where
     F: FnMut(Request) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
 {
     type MapType = AsyncMapDef<AsyncMapAdapter<F>, Request, Task, ()>;
@@ -243,7 +243,7 @@ pub struct AsyncMapAdapter<F>(F);
 impl<F, Request, Task> CallAsyncMap<Request, Task, ()> for AsyncMapAdapter<F>
 where
     F: FnMut(Request) -> Task + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
 {
     fn call(&mut self, AsyncMap{ request, .. }: AsyncMap<Request, ()>) -> Task {
         (self.0)(request)

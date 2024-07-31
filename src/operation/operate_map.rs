@@ -123,25 +123,23 @@ where
     }
 }
 
-#[derive(Bundle)]
 pub(crate) struct OperateAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send + Sync,
+    Task: 'static + Send,
     Streams: StreamPack,
 {
     storage: AsyncMapStorage<F>,
     target: SingleTargetStorage,
-    #[bundle(ignore)]
-    _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Task, Streams)>,
 }
 
 impl<F, Request, Task, Streams> OperateAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send + Sync,
+    Task: 'static + Send,
     Streams: StreamPack,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
@@ -161,7 +159,7 @@ struct AsyncMapStorage<F> {
 impl<F, Request, Task, Streams> Operation for OperateAsyncMap<F, Request, Task, Streams>
 where
     F: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -171,7 +169,8 @@ where
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
-            self,
+            self.storage,
+            self.target,
             ActiveTasksStorage::default(),
             InputBundle::<Request>::new(),
         ));

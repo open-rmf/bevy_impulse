@@ -110,25 +110,23 @@ where
 /// this supports FnOnce since it's used for impulse chains which are not
 /// reusable, whereas [`crate::OperateAsyncMap`] is used in workflows which
 /// need to be reusable, so it can only support FnMut.
-#[derive(Bundle)]
 pub(crate) struct ImpulseAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send + Sync,
+    Task: 'static + Send,
     Streams: 'static + Send + Sync,
 {
     f: AsyncMapOnceStorage<F>,
     target: SingleTargetStorage,
-    #[bundle(ignore)]
-    _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Task, Streams)>,
 }
 
 impl<F, Request, Task, Streams> ImpulseAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send + Sync,
+    Task: 'static + Send,
     Streams: 'static + Send + Sync,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
@@ -148,14 +146,15 @@ struct AsyncMapOnceStorage<F> {
 impl<F, Request, Task, Streams> Impulsive for ImpulseAsyncMap<F, Request, Task, Streams>
 where
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send + Sync,
+    Task: Future + 'static + Send,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
     F: CallAsyncMapOnce<Request, Task, Streams> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
-            self,
+            self.f,
+            self.target,
             InputBundle::<Request>::new(),
             ActiveTasksStorage::default(),
         ));
