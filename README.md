@@ -2,7 +2,7 @@
 
 # Reactive Programming for Bevy
 
-This library provides sophisticated [reactive programming](https://en.wikipedia.org/wiki/Reactive_programming) for the [bevy](https://bevyengine.org/) ECS. In addition to supporting one-shot chains of async operations, it can support reusable arbitrary workflows with parallel branches, synchronization, and cycles. These workflows can be hierarchical, so workflows can be built out of other workflows.
+This library provides sophisticated [reactive programming](https://en.wikipedia.org/wiki/Reactive_programming) for the [bevy](https://bevyengine.org/) ECS. In addition to supporting one-shot chains of async operations, it can support reusable workflows with parallel branches, synchronization, races, and cycles. These workflows can be hierarchical, so workflows can be built out of other workflows.
 
 # Helpful Links
 
