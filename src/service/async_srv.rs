@@ -137,7 +137,7 @@ where
                         .and_then(|stop_task| {
                             let disposal = Disposal::supplanted(stop.source, source, session);
                             (stop_task.0)(
-                                OperationRequest { source: task_id, world, roster },
+                                OperationRequest { source: stop.task_id, world, roster },
                                 disposal,
                             )
                         });

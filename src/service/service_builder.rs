@@ -116,7 +116,10 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
 }
 
 impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
-    pub(crate) fn add_service<M>(self, app: &mut App)
+    pub(crate) fn spawn_app_service<M>(
+        self,
+        app: &mut App,
+    ) -> Service<Srv::Request, Srv::Response, Srv::Streams>
     where
         Srv: IntoService<M>,
         Deliver: DeliveryChoice,
@@ -128,11 +131,12 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
     {
         let mut entity_mut = app.world.spawn(());
         self.service.insert_service_mut(&mut entity_mut);
-        let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
+        let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         entity_mut.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
         self.deliver.apply_entity_mut::<Srv::Request>(&mut entity_mut);
         self.with.apply(entity_mut);
-        self.also.apply(app, provider);
+        self.also.apply(app, service);
+        service
     }
 }
 
