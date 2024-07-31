@@ -129,7 +129,7 @@ pub mod testing;
 pub mod trim;
 pub use trim::*;
 
-use bevy::prelude::{Entity, In};
+use bevy::prelude::{App, Entity, In, Plugin, Update};
 
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///
@@ -295,4 +295,12 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     pub source: Entity,
     /// The unique session ID for the workflow
     pub session: Entity,
+}
+
+pub struct ImpulsePlugin {}
+
+impl Plugin for ImpulsePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, flush_impulses);
+    }
 }
