@@ -18,10 +18,10 @@
 use crate::{Service, IntoService, IntoContinuousService, Delivery, stream::*};
 
 use bevy::{
-    prelude::App,
+    prelude::{App, World},
     ecs::{
         world::EntityWorldMut,
-        system::{Commands, EntityCommands},
+        system::{Commands, CommandQueue, EntityCommands},
         schedule::{ScheduleLabel, SystemConfigs},
     }
 };
@@ -191,6 +191,19 @@ where
         self.deliver.apply_entity_commands::<Srv::Request>(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider
+    }
+
+    pub(crate) fn spawn_service_world<M>(self, world: &mut World) -> Service<Srv::Request, Srv::Response, Srv::Streams>
+    where
+        Srv: IntoService<M>,
+        With: WithEntityCommands,
+        Srv::Request: 'static + Send + Sync,
+        Srv::Response: 'static + Send + Sync,
+        Srv::Streams: StreamPack,
+    {
+        let mut command_queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut command_queue, &world);
+        self.spawn_service(&mut commands)
     }
 }
 
