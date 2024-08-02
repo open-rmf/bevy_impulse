@@ -19,7 +19,10 @@ use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
 use bevy::{
     prelude::{Entity, App, Commands, Component, Deref, DerefMut, World},
-    ecs::schedule::ScheduleLabel,
+    ecs::{
+        schedule::ScheduleLabel,
+        system::CommandQueue,
+    },
     utils::{intern::Interned, define_label},
 };
 
@@ -330,7 +333,11 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for World {
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
-        builder.into_service_builder().spawn_service_world(self)
+        let mut command_queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut command_queue, self);
+        let provider = commands.spawn_service(builder);
+        command_queue.apply(self);
+        provider
     }
 }
 
