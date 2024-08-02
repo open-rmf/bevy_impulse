@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Entity, World};
+use bevy_ecs::prelude::{Entity, World};
 
 use crossbeam::channel::Sender as CbSender;
 

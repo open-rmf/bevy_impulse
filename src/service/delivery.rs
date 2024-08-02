@@ -17,7 +17,7 @@
 
 use crate::{Blocker, OperationRoster, DeliveryInstructions, DeliveryLabelId};
 
-use bevy::prelude::{Entity, Component, World};
+use bevy_ecs::prelude::{Entity, Component, World};
 
 use smallvec::SmallVec;
 

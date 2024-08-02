@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::utils::all_tuples;
+use bevy_utils::all_tuples;
 
 use crate::{
     Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage, Builder,

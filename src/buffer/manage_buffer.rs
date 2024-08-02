@@ -15,9 +15,9 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::Entity,
-    ecs::world::{EntityWorldMut, EntityRef},
+    world::{EntityWorldMut, EntityRef},
 };
 
 use smallvec::SmallVec;

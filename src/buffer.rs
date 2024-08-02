@@ -15,13 +15,11 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Entity, Query, Commands},
-    ecs::{
-        system::SystemParam,
-        change_detection::Mut,
-        query::QueryEntityError,
-    }
+    system::SystemParam,
+    change_detection::Mut,
+    query::QueryEntityError,
 };
 
 use std::{

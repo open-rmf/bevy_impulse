@@ -23,7 +23,7 @@ use crate::{
     try_emit_broken,
 };
 
-use bevy::prelude::{Entity, Component};
+use bevy_ecs::prelude::{Entity, Component};
 
 pub(crate) struct OperateCallback<Request, Response, Streams> {
     callback: Callback<Request, Response, Streams>,

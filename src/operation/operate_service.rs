@@ -24,9 +24,9 @@ use crate::{
     DisposalFailure, ActiveContinuousSessions, DeliveryInstructions,
 };
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Component, Entity, World, Query},
-    ecs::system::SystemState,
+    system::SystemState,
 };
 
 use smallvec::SmallVec;

@@ -21,7 +21,7 @@ use crate::{
     Buffered,
 };
 
-use bevy::prelude::{Entity, World, Component};
+use bevy_ecs::prelude::{Entity, World, Component};
 
 use std::{
     sync::Arc,

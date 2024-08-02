@@ -15,9 +15,9 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Entity, Resource, World},
-    ecs::system::{CommandQueue, Commands},
+    system::{CommandQueue, Commands},
 };
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
@@ -152,7 +152,7 @@ impl<T: Stream> StreamChannel<T> {
 #[cfg(test)]
 mod tests {
     use crate::{*, testing::*};
-    use bevy::ecs::system::EntityCommands;
+    use bevy_ecs::system::EntityCommands;
     use std::time::Duration;
 
     #[test]

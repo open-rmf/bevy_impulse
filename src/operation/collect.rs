@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Entity, Component, World};
+use bevy_ecs::prelude::{Entity, Component, World};
 
 use std::collections::HashMap;
 

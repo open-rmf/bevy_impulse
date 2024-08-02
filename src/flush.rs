@@ -15,16 +15,13 @@
  *
 */
 
-use bevy::{
-    prelude::{
-        Entity, World, Query, QueryState, Added, With, Resource, Deref, DerefMut,
-        Children, BuildWorldChildren, DespawnRecursiveExt,
-    },
-    ecs::{
-        system::{SystemState, Command},
-        schedule::{SystemConfigs, IntoSystemConfigs},
-    },
+use bevy_ecs::{
+    prelude::{Entity, World, Query, QueryState, Added, With, Resource},
+    system::{SystemState, Command},
+    schedule::{SystemConfigs, IntoSystemConfigs},
 };
+use bevy_derive::{Deref, DerefMut};
+use bevy_hierarchy::{Children, BuildWorldChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 

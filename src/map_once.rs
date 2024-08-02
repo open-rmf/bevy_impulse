@@ -21,7 +21,7 @@ use crate::{
     AsyncMapMarker,
 };
 
-use bevy::prelude::{Entity, Commands};
+use bevy_ecs::prelude::{Entity, Commands};
 
 use std::future::Future;
 

@@ -15,10 +15,11 @@
  *
 */
 
-use bevy::{
-    prelude::{Commands, World, BuildChildren},
-    ecs::system::CommandQueue,
+use bevy_ecs::{
+    prelude::{Commands, World},
+    system::CommandQueue,
 };
+use bevy_hierarchy::BuildChildren;
 
 use crate::{
     Service, InputSlot, Output, StreamPack, OperateScope, DeliveryChoice,

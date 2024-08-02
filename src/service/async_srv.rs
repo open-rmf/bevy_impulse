@@ -27,14 +27,12 @@ use crate::{
     OperationResult,
 };
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Component, In, World, Entity},
-    tasks::AsyncComputeTaskPool,
-    ecs::{
-        world::EntityWorldMut,
-        system::{IntoSystem, BoxedSystem, EntityCommands},
-    }
+    world::EntityWorldMut,
+    system::{IntoSystem, BoxedSystem, EntityCommands},
 };
+use bevy_tasks::AsyncComputeTaskPool;
 
 use std::future::Future;
 

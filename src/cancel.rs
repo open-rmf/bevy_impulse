@@ -15,9 +15,9 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Entity, Component, Bundle, World},
-    ecs::world::EntityWorldMut,
+    world::EntityWorldMut,
 };
 
 use backtrace::Backtrace;

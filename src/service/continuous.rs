@@ -15,14 +15,13 @@
  *
 */
 
-use bevy::{
-    prelude::{Component, Entity, Local, Query, Commands, World, BuildWorldChildren},
-    ecs::{
-        system::{SystemParam, Command, IntoSystem},
-        world::EntityWorldMut,
-        schedule::{SystemConfigs, IntoSystemConfigs}
-    }
+use bevy_ecs::{
+    prelude::{Component, Entity, Local, Query, Commands, World},
+    system::{SystemParam, Command, IntoSystem},
+    world::EntityWorldMut,
+    schedule::{SystemConfigs, IntoSystemConfigs},
 };
+use bevy_hierarchy::prelude::BuildWorldChildren;
 
 use smallvec::SmallVec;
 

@@ -124,12 +124,14 @@ pub use stream::*;
 pub mod workflow;
 pub use workflow::*;
 
+#[cfg(test)]
 pub mod testing;
 
 pub mod trim;
 pub use trim::*;
 
-use bevy::prelude::{App, Entity, In, Plugin, Update};
+use bevy_ecs::prelude::{Entity, In};
+use bevy_app::prelude::{App, Plugin, Update};
 
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///

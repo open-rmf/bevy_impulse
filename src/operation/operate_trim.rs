@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Component, Entity, World};
+use bevy_ecs::prelude::{Component, Entity, World};
 
 use smallvec::SmallVec;
 

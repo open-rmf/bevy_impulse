@@ -15,12 +15,10 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Entity, Component, Bundle},
-    ecs::{
-        world::{EntityWorldMut, EntityRef, World},
-        system::Command,
-    },
+    world::{EntityWorldMut, EntityRef, World},
+    system::Command,
 };
 
 use smallvec::SmallVec;

@@ -17,7 +17,7 @@
 
 use std::future::Future;
 
-use bevy::prelude::{Entity, In};
+use bevy_ecs::prelude::{Entity, In};
 
 use smallvec::SmallVec;
 

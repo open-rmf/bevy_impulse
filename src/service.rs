@@ -17,11 +17,13 @@
 
 use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
-use bevy::{
-    prelude::{Entity, App, Commands, Component, Deref, DerefMut},
-    ecs::schedule::ScheduleLabel,
-    utils::{intern::Interned, define_label},
+use bevy_ecs::{
+    prelude::{Entity, Commands, Component},
+    schedule::ScheduleLabel,
 };
+use bevy_app::prelude::App;
+use bevy_derive::{Deref, DerefMut};
+use bevy_utils::{intern::Interned, define_label};
 
 mod async_srv;
 pub use async_srv::*;
@@ -501,14 +503,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{BlockingService, BlockingServiceInput, AsyncService, AsyncServiceInput};
-    use bevy::{
-        prelude::*,
-        ecs::world::EntityWorldMut,
-    };
+    use crate::*;
+    use bevy::{prelude::*, ecs::world::EntityWorldMut};
     use std::future::Future;
-
     #[derive(Component)]
     struct TestPeople {
         name: String,

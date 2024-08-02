@@ -15,7 +15,8 @@
  *
 */
 
-use bevy::prelude::{Component, DespawnRecursiveExt};
+use bevy_ecs::prelude::Component;
+use bevy_hierarchy::DespawnRecursiveExt;
 
 use crossbeam::channel::Sender;
 

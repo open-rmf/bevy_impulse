@@ -15,7 +15,8 @@
  *
 */
 
-use bevy::prelude::{Commands, BuildChildren};
+use bevy_ecs::prelude::Commands;
+use bevy_hierarchy::BuildChildren;
 
 use std::future::Future;
 

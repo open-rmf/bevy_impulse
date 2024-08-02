@@ -15,9 +15,9 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Entity, Component, World},
-    ecs::system::Command,
+    system::Command,
 };
 
 use anyhow::anyhow;

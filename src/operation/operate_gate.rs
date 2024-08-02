@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Component, Entity};
+use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
     Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,

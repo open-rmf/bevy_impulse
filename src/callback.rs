@@ -23,11 +23,11 @@ use crate::{
     make_stream_buffer_from_world,
 };
 
-use bevy::{
-    prelude::{World, Entity, In},
-    ecs::system::{IntoSystem, BoxedSystem},
-    tasks::AsyncComputeTaskPool,
+use bevy_ecs::{
+    prelude::{World, Entity, In, Commands},
+    system::{IntoSystem, BoxedSystem},
 };
+use bevy_tasks::AsyncComputeTaskPool;
 
 use std::{
     collections::VecDeque,
@@ -462,7 +462,7 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut bevy::prelude::Commands) {
+    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddOperation::new(scope, source, OperateCallback::new(self, target)));
     }
 }

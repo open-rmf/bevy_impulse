@@ -15,10 +15,8 @@
  *
 */
 
-use bevy::{
-    prelude::{Entity, Component, Bundle},
-    tasks::AsyncComputeTaskPool,
-};
+use bevy_ecs::prelude::{Entity, Component, Bundle};
+use bevy_tasks::AsyncComputeTaskPool;
 
 use std::future::Future;
 

@@ -17,14 +17,12 @@
 
 use crate::{Service, IntoService, IntoContinuousService, Delivery, stream::*};
 
-use bevy::{
-    prelude::App,
-    ecs::{
-        world::EntityWorldMut,
-        system::{Commands, EntityCommands},
-        schedule::{ScheduleLabel, SystemConfigs},
-    }
+use bevy_ecs::{
+    world::EntityWorldMut,
+    system::{Commands, EntityCommands},
+    schedule::{ScheduleLabel, SystemConfigs},
 };
+use bevy_app::prelude::App;
 
 use super::traits::*;
 

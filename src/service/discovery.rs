@@ -15,12 +15,10 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Query, Entity, With},
-    ecs::{
-        query::{ReadOnlyWorldQuery, QueryIter, QueryEntityError},
-        system::SystemParam,
-    }
+    query::{ReadOnlyWorldQuery, QueryIter, QueryEntityError},
+    system::SystemParam,
 };
 
 use crate::{ServiceMarker, StreamFilter, Service};

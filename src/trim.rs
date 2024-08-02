@@ -17,7 +17,7 @@
 
 use crate::InputSlot;
 
-use bevy::prelude::Entity;
+use bevy_ecs::prelude::Entity;
 
 use smallvec::SmallVec;
 

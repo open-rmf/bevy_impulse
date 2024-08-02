@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::Entity;
+use bevy_ecs::prelude::Entity;
 
 use crate::{
     StreamPack, Chain, Builder, UnusedTarget, AddBranchToForkClone, ForkClone,

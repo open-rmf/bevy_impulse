@@ -15,9 +15,8 @@
  *
 */
 
-use bevy::prelude::{
-    Commands, Entity, Bundle, Component, BuildChildren, Event,
-};
+use bevy_ecs::prelude::{Commands, Entity, Bundle, Component, Event};
+use bevy_hierarchy::BuildChildren;
 
 use std::future::Future;
 

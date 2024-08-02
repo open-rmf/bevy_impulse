@@ -15,9 +15,9 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Entity, World},
-    ecs::system::Command,
+    system::Command,
 };
 
 use backtrace::Backtrace;

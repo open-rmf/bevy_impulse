@@ -15,10 +15,12 @@
  *
 */
 
-use bevy::{
-    prelude::{World, Entity, Component, Resource, DespawnRecursiveExt},
-    ecs::system::Command,
+use bevy_ecs::{
+    prelude::{World, Entity, Component, Resource},
+    system::Command,
+
 };
+use bevy_hierarchy::DespawnRecursiveExt;
 
 use backtrace::Backtrace;
 

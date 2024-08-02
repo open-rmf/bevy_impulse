@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::DespawnRecursiveExt;
+use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
 use crate::{
     Impulsive, OperationSetup, OperationRequest, OperationResult, OrBroken,

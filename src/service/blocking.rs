@@ -15,12 +15,10 @@
  *
 */
 
-use bevy::{
+use bevy_ecs::{
     prelude::{Component, In},
-    ecs::{
-        world::EntityWorldMut,
-        system::{IntoSystem, BoxedSystem, EntityCommands},
-    }
+    world::EntityWorldMut,
+    system::{IntoSystem, BoxedSystem, EntityCommands},
 };
 
 use crate::{

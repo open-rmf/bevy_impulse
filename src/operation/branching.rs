@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Component, World, Entity};
+use bevy_ecs::prelude::{Component, World, Entity};
 
 use crate::{
     Operation, OperationRoster, ForkTargetStorage, SingleInputStorage,

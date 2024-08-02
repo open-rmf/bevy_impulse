@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::utils::all_tuples;
+use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{

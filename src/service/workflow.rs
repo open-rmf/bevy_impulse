@@ -25,7 +25,7 @@ use crate::{
     pop_next_delivery,
 };
 
-use bevy::prelude::{Entity, World, Component};
+use bevy_ecs::prelude::{Entity, World, Component};
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct WorkflowStorage {

@@ -20,14 +20,12 @@ use crate::{
     service::service_builder::{SerialChosen, ParallelChosen},
 };
 
-use bevy::{
-    prelude::App,
-    ecs::{
-        world::EntityWorldMut,
-        system::EntityCommands,
-        schedule::SystemConfigs,
-    },
+use bevy_ecs::{
+    world::EntityWorldMut,
+    system::EntityCommands,
+    schedule::SystemConfigs,
 };
+use bevy_app::prelude::App;
 
 pub trait ServiceTrait {
     // TODO(@mxgrey): Are we using these associated types anymore?

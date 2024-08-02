@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Entity, Commands};
+use bevy_ecs::prelude::{Entity, Commands};
 
 /// The `Provider` trait encapsulates the idea of providing a response to a
 /// request. There are three different provider types with different advantages:

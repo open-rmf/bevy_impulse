@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Entity, Component};
+use bevy_ecs::prelude::{Entity, Component};
 
 use smallvec::{SmallVec, Drain};
 

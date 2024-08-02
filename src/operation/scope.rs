@@ -31,7 +31,8 @@ use crate::{
 
 use backtrace::Backtrace;
 
-use bevy::prelude::{Component, Entity, World, Commands, BuildChildren};
+use bevy_ecs::prelude::{Component, Entity, World, Commands};
+use bevy_hierarchy::BuildChildren;
 
 use smallvec::SmallVec;
 

@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::{Resource, Entity};
+use bevy_ecs::prelude::{Resource, Entity};
 
 use backtrace::Backtrace;
 

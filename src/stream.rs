@@ -15,17 +15,14 @@
  *
 */
 
-use bevy::{
-    prelude::{
-        Component, Bundle, Entity, Commands, World, BuildChildren, Deref,
-        DerefMut, With,
-    },
-    ecs::{
-        system::Command,
-        query::{ReadOnlyWorldQuery, WorldQuery},
-    },
-    utils::all_tuples,
+use bevy_ecs::{
+    prelude::{Component, Bundle, Entity, Commands, World, With},
+    system::Command,
+    query::{ReadOnlyWorldQuery, WorldQuery},
 };
+use bevy_hierarchy::BuildChildren;
+use bevy_derive::{Deref, DerefMut};
+use bevy_utils::all_tuples;
 
 use crossbeam::channel::{Receiver, unbounded};
 

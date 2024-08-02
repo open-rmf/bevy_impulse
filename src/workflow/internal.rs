@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::ecs::{
+use bevy_ecs::{
     system::EntityCommands,
     world::EntityWorldMut,
 };

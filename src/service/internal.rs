@@ -15,7 +15,7 @@
  *
 */
 
-use bevy::prelude::*;
+use bevy_ecs::prelude::{Entity, Component, Bundle, World, Resource};
 
 use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
 

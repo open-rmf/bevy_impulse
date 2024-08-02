@@ -15,10 +15,8 @@
  *
 */
 
-use bevy::{
-    prelude::{Entity, World},
-    utils::all_tuples,
-};
+use bevy_ecs::prelude::{Entity, World};
+use bevy_utils::all_tuples;
 
 use smallvec::SmallVec;
 

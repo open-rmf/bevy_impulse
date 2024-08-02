@@ -22,7 +22,7 @@ use crate::{
     emit_disposal,
 };
 
-use bevy::prelude::Entity;
+use bevy_ecs::prelude::Entity;
 
 pub(crate) struct Spread<I> {
     target: Entity,

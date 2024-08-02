@@ -21,10 +21,11 @@ use crate::{
     try_emit_broken,
 };
 
-use bevy::{
-    prelude::{Entity, World, Component, BuildWorldChildren},
-    ecs::system::Command,
+use bevy_ecs::{
+    prelude::{Entity, World, Component},
+    system::Command,
 };
+use bevy_hierarchy::prelude::BuildWorldChildren;
 
 use backtrace::Backtrace;
 

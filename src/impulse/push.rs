@@ -15,7 +15,8 @@
  *
 */
 
-use bevy::prelude::{Entity, Component, DespawnRecursiveExt};
+use bevy_ecs::prelude::{Entity, Component};
+use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
     Impulsive, OperationSetup, OperationRequest, Storage,

@@ -15,11 +15,12 @@
  *
 */
 
-use bevy::{
-    prelude::{Component, Entity, World, Resource, BuildWorldChildren},
-    tasks::{Task as BevyTask, AsyncComputeTaskPool},
-    ecs::system::Command,
+use bevy_ecs::{
+    prelude::{Component, Entity, World, Resource},
+    system::Command,
 };
+use bevy_hierarchy::BuildWorldChildren;
+use bevy_tasks::{Task as BevyTask, AsyncComputeTaskPool};
 
 use std::{
     task::Poll,
