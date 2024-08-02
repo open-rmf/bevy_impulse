@@ -18,8 +18,11 @@
 use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
 use bevy::{
-    prelude::{Entity, App, Commands, Component, Deref, DerefMut},
-    ecs::schedule::ScheduleLabel,
+    prelude::{Entity, App, Commands, Component, Deref, DerefMut, World},
+    ecs::{
+        schedule::ScheduleLabel,
+        system::CommandQueue,
+    },
     utils::{intern::Interned, define_label},
 };
 
@@ -310,6 +313,31 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
         <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
         builder.into_service_builder().spawn_service(self)
+    }
+}
+
+impl<'w, 's> SpawnServicesExt<'w, 's> for World {
+    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
+        &'a mut self,
+        builder: B,
+    ) -> Service<
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams,
+        >
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityCommands,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: StreamPack,
+    {
+        let mut command_queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut command_queue, self);
+        let provider = commands.spawn_service(builder);
+        command_queue.apply(self);
+        provider
     }
 }
 
