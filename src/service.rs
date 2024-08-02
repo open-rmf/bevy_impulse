@@ -18,7 +18,8 @@
 use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
 
 use bevy_ecs::{
-    prelude::{Entity, Commands, Component},
+    prelude::{Entity, Commands, Component, World},
+    system::CommandQueue,
     schedule::ScheduleLabel,
 };
 use bevy_app::prelude::App;
@@ -315,6 +316,31 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
     }
 }
 
+impl<'w, 's> SpawnServicesExt<'w, 's> for World {
+    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
+        &'a mut self,
+        builder: B,
+    ) -> Service<
+            <B::Service as IntoService<M2>>::Request,
+            <B::Service as IntoService<M2>>::Response,
+            <B::Service as IntoService<M2>>::Streams,
+        >
+    where
+        B::Service: IntoService<M2>,
+        B::Deliver: DeliveryChoice,
+        B::With: WithEntityCommands,
+        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
+        <B::Service as IntoService<M2>>::Streams: StreamPack,
+    {
+        let mut command_queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut command_queue, self);
+        let provider = commands.spawn_service(builder);
+        command_queue.apply(self);
+        provider
+    }
+}
+
 /// This trait extends the App interface so that services can be added while
 /// configuring an App.
 pub trait AddServicesExt {
@@ -504,8 +530,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use bevy::{prelude::*, ecs::world::EntityWorldMut};
+    use bevy_ecs::{prelude::*, world::EntityWorldMut};
+    use bevy_app::Startup;
     use std::future::Future;
+
     #[derive(Component)]
     struct TestPeople {
         name: String,

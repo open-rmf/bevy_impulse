@@ -29,24 +29,27 @@ use crate::{
 /// Extensions for creating impulse chains by making a request to a provider or
 /// serving a value. This is implemented for [`Commands`].
 pub trait RequestExt<'w, 's> {
-    /// Call this on [`Commands`] to begin building a impulse chain by submitting
-    /// a request to a provider.
+    /// Call this on [`Commands`] to trigger an [impulse](Impulse) to fire.
+    ///
+    /// Impulses are one-time requests that you can send to a provider. Impulses
+    /// can be chained together as a sequence, but you should end the sequence
+    /// by [taking][1] the response, [detaching][2] the impulse, or using one of
+    /// the other terminating operations mentioned in [the chart](Impulse::detach).
     ///
     /// ```
     /// use bevy_impulse::{*, testing::*};
-    /// let mut context = TestingContext::headless_plugins();
+    /// let mut context = TestingContext::minimal_plugins();
     /// let mut promise = context.command(|commands| {
-    ///     let service = commands.spawn_service(spawn_cube.into_blocking_service());
-    ///
-    ///     commands
-    ///     .request(SpawnCube { position: Vec3::ZERO, size: 0.1 }, service)
-    ///     .take()
-    ///     .response
+    ///     let service = commands.spawn_service(spawn_test_entities);
+    ///     commands.request(5, service).take().response
     /// });
     ///
     /// context.run_while_pending(&mut promise);
     /// assert!(promise.peek().is_available());
     /// ```
+    ///
+    /// [1]: Impulse::take
+    /// [2]: Impulse::detach
     #[must_use]
     fn request<'a, P: ProvideOnce>(
         &'a mut self,
@@ -147,14 +150,10 @@ mod tests {
 
     #[test]
     fn simple_spawn() {
-        let mut context = TestingContext::headless_plugins();
+        let mut context = TestingContext::minimal_plugins();
         let mut promise = context.command(|commands| {
-            let request = SpawnCube { position: Vec3::ZERO, size: 0.1 };
-            let service = commands.spawn_service(spawn_cube.into_blocking_service());
-
-            commands
-                .request(request, service)
-                .take()
+            let service = commands.spawn_service(spawn_test_entities);
+            commands.request(3, service).take()
         });
 
         context.run_with_conditions(

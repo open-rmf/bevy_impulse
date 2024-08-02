@@ -15,18 +15,20 @@
  *
 */
 
-pub use bevy::{
-    prelude::{
-        Commands, App, Update, MinimalPlugins, DefaultPlugins, PbrBundle, Vec3,
-        In, Entity, Assets, Mesh, ResMut, Transform, Component, Query, Local,
-    },
-    render::mesh::shape::Cube,
-    ecs::system::{CommandQueue, IntoSystem},
+pub use bevy_ecs::{
+    prelude::{Commands, In, Entity, ResMut, Component, Query, Local},
+    system::{CommandQueue, IntoSystem},
 };
+pub use bevy_app::{App, Update};
+use bevy_app::ScheduleRunnerPlugin;
+use bevy_core::{TaskPoolPlugin, TypeRegistrationPlugin, FrameCountPlugin};
+use bevy_time::TimePlugin;
 
 use thiserror::Error as ThisError;
 
 pub use std::time::{Duration, Instant};
+
+use smallvec::SmallVec;
 
 use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
@@ -46,29 +48,12 @@ impl TestingContext {
     pub fn minimal_plugins() -> Self {
         let mut app = App::new();
         app
-            .add_plugins(MinimalPlugins)
-            .add_systems(Update, flush_impulses());
-
-        TestingContext { app }
-    }
-
-    /// Make a testing context that is headless but has some additional plugins
-    /// for use cases that have hierarchy (parents/children), assets, and geometry.
-    pub fn headless_plugins() -> Self {
-        use bevy::{
-            asset::AssetPlugin,
-            transform::TransformPlugin,
-            hierarchy::HierarchyPlugin,
-            render::mesh::MeshPlugin,
-        };
-        let mut app = App::new();
-        app
-            .add_plugins(MinimalPlugins)
             .add_plugins((
-                AssetPlugin::default(),
-                TransformPlugin::default(),
-                HierarchyPlugin::default(),
-                MeshPlugin,
+                TaskPoolPlugin::default(),
+                TypeRegistrationPlugin::default(),
+                FrameCountPlugin::default(),
+                TimePlugin::default(),
+                ScheduleRunnerPlugin::default(),
             ))
             .add_systems(Update, flush_impulses());
 
@@ -324,29 +309,16 @@ impl FlushConditions {
 #[derive(Debug, Clone, Copy)]
 pub struct InvalidValue(pub f32);
 
-pub struct SpawnCube {
-    pub position: Vec3,
-    pub size: f32,
-}
-
-/// Spawns a cube according to a [`SpawnCube`] request. Returns the entity of
-/// the new cube.
-pub fn spawn_cube(
-    In(request): In<SpawnCube>,
+pub fn spawn_test_entities(
+    In(input): BlockingServiceInput<usize>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-) -> Result<Entity, InvalidValue> {
-    if request.size <= 0.0 {
-        return Err(InvalidValue(request.size));
+) -> SmallVec<[Entity; 8]> {
+    let mut entities = SmallVec::new();
+    for _ in 0..input.request {
+        entities.push(commands.spawn(TestComponent).id());
     }
 
-    let entity = commands.spawn(PbrBundle {
-        mesh: meshes.add(Cube::new(request.size).into()),
-        transform: Transform::from_translation(request.position),
-        ..Default::default()
-    }).id();
-
-    Ok(entity)
+    entities
 }
 
 pub fn duplicate<T: Clone>(value: T) -> (T, T) {

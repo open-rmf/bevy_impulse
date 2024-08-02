@@ -335,7 +335,7 @@ mod tests {
     };
     use smallvec::SmallVec;
     use crossbeam::channel::unbounded;
-
+    use bevy_utils::label::DynEq;
 
     #[test]
     fn test_dropped_chain() {
@@ -482,11 +482,11 @@ mod tests {
     // TODO(luca) create a proc-macro for this, because library crates can't
     // export proc macros we will need to create a new macros only crate
     impl DeliveryLabel for TestLabel {
-        fn dyn_clone(&self) -> std::boxed::Box<dyn DeliveryLabel> {
+        fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
             Box::new(self.clone())
         }
 
-        fn as_dyn_eq(&self) -> &dyn bevy::utils::label::DynEq {
+        fn as_dyn_eq(&self) -> &dyn DynEq {
             self
         }
 

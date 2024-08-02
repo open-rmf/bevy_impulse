@@ -124,7 +124,6 @@ pub use stream::*;
 pub mod workflow;
 pub use workflow::*;
 
-#[cfg(test)]
 pub mod testing;
 
 pub mod trim;
@@ -146,7 +145,7 @@ use bevy_app::prelude::{App, Plugin, Update};
 /// field of `BlockingService`:
 ///
 /// ```
-/// use bevy::prelude::*;
+/// use bevy_ecs::prelude::*;
 /// use bevy_impulse::*;
 ///
 /// #[derive(Component, Resource)]

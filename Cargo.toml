@@ -4,8 +4,6 @@ version = "0.0.1"
 edition = "2021"
 authors = ["Grey <mxgrey@intrinsic.ai>"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 bevy_ecs = "0.12"
 bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
@@ -23,6 +21,13 @@ backtrace = "0.3"
 anyhow = "*"
 thiserror = "*"
 
+# These dependencies are only used by the testing module.
+# We may want to consider feature-gating them, but we use
+# the testing module for doctests, and doctests can only
+# make use of default features, so we're a bit stuck with
+# these for now.
+bevy_core = "0.12"
+bevy_time = "0.12"
+
 [dev-dependencies]
 async-std = { version = "*" }
-bevy = "0.12"
