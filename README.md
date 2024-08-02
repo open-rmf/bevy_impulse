@@ -6,6 +6,7 @@ This library provides sophisticated [reactive programming](https://en.wikipedia.
 
 # Helpful Links
 
+ * [Introduction to workflows](https://docs.google.com/presentation/d/1_vJTyFKOB1T0ylCbp1jG72tn8AXYQOKgTGh9En9si-w/edit?usp=sharing)
  * [Bevy Engine](https://bevyengine.org/)
  * [Bevy Cheat Book](https://bevy-cheatbook.github.io/)
  * [Rust Book](https://doc.rust-lang.org/stable/book/)
