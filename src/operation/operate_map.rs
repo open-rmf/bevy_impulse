@@ -16,7 +16,6 @@
 */
 
 use bevy_ecs::prelude::{Component, Entity, Bundle};
-use bevy_tasks::AsyncComputeTaskPool;
 
 use std::future::Future;
 
@@ -26,7 +25,7 @@ use crate::{
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
     OperationReachability, ReachabilityResult, InputBundle, UnusedStreams,
-    ManageDisposal, make_stream_buffer_from_world,
+    ManageDisposal, make_stream_buffer_from_world, async_execution::spawn_task,
 };
 
 #[derive(Bundle)]
@@ -188,7 +187,7 @@ where
         let channel = Channel::new(source, session, sender.clone());
         let streams = channel.for_streams::<Streams>(&world)?;
 
-        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap {
+        let task = spawn_task(f.call(AsyncMap {
             request, streams, channel, source, session,
         }));
         world.get_entity_mut(source).or_broken()?

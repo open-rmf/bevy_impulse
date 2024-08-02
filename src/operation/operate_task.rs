@@ -20,7 +20,6 @@ use bevy_ecs::{
     system::Command,
 };
 use bevy_hierarchy::BuildWorldChildren;
-use bevy_tasks::{Task as BevyTask, AsyncComputeTaskPool};
 
 use std::{
     task::Poll,
@@ -41,7 +40,7 @@ use crate::{
     OperationSetup, OperationRequest, OperationResult, Operation, AddOperation,
     OrBroken, OperationCleanup, ChannelItem, OperationError, Broken, ScopeStorage,
     OperationReachability, ReachabilityResult, emit_disposal, Disposal, StreamPack,
-    Cleanup,
+    Cleanup, async_execution::{spawn_task, TaskHandle},
 };
 
 struct JobWaker {
@@ -77,7 +76,7 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPa
     session: Entity,
     node: Entity,
     target: Entity,
-    task: Option<BevyTask<Response>>,
+    task: Option<TaskHandle<Response>>,
     blocker: Option<Blocker>,
     sender: CbSender<ChannelItem>,
     disposal: Option<Disposal>,
@@ -92,7 +91,7 @@ impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response,
         session: Entity,
         node: Entity,
         target: Entity,
-        task: BevyTask<Response>,
+        task: TaskHandle<Response>,
         blocker: Option<Blocker>,
         sender: CbSender<ChannelItem>,
     ) -> Self {
@@ -145,7 +144,7 @@ where
         let disposal = self.disposal.take();
         let being_cleaned = self.being_cleaned;
 
-        AsyncComputeTaskPool::get().spawn(async move {
+        spawn_task(async move {
             let mut disposed = false;
             if let Some(task) = task {
                 disposed = true;
@@ -309,7 +308,7 @@ where
         let unblock = operation.blocker.take();
         let sender = operation.sender.clone();
         if let Some(task) = task {
-            AsyncComputeTaskPool::get().spawn(async move {
+            spawn_task(async move {
                 task.cancel().await;
                 if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
                     cleanup_task::<Response>(source, node, unblock, Some(cleanup), world, roster);

@@ -158,8 +158,9 @@ where
     }
 
     /// Apply a one-time callback whose output is a [`Future`] that will be run
-    /// in the [`AsyncComputeTaskPool`][1]. The output of the [`Future`] will be
-    /// the Response of the returned Impulse.
+    /// in the [`AsyncComputeTaskPool`][1] (unless the `single_threaded_async`
+    /// feature is active). The output of the [`Future`] will be the Response of
+    /// the returned Impulse.
     ///
     /// [1]: bevy::tasks::AsyncComputeTaskPool
     #[must_use]

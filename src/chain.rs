@@ -178,8 +178,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Apply a map whose output is a Future that will be run in the
-    /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool). The
-    /// output of the Future will be the Response of the returned Chain.
+    /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool) (unless
+    /// the `single_threaded_async` feature is active). The output of the Future
+    /// will be the Response of the returned Chain.
     #[must_use]
     pub fn map_async<Task>(
         self,
@@ -1012,7 +1013,7 @@ mod tests {
                         // 4.0
                         chain.map_block(|value|
                             WaitRequest {
-                                duration: Duration::from_secs_f64(value),
+                                duration: Duration::from_secs_f64(0.01*value),
                                 value,
                             }
                         )
@@ -1031,7 +1032,7 @@ mod tests {
                 ));
             })
             // This should be won by the 8.0 branch because it does not wait,
-            // while the 4.0 branch should wait for 4.0s.
+            // while the 4.0 branch should wait for 0.04s.
             .map_block(|a| (a, a))
             // (8.0, 8.0)
             .map_block(add)
@@ -1045,11 +1046,7 @@ mod tests {
             .take_response()
         );
 
-        context.run_with_conditions(
-            &mut promise,
-            FlushConditions::new()
-            .with_update_count(100),
-        );
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
 
         assert_eq!(promise.take().available(), Some(16.0));
         assert!(context.no_unhandled_errors());

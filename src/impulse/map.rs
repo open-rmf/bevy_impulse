@@ -16,7 +16,6 @@
 */
 
 use bevy_ecs::prelude::{Entity, Component, Bundle};
-use bevy_tasks::AsyncComputeTaskPool;
 
 use std::future::Future;
 
@@ -25,6 +24,7 @@ use crate::{
     InputBundle, OperationResult, OrBroken, Input, ManageInput,
     ChannelQueue, BlockingMap, AsyncMap, Channel, OperateTask, ActiveTasksStorage,
     CallBlockingMapOnce, CallAsyncMapOnce, UnusedStreams, make_stream_buffer_from_world,
+    async_execution::spawn_task,
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
@@ -171,7 +171,7 @@ where
         let channel = Channel::new(source, session, sender.clone());
         let streams = channel.for_streams::<Streams>(&world)?;
 
-        let task = AsyncComputeTaskPool::get().spawn(f.call(AsyncMap {
+        let task = spawn_task(f.call(AsyncMap {
             request, streams, channel, source, session,
         }));
 

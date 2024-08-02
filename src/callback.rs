@@ -20,14 +20,13 @@ use crate::{
     OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateCallback, ManageInput, OperationError,
     OrBroken, OperateTask, UnusedStreams, ManageDisposal,
-    make_stream_buffer_from_world,
+    make_stream_buffer_from_world, async_execution::spawn_task,
 };
 
 use bevy_ecs::{
     prelude::{World, Entity, In, Commands},
     system::{IntoSystem, BoxedSystem},
 };
-use bevy_tasks::AsyncComputeTaskPool;
 
 use std::{
     collections::VecDeque,
@@ -139,7 +138,7 @@ impl<'a> CallbackRequest<'a> {
         Task::Output: Send + Sync,
     {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let task = AsyncComputeTaskPool::get().spawn(task);
+        let task = spawn_task(task);
         let task_id = self.world.spawn(()).id();
         OperateTask::<_, Streams>::new(task_id, session, self.source, self.target, task, None, sender)
             .add(self.world, self.roster);

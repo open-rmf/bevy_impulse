@@ -58,6 +58,8 @@
 //! run freely, or use [`Impulse::take`] to receive a [`Promise`] of the final
 //! result.
 
+mod async_execution;
+
 pub mod buffer;
 pub use buffer::*;
 

@@ -24,7 +24,7 @@ use crate::{
     service::service_builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
     StopTask, UnhandledErrors, StopTaskFailure, Delivery, DeliveryInstructions,
     Deliver, DeliveryOrder, DeliveryUpdate, insert_new_order, pop_next_delivery,
-    OperationResult,
+    OperationResult, async_execution::spawn_task,
 };
 
 use bevy_ecs::{
@@ -32,7 +32,6 @@ use bevy_ecs::{
     world::EntityWorldMut,
     system::{IntoSystem, BoxedSystem, EntityCommands},
 };
-use bevy_tasks::AsyncComputeTaskPool;
 
 use std::future::Future;
 
@@ -234,7 +233,7 @@ where
         // imply that all the service's active tasks should be dropped?
     }
 
-    let task = AsyncComputeTaskPool::get().spawn(job);
+    let task = spawn_task(job);
 
     OperateTask::<_, Streams>::new(
         task_id, session, source, target, task, blocker, sender,

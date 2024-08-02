@@ -39,6 +39,9 @@ use crate::{
     execute_operation, awaken_task, dispose_for_despawned_service,
 };
 
+#[cfg(feature = "single_threaded_async")]
+use crate::async_execution::SingleThreadedExecution;
+
 #[derive(Resource, Default)]
 pub struct FlushParameters {
     /// By default, a flush will loop until the whole [`OperationRoster`] is empty.
@@ -54,6 +57,14 @@ pub struct FlushParameters {
     ///
     /// A value of `None` means the flush can loop indefinitely (this is the default).
     pub flush_loop_limit: Option<usize>,
+    /// When using the single_threaded_async feature, async futures get polled
+    /// during the impulse flush. If async futures repeatedly spawn more async
+    /// tasks then the flush could get stuck in a loop. This parameter lets you
+    /// put a limit on how many futures get polled so that the flush cannot get
+    /// stuck.
+    ///
+    /// A value of `None` means the futures can be polled indefinitely (this is the default).
+    pub single_threaded_poll_limit: Option<usize>,
 }
 
 pub fn flush_impulses() -> SystemConfigs {
@@ -64,16 +75,17 @@ fn flush_impulses_impl(
     world: &mut World,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
+    let parameters = world.get_resource_or_insert_with(|| FlushParameters::default());
+    let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
     let mut roster = OperationRoster::new();
-    collect_from_channels(new_service_query, world, &mut roster);
+    collect_from_channels(single_threaded_poll_limit, new_service_query, world, &mut roster);
 
     let mut loop_count = 0;
     while !roster.is_empty() {
-        if world.get_resource_or_insert_with(
-            || FlushParameters::default()
-        ).flush_loop_limit.is_some_and(
-            |limit| limit <= loop_count
-        ) {
+        let parameters = world.get_resource_or_insert_with(|| FlushParameters::default());
+        let flush_loop_limit = parameters.flush_loop_limit;
+        let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
+        if flush_loop_limit.is_some_and(|limit| limit <= loop_count) {
             // We have looped beyoond the limit, so we will defer anything that
             // remains in the roster and stop looping from here.
             world.get_resource_or_insert_with(|| DeferredRoster::default())
@@ -101,7 +113,9 @@ fn flush_impulses_impl(
             garbage_cleanup(world, &mut roster);
         }
 
-        collect_from_channels(new_service_query, world, &mut roster);
+        collect_from_channels(
+            single_threaded_poll_limit, new_service_query, world, &mut roster,
+        );
     }
 }
 
@@ -116,6 +130,7 @@ fn garbage_cleanup(world: &mut World, roster: &mut OperationRoster) {
 }
 
 fn collect_from_channels(
+    _single_threaded_poll_limit: Option<usize>,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
     world: &mut World,
     roster: &mut OperationRoster,
@@ -226,6 +241,9 @@ fn collect_from_channels(
                 });
         }
     }
+
+    #[cfg(feature = "single_threaded_async")]
+    SingleThreadedExecution::poll(_single_threaded_poll_limit);
 }
 
 fn drop_target(
