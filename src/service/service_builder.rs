@@ -203,7 +203,9 @@ where
     {
         let mut command_queue = CommandQueue::default();
         let mut commands = Commands::new(&mut command_queue, &world);
-        self.spawn_service(&mut commands)
+        let provider = self.spawn_service(&mut commands);
+        command_queue.apply(world);
+        provider
     }
 }
 
