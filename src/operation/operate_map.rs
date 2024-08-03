@@ -20,12 +20,13 @@ use bevy_ecs::prelude::{Component, Entity, Bundle};
 use std::future::Future;
 
 use crate::{
-    BlockingMap, AsyncMap, Operation, ChannelQueue, Channel,
+    BlockingMap, AsyncMap, Operation, ChannelQueue, Channel, Sendish,
     SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
     CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
     OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
     OperationReachability, ReachabilityResult, InputBundle, UnusedStreams,
-    ManageDisposal, make_stream_buffer_from_world, async_execution::spawn_task,
+    ManageDisposal, make_stream_buffer_from_world,
+    async_execution::{spawn_task, task_cancel_sender},
 };
 
 #[derive(Bundle)]
@@ -124,7 +125,7 @@ pub(crate) struct OperateAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send,
+    Task: 'static + Sendish,
     Streams: StreamPack,
 {
     storage: AsyncMapStorage<F>,
@@ -136,7 +137,7 @@ impl<F, Request, Task, Streams> OperateAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send,
+    Task: 'static + Sendish,
     Streams: StreamPack,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
@@ -156,7 +157,7 @@ struct AsyncMapStorage<F> {
 impl<F, Request, Task, Streams> Operation for OperateAsyncMap<F, Request, Task, Streams>
 where
     F: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -189,14 +190,15 @@ where
 
         let task = spawn_task(f.call(AsyncMap {
             request, streams, channel, source, session,
-        }));
+        }), world);
+        let cancel_sender = task_cancel_sender(world);
         world.get_entity_mut(source).or_broken()?
             .get_mut::<AsyncMapStorage<F>>().or_broken()?
             .f = Some(f);
 
         let task_source = world.spawn(()).id();
         OperateTask::<_, Streams>::new(
-            task_source, session, source, target, task, None, sender,
+            task_source, session, source, target, task, cancel_sender, None, sender,
         ).add(world, roster);
         Ok(())
     }

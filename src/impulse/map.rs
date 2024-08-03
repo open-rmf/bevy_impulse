@@ -21,10 +21,10 @@ use std::future::Future;
 
 use crate::{
     Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
-    InputBundle, OperationResult, OrBroken, Input, ManageInput,
+    InputBundle, OperationResult, OrBroken, Input, ManageInput, Sendish,
     ChannelQueue, BlockingMap, AsyncMap, Channel, OperateTask, ActiveTasksStorage,
     CallBlockingMapOnce, CallAsyncMapOnce, UnusedStreams, make_stream_buffer_from_world,
-    async_execution::spawn_task,
+    async_execution::{spawn_task, task_cancel_sender}
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
@@ -112,7 +112,7 @@ pub(crate) struct ImpulseAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send,
+    Task: 'static + Sendish,
     Streams: 'static + Send + Sync,
 {
     f: AsyncMapOnceStorage<F>,
@@ -124,7 +124,7 @@ impl<F, Request, Task, Streams> ImpulseAsyncMap<F, Request, Task, Streams>
 where
     F: 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: 'static + Send,
+    Task: 'static + Sendish,
     Streams: 'static + Send + Sync,
 {
     pub(crate) fn new(target: Entity, f: F) -> Self {
@@ -144,7 +144,7 @@ struct AsyncMapOnceStorage<F> {
 impl<F, Request, Task, Streams> Impulsive for ImpulseAsyncMap<F, Request, Task, Streams>
 where
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
     F: CallAsyncMapOnce<Request, Task, Streams> + 'static + Send + Sync,
@@ -173,11 +173,12 @@ where
 
         let task = spawn_task(f.call(AsyncMap {
             request, streams, channel, source, session,
-        }));
+        }), world);
+        let cancel_sender = task_cancel_sender(world);
 
         let task_source = world.spawn(()).id();
         OperateTask::<_, Streams>::new(
-            task_source, session, source, target, task, None, sender,
+            task_source, session, source, target, task, cancel_sender, None, sender,
         ).add(world, roster);
         Ok(())
     }

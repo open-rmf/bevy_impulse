@@ -17,14 +17,14 @@
 
 use crate::{
     AsyncService, AsyncServiceInput, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
-    Channel, ChannelQueue, OperationRoster, Blocker,
+    Channel, ChannelQueue, OperationRoster, Blocker, Sendish,
     StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
     OperationError, OrBroken, ManageInput, Input, OperateTask,
     SingleTargetStorage, dispose_for_despawned_service,
     service::service_builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
     StopTask, UnhandledErrors, StopTaskFailure, Delivery, DeliveryInstructions,
     Deliver, DeliveryOrder, DeliveryUpdate, insert_new_order, pop_next_delivery,
-    OperationResult, async_execution::spawn_task,
+    OperationResult, async_execution::{spawn_task, task_cancel_sender}
 };
 
 use bevy_ecs::{
@@ -46,7 +46,7 @@ struct UninitAsyncServiceStorage<Request, Streams: StreamPack, Task>(BoxedSystem
 impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -74,7 +74,7 @@ where
 impl<Request, Streams, Task, M, Sys> IsAsyncService<(Request, Streams, Task, M)> for Sys
 where
     Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -85,7 +85,7 @@ where
 impl<Request, Streams, Task> ServiceTrait for AsyncServiceStorage<Request, Streams, Task>
 where
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
@@ -182,7 +182,7 @@ fn serve_async_request<Request, Streams, Task>(
 ) -> OperationResult
 where
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
@@ -233,10 +233,11 @@ where
         // imply that all the service's active tasks should be dropped?
     }
 
-    let task = spawn_task(job);
+    let task = spawn_task(job, world);
+    let cancel_sender = task_cancel_sender(world);
 
     OperateTask::<_, Streams>::new(
-        task_id, session, source, target, task, blocker, sender,
+        task_id, session, source, target, task, cancel_sender, blocker, sender,
     ).add(world, roster);
     Ok(())
 }
@@ -248,7 +249,7 @@ pub(crate) fn serve_next_async_request<Request, Streams, Task>(
 )
 where
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
@@ -316,7 +317,7 @@ where
 impl<Request, Task, M, Sys> IntoService<(Request, Task, M)> for AsAsyncService<Sys>
 where
     Sys: IntoSystem<Request, Task, M>,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {
@@ -337,7 +338,7 @@ where
 impl<Request, Task, M, Sys> IsAsyncService<(Request, Task, M)> for AsAsyncService<Sys>
 where
     Sys: IntoSystem<Request, Task, M>,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {

@@ -19,8 +19,9 @@ use crate::{
     BlockingCallback, AsyncCallback, Channel, ChannelQueue,
     OperationRoster, StreamPack, Input, Provider, ProvideOnce,
     AddOperation, OperateCallback, ManageInput, OperationError,
-    OrBroken, OperateTask, UnusedStreams, ManageDisposal,
-    make_stream_buffer_from_world, async_execution::spawn_task,
+    OrBroken, OperateTask, UnusedStreams, ManageDisposal, Sendish,
+    make_stream_buffer_from_world,
+    async_execution::{spawn_task, task_cancel_sender}
 };
 
 use bevy_ecs::{
@@ -129,7 +130,7 @@ impl<'a> CallbackRequest<'a> {
         Ok(())
     }
 
-    fn give_task<Task: Future + 'static + Send, Streams: StreamPack>(
+    fn give_task<Task: Future + 'static + Sendish, Streams: StreamPack>(
         &mut self,
         session: Entity,
         task: Task,
@@ -138,9 +139,12 @@ impl<'a> CallbackRequest<'a> {
         Task::Output: Send + Sync,
     {
         let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
-        let task = spawn_task(task);
+        let task = spawn_task(task, self.world);
         let task_id = self.world.spawn(()).id();
-        OperateTask::<_, Streams>::new(task_id, session, self.source, self.target, task, None, sender)
+        let cancel_sender = task_cancel_sender(self.world);
+        OperateTask::<_, Streams>::new(
+            task_id, session, self.source, self.target, task, cancel_sender, None, sender
+        )
             .add(self.world, self.roster);
         Ok(())
     }
@@ -226,7 +230,7 @@ struct AsyncCallbackSystem<Request, Task, Streams: StreamPack> {
 
 impl<Request, Task, Streams> CallbackTrait<Request, Task::Output, Streams> for AsyncCallbackSystem<Request, Task, Streams>
 where
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -297,7 +301,7 @@ where
 impl<Request, Task, Streams, M, Sys> AsCallback<AsyncCallbackMarker<(Request, Task, Streams, M)>> for Sys
 where
     Sys: IntoSystem<AsyncCallback<Request, Streams>, Task, M>,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -346,7 +350,7 @@ where
 impl<Request, Task, Streams, F> AsCallback<AsyncMapCallbackMarker<(Request, Task, Streams)>> for F
 where
     F: FnMut(AsyncCallback<Request, Streams>) -> Task + 'static + Send,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -418,7 +422,7 @@ pub trait IntoAsyncCallback<M> {
 impl<Request, Task, M, Sys> IntoAsyncCallback<AsyncCallbackMarker<(Request, Task, (), M)>> for Sys
 where
     Sys: IntoSystem<Request, Task, M>,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {
@@ -436,7 +440,7 @@ fn peel_async<Request>(In(AsyncCallback { request, .. }): In<AsyncCallback<Reque
 impl<Request, Task, F> IntoAsyncCallback<AsyncMapCallbackMarker<(Request, Task, ())>> for F
 where
     F: FnMut(Request) -> Task + 'static + Send,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {

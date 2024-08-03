@@ -59,6 +59,7 @@
 //! result.
 
 mod async_execution;
+pub use async_execution::Sendish;
 
 pub mod buffer;
 pub use buffer::*;

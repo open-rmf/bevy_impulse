@@ -17,7 +17,7 @@
 
 use crate::{
     Provider, BlockingMap, AsyncMap, AddOperation, OperateBlockingMap,
-    OperateAsyncMap, StreamPack, ProvideOnce,
+    OperateAsyncMap, StreamPack, ProvideOnce, Sendish,
 };
 
 use bevy_ecs::prelude::{Entity, Commands};
@@ -163,7 +163,7 @@ pub struct AsyncMapMarker;
 impl<F, Request, Task, Streams> AsMap<(Request, Task, Streams, AsyncMapMarker)> for F
 where
     F: FnMut(AsyncMap<Request, Streams>) -> Task + 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -195,7 +195,7 @@ impl<Def: Clone, Request, Task, Streams> Clone for AsyncMapDef<Def, Request, Tas
 impl<Def, Request, Task, Streams> ProvideOnce for AsyncMapDef<Def, Request, Task, Streams>
 where
     Def: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -212,7 +212,7 @@ where
 impl<Def, Request, Task, Streams> Provider for AsyncMapDef<Def, Request, Task, Streams>
 where
     Def: CallAsyncMap<Request, Task, Streams> + 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
@@ -229,7 +229,7 @@ impl<F, Request, Task> IntoAsyncMap<(Request, Task)> for F
 where
     F: FnMut(Request) -> Task + 'static + Send + Sync,
     Request: 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
     Task::Output: 'static + Send + Sync,
 {
     type MapType = AsyncMapDef<AsyncMapAdapter<F>, Request, Task, ()>;
@@ -243,7 +243,7 @@ pub struct AsyncMapAdapter<F>(F);
 impl<F, Request, Task> CallAsyncMap<Request, Task, ()> for AsyncMapAdapter<F>
 where
     F: FnMut(Request) -> Task + 'static + Send + Sync,
-    Task: Future + 'static + Send,
+    Task: Future + 'static + Sendish,
 {
     fn call(&mut self, AsyncMap{ request, .. }: AsyncMap<Request, ()>) -> Task {
         (self.0)(request)

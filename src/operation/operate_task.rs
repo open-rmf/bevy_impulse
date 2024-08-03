@@ -40,7 +40,8 @@ use crate::{
     OperationSetup, OperationRequest, OperationResult, Operation, AddOperation,
     OrBroken, OperationCleanup, ChannelItem, OperationError, Broken, ScopeStorage,
     OperationReachability, ReachabilityResult, emit_disposal, Disposal, StreamPack,
-    Cleanup, async_execution::{spawn_task, TaskHandle},
+    Cleanup,
+    async_execution::{task_cancel_sender, TaskHandle, CancelSender},
 };
 
 struct JobWaker {
@@ -77,6 +78,7 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPa
     node: Entity,
     target: Entity,
     task: Option<TaskHandle<Response>>,
+    cancel_sender: CancelSender,
     blocker: Option<Blocker>,
     sender: CbSender<ChannelItem>,
     disposal: Option<Disposal>,
@@ -92,6 +94,7 @@ impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response,
         node: Entity,
         target: Entity,
         task: TaskHandle<Response>,
+        cancel_sender: CancelSender,
         blocker: Option<Blocker>,
         sender: CbSender<ChannelItem>,
     ) -> Self {
@@ -101,6 +104,7 @@ impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response,
             node,
             target,
             task: Some(task),
+            cancel_sender,
             blocker,
             sender,
             disposal: None,
@@ -144,7 +148,7 @@ where
         let disposal = self.disposal.take();
         let being_cleaned = self.being_cleaned;
 
-        spawn_task(async move {
+        self.cancel_sender.send(move || async move {
             let mut disposed = false;
             if let Some(task) = task {
                 disposed = true;
@@ -159,8 +163,8 @@ where
                     });
                     emit_disposal(node, session, disposal, world, roster);
                 }
-            }))
-        }).detach();
+            })).ok();
+        });
     }
 }
 
@@ -282,8 +286,10 @@ where
                             || ChannelQueue::default()
                         ).sender.clone();
 
+                        let cancel_sender = task_cancel_sender(world);
+
                         let operation = OperateTask::<_, Streams>::new(
-                            source, session, node, target, task, unblock, sender,
+                            source, session, node, target, task, cancel_sender, unblock, sender,
                         );
 
                         // Dropping this operation will trigger the task cancellation
@@ -308,14 +314,14 @@ where
         let unblock = operation.blocker.take();
         let sender = operation.sender.clone();
         if let Some(task) = task {
-            spawn_task(async move {
+            operation.cancel_sender.send(move || async move {
                 task.cancel().await;
                 if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
                     cleanup_task::<Response>(source, node, unblock, Some(cleanup), world, roster);
                 })) {
                     eprintln!("Failed to send a command to cleanup a task: {err}");
                 }
-            }).detach();
+            });
         } else {
             cleanup_task::<Response>(source, node, unblock, Some(cleanup), clean.world, clean.roster);
         }

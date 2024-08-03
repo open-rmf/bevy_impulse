@@ -243,7 +243,7 @@ fn collect_from_channels(
     }
 
     #[cfg(feature = "single_threaded_async")]
-    SingleThreadedExecution::poll(_single_threaded_poll_limit);
+    SingleThreadedExecution::get(world).poll(_single_threaded_poll_limit);
 }
 
 fn drop_target(

@@ -22,7 +22,7 @@ use std::future::Future;
 
 use crate::{
     Promise, ProvideOnce, StreamPack, IntoBlockingMapOnce, IntoAsyncMapOnce,
-    AsMapOnce, UnusedTarget, StreamTargetMap, Cancellable,
+    AsMapOnce, UnusedTarget, StreamTargetMap, Cancellable, Sendish,
 };
 
 mod detach;
@@ -169,7 +169,7 @@ where
         f: impl FnOnce(Response) -> Task + 'static + Send + Sync,
     ) -> Impulse<'w, 's, 'a, Task::Output, ()>
     where
-        Task: Future + 'static + Send,
+        Task: Future + 'static + Sendish,
         Task::Output: 'static + Send + Sync,
     {
         self.then(f.into_async_map_once())

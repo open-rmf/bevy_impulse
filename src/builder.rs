@@ -28,7 +28,7 @@ use crate::{
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, GateAction,
-    OperateStaticGate, OperateBufferAccess, Collect,
+    OperateStaticGate, OperateBufferAccess, Collect, Sendish,
 };
 
 pub(crate) mod connect;
@@ -99,7 +99,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ) -> Node<T, Task::Output, ()>
     where
         T: 'static + Send + Sync,
-        Task: Future + 'static + Send,
+        Task: Future + 'static + Sendish,
         Task::Output: 'static + Send + Sync,
     {
         self.create_node(f.into_async_map())

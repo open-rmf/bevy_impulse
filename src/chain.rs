@@ -30,7 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, GateAction, Buffered,
-    Spread, Collect,
+    Spread, Collect, Sendish,
     make_result_branching, make_option_branching,
 };
 
@@ -187,7 +187,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
     ) -> Chain<'w, 's, 'a, 'b, Task::Output>
     where
-        Task: Future + 'static + Send,
+        Task: Future + 'static + Sendish,
         Task::Output: 'static + Send + Sync,
     {
         self.then(f.into_async_map())
@@ -201,7 +201,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
     ) -> Node<T, Task::Output, ()>
     where
-        Task: Future + 'static + Send,
+        Task: Future + 'static + Sendish,
         Task::Output: 'static + Send + Sync,
     {
         self.then_node(f.into_async_map())
