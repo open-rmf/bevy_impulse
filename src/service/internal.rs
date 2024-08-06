@@ -17,7 +17,11 @@
 
 use bevy_ecs::prelude::{Entity, Component, Bundle, World, Resource};
 
-use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
+use tokio::sync::mpsc::{
+    unbounded_channel,
+    UnboundedSender as TokioSender,
+    UnboundedReceiver as TokioReceiver,
+};
 
 use anyhow::anyhow;
 
@@ -86,11 +90,11 @@ pub(crate) struct ServiceLifecycle {
     /// The entity that this is attached to
     entity: Entity,
     /// Used to send the signal that the service has despawned
-    sender: CbSender<Entity>,
+    sender: TokioSender<Entity>,
 }
 
 impl ServiceLifecycle {
-    pub(crate) fn new(entity: Entity, sender: CbSender<Entity>) -> Self {
+    pub(crate) fn new(entity: Entity, sender: TokioSender<Entity>) -> Self {
         Self { entity, sender }
     }
 }
@@ -101,15 +105,15 @@ impl Drop for ServiceLifecycle {
     }
 }
 
-#[derive(Resource, Clone)]
+#[derive(Resource)]
 pub(crate) struct ServiceLifecycleChannel {
-    pub(crate) sender: CbSender<Entity>,
-    pub(crate) receiver: CbReceiver<Entity>,
+    pub(crate) sender: TokioSender<Entity>,
+    pub(crate) receiver: TokioReceiver<Entity>,
 }
 
 impl ServiceLifecycleChannel {
     pub(crate) fn new() -> Self {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = unbounded_channel();
         Self { sender, receiver }
     }
 }

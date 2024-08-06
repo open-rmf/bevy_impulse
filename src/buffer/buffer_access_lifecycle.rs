@@ -17,7 +17,7 @@
 
 use bevy_ecs::prelude::{Entity, World};
 
-use crossbeam::channel::Sender as CbSender;
+use tokio::sync::mpsc::UnboundedSender as TokioSender;
 
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ pub(crate) struct BufferAccessLifecycle {
     accessor: Entity,
     session: Entity,
     buffer: Entity,
-    sender: CbSender<ChannelItem>,
+    sender: TokioSender<ChannelItem>,
     /// This tracker is an additional layer of indirection that allows the
     /// buffer accessor node that created the key to keep track of whether this
     /// lifecycle is still active.
@@ -47,7 +47,7 @@ impl BufferAccessLifecycle {
         buffer: Entity,
         session: Entity,
         accessor: Entity,
-        sender: CbSender<ChannelItem>,
+        sender: TokioSender<ChannelItem>,
         tracker: Arc<()>,
     ) -> Self {
         Self { scope, accessor, session, buffer, sender, tracker }

@@ -21,7 +21,7 @@ bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
 arrayvec = "*"
 itertools = "*"
 smallvec = "*"
-crossbeam = "*"
+tokio = { version = "*", features = ["sync"]}
 futures = "0.3"
 backtrace = "0.3"
 anyhow = "*"

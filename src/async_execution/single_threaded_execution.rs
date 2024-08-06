@@ -34,8 +34,8 @@ pub(crate) struct SingleThreadedExecution {
 
 impl SingleThreadedExecution {
     fn new() -> Self {
-        let (cancel_sender, cancel_receiver) = unbounded();
-        let (runnable_sender, runnable_receiver) = unbounded();
+        let (cancel_sender, cancel_receiver) = unbounded_channel();
+        let (runnable_sender, runnable_receiver) = unbounded_channel();
         Self { cancel_sender, cancel_receiver, runnable_sender, runnable_receiver }
     }
 

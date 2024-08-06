@@ -335,15 +335,15 @@ mod tests {
         sync::{Arc, Mutex}
     };
     use smallvec::SmallVec;
-    use crossbeam::channel::unbounded;
+    use tokio::sync::mpsc::unbounded_channel;
     use bevy_utils::label::DynEq;
 
     #[test]
     fn test_dropped_chain() {
         let mut context = TestingContext::minimal_plugins();
 
-        let (detached_sender, detached_receiver) = unbounded();
-        let (attached_sender, attached_receiver) = unbounded();
+        let (detached_sender, mut detached_receiver) = unbounded_channel();
+        let (attached_sender, mut attached_receiver) = unbounded_channel();
 
         context.command(|commands| {
             let _ = commands

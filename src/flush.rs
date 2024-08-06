@@ -136,20 +136,18 @@ fn collect_from_channels(
     roster: &mut OperationRoster,
 ) {
     // Get the receiver for async task commands
-    let async_receiver = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.clone();
-
-    // Apply all the commands that have been received
-    while let Ok(item) = async_receiver.try_recv() {
+    while let Ok(item) = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.try_recv() {
         (item)(world, roster);
     }
 
     roster.process_deferals();
 
+    let mut removed_services: SmallVec<[Entity; 8]> = SmallVec::new();
     world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
-    world.resource_scope::<ServiceLifecycleChannel, ()>(|world, lifecycles| {
+    world.resource_scope::<ServiceLifecycleChannel, ()>(|world, mut lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.
-        for removed_service in lifecycles.receiver.try_iter() {
-            dispose_for_despawned_service(removed_service, world, roster);
+        while let Ok(removed_service) = lifecycles.receiver.try_recv() {
+            removed_services.push(removed_service);
         }
 
         // Add a lifecycle tracker to any new services that might have shown up
@@ -167,18 +165,21 @@ fn collect_from_channels(
         }
     });
 
+    for removed_service in removed_services {
+        dispose_for_despawned_service(removed_service, world, roster);
+    }
+
     // Queue any operations that needed to be deferred
     let mut deferred = world.get_resource_or_insert_with(|| DeferredRoster::default());
     roster.append(&mut deferred);
 
     // Collect any tasks that are ready to be woken
-    for wakeable in world
-        .get_resource_or_insert_with(|| WakeQueue::new())
-        .receiver
-        .try_iter()
-    {
-        roster.awake(wakeable);
-    }
+    world.get_resource_or_insert_with(|| WakeQueue::new());
+    world.resource_scope::<WakeQueue, ()>(|world, mut wake| {
+        while let Ok(wakeable) = wake.receiver.try_recv() {
+            roster.awake(wakeable);
+        }
+    });
 
     let mut unused_targets_state: SystemState<Query<(Entity, &Detached), With<UnusedTarget>>> =
         SystemState::new(world);
@@ -203,14 +204,13 @@ fn collect_from_channels(
         drop_target(target, world, roster, true);
     }
 
-    drop_targets.extend(
-        world
-            .get_resource_or_insert_with(|| ImpulseLifecycleChannel::default())
-            .receiver
-            .try_iter()
-    );
+    let mut lifecycles = world.get_resource_or_insert_with(|| ImpulseLifecycleChannel::default());
+    let mut dropped_targets: SmallVec<[Entity; 8]> = SmallVec::new();
+    while let Ok(dropped_target) = lifecycles.receiver.try_recv() {
+        dropped_targets.push(dropped_target);
+    }
 
-    for target in drop_targets.drain(..) {
+    for target in drop_targets {
         drop_target(target, world, roster, false);
     }
 

@@ -24,9 +24,16 @@ use bevy_hierarchy::BuildChildren;
 use bevy_derive::{Deref, DerefMut};
 use bevy_utils::all_tuples;
 
-use crossbeam::channel::{Receiver, unbounded};
+use tokio::sync::mpsc::{UnboundedReceiver as Receiver, unbounded_channel};
 
-use std::{rc::Rc, cell::RefCell, sync::Arc};
+use std::{
+    rc::Rc,
+    cell::RefCell,
+    sync::Arc,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use smallvec::SmallVec;
 
@@ -113,7 +120,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         StreamTargetStorage<Self>,
         Receiver<Self>,
     ) {
-        let (sender, receiver) = unbounded::<Self>();
+        let (sender, receiver) = unbounded_channel::<Self>();
         let target = commands
             .spawn(())
             // Set the parent of this stream to be the session so it can be
@@ -182,6 +189,21 @@ impl<T: Stream + std::fmt::Debug> StreamBuffer<T> {
         self.target
     }
 }
+
+pub struct StreamForward<T: Stream> {
+    receiver: Receiver<T>,
+    channel: StreamChannel<T>,
+}
+
+// impl<T: Stream> Future for StreamForward<T> {
+//     /// This will keep forwarding the streams until the upstream sender
+//     /// disconnects, so there is nothing of interest to return from the future.
+//     type Output = ();
+
+//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+
+//     }
+// }
 
 pub struct StreamRequest<'a> {
     /// The node that emitted the stream
@@ -264,7 +286,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type StreamStorageBundle: Bundle;
     type StreamInputPack;
     type StreamOutputPack: std::fmt::Debug;
-    type Receiver;
+    type Receiver: Send + Sync;
     type Channel;
     type Buffer: Clone;
     type TargetIndexQuery: ReadOnlyWorldQuery;
@@ -934,7 +956,11 @@ mod tests {
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some_and(|v| v == 10));
-        let stream: Vec<u32> = recipient.streams.into_iter().map(|v| v.0).collect();
+
+        let mut stream: Vec<u32> = Vec::new();
+        while let Ok(r) = recipient.streams.try_recv() {
+            stream.push(r.0);
+        }
         assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         assert!(context.no_unhandled_errors());
     }
@@ -1127,6 +1153,7 @@ mod tests {
         assert!(outcome.stream_f32.is_empty());
     }
 
+    #[derive(Default)]
     struct FormatOutcome {
         stream_u32: Vec<u32>,
         stream_i32: Vec<i32>,
@@ -1134,12 +1161,21 @@ mod tests {
     }
 
     impl From<Recipient<(), FormatStreams>> for FormatOutcome {
-        fn from(recipient: Recipient<(), FormatStreams>) -> Self {
-            Self {
-                stream_u32: recipient.streams.0.into_iter().map(|v| v.0).collect(),
-                stream_i32: recipient.streams.1.into_iter().map(|v| v.0).collect(),
-                stream_f32: recipient.streams.2.into_iter().map(|v| v.0).collect()
+        fn from(mut recipient: Recipient<(), FormatStreams>) -> Self {
+            let mut result = Self::default();
+            while let Ok(r) = recipient.streams.0.try_recv() {
+                result.stream_u32.push(r.0);
             }
+
+            while let Ok(r) = recipient.streams.1.try_recv() {
+                result.stream_i32.push(r.0);
+            }
+
+            while let Ok(r) = recipient.streams.2.try_recv() {
+                result.stream_f32.push(r.0);
+            }
+
+            result
         }
     }
 }

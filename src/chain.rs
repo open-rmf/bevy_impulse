@@ -30,7 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, Gate, Buffered,
-    Spread, Collect, Sendish,
+    Spread, Collect, Sendish, Service,
     make_result_branching, make_option_branching,
 };
 
@@ -890,6 +890,21 @@ where
 
         Chain::new(target, self.builder)
     }
+}
+
+impl<'w, 's, 'a, 'b, Request, Response, Streams> Chain<'w, 's, 'a, 'b, (Request, Service<Request, Response, Streams>)>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    // pub fn then_run(self) -> Chain<'w, 's, 'a, 'b, Response> {
+
+    // }
+
+    // pub fn then_run_node(self) -> Node<Request, Response, Streams> {
+
+    // }
 }
 
 impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, GateRequest<T>>

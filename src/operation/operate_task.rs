@@ -31,7 +31,11 @@ use std::{
 
 use futures::task::{waker_ref, ArcWake};
 
-use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
+use tokio::sync::mpsc::{
+    unbounded_channel,
+    UnboundedSender as TokioSender,
+    UnboundedReceiver as TokioReceiver,
+};
 
 use smallvec::SmallVec;
 
@@ -45,7 +49,7 @@ use crate::{
 };
 
 struct JobWaker {
-    sender: CbSender<Entity>,
+    sender: TokioSender<Entity>,
     entity: Entity,
 }
 
@@ -60,13 +64,13 @@ struct JobWakerStorage(Arc<JobWaker>);
 
 #[derive(Resource)]
 pub(crate) struct WakeQueue {
-    sender: CbSender<Entity>,
-    pub(crate) receiver: CbReceiver<Entity>,
+    sender: TokioSender<Entity>,
+    pub(crate) receiver: TokioReceiver<Entity>,
 }
 
 impl WakeQueue {
     pub(crate) fn new() -> WakeQueue {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = unbounded_channel();
         WakeQueue { sender, receiver }
     }
 }
@@ -80,7 +84,7 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPa
     task: Option<TaskHandle<Response>>,
     cancel_sender: CancelSender,
     blocker: Option<Blocker>,
-    sender: CbSender<ChannelItem>,
+    sender: TokioSender<ChannelItem>,
     disposal: Option<Disposal>,
     being_cleaned: Option<Cleanup>,
     finished_normally: bool,
@@ -96,7 +100,7 @@ impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response,
         task: TaskHandle<Response>,
         cancel_sender: CancelSender,
         blocker: Option<Blocker>,
-        sender: CbSender<ChannelItem>,
+        sender: TokioSender<ChannelItem>,
     ) -> Self {
         Self {
             source,

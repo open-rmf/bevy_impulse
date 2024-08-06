@@ -847,13 +847,13 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    use crossbeam::channel::unbounded;
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[test]
     fn test_on_cleanup() {
         let mut context = TestingContext::minimal_plugins();
 
-        let (sender, receiver) = unbounded();
+        let (sender, mut receiver) = unbounded_channel();
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let input = scope.input.fork_clone(builder);
 
@@ -895,9 +895,9 @@ mod tests {
         assert!(context.no_unhandled_errors());
         assert!(context.confirm_buffers_empty().is_ok());
 
-        let (cancel_sender, cancel_receiver) = unbounded();
-        let (terminate_sender, terminate_receiver) = unbounded();
-        let (cleanup_sender, cleanup_receiver) = unbounded();
+        let (cancel_sender, mut cancel_receiver) = unbounded_channel();
+        let (terminate_sender, mut terminate_receiver) = unbounded_channel();
+        let (cleanup_sender, mut cleanup_receiver) = unbounded_channel();
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let input = scope.input.fork_clone(builder);
 

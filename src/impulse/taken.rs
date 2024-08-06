@@ -18,7 +18,7 @@
 use bevy_ecs::prelude::Component;
 use bevy_hierarchy::DespawnRecursiveExt;
 
-use crossbeam::channel::Sender;
+use tokio::sync::mpsc::UnboundedSender as Sender;
 
 use crate::{
     Impulsive, OperationSetup, OperationRequest,

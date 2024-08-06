@@ -24,7 +24,11 @@ use bevy_hierarchy::DespawnRecursiveExt;
 
 use backtrace::Backtrace;
 
-use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
+use tokio::sync::mpsc::{
+    unbounded_channel,
+    UnboundedSender as TokioSender,
+    UnboundedReceiver as TokioReceiver,
+};
 
 use smallvec::SmallVec;
 
@@ -147,15 +151,15 @@ pub(crate) fn cancel_impulse(
 #[derive(Component)]
 pub(crate) struct OnTerminalCancelled(pub(crate) fn(OperationCancel) -> OperationResult);
 
-#[derive(Resource, Clone)]
+#[derive(Resource)]
 pub(crate) struct ImpulseLifecycleChannel {
-    pub(crate) sender: CbSender<Entity>,
-    pub(crate) receiver: CbReceiver<Entity>,
+    pub(crate) sender: TokioSender<Entity>,
+    pub(crate) receiver: TokioReceiver<Entity>,
 }
 
 impl Default for ImpulseLifecycleChannel {
     fn default() -> Self {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = unbounded_channel();
         Self { sender, receiver }
     }
 }
@@ -169,11 +173,11 @@ pub(crate) struct ImpulseLifecycle {
     /// component.
     sources: SmallVec<[Entity; 8]>,
     /// Used to notify the flusher that the target of the sources has been dropped
-    sender: CbSender<Entity>,
+    sender: TokioSender<Entity>,
 }
 
 impl ImpulseLifecycle {
-    fn new(source: Entity, sender: CbSender<Entity>) -> Self {
+    fn new(source: Entity, sender: TokioSender<Entity>) -> Self {
         Self {
             sources: SmallVec::from_iter([source]),
             sender,

@@ -20,7 +20,11 @@ use bevy_ecs::{
     system::{CommandQueue, Commands},
 };
 
-use crossbeam::channel::{unbounded, Sender as CbSender, Receiver as CbReceiver};
+use tokio::sync::mpsc::{
+    unbounded_channel,
+    UnboundedSender as TokioSender,
+    UnboundedReceiver as TokioReceiver,
+};
 
 use std::sync::Arc;
 
@@ -76,7 +80,7 @@ impl Channel {
     pub(crate) fn new(
         source: Entity,
         session: Entity,
-        sender: CbSender<ChannelItem>,
+        sender: TokioSender<ChannelItem>,
     ) -> Self {
         Self {
             inner: Arc::new(InnerChannel { source, session, sender }),
@@ -88,7 +92,7 @@ impl Channel {
 pub struct InnerChannel {
     source: Entity,
     session: Entity,
-    sender: CbSender<ChannelItem>,
+    sender: TokioSender<ChannelItem>,
 }
 
 impl InnerChannel {
@@ -96,14 +100,14 @@ impl InnerChannel {
         self.source
     }
 
-    pub fn sender(&self) -> &CbSender<ChannelItem> {
+    pub fn sender(&self) -> &TokioSender<ChannelItem> {
         &self.sender
     }
 }
 
 pub(crate) type ChannelItem = Box<dyn FnOnce(&mut World, &mut OperationRoster) + Send>;
-pub(crate) type ChannelSender = CbSender<ChannelItem>;
-pub(crate) type ChannelReceiver = CbReceiver<ChannelItem>;
+pub(crate) type ChannelSender = TokioSender<ChannelItem>;
+pub(crate) type ChannelReceiver = TokioReceiver<ChannelItem>;
 
 #[derive(Resource)]
 pub(crate) struct ChannelQueue {
@@ -113,7 +117,7 @@ pub(crate) struct ChannelQueue {
 
 impl ChannelQueue {
     pub(crate) fn new() -> Self {
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = unbounded_channel();
         Self { sender, receiver }
     }
 }
