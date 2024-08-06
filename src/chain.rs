@@ -29,7 +29,7 @@ use crate::{
     AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop, BufferAccessMut,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
-    GateRequest, OperateDynamicGate, OperateStaticGate, GateAction, Buffered,
+    GateRequest, OperateDynamicGate, OperateStaticGate, Gate, Buffered,
     Spread, Collect, Sendish,
     make_result_branching, make_option_branching,
 };
@@ -72,6 +72,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn connect(self, input: InputSlot<T>) {
         let output = Output::new(self.scope(), self.target);
         self.builder.connect(output, input)
+    }
+
+    /// Explicitly terminate the chain by indicating that you want it to remain
+    /// unused.
+    pub fn unused(self) {
+        // Do nothing
     }
 
     /// Connect the response at the end of the chain into a new provider. Get
@@ -395,7 +401,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// `unzip` allows you to convert it into a tuple of chains:
     /// `(Output<A>, Output<B>, Output<C>, ...)`.
     ///
-    /// You can also consider using `unzip_build` to continue building each
+    /// You can also consider using `fork_unzip` to continue building each
     /// chain in the tuple independently by providing a builder function for
     /// each element of the tuple.
     pub fn unzip(self) -> T::Unzipped
@@ -406,14 +412,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// If you have a `Chain<(A, B, C, ...)>` with a tuple response then
-    /// `unzip_build` allows you to split it into multiple chains (one for each
+    /// `fork_unzip` allows you to split it into multiple chains (one for each
     /// tuple element) and apply a separate builder function to each chain. You
     /// will be passed back the zipped return values of all the builder functions.
-    pub fn unzip_build<Build>(self, build: Build) -> Build::ReturnType
+    pub fn fork_unzip<Build>(self, build: Build) -> Build::ReturnType
     where
         Build: UnzipBuilder<T>
     {
-        build.unzip_build(Output::<T>::new(self.scope(), self.target), self.builder)
+        build.fork_unzip(Output::<T>::new(self.scope(), self.target), self.builder)
     }
 
     /// If `T` implements [`Iterator`] then you can fire off each of its elements
@@ -532,11 +538,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         }
     }
 
-    /// Apply a [gate action](GateAction) to one or more buffers at this point
+    /// Apply a [gate action](Gate) to one or more buffers at this point
     /// in the workflow.
     pub fn then_gate_action<B>(
         self,
-        action: GateAction,
+        action: Gate,
         buffers: B,
     ) -> Chain<'w, 's, 'a, 'b, T>
     where
@@ -557,24 +563,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Chain::new(target, self.builder)
     }
 
-    /// [Open the gates](GateAction) of one or more buffers at this point in the
+    /// [Open the gates](Gate) of one or more buffers at this point in the
     /// workflow.
     pub fn then_gate_open<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
     {
-        self.then_gate_action(GateAction::Open, buffers)
+        self.then_gate_action(Gate::Open, buffers)
     }
 
-    /// [Close the gates](GateAction) of one or more buffers at this point in
+    /// [Close the gates](Gate) of one or more buffers at this point in
     /// the workflow.
     pub fn then_gate_close<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
     {
-        self.then_gate_action(GateAction::Close, buffers)
+        self.then_gate_action(Gate::Closed, buffers)
     }
 
     /// If the chain's response implements the [`Future`] trait, applying
@@ -960,7 +966,7 @@ mod tests {
         let workflow = context.spawn_io_workflow(|scope, builder| {
             scope.input.chain(builder)
                 // (2.0, 2.0)
-                .unzip_build((
+                .fork_unzip((
                     |chain: Chain<f64>| chain
                         // 2.0
                         .map_block(|value|
@@ -1062,7 +1068,7 @@ mod tests {
             .map_block(|v| (v, 2.0*v))
             .then_io_scope(|scope, builder| {
                 scope.input.chain(builder)
-                .unzip_build((
+                .fork_unzip((
                     |chain: Chain<f64>| {
                         chain
                         .map_block(|v| (v, 10.0))
@@ -1323,7 +1329,7 @@ mod tests {
                 .collect_all::<16>()
                 .connect(scope.terminate);
 
-            let _ = scope.input.chain(builder)
+            scope.input.chain(builder)
                 .map_block(|v: i32| Some(v))
                 .fork_option(
                     |chain: Chain<i32>| chain
@@ -1331,7 +1337,8 @@ mod tests {
                         .collect_all::<16>()
                         .connect(scope.terminate),
                     |chain: Chain<()>| chain
-                        .map_block(|()| unreachable!()).output(),
+                        .map_block(|()| unreachable!())
+                        .unused(),
                 );
         });
 

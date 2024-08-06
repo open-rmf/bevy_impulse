@@ -17,7 +17,7 @@
 
 /// Indicate whether a buffer gate should open or close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GateAction {
+pub enum Gate {
     /// Open the buffer gate so that listeners (including [join][1] operations)
     /// can resume getting woken when the value in a buffer changes. They will
     /// receive a wakeup immediately when a gate switches from closed to open,
@@ -32,18 +32,18 @@ pub enum GateAction {
     ///
     /// [1]: crate::Bufferable::join
     /// [2]: crate::BufferSettings
-    Close,
+    Closed,
 }
 
-impl GateAction {
+impl Gate {
     /// Is this action supposed to open a gate?
     pub fn is_open(&self) -> bool {
         matches!(self, Self::Open)
     }
 
     /// Is this action supposed to close a gate?
-    pub fn is_close(&self) -> bool {
-        matches!(self, Self::Close)
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
     }
 }
 
@@ -57,7 +57,7 @@ impl GateAction {
 /// [`create_gate_open`][3], [`create_gate_close`][4], [`then_gate_open`][5],
 /// or [`then_gate_close`][6].
 ///
-/// See [`GateAction`] to understand what hapens when a gate is open or closed.
+/// See [`Gate`] to understand what hapens when a gate is open or closed.
 ///
 /// [1]: crate::Builder::create_gate
 /// [2]: crate::Chain::then_gate
@@ -67,7 +67,7 @@ impl GateAction {
 /// [6]: crate::chain::then_gate_close
 pub struct GateRequest<T> {
     /// Indicate what action the gate should take
-    pub action: GateAction,
+    pub action: Gate,
     /// Indicate what data should be passed along after the gate action has
     /// completed.
     pub data: T,
@@ -93,10 +93,11 @@ mod tests {
                 .consume_buffer::<8>()
                 .connect(scope.terminate);
 
-            let _ = fork_input.clone_chain(builder)
+            fork_input.clone_chain(builder)
                 .with_access(buffer)
                 .then(push_value.into_blocking_callback())
-                .then_gate_open(buffer);
+                .then_gate_open(buffer)
+                .unused();
         });
 
         let mut promise = context.command(|commands| {

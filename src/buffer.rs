@@ -29,6 +29,7 @@ use std::{
 
 use crate::{
     Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot, NotifyBufferUpdate,
+    GateState, Gate,
 };
 
 mod buffer_access_lifecycle;
@@ -248,7 +249,7 @@ pub struct BufferAccess<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    query: Query<'w, 's, &'static BufferStorage<T>>,
+    query: Query<'w, 's, (&'static BufferStorage<T>, &'static GateState)>,
 }
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
@@ -257,7 +258,7 @@ impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
         key: &BufferKey<T>,
     ) -> Result<BufferView<'a, T>, QueryEntityError> {
         let session = key.session;
-        self.query.get(key.buffer).map(|storage| BufferView { storage, session })
+        self.query.get(key.buffer).map(|(storage, gate)| BufferView { storage, gate, session })
     }
 }
 
@@ -270,7 +271,7 @@ pub struct BufferAccessMut<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    query: Query<'w, 's, &'static mut BufferStorage<T>>,
+    query: Query<'w, 's, (&'static mut BufferStorage<T>, &'static mut GateState)>,
     commands: Commands<'w, 's>,
 }
 
@@ -283,7 +284,7 @@ where
         key: &BufferKey<T>,
     ) -> Result<BufferView<'a, T>, QueryEntityError> {
         let session = key.session;
-        self.query.get(key.buffer).map(|storage| BufferView { storage, session })
+        self.query.get(key.buffer).map(|(storage, gate)| BufferView { storage, gate, session })
     }
 
     pub fn get_mut<'a>(
@@ -295,8 +296,8 @@ where
         let accessor = key.accessor;
         self.query
             .get_mut(key.buffer)
-            .map(|storage| BufferMut::new(
-                storage, buffer, session, accessor, &mut self.commands,
+            .map(|(storage, gate)| BufferMut::new(
+                storage, gate, buffer, session, accessor, &mut self.commands,
             ))
     }
 }
@@ -307,6 +308,7 @@ where
     T: 'static + Send + Sync,
 {
     storage: &'a BufferStorage<T>,
+    gate: &'a GateState,
     session: Entity,
 }
 
@@ -344,6 +346,13 @@ where
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Check whether the gate of this buffer is open or closed
+    pub fn gate(&self) -> Gate {
+        // Gate buffers are open by default, so pretend it's open if a session
+        // has never touched this buffer gate.
+        self.gate.map.get(&self.session).copied().unwrap_or(Gate::Open)
+    }
 }
 
 /// Access to mutate a buffer that exists inside a workflow.
@@ -352,6 +361,7 @@ where
     T: 'static + Send + Sync,
 {
     storage: Mut<'a, BufferStorage<T>>,
+    gate: Mut<'a, GateState>,
     buffer: Entity,
     session: Entity,
     accessor: Option<Entity>,
@@ -411,6 +421,11 @@ where
     /// Check if the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Check whether the gate of this buffer is open or closed
+    pub fn gate(&self) -> Gate {
+        self.gate.map.get(&self.session).copied().unwrap_or(Gate::Open)
     }
 
     /// Iterate over mutable borrows of the contents in the buffer.
@@ -475,14 +490,54 @@ where
         self.storage.push_as_oldest(self.session, value)
     }
 
+    // TODO(@mxgrey): Consider putting the gate viewing and modifying methods
+    // into a separate SystemParam because they are currently preventing any two
+    // continuous systems with BufferAccessMut from running at the same time no
+    // matter what the buffer type is.
+
+    /// Tell the buffer [`Gate`] to open
+    pub fn open_gate(&mut self) {
+        if let Some(gate) = self.gate.map.get_mut(&self.session) {
+            if *gate != Gate::Open {
+                *gate = Gate::Open;
+                self.modified = true;
+            }
+        }
+    }
+
+    /// Tell the buffer [`Gate`] to close
+    pub fn close_gate(&mut self) {
+        if let Some(gate) = self.gate.map.get_mut(&self.session) {
+            *gate = Gate::Closed;
+            // There is no need to to indicate that a modification happened
+            // because listeners do not get notified about gates closing.
+        }
+    }
+
+    /// Perform an action on the gate of the buffer
+    pub fn gate_action(&mut self, action: Gate) {
+        match action {
+            Gate::Open => self.open_gate(),
+            Gate::Closed => self.close_gate(),
+        }
+    }
+
+    /// Trigger the listeners for this buffer to wake up even if nothing in the
+    /// buffer has changed. This could be used for timers or timeout elements
+    /// in a workflow.
+    pub fn pulse(&mut self) {
+        self.modified = true;
+    }
+
     fn new(
         storage: Mut<'a, BufferStorage<T>>,
+        gate: Mut<'a, GateState>,
         buffer: Entity,
         session: Entity,
         accessor: Entity,
         commands: &'a mut Commands<'w, 's>,
     ) -> Self {
-        Self { storage, buffer, session, accessor: Some(accessor), commands, modified: false }
+        Self { storage, gate, buffer, session, accessor: Some(accessor), commands, modified: false }
     }
 }
 
@@ -596,7 +651,6 @@ mod tests {
     fn add_from_buffer(
         In((lhs, key)): In<(f64, BufferKey<f64>)>,
         mut access: BufferAccessMut<f64>,
-        // access: BufferAccess<f64>,
     ) -> Result<f64, f64> {
         let rhs = access.get_mut(&key).map_err(|_| lhs)?.pull().ok_or(lhs)?;
         Ok(lhs + rhs)
@@ -644,7 +698,7 @@ mod tests {
 
             let decrement_register_cb = decrement_register.into_blocking_callback();
             let async_decrement_register_cb = async_decrement_register.as_callback();
-            let _ = scope.input.chain(builder)
+            scope.input.chain(builder)
                 .with_access(buffer)
                 .then(decrement_register_cb.clone())
                 .with_access(buffer)
@@ -653,7 +707,8 @@ mod tests {
                 .with_access(buffer)
                 .then(decrement_register_cb.clone())
                 .with_access(buffer)
-                .then(async_decrement_register_cb);
+                .then(async_decrement_register_cb)
+                .unused();
         });
 
         run_register_test(workflow, 0, true, &mut context);
@@ -687,12 +742,13 @@ mod tests {
                 .unzip();
 
             // Force the workflow to trigger a disposal while the key is still in flight
-            let _ = dead_end.chain(builder).dispose_on_none();
+            dead_end.chain(builder).dispose_on_none().unused();
 
-            let _ = loose_end.chain(builder)
+            loose_end.chain(builder)
                 .then(async_decrement_register_and_pass_keys_cb)
                 .dispose_on_none()
-                .then(decrement_register_and_pass_keys_cb);
+                .then(decrement_register_and_pass_keys_cb)
+                .unused();
         });
 
         run_register_test(workflow, 0, true, &mut context);
@@ -799,6 +855,109 @@ mod tests {
                 input.request,
                 decrement_register_and_pass_keys.into_blocking_callback(),
             ).await.available()
+        }
+    }
+
+    #[test]
+    fn test_buffer_key_gate_control() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let service = builder.commands().spawn_service(gate_access_test_open_loop);
+
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            builder.connect(scope.input, buffer.input_slot());
+            builder.listen(buffer)
+                .then_gate_close(buffer)
+                .then(service)
+                .fork_unzip((
+                    |chain: Chain<_>| chain.dispose_on_none().connect(buffer.input_slot()),
+                    |chain: Chain<_>| chain.dispose_on_none().connect(scope.terminate),
+                ));
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(0, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v| v == 5));
+        assert!(context.no_unhandled_errors());
+    }
+
+    /// Used to verify that when a key is used to open a buffer gate, it will not
+    /// trigger the key's listener to wake up again.
+    fn gate_access_test_open_loop(
+        In(BlockingService { request: key, .. }): BlockingServiceInput<BufferKey<u64>>,
+        mut access: BufferAccessMut<u64>,
+    ) -> (Option<u64>, Option<u64>) {
+        // We should never see a spurious wake-up in this service because the
+        // gate opening is done by the key of this service.
+        let mut buffer = access.get_mut(&key).unwrap();
+        let value = buffer.pull().unwrap();
+
+        // The gate should have previously been closed before reaching this
+        // service
+        assert_eq!(buffer.gate(), Gate::Closed);
+        // Open the gate, which would normally trigger a notice, but the notice
+        // should not come to this service because we're using the key without
+        // closed loops allowed.
+        buffer.open_gate();
+
+        if value >= 5 {
+            (None, Some(value))
+        } else {
+            (Some(value + 1), None)
+        }
+    }
+
+    #[test]
+    fn test_closed_loop_key_access() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let delay = context.spawn_delay(Duration::from_secs_f32(0.1));
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let service = builder.commands().spawn_service(gate_access_test_closed_loop);
+
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            builder.connect(scope.input, buffer.input_slot());
+            builder.listen(buffer)
+                .then(service)
+                .fork_unzip((
+                    |chain: Chain<_>| chain
+                        .dispose_on_none()
+                        .then(delay)
+                        .connect(buffer.input_slot()),
+                    |chain: Chain<_>| chain
+                        .dispose_on_none()
+                        .connect(scope.terminate),
+                ));
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request(3, workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v| v == 0));
+        assert!(context.no_unhandled_errors());
+    }
+
+    /// Used to verify that we get spurious wakeups when closed loops are allowed
+    fn gate_access_test_closed_loop(
+        In(BlockingService { request: key, .. }): BlockingServiceInput<BufferKey<u64>>,
+        mut access: BufferAccessMut<u64>,
+    ) -> (Option<u64>, Option<u64>) {
+        let mut buffer = access.get_mut(&key).unwrap().allow_closed_loops();
+        if let Some(value) = buffer.pull() {
+            (Some(value + 1), None)
+        } else {
+            (None, Some(0))
         }
     }
 }

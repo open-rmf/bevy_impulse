@@ -27,7 +27,7 @@ use crate::{
     Buffer, BufferSettings, AddOperation, OperateBuffer, Scope, OperateScope,
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
-    Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, GateAction,
+    Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, Gate,
     OperateStaticGate, OperateBufferAccess, Collect, Sendish,
 };
 
@@ -483,7 +483,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// The data inside the request will be passed along as output once the
     /// gate action is finished.
     ///
-    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    /// See [`Gate`] to understand what happens when a gate is opened or closed.
     pub fn create_gate<T, B>(
         &mut self,
         buffers: B,
@@ -516,10 +516,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ///
     /// The data sent into the node will be passed back out as input, unchanged.
     ///
-    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    /// See [`Gate`] to understand what happens when a gate is opened or closed.
     pub fn create_gate_action<T, B>(
         &mut self,
-        action: GateAction,
+        action: Gate,
         buffers: B,
     ) -> Node<T, T>
     where
@@ -547,26 +547,26 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
     /// Create a gate node that always opens the gates on one or more buffers.
     ///
-    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    /// See [`Gate`] to understand what happens when a gate is opened or closed.
     pub fn create_gate_open<B, T>(&mut self, buffers: B) -> Node<T, T>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
-        self.create_gate_action(GateAction::Open, buffers)
+        self.create_gate_action(Gate::Open, buffers)
     }
 
     /// Create a gate node that always closes the gates on one or more buffers.
     ///
-    /// See [`GateAction`] to understand what happens when a gate is opened or closed.
+    /// See [`Gate`] to understand what happens when a gate is opened or closed.
     pub fn create_gate_close<T, B>(&mut self, buffers: B) -> Node<T, T>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
-        self.create_gate_action(GateAction::Close, buffers)
+        self.create_gate_action(Gate::Closed, buffers)
     }
 
     /// Get the scope that this builder is building for.
@@ -575,7 +575,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Borrow the commands for the builder
-    pub fn commands(&'a mut self) -> &'a mut Commands<'w, 's> {
+    pub fn commands(&mut self) -> &mut Commands<'w, 's> {
         &mut self.commands
     }
 
@@ -674,12 +674,12 @@ mod tests {
         check_unreachable(workflow, 1, &mut context);
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let _ = scope.input.chain(builder)
+            scope.input.chain(builder)
                 .map_block(|v| v)
                 .fork_clone((
-                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).output(),
-                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).output(),
-                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).output(),
+                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).unused(),
+                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).unused(),
+                    |chain: Chain<()>| chain.map_block(|v| v).map_block(|v| v).unused(),
                 ));
 
             // Create an exit node that never connects to the scope's input.
@@ -692,7 +692,7 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let entry_buffer = builder.create_buffer::<()>(BufferSettings::keep_all());
-            let _ = scope.input.chain(builder)
+            scope.input.chain(builder)
                 .map_block(|v| v)
                 .fork_clone((
                     |chain: Chain<()>| chain.map_block(|v| v).connect(entry_buffer.input_slot()),

@@ -34,7 +34,7 @@ use crate::{
     ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
     UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
     Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
-    GateActionStorage, GateAction, OperationRoster,
+    GateActionStorage, Gate, OperationRoster,
 };
 
 #[derive(Bundle)]
@@ -97,6 +97,13 @@ where
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
         if !RelatedGateNodes::is_opening_reachable(&mut reachability)? {
+            if BufferAccessors::is_reachable(&mut reachability)? {
+                // A buffer accessor can open the buffer gate and also push new
+                // items which would then wake up listeners, so we consider this
+                // buffer to be reachable.
+                return Ok(true);
+            }
+
             // If this gate is closed and will never be able to open again, then
             // this buffer is considered unreachable for its listeners.
             return Ok(false);
@@ -115,20 +122,20 @@ where
 }
 
 #[derive(Component, Debug, Default)]
-pub struct GateState {
-    map: HashMap<Entity, GateAction>,
+pub(crate) struct GateState {
+    pub(crate) map: HashMap<Entity, Gate>,
 }
 
 impl GateState {
     pub fn apply(
         buffer: Entity,
         session: Entity,
-        action: GateAction,
+        action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
         let mut states = world.get_mut::<GateState>(buffer).or_broken()?;
-        let state = states.map.entry(session).or_insert(GateAction::Open);
+        let state = states.map.entry(session).or_insert(Gate::Open);
         if *state == action {
             // No change needed
             return Ok(());
@@ -153,7 +160,7 @@ impl GateState {
 
 impl GateState {
     fn is_closed(&self, session: Entity) -> bool {
-        self.map.get(&session).unwrap_or(&GateAction::Open).is_close()
+        self.map.get(&session).unwrap_or(&Gate::Open).is_closed()
     }
 }
 

@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer,
     ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
-    BufferStorage, SingleInputStorage, BufferKeyBuilder, GateAction, GateState,
+    BufferStorage, SingleInputStorage, BufferKeyBuilder, Gate, GateState,
     OperationRoster,
 };
 
@@ -52,7 +52,7 @@ pub trait Buffered: Clone {
     fn gate_action(
         &self,
         session: Entity,
-        action: GateAction,
+        action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult;
@@ -127,7 +127,7 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     fn gate_action(
         &self,
         session: Entity,
-        action: GateAction,
+        action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
@@ -229,7 +229,7 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     fn gate_action(
         &self,
         session: Entity,
-        action: GateAction,
+        action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
@@ -334,7 +334,7 @@ macro_rules! impl_buffered_for_tuple {
             fn gate_action(
                 &self,
                 session: Entity,
-                action: GateAction,
+                action: Gate,
                 world: &mut World,
                 roster: &mut OperationRoster,
             ) -> OperationResult {
@@ -460,7 +460,7 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
     fn gate_action(
         &self,
         session: Entity,
-        action: GateAction,
+        action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
@@ -576,7 +576,7 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
     fn gate_action(
         &self,
         session: Entity,
-        action: GateAction,
+        action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {

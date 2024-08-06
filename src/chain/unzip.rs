@@ -105,7 +105,7 @@ all_tuples!(impl_unzippable_for_tuple, 1, 12, T, D);
 /// tuple.
 pub trait UnzipBuilder<Z> {
     type ReturnType;
-    fn unzip_build(self, output: Output<Z>, builder: &mut Builder) -> Self::ReturnType;
+    fn fork_unzip(self, output: Output<Z>, builder: &mut Builder) -> Self::ReturnType;
 }
 
 macro_rules! impl_unzipbuilder_for_tuple {
@@ -114,7 +114,7 @@ macro_rules! impl_unzipbuilder_for_tuple {
         impl<$($A: 'static + Send + Sync),*, $($F: FnOnce(Chain<$A>) -> $U),*, $($U),*> UnzipBuilder<($($A,)*)> for ($($F,)*)
         {
             type ReturnType = ($($U),*);
-            fn unzip_build(self, output: Output<($($A,)*)>, builder: &mut Builder) -> Self::ReturnType {
+            fn fork_unzip(self, output: Output<($($A,)*)>, builder: &mut Builder) -> Self::ReturnType {
                 let outputs = <($($A),*)>::unzip_output(output, builder);
                 let ($($A,)*) = outputs;
                 let ($($F,)*) = self;

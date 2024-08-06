@@ -20,7 +20,7 @@ use bevy_ecs::prelude::{Component, Entity};
 use crate::{
     Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
     OperationReachability, ReachabilityResult, OperationSetup, SingleInputStorage,
-    SingleTargetStorage, OrBroken, OperationCleanup, Disposal, GateAction,
+    SingleTargetStorage, OrBroken, OperationCleanup, Disposal, Gate,
     GateRequest, Buffered, emit_disposal,
 };
 
@@ -28,7 +28,7 @@ use crate::{
 pub(crate) struct BufferRelationStorage<B>(B);
 
 #[derive(Component, Clone, Copy)]
-pub(crate) struct GateActionStorage(pub(crate) GateAction);
+pub(crate) struct GateActionStorage(pub(crate) Gate);
 
 pub(crate) struct OperateDynamicGate<T, B> {
     buffers: B,
@@ -55,12 +55,12 @@ where
             InputBundle::<GateRequest<T>>::new(),
             SingleTargetStorage::new(self.target),
             BufferRelationStorage(self.buffers),
-            // We store GateAction::Open for this here because this component is
+            // We store Gate::Open for this here because this component is
             // checked by buffers when examining their reachability, and dynamic
             // gates can't know if they will open or close a buffer until the
             // input arrives, so we need to treat it as opening to avoid any
             // false negatives on reachability.
-            GateActionStorage(GateAction::Open),
+            GateActionStorage(Gate::Open),
         ));
 
         Ok(())
@@ -82,7 +82,7 @@ where
         world.get_entity_mut(target).or_broken()?
             .give_input(session, data, roster)?;
 
-        if action.is_close() {
+        if action.is_closed() {
             // When doing a closing, we should emit a disposal because we are
             // cutting off part of the workflow, which may alter the
             // reachability of the terminal node.
@@ -111,7 +111,7 @@ where
 pub(crate) struct OperateStaticGate<T, B> {
     buffers: B,
     target: Entity,
-    action: GateAction,
+    action: Gate,
     _ignore: std::marker::PhantomData<T>,
 }
 
@@ -119,7 +119,7 @@ impl<T, B> OperateStaticGate<T, B> {
     pub(crate) fn new(
         buffers: B,
         target: Entity,
-        action: GateAction,
+        action: Gate,
     ) -> Self {
         Self { buffers, target, action, _ignore: Default::default() }
     }
@@ -160,7 +160,7 @@ where
         world.get_entity_mut(target).or_broken()?
             .give_input(session, data, roster)?;
 
-        if action.is_close() {
+        if action.is_closed() {
             // When doing a closing, we should emit a disposal because we are
             // cutting off part of the workflow, which may alter the
             // reachability of the terminal node.
