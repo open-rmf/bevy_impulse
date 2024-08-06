@@ -28,7 +28,8 @@ use crate::{
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, Gate,
-    OperateStaticGate, OperateBufferAccess, Collect, Sendish,
+    OperateStaticGate, OperateBufferAccess, Collect, Sendish, Service, Cancellation,
+    chain::premade::request_service,
 };
 
 pub(crate) mod connect;
@@ -126,6 +127,26 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         <F::MapType as ProvideOnce>::Streams: StreamPack,
     {
         self.create_node(f.as_map())
+    }
+
+    /// Create a node that takes in a `(request, service)` at runtime and then
+    /// passes the `request` into the `service`. All streams will be forwarded
+    /// and the response of the service will be the node's output.
+    ///
+    /// This allows services to be injected into workflows as input, or for a
+    /// service to be chosen during runtime.
+    pub fn create_request_node<Request, Response, Streams>(&mut self) -> Node<
+        (Request, Service<Request, Response, Streams>),
+        Result<Response, Cancellation>,
+        Streams,
+    >
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync + Unpin,
+        Streams: StreamPack,
+        Streams::Receiver: Unpin,
+    {
+        self.create_map(request_service)
     }
 
     /// Connect the output of one into the input slot of another node.

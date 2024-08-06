@@ -174,12 +174,10 @@ fn collect_from_channels(
     roster.append(&mut deferred);
 
     // Collect any tasks that are ready to be woken
-    world.get_resource_or_insert_with(|| WakeQueue::new());
-    world.resource_scope::<WakeQueue, ()>(|world, mut wake| {
-        while let Ok(wakeable) = wake.receiver.try_recv() {
-            roster.awake(wakeable);
-        }
-    });
+    let mut wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
+    while let Ok(wakeable) = wake_queue.receiver.try_recv() {
+        roster.awake(wakeable);
+    }
 
     let mut unused_targets_state: SystemState<Query<(Entity, &Detached), With<UnusedTarget>>> =
         SystemState::new(world);

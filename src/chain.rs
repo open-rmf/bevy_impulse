@@ -17,7 +17,7 @@
 
 use std::future::Future;
 
-use bevy_ecs::prelude::{Entity, In};
+use bevy_ecs::prelude::Entity;
 
 use smallvec::SmallVec;
 
@@ -26,19 +26,23 @@ use std::error::Error;
 use crate::{
     UnusedTarget, AddOperation, Node, InputSlot, Builder, IntoBlockingCallback,
     StreamPack, Provider, ProvideOnce, Scope, StreamOf, Trim, TrimBranch,
-    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop, BufferAccessMut,
+    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, Gate, Buffered,
-    Spread, Collect, Sendish, Service,
+    Spread, Collect, Sendish, Service, Cancellation,
     make_result_branching, make_option_branching,
 };
 
 pub mod fork_clone_builder;
 pub use fork_clone_builder::*;
 
+pub(crate) mod premade;
+use premade::*;
+
 pub mod unzip;
 pub use unzip::*;
+
 
 /// Chain operations onto the output of a workflow node.
 ///
@@ -895,16 +899,31 @@ where
 impl<'w, 's, 'a, 'b, Request, Response, Streams> Chain<'w, 's, 'a, 'b, (Request, Service<Request, Response, Streams>)>
 where
     Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync,
+    Response: 'static + Send + Sync + Unpin,
     Streams: StreamPack,
+    Streams::Receiver: Unpin,
 {
-    // pub fn then_run(self) -> Chain<'w, 's, 'a, 'b, Response> {
+    /// Given the input `(request, service)`, pass `request` into `service` and
+    /// forward its response. Since it's possible for `service` to fail for
+    /// various reasons, this returns a [`Result`]. Follow this with
+    /// `.dispose_on_err` to filter away errors.
+    ///
+    /// To access the streams of the service, use [`Chain::then_request_node`].
+    pub fn then_request(self) -> Chain<'w, 's, 'a, 'b, Result<Response, Cancellation>> {
+        self.map(request_service)
+    }
 
-    // }
-
-    // pub fn then_run_node(self) -> Node<Request, Response, Streams> {
-
-    // }
+    /// Given the input `(request, service)`, pass `request` into `service` and
+    /// forward its streams and response. Since it's possible for `service` to
+    /// fail for various reasons, this returns a [`Result`]. Follow this with
+    /// `.dispose_on_err` to filter away errors.
+    pub fn then_request_node(self) -> Node<
+        (Request, Service<Request, Response, Streams>),
+        Result<Response, Cancellation>,
+        Streams,
+    > {
+        self.map_node(request_service)
+    }
 }
 
 impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, GateRequest<T>>
@@ -938,20 +957,6 @@ where
     pub fn consume_buffer<const N: usize>(self) -> Chain<'w, 's, 'a, 'b, SmallVec<[T; N]>> {
         self.then(consume_buffer.into_blocking_callback())
     }
-}
-
-fn consume_buffer<const N: usize, T>(
-    In(key): In<BufferKey<T>>,
-    mut access: BufferAccessMut<T>,
-) -> SmallVec<[T; N]>
-where
-    T: 'static + Send + Sync,
-{
-    let Ok(mut buffer) = access.get_mut(&key) else {
-        return SmallVec::new();
-    };
-
-    buffer.drain(..).collect()
 }
 
 impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {

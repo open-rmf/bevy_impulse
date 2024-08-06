@@ -120,7 +120,7 @@ impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response,
 
     pub(crate) fn add(self, world: &mut World, roster: &mut OperationRoster) {
         let source = self.source;
-        let scope = world.get::<ScopeStorage>(source).map(|s| s.get());
+        let scope = world.get::<ScopeStorage>(self.node).map(|s| s.get());
         let mut source_mut = world.entity_mut(source);
         source_mut.set_parent(self.node);
         if let Some(scope) = scope {

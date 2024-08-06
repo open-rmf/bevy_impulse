@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_ecs::prelude::{In, Commands};
+use bevy_ecs::prelude::In;
 
 use smallvec::SmallVec;
 
@@ -23,7 +23,7 @@ use std::future::Future;
 
 use crate::{
     BufferKey, BufferAccessMut, AsyncMap, StreamPack, Service, Cancellation,
-    RequestExt,
+    RequestExt, PromiseState,
 };
 
 pub(super) fn consume_buffer<const N: usize, T>(
@@ -40,7 +40,7 @@ where
     buffer.drain(..).collect()
 }
 
-pub(super) fn run_service<Request, Response, Streams>(
+pub(crate) fn request_service<Request, Response, Streams>(
     input: AsyncMap<(Request, Service<Request, Response, Streams>), Streams>,
 ) -> impl Future<Output = Result<Response, Cancellation>>
 where
@@ -51,10 +51,34 @@ where
 {
     async move {
         let (request, service) = input.request;
-        let recipient = input.channel.command(move |commands|
+        let recipient = match input.channel.command(move |commands|
             commands.request(request, service).take()
-        ).await;
+        ).await {
+            PromiseState::Available(recipient) => {
+                recipient
+            },
+            PromiseState::Cancelled(cancellation) => {
+                return Err(cancellation);
+            }
+            PromiseState::Disposed => {
+                return Err(Cancellation::undeliverable());
+            }
+            PromiseState::Pending | PromiseState::Taken => unreachable!(),
+        };
 
+        Streams::forward_channels(recipient.streams, input.streams).await;
 
+        match recipient.response.await {
+            PromiseState::Available(response) => {
+                Ok(response)
+            },
+            PromiseState::Cancelled(cancellation) => {
+                return Err(cancellation);
+            }
+            PromiseState::Disposed => {
+                return Err(Cancellation::undeliverable());
+            }
+            PromiseState::Pending | PromiseState::Taken => unreachable!(),
+        }
     }
 }

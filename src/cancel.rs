@@ -22,6 +22,8 @@ use bevy_ecs::{
 
 use backtrace::Backtrace;
 
+use thiserror::Error as ThisError;
+
 use std::sync::Arc;
 
 use crate::{
@@ -30,7 +32,8 @@ use crate::{
 };
 
 /// Information about the cancellation that occurred.
-#[derive(Debug, Clone)]
+#[derive(ThisError, Debug, Clone)]
+#[error("A workflow or a request was cancelled")]
 pub struct Cancellation {
     /// The cause of a cancellation
     pub cause: Arc<CancellationCause>,
@@ -76,6 +79,10 @@ impl Cancellation {
     ) -> Self {
         CircularCollect { conflicts }.into()
     }
+
+    pub fn undeliverable() -> Self {
+        CancellationCause::Undeliverable.into()
+    }
 }
 
 impl<T: Into<CancellationCause>> From<T> for Cancellation {
@@ -116,6 +123,12 @@ pub enum CancellationCause {
     /// collect operations into a scope that excludes the other collect
     /// operations while including the branches that it needs to collect from.
     CircularCollect(CircularCollect),
+
+    /// A request became undeliverable because the sender was dropped. This may
+    /// indicate that a critical entity within a workflow was manually despawned.
+    /// Check to make sure that you are not manually despawning anything that
+    /// you shouldn't.
+    Undeliverable,
 
     /// A promise can never be delivered because the mutex inside of a [`Promise`][1]
     /// was poisoned.

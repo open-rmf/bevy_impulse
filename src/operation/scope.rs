@@ -1368,7 +1368,10 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>()
+        // TODO(@mxgrey): Consider whether we should cleanup the inputs by
+        // pushing them out of the scope instead of just dropping them.
+        clean.cleanup_inputs::<T>()?;
+        clean.notify_cleaned()
     }
 }
 
@@ -1435,6 +1438,9 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        clean.cleanup_inputs::<T>()
+        // TODO(@mxgrey): Consider whether we should cleanup the inputs by
+        // pushing them out of the scope instead of just dropping them.
+        clean.cleanup_inputs::<T>()?;
+        clean.notify_cleaned()
     }
 }

@@ -166,6 +166,8 @@ where
         world.get_entity_mut(self.target.0).or_broken()?
             .insert(SingleInputStorage::new(source));
 
+        dbg!(source, self.target.get());
+
         world.entity_mut(source).insert((
             self.storage,
             self.target,

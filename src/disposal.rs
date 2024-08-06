@@ -26,12 +26,15 @@ use std::{collections::HashMap, sync::Arc};
 
 use smallvec::SmallVec;
 
+use thiserror::Error as ThisError;
+
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
     DisposalFailure, ImpulseMarker, Cancel,
 };
 
-#[derive(Debug, Clone)]
+#[derive(ThisError, Debug, Clone)]
+#[error("The output of an operation in a workflow was disposed")]
 pub struct Disposal {
     pub cause: Arc<DisposalCause>,
 }

@@ -25,7 +25,7 @@ use backtrace::Backtrace;
 use crate::{
     SingleInputStorage, SingleTargetStorage, ForkTargetStorage, StreamTargetMap,
     OperationResult, OperationError, OrBroken, UnhandledErrors, ConnectionFailure,
-    ScopeEntryStorage, EntryForScope,
+    ScopeEntryStorage, EntryForScope, Broken,
 };
 
 /// If two nodes have been created, they will each have a unique source and a
@@ -74,13 +74,21 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
     for input in old_inputs.into_iter() {
         let mut input_mut = world.get_entity_mut(input).or_broken()?;
 
+        let mut connection_happened = false;
         if let Some(mut target) = input_mut.get_mut::<SingleTargetStorage>() {
-            target.set(connect.new_target);
+            // If the old target is different from the original target, then that
+            // means we are connecting to a stream instead, so we need to first
+            // check if they are equal.
+            if target.get() == connect.original_target {
+                connection_happened = true;
+                target.set(connect.new_target);
+            }
         }
 
         if let Some(mut targets) = input_mut.get_mut::<ForkTargetStorage>() {
             for target in &mut targets.0 {
                 if *target == connect.original_target {
+                    connection_happened = true;
                     *target = connect.new_target;
                 }
             }
@@ -89,9 +97,19 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         if let Some(mut targets) = input_mut.get_mut::<StreamTargetMap>() {
             for target in &mut targets.map {
                 if *target == connect.original_target {
+                    connection_happened = true;
                     *target = connect.new_target;
                 }
             }
+        }
+
+        if !connection_happened {
+            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                .broken
+                .push(Broken {
+                    node: input,
+                    backtrace: Some(Backtrace::new()),
+                });
         }
 
         if let Some(mut new_inputs_mut) = world.get_mut::<SingleInputStorage>(connect.new_target) {

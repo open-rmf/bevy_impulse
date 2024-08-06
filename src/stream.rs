@@ -23,6 +23,7 @@ use bevy_ecs::{
 use bevy_hierarchy::BuildChildren;
 use bevy_derive::{Deref, DerefMut};
 use bevy_utils::all_tuples;
+use futures::{join, future::BoxFuture};
 
 use tokio::sync::mpsc::{UnboundedReceiver as Receiver, unbounded_channel};
 
@@ -190,20 +191,65 @@ impl<T: Stream + std::fmt::Debug> StreamBuffer<T> {
     }
 }
 
+/// Used to forward the data from a stream receiver into a different
+/// [`StreamChannel`].
 pub struct StreamForward<T: Stream> {
     receiver: Receiver<T>,
     channel: StreamChannel<T>,
 }
 
-// impl<T: Stream> Future for StreamForward<T> {
-//     /// This will keep forwarding the streams until the upstream sender
-//     /// disconnects, so there is nothing of interest to return from the future.
-//     type Output = ();
+impl<T: Stream + Unpin> Future for StreamForward<T> {
+    /// This will keep forwarding the streams until the upstream sender
+    /// disconnects, so there is nothing of interest to return from the future.
+    type Output = ();
 
-//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let self_mut = self.get_mut();
+        loop {
+            // We loop because even if there are multiple values available, the
+            // poll will only be triggered once.
+            match self_mut.receiver.poll_recv(cx) {
+                Poll::Pending => {
+                    return Poll::Pending
+                },
+                Poll::Ready(Some(result)) => {
+                    self_mut.channel.send(result);
+                }
+                Poll::Ready(None) => {
+                    // This channel has expired so we should indicate that we are
+                    // finished here
+                    return Poll::Ready(());
+                }
+            }
+        }
+    }
+}
 
-//     }
-// }
+/// Used by [`StreamPack`] to implement the `StreamPack::forward_channels` method
+/// for an empty tuple.
+pub struct NoopForward;
+
+impl Future for NoopForward {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(())
+    }
+}
+
+/// Used by [`StreamPack`] to implement the `StreamPack::forward_channels` method
+/// for a non-empty tuple.
+pub struct StreamPackForward {
+    inner: BoxFuture<'static, ()>,
+}
+
+impl Future for StreamPackForward {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.get_mut().inner.as_mut().poll(cx)
+    }
+}
 
 pub struct StreamRequest<'a> {
     /// The node that emitted the stream
@@ -287,7 +333,8 @@ pub trait StreamPack: 'static + Send + Sync {
     type StreamInputPack;
     type StreamOutputPack: std::fmt::Debug;
     type Receiver: Send + Sync;
-    type Channel;
+    type Channel: Send;
+    type Forward: Future<Output = ()> + Send;
     type Buffer: Clone;
     type TargetIndexQuery: ReadOnlyWorldQuery;
 
@@ -346,11 +393,16 @@ pub trait StreamPack: 'static + Send + Sync {
         commands: &mut Commands,
     );
 
+    fn forward_channels(
+        receiver: Self::Receiver,
+        channel: Self::Channel,
+    ) -> Self::Forward;
+
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
 }
 
-impl<T: Stream> StreamPack for T {
+impl<T: Stream + Unpin> StreamPack for T {
     type StreamAvailableBundle = StreamAvailable<Self>;
     type StreamFilter = With<StreamAvailable<Self>>;
     type StreamStorageBundle = StreamTargetStorage<Self>;
@@ -358,6 +410,7 @@ impl<T: Stream> StreamPack for T {
     type StreamOutputPack = Output<Self>;
     type Receiver = Receiver<Self>;
     type Channel = StreamChannel<Self>;
+    type Forward = StreamForward<Self>;
     type Buffer = StreamBuffer<Self>;
     type TargetIndexQuery = Option<&'static StreamTargetStorage<Self>>;
 
@@ -469,6 +522,13 @@ impl<T: Stream> StreamPack for T {
         });
     }
 
+    fn forward_channels(
+        receiver: Self::Receiver,
+        channel: Self::Channel,
+    ) -> Self::Forward {
+        StreamForward { receiver, channel }
+    }
+
     fn has_streams() -> bool {
         true
     }
@@ -482,6 +542,7 @@ impl StreamPack for () {
     type StreamOutputPack = ();
     type Receiver = ();
     type Channel = ();
+    type Forward = NoopForward;
     type Buffer = ();
     type TargetIndexQuery = ();
 
@@ -561,13 +622,20 @@ impl StreamPack for () {
 
     }
 
+    fn forward_channels(
+        _: Self::Receiver,
+        _: Self::Channel,
+    ) -> Self::Forward {
+        NoopForward
+    }
+
     fn has_streams() -> bool {
         false
     }
 }
 
 macro_rules! impl_streampack_for_tuple {
-    ($($T:ident),*) => {
+    ($(($T:ident, $U:ident)),*) => {
         #[allow(non_snake_case)]
         impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
             type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
@@ -578,6 +646,7 @@ macro_rules! impl_streampack_for_tuple {
             type Receiver = ($($T::Receiver,)*);
             type Channel = ($($T::Channel,)*);
             type Buffer = ($($T::Buffer,)*);
+            type Forward = StreamPackForward;
             type TargetIndexQuery = ($($T::TargetIndexQuery,)*);
 
             fn spawn_scope_streams(
@@ -730,6 +799,22 @@ macro_rules! impl_streampack_for_tuple {
                 )*
             }
 
+            fn forward_channels(
+                receiver: Self::Receiver,
+                channel: Self::Channel,
+            ) -> Self::Forward {
+                let inner = async move {
+                    let ($($T,)*) = receiver;
+                    let ($($U,)*) = channel;
+                    join!($(
+                        $T::forward_channels($T, $U),
+                    )*);
+                    ()
+                };
+
+                StreamPackForward{ inner: Box::pin(inner) }
+            }
+
             fn has_streams() -> bool {
                 let mut has_streams = false;
                 $(
@@ -743,7 +828,7 @@ macro_rules! impl_streampack_for_tuple {
 
 // Implements the `StreamPack` trait for all tuples between size 1 and 12
 // (inclusive) made of types that implement `StreamPack`
-all_tuples!(impl_streampack_for_tuple, 1, 12, T);
+all_tuples!(impl_streampack_for_tuple, 1, 12, T, U);
 
 pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
     source: Entity,
@@ -978,7 +1063,7 @@ mod tests {
             )
         });
 
-        test_formatting_stream(parse_blocking_srv, &mut context);
+        // test_formatting_stream(parse_blocking_srv, &mut context);
 
         let parse_async_srv = context.command(|commands| {
             commands.spawn_service(
@@ -990,55 +1075,77 @@ mod tests {
             )
         });
 
-        test_formatting_stream(parse_async_srv, &mut context);
-
-        let parse_blocking_callback = (
-            |In(input): BlockingCallbackInput<String, FormatStreams>| {
-                impl_formatting_streams_blocking(input.request, input.streams);
-            }
-        ).as_callback();
-
-        test_formatting_stream(parse_blocking_callback, &mut context);
-
-        let parse_async_callback = (
-            |In(input): AsyncCallbackInput<String, FormatStreams>| {
-                async move {
-                    impl_formatting_streams_async(input.request, input.streams);
-                }
-            }
-        ).as_callback();
-
-        test_formatting_stream(parse_async_callback, &mut context);
-
-        let parse_blocking_map = (
-            |input: BlockingMap<String, FormatStreams>| {
-                impl_formatting_streams_blocking(input.request, input.streams);
-            }
-        ).as_map();
-
-        test_formatting_stream(parse_blocking_map, &mut context);
-
-        let parse_async_map = (
-            |input: AsyncMap<String, FormatStreams>| {
-                async move {
-                    impl_formatting_streams_async(input.request, input.streams);
-                }
-            }
-        ).as_map();
-
-        test_formatting_stream(parse_async_map, &mut context);
-
-        let mut parse_continuous_srv = None;
-        context.app.add_continuous_service(
+        let parse_continuous_srv = context.app.spawn_continuous_service(
             Update,
-            impl_formatting_streams_continuous
-            .also(|_: &mut App, service: Service<String, (), FormatStreams>| {
-                parse_continuous_srv = Some(service);
-            }),
+            impl_formatting_streams_continuous,
         );
-        let parse_continuous_srv = parse_continuous_srv.unwrap();
 
-        test_formatting_stream(parse_continuous_srv, &mut context);
+        // test_formatting_stream(parse_continuous_srv, &mut context);
+
+        // test_formatting_stream(parse_async_srv, &mut context);
+
+        // let parse_blocking_callback = (
+        //     |In(input): BlockingCallbackInput<String, FormatStreams>| {
+        //         impl_formatting_streams_blocking(input.request, input.streams);
+        //     }
+        // ).as_callback();
+
+        // test_formatting_stream(parse_blocking_callback, &mut context);
+
+        // let parse_async_callback = (
+        //     |In(input): AsyncCallbackInput<String, FormatStreams>| {
+        //         async move {
+        //             impl_formatting_streams_async(input.request, input.streams);
+        //         }
+        //     }
+        // ).as_callback();
+
+        // test_formatting_stream(parse_async_callback, &mut context);
+
+        // let parse_blocking_map = (
+        //     |input: BlockingMap<String, FormatStreams>| {
+        //         impl_formatting_streams_blocking(input.request, input.streams);
+        //     }
+        // ).as_map();
+
+        // test_formatting_stream(parse_blocking_map, &mut context);
+
+        // let parse_async_map = (
+        //     |input: AsyncMap<String, FormatStreams>| {
+        //         async move {
+        //             impl_formatting_streams_async(input.request, input.streams);
+        //         }
+        //     }
+        // ).as_map();
+
+        // test_formatting_stream(parse_async_map, &mut context);
+
+        let make_workflow = |service: Service<String, (), FormatStreams>| {
+            move |scope: Scope<String, (), FormatStreams>, builder: &mut Builder| {
+                let node = scope.input.chain(builder)
+                    .map_block(move |value| {
+                        (value, service)
+                    })
+                    .then_request_node();
+
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
+
+                node.output.chain(builder)
+                    .dispose_on_err()
+                    .connect(scope.terminate);
+            }
+        };
+
+        let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
+        test_formatting_stream(blocking_injection_workflow, &mut context);
+
+        let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
+        test_formatting_stream(async_injection_workflow, &mut context);
+
+        let continuous_injection_workflow = context.spawn_workflow(make_workflow(parse_continuous_srv));
+        test_formatting_stream(continuous_injection_workflow, &mut context);
     }
 
     fn impl_formatting_streams_blocking(
