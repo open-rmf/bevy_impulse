@@ -1063,7 +1063,7 @@ mod tests {
             )
         });
 
-        // test_formatting_stream(parse_blocking_srv, &mut context);
+        test_formatting_stream(parse_blocking_srv, &mut context);
 
         let parse_async_srv = context.command(|commands| {
             commands.spawn_service(
@@ -1080,45 +1080,45 @@ mod tests {
             impl_formatting_streams_continuous,
         );
 
-        // test_formatting_stream(parse_continuous_srv, &mut context);
+        test_formatting_stream(parse_continuous_srv, &mut context);
 
-        // test_formatting_stream(parse_async_srv, &mut context);
+        test_formatting_stream(parse_async_srv, &mut context);
 
-        // let parse_blocking_callback = (
-        //     |In(input): BlockingCallbackInput<String, FormatStreams>| {
-        //         impl_formatting_streams_blocking(input.request, input.streams);
-        //     }
-        // ).as_callback();
+        let parse_blocking_callback = (
+            |In(input): BlockingCallbackInput<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            }
+        ).as_callback();
 
-        // test_formatting_stream(parse_blocking_callback, &mut context);
+        test_formatting_stream(parse_blocking_callback, &mut context);
 
-        // let parse_async_callback = (
-        //     |In(input): AsyncCallbackInput<String, FormatStreams>| {
-        //         async move {
-        //             impl_formatting_streams_async(input.request, input.streams);
-        //         }
-        //     }
-        // ).as_callback();
+        let parse_async_callback = (
+            |In(input): AsyncCallbackInput<String, FormatStreams>| {
+                async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                }
+            }
+        ).as_callback();
 
-        // test_formatting_stream(parse_async_callback, &mut context);
+        test_formatting_stream(parse_async_callback, &mut context);
 
-        // let parse_blocking_map = (
-        //     |input: BlockingMap<String, FormatStreams>| {
-        //         impl_formatting_streams_blocking(input.request, input.streams);
-        //     }
-        // ).as_map();
+        let parse_blocking_map = (
+            |input: BlockingMap<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            }
+        ).as_map();
 
-        // test_formatting_stream(parse_blocking_map, &mut context);
+        test_formatting_stream(parse_blocking_map, &mut context);
 
-        // let parse_async_map = (
-        //     |input: AsyncMap<String, FormatStreams>| {
-        //         async move {
-        //             impl_formatting_streams_async(input.request, input.streams);
-        //         }
-        //     }
-        // ).as_map();
+        let parse_async_map = (
+            |input: AsyncMap<String, FormatStreams>| {
+                async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                }
+            }
+        ).as_map();
 
-        // test_formatting_stream(parse_async_map, &mut context);
+        test_formatting_stream(parse_async_map, &mut context);
 
         let make_workflow = |service: Service<String, (), FormatStreams>| {
             move |scope: Scope<String, (), FormatStreams>, builder: &mut Builder| {

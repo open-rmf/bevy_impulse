@@ -217,6 +217,9 @@ pub struct ContinuousService<Request, Response, Streams: StreamPack = ()> {
     pub key: ContinuousServiceKey<Request, Response, Streams>,
 }
 
+/// Use this to reduce the bracket noise when you need `In<`[`ContinuousService`]`>`.
+pub type ContinuousServiceInput<Request, Response, Streams> = In<ContinuousService<Request, Response, Streams>>;
+
 /// Use BlockingCallback to indicate that your system is meant to define a
 /// blocking [`Callback`]. Callbacks are different from services because they are
 /// not associated with any entity.
