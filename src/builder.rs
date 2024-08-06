@@ -29,7 +29,7 @@ use crate::{
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, Gate,
     OperateStaticGate, OperateBufferAccess, Collect, Sendish, Service, Cancellation,
-    chain::premade::request_service,
+    chain::premade::inject_service,
 };
 
 pub(crate) mod connect;
@@ -135,7 +135,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ///
     /// This allows services to be injected into workflows as input, or for a
     /// service to be chosen during runtime.
-    pub fn create_request_node<Request, Response, Streams>(&mut self) -> Node<
+    pub fn create_injection_node<Request, Response, Streams>(&mut self) -> Node<
         (Request, Service<Request, Response, Streams>),
         Result<Response, Cancellation>,
         Streams,
@@ -146,7 +146,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Streams: StreamPack,
         Streams::Receiver: Unpin,
     {
-        self.create_map(request_service)
+        self.create_map(inject_service)
     }
 
     /// Connect the output of one into the input slot of another node.

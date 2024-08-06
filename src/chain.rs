@@ -904,25 +904,33 @@ where
     Streams::Receiver: Unpin,
 {
     /// Given the input `(request, service)`, pass `request` into `service` and
-    /// forward its response. Since it's possible for `service` to fail for
+    /// forward its response. This is called `injection` because it's a
+    /// [dependency injection](https://en.wikipedia.org/wiki/Dependency_injection)
+    /// operation.
+    ///
+    /// Since it's possible for `service` to fail for
     /// various reasons, this returns a [`Result`]. Follow this with
     /// `.dispose_on_err` to filter away errors.
     ///
     /// To access the streams of the service, use [`Chain::then_request_node`].
-    pub fn then_request(self) -> Chain<'w, 's, 'a, 'b, Result<Response, Cancellation>> {
-        self.map(request_service)
+    pub fn then_injection(self) -> Chain<'w, 's, 'a, 'b, Result<Response, Cancellation>> {
+        self.map(inject_service)
     }
 
     /// Given the input `(request, service)`, pass `request` into `service` and
-    /// forward its streams and response. Since it's possible for `service` to
+    /// forward its streams and response. This is called `injection` because it's a
+    /// [dependency injection](https://en.wikipedia.org/wiki/Dependency_injection)
+    /// operation.
+    ///
+    /// Since it's possible for `service` to
     /// fail for various reasons, this returns a [`Result`]. Follow this with
     /// `.dispose_on_err` to filter away errors.
-    pub fn then_request_node(self) -> Node<
+    pub fn then_injection_node(self) -> Node<
         (Request, Service<Request, Response, Streams>),
         Result<Response, Cancellation>,
         Streams,
     > {
-        self.map_node(request_service)
+        self.map_node(inject_service)
     }
 }
 

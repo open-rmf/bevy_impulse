@@ -1126,7 +1126,7 @@ mod tests {
                     .map_block(move |value| {
                         (value, service)
                     })
-                    .then_request_node();
+                    .then_injection_node();
 
                 builder.connect(node.streams.0, scope.streams.0);
                 builder.connect(node.streams.1, scope.streams.1);

@@ -40,7 +40,7 @@ where
     buffer.drain(..).collect()
 }
 
-pub(crate) fn request_service<Request, Response, Streams>(
+pub(crate) fn inject_service<Request, Response, Streams>(
     input: AsyncMap<(Request, Service<Request, Response, Streams>), Streams>,
 ) -> impl Future<Output = Result<Response, Cancellation>>
 where
