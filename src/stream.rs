@@ -15,6 +15,7 @@
  *
 */
 
+pub use bevy_impulse_derive::Stream;
 use bevy_ecs::{
     prelude::{Component, Bundle, Entity, Commands, World, With},
     system::Command,
@@ -158,10 +159,12 @@ pub trait Stream: 'static + Send + Sync + Sized {
 /// A simple newtype wrapper that turns any suitable data structure
 /// (`'static + Send + Sync`) into a stream.
 #[derive(Clone, Copy, Debug, Deref, DerefMut)]
-pub struct StreamOf<T>(pub T);
+pub struct StreamOf<T: 'static + Send + Sync>(pub T);
+
+pub type DefaultStreamContainer<T> = SmallVec<[T; 16]>;
 
 impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
-    type Container = SmallVec<[StreamOf<T>; 16]>;
+    type Container = DefaultStreamContainer<Self>;
 }
 
 pub struct StreamBuffer<T: Stream> {

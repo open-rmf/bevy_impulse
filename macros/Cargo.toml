@@ -1,0 +1,12 @@
+[package]
+name = "bevy_impulse_derive"
+version = "0.0.1"
+edition = "2021"
+authors = ["Grey <mxgrey@intrinsic.ai>"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "*"
+quote = "*"
