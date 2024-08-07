@@ -212,6 +212,27 @@ where
             })
     }
 
+    pub fn get(&self, index: usize) -> Option<OrderView<'_, Request>> {
+        if self.delivered.contains_key(&index) {
+            return None;
+        }
+
+        self.queue.inner
+            .get(index)
+            .map(|item| OrderView {
+                index,
+                order: item,
+            })
+    }
+
+    pub fn len(&self) -> usize {
+        self.queue.inner.len() - self.delivered.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn get_mut<'b>(
         &'b mut self,
         index: usize,
