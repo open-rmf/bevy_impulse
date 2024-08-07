@@ -529,8 +529,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
-    use bevy_ecs::{prelude::*, world::EntityWorldMut};
+    use crate::{*, testing::*};
+    use bevy_ecs::{
+        prelude::*,
+        world::EntityWorldMut,
+        system::{SystemParam, StaticSystemParam},
+    };
     use bevy_app::Startup;
     use std::future::Future;
 
@@ -716,5 +720,23 @@ mod tests {
     ) {
         assert!(my_provider.is_some());
         ran.0 = true;
+    }
+    #[derive(SystemParam)]
+    struct CustomParamA<'w ,'s> {
+        _commands: Commands<'w ,'s>
+    }
+
+    fn service_with_generic<P: SystemParam>(
+        In(BlockingService{ .. }): BlockingServiceInput<()>,
+        _: StaticSystemParam<P>,
+    ) {
+
+    }
+
+    #[test]
+    fn test_generic_service() {
+        // Test that we can add services with generics
+        let mut context = TestingContext::minimal_plugins();
+        context.app.add_service(service_with_generic::<CustomParamA>);
     }
 }
