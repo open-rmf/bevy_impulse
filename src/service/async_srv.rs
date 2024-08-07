@@ -32,6 +32,7 @@ use bevy_ecs::{
     world::EntityWorldMut,
     system::{IntoSystem, BoxedSystem, EntityCommands},
 };
+use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
 use std::future::Future;
 
@@ -124,7 +125,9 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    world.despawn(cancelled.task_id);
+                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                        task_mut.despawn_recursive();
+                    }
                 }
                 if let Some(stop) = stop {
                     // This task is already running and we need to stop it at the

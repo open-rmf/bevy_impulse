@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Component, Entity, World, Resource},
     system::Command,
 };
-use bevy_hierarchy::BuildWorldChildren;
+use bevy_hierarchy::{BuildWorldChildren, DespawnRecursiveExt};
 
 use std::{
     task::Poll,
@@ -390,8 +390,8 @@ fn cleanup_task<Response>(
         };
     };
 
-    if world.get_entity(source).is_some() {
-        world.despawn(source);
+    if let Some(source_mut) = world.get_entity_mut(source) {
+        source_mut.despawn_recursive();
     }
 
     roster.purge(source);

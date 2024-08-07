@@ -32,7 +32,7 @@ use crate::{
 use backtrace::Backtrace;
 
 use bevy_ecs::prelude::{Component, Entity, World, Commands};
-use bevy_hierarchy::BuildChildren;
+use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -306,7 +306,9 @@ where
     if result.is_err() {
         // We won't be executing this scope after all, so despawn the scoped
         // session that we created.
-        world.despawn(scoped_session);
+        if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+            scoped_session_mut.despawn_recursive();
+        }
         return result;
     }
 
@@ -1235,7 +1237,9 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
         clear_scope_buffers(scope, scoped_session, world)?;
 
         if world.get_entity(scoped_session).is_some() {
-            world.despawn(scoped_session);
+            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn_recursive();
+            }
         }
 
         Ok(())

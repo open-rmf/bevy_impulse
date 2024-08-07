@@ -26,6 +26,7 @@ use crate::{
 };
 
 use bevy_ecs::prelude::{Entity, World, Component};
+use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct WorkflowStorage {
@@ -86,7 +87,9 @@ where
         );
 
         if result.is_err() {
-            world.despawn(scoped_session);
+            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn_recursive();
+            }
         }
 
         result
@@ -246,7 +249,9 @@ where
             roster,
         ).is_err() {
             // The workflow will not run, so we should despawn the scoped session
-            world.despawn(scoped_session);
+            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn_recursive();
+            }
 
             // The service did not launch so we should move onto the next item
             // in the queue.

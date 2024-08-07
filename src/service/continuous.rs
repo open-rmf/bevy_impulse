@@ -21,7 +21,7 @@ use bevy_ecs::{
     world::EntityWorldMut,
     schedule::{SystemConfigs, IntoSystemConfigs},
 };
-use bevy_hierarchy::prelude::BuildWorldChildren;
+use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -508,7 +508,9 @@ where
                     }
                 }
 
-                world.despawn(task_id);
+                if let Some(task_mut) = world.get_entity_mut(task_id) {
+                    task_mut.despawn_recursive();
+                }
             }
 
             // Reverse sort by index so that as we iterate forward through this,
@@ -602,7 +604,9 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    world.despawn(cancelled.task_id);
+                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                        task_mut.despawn_recursive();
+                    }
                 }
                 if let Some(stop) = stop {
                     // This task is already running so we need to remove it from
@@ -627,7 +631,9 @@ where
 
                     let disposal = Disposal::supplanted(stop.source, source, session);
                     emit_disposal(stop.source, stop.session, disposal, world, roster);
-                    world.despawn(stop.task_id);
+                    if let Some(task_mut) = world.get_entity_mut(stop.task_id) {
+                        task_mut.despawn_recursive();
+                    }
                 }
 
                 return Ok(());

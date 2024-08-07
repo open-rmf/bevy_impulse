@@ -55,6 +55,7 @@ impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
         if let Some(mut target_mut) = world.get_entity_mut(target) {
             target_mut.insert(data);
         }
+
         world.entity_mut(source).despawn_recursive();
         Ok(())
     }
