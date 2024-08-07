@@ -287,6 +287,15 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.then_scope_node(build)
     }
 
+    /// Many services just need to be triggered without being give any particular
+    /// input. The convention for those services is to take an input of `()`.
+    ///
+    /// We call this "triggering", and this function is a convenient way to turn
+    /// any output type into a trigger.
+    pub fn trigger(self) -> Chain<'w, 's, 'a, 'b, ()> {
+        self.map_block(|_| ())
+    }
+
     /// Combine the output with access to some buffers. You must specify one or
     /// more buffers to access. For multiple buffers, combine them into a tuple
     /// or an [`Iterator`]. Tuples of buffers can be nested inside each other.
