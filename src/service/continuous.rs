@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Component, Entity, Local, Query, Commands, World},
     system::{SystemParam, Command, IntoSystem},
     world::EntityWorldMut,
-    schedule::{SystemConfigs, IntoSystemConfigs},
+    schedule::IntoSystemConfigs,
 };
 use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
 
@@ -38,6 +38,8 @@ use crate::{
     dispose_for_despawned_service, insert_new_order, pop_next_delivery,
     emit_disposal,
 };
+
+pub use bevy_ecs::schedule::SystemConfigs;
 
 pub struct ContinuousServiceKey<Request, Response, Streams> {
     provider: Entity,
