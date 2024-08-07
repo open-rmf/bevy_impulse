@@ -711,6 +711,27 @@ where
         (u, v)
     }
 
+    /// If the result contains an [`Err`] value then connect the error result
+    /// to an input that takes in a [`Result`] with the same [`Err`] variant.
+    /// If the result contained an [`Ok`] value then it will be passed along to
+    /// the next step in the chain.
+    ///
+    /// This is meant to replicate the `?` operator used in normal Rust
+    /// programming.
+    pub fn connect_on_err<U>(
+        self,
+        input: InputSlot<Result<U, E>>,
+    ) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        U: 'static + Send + Sync,
+    {
+        self.branch_for_err(move |chain: Chain<E>|
+            chain
+            .map_block(|err| Err(err))
+            .connect(input)
+        )
+    }
+
     /// If the result contains an [`Err`] value then the entire scope that
     /// contains this operation will be immediately cancelled. If the scope is
     /// within a node of an outer workflow, then the node will emit a disposal
@@ -801,7 +822,10 @@ where
         Chain::new(target, self.builder)
     }
 
-    #[must_use]
+    /// Same as [`Self::dispose_on_err`] except it also works for [`Err`] variants
+    /// that do not implement [`Error`]. The catch is that their error message
+    /// will not be included in the [`Filtered`](crate::Filtered) information
+    /// that gets propagated outward.
     pub fn dispose_on_quiet_err(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
@@ -867,10 +891,30 @@ where
         (u, v)
     }
 
+    /// If the result contains a [`None`] value then connect the trigger to
+    /// an input that takes in an [`Option`] with any [`Some`] variant.
+    /// If the result contained a [`Some`] value then it will be passed along to
+    /// the next step in the chain.
+    ///
+    /// This is meant to replicate the `?` operator used in normal Rust
+    /// programming.
+    pub fn connect_on_none<U>(
+        self,
+        input: InputSlot<Option<U>>,
+    ) -> Chain<'w, 's, 'a, 'b, T>
+    where
+        U: 'static + Send + Sync,
+    {
+        self.branch_for_none(move |chain: Chain<()>|
+            chain
+            .map_block(|_| None)
+            .connect(input)
+        )
+    }
+
     /// If the result contains a [`None`] value then the chain will be cancelled
     /// from this link onwards. The next link in the chain will receive a `T` if
     /// the chain is not cancelled.
-    #[must_use]
     pub fn cancel_on_none(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
@@ -890,7 +934,6 @@ where
     /// not be triggered, but the workflow is not necessarily cancelled. If a
     /// disposal makes it impossible for the workflow to terminate, then the
     /// workflow will be cancelled immediately.
-    #[must_use]
     pub fn dispose_on_none(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
