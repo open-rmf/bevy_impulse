@@ -31,12 +31,14 @@ mod internal;
 
 /// Trait to allow workflows to be spawned from a [`Commands`] or a [`World`].
 pub trait SpawnWorkflow {
-    /// Spawn a workflow with specific settings.
+    /// Spawn a workflow.
     ///
-    /// * `settings` - Settings that describe some details of how the workflow
-    /// should behave
     /// * `build` - A function that takes in a [`Scope`] and a [`Builder`] to
     /// build the workflow
+    ///
+    /// If you want any particular settings for your workflow, specify that with
+    /// the return value of `build`. Returning nothing `()` will use default
+    /// workflow settings.
     fn spawn_workflow<Request, Response, Streams, W>(
         &mut self,
         build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> W,
@@ -46,6 +48,22 @@ pub trait SpawnWorkflow {
         Response: 'static + Send + Sync,
         Streams: StreamPack,
         W: Into<WorkflowSettings>;
+
+    /// Spawn a pure input/output (io) workflow with no streams. This is just a
+    /// convenience wrapper around `spawn_workflow` which usually allows you to
+    /// avoid specifying any generic parameters when there are no streams being
+    /// used.
+    fn spawn_io_workflow<Request, Response, W>(
+        &mut self,
+        build: impl FnOnce(Scope<Request, Response>, &mut Builder) -> W,
+    ) -> Service<Request, Response>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+        W: Into<WorkflowSettings>,
+    {
+        self.spawn_workflow::<Request, Response, (), W>(build)
+    }
 }
 
 /// A view of a scope's inputs and outputs from inside of the scope.
