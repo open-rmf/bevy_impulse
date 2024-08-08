@@ -15,10 +15,10 @@
  *
 */
 
-use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce};
+use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce, StreamOf};
 
 use bevy_ecs::{
-    prelude::{Entity, Commands, Component, World},
+    prelude::{Entity, Commands, Component, World, Event},
     system::CommandQueue,
     schedule::ScheduleLabel,
 };
@@ -413,25 +413,9 @@ impl AddServicesExt for App {
 }
 
 pub trait AddContinuousServicesExt {
-    fn add_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
-        &mut self,
-        schedule: impl ScheduleLabel,
-        builder: B,
-    ) -> &mut Self
-    where
-        B::Service: IntoContinuousService<M2>,
-        B::Deliver: DeliveryChoice,
-        B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
-        B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
-
+    /// Spawn a continuous service. This needs to be used from [`App`] because
+    /// continuous services are added to the Bevy schedule, which only the `App`
+    /// can access.
     fn spawn_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -454,9 +438,8 @@ pub trait AddContinuousServicesExt {
         <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
         <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
-}
 
-impl AddContinuousServicesExt for App {
+    /// Add a continuous service to an [`App`].
     fn add_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -476,10 +459,27 @@ impl AddContinuousServicesExt for App {
         <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
     {
-        builder.into_service_builder().spawn_continuous_service(schedule, self);
+        self.spawn_continuous_service(schedule, builder);
         self
     }
 
+    /// Spawn a service that reads events from the world and streams them out
+    /// after being activated. This service will never terminate so you'll need
+    /// to use the [trim] operation if you want it to stop streaming events.
+    ///
+    /// [trim]: crate::Builder::create_trim
+    fn spawn_event_streaming_service<E: Event>(
+        &mut self,
+        schedule: impl ScheduleLabel
+    ) -> Service<(), (), StreamOf<E>>
+    where
+        E: 'static + Send + Sync + Unpin + Clone,
+    {
+        self.spawn_continuous_service(schedule, event_streaming_service::<E>)
+    }
+}
+
+impl AddContinuousServicesExt for App {
     fn spawn_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -535,8 +535,9 @@ mod tests {
         world::EntityWorldMut,
         system::{SystemParam, StaticSystemParam},
     };
-    use bevy_app::Startup;
+    use bevy_app::{Startup, PreUpdate, PostUpdate};
     use std::future::Future;
+    use smallvec::SmallVec;
 
     #[derive(Component)]
     struct TestPeople {
@@ -739,4 +740,38 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
         context.app.add_service(service_with_generic::<CustomParamA>);
     }
+
+    #[test]
+    fn test_event_streaming_service() {
+        let mut context = TestingContext::minimal_plugins();
+
+        // Add impulse flushes before and after the Update schedule so that the
+        // request and streams can all be processed within one cycle.
+        context.app.add_systems(PreUpdate, flush_impulses());
+        context.app.add_systems(PostUpdate, flush_impulses());
+
+        context.app.add_event::<CustomEvent>();
+        let event_streamer = context.app.spawn_event_streaming_service::<CustomEvent>(Update);
+
+        let mut recipient = context.command(|commands|
+            commands.request((), event_streamer).take()
+        );
+
+        context.app.world.send_event(CustomEvent(0));
+        context.app.world.send_event(CustomEvent(1));
+        context.app.world.send_event(CustomEvent(2));
+
+        context.run_with_conditions(&mut recipient.response, 1);
+
+        // We do not expect the response to be available because event streamers
+        // never end.
+        let mut result: SmallVec<[_; 3]> = SmallVec::new();
+        while let Ok(r) = recipient.streams.try_recv() {
+            result.push(r.0.0);
+        }
+        assert_eq!(&result[..], &[0, 1, 2]);
+    }
+
+    #[derive(Event, Clone, Copy)]
+    struct CustomEvent(i64);
 }

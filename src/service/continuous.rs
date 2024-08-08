@@ -16,7 +16,7 @@
 */
 
 use bevy_ecs::{
-    prelude::{Component, Entity, Local, Query, Commands, World},
+    prelude::{Component, Entity, Local, Query, Commands, World, Event, In, EventReader},
     system::{SystemParam, Command, IntoSystem},
     world::EntityWorldMut,
     schedule::IntoSystemConfigs,
@@ -34,7 +34,7 @@ use crate::{
     OperationRequest, DeliveryInstructions, Delivery, DeliveryUpdate, Deliver,
     SingleTargetStorage, Disposal, DeliveryOrder, IntoContinuousService,
     ContinuousService, IntoServiceBuilder, ServiceBuilder, OperationReachability,
-    ReachabilityResult, ProviderStorage,
+    ReachabilityResult, ProviderStorage, StreamOf, ContinuousServiceInput,
     dispose_for_despawned_service, insert_new_order, pop_next_delivery,
     emit_disposal,
 };
@@ -788,5 +788,25 @@ where
 
     fn into_service_builder(self) -> ServiceBuilder<Self::Service, (), (), (), ()> {
         ServiceBuilder::new(self)
+    }
+}
+
+/// Implementation for [`crate::AddContinuousServicesExt::spawn_event_streaming_service`]
+pub fn event_streaming_service<E: Event>(
+    In(ContinuousService { key }): ContinuousServiceInput<(), (), StreamOf<E>>,
+    mut requests: ContinuousQuery<(), (), StreamOf<E>>,
+    mut events: EventReader<E>,
+)
+where
+    E: 'static + Send + Sync + Unpin + Clone,
+{
+    let Some(mut requests) = requests.get_mut(&key) else {
+        return;
+    };
+
+    for event in events.read() {
+        requests.for_each(|order| {
+            order.streams().send(StreamOf(event.clone()));
+        });
     }
 }

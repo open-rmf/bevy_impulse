@@ -184,7 +184,7 @@ impl<T: Stream> Clone for StreamBuffer<T> {
     }
 }
 
-impl<T: Stream + std::fmt::Debug> StreamBuffer<T> {
+impl<T: Stream> StreamBuffer<T> {
     pub fn send(&self, data: T) {
         self.container.borrow_mut().extend([data]);
     }
@@ -334,7 +334,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type StreamFilter: ReadOnlyWorldQuery;
     type StreamStorageBundle: Bundle;
     type StreamInputPack;
-    type StreamOutputPack: std::fmt::Debug;
+    type StreamOutputPack;
     type Receiver: Send + Sync;
     type Channel: Send;
     type Forward: Future<Output = ()> + Send;
