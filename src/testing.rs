@@ -34,7 +34,7 @@ use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
     GetBufferedSessionsFn, ContinuousService, ContinuousQuery,
-    AddContinuousServicesExt, ContinuousQueueView,
+    AddContinuousServicesExt, ContinuousQueueView, RunCommandsOnWorldExt,
     flush_impulses,
 };
 
@@ -61,11 +61,7 @@ impl TestingContext {
     }
 
     pub fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
-        let mut command_queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut command_queue, &self.app.world);
-        let u = f(&mut commands);
-        command_queue.apply(&mut self.app.world);
-        u
+        self.app.world.command(f)
     }
 
     /// Build a simple workflow with a single input and output, and no streams

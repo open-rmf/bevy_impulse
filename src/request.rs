@@ -15,7 +15,10 @@
  *
 */
 
-use bevy_ecs::prelude::Commands;
+use bevy_ecs::{
+    prelude::{Commands, World},
+    system::CommandQueue,
+};
 use bevy_hierarchy::BuildChildren;
 
 use std::future::Future;
@@ -66,7 +69,9 @@ pub trait RequestExt<'w, 's> {
     fn provide<'a, T: 'static + Send + Sync>(
         &'a mut self,
         value: T,
-    ) -> Impulse<'w, 's, 'a, T, ()>;
+    ) -> Impulse<'w, 's, 'a, T, ()> {
+        self.request(value, provide_value.into_blocking_map_once())
+    }
 
     /// Call this on [`Commands`] to begin building an impulse chain from a
     /// [`Future`] whose [`Future::Output`] will be the item provided to the
@@ -76,7 +81,10 @@ pub trait RequestExt<'w, 's> {
         future: T,
     ) -> Impulse<'w, 's, 'a, T::Output, ()>
     where
-        T::Output: 'static + Send + Sync;
+        T::Output: 'static + Send + Sync,
+    {
+        self.request(future, async_server.into_async_map())
+    }
 }
 
 impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
@@ -117,22 +125,19 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             _ignore: Default::default(),
         }
     }
+}
 
-    fn provide<'a, T: 'static + Send + Sync>(
-        &'a mut self,
-        value: T,
-    ) -> Impulse<'w, 's, 'a, T, ()> {
-        self.request(value, provide_value.into_blocking_map_once())
-    }
+pub trait RunCommandsOnWorldExt {
+    fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U;
+}
 
-    fn serve<'a, T: 'static + Send + Sync + Future>(
-        &'a mut self,
-        future: T,
-    ) -> Impulse<'w, 's, 'a, T::Output, ()>
-    where
-        T::Output: 'static + Send + Sync,
-    {
-        self.request(future, async_server.into_async_map())
+impl RunCommandsOnWorldExt for World {
+    fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
+        let mut command_queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut command_queue, &self);
+        let u = f(&mut commands);
+        command_queue.apply(self);
+        u
     }
 }
 

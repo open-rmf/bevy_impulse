@@ -15,11 +15,13 @@
  *
 */
 
-use crate::{StreamPack, AddOperation, OperateService, Provider, ProvideOnce, StreamOf};
+use crate::{
+    StreamPack, AddOperation, OperateService, Provider, ProvideOnce, StreamOf,
+    RunCommandsOnWorldExt,
+};
 
 use bevy_ecs::{
     prelude::{Entity, Commands, Component, World, Event},
-    system::CommandQueue,
     schedule::ScheduleLabel,
 };
 use bevy_app::prelude::App;
@@ -333,11 +335,9 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for World {
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
-        let mut command_queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut command_queue, self);
-        let provider = commands.spawn_service(builder);
-        command_queue.apply(self);
-        provider
+        self.command(move |commands| {
+            commands.spawn_service(builder)
+        })
     }
 }
 
