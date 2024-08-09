@@ -850,6 +850,22 @@ where
 
         Chain::new(target, self.builder)
     }
+
+    /// Inverse of [`Self::dispose_on_err`], this will dispose [`Ok`] results
+    /// and pass along [`Err`] values. This can be used in cases where you are
+    /// monitoring only for errors and are not concerned about any [`Ok`] results.
+    pub fn dispose_on_ok(self) -> Chain<'w, 's, 'a, 'b, E> {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            source,
+            CreateDisposalFilter::on_ok::<T, E>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
 }
 
 impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, Option<T>>
@@ -954,6 +970,23 @@ where
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_none::<T>(target),
+        ));
+
+        Chain::new(target, self.builder)
+    }
+
+    /// Inverse of [`Self::dispose_on_none`], this will dispose [`Some`] values
+    /// and pass along a trigger `()` for [`None`] values. This can be used in
+    /// cases where you are monitoring only for [`None`] values and are not
+    /// concerned about any [`Some`] values.
+    pub fn dispose_on_some(self) -> Chain<'w, 's, 'a, 'b, ()> {
+        let source = self.target;
+        let target = self.builder.commands.spawn(UnusedTarget).id();
+
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            source,
+            CreateDisposalFilter::on_some::<T>(target),
         ));
 
         Chain::new(target, self.builder)

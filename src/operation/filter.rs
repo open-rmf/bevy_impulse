@@ -37,6 +37,17 @@ fn filter_none<Value>(value: Option<Value>) -> FilterResult<Value> {
 }
 
 #[derive(ThisError, Debug)]
+#[error("A Some value was received and we did not need to use it")]
+pub struct FilteredSome;
+
+fn filter_some<Value>(value: Option<Value>) -> FilterResult<()> {
+    match value {
+        Some(_) => FilterResult::Err(Some(FilteredSome.into())),
+        None => FilterResult::Ok(()),
+    }
+}
+
+#[derive(ThisError, Debug)]
 #[error("An unacceptable Err value was received")]
 pub struct FilteredErr<E: Error + 'static + Send + Sync> {
     #[source]
@@ -53,6 +64,17 @@ pub struct QuietlyFilteredErr;
 
 fn filter_quiet_err<T, E>(value: Result<T, E>) -> FilterResult<T> {
     value.map_err(|_| Some(QuietlyFilteredErr.into()))
+}
+
+#[derive(ThisError, Debug)]
+#[error("An Ok value was received and we did not need to use it")]
+pub struct FilterOk;
+
+fn filter_ok<T, E>(value: Result<T, E>) -> FilterResult<E> {
+    match value {
+        Ok(_) => FilterResult::Err(Some(FilterOk.into())),
+        Err(err) => FilterResult::Ok(err),
+    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -188,12 +210,35 @@ impl CreateDisposalFilter {
         }
     }
 
+    pub fn on_ok<T, E>(target: Entity) -> DisposalFilter<Result<T, E>, E, fn(Result<T, E>) -> FilterResult<E>>
+    where
+        T: 'static + Send + Sync,
+        E: 'static + Send + Sync,
+    {
+        DisposalFilter {
+            filter: filter_ok::<T, E>,
+            target,
+            _ignore: Default::default(),
+        }
+    }
+
     pub fn on_none<T>(target: Entity) -> DisposalFilter<Option<T>, T, fn(Option<T>) -> FilterResult<T>>
     where
         T: 'static + Send + Sync,
     {
         DisposalFilter {
             filter: filter_none::<T>,
+            target,
+            _ignore: Default::default(),
+        }
+    }
+
+    pub fn on_some<T>(target: Entity) -> DisposalFilter<Option<T>, (), fn(Option<T>) -> FilterResult<()>>
+    where
+        T: 'static + Send + Sync,
+    {
+        DisposalFilter {
+            filter: filter_some::<T>,
             target,
             _ignore: Default::default(),
         }
