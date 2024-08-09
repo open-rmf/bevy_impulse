@@ -15,7 +15,10 @@
  *
 */
 
-use bevy_ecs::prelude::In;
+use bevy_ecs::{
+    prelude::In,
+    query::QueryEntityError,
+};
 
 use smallvec::SmallVec;
 
@@ -81,4 +84,12 @@ where
             PromiseState::Pending | PromiseState::Taken => unreachable!(),
         }
     }
+}
+
+pub fn push_into_buffer<T: 'static + Send + Sync>(
+    In((input, key)): In<(T, BufferKey<T>)>,
+    mut access: BufferAccessMut<T>,
+) -> Result<(), QueryEntityError> {
+    access.get_mut(&key)?.push(input);
+    Ok(())
 }

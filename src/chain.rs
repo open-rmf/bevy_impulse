@@ -30,7 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, Gate, Buffered,
-    Spread, Collect, Sendish, Service, Cancellation,
+    Spread, Collect, Sendish, Service, Cancellation, Buffer,
     make_result_branching, make_option_branching,
 };
 
@@ -549,6 +549,18 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
             output: Output::new(scope, target),
             streams: (),
         }
+    }
+
+    /// Push the value into a buffer then emit a trigger once the value is
+    /// inside the buffer.
+    ///
+    /// If the buffer is broken (e.g. its operation has been despawned) the
+    /// workflow will be cancelled.
+    pub fn then_push(self, buffer: Buffer<T>) -> Chain<'w, 's, 'a, 'b, ()> {
+        assert_eq!(self.scope(), buffer.scope);
+        self.with_access(buffer)
+            .then(push_into_buffer.into_blocking_callback())
+            .cancel_on_err()
     }
 
     /// Apply a [gate action](Gate) to one or more buffers at this point
