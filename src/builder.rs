@@ -29,6 +29,7 @@ use crate::{
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, Gate,
     OperateStaticGate, OperateBufferAccess, Collect, Sendish, Service, Cancellation,
+    ForkCloneOutput, ForkClone, ForkTargetStorage,
     chain::premade::inject_service,
 };
 
@@ -218,6 +219,26 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Settings: Into<ScopeSettings>,
     {
         self.create_scope::<Request, Response, (), Settings>(build)
+    }
+
+    /// Create a node that clones its inputs and sends them off to any number of
+    /// targets.
+    pub fn create_fork_clone<T: Clone>(
+        &mut self,
+    ) -> (InputSlot<T>, ForkCloneOutput<T>)
+    where
+        T: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            ForkClone::<T>::new(ForkTargetStorage::new()),
+        ));
+        (
+            InputSlot::new(self.scope, source),
+            ForkCloneOutput::new(self.scope, source),
+        )
     }
 
     /// Alternative way of calling [`Bufferable::join`]
@@ -817,6 +838,23 @@ mod tests {
 
         context.run_with_conditions(&mut promise, Duration::from_secs_f64(0.5));
         assert!(promise.take().available().is_some_and(|v| v == 0.01));
+        assert!(context.no_unhandled_errors());
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let (fork_input, fork_output) = builder.create_fork_clone();
+            builder.connect(scope.input, fork_input);
+            let a = fork_output.clone_output(builder);
+            let b = fork_output.clone_output(builder);
+            builder.join((a, b)).connect(scope.terminate);
+        });
+
+
+        let mut promise = context.command(|commands|
+            commands.request(5, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(promise.take().available().is_some_and(|v| v == (5, 5)));
         assert!(context.no_unhandled_errors());
     }
 
