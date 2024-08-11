@@ -69,6 +69,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Output::new(self.scope(), self.target)
     }
 
+    /// Get the raw [`Output`] slot for the current link in the chain, along with
+    /// the builder. This can be used to do more complex building inside of
+    /// chain builder functions.
+    #[must_use]
+    pub fn unpack(self) -> (Output<T>, &'b mut Builder<'w, 's, 'a>) {
+        (Output::new(self.scope(), self.target), self.builder)
+    }
+
     /// Connect this output into an input slot.
     ///
     /// Pass a [terminate](crate::Scope::terminate) into this function to

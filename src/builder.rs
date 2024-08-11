@@ -275,7 +275,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_buffer_access<T, B>(
         &mut self,
         buffers: B,
-    ) -> Node<T, T>
+    ) -> Node<T, (T, BufferKeys<B>)>
     where
         T: 'static + Send + Sync,
         B: Bufferable,

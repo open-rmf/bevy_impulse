@@ -626,7 +626,7 @@ mod tests {
                         // terminates.
                         |chain| chain
                             .with_access(buffer)
-                            .then(add_from_buffer_cb)
+                            .then(add_from_buffer_cb.clone())
                             .connect(scope.terminate),
                         // If the buffer was empty, keep looping back until there
                         // is a value available.
@@ -646,6 +646,40 @@ mod tests {
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|value| value.is_err_and(|n| n == 5.0)));
         assert!(context.no_unhandled_errors());
+
+        // Same as previous test, but using Builder::create_buffer_access instead
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let (branch_to_adder, branch_to_buffer) = scope.input.chain(builder).unzip();
+            let buffer = builder.create_buffer::<f64>(BufferSettings::keep_first(10));
+            builder.connect(branch_to_buffer, buffer.input_slot());
+
+            let access = builder.create_buffer_access(buffer);
+            builder.connect(branch_to_adder, access.input);
+            access.output.chain(builder)
+                .then(add_from_buffer_cb.clone())
+                .fork_result(
+                    |ok| {
+                        let (output, builder) = ok.unpack();
+                        let second_access = builder.create_buffer_access(buffer);
+                        builder.connect(output, second_access.input);
+                        second_access.output.chain(builder)
+                            .then(add_from_buffer_cb.clone())
+                            .connect(scope.terminate);
+                    },
+                    |err| err.connect(access.input),
+                );
+        });
+
+        let mut promise = context.command(|commands|
+            commands
+            .request((2.0, 3.0), workflow)
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|value| value.is_err_and(|n| n == 5.0)));
+        assert!(context.no_unhandled_errors());
+
     }
 
     fn add_from_buffer(
