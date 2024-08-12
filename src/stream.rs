@@ -1078,14 +1078,14 @@ mod tests {
             )
         });
 
+        test_formatting_stream(parse_async_srv, &mut context);
+
         let parse_continuous_srv = context.app.spawn_continuous_service(
             Update,
             impl_formatting_streams_continuous,
         );
 
         test_formatting_stream(parse_continuous_srv, &mut context);
-
-        test_formatting_stream(parse_async_srv, &mut context);
 
         let parse_blocking_callback = (
             |In(input): BlockingCallbackInput<String, FormatStreams>| {
@@ -1149,6 +1149,25 @@ mod tests {
 
         let continuous_injection_workflow = context.spawn_workflow(make_workflow(parse_continuous_srv));
         test_formatting_stream(continuous_injection_workflow, &mut context);
+
+        let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
+            let inner_node = scope.input.chain(builder).then_node(parse_continuous_srv);
+            builder.connect(inner_node.streams.0, scope.streams.0);
+            builder.connect(inner_node.streams.1, scope.streams.1);
+            builder.connect(inner_node.streams.2, scope.streams.2);
+            builder.connect(inner_node.output, scope.terminate);
+        });
+        test_formatting_stream(nested_workflow, &mut context);
+
+        let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
+            let inner_node = builder.create_node(parse_continuous_srv);
+            builder.connect(scope.input, inner_node.input);
+            builder.connect(inner_node.streams.0, scope.streams.0);
+            builder.connect(inner_node.streams.1, scope.streams.1);
+            builder.connect(inner_node.streams.2, scope.streams.2);
+            builder.connect(inner_node.output, scope.terminate);
+        });
+        test_formatting_stream(nested_workflow, &mut context);
     }
 
     fn impl_formatting_streams_blocking(

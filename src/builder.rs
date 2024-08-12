@@ -74,7 +74,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
             source, &mut map, self,
         );
-        self.commands.entity(source).insert(bundle);
+        self.commands.entity(source).insert((bundle, map));
         Node {
             input: InputSlot::new(self.scope, source),
             output: Output::new(self.scope, target),
