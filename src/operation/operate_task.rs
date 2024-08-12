@@ -434,7 +434,7 @@ pub struct ActiveTask {
 }
 
 impl ActiveTasksStorage {
-    pub fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+    pub fn cleanup(clean: &mut OperationCleanup) -> Result<bool, OperationError> {
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
         let mut active_tasks = source_mut.get_mut::<Self>().or_broken()?;
@@ -448,16 +448,18 @@ impl ActiveTasksStorage {
             }
         }
 
+        let mut clean = OperationCleanup {
+            source,
+            cleanup: clean.cleanup,
+            world: clean.world,
+            roster: clean.roster,
+        };
         for task_id in to_cleanup {
-            clean = clean.for_node(task_id);
+            clean = clean.delegate_to(task_id);
             clean.clean();
         }
 
-        if cleanup_ready {
-            clean.notify_cleaned()?;
-        }
-
-        Ok(())
+        Ok(cleanup_ready)
     }
 
     pub fn contains_session(r: &OperationReachability) -> ReachabilityResult {

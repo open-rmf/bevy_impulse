@@ -103,7 +103,11 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
         clean.cleanup_disposals()?;
-        ActiveTasksStorage::cleanup(clean)
+        if !ActiveTasksStorage::cleanup(&mut clean)? {
+            // We need to wait for some async tasks to be cleared out
+            return Ok(());
+        }
+        clean.notify_cleaned()
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {

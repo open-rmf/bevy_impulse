@@ -15,7 +15,11 @@
  *
 */
 
-use crate::{Blocker, OperationRoster, DeliveryInstructions, DeliveryLabelId};
+use crate::{
+    Blocker, OperationRoster, DeliveryInstructions, DeliveryLabelId,
+    OperationCleanup, OperationResult, OperationReachability,
+    ReachabilityResult, ProviderStorage, OrBroken,
+};
 
 use bevy_ecs::prelude::{Entity, Component, World};
 
@@ -122,11 +126,53 @@ impl<Request> Delivery<Request> {
     pub(crate) fn parallel() -> Self {
         Delivery::Parallel(ParallelDelivery::<Request>::default())
     }
+
+    pub(crate) fn contains_session(r: &OperationReachability) -> ReachabilityResult
+    where
+        Request: 'static + Send + Sync,
+    {
+        let provider = r.world().get::<ProviderStorage>(r.source()).or_broken()?.get();
+        let Some(delivery) = r.world().get::<Self>(provider) else {
+            return Ok(false);
+        };
+
+        match delivery {
+            Self::Serial(serial) => Ok(serial.contains_session(r.session())),
+            Self::Parallel(parallel) => Ok(parallel.contains_session(r.session())),
+        }
+    }
+
+    pub(crate) fn cleanup(clean: &mut OperationCleanup) -> OperationResult
+    where
+        Request: 'static + Send + Sync,
+    {
+        let source = clean.source;
+        let provider = clean.world.get::<ProviderStorage>(source).or_broken()?.get();
+        let Some(mut delivery) = clean.world.get_mut::<Delivery<Request>>(provider) else {
+            return Ok(());
+        };
+
+        match delivery.as_mut() {
+            Delivery::Serial(serial) => serial.cleanup(clean.cleanup.session),
+            Delivery::Parallel(parallel) => parallel.cleanup(clean.cleanup.session),
+        }
+
+        Ok(())
+    }
 }
 
 pub(crate) struct SerialDelivery<Request> {
     delivering: Option<ActiveDelivery>,
     queue: VecDeque<DeliveryOrder<Request>>,
+}
+
+impl<Request> SerialDelivery<Request> {
+    fn contains_session(&self, session: Entity) -> bool {
+        self.queue.iter().find(|order| order.session == session).is_some()
+    }
+    fn cleanup(&mut self, session: Entity) {
+        self.queue.retain(|order| order.session != session);
+    }
 }
 
 impl<Request> Default for SerialDelivery<Request> {
@@ -145,6 +191,17 @@ pub struct ParallelDelivery<Request> {
 impl<Request> Default for ParallelDelivery<Request> {
     fn default() -> Self {
         Self { labeled: Default::default() }
+    }
+}
+
+impl<Request> ParallelDelivery<Request> {
+    fn contains_session(&self, session: Entity) -> bool {
+        self.labeled.values().find(|serial| serial.contains_session(session)).is_some()
+    }
+    fn cleanup(&mut self, session: Entity) {
+        for serial in self.labeled.values_mut() {
+            serial.cleanup(session);
+        }
     }
 }
 

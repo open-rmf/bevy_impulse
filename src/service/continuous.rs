@@ -35,6 +35,7 @@ use crate::{
     SingleTargetStorage, Disposal, DeliveryOrder, IntoContinuousService,
     ContinuousService, IntoServiceBuilder, ServiceBuilder, OperationReachability,
     ReachabilityResult, ProviderStorage, StreamOf, ContinuousServiceInput,
+    OperationCleanup,
     dispose_for_despawned_service, insert_new_order, pop_next_delivery,
     emit_disposal,
 };
@@ -437,6 +438,15 @@ struct ContinuousQueueStorage<Request> {
     inner: SmallVec<[ContinuousOrder<Request>; 16]>,
 }
 
+impl<Request> std::fmt::Debug for ContinuousQueueStorage<Request> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_list()
+            .entries(self.inner.iter())
+            .finish()
+    }
+}
+
 impl<Request> ContinuousQueueStorage<Request> {
     fn new() -> Self {
         Self { inner: Default::default() }
@@ -456,21 +466,56 @@ impl<Request> ContinuousQueueStorage<Request> {
 
         Ok(queue.inner.iter().find(|order| order.session == session).is_some())
     }
+
+    fn cleanup(
+        provider: Entity,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult
+    where
+        Request: 'static + Send + Sync,
+    {
+        let mut provider_mut = world.get_entity_mut(provider).or_broken()?;
+        let Some(mut queue) = provider_mut.get_mut::<Self>() else {
+            return Ok(());
+        };
+
+        queue.inner.retain(|order| order.session != session);
+        Ok(())
+    }
 }
 
 #[derive(Component)]
-pub(crate) struct ActiveContinuousSessions(
-    fn(Entity, Entity, &World) -> ReachabilityResult
-);
+pub(crate) struct ActiveContinuousSessions {
+    reachability: fn(Entity, Entity, &World) -> ReachabilityResult,
+    cleanup: fn(Entity, Entity, &mut World) -> OperationResult,
+}
 
 impl ActiveContinuousSessions {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self {
+            reachability: ContinuousQueueStorage::<T>::contains_session,
+            cleanup: ContinuousQueueStorage::<T>::cleanup,
+        }
+    }
+
     pub(crate) fn contains_session(r: &OperationReachability) -> ReachabilityResult {
         let provider = r.world().get::<ProviderStorage>(r.source()).or_broken()?.get();
         let Some(active) = r.world().get::<ActiveContinuousSessions>(provider) else {
             return Ok(false);
         };
-        let f = active.0;
+        let f = active.reachability;
         f(provider, r.session(), r.world())
+    }
+
+    pub(crate) fn cleanup(clean: &mut OperationCleanup) -> OperationResult {
+        let source = clean.source;
+        let provider = clean.world.get::<ProviderStorage>(source).or_broken()?.get();
+        let Some(active) = clean.world.get::<ActiveContinuousSessions>(provider) else {
+            return Ok(());
+        };
+        let f = active.cleanup;
+        f(provider, clean.cleanup.session, clean.world)
     }
 }
 
@@ -480,6 +525,17 @@ struct ContinuousOrder<Request> {
     source: Entity,
     task_id: Entity,
     unblock: Option<Blocker>,
+}
+
+impl<Request> std::fmt::Debug for ContinuousOrder<Request> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("ContinuousQueueStorage")
+            .field("session", &self.session)
+            .field("source", &self.source)
+            .field("task_id", &self.task_id)
+            .finish()
+    }
 }
 
 struct DeliverResponses<Request, Response, Streams> {
@@ -766,7 +822,7 @@ where
     fn into_system_config<'w>(self, entity_mut: &mut EntityWorldMut<'w>) -> SystemConfigs {
         let provider = entity_mut.insert((
             ContinuousQueueStorage::<Request>::new(),
-            ActiveContinuousSessions(ContinuousQueueStorage::<Request>::contains_session),
+            ActiveContinuousSessions::new::<Request>(),
             ServiceBundle::<ContinuousServiceImpl<Request, Response, Streams>>::new(),
         )).id();
         let continuous_key = move || ContinuousService { key: ContinuousServiceKey::new(provider) };

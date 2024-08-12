@@ -17,11 +17,11 @@
 
 use crate::{
     Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
-    SingleInputStorage, dispatch_service, OperationCleanup,
+    SingleInputStorage, dispatch_service, OperationCleanup, WorkflowHooks,
     OperationResult, OrBroken, OperationSetup, OperationRequest,
     ActiveTasksStorage, OperationReachability, ReachabilityResult,
     InputBundle, Input, ManageDisposal, Disposal, ManageInput, UnhandledErrors,
-    DisposalFailure, ActiveContinuousSessions, DeliveryInstructions,
+    DisposalFailure, ActiveContinuousSessions, DeliveryInstructions, Delivery,
 };
 
 use bevy_ecs::{
@@ -84,7 +84,27 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<Request>()?;
         clean.cleanup_disposals()?;
-        ActiveTasksStorage::cleanup(clean)
+        ActiveContinuousSessions::cleanup(&mut clean)?;
+        Delivery::<Request>::cleanup(&mut clean)?;
+
+        // The previous cleanups are all done immediately. The next two cleanups
+        // are async, but only one will be applicable. One will return false if
+        // we need to wait for the cleanup to happen. They will both return true
+        // if it is okay for us to immediately notify of the cleanup.
+        if !ActiveTasksStorage::cleanup(&mut clean)? {
+            // We need to wait for some async tasks to be cleared out
+            return Ok(());
+        }
+
+        if !WorkflowHooks::cleanup(&mut clean)? {
+            // We need to wait for the scope to be cleaned
+            return Ok(());
+        }
+
+        // TODO(@mxgrey): Seriously consider how to make all these different
+        // service cleanup routes more maintainable.
+
+        clean.notify_cleaned()
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
@@ -97,6 +117,13 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
         if ActiveContinuousSessions::contains_session(&reachability)? {
             return Ok(true);
         }
+        if Delivery::<Request>::contains_session(&reachability)? {
+            return Ok(true);
+        }
+        if WorkflowHooks::is_reachable(&mut reachability)? {
+            return Ok(true);
+        }
+
         SingleInputStorage::is_reachable(&mut reachability)
     }
 }

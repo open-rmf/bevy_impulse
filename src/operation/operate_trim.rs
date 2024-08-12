@@ -25,7 +25,7 @@ use crate::{
     Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
     OperationReachability, ReachabilityResult, OperationSetup, SingleInputStorage,
     SingleTargetStorage, OrBroken, OperationCleanup, Cancellation, ManageCancellation,
-    Disposal, OperationError, Cleanup, TrimBranch, TrimPoint, TrimPolicy, CleanupContents,
+    Disposal, OperationError, TrimBranch, TrimPoint, TrimPolicy, CleanupContents,
     FinalizeCleanup, FinalizeCleanupRequest, ScopeStorage, ScopeEntryStorage,
     immediately_downstream_of, emit_disposal,
 };
@@ -141,11 +141,10 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
         let cleanup_id = world.spawn(()).id();
         world.get_mut::<HoldingStorage<T>>(source).or_broken()?
             .map.insert(cleanup_id, Input { data, session });
-        let cleanup = Cleanup { cleaner: source, session, cleanup_id };
 
         let nodes = world.get::<CleanupContents>(source).or_broken()?.nodes().clone();
         for node in nodes {
-            OperationCleanup { source: node, cleanup, world, roster }.clean();
+            OperationCleanup::new(source, node, session, cleanup_id, world, roster).clean();
         }
 
         Ok(())

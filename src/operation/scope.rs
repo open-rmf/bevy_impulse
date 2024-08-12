@@ -221,8 +221,6 @@ where
         OperationCleanup { source, cleanup, world, roster }: OperationCleanup
     ) -> OperationResult {
         let parent_session = cleanup.session;
-        let cleaner = cleanup.cleaner;
-        let cleanup_id = cleanup.cleanup_id;
 
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         source_mut.cleanup_inputs::<Request>(cleanup.session);
@@ -252,7 +250,7 @@ where
         };
 
         cleanup_entire_scope(
-            source, cleaner, cleanup_id, FinishStatus::EarlyCleanup,
+            source, cleanup, FinishStatus::EarlyCleanup,
             relevant_scoped_sessions, world, roster,
         )
     }
@@ -526,8 +524,9 @@ where
             })
             .collect();
 
+        let cleanup = Cleanup { cleaner: source, node: source, session, cleanup_id: session };
         cleanup_entire_scope(
-            source, source, session, FinishStatus::Cancelled(cancellation),
+            source, cleanup, FinishStatus::Cancelled(cancellation),
             relevant_scoped_sessions, world, roster,
         )
     }
@@ -578,8 +577,14 @@ where
             disposals,
         }.into();
         if pair.status.to_cancelled() {
+            let cleanup = Cleanup {
+                cleaner: source,
+                node: source,
+                session: scoped_session,
+                cleanup_id: scoped_session,
+            };
             cleanup_entire_scope(
-                source, source, scoped_session, FinishStatus::Cancelled(cancellation),
+                source, cleanup, FinishStatus::Cancelled(cancellation),
                 SmallVec::from_iter([scoped_session]), world, roster,
             )?;
         }
@@ -703,8 +708,7 @@ impl<T> Terminate<T> {
 
 fn cleanup_entire_scope(
     scope: Entity,
-    cleaner: Entity,
-    cleanup_id: Entity,
+    cleanup: Cleanup,
     status: FinishStatus,
     relevant_scoped_sessions: SmallVec<[Entity; 16]>,
     world: &mut World,
@@ -720,18 +724,22 @@ fn cleanup_entire_scope(
         world.get_mut::<AwaitingCleanupStorage>(finish_cleanup_workflow).or_broken()?.0
             .push(AwaitingCleanup::new(
                 scoped_session,
-                CleanupInfo { parent_session, cleaner, cleanup_id, status: status.clone() },
+                CleanupInfo { parent_session, cleanup, status: status.clone() },
             ));
 
         if nodes.is_empty() {
             // There are no nodes to clean up (... meaning the workflow is totally
             // empty and not even a valid workflow to begin with, but oh well ...)
             // so we should immediately trigger a finished cleaning notice.
-            roster.cleanup_finished(Cleanup { cleaner: scope, session: scoped_session, cleanup_id });
+            roster.cleanup_finished(Cleanup {
+                cleaner: scope,
+                node: scope,
+                session: scoped_session,
+                cleanup_id: cleanup.cleanup_id,
+            });
         } else {
-            let cleanup = Cleanup { cleaner: scope, session: scoped_session, cleanup_id };
             for node in nodes.iter() {
-                OperationCleanup { source: *node, cleanup, world, roster }.clean();
+                OperationCleanup::new(scope, *node, scoped_session, cleanup.cleanup_id, world, roster).clean();
             }
         }
 
@@ -786,8 +794,14 @@ where
             return Ok(());
         }
 
+        let cleanup = Cleanup {
+            cleaner: scope,
+            node: scope,
+            cleanup_id: scoped_session,
+            session: scoped_session,
+        };
         cleanup_entire_scope(
-            scope, scope, scoped_session, FinishStatus::Terminated,
+            scope, cleanup, FinishStatus::Terminated,
             SmallVec::from_iter([scoped_session]), world, roster,
         )
     }
@@ -859,8 +873,7 @@ pub(crate) struct FinishCleanupWorkflowStorage(pub(crate) Entity);
 
 pub(crate) struct CleanupInfo {
     parent_session: Entity,
-    cleaner: Entity,
-    cleanup_id: Entity,
+    cleanup: Cleanup,
     status: FinishStatus,
 }
 
@@ -1130,8 +1143,8 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
         let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
         let a = awaiting.0.get(index).or_broken()?;
         let parent_session = a.info.parent_session;
-        let cleaner = a.info.cleaner;
-        let cleanup_id = a.info.cleanup_id;
+        let cleanup = a.info.cleanup;
+        let cleanup_id = cleanup.cleanup_id;
         let scoped_session = a.scoped_session;
         let terminating = a.info.status.is_terminated();
         if !a.info.status.is_early_cleanup() {
@@ -1156,7 +1169,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
         let mut early_cleanup = false;
         let mut cleaning_finished = true;
         for a in &source_mut.get::<AwaitingCleanupStorage>().or_broken()?.0 {
-            if a.info.cleanup_id == cleanup_id {
+            if a.info.cleanup.cleanup_id == cleanup_id {
                 if !a.cleanup_workflow_sessions.as_ref().is_some_and(|s| s.is_empty()) {
                     cleaning_finished = false;
                 }
@@ -1190,12 +1203,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             // clean.
             let mut awaiting = world.get_mut::<AwaitingCleanupStorage>(source).or_broken()?;
             awaiting.0.retain(|p| p.info.parent_session != parent_session);
-            OperationCleanup {
-                source: scope,
-                cleanup: Cleanup { cleaner, session: parent_session, cleanup_id },
-                world,
-                roster,
-            }.notify_cleaned()?;
+            cleanup.notify_cleaned(world, roster)?;
         }
 
         let mut scope_mut = world.get_entity_mut(scope).or_broken()?;

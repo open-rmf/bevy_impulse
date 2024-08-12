@@ -40,6 +40,18 @@ pub struct OperationCleanup<'a> {
 }
 
 impl<'a> OperationCleanup<'a> {
+    pub fn new(
+        cleaner: Entity,
+        node: Entity,
+        session: Entity,
+        cleanup_id: Entity,
+        world: &'a mut World,
+        roster: &'a mut OperationRoster,
+    ) -> Self {
+        let cleanup = Cleanup { cleaner, node, session, cleanup_id };
+        Self { source: node, cleanup, world, roster }
+    }
+
     pub fn clean(&mut self) {
         let Some(cleanup) = self.world.get::<OperationCleanupStorage>(self.source) else {
             return;
@@ -95,16 +107,15 @@ impl<'a> OperationCleanup<'a> {
     }
 
     pub fn notify_cleaned(&mut self) -> OperationResult {
-        let mut cleaner_mut = self.world.get_entity_mut(self.cleanup.cleaner).or_broken()?;
-        let mut scope_contents = cleaner_mut.get_mut::<CleanupContents>().or_broken()?;
-        if scope_contents.register_cleanup_of_node(self.cleanup.cleanup_id, self.source) {
-            self.roster.cleanup_finished(self.cleanup);
-        }
-        Ok(())
+        self.cleanup.notify_cleaned(self.world, self.roster)
     }
 
-    pub fn for_node(self, source: Entity) -> Self {
-        Self { source, ..self }
+    /// Use this to pass the responsibility of cleaning up this node to another
+    /// operation node. This is used by async providers to hand off cleanup
+    /// responsibilities to their active tasks.
+    pub fn delegate_to(mut self, source: Entity) -> Self {
+        self.source = source;
+        self
     }
 }
 
@@ -147,7 +158,7 @@ pub struct FinalizeCleanupRequest<'a> {
 }
 
 #[derive(Component)]
-pub(super) struct OperationCleanupStorage(pub(super) fn(OperationCleanup) -> OperationResult);
+pub(crate) struct OperationCleanupStorage(pub(super) fn(OperationCleanup) -> OperationResult);
 
 #[derive(Component, Clone, Copy)]
 pub struct FinalizeCleanup(pub(crate) fn(FinalizeCleanupRequest) -> OperationResult);
@@ -162,6 +173,12 @@ impl FinalizeCleanup {
 #[derive(Clone, Copy, Debug)]
 pub struct Cleanup {
     pub cleaner: Entity,
+    /// This is the operation node that the Cleanup request was sent to. The
+    /// request might need to move across other operation nodes while it is
+    /// being carried out, so we keep track of the original target node here so
+    /// that the cleaner can be correctly notified about which node finished
+    /// cleaning up.
+    pub node: Entity,
     pub session: Entity,
     // A unique ID for this cleanup operation. For final scope cleanup, this
     // will be equal to the session ID.
@@ -169,6 +186,15 @@ pub struct Cleanup {
 }
 
 impl Cleanup {
+    pub(crate) fn notify_cleaned(&self, world: &mut World, roster: &mut OperationRoster) -> OperationResult {
+        let mut cleaner_mut = world.get_entity_mut(self.cleaner).or_broken()?;
+        let mut scope_contents = cleaner_mut.get_mut::<CleanupContents>().or_broken()?;
+        if scope_contents.register_cleanup_of_node(self.cleanup_id, self.node) {
+            roster.cleanup_finished(*self);
+        }
+        Ok(())
+    }
+
     pub(crate) fn trigger(self, world: &mut World, roster: &mut OperationRoster) {
         // Clear this cleanup_id so we're not leaking memory
         match world.get_mut::<CleanupContents>(self.cleaner) {

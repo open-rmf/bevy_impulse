@@ -571,7 +571,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
 pub(crate) struct OperationExecuteStorage(pub(crate) fn(OperationRequest));
 
 #[derive(Component)]
-struct OperationReachabilityStorage(
+pub(crate) struct OperationReachabilityStorage(
     fn(OperationReachability) -> ReachabilityResult
 );
 

@@ -20,13 +20,47 @@ use crate::{
     OrBroken, Input, ManageInput, DeliveryInstructions, ParentSession, SessionStatus,
     OperationError, Delivery, DeliveryOrder, DeliveryUpdate, Blocker,
     OperationRoster, Disposal, Cancellation, Cancel, Deliver, SingleTargetStorage,
-    ExitTargetStorage, ExitTarget, Service,
+    ExitTargetStorage, ExitTarget, Service, OperationCleanup,
+    OperationReachability, ReachabilityResult, ProviderStorage,
     begin_scope, dispose_for_despawned_service, insert_new_order, emit_disposal,
     pop_next_delivery,
 };
 
 use bevy_ecs::prelude::{Entity, World, Component};
 use bevy_hierarchy::prelude::DespawnRecursiveExt;
+
+pub(crate) struct WorkflowHooks {}
+
+impl WorkflowHooks {
+    pub(crate) fn cleanup(clean: &mut OperationCleanup) -> Result<bool, OperationError> {
+        let source = clean.source;
+        let provider = clean.world.get::<ProviderStorage>(source).or_broken()?.get();
+        let Some(workflow) = clean.world.get::<WorkflowStorage>(provider) else {
+            // The provider is not a workflow, so we have nothing to do here
+            return Ok(true);
+        };
+        let scope = workflow.scope;
+
+        OperationCleanup {
+            source: scope,
+            cleanup: clean.cleanup,
+            world: clean.world,
+            roster: clean.roster,
+        }.clean();
+        Ok(false)
+    }
+
+    pub(crate) fn is_reachable(reachability: &mut OperationReachability) -> ReachabilityResult {
+        let source = reachability.source();
+        let provider = reachability.world().get::<ProviderStorage>(source).or_broken()?.get();
+        let Some(workflow) = reachability.world().get::<WorkflowStorage>(provider) else {
+            // The provider is not a workflow, so we have nothing to do here
+            return Ok(false);
+        };
+        let scope = workflow.scope;
+        return reachability.check_upstream(scope)
+    }
+}
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct WorkflowStorage {
