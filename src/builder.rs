@@ -29,8 +29,7 @@ use crate::{
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, Gate,
     OperateStaticGate, OperateBufferAccess, Collect, Sendish, Service, Cancellation,
-    ForkCloneOutput, ForkClone, ForkTargetStorage,
-    chain::premade::inject_service,
+    ForkCloneOutput, ForkClone, ForkTargetStorage, Injection,
 };
 
 pub(crate) mod connect;
@@ -136,18 +135,16 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ///
     /// This allows services to be injected into workflows as input, or for a
     /// service to be chosen during runtime.
-    pub fn create_injection_node<Request, Response, Streams>(&mut self) -> Node<
-        (Request, Service<Request, Response, Streams>),
-        Result<Response, Cancellation>,
-        Streams,
-    >
+    pub fn create_injection_node<Request, Response, Streams>(
+        &mut self
+    ) -> Node<(Request, Service<Request, Response, Streams>), Response, Streams>
     where
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync + Unpin,
         Streams: StreamPack,
-        Streams::Receiver: Unpin,
     {
-        self.create_map(inject_service)
+        let source = self.commands.spawn(()).id();
+        self.create_injection_impl::<Request, Response, Streams>(source)
     }
 
     /// Connect the output of one into the input slot of another node.
@@ -667,6 +664,35 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             input: InputSlot::new(self.scope, scope_id),
             output: Output::new(self.scope, exit_scope),
             streams: stream_out,
+        }
+    }
+
+    pub(crate) fn create_injection_impl<Request, Response, Streams>(
+        &mut self,
+        source: Entity,
+    ) -> Node<(Request, Service<Request, Response, Streams>), Response, Streams>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+        Streams: StreamPack,
+    {
+        let target = self.commands.spawn(UnusedTarget).id();
+
+        let mut map = StreamTargetMap::default();
+        let (bundle, streams) = Streams::spawn_node_streams(
+            source, &mut map, self,
+        );
+        self.commands.entity(source).insert((bundle, map));
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            Injection::<Request, Response, Streams>::new(target),
+        ));
+
+        Node {
+            input: InputSlot::new(self.scope, source),
+            output: Output::new(self.scope, target),
+            streams,
         }
     }
 }

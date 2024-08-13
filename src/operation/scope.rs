@@ -166,6 +166,25 @@ impl TerminalStorage {
     }
 }
 
+#[derive(Component, Default)]
+pub struct ScopeContents {
+    nodes: SmallVec<[Entity; 16]>,
+}
+
+impl ScopeContents {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn add_node(&mut self, node: Entity) {
+        self.nodes.push(node);
+    }
+
+    pub fn nodes(&self) -> &SmallVec<[Entity; 16]> {
+        &self.nodes
+    }
+}
+
 impl<Request, Response, Streams> Operation for OperateScope<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
@@ -183,6 +202,7 @@ where
             Cancellable::new(Self::receive_cancel),
             ValidateScopeReachability(Self::validate_scope_reachability),
             CleanupContents::new(),
+            ScopeContents::new(),
             FinalizeCleanup::new(Self::begin_cleanup_workflows),
             BeginCleanupWorkflowStorage::default(),
             FinishCleanupWorkflowStorage(self.finish_scope_cancel),
@@ -360,7 +380,7 @@ fn find_circular_collects(
     scope: Entity,
     world: &World,
 ) -> Result<Vec<[Entity; 2]>, OperationError> {
-    let nodes = world.get::<CleanupContents>(scope).or_broken()?.nodes();
+    let nodes = world.get::<ScopeContents>(scope).or_broken()?.nodes();
     let mut conflicts = Vec::new();
     for (i, node_i) in nodes.iter().enumerate() {
         if world.get::<CollectMarker>(*node_i).is_none() {
@@ -536,7 +556,7 @@ where
     fn validate_scope_reachability(
         ValidationRequest { source, origin, session, world, roster }: ValidationRequest,
     ) -> ReachabilityResult {
-        let nodes = world.get::<CleanupContents>(source).or_broken()?.nodes().clone();
+        let nodes = world.get::<ScopeContents>(source).or_broken()?.nodes().clone();
         for node in nodes.iter() {
             let Some(disposal_listener) = world.get::<DisposalListener>(*node) else {
                 continue;
@@ -715,7 +735,7 @@ fn cleanup_entire_scope(
     roster: &mut OperationRoster,
 ) -> OperationResult {
     let scope_ref = world.get_entity(scope).or_broken()?;
-    let nodes = scope_ref.get::<CleanupContents>().or_broken()?.nodes().clone();
+    let nodes = scope_ref.get::<ScopeContents>().or_broken()?.nodes().clone();
     let finish_cleanup_workflow = scope_ref
         .get::<FinishCleanupWorkflowStorage>().or_broken()?.0;
 
@@ -738,6 +758,9 @@ fn cleanup_entire_scope(
                 cleanup_id: cleanup.cleanup_id,
             });
         } else {
+            world.get_mut::<CleanupContents>(scope).or_broken()?
+                .add_cleanup(cleanup.cleanup_id, nodes.clone());
+
             for node in nodes.iter() {
                 OperationCleanup::new(scope, *node, scoped_session, cleanup.cleanup_id, world, roster).clean();
             }
@@ -1259,7 +1282,7 @@ fn clear_scope_buffers(
     session: Entity,
     world: &mut World,
 ) -> OperationResult {
-    let nodes = world.get::<CleanupContents>(scope).or_broken()?.nodes().clone();
+    let nodes = world.get::<ScopeContents>(scope).or_broken()?.nodes().clone();
     for node in nodes {
         if let Some(clear_buffer) = world.get::<ClearBufferFn>(node) {
             let clear_buffer = clear_buffer.0;

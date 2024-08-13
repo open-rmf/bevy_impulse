@@ -130,7 +130,7 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
 }
 
 #[derive(Component)]
-pub(crate) struct ProviderStorage(Entity);
+pub(crate) struct ProviderStorage(pub(crate) Entity);
 
 impl ProviderStorage {
     pub(crate) fn get(&self) -> Entity {

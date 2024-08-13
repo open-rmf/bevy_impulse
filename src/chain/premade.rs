@@ -43,52 +43,6 @@ where
     buffer.drain(..).collect()
 }
 
-pub(crate) fn inject_service<Request, Response, Streams>(
-    input: AsyncMap<(Request, Service<Request, Response, Streams>), Streams>,
-) -> impl Future<Output = Result<Response, Cancellation>>
-where
-    Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync + Unpin,
-    Streams: StreamPack,
-    <Streams as StreamPack>::Receiver: Unpin,
-{
-    dbg!();
-    async move {
-        let (request, service) = input.request;
-        let recipient = match input.channel.command(move |commands|
-            commands.request(request, service).take()
-        ).await {
-            PromiseState::Available(recipient) => {
-                recipient
-            },
-            PromiseState::Cancelled(cancellation) => {
-                return Err(cancellation);
-            }
-            PromiseState::Disposed => {
-                return Err(Cancellation::undeliverable());
-            }
-            PromiseState::Pending | PromiseState::Taken => unreachable!(),
-        };
-
-        dbg!();
-        Streams::forward_channels(recipient.streams, input.streams).await;
-        dbg!();
-
-        match recipient.response.await {
-            PromiseState::Available(response) => {
-                Ok(response)
-            },
-            PromiseState::Cancelled(cancellation) => {
-                return Err(cancellation);
-            }
-            PromiseState::Disposed => {
-                return Err(Cancellation::undeliverable());
-            }
-            PromiseState::Pending | PromiseState::Taken => unreachable!(),
-        }
-    }
-}
-
 pub fn push_into_buffer<T: 'static + Send + Sync>(
     In((input, key)): In<(T, BufferKey<T>)>,
     mut access: BufferAccessMut<T>,

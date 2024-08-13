@@ -30,7 +30,7 @@ use thiserror::Error as ThisError;
 
 use crate::{
     OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
-    DisposalFailure, ImpulseMarker, Cancel,
+    DisposalFailure, ImpulseMarker, Cancel, OperationResult, OrBroken,
 };
 
 #[derive(ThisError, Debug, Clone)]
@@ -369,6 +369,10 @@ pub trait ManageDisposal {
     );
 
     fn clear_disposals(&mut self, session: Entity);
+
+    /// Used to transfer the disposals gathered by a temporary operation (e.g.
+    /// a task) over to a persistent node
+    fn transfer_disposals(&mut self, to_node: Entity) -> OperationResult;
 }
 
 pub trait InspectDisposals {
@@ -428,6 +432,31 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
         if let Some(mut storage) = self.get_mut::<DisposalStorage>() {
             storage.disposals.remove(&session);
         }
+    }
+
+    fn transfer_disposals(&mut self, to: Entity) -> OperationResult {
+        if let Some(from_storage) = self.take::<DisposalStorage>() {
+            self.world_scope::<OperationResult>(|world| {
+                let mut to_mut = world.get_entity_mut(to).or_broken()?;
+                match to_mut.get_mut::<DisposalStorage>() {
+                    Some(mut to_storage) => {
+                        for (session, disposals) in from_storage.disposals {
+                            to_storage
+                                .disposals
+                                .entry(session)
+                                .or_default()
+                                .extend(disposals);
+                        }
+                    }
+                    None => {
+                        to_mut.insert(from_storage);
+                    }
+                }
+                Ok(())
+            })?;
+        }
+
+        Ok(())
     }
 }
 

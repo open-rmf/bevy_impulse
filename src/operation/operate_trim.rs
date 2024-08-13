@@ -63,7 +63,7 @@ struct TrimStorage {
     /// because we can't be certain that the workflow is fully defined until the
     /// first time it runs. After that the workflow is fixed, so we can just
     /// reuse them.
-    nodes_calculated: bool,
+    nodes: Option<Result<SmallVec<[Entity; 16]>, Cancellation>>,
 }
 
 /// Data that's passing through this node will be held here until the trimming
@@ -82,7 +82,7 @@ impl<T> Default for HoldingStorage<T> {
 
 impl TrimStorage {
     fn new(branches: SmallVec<[TrimBranch; 16]>) -> Self {
-        Self { branches, nodes_calculated: false }
+        Self { branches, nodes: None }
     }
 }
 
@@ -111,39 +111,44 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
 
         let source_ref = world.get_entity(source).or_broken()?;
         let trim = source_ref.get::<TrimStorage>().or_broken()?;
-        if !trim.nodes_calculated {
-            let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
-            let scope_entry = world.get::<ScopeEntryStorage>(scope).or_broken()?.0;
-            match calculate_nodes(scope_entry, &trim.branches, world) {
-                Ok(Ok(nodes)) => {
-                    dbg!(&nodes);
-                    let mut source_mut = world.get_entity_mut(source).or_broken()?;
-                    let mut contents = source_mut.get_mut::<CleanupContents>().or_broken()?;
-                    for node in nodes {
-                        contents.add_node(node);
+        let nodes = match &trim.nodes {
+            Some(Ok(nodes)) => nodes.clone(),
+            Some(Err(cancellation)) => {
+                let cancellation = cancellation.clone();
+                world.get_entity_mut(source).or_broken()?
+                    .emit_cancel(session, cancellation, roster);
+                return Ok(());
+            }
+            None => {
+                let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
+                let scope_entry = world.get::<ScopeEntryStorage>(scope).or_broken()?.0;
+                match calculate_nodes(scope_entry, &trim.branches, world) {
+                    Ok(Ok(nodes)) => {
+                        world.get_mut::<TrimStorage>(source).or_broken()?.nodes = Some(Ok(nodes.clone()));
+                        nodes
                     }
+                    Ok(Err(cancellation)) => {
+                        // There is something broken in how the branches to be
+                        // trimmed re defined, so we should cancel the workflow.
+                        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+                        source_mut.get_mut::<TrimStorage>().or_broken()?
+                            .nodes = Some(Err(cancellation.clone()));
 
-                    source_mut.get_mut::<TrimStorage>().or_broken()?
-                        .nodes_calculated = true;
-                }
-                Ok(Err(cancellation)) => {
-                    // There is something broken in how the branches to be
-                    // trimmed re defined, so we should cancel the workflow.
-                    world.get_entity_mut(source).or_broken()?
-                        .emit_cancel(session, cancellation, roster);
-                    return Ok(());
-                }
-                Err(broken) => {
-                    return Err(broken);
+                        source_mut.emit_cancel(session, cancellation, roster);
+                        return Ok(());
+                    }
+                    Err(broken) => {
+                        return Err(broken);
+                    }
                 }
             }
-        }
+        };
 
         let cleanup_id = world.spawn(()).id();
         world.get_mut::<HoldingStorage<T>>(source).or_broken()?
             .map.insert(cleanup_id, Input { data, session });
 
-        let nodes = world.get::<CleanupContents>(source).or_broken()?.nodes().clone();
+        world.get_mut::<CleanupContents>(source).or_broken()?.add_cleanup(cleanup_id, nodes.clone());
         for node in nodes {
             dbg!(node);
             OperationCleanup::new(source, node, session, cleanup_id, world, roster).clean();
@@ -183,7 +188,13 @@ impl<T: 'static + Send + Sync> Trim<T> {
             .map.remove(&cleanup.cleanup_id).or_not_ready()?;
 
         dbg!(cleanup.cleaner);
-        let nodes = source_mut.get::<CleanupContents>().or_broken()?.nodes().clone();
+        let nodes = source_mut.get::<TrimStorage>().or_broken()?
+            .nodes
+            .clone()
+            .map(|n| n.ok())
+            .flatten()
+            .unwrap_or(SmallVec::new());
+
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
 
         let disposal = Disposal::trimming(cleanup.cleaner, nodes);

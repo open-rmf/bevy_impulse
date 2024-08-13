@@ -122,8 +122,7 @@ impl<'a> OperationCleanup<'a> {
 /// The contents that an operation is willing to clean.
 #[derive(Default, Component)]
 pub struct CleanupContents {
-    nodes: SmallVec<[Entity; 16]>,
-    cleanup: HashMap<Entity, SmallVec<[Entity; 16]>>,
+    awaiting_cleanup: HashMap<Entity, SmallVec<[Entity; 16]>>,
 }
 
 impl CleanupContents {
@@ -131,24 +130,21 @@ impl CleanupContents {
         Self::default()
     }
 
-    pub fn add_node(&mut self, node: Entity) {
-        if let Err(index) = self.nodes.binary_search(&node) {
-            self.nodes.insert(index, node);
-        }
+    pub fn add_cleanup(
+        &mut self,
+        cleanup_id: Entity,
+        nodes: SmallVec<[Entity; 16]>,
+    ) {
+        self.awaiting_cleanup.insert(cleanup_id, nodes);
     }
 
     pub fn register_cleanup_of_node(&mut self, cleanup_id: Entity, node: Entity) -> bool {
-        let cleanup = self.cleanup.entry(cleanup_id).or_default();
-        if let Err(index) = cleanup.binary_search(&node) {
-            cleanup.insert(index, node);
-        }
-
-        dbg!((&self.nodes, &cleanup));
-        self.nodes == *cleanup
-    }
-
-    pub fn nodes(&self) -> &SmallVec<[Entity; 16]> {
-        &self.nodes
+        let Some(nodes) = self.awaiting_cleanup.get_mut(&cleanup_id) else {
+            return false;
+        };
+        nodes.retain(|n| *n != node);
+        dbg!(&nodes);
+        nodes.is_empty()
     }
 }
 
@@ -192,6 +188,7 @@ impl Cleanup {
         let mut scope_contents = cleaner_mut.get_mut::<CleanupContents>().or_broken()?;
         if scope_contents.register_cleanup_of_node(self.cleanup_id, self.node) {
             roster.cleanup_finished(*self);
+            scope_contents.awaiting_cleanup.remove(&self.cleanup_id);
         }
         Ok(())
     }
@@ -200,7 +197,7 @@ impl Cleanup {
         // Clear this cleanup_id so we're not leaking memory
         match world.get_mut::<CleanupContents>(self.cleaner) {
             Some(mut contents) => {
-                contents.cleanup.remove(&self.cleanup_id);
+                contents.awaiting_cleanup.remove(&self.cleanup_id);
             }
             None => {
                 world.get_resource_or_insert_with(|| UnhandledErrors::default())

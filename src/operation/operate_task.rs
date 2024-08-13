@@ -198,7 +198,6 @@ where
         let mut node_mut = world.get_entity_mut(node).or_broken()?;
         let mut tasks = node_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
         tasks.list.push(ActiveTask { task_id: source, session, being_cleaned: None });
-        dbg!(&tasks);
         Ok(())
     }
 

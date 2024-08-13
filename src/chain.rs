@@ -30,7 +30,7 @@ use crate::{
     ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
     CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
     GateRequest, OperateDynamicGate, OperateStaticGate, Gate, Buffered,
-    Spread, Collect, Sendish, Service, Cancellation, Buffer,
+    Spread, Collect, Sendish, Service, Cancellation, Buffer, Injection,
     make_result_branching, make_option_branching,
 };
 
@@ -1018,8 +1018,10 @@ where
     /// `.dispose_on_err` to filter away errors.
     ///
     /// To access the streams of the service, use [`Chain::then_request_node`].
-    pub fn then_injection(self) -> Chain<'w, 's, 'a, 'b, Result<Response, Cancellation>> {
-        self.map(inject_service)
+    pub fn then_injection(self) -> Chain<'w, 's, 'a, 'b, Response> {
+        let source = self.target;
+        let node = self.builder.create_injection_impl::<Request, Response, Streams>(source);
+        node.output.chain(self.builder)
     }
 
     /// Given the input `(request, service)`, pass `request` into `service` and
@@ -1030,12 +1032,11 @@ where
     /// Since it's possible for `service` to
     /// fail for various reasons, this returns a [`Result`]. Follow this with
     /// `.dispose_on_err` to filter away errors.
-    pub fn then_injection_node(self) -> Node<
-        (Request, Service<Request, Response, Streams>),
-        Result<Response, Cancellation>,
-        Streams,
-    > {
-        self.map_node(inject_service)
+    pub fn then_injection_node(
+        self
+    ) -> Node<(Request, Service<Request, Response, Streams>), Response, Streams> {
+        let source = self.target;
+        self.builder.create_injection_impl::<Request, Response, Streams>(source)
     }
 }
 

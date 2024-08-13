@@ -56,8 +56,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         StreamRequest { session, target, world, roster, .. }: StreamRequest
     ) -> OperationResult {
         if let Some(target) = target {
-            world.get_entity_mut(target)
-                .or_broken()?
+            world.get_entity_mut(target).or_broken()?
                 .give_input(session, self, roster)?;
         }
 
@@ -114,6 +113,13 @@ pub trait Stream: 'static + Send + Sync + Sized {
             StreamTargetStorage::new(index),
             Output::new(builder.scope, target),
         )
+    }
+
+    fn extract_target_storage(
+        source: Entity,
+        world: &World,
+    ) -> Result<StreamTargetStorage<Self>, OperationError> {
+        world.get::<StreamTargetStorage<Self>>(source).or_broken().cloned()
     }
 
     fn take_stream(
@@ -289,6 +295,17 @@ pub struct StreamTargetStorage<T: Stream> {
     _ignore: std::marker::PhantomData<T>,
 }
 
+impl<T: Stream> Clone for StreamTargetStorage<T> {
+    fn clone(&self) -> Self {
+        Self {
+            index: self.index,
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<T: Stream> Copy for StreamTargetStorage<T> {}
+
 impl<T: Stream> StreamTargetStorage<T> {
     fn new(index: usize) -> Self {
         Self { index, _ignore: Default::default() }
@@ -306,7 +323,7 @@ impl<T: Stream> StreamTargetStorage<T> {
 /// targets.
 //
 // TODO(@mxgrey): Consider whether we should store stream type information in here
-#[derive(Component, Default)]
+#[derive(Component, Default, Clone, Debug)]
 pub struct StreamTargetMap {
     pub(crate) map: SmallVec<[Entity; 8]>,
 }
@@ -334,7 +351,7 @@ impl StreamTargetMap {
 pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
     type StreamFilter: ReadOnlyWorldQuery;
-    type StreamStorageBundle: Bundle;
+    type StreamStorageBundle: Bundle + Clone;
     type StreamInputPack;
     type StreamOutputPack;
     type Receiver: Send + Sync;
@@ -362,6 +379,11 @@ pub trait StreamPack: 'static + Send + Sync {
         Self::StreamStorageBundle,
         Self::StreamOutputPack,
     );
+
+    fn extract_target_storage(
+        source: Entity,
+        world: &World,
+    ) -> Result<Self::StreamStorageBundle, OperationError>;
 
     fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
         Self::StreamStorageBundle,
@@ -447,6 +469,13 @@ impl<T: Stream + Unpin> StreamPack for T {
         T::spawn_node_stream(source, map, builder)
     }
 
+    fn extract_target_storage(
+        source: Entity,
+        world: &World,
+    ) -> Result<Self::StreamStorageBundle, OperationError> {
+        T::extract_target_storage(source, world)
+    }
+
     fn take_streams(
         source: Entity,
         map: &mut StreamTargetMap,
@@ -487,7 +516,8 @@ impl<T: Stream + Unpin> StreamPack for T {
         target_map: Option<&StreamTargetMap>,
     ) -> Self::Buffer {
         let target = target_index
-            .map(|s| target_map.map(|t| t.map.get(s.index))
+            .map(
+                |s| target_map.map(|t| t.map.get(s.index))
             ).flatten().flatten().copied();
 
         StreamBuffer { container: Default::default(), target }
@@ -581,6 +611,13 @@ impl StreamPack for () {
         Self::StreamOutputPack,
     ) {
         ((), ())
+    }
+
+    fn extract_target_storage(
+        _: Entity,
+        _: &World,
+    ) -> Result<Self::StreamStorageBundle, OperationError> {
+        Ok(())
     }
 
     fn take_streams(_: Entity, _: &mut StreamTargetMap, _: &mut Commands) -> (
@@ -725,6 +762,15 @@ macro_rules! impl_streampack_for_tuple {
                         )*
                     )
                 )
+            }
+
+            fn extract_target_storage(
+                source: Entity,
+                world: &World,
+            ) -> Result<Self::StreamStorageBundle, OperationError> {
+                Ok(($(
+                    $T::extract_target_storage(source, world)?,
+                )*))
             }
 
             fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
@@ -1154,7 +1200,6 @@ mod tests {
                 builder.connect(node.streams.2, scope.streams.2);
 
                 node.output.chain(builder)
-                    .dispose_on_err()
                     .connect(scope.terminate);
             }
         };
@@ -1252,6 +1297,8 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        dbg!(context.get_unhandled_errors());
+        dbg!(recipient.response.peek());
         assert!(recipient.response.take().available().is_some());
         assert!(context.no_unhandled_errors());
 
