@@ -143,6 +143,7 @@ impl CleanupContents {
             cleanup.insert(index, node);
         }
 
+        dbg!((&self.nodes, &cleanup));
         self.nodes == *cleanup
     }
 

@@ -76,7 +76,7 @@ where
     type Request = Request;
     type Response = Response;
     fn serve(
-        ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } }: ServiceRequest
+        ServiceRequest { provider, target, instructions: _, operation: OperationRequest { source, world, roster } }: ServiceRequest
     ) -> Result<(), OperationError> {
         let Input { session, data: request } = world
             .get_entity_mut(source).or_broken()?

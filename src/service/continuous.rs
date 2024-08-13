@@ -79,7 +79,7 @@ where
 {
     queues: Query<'w, 's, &'static ContinuousQueueStorage<Request>>,
     streams: Query<'w, 's, StreamTargetQuery<Streams>>,
-    delivered: Local<'s, HashMap<Entity, HashMap<usize, DeliverResponse<Response>>>>,
+    delivered: Local<'s, HashMap<Entity, DeliveredQueue<Response>>>,
     commands: Commands<'w, 's>,
 }
 
@@ -117,13 +117,49 @@ where
     }
 }
 
+/// We use this custom container whose interface resembles a HashMap but the
+/// underlying implementation is a SmallVec because:
+/// 1. The number of responses delivered in one cycle is likely to be small,
+///    making SmallVec a more efficient container
+/// 2. Using SmallVec and pushing items in will ensure stable delivery. If we
+///    used HashMap then the order of deliveries gets scrambled and that can
+///    lead to unexpected arrival orders.
+struct DeliveredQueue<Response> {
+    queue: SmallVec<[Delivered<Response>; 16]>,
+}
+
+impl<Response> Default for DeliveredQueue<Response> {
+    fn default() -> Self {
+        Self { queue: Default::default() }
+    }
+}
+
+struct Delivered<Response> {
+    index: usize,
+    response: DeliverResponse<Response>,
+}
+
+impl<Response> DeliveredQueue<Response> {
+    fn contains_key(&self, key: &usize) -> bool {
+        self.queue.iter().find(|d| d.index == *key).is_some()
+    }
+
+    fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    fn insert(&mut self, index: usize, response: DeliverResponse<Response>) {
+        self.queue.push(Delivered { index, response });
+    }
+}
+
 pub struct ContinuousQueueView<'a, Request, Response>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
     queue: &'a ContinuousQueueStorage<Request>,
-    delivered: Option<&'a HashMap<usize, DeliverResponse<Response>>>,
+    delivered: Option<&'a DeliveredQueue<Response>>,
 }
 
 impl<'a, Request, Response> ContinuousQueueView<'a, Request, Response>
@@ -184,6 +220,10 @@ impl<'a, Request> OrderView<'a, Request> {
     pub fn index(&self) -> usize {
         self.index
     }
+
+    pub fn id(&self) -> Entity {
+        self.order.task_id
+    }
 }
 
 pub struct ContinuousQueueMut<'w, 's, 'a, Request, Response, Streams>
@@ -195,7 +235,7 @@ where
     provider: Entity,
     queue: &'a ContinuousQueueStorage<Request>,
     streams: &'a Query<'w, 's, StreamTargetQuery<Streams>>,
-    delivered: &'a mut HashMap<usize, DeliverResponse<Response>>,
+    delivered: &'a mut DeliveredQueue<Response>,
     commands: &'a mut Commands<'w, 's>,
 }
 
@@ -343,7 +383,7 @@ where
     // We need to take the buffer so that the data can be sent into commands and
     // flushed later.
     streams: Option<Streams::Buffer>,
-    delivered: &'a mut HashMap<usize, DeliverResponse<Response>>,
+    delivered: &'a mut DeliveredQueue<Response>,
     commands: &'a mut Commands<'w, 's>,
 }
 
@@ -391,6 +431,18 @@ where
         // buffer for as long as the OrderMut is not being dropped.
         self.streams.as_ref().unwrap()
     }
+
+    /// The current index in the queue of this order. This will change between
+    /// cycles of the continuous service.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// An ID that uniquely identifies this order. Every order will have a unique
+    /// ID even if they belong to the same session.
+    pub fn id(&self) -> Entity {
+        self.request.task_id
+    }
 }
 
 impl<'w, 's, 'a, Request, Response, Streams> Drop for OrderMut<'w, 's, 'a, Request, Response, Streams>
@@ -419,8 +471,8 @@ where
     fn drop(&mut self) {
         let mut responses = SmallVec::new();
         for (_, delivered) in self.delivered.drain() {
-            for (_, deliver) in delivered {
-                responses.push(deliver)
+            for deliver in delivered.queue {
+                responses.push(deliver.response);
             }
         }
 
@@ -656,11 +708,10 @@ where
     type Request = Request;
     type Response = Response;
     fn serve(
-        ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } }: ServiceRequest,
+        ServiceRequest { provider, target, instructions, operation: OperationRequest { source, world, roster } }: ServiceRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let instructions = source_mut.get::<DeliveryInstructions>().cloned();
         let task_id = world.spawn(()).set_parent(source).id();
 
         let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
@@ -727,6 +778,7 @@ where
             ServiceRequest {
                 provider,
                 target,
+                instructions,
                 operation: OperationRequest { source, world, roster },
             }
         )
@@ -795,6 +847,8 @@ where
             ServiceRequest {
                 provider,
                 target,
+                // Instructions are already being handled by the delivery queue
+                instructions: None,
                 operation: OperationRequest { source, world, roster }
             },
         ).is_err() {

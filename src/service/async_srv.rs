@@ -96,12 +96,12 @@ where
         ServiceRequest {
             provider,
             target,
+            instructions,
             operation: OperationRequest { source, world, roster },
         }: ServiceRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let instructions = source_mut.get::<DeliveryInstructions>().cloned();
         let task_id = world.spawn(()).id();
 
         let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
@@ -170,6 +170,7 @@ where
             ServiceRequest {
                 provider,
                 target,
+                instructions,
                 operation: OperationRequest { source, world, roster },
             }
         )
@@ -189,7 +190,7 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    let ServiceRequest { provider, target, operation: OperationRequest { source, world, roster } } = cmd;
+    let ServiceRequest { provider, target, instructions: _, operation: OperationRequest { source, world, roster } } = cmd;
     let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
         if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
             storage.0.take().expect("Async service is missing while attempting to serve")
@@ -283,6 +284,8 @@ where
             ServiceRequest {
                 provider,
                 target,
+                // Instructions are already being handled by the delivery queue
+                instructions: None,
                 operation: OperationRequest { source, world, roster }
             },
         ).is_err() {

@@ -64,7 +64,7 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
             ProviderStorage(self.provider),
             SingleTargetStorage::new(self.target),
             ActiveTasksStorage::default(),
-            DisposeForUnavailableService(dispose_for_unavailable_service::<Request>),
+            DisposeForUnavailableService::new::<Request>(),
         ));
         if let Some(instructions) = self.instructions {
             world.entity_mut(source).insert(instructions);
@@ -76,8 +76,9 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
         let source_ref = operation.world.get_entity(operation.source).or_broken()?;
         let target = source_ref.get::<SingleTargetStorage>().or_broken()?.0;
         let provider = source_ref.get::<ProviderStorage>().or_broken()?.0;
+        let instructions = source_ref.get::<DeliveryInstructions>().cloned();
 
-        dispatch_service(ServiceRequest { provider, target, operation });
+        dispatch_service(ServiceRequest { provider, target, instructions, operation });
         Ok(())
     }
 
@@ -171,6 +172,12 @@ pub(crate) fn dispose_for_despawned_service(
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct DisposeForUnavailableService(fn(Entity, Entity, &mut World, &mut OperationRoster));
+
+impl DisposeForUnavailableService {
+    pub(crate) fn new<T: 'static + Send + Sync>() -> Self {
+        DisposeForUnavailableService(dispose_for_unavailable_service::<T>)
+    }
+}
 
 fn dispose_for_unavailable_service<T: 'static + Send + Sync>(
     source: Entity,

@@ -27,6 +27,8 @@ use bevy_ecs::{
 use bevy_app::prelude::App;
 use bevy_derive::{Deref, DerefMut};
 use bevy_utils::{intern::Interned, define_label};
+use thiserror::Error as ThisError;
+use std::{any::TypeId, collections::HashSet};
 
 mod async_srv;
 pub use async_srv::*;
@@ -85,6 +87,13 @@ impl<Req, Res, S> Clone for Service<Req, Res, S> {
 
 impl<Req, Res, S> Copy for Service<Req, Res, S> {}
 
+#[derive(ThisError, Debug, Clone)]
+#[error("The original service is missing streams that are needed by the target service")]
+pub struct MissingStreamsError {
+    /// These stream types were missing from the original service
+    types: HashSet<TypeId>,
+}
+
 impl<Request, Response, Streams> Service<Request, Response, Streams> {
     /// Get the underlying entity that the service provider is associated with.
     pub fn provider(&self) -> Entity {
@@ -104,6 +113,62 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
         self.instructions = Some(instructions.into());
         self
     }
+
+    /// Cast the streams of this service into a different stream pack. This will
+    /// fail if the target stream pack contains stream types that were not
+    /// present in the original.
+    ///
+    /// If you are okay with misrepresenting the streams of the service, use
+    /// [`Self::optional_stream_cast`]. Note that misrepresenting the service's
+    /// streams means that users of the service will never receive anything from
+    /// streams that the service does not actually provide.
+    pub fn stream_cast<TargetStreams>(
+        self,
+    ) -> Result<Service<Request, Response, TargetStreams>, MissingStreamsError>
+    where
+        Streams: StreamPack,
+        TargetStreams: StreamPack,
+    {
+        let mut original = HashSet::new();
+        Streams::insert_types(&mut original);
+        let mut target = HashSet::new();
+        Streams::insert_types(&mut target);
+        for t in original {
+            target.remove(&t);
+        }
+
+        if !target.is_empty() {
+            // Some of the target streams were not available in the original,
+            // so this is not a valid cast
+            return Err(MissingStreamsError { types: target });
+        }
+
+        Ok(Service {
+            provider: self.provider,
+            instructions: self.instructions,
+            _ignore: Default::default(),
+        })
+    }
+
+    /// Cast the streams of this service into a different stream pack. This will
+    /// succeed even if the original streams do not match the target streams.
+    ///
+    /// Be careful when using this since the service will not output anything to
+    /// streams that it was not originally equipped with. This could lead to
+    /// confusing results for anyone trying to use the resulting service.
+    ///
+    /// There is never a risk of undefined behavior from performing this cast,
+    /// only the unexpected absence of advertised streams, but stream data is
+    /// always treated as optional by workflows anyway.
+    pub fn optional_stream_cast<TargetStreams>(self) -> Service<Request, Response, TargetStreams> {
+        Service {
+            provider: self.provider,
+            instructions: self.instructions,
+            _ignore: Default::default(),
+        }
+    }
+
+    // TODO(@mxgrey): Offer a stream casting method that uses StreamFilter.
 
     /// This can only be used internally. To obtain a Service, use one of the
     /// following:

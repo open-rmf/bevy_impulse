@@ -35,6 +35,8 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
+    collections::HashSet,
+    any::TypeId,
 };
 
 use smallvec::SmallVec;
@@ -403,6 +405,8 @@ pub trait StreamPack: 'static + Send + Sync {
 
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
+
+    fn insert_types(types: &mut HashSet<TypeId>);
 }
 
 impl<T: Stream + Unpin> StreamPack for T {
@@ -535,6 +539,10 @@ impl<T: Stream + Unpin> StreamPack for T {
     fn has_streams() -> bool {
         true
     }
+
+    fn insert_types(types: &mut HashSet<TypeId>) {
+        types.insert(TypeId::of::<T>());
+    }
 }
 
 impl StreamPack for () {
@@ -634,6 +642,10 @@ impl StreamPack for () {
 
     fn has_streams() -> bool {
         false
+    }
+
+    fn insert_types(_: &mut HashSet<TypeId>) {
+        // Do nothing
     }
 }
 
@@ -824,6 +836,12 @@ macro_rules! impl_streampack_for_tuple {
                     has_streams = has_streams || $T::has_streams();
                 )*
                 has_streams
+            }
+
+            fn insert_types(types: &mut HashSet<TypeId>) {
+                $(
+                    $T::insert_types(types);
+                )*
             }
         }
     }

@@ -198,6 +198,7 @@ where
         let mut node_mut = world.get_entity_mut(node).or_broken()?;
         let mut tasks = node_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
         tasks.list.push(ActiveTask { task_id: source, session, being_cleaned: None });
+        dbg!(&tasks);
         Ok(())
     }
 
@@ -307,6 +308,7 @@ where
     }
 
     fn cleanup(clean: OperationCleanup) -> OperationResult {
+        dbg!();
         let cleanup = clean.cleanup;
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
@@ -319,7 +321,9 @@ where
         let sender = operation.sender.clone();
         if let Some(task) = task {
             operation.cancel_sender.send(move || async move {
+                dbg!();
                 task.cancel().await;
+                dbg!();
                 if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
                     cleanup_task::<Response>(source, node, unblock, Some(cleanup), world, roster);
                 })) {
@@ -375,12 +379,8 @@ fn cleanup_task<Response>(
 
             if cleanup_ready {
                 if let Some(being_cleaned) = being_cleaned {
-                    // We are notifying about the cleanup on behalf of the node that
-                    // created this task, so we set initialize as source: node
-                    let mut cleanup = OperationCleanup {
-                        source: node, cleanup: being_cleaned, world, roster,
-                    };
-                    if let Err(OperationError::Broken(backtrace)) = cleanup.notify_cleaned() {
+                    let r = being_cleaned.notify_cleaned(world, roster);
+                    if let Err(OperationError::Broken(backtrace)) = r {
                         world.get_resource_or_insert_with(|| UnhandledErrors::default())
                             .broken
                             .push(Broken { node, backtrace });
@@ -422,11 +422,12 @@ fn stop_task<Response: 'static + Send + Sync, Streams: StreamPack>(
     Ok(())
 }
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Debug)]
 pub struct ActiveTasksStorage {
     pub list: SmallVec<[ActiveTask; 16]>,
 }
 
+#[derive(Debug)]
 pub struct ActiveTask {
     task_id: Entity,
     session: Entity,
@@ -435,12 +436,15 @@ pub struct ActiveTask {
 
 impl ActiveTasksStorage {
     pub fn cleanup(clean: &mut OperationCleanup) -> Result<bool, OperationError> {
+        dbg!(clean.source);
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
         let mut active_tasks = source_mut.get_mut::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
+        dbg!(&active_tasks);
         for ActiveTask { task_id: id, session, being_cleaned } in &mut active_tasks.list {
+            dbg!(&id, &session, clean.cleanup.session);
             if *session == clean.cleanup.session {
                 *being_cleaned = Some(clean.cleanup);
                 to_cleanup.push(*id);
@@ -455,6 +459,7 @@ impl ActiveTasksStorage {
             roster: clean.roster,
         };
         for task_id in to_cleanup {
+            dbg!(task_id);
             clean = clean.delegate_to(task_id);
             clean.clean();
         }

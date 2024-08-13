@@ -511,7 +511,7 @@ mod tests {
             }
         );
 
-        verify_delivery_instruction_matrix(service, &mut context);
+        verify_delivery_instruction_matrix(service.optional_stream_cast(), &mut context);
 
         let service = context.spawn_async_delayed_map(
             Duration::from_secs_f32(0.01),

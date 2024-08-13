@@ -52,6 +52,7 @@ where
     Streams: StreamPack,
     <Streams as StreamPack>::Receiver: Unpin,
 {
+    dbg!();
     async move {
         let (request, service) = input.request;
         let recipient = match input.channel.command(move |commands|
@@ -69,7 +70,9 @@ where
             PromiseState::Pending | PromiseState::Taken => unreachable!(),
         };
 
+        dbg!();
         Streams::forward_channels(recipient.streams, input.streams).await;
+        dbg!();
 
         match recipient.response.await {
             PromiseState::Available(response) => {

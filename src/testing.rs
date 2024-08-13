@@ -27,14 +27,16 @@ use bevy_time::TimePlugin;
 use thiserror::Error as ThisError;
 
 pub use std::time::{Duration, Instant};
+use std::collections::HashMap;
 
 use smallvec::SmallVec;
 
 use crate::{
     Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
     Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
-    GetBufferedSessionsFn, ContinuousService, ContinuousQuery,
+    GetBufferedSessionsFn, ContinuousService, ContinuousQuery, StreamOf,
     AddContinuousServicesExt, ContinuousQueueView, RunCommandsOnWorldExt,
+    FlushParameters,
     flush_impulses,
 };
 
@@ -58,6 +60,11 @@ impl TestingContext {
             .add_systems(Update, flush_impulses());
 
         TestingContext { app }
+    }
+
+    pub fn set_flush_loop_limit(&mut self, limit: Option<usize>) {
+        self.app.world.get_resource_or_insert_with(|| FlushParameters::default())
+            .flush_loop_limit = limit;
     }
 
     pub fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
@@ -180,7 +187,7 @@ impl TestingContext {
     }
 
     /// Create a service that passes along its inputs after a delay.
-    pub fn spawn_delay<T>(&mut self, duration: Duration) -> Service<T, T>
+    pub fn spawn_delay<T>(&mut self, duration: Duration) -> Service<T, T, StreamOf<()>>
     where
         T: Clone + 'static + Send + Sync,
     {
@@ -192,7 +199,7 @@ impl TestingContext {
         &mut self,
         duration: Duration,
         f: F,
-    ) -> Service<T, U>
+    ) -> Service<T, U, StreamOf<()>>
     where
         T: 'static + Send + Sync,
         U: 'static + Send + Sync,
@@ -202,13 +209,14 @@ impl TestingContext {
     }
 
     /// Create a service that applies a map to an input after a delay and allows
-    /// you to view the current set of requests.
+    /// you to view the current set of requests. Its output stream will be
+    /// triggered when the timer begins for the request.
     pub fn spawn_delayed_map_with_viewer<T, U, F, V>(
         &mut self,
         duration: Duration,
         mut f: F,
         mut viewer: V,
-    ) -> Service<T, U>
+    ) -> Service<T, U, StreamOf<()>>
     where
         T: 'static + Send + Sync,
         U: 'static + Send + Sync,
@@ -217,22 +225,33 @@ impl TestingContext {
     {
         self.app.spawn_continuous_service(
             Update,
-            move |In(input): In<ContinuousService<T, U>>, mut query: ContinuousQuery<T, U>, mut t: Local<Option<Instant>>| {
+            move |
+                In(input): In<ContinuousService<T, U, StreamOf<()>>>,
+                mut query: ContinuousQuery<T, U, StreamOf<()>>,
+                mut timers: Local<HashMap<Entity, Instant>>,
+            | {
                 if let Some(view) = query.view(&input.key) {
                     viewer(&view);
                 }
 
-                if let Some(order) = query.get_mut(&input.key).unwrap().get_mut(0) {
-                    if let Some(t0) = *t {
-                        if t0.elapsed() > duration {
-                            let u = f(order.request());
-                            order.respond(u);
-                            *t = None;
-                        }
-                    } else {
-                        *t = Some(Instant::now());
+                // Use a single now and elapsed for the entire cycle of this
+                // system so that race conditions don't cause later orders to
+                // "finish" before earlier orders.
+                let now = Instant::now();
+
+                query.get_mut(&input.key).unwrap().for_each(|order| {
+                    let order_id = order.id();
+                    let t0 = *timers.entry(order_id).or_insert_with(|| {
+                        order.streams().send(StreamOf(()));
+                        now
+                    });
+
+                    if now - t0 > duration {
+                        let u = f(order.request());
+                        order.respond(u);
+                        timers.remove(&order_id);
                     }
-                }
+                });
             }
         )
     }

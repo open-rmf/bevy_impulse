@@ -29,7 +29,7 @@ use std::{collections::VecDeque, sync::Arc};
 
 use crate::{
     OperationRoster, OperationRequest, PendingOperationRequest, ServiceTrait,
-    OperationError, UnhandledErrors, MiscellaneousFailure,
+    OperationError, UnhandledErrors, MiscellaneousFailure, DeliveryInstructions,
     dispose_for_despawned_service,
 };
 
@@ -37,6 +37,7 @@ pub struct ServiceRequest<'a> {
     /// The entity that holds the service that is being used.
     pub(crate) provider: Entity,
     pub(crate) target: Entity,
+    pub(crate) instructions: Option<DeliveryInstructions>,
     pub(crate) operation: OperationRequest<'a>,
 }
 
@@ -44,6 +45,7 @@ pub struct ServiceRequest<'a> {
 pub struct PendingServiceRequest {
     pub provider: Entity,
     pub target: Entity,
+    pub instructions: Option<DeliveryInstructions>,
     pub operation: PendingOperationRequest,
 }
 
@@ -56,6 +58,7 @@ impl PendingServiceRequest {
         ServiceRequest {
             provider: self.provider,
             target: self.target,
+            instructions: self.instructions,
             operation: self.operation.activate(world, roster),
         }
     }
@@ -143,12 +146,14 @@ fn service_hook<Srv: ServiceTrait>(
     ServiceRequest {
             provider,
             target,
+            instructions,
             operation: OperationRequest { source, world, roster }
         }: ServiceRequest,
 ) {
     match Srv::serve(ServiceRequest {
         provider,
         target,
+        instructions,
         operation: OperationRequest { source, world, roster }
     }) {
         Ok(()) | Err(OperationError::NotReady) => {
@@ -183,11 +188,12 @@ pub(crate) fn dispatch_service(
     ServiceRequest {
         provider,
         target,
+        instructions,
         operation: OperationRequest { source, world, roster }
     }: ServiceRequest,
 ) {
     let pending = PendingServiceRequest {
-        provider, target, operation: PendingOperationRequest { source }
+        provider, target, instructions, operation: PendingOperationRequest { source }
     };
     let mut service_queue = world.get_resource_or_insert_with(|| ServiceQueue::new());
     service_queue.queue.push_back(pending);

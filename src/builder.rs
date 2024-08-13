@@ -1081,6 +1081,7 @@ mod tests {
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(5));
+        dbg!(promise.peek());
         assert!(promise.take().available().is_some_and(|v| &v[..] == [1, 2, 3, 4]));
         assert!(context.no_unhandled_errors());
 

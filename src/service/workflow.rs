@@ -97,12 +97,12 @@ where
         ServiceRequest {
             provider,
             target,
+            instructions,
             operation: OperationRequest { source, world, roster }
         }: ServiceRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let instructions = source_mut.get::<DeliveryInstructions>().cloned();
         let scoped_session = world.spawn((
             ParentSession::new(session),
             SessionStatus::Active,
@@ -112,10 +112,10 @@ where
             request,
             session,
             scoped_session,
-            instructions,
             ServiceRequest {
                 provider,
                 target,
+                instructions,
                 operation: OperationRequest { source, world, roster },
             }
         );
@@ -134,10 +134,10 @@ fn serve_workflow_impl<Request, Response, Streams>(
     request: Request,
     parent_session: Entity,
     scoped_session: Entity,
-    instructions: Option<DeliveryInstructions>,
     ServiceRequest {
         provider,
         target,
+        instructions,
         operation: OperationRequest { source, world, roster }
     }: ServiceRequest,
 ) -> OperationResult
