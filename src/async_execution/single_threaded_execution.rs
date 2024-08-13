@@ -19,17 +19,21 @@ use bevy_ecs::prelude::World;
 
 pub(crate) use bevy_tasks::Task as TaskHandle;
 use async_task::Runnable;
-use crossbeam::channel::{unbounded, Sender, Receiver};
+use tokio::sync::mpsc::{
+    unbounded_channel,
+    UnboundedSender as TokioSender,
+    UnboundedReceiver as TokioReceiver,
+};
 
 use std::{future::Future, pin::Pin};
 
 type CancellingTask = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static>;
 
 pub(crate) struct SingleThreadedExecution {
-    cancel_sender: Sender<CancellingTask>,
-    cancel_receiver: Receiver<CancellingTask>,
-    runnable_sender: Sender<Runnable>,
-    runnable_receiver: Receiver<Runnable>,
+    cancel_sender: TokioSender<CancellingTask>,
+    cancel_receiver: TokioReceiver<CancellingTask>,
+    runnable_sender: TokioSender<Runnable>,
+    runnable_receiver: TokioReceiver<Runnable>,
 }
 
 impl SingleThreadedExecution {
@@ -39,14 +43,21 @@ impl SingleThreadedExecution {
         Self { cancel_sender, cancel_receiver, runnable_sender, runnable_receiver }
     }
 
-    pub(crate) fn get(world: &mut World) -> &SingleThreadedExecution {
+    pub(crate) fn get(world: &mut World) -> &Self {
         if !world.contains_non_send::<SingleThreadedExecution>() {
             world.insert_non_send_resource(SingleThreadedExecution::new());
         }
         world.non_send_resource::<SingleThreadedExecution>()
     }
 
-    pub(crate) fn poll(&self, limit: Option<usize>) {
+    pub(crate) fn world_poll(world: &mut World, limit: Option<usize>) {
+        if !world.contains_non_send::<SingleThreadedExecution>() {
+            world.insert_non_send_resource(SingleThreadedExecution::new());
+        }
+        world.non_send_resource_mut::<SingleThreadedExecution>().poll(limit);
+    }
+
+    pub(crate) fn poll(&mut self, limit: Option<usize>) {
         let mut count = 0;
         while let Ok(f) = self.cancel_receiver.try_recv() {
             let sender = self.runnable_sender.clone();
@@ -100,7 +111,7 @@ impl SingleThreadedExecution {
 
 #[derive(Clone)]
 pub(crate) struct SingleThreadedExecutionSender {
-    sender: Sender<CancellingTask>,
+    sender: TokioSender<CancellingTask>,
 }
 
 impl SingleThreadedExecutionSender {
