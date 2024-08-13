@@ -22,12 +22,7 @@ use bevy_ecs::{
 
 use smallvec::SmallVec;
 
-use std::future::Future;
-
-use crate::{
-    BufferKey, BufferAccessMut, AsyncMap, StreamPack, Service, Cancellation,
-    RequestExt, PromiseState,
-};
+use crate::{BufferKey, BufferAccessMut};
 
 pub(super) fn consume_buffer<const N: usize, T>(
     In(key): In<BufferKey<T>>,

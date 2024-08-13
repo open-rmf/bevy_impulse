@@ -160,95 +160,88 @@ mod tests {
     use crate::{*, testing::*};
     use std::sync::mpsc::channel;
 
-    // #[test]
-    // fn test_trimming() {
-    //     let mut context = TestingContext::minimal_plugins();
+    #[test]
+    fn test_trimming() {
+        let mut context = TestingContext::minimal_plugins();
 
-    //     // let workflow = context.spawn_io_workflow(|scope, builder| {
-    //     //     let fork_input = scope.input.fork_clone(builder);
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let fork_input = scope.input.fork_clone(builder);
 
-    //     //     let noop = fork_input.clone_chain(builder).noop_node();
-    //     //     let doubler_a = builder.create_node((
-    //     //         |value| async move {
-    //     //             2.0 * value
-    //     //         }
-    //     //     ).into_async_map());
-    //     //     builder.connect(noop.output, doubler_a.input);
-    //     //     builder.connect(doubler_a.output, scope.terminate);
+            let noop = fork_input.clone_chain(builder).noop_node();
+            let doubler_a = builder.create_node((
+                |value| async move {
+                    2.0 * value
+                }
+            ).into_async_map());
+            builder.connect(noop.output, doubler_a.input);
+            builder.connect(doubler_a.output, scope.terminate);
 
-    //     //     let trim = builder.create_trim::<f64>(Some(TrimBranch::downstream(noop.input)));
-    //     //     fork_input.clone_chain(builder).connect(trim.input);
+            let trim = builder.create_trim::<f64>(Some(TrimBranch::downstream(noop.input)));
+            fork_input.clone_chain(builder).connect(trim.input);
 
-    //     //     let doubler_b = builder.create_node(double.into_blocking_map());
-    //     //     builder.connect(trim.output, doubler_b.input);
-    //     //     builder.connect(doubler_b.output, doubler_a.input);
-    //     // });
+            let doubler_b = builder.create_node(double.into_blocking_map());
+            builder.connect(trim.output, doubler_b.input);
+            builder.connect(doubler_b.output, doubler_a.input);
+        });
 
-    //     // let mut promise = context.command(|commands| {
-    //     //     commands
-    //     //     .request(2.0, workflow)
-    //     //     .take_response()
-    //     // });
+        let mut promise = context.command(|commands| {
+            commands
+            .request(2.0, workflow)
+            .take_response()
+        });
 
-    //     // context.run_with_conditions(&mut promise, Duration::from_secs(2));
-    //     // assert!(promise.take().available().is_some_and(|v| v == 8.0));
-    //     // assert!(context.no_unhandled_errors());
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(promise.take().available().is_some_and(|v| v == 8.0));
+        assert!(context.no_unhandled_errors());
 
-    //     let delay = context.spawn_delay::<i32>(Duration::from_secs(20));
-    //     let workflow = context.spawn_io_workflow(|scope, builder| {
-    //         let injection: Node<_, _, StreamOf<()>> = scope.input.chain(builder).then_injection_node();
-    //         injection.output.chain(builder)
-    //             .dispose_on_err()
-    //             .connect(scope.terminate);
+        let delay = context.spawn_delay::<i32>(Duration::from_secs(20));
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let injection: Node<_, _, StreamOf<()>> = scope.input.chain(builder).then_injection_node();
+            injection.output.chain(builder)
+                .connect(scope.terminate);
 
-    //         injection.streams.chain(builder)
-    //             .map(print_debug("About to trim"))
-    //             .then_trim(Some(TrimBranch::single_point(&injection.input)))
-    //             .map_block(|_| 2)
-    //             .connect(scope.terminate);
-    //     });
+            injection.streams.chain(builder)
+                .map(print_debug("About to trim"))
+                .then_trim(Some(TrimBranch::single_point(&injection.input)))
+                .map_block(|_| 2)
+                .connect(scope.terminate);
+        });
 
-    //     let mut promise = context.command(|commands|
-    //         commands.request((1, delay), workflow).take_response()
-    //     );
+        let mut promise = context.command(|commands|
+            commands.request((1, delay), workflow).take_response()
+        );
 
-    //     context.run_with_conditions(&mut promise, Duration::from_secs(1));
-    //     dbg!(context.get_unhandled_errors());
-    //     dbg!(promise.peek());
-    //     assert!(promise.take().available().is_some_and(|v| v == 2));
-    //     assert!(context.no_unhandled_errors());
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.take().available().is_some_and(|v| v == 2));
+        assert!(context.no_unhandled_errors());
 
-    //     println!("===================================================");
+        let (sender, receiver) = channel::<()>();
+        let inner_workflow = context.spawn_workflow(|scope, builder| {
+            let node = scope.input.chain(builder).then_node(delay);
+            builder.connect(node.output, scope.terminate);
+            builder.connect(node.streams, scope.streams);
 
-    //     let (sender, receiver) = channel::<()>();
-    //     let inner_workflow = context.spawn_workflow(|scope, builder| {
-    //         let node = scope.input.chain(builder).then_node(delay);
-    //         builder.connect(node.output, scope.terminate);
-    //         builder.connect(node.streams, scope.streams);
+            let buffer = builder.create_buffer::<()>(BufferSettings::keep_all());
+            builder.on_cancel(buffer, |scope, builder| {
+                scope.input.chain(builder)
+                    .map_block(move |_| {
+                        // This is the real test: That the cleanup of the
+                        // workflow worked as intended.
+                        sender.send(()).unwrap();
+                    })
+                    .connect(scope.terminate);
+            });
+        });
 
-    //         let buffer = builder.create_buffer::<()>(BufferSettings::keep_all());
-    //         builder.on_cancel(buffer, |scope, builder| {
-    //             scope.input.chain(builder)
-    //                 .map_block(move |_| {
-    //                     // This is the real test: That the cleanup of the
-    //                     // workflow worked as intended.
-    //                     sender.send(()).unwrap();
-    //                 })
-    //                 .connect(scope.terminate);
-    //         });
-    //     });
+        let mut promise = context.command(|commands|
+            commands.request((1, inner_workflow), workflow).take_response()
+        );
 
-    //     let mut promise = context.command(|commands|
-    //         commands.request((1, inner_workflow), workflow).take_response()
-    //     );
-
-    //     context.run_with_conditions(&mut promise, Duration::from_secs(1));
-    //     dbg!(context.get_unhandled_errors());
-    //     dbg!(promise.peek());
-    //     assert!(promise.take().available().is_some_and(|v| v == 2));
-    //     assert!(receiver.try_recv().is_ok());
-    //     assert!(context.no_unhandled_errors());
-    // }
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert!(promise.take().available().is_some_and(|v| v == 2));
+        assert!(receiver.try_recv().is_ok());
+        assert!(context.no_unhandled_errors());
+    }
 
     // TODO(@mxgrey): It would be good to have a testing-only node whose entire
     // purpose is to track when it's been told to cleanup so we can test that

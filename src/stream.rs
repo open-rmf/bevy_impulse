@@ -1297,8 +1297,6 @@ mod tests {
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        dbg!(context.get_unhandled_errors());
-        dbg!(recipient.response.peek());
         assert!(recipient.response.take().available().is_some());
         assert!(context.no_unhandled_errors());
 

@@ -150,7 +150,6 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
 
         world.get_mut::<CleanupContents>(source).or_broken()?.add_cleanup(cleanup_id, nodes.clone());
         for node in nodes {
-            dbg!(node);
             OperationCleanup::new(source, node, session, cleanup_id, world, roster).clean();
         }
 
@@ -179,7 +178,6 @@ impl<T: 'static + Send + Sync> Trim<T> {
     fn finalize_trim(
         FinalizeCleanupRequest { cleanup, world, roster }: FinalizeCleanupRequest,
     ) -> OperationResult {
-        dbg!(cleanup.cleaner);
         let mut source_mut = world.get_entity_mut(cleanup.cleaner).or_broken()?;
         let Input { session, data } = source_mut
             .get_mut::<HoldingStorage<T>>().or_broken()?
@@ -187,7 +185,6 @@ impl<T: 'static + Send + Sync> Trim<T> {
             // cleaned up while this cleanup is happening.
             .map.remove(&cleanup.cleanup_id).or_not_ready()?;
 
-        dbg!(cleanup.cleaner);
         let nodes = source_mut.get::<TrimStorage>().or_broken()?
             .nodes
             .clone()
@@ -280,16 +277,13 @@ fn calculate_all_spans(
     span: &SmallVec<[TrimPoint; 16]>,
     world: &World,
 ) -> Result<Result<SmallVec<[Entity; 16]>, Cancellation>, OperationError> {
-    dbg!((initial_point, span));
     let mut all_nodes: SmallVec<[Entity; 16]> = SmallVec::new();
     for to_point in span {
         match calculate_span_nodes(scope_entry, initial_point, *to_point, world)? {
             Ok(nodes) => {
-                dbg!(&nodes);
                 all_nodes.extend(nodes);
             }
             Err(cancellation) => {
-                dbg!(&cancellation);
                 return Ok(Err(cancellation));
             }
         }
@@ -313,9 +307,7 @@ fn calculate_span_nodes(
     // the calculation of the span. If the iniital point is exclusive, it will be
     // filtered out of the span at the end of this function.
     filter.remove(&initial_point.id());
-    dbg!(&filter);
     let span = calculate_span(initial_point.id(), to_point.id(), &filter, world);
-    dbg!(&span);
     if span.is_empty() {
         return Ok(Err(Cancellation::invalid_span(
             initial_point.id(), Some(to_point.id()),
@@ -323,8 +315,7 @@ fn calculate_span_nodes(
     }
 
     Ok(Ok(span.into_iter().filter(|n| {
-        dbg!(&n);
-        dbg!(initial_point.accept(*n)) && dbg!(to_point.accept(*n))
+        initial_point.accept(*n) && to_point.accept(*n)
     }).collect()))
 }
 
@@ -340,7 +331,6 @@ fn calculate_span(
     let mut span_map: HashMap<Entity, HashSet<Entity>> = Default::default();
     span_map.insert(initial_point, Default::default());
 
-    dbg!(filter);
     if filter.contains(&to_point) {
         // The goal point is part of the filtered set. This probably means it's
         // upstream of the initial_point, which makes this an invalid span.
@@ -351,9 +341,7 @@ fn calculate_span(
     queue.push(initial_point);
 
     while let Some(top) = queue.pop() {
-        dbg!(top);
         if top == to_point {
-            dbg!((top, to_point));
             // No need to expand from here because we've reached the goal.
             continue;
         }
@@ -381,7 +369,6 @@ fn calculate_span(
     let mut nodes = HashSet::new();
     queue.push(to_point);
     while let Some(top) = queue.pop() {
-        dbg!(top);
         if nodes.insert(top) {
             if let Some(parents) = span_map.get(&top) {
                 for parent in parents {

@@ -143,7 +143,6 @@ impl CleanupContents {
             return false;
         };
         nodes.retain(|n| *n != node);
-        dbg!(&nodes);
         nodes.is_empty()
     }
 }

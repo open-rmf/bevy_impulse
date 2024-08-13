@@ -31,7 +31,7 @@ use crate::{
     ManageInput, OperationError, StreamPack, OrBroken, OperationResult,
     DeferredRoster, UnhandledErrors, OperationRoster, Broken, Input, ServiceRequest,
     StreamTargetMap, ScopeStorage, Blocker, ServiceBundle, ServiceTrait,
-    OperationRequest, DeliveryInstructions, Delivery, DeliveryUpdate, Deliver,
+    OperationRequest, Delivery, DeliveryUpdate, Deliver,
     SingleTargetStorage, Disposal, DeliveryOrder, IntoContinuousService,
     ContinuousService, IntoServiceBuilder, ServiceBuilder, OperationReachability,
     ReachabilityResult, ProviderStorage, StreamOf, ContinuousServiceInput,

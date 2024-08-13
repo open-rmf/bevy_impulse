@@ -307,7 +307,6 @@ where
     }
 
     fn cleanup(clean: OperationCleanup) -> OperationResult {
-        dbg!();
         let cleanup = clean.cleanup;
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
@@ -320,9 +319,7 @@ where
         let sender = operation.sender.clone();
         if let Some(task) = task {
             operation.cancel_sender.send(move || async move {
-                dbg!();
                 task.cancel().await;
-                dbg!();
                 if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
                     cleanup_task::<Response>(source, node, unblock, Some(cleanup), world, roster);
                 })) {
@@ -435,15 +432,12 @@ pub struct ActiveTask {
 
 impl ActiveTasksStorage {
     pub fn cleanup(clean: &mut OperationCleanup) -> Result<bool, OperationError> {
-        dbg!(clean.source);
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
         let mut active_tasks = source_mut.get_mut::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
-        dbg!(&active_tasks);
         for ActiveTask { task_id: id, session, being_cleaned } in &mut active_tasks.list {
-            dbg!(&id, &session, clean.cleanup.session);
             if *session == clean.cleanup.session {
                 *being_cleaned = Some(clean.cleanup);
                 to_cleanup.push(*id);
@@ -458,7 +452,6 @@ impl ActiveTasksStorage {
             roster: clean.roster,
         };
         for task_id in to_cleanup {
-            dbg!(task_id);
             clean = clean.delegate_to(task_id);
             clean.clean();
         }

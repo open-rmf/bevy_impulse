@@ -28,7 +28,7 @@ use crate::{
     ScopeSettings, BeginCleanupWorkflow, ScopeEndpoints, IntoBlockingMap, IntoAsyncMap,
     AsMap, ProvideOnce, ScopeSettingsStorage, Bufferable, BufferKeys, BufferItem,
     Chain, Trim, TrimBranch, GateRequest, Buffered, OperateDynamicGate, Gate,
-    OperateStaticGate, OperateBufferAccess, Collect, Sendish, Service, Cancellation,
+    OperateStaticGate, OperateBufferAccess, Collect, Sendish, Service,
     ForkCloneOutput, ForkClone, ForkTargetStorage, Injection,
 };
 
@@ -1107,7 +1107,6 @@ mod tests {
         );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(5));
-        dbg!(promise.peek());
         assert!(promise.take().available().is_some_and(|v| &v[..] == [1, 2, 3, 4]));
         assert!(context.no_unhandled_errors());
 
