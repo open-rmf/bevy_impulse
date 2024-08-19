@@ -336,6 +336,22 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Chain::new(target, self.builder)
     }
 
+    /// After the previous operation is finished, trigger a new operation whose
+    /// input is simply the access keys for one or more buffers.
+    pub fn then_access<B>(
+        self,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
+    where
+        B: Bufferable,
+        B::BufferType: 'static + Send + Sync,
+        BufferKeys<B>: 'static + Send + Sync,
+    {
+        self
+        .with_access(buffers)
+        .map_block(|(_, key)| key)
+    }
+
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
     /// If the filter returns [`None`] then a [`Cancellation`](crate::Cancellation)
     /// is triggered. Otherwise the chain continues with the value that was
