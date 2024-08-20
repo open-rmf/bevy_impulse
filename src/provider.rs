@@ -106,6 +106,28 @@ mod tests {
             Update,
             exclusive_continuous_service_with_param,
         );
+
+        let exclusive_closure = |_: In<()>, _: &mut World| {
+        };
+        let _exclusive_closure_blocking_srv = context.app.spawn_service(exclusive_closure.into_blocking_service());
+
+        let exclusive_closure = |_: In<()>, _: &mut World| {
+            async move { }
+        };
+        let _exclusive_closure_async_srv = context.app.spawn_service(exclusive_closure.into_async_service());
+
+        let exclusive_closure = |_: ContinuousServiceInput<(), ()>, _: &mut World| {
+        };
+        let _exclusive_closure_continuous_srv = context.app.spawn_continuous_service(Update, exclusive_closure);
+
+        let exclusive_closure = |_: In<()>, _: &mut World| {
+        };
+        let _exclusive_closure_blocking_cb = exclusive_closure.into_blocking_callback();
+
+        let exclusive_closure = |_: In<()>, _: &mut World| {
+            async move { }
+        };
+        let _exclusive_closure_async_cb = exclusive_closure.into_async_callback();
     }
 
     fn blocking_exclusive_system(
