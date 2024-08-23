@@ -189,15 +189,11 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn oldest(&self, session: Entity) -> Option<&T> {
-        self.reverse_queues
-            .get(&session)
-            .and_then(|q| q.last())
+        self.reverse_queues.get(&session).and_then(|q| q.last())
     }
 
     pub(crate) fn newest(&self, session: Entity) -> Option<&T> {
-        self.reverse_queues
-            .get(&session)
-            .and_then(|q| q.first())
+        self.reverse_queues.get(&session).and_then(|q| q.first())
     }
 
     pub(crate) fn get(&self, session: Entity, index: usize) -> Option<&T> {

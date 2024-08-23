@@ -26,10 +26,9 @@ use crate::{
     AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferItem, BufferKeys, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
     GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
-    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output,
-    Provider, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service,
-    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget, RequestOfMap, ResponseOfMap,
-    StreamsOfMap,
+    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output, Provider,
+    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
+    Sendish, Service, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;

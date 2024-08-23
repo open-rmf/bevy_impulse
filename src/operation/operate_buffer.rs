@@ -312,7 +312,7 @@ fn check_buffer_size<T: 'static + Send + Sync>(
 #[derive(Component)]
 pub struct GetBufferedSessionsFn(
     #[allow(clippy::type_complexity)]
-    pub fn(Entity, &World) -> Result<SmallVec<[Entity; 16]>, OperationError>,
+    pub  fn(Entity, &World) -> Result<SmallVec<[Entity; 16]>, OperationError>,
 );
 
 impl GetBufferedSessionsFn {

@@ -91,10 +91,7 @@ pub trait ChooseAsyncServiceDelivery<M> {
 
 /// This trait is used to set the delivery mode of a service.
 pub trait DeliveryChoice {
-    fn apply_entity_mut<Request: 'static + Send + Sync>(
-        self,
-        entity_mut: &mut EntityWorldMut,
-    );
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut);
     fn apply_entity_commands<Request: 'static + Send + Sync>(
         self,
         entity_commands: &mut EntityCommands,

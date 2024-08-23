@@ -151,9 +151,7 @@ impl<T> Promise<T> {
                 *state = PromiseState::Disposed;
                 false
             }
-            None => {
-                true
-            }
+            None => true,
         }
     }
 }

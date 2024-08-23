@@ -153,14 +153,7 @@ where
             sender
                 .send(Box::new(
                     move |world: &mut World, roster: &mut OperationRoster| {
-                        cleanup_task(
-                            source,
-                            node,
-                            unblock,
-                            being_cleaned,
-                            world,
-                            roster,
-                        );
+                        cleanup_task(source, node, unblock, being_cleaned, world, roster);
 
                         if disposed {
                             let disposal =
@@ -345,14 +338,7 @@ where
                 task.cancel().await;
                 if let Err(err) = sender.send(Box::new(
                     move |world: &mut World, roster: &mut OperationRoster| {
-                        cleanup_task(
-                            source,
-                            node,
-                            unblock,
-                            Some(cleanup),
-                            world,
-                            roster,
-                        );
+                        cleanup_task(source, node, unblock, Some(cleanup), world, roster);
                     },
                 )) {
                     eprintln!("Failed to send a command to cleanup a task: {err}");
@@ -521,10 +507,6 @@ impl ActiveTasksStorage {
             .or_broken()?
             .list;
 
-        Ok(
-            active_tasks
-            .iter()
-            .any(|task| task.session == r.session)
-        )
+        Ok(active_tasks.iter().any(|task| task.session == r.session))
     }
 }

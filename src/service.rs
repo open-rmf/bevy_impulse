@@ -446,7 +446,8 @@ impl AddServicesExt for App {
 type RequestOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Request;
 type ResponseOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Response;
 type StreamsOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Streams;
-type ServiceOf<M1, M2, B> = Service<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>;
+type ServiceOf<M1, M2, B> =
+    Service<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>;
 
 pub trait AddContinuousServicesExt {
     /// Spawn a continuous service. This needs to be used from [`App`] because
@@ -525,10 +526,14 @@ impl AddContinuousServicesExt for App {
     }
 }
 
-type RequestOfC<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Request;
-type ResponseOfC<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Response;
-type StreamsOfC<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Streams;
-type ServiceOfC<M1, M2, B> = Service<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>;
+type RequestOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Request;
+type ResponseOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Response;
+type StreamsOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Streams;
+type ServiceOfC<M1, M2, B> =
+    Service<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>;
 
 impl<Request, Response, Streams> ProvideOnce for Service<Request, Response, Streams>
 where

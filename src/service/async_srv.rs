@@ -252,8 +252,8 @@ where
                 .0
                 .take()
                 .expect("Async service is missing while attempting to serve")
-        } else if let Some(uninit) = provider_mut
-            .take::<UninitAsyncServiceStorage<Request, Streams, Task>>()
+        } else if let Some(uninit) =
+            provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>()
         {
             // We need to initialize the service
             let mut service = uninit.0;

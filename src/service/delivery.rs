@@ -187,9 +187,7 @@ pub(crate) struct SerialDelivery<Request> {
 
 impl<Request> SerialDelivery<Request> {
     fn contains_session(&self, session: Entity) -> bool {
-        self.queue
-            .iter()
-            .any(|order| order.session == session)
+        self.queue.iter().any(|order| order.session == session)
     }
     fn cleanup(&mut self, session: Entity) {
         self.queue.retain(|order| order.session != session);

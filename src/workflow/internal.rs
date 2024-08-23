@@ -34,10 +34,7 @@ impl DeliveryChoice for DeliverySettings {
         }
     }
 
-    fn apply_entity_mut<Request: 'static + Send + Sync>(
-        self,
-        entity_mut: &mut EntityWorldMut,
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         match self {
             Self::Serial => {
                 entity_mut.insert(Delivery::<Request>::serial());

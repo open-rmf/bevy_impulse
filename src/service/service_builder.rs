@@ -294,10 +294,7 @@ where
 pub struct SerialChosen;
 
 impl DeliveryChoice for SerialChosen {
-    fn apply_entity_mut<Request: 'static + Send + Sync>(
-        self,
-        entity_mut: &mut EntityWorldMut,
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert(Delivery::<Request>::serial());
     }
 
@@ -315,10 +312,7 @@ impl DeliveryChoice for SerialChosen {
 pub struct ParallelChosen;
 
 impl DeliveryChoice for ParallelChosen {
-    fn apply_entity_mut<Request: 'static + Send + Sync>(
-        self,
-        entity_mut: &mut EntityWorldMut,
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert(Delivery::<Request>::parallel());
     }
 
@@ -337,10 +331,7 @@ impl DeliveryChoice for ParallelChosen {
 pub struct BlockingChosen;
 
 impl DeliveryChoice for BlockingChosen {
-    fn apply_entity_commands<Request: 'static + Send + Sync>(
-        self,
-        _: &mut EntityCommands,
-    ) {
+    fn apply_entity_commands<Request: 'static + Send + Sync>(self, _: &mut EntityCommands) {
         // Do nothing
     }
 
@@ -356,10 +347,7 @@ impl DeliveryChoice for () {
     ) {
         ParallelChosen.apply_entity_commands::<Request>(entity_commands)
     }
-    fn apply_entity_mut<Request: 'static + Send + Sync>(
-        self,
-        entity_mut: &mut EntityWorldMut,
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         ParallelChosen.apply_entity_mut::<Request>(entity_mut)
     }
 }

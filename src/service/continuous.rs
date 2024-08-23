@@ -797,8 +797,7 @@ where
 
                     // Immediately queue up an unblocking because continuous services
                     // cancel immediately.
-                    if let Some(unblock) = stopped_index
-                        .and_then(|i| queue.inner.remove(i).unblock)
+                    if let Some(unblock) = stopped_index.and_then(|i| queue.inner.remove(i).unblock)
                     {
                         let f = unblock.serve_next;
                         f(unblock, world, roster);

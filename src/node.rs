@@ -118,10 +118,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
 
     /// Create a node that will fork the output along multiple branches, giving
     /// a clone of the output to each branch.
-    pub fn fork_clone(
-        self,
-        builder: &mut Builder,
-    ) -> ForkCloneOutput<Response>
+    pub fn fork_clone(self, builder: &mut Builder) -> ForkCloneOutput<Response>
     where
         Response: Clone,
     {

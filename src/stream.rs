@@ -474,12 +474,11 @@ impl<T: Stream + Unpin> StreamPack for T {
         let index = world
             .get::<StreamTargetStorage<Self>>(inner.source())
             .map(|t| t.index);
-        let target = index
-            .and_then(|index| {
-                world
-                    .get::<StreamTargetMap>(inner.source())
-                    .and_then(|t| t.get(index))
-            });
+        let target = index.and_then(|index| {
+            world
+                .get::<StreamTargetMap>(inner.source())
+                .and_then(|t| t.get(index))
+        });
         StreamChannel::new(target, Arc::clone(inner))
     }
 
