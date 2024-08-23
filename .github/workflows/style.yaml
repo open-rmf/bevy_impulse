@@ -1,0 +1,29 @@
+name: style
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  style:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - uses: actions/checkout@v3
+
+    - name: rustfmt
+      run: |
+        rustup component add rustfmt
+
+    - name: style
+      run: cargo fmt --all --check
+
+    - name: minimal feature build
+      run: cargo check --no-default-features

@@ -1,0 +1,41 @@
+name: ci_windows
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v3
+
+      # Run build
+    - name: Install Rustup using win.rustup.rs
+      run: |
+        # Disable the download progress bar which can cause perf issues
+        $ProgressPreference = "SilentlyContinue"
+        Invoke-WebRequest https://win.rustup.rs/ -OutFile rustup-init.exe
+        .\rustup-init.exe -y --default-host=x86_64-pc-windows-msvc --default-toolchain=none
+        del rustup-init.exe
+        rustup target add x86_64-pc-windows-msvc
+      shell: powershell
+
+    - name: Build default features
+      run: cargo build
+      shell: cmd
+
+    - name: Test default features
+      run: cargo test
+      shell: cmd
+
+    - name: Build single_threaded_async
+      run: cargo build --features single_threaded_async
+      shell: cmd
+
+    - name: Test single_threaded_async
+      run: cargo test --features single_threaded_async
+      shell: cmd

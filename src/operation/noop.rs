@@ -18,25 +18,30 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::{
-    Operation, SingleInputStorage, SingleTargetStorage, Input, ManageInput,
-    OperationResult, OrBroken, OperationSetup, OperationRequest, OperationCleanup,
-    OperationReachability, ReachabilityResult, InputBundle,
+    Input, InputBundle, ManageInput, Operation, OperationCleanup, OperationReachability,
+    OperationRequest, OperationResult, OperationSetup, OrBroken, ReachabilityResult,
+    SingleInputStorage, SingleTargetStorage,
 };
 
 pub(crate) struct Noop<T> {
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Noop<T> {
     pub(crate) fn new(target: Entity) -> Self {
-        Noop { target, _ignore: Default::default() }
+        Noop {
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
 impl<T: 'static + Send + Sync> Operation for Noop<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -47,11 +52,18 @@ impl<T: 'static + Send + Sync> Operation for Noop<T> {
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let Input { session, data: value } = source_mut.take_input::<T>()?;
+        let Input {
+            session,
+            data: value,
+        } = source_mut.take_input::<T>()?;
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
         target_mut.give_input(session, value, roster)
     }

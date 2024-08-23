@@ -1,0 +1,32 @@
+name: ci_web
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Add wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+
+    - uses: actions/checkout@v3
+
+    - name: Build package
+      run: cargo build --target wasm32-unknown-unknown --release --features single_threaded_async
+
+    # Notes:
+    # * Targeting wasm32 only works with the single_threaded_async feature because
+    #   wasm32 doesn't support threading at the moment.
+    # * The regular cargo test pipeline cannot run tests that were compiled to wasm.
+    #   There may be ways to develop test executables specific to wasm32, but this
+    #   seems like overkill for now.

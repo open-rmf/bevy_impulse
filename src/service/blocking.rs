@@ -17,22 +17,22 @@
 
 use bevy_ecs::{
     prelude::{Component, In},
+    system::{BoxedSystem, EntityCommands, IntoSystem},
     world::EntityWorldMut,
-    system::{IntoSystem, BoxedSystem, EntityCommands},
 };
 
 use crate::{
-    BlockingService, BlockingServiceInput, IntoService, ServiceTrait, ServiceRequest,
-    Input, ManageInput, ServiceBundle, OperationRequest, OperationError, StreamPack,
-    UnusedStreams, ManageDisposal, OrBroken, dispose_for_despawned_service,
-    service::service_builder::BlockingChosen, make_stream_buffer_from_world,
+    dispose_for_despawned_service, make_stream_buffer_from_world,
+    service::service_builder::BlockingChosen, BlockingService, BlockingServiceInput, Input,
+    IntoService, ManageDisposal, ManageInput, OperationError, OperationRequest, OrBroken,
+    ServiceBundle, ServiceRequest, ServiceTrait, StreamPack, UnusedStreams,
 };
 
-pub struct Blocking<M>(std::marker::PhantomData<M>);
+pub struct Blocking<M>(std::marker::PhantomData<fn(M)>);
 
 #[derive(Component)]
 struct BlockingServiceStorage<Request, Response, Streams: StreamPack>(
-    Option<BoxedSystem<BlockingService<Request, Streams>, Response>>
+    Option<BoxedSystem<BlockingService<Request, Streams>, Response>>,
 );
 
 #[derive(Component)]
@@ -40,7 +40,8 @@ struct UninitBlockingServiceStorage<Request, Response, Streams: StreamPack>(
     BoxedSystem<BlockingService<Request, Streams>, Response>,
 );
 
-impl<Request, Response, Streams, M, Sys> IntoService<Blocking<(Request, Response, Streams, M)>> for Sys
+impl<Request, Response, Streams, M, Sys> IntoService<Blocking<(Request, Response, Streams, M)>>
+    for Sys
 where
     Sys: IntoSystem<BlockingService<Request, Streams>, Response, M>,
     Request: 'static + Send + Sync,
@@ -76,18 +77,39 @@ where
     type Request = Request;
     type Response = Response;
     fn serve(
-        ServiceRequest { provider, target, instructions: _, operation: OperationRequest { source, world, roster } }: ServiceRequest
+        ServiceRequest {
+            provider,
+            target,
+            instructions: _,
+            operation:
+                OperationRequest {
+                    source,
+                    world,
+                    roster,
+                },
+        }: ServiceRequest,
     ) -> Result<(), OperationError> {
-        let Input { session, data: request } = world
-            .get_entity_mut(source).or_broken()?
+        let Input {
+            session,
+            data: request,
+        } = world
+            .get_entity_mut(source)
+            .or_broken()?
             .take_input::<Request>()?;
 
         let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>() {
-                storage.0.take().expect("Service is missing while attempting to serve")
+            if let Some(mut storage) =
+                provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>()
+            {
+                storage
+                    .0
+                    .take()
+                    .expect("Service is missing while attempting to serve")
             } else {
                 // Check if the system still needs to be initialized
-                if let Some(uninit) = provider_mut.take::<UninitBlockingServiceStorage<Request, Response, Streams>>() {
+                if let Some(uninit) =
+                    provider_mut.take::<UninitBlockingServiceStorage<Request, Response, Streams>>()
+                {
                     // We need to initialize the service
                     let mut service = uninit.0;
                     service.initialize(world);
@@ -109,16 +131,25 @@ where
         };
 
         let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
-        let response = service.run(BlockingService {
-            request, streams: streams.clone(), provider, source, session,
-        }, world);
+        let response = service.run(
+            BlockingService {
+                request,
+                streams: streams.clone(),
+                provider,
+                source,
+                session,
+            },
+            world,
+        );
         service.apply_deferred(world);
 
         let mut unused_streams = UnusedStreams::new(source);
         Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-            if let Some(mut storage) = provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>() {
+            if let Some(mut storage) =
+                provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>()
+            {
                 storage.0 = Some(service);
             } else {
                 // The service storage has been removed for some reason. We
@@ -132,11 +163,16 @@ where
         }
 
         if !unused_streams.streams.is_empty() {
-            world.get_entity_mut(source).or_broken()?
-                .emit_disposal(session, unused_streams.into(), roster);
+            world.get_entity_mut(source).or_broken()?.emit_disposal(
+                session,
+                unused_streams.into(),
+                roster,
+            );
         }
 
-        world.get_entity_mut(target).or_broken()?
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(session, response, roster)?;
         Ok(())
     }
@@ -152,7 +188,8 @@ pub trait IntoBlockingService<M> {
     fn into_blocking_service(self) -> Self::Service;
 }
 
-impl<Request, Response, M, Sys> IntoBlockingService<AsBlockingService<(Request, Response, M)>> for Sys
+impl<Request, Response, M, Sys> IntoBlockingService<AsBlockingService<(Request, Response, M)>>
+    for Sys
 where
     Sys: IntoSystem<Request, Response, M>,
     Request: 'static,
@@ -164,7 +201,8 @@ where
     }
 }
 
-impl<Request, Response, M, Sys> IntoService<AsBlockingService<(Request, Response, M)>> for AsBlockingService<Sys>
+impl<Request, Response, M, Sys> IntoService<AsBlockingService<(Request, Response, M)>>
+    for AsBlockingService<Sys>
 where
     Sys: IntoSystem<Request, Response, M>,
     Request: 'static + Send + Sync,
@@ -176,7 +214,9 @@ where
     type DefaultDeliver = BlockingChosen;
 
     fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        peel_blocking.pipe(self.0).insert_service_commands(entity_commands)
+        peel_blocking
+            .pipe(self.0)
+            .insert_service_commands(entity_commands)
     }
 
     fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
@@ -184,6 +224,8 @@ where
     }
 }
 
-fn peel_blocking<Request>(In(BlockingService { request, .. }): BlockingServiceInput<Request>) -> Request {
+fn peel_blocking<Request>(
+    In(BlockingService { request, .. }): BlockingServiceInput<Request>,
+) -> Request {
     request
 }

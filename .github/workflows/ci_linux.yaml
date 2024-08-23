@@ -1,0 +1,28 @@
+name: ci_linux
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Build default features
+      run: cargo build
+    - name: Test default features
+      run: cargo test
+
+    - name: Build single_threaded_async
+      run: cargo build --features single_threaded_async
+    - name: Test single_threaded_async
+      run: cargo test --features single_threaded_async

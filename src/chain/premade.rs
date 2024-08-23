@@ -15,14 +15,11 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::In,
-    query::QueryEntityError,
-};
+use bevy_ecs::{prelude::In, query::QueryEntityError};
 
 use smallvec::SmallVec;
 
-use crate::{BufferKey, BufferAccessMut};
+use crate::{BufferAccessMut, BufferKey};
 
 pub(super) fn consume_buffer<const N: usize, T>(
     In(key): In<BufferKey<T>>,

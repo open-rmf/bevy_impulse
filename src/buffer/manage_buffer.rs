@@ -17,12 +17,12 @@
 
 use bevy_ecs::{
     prelude::Entity,
-    world::{EntityWorldMut, EntityRef},
+    world::{EntityRef, EntityWorldMut},
 };
 
 use smallvec::SmallVec;
 
-use crate::{OperationError, OrBroken, OperationResult, BufferStorage};
+use crate::{BufferStorage, OperationError, OperationResult, OrBroken};
 
 pub trait InspectBuffer {
     fn buffered_count<T: 'static + Send + Sync>(
@@ -60,7 +60,9 @@ impl<'w> InspectBuffer for EntityRef<'w> {
     fn buffered_sessions<T: 'static + Send + Sync>(
         &self,
     ) -> Result<SmallVec<[Entity; 16]>, OperationError> {
-        let sessions = self.get::<BufferStorage<T>>().or_broken()?
+        let sessions = self
+            .get::<BufferStorage<T>>()
+            .or_broken()?
             .active_sessions();
 
         Ok(sessions)
@@ -72,7 +74,8 @@ pub trait ManageBuffer {
         &mut self,
         session: Entity,
     ) -> Result<T, OperationError> {
-        self.try_pull_from_buffer(session).and_then(|r| r.or_broken())
+        self.try_pull_from_buffer(session)
+            .and_then(|r| r.or_broken())
     }
 
     fn try_pull_from_buffer<T: 'static + Send + Sync>(
@@ -85,10 +88,7 @@ pub trait ManageBuffer {
         session: Entity,
     ) -> Result<SmallVec<[T; 16]>, OperationError>;
 
-    fn clear_buffer<T: 'static + Send + Sync>(
-        &mut self,
-        session: Entity,
-    ) -> OperationResult;
+    fn clear_buffer<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
 }
 
 impl<'w> ManageBuffer for EntityWorldMut<'w> {
@@ -108,13 +108,10 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
         Ok(buffer.consume(session))
     }
 
-    fn clear_buffer<T: 'static + Send + Sync>(
-        &mut self,
-        session: Entity,
-    ) -> OperationResult {
-        self.get_mut::<BufferStorage<T>>().or_broken()?
+    fn clear_buffer<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult {
+        self.get_mut::<BufferStorage<T>>()
+            .or_broken()?
             .clear_session(session);
         Ok(())
     }
-
 }

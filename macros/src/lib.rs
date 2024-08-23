@@ -16,8 +16,8 @@
 */
 
 use proc_macro::TokenStream;
-use syn::DeriveInput;
 use quote::quote;
+use syn::DeriveInput;
 
 #[proc_macro_derive(Stream)]
 pub fn simple_stream_macro(item: TokenStream) -> TokenStream {

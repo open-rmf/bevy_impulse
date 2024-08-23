@@ -16,9 +16,9 @@
 */
 
 use bevy_ecs::{
-    prelude::{Entity, Component, Bundle},
-    world::{EntityWorldMut, EntityRef, World},
+    prelude::{Bundle, Component, Entity},
     system::Command,
+    world::{EntityRef, EntityWorldMut, World},
 };
 
 use smallvec::SmallVec;
@@ -26,8 +26,8 @@ use smallvec::SmallVec;
 use backtrace::Backtrace;
 
 use crate::{
-    OperationRoster, OperationError, OrBroken, BufferStorage, DeferredRoster,
-    Cancel, Cancellation, CancellationCause, Broken, UnusedTarget, SessionStatus,
+    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, OperationError,
+    OperationRoster, OrBroken, SessionStatus, UnusedTarget,
 };
 
 /// This contains data that has been provided as input into an operation, along
@@ -51,13 +51,16 @@ pub(crate) struct InputStorage<T> {
 
 impl<T> InputStorage<T> {
     pub fn new() -> Self {
-        Self { reverse_queue: Default::default() }
+        Self {
+            reverse_queue: Default::default(),
+        }
     }
 
     pub fn contains_session(&self, session: Entity) -> bool {
-        self.reverse_queue.iter()
-        .find(|input| input.session == session)
-        .is_some()
+        self.reverse_queue
+            .iter()
+            .find(|input| input.session == session)
+            .is_some()
     }
 }
 
@@ -74,7 +77,9 @@ pub struct InputBundle<T: 'static + Send + Sync> {
 
 impl<T: 'static + Send + Sync> InputBundle<T> {
     pub fn new() -> Self {
-        Self { storage: Default::default() }
+        Self {
+            storage: Default::default(),
+        }
     }
 }
 
@@ -111,27 +116,19 @@ pub trait ManageInput {
     ) -> Result<bool, OperationError>;
 
     /// Get an input that is ready to be taken, or else produce an error.
-    fn take_input<T: 'static + Send + Sync>(
-        &mut self
-    ) -> Result<Input<T>, OperationError>;
+    fn take_input<T: 'static + Send + Sync>(&mut self) -> Result<Input<T>, OperationError>;
 
     /// Try to take an input if one is ready. If no input is ready this will
     /// return Ok(None). It only returns an error if the node is broken.
     fn try_take_input<T: 'static + Send + Sync>(
-        &mut self
+        &mut self,
     ) -> Result<Option<Input<T>>, OperationError>;
 
-    fn cleanup_inputs<T: 'static + Send + Sync>(
-        &mut self,
-        session: Entity,
-    );
+    fn cleanup_inputs<T: 'static + Send + Sync>(&mut self, session: Entity);
 }
 
 pub trait InspectInput {
-    fn has_input<T: 'static + Send + Sync>(
-        &self,
-        session: Entity,
-    ) -> Result<bool, OperationError>;
+    fn has_input<T: 'static + Send + Sync>(&self, session: Entity) -> Result<bool, OperationError>;
 }
 
 impl<'w> ManageInput for EntityWorldMut<'w> {
@@ -166,11 +163,12 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         only_if_active: bool,
     ) -> Result<bool, OperationError> {
         if only_if_active {
-            let active_session = if let Some(session_status) = self.world().get::<SessionStatus>(session) {
-                matches!(session_status, SessionStatus::Active)
-            } else {
-                false
-            };
+            let active_session =
+                if let Some(session_status) = self.world().get::<SessionStatus>(session) {
+                    matches!(session_status, SessionStatus::Active)
+                } else {
+                    false
+                };
 
             if !active_session {
                 // The session being sent is not active, either it is being cleaned
@@ -200,16 +198,13 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
     }
 
     fn try_take_input<T: 'static + Send + Sync>(
-        &mut self
+        &mut self,
     ) -> Result<Option<Input<T>>, OperationError> {
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
         Ok(storage.reverse_queue.pop())
     }
 
-    fn cleanup_inputs<T: 'static + Send + Sync>(
-        &mut self,
-        session: Entity,
-    ) {
+    fn cleanup_inputs<T: 'static + Send + Sync>(&mut self, session: Entity) {
         if self.contains::<BufferStorage<T>>() {
             // Buffers are handled in a special way because the data of some
             // buffers will be used during cancellation. Therefore we do not
@@ -218,12 +213,17 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
             // buffer data after all the cancellation workflows are finished.
             if let Some(mut inputs) = self.get_mut::<InputStorage<T>>() {
                 // Pull out only the data that
-                let remaining_indices: SmallVec<[usize; 16]> = inputs.reverse_queue
+                let remaining_indices: SmallVec<[usize; 16]> = inputs
+                    .reverse_queue
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, input)|
-                        if input.session == session { Some(i) } else { None }
-                    )
+                    .filter_map(|(i, input)| {
+                        if input.session == session {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
 
                 let mut reverse_remaining: SmallVec<[T; 16]> = SmallVec::new();
@@ -244,28 +244,22 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         }
 
         if let Some(mut inputs) = self.get_mut::<InputStorage<T>>() {
-            inputs.reverse_queue.retain(
-                |Input { session: r, .. }| *r != session
-            );
+            inputs
+                .reverse_queue
+                .retain(|Input { session: r, .. }| *r != session);
         }
     }
 }
 
 impl<'a> InspectInput for EntityWorldMut<'a> {
-    fn has_input<T: 'static + Send + Sync>(
-        &self,
-        session: Entity,
-    ) -> Result<bool, OperationError> {
+    fn has_input<T: 'static + Send + Sync>(&self, session: Entity) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
         Ok(inputs.contains_session(session))
     }
 }
 
 impl<'a> InspectInput for EntityRef<'a> {
-    fn has_input<T: 'static + Send + Sync>(
-        &self,
-        session: Entity,
-    ) -> Result<bool, OperationError> {
+    fn has_input<T: 'static + Send + Sync>(&self, session: Entity) -> Result<bool, OperationError> {
         let inputs = self.get::<InputStorage<T>>().or_broken()?;
         Ok(inputs.contains_session(session))
     }
@@ -281,10 +275,16 @@ impl<T: 'static + Send + Sync> Command for InputCommand<T> {
     fn apply(self, world: &mut World) {
         match world.get_mut::<InputStorage<T>>(self.target) {
             Some(mut storage) => {
-                storage.reverse_queue
-                    .insert(0, Input { session: self.session, data: self.data });
+                storage.reverse_queue.insert(
+                    0,
+                    Input {
+                        session: self.session,
+                        data: self.data,
+                    },
+                );
 
-                world.get_resource_or_insert_with(|| DeferredRoster::default())
+                world
+                    .get_resource_or_insert_with(|| DeferredRoster::default())
                     .queue(self.target);
             }
             None => {
@@ -296,13 +296,13 @@ impl<T: 'static + Send + Sync> Command for InputCommand<T> {
                     origin: self.target,
                     target: self.session,
                     session: Some(self.session),
-                    cancellation: Cancellation::from_cause(cause)
+                    cancellation: Cancellation::from_cause(cause),
                 };
 
-                world.get_resource_or_insert_with(|| DeferredRoster::default())
+                world
+                    .get_resource_or_insert_with(|| DeferredRoster::default())
                     .cancel(cancel);
             }
         }
-
     }
 }

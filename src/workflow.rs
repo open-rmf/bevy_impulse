@@ -22,9 +22,8 @@ use bevy_ecs::{
 use bevy_hierarchy::BuildChildren;
 
 use crate::{
-    Service, InputSlot, Output, StreamPack, OperateScope, DeliveryChoice,
-    WorkflowService, Builder, ServiceBundle, WorkflowStorage, ScopeEndpoints,
-    ScopeSettingsStorage,
+    Builder, DeliveryChoice, InputSlot, OperateScope, Output, ScopeEndpoints, ScopeSettingsStorage,
+    Service, ServiceBundle, StreamPack, WorkflowService, WorkflowStorage,
 };
 
 mod internal;
@@ -147,15 +146,13 @@ impl From<()> for WorkflowSettings {
 
 impl From<ScopeSettings> for WorkflowSettings {
     fn from(value: ScopeSettings) -> Self {
-        WorkflowSettings::new()
-        .with_scope(value)
+        WorkflowSettings::new().with_scope(value)
     }
 }
 
 impl From<DeliverySettings> for WorkflowSettings {
     fn from(value: DeliverySettings) -> Self {
-        WorkflowSettings::new()
-        .with_delivery(value)
+        WorkflowSettings::new().with_delivery(value)
     }
 }
 
@@ -198,7 +195,9 @@ impl ScopeSettings {
 
     /// Make a new [`ScopeSettings`] for an uninterruptible scope.
     pub fn uninterruptible() -> Self {
-        Self { uninterruptible: true }
+        Self {
+            uninterruptible: true,
+        }
     }
 
     /// Check if the scope will be set to uninterruptible.
@@ -234,14 +233,12 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
             terminal,
             enter_scope,
             finish_scope_cancel,
-        } = OperateScope::<Request, Response, Streams>::add(
-            None, scope_id, None, self,
-        );
+        } = OperateScope::<Request, Response, Streams>::add(None, scope_id, None, self);
 
         let mut builder = Builder {
             scope: scope_id,
             finish_scope_cancel,
-            commands: self
+            commands: self,
         };
 
         let streams = Streams::spawn_workflow_streams(&mut builder);
@@ -259,7 +256,9 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
             WorkflowStorage::new(scope_id),
             Streams::StreamAvailableBundle::default(),
         ));
-        settings.delivery.apply_entity_commands::<Request>(&mut service);
+        settings
+            .delivery
+            .apply_entity_commands::<Request>(&mut service);
         let service = service.id();
         self.entity(scope_id)
             .insert(ScopeSettingsStorage(settings.scope))
@@ -290,7 +289,7 @@ impl SpawnWorkflow for World {
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
 
     #[test]
     fn test_simple_workflows() {
@@ -298,17 +297,14 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             scope
-            .input
-            .chain(builder)
-            .map_block(add)
-            .connect(scope.terminate);
+                .input
+                .chain(builder)
+                .map_block(add)
+                .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((2.0, 2.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 2.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
         assert!(promise.take().available().is_some_and(|v| v == 4.0));
@@ -320,11 +316,8 @@ mod tests {
             builder.connect(add_node.output, scope.terminate);
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((3.0, 3.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((3.0, 3.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
         assert!(promise.take().available().is_some_and(|v| v == 6.0));

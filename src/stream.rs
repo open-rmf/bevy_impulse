@@ -15,37 +15,37 @@
  *
 */
 
-pub use bevy_impulse_derive::Stream;
+use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
-    prelude::{Component, Bundle, Entity, Commands, World, With},
-    system::Command,
+    prelude::{Bundle, Commands, Component, Entity, With, World},
     query::{ReadOnlyWorldQuery, WorldQuery},
+    system::Command,
 };
 use bevy_hierarchy::BuildChildren;
-use bevy_derive::{Deref, DerefMut};
+pub use bevy_impulse_derive::Stream;
 use bevy_utils::all_tuples;
-use futures::{join, future::BoxFuture};
+use futures::{future::BoxFuture, join};
 
-use tokio::sync::mpsc::{UnboundedReceiver as Receiver, unbounded_channel};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver as Receiver};
 
 use std::{
-    rc::Rc,
+    any::TypeId,
     cell::RefCell,
-    sync::Arc,
+    collections::HashSet,
     future::Future,
     pin::Pin,
+    rc::Rc,
+    sync::Arc,
     task::{Context, Poll},
-    collections::HashSet,
-    any::TypeId,
 };
 
 use smallvec::SmallVec;
 
 use crate::{
-    InputSlot, Output, UnusedTarget, RedirectWorkflowStream, RedirectScopeStream,
-    AddOperation, AddImpulse, OperationRoster, OperationResult, OrBroken, ManageInput,
-    InnerChannel, TakenStream, StreamChannel, Push, Builder, UnusedStreams,
-    OperationError, DeferredRoster, UnhandledErrors, Broken, SingleInputStorage,
+    AddImpulse, AddOperation, Broken, Builder, DeferredRoster, InnerChannel, InputSlot,
+    ManageInput, OperationError, OperationResult, OperationRoster, OrBroken, Output, Push,
+    RedirectScopeStream, RedirectWorkflowStream, SingleInputStorage, StreamChannel, TakenStream,
+    UnhandledErrors, UnusedStreams, UnusedTarget,
 };
 
 pub trait Stream: 'static + Send + Sync + Sized {
@@ -53,10 +53,18 @@ pub trait Stream: 'static + Send + Sync + Sized {
 
     fn send(
         self,
-        StreamRequest { session, target, world, roster, .. }: StreamRequest
+        StreamRequest {
+            session,
+            target,
+            world,
+            roster,
+            ..
+        }: StreamRequest,
     ) -> OperationResult {
         if let Some(target) = target {
-            world.get_entity_mut(target).or_broken()?
+            world
+                .get_entity_mut(target)
+                .or_broken()?
                 .give_input(session, self, roster)?;
         }
 
@@ -67,10 +75,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         in_scope: Entity,
         out_scope: Entity,
         commands: &mut Commands,
-    ) -> (
-        InputSlot<Self>,
-        Output<Self>,
-    ) {
+    ) -> (InputSlot<Self>, Output<Self>) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
         commands.add(AddOperation::new(
@@ -85,13 +90,13 @@ pub trait Stream: 'static + Send + Sync + Sized {
         )
     }
 
-    fn spawn_workflow_stream(
-        builder: &mut Builder,
-    ) -> InputSlot<Self> {
+    fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self> {
         let source = builder.commands.spawn(()).id();
         builder.commands.add(AddOperation::new(
-            Some(builder.scope()), source, RedirectWorkflowStream::<Self>::new()),
-        );
+            Some(builder.scope()),
+            source,
+            RedirectWorkflowStream::<Self>::new(),
+        ));
         InputSlot::new(builder.scope, source)
     }
 
@@ -99,14 +104,11 @@ pub trait Stream: 'static + Send + Sync + Sized {
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> (
-        StreamTargetStorage<Self>,
-        Output<Self>,
-    ) {
-        let target = builder.commands.spawn((
-            SingleInputStorage::new(source),
-            UnusedTarget,
-        )).id();
+    ) -> (StreamTargetStorage<Self>, Output<Self>) {
+        let target = builder
+            .commands
+            .spawn((SingleInputStorage::new(source), UnusedTarget))
+            .id();
 
         let index = map.add(target);
         (
@@ -119,17 +121,17 @@ pub trait Stream: 'static + Send + Sync + Sized {
         source: Entity,
         world: &World,
     ) -> Result<StreamTargetStorage<Self>, OperationError> {
-        world.get::<StreamTargetStorage<Self>>(source).or_broken().cloned()
+        world
+            .get::<StreamTargetStorage<Self>>(source)
+            .or_broken()
+            .cloned()
     }
 
     fn take_stream(
         source: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
-    ) -> (
-        StreamTargetStorage<Self>,
-        Receiver<Self>,
-    ) {
+    ) -> (StreamTargetStorage<Self>, Receiver<Self>) {
         let (sender, receiver) = unbounded_channel::<Self>();
         let target = commands
             .spawn(())
@@ -142,10 +144,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
 
         commands.add(AddImpulse::new(target, TakenStream::new(sender)));
 
-        (
-            StreamTargetStorage::new(index),
-            receiver,
-        )
+        (StreamTargetStorage::new(index), receiver)
     }
 
     fn collect_stream(
@@ -155,10 +154,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         commands: &mut Commands,
     ) -> StreamTargetStorage<Self> {
         let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(
-            redirect,
-            Push::<Self>::new(target, true),
-        ));
+        commands.add(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
         let index = map.add(redirect);
         StreamTargetStorage::new(index)
     }
@@ -220,9 +216,7 @@ impl<T: Stream + Unpin> Future for StreamForward<T> {
             // We loop because even if there are multiple values available, the
             // poll will only be triggered once.
             match self_mut.receiver.poll_recv(cx) {
-                Poll::Pending => {
-                    return Poll::Pending
-                },
+                Poll::Pending => return Poll::Pending,
                 Poll::Ready(Some(result)) => {
                     self_mut.channel.send(result);
                 }
@@ -279,12 +273,14 @@ pub struct StreamRequest<'a> {
 /// a service.
 #[derive(Component)]
 pub struct StreamAvailable<T: Stream> {
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> Default for StreamAvailable<T> {
     fn default() -> Self {
-        Self { _ignore: Default::default() }
+        Self {
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -292,7 +288,7 @@ impl<T: Stream> Default for StreamAvailable<T> {
 #[derive(Component)]
 pub struct StreamTargetStorage<T: Stream> {
     index: usize,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> Clone for StreamTargetStorage<T> {
@@ -308,7 +304,10 @@ impl<T: Stream> Copy for StreamTargetStorage<T> {}
 
 impl<T: Stream> StreamTargetStorage<T> {
     fn new(index: usize) -> Self {
-        Self { index, _ignore: Default::default() }
+        Self {
+            index,
+            _ignore: Default::default(),
+        }
     }
 
     pub fn get(&self) -> usize {
@@ -364,10 +363,7 @@ pub trait StreamPack: 'static + Send + Sync {
         in_scope: Entity,
         out_scope: Entity,
         commands: &mut Commands,
-    ) -> (
-        Self::StreamInputPack,
-        Self::StreamOutputPack,
-    );
+    ) -> (Self::StreamInputPack, Self::StreamOutputPack);
 
     fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack;
 
@@ -375,20 +371,18 @@ pub trait StreamPack: 'static + Send + Sync {
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::StreamOutputPack,
-    );
+    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack);
 
     fn extract_target_storage(
         source: Entity,
         world: &World,
     ) -> Result<Self::StreamStorageBundle, OperationError>;
 
-    fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::Receiver,
-    );
+    fn take_streams(
+        source: Entity,
+        map: &mut StreamTargetMap,
+        builder: &mut Commands,
+    ) -> (Self::StreamStorageBundle, Self::Receiver);
 
     fn collect_streams(
         source: Entity,
@@ -413,17 +407,9 @@ pub trait StreamPack: 'static + Send + Sync {
         roster: &mut OperationRoster,
     ) -> OperationResult;
 
-    fn defer_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        commands: &mut Commands,
-    );
+    fn defer_buffer(buffer: Self::Buffer, source: Entity, session: Entity, commands: &mut Commands);
 
-    fn forward_channels(
-        receiver: Self::Receiver,
-        channel: Self::Channel,
-    ) -> Self::Forward;
+    fn forward_channels(receiver: Self::Receiver, channel: Self::Channel) -> Self::Forward;
 
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
@@ -447,10 +433,7 @@ impl<T: Stream + Unpin> StreamPack for T {
         in_scope: Entity,
         out_scope: Entity,
         commands: &mut Commands,
-    ) -> (
-        Self::StreamInputPack,
-        Self::StreamOutputPack,
-    ) {
+    ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
         T::spawn_scope_stream(in_scope, out_scope, commands)
     }
 
@@ -462,10 +445,7 @@ impl<T: Stream + Unpin> StreamPack for T {
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::StreamOutputPack,
-    ) {
+    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack) {
         T::spawn_node_stream(source, map, builder)
     }
 
@@ -480,10 +460,7 @@ impl<T: Stream + Unpin> StreamPack for T {
         source: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::Receiver,
-    ) {
+    ) -> (Self::StreamStorageBundle, Self::Receiver) {
         Self::take_stream(source, map, commands)
     }
 
@@ -496,18 +473,18 @@ impl<T: Stream + Unpin> StreamPack for T {
         Self::collect_stream(source, target, map, commands)
     }
 
-    fn make_channel(
-        inner: &Arc<InnerChannel>,
-        world: &World,
-    ) -> Self::Channel {
-        let index = world.get::<StreamTargetStorage<Self>>(inner.source())
+    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel {
+        let index = world
+            .get::<StreamTargetStorage<Self>>(inner.source())
             .map(|t| t.index);
-        let target = index.map(
-            |index| world
-                .get::<StreamTargetMap>(inner.source())
-                .map(|t| t.get(index))
-                .flatten()
-        ).flatten();
+        let target = index
+            .map(|index| {
+                world
+                    .get::<StreamTargetMap>(inner.source())
+                    .map(|t| t.get(index))
+                    .flatten()
+            })
+            .flatten();
         StreamChannel::new(target, Arc::clone(inner))
     }
 
@@ -516,11 +493,15 @@ impl<T: Stream + Unpin> StreamPack for T {
         target_map: Option<&StreamTargetMap>,
     ) -> Self::Buffer {
         let target = target_index
-            .map(
-                |s| target_map.map(|t| t.map.get(s.index))
-            ).flatten().flatten().copied();
+            .map(|s| target_map.map(|t| t.map.get(s.index)))
+            .flatten()
+            .flatten()
+            .copied();
 
-        StreamBuffer { container: Default::default(), target }
+        StreamBuffer {
+            container: Default::default(),
+            target,
+        }
     }
 
     fn process_buffer(
@@ -533,9 +514,19 @@ impl<T: Stream + Unpin> StreamPack for T {
     ) -> OperationResult {
         let target = buffer.target;
         let mut was_unused = true;
-        for data in Rc::into_inner(buffer.container).or_broken()?.into_inner().into_iter() {
+        for data in Rc::into_inner(buffer.container)
+            .or_broken()?
+            .into_inner()
+            .into_iter()
+        {
             was_unused = false;
-            data.send(StreamRequest { source, session, target, world, roster })?;
+            data.send(StreamRequest {
+                source,
+                session,
+                target,
+                world,
+                roster,
+            })?;
         }
 
         if was_unused {
@@ -559,10 +550,7 @@ impl<T: Stream + Unpin> StreamPack for T {
         });
     }
 
-    fn forward_channels(
-        receiver: Self::Receiver,
-        channel: Self::Channel,
-    ) -> Self::Forward {
+    fn forward_channels(receiver: Self::Receiver, channel: Self::Channel) -> Self::Forward {
         StreamForward { receiver, channel }
     }
 
@@ -591,10 +579,7 @@ impl StreamPack for () {
         _: Entity,
         _: Entity,
         _: &mut Commands,
-    ) -> (
-        Self::StreamInputPack,
-        Self::StreamOutputPack,
-    ) {
+    ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
         ((), ())
     }
 
@@ -606,10 +591,7 @@ impl StreamPack for () {
         _: Entity,
         _: &mut StreamTargetMap,
         _: &mut Builder,
-    ) -> (
-        Self::StreamStorageBundle,
-        Self::StreamOutputPack,
-    ) {
+    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack) {
         ((), ())
     }
 
@@ -620,10 +602,11 @@ impl StreamPack for () {
         Ok(())
     }
 
-    fn take_streams(_: Entity, _: &mut StreamTargetMap, _: &mut Commands) -> (
-        Self::StreamStorageBundle,
-        Self::Receiver,
-    ) {
+    fn take_streams(
+        _: Entity,
+        _: &mut StreamTargetMap,
+        _: &mut Commands,
+    ) -> (Self::StreamStorageBundle, Self::Receiver) {
         ((), ())
     }
 
@@ -636,17 +619,11 @@ impl StreamPack for () {
         ()
     }
 
-    fn make_channel(
-        _: &Arc<InnerChannel>,
-        _: &World,
-    ) -> Self::Channel {
+    fn make_channel(_: &Arc<InnerChannel>, _: &World) -> Self::Channel {
         ()
     }
 
-    fn make_buffer(
-        _: Self::TargetIndexQuery,
-        _: Option<&StreamTargetMap>,
-    ) -> Self::Buffer {
+    fn make_buffer(_: Self::TargetIndexQuery, _: Option<&StreamTargetMap>) -> Self::Buffer {
         ()
     }
 
@@ -661,19 +638,9 @@ impl StreamPack for () {
         Ok(())
     }
 
-    fn defer_buffer(
-        _: Self::Buffer,
-        _: Entity,
-        _: Entity,
-        _: &mut Commands,
-    ) {
+    fn defer_buffer(_: Self::Buffer, _: Entity, _: Entity, _: &mut Commands) {}
 
-    }
-
-    fn forward_channels(
-        _: Self::Receiver,
-        _: Self::Channel,
-    ) -> Self::Forward {
+    fn forward_channels(_: Self::Receiver, _: Self::Channel) -> Self::Forward {
         NoopForward
     }
 
@@ -901,10 +868,8 @@ pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
     source: Entity,
     world: &mut World,
 ) -> Result<Streams::Buffer, OperationError> {
-    let mut stream_query = world.query::<(
-        Streams::TargetIndexQuery,
-        Option<&'static StreamTargetMap>,
-    )>();
+    let mut stream_query =
+        world.query::<(Streams::TargetIndexQuery, Option<&'static StreamTargetMap>)>();
     let (target_indices, target_map) = stream_query.get(world, source).or_broken()?;
     Ok(Streams::make_buffer(target_indices, target_map))
 }
@@ -930,9 +895,13 @@ impl<S: Stream> Command for SendStreams<S> {
                 });
 
                 if let Err(OperationError::Broken(backtrace)) = r {
-                    world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                    world
+                        .get_resource_or_insert_with(|| UnhandledErrors::default())
                         .broken
-                        .push(Broken { node: self.source, backtrace });
+                        .push(Broken {
+                            node: self.source,
+                            backtrace,
+                        });
                 }
             }
         });
@@ -986,7 +955,7 @@ pub trait StreamFilter {
 ///
 /// See [`StreamFilter`] for a usage example.
 pub struct Require<T> {
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: StreamPack> StreamFilter for Require<T> {
@@ -1015,85 +984,74 @@ all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
 
     #[test]
     fn test_single_stream() {
         let mut context = TestingContext::minimal_plugins();
 
         let count_blocking_srv = context.command(|commands| {
-            commands.spawn_service(
-                |In(input): BlockingServiceInput<u32, StreamOf<u32>>| {
-                    for i in 0..input.request {
-                        input.streams.send(StreamOf(i));
-                    }
-                    return input.request;
+            commands.spawn_service(|In(input): BlockingServiceInput<u32, StreamOf<u32>>| {
+                for i in 0..input.request {
+                    input.streams.send(StreamOf(i));
                 }
-            )
+                return input.request;
+            })
         });
 
         test_counting_stream(count_blocking_srv, &mut context);
 
         let count_async_srv = context.command(|commands| {
             commands.spawn_service(
-                |In(input): AsyncServiceInput<u32, StreamOf<u32>>| {
-                    async move {
-                        for i in 0..input.request {
-                            input.streams.send(StreamOf(i));
-                        }
-                        return input.request;
+                |In(input): AsyncServiceInput<u32, StreamOf<u32>>| async move {
+                    for i in 0..input.request {
+                        input.streams.send(StreamOf(i));
                     }
-                }
+                    return input.request;
+                },
             )
         });
 
         test_counting_stream(count_async_srv, &mut context);
 
-        let count_blocking_callback = (
-            |In(input): BlockingCallbackInput<u32, StreamOf<u32>>| {
-                for i in 0..input.request {
-                    input.streams.send(StreamOf(i));
-                }
-                return input.request;
+        let count_blocking_callback = (|In(input): BlockingCallbackInput<u32, StreamOf<u32>>| {
+            for i in 0..input.request {
+                input.streams.send(StreamOf(i));
             }
-        ).as_callback();
+            return input.request;
+        })
+        .as_callback();
 
         test_counting_stream(count_blocking_callback, &mut context);
 
-        let count_async_callback = (
-            |In(input): AsyncCallbackInput<u32, StreamOf<u32>>| {
-                async move {
-                    for i in 0..input.request {
-                        input.streams.send(StreamOf(i));
-                    }
-                    return input.request;
-                }
-            }
-        ).as_callback();
-
-        test_counting_stream(count_async_callback, &mut context);
-
-        let count_blocking_map = (
-            |input: BlockingMap<u32, StreamOf<u32>>| {
+        let count_async_callback =
+            (|In(input): AsyncCallbackInput<u32, StreamOf<u32>>| async move {
                 for i in 0..input.request {
                     input.streams.send(StreamOf(i));
                 }
                 return input.request;
+            })
+            .as_callback();
+
+        test_counting_stream(count_async_callback, &mut context);
+
+        let count_blocking_map = (|input: BlockingMap<u32, StreamOf<u32>>| {
+            for i in 0..input.request {
+                input.streams.send(StreamOf(i));
             }
-        ).as_map();
+            return input.request;
+        })
+        .as_map();
 
         test_counting_stream(count_blocking_map, &mut context);
 
-        let count_async_map = (
-            |input: AsyncMap<u32, StreamOf<u32>>| {
-                async move {
-                    for i in 0..input.request {
-                        input.streams.send(StreamOf(i));
-                    }
-                    return input.request;
-                }
+        let count_async_map = (|input: AsyncMap<u32, StreamOf<u32>>| async move {
+            for i in 0..input.request {
+                input.streams.send(StreamOf(i));
             }
-        ).as_map();
+            return input.request;
+        })
+        .as_map();
 
         test_counting_stream(count_async_map, &mut context);
     }
@@ -1102,12 +1060,14 @@ mod tests {
         provider: impl Provider<Request = u32, Response = u32, Streams = StreamOf<u32>>,
         context: &mut TestingContext,
     ) {
-        let mut recipient = context.command(|commands| {
-            commands.request(10, provider).take()
-        });
+        let mut recipient = context.command(|commands| commands.request(10, provider).take());
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
-        assert!(recipient.response.take().available().is_some_and(|v| v == 10));
+        assert!(recipient
+            .response
+            .take()
+            .available()
+            .is_some_and(|v| v == 10));
 
         let mut stream: Vec<u32> = Vec::new();
         while let Ok(r) = recipient.streams.try_recv() {
@@ -1123,84 +1083,72 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let parse_blocking_srv = context.command(|commands| {
-            commands.spawn_service(
-                |In(input): BlockingServiceInput<String, FormatStreams>| {
-                    impl_formatting_streams_blocking(input.request, input.streams);
-                }
-            )
+            commands.spawn_service(|In(input): BlockingServiceInput<String, FormatStreams>| {
+                impl_formatting_streams_blocking(input.request, input.streams);
+            })
         });
 
         test_formatting_stream(parse_blocking_srv, &mut context);
 
         let parse_async_srv = context.command(|commands| {
             commands.spawn_service(
-                |In(input): AsyncServiceInput<String, FormatStreams>| {
-                    async move {
-                        impl_formatting_streams_async(input.request, input.streams);
-                    }
-                }
+                |In(input): AsyncServiceInput<String, FormatStreams>| async move {
+                    impl_formatting_streams_async(input.request, input.streams);
+                },
             )
         });
 
         test_formatting_stream(parse_async_srv, &mut context);
 
-        let parse_continuous_srv = context.app.spawn_continuous_service(
-            Update,
-            impl_formatting_streams_continuous,
-        );
+        let parse_continuous_srv = context
+            .app
+            .spawn_continuous_service(Update, impl_formatting_streams_continuous);
 
         test_formatting_stream(parse_continuous_srv, &mut context);
 
-        let parse_blocking_callback = (
-            |In(input): BlockingCallbackInput<String, FormatStreams>| {
+        let parse_blocking_callback =
+            (|In(input): BlockingCallbackInput<String, FormatStreams>| {
                 impl_formatting_streams_blocking(input.request, input.streams);
-            }
-        ).as_callback();
+            })
+            .as_callback();
 
         test_formatting_stream(parse_blocking_callback, &mut context);
 
-        let parse_async_callback = (
-            |In(input): AsyncCallbackInput<String, FormatStreams>| {
-                async move {
-                    impl_formatting_streams_async(input.request, input.streams);
-                }
-            }
-        ).as_callback();
+        let parse_async_callback =
+            (|In(input): AsyncCallbackInput<String, FormatStreams>| async move {
+                impl_formatting_streams_async(input.request, input.streams);
+            })
+            .as_callback();
 
         test_formatting_stream(parse_async_callback, &mut context);
 
-        let parse_blocking_map = (
-            |input: BlockingMap<String, FormatStreams>| {
-                impl_formatting_streams_blocking(input.request, input.streams);
-            }
-        ).as_map();
+        let parse_blocking_map = (|input: BlockingMap<String, FormatStreams>| {
+            impl_formatting_streams_blocking(input.request, input.streams);
+        })
+        .as_map();
 
         test_formatting_stream(parse_blocking_map, &mut context);
 
-        let parse_async_map = (
-            |input: AsyncMap<String, FormatStreams>| {
-                async move {
-                    impl_formatting_streams_async(input.request, input.streams);
-                }
-            }
-        ).as_map();
+        let parse_async_map = (|input: AsyncMap<String, FormatStreams>| async move {
+            impl_formatting_streams_async(input.request, input.streams);
+        })
+        .as_map();
 
         test_formatting_stream(parse_async_map, &mut context);
 
         let make_workflow = |service: Service<String, (), FormatStreams>| {
             move |scope: Scope<String, (), FormatStreams>, builder: &mut Builder| {
-                let node = scope.input.chain(builder)
-                    .map_block(move |value| {
-                        (value, service)
-                    })
+                let node = scope
+                    .input
+                    .chain(builder)
+                    .map_block(move |value| (value, service))
                     .then_injection_node();
 
                 builder.connect(node.streams.0, scope.streams.0);
                 builder.connect(node.streams.1, scope.streams.1);
                 builder.connect(node.streams.2, scope.streams.2);
 
-                node.output.chain(builder)
-                    .connect(scope.terminate);
+                node.output.chain(builder).connect(scope.terminate);
             }
         };
 
@@ -1210,7 +1158,8 @@ mod tests {
         let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
         test_formatting_stream(async_injection_workflow, &mut context);
 
-        let continuous_injection_workflow = context.spawn_workflow(make_workflow(parse_continuous_srv));
+        let continuous_injection_workflow =
+            context.spawn_workflow(make_workflow(parse_continuous_srv));
         test_formatting_stream(continuous_injection_workflow, &mut context);
 
         let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
@@ -1292,9 +1241,8 @@ mod tests {
         provider: impl Provider<Request = String, Response = (), Streams = FormatStreams> + Clone,
         context: &mut TestingContext,
     ) {
-        let mut recipient = context.command(|commands| {
-            commands.request("5".to_owned(), provider.clone()).take()
-        });
+        let mut recipient =
+            context.command(|commands| commands.request("5".to_owned(), provider.clone()).take());
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
@@ -1305,9 +1253,8 @@ mod tests {
         assert_eq!(outcome.stream_i32, [5]);
         assert_eq!(outcome.stream_f32, [5.0]);
 
-        let mut recipient = context.command(|commands| {
-            commands.request("-2".to_owned(), provider.clone()).take()
-        });
+        let mut recipient =
+            context.command(|commands| commands.request("-2".to_owned(), provider.clone()).take());
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
@@ -1318,9 +1265,8 @@ mod tests {
         assert_eq!(outcome.stream_i32, [-2]);
         assert_eq!(outcome.stream_f32, [-2.0]);
 
-        let mut recipient = context.command(|commands| {
-            commands.request("6.7".to_owned(), provider.clone()).take()
-        });
+        let mut recipient =
+            context.command(|commands| commands.request("6.7".to_owned(), provider.clone()).take());
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
@@ -1332,7 +1278,9 @@ mod tests {
         assert_eq!(outcome.stream_f32, [6.7]);
 
         let mut recipient = context.command(|commands| {
-            commands.request("hello".to_owned(), provider.clone()).take()
+            commands
+                .request("hello".to_owned(), provider.clone())
+                .take()
         });
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));

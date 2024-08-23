@@ -27,54 +27,65 @@ use backtrace::Backtrace;
 use std::sync::Arc;
 
 use crate::{
-    Input, ManageInput, Operation, InputBundle, MiscellaneousFailure,
-    ForkTargetStorage, SingleInputStorage, UnhandledErrors,
-    OperationResult, OrBroken, OperationRequest, OperationSetup, OperationError,
-    OperationCleanup, OperationReachability, ReachabilityResult,
+    ForkTargetStorage, Input, InputBundle, ManageInput, MiscellaneousFailure, Operation,
+    OperationCleanup, OperationError, OperationReachability, OperationRequest, OperationResult,
+    OperationSetup, OrBroken, ReachabilityResult, SingleInputStorage, UnhandledErrors,
 };
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
     targets: ForkTargetStorage,
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {
     pub(crate) fn new(targets: ForkTargetStorage) -> Self {
-        Self { targets, _ignore: Default::default() }
+        Self {
+            targets,
+            _ignore: Default::default(),
+        }
     }
 }
 
 impl<T: 'static + Send + Sync + Clone> Operation for ForkClone<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
-            world.get_entity_mut(*target).or_broken()?
+            world
+                .get_entity_mut(*target)
+                .or_broken()?
                 .insert(SingleInputStorage::new(source));
         }
-        world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
-            self.targets,
-        ));
+        world
+            .entity_mut(source)
+            .insert((InputBundle::<T>::new(), self.targets));
         Ok(())
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: input } = source_mut.take_input::<T>()?;
+        let Input {
+            session,
+            data: input,
+        } = source_mut.take_input::<T>()?;
         let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
 
         let mut send_value = |value: T, target: Entity| -> Result<(), OperationError> {
             world
-            .get_entity_mut(target).or_broken()?
-            .give_input(session, value, roster)
+                .get_entity_mut(target)
+                .or_broken()?
+                .give_input(session, value, roster)
         };
 
         // Distributing the values like this is a bit convoluted, but it ensures
         // that we are not producing any more clones of the input than what is
         // strictly necessary. This may be valuable if cloning the value is
         // expensive.
-        for target in targets[..targets.len()-1].iter() {
+        for target in targets[..targets.len() - 1].iter() {
             send_value(input.clone(), *target)?;
         }
 
@@ -125,7 +136,9 @@ fn try_add_branch_to_fork_clone(
     branch: AddBranchToForkClone,
     world: &mut World,
 ) -> OperationResult {
-    let mut targets = world.get_mut::<ForkTargetStorage>(branch.source).or_broken()?;
+    let mut targets = world
+        .get_mut::<ForkTargetStorage>(branch.source)
+        .or_broken()?;
     targets.0.push(branch.target);
     Ok(())
 }

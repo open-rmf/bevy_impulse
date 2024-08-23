@@ -24,9 +24,9 @@ use bevy_hierarchy::prelude::DespawnRecursiveExt;
 use backtrace::Backtrace;
 
 use crate::{
-    SingleInputStorage, SingleTargetStorage, ForkTargetStorage, StreamTargetMap,
-    OperationResult, OperationError, OrBroken, UnhandledErrors, ConnectionFailure,
-    ScopeEntryStorage, EntryForScope, Broken,
+    Broken, ConnectionFailure, EntryForScope, ForkTargetStorage, OperationError, OperationResult,
+    OrBroken, ScopeEntryStorage, SingleInputStorage, SingleTargetStorage, StreamTargetMap,
+    UnhandledErrors,
 };
 
 /// If two nodes have been created, they will each have a unique source and a
@@ -43,7 +43,8 @@ pub(crate) struct Connect {
 impl Command for Connect {
     fn apply(self, world: &mut World) {
         if let Err(OperationError::Broken(backtrace)) = try_connect(self, world) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .connections
                 .push(ConnectionFailure {
                     original_target: self.original_target,
@@ -61,16 +62,27 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         // storage components, we need to modify EntryForScope and
         // ScopeEntryStorage components.
         let scope = *scope;
-        world.get_entity_mut(connect.new_target).or_broken()?.insert(EntryForScope(scope));
-        world.get_entity_mut(scope).or_broken()?.insert(ScopeEntryStorage(connect.new_target));
+        world
+            .get_entity_mut(connect.new_target)
+            .or_broken()?
+            .insert(EntryForScope(scope));
+        world
+            .get_entity_mut(scope)
+            .or_broken()?
+            .insert(ScopeEntryStorage(connect.new_target));
 
-        world.get_entity_mut(connect.original_target).or_broken()?
+        world
+            .get_entity_mut(connect.original_target)
+            .or_broken()?
             .despawn_recursive();
         return Ok(());
     }
 
-    let old_inputs = world.get_entity_mut(connect.original_target).or_broken()?
-        .take::<SingleInputStorage>().or_broken()?
+    let old_inputs = world
+        .get_entity_mut(connect.original_target)
+        .or_broken()?
+        .take::<SingleInputStorage>()
+        .or_broken()?
         .take();
 
     for input in old_inputs.into_iter() {
@@ -106,7 +118,8 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         }
 
         if !connection_happened {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .broken
                 .push(Broken {
                     node: input,
@@ -117,12 +130,16 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         if let Some(mut new_inputs_mut) = world.get_mut::<SingleInputStorage>(connect.new_target) {
             new_inputs_mut.add(input);
         } else {
-            world.get_entity_mut(connect.new_target).or_broken()?
+            world
+                .get_entity_mut(connect.new_target)
+                .or_broken()?
                 .insert(SingleInputStorage::new(input));
         }
     }
 
-    world.get_entity_mut(connect.original_target).or_broken()?
+    world
+        .get_entity_mut(connect.original_target)
+        .or_broken()?
         .despawn_recursive();
 
     Ok(())

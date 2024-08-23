@@ -19,9 +19,8 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
-    UnusedTarget, AddOperation, Chain, Listen, Scope, ScopeSettings,
-    CleanupWorkflowConditions,
+    AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain, CleanupWorkflowConditions,
+    CloneFromBuffer, Join, Listen, Output, Scope, ScopeSettings, UnusedTarget,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
@@ -56,7 +55,9 @@ pub trait Bufferable {
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(scope), join, Join::new(buffers, target)
+            Some(scope),
+            join,
+            Join::new(buffers, target),
         ));
 
         Output::new(scope, target).chain(builder)
@@ -98,8 +99,7 @@ pub trait Bufferable {
         self,
         builder: &mut Builder<'w, 's, 'a>,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -113,8 +113,7 @@ pub trait Bufferable {
         self,
         builder: &mut Builder<'w, 's, 'a>,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -128,8 +127,7 @@ pub trait Bufferable {
         self,
         builder: &mut Builder<'w, 's, 'a>,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -144,8 +142,7 @@ pub trait Bufferable {
         builder: &mut Builder<'w, 's, 'a>,
         conditions: CleanupWorkflowConditions,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -237,7 +234,9 @@ pub trait IterBufferable {
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(builder.scope()), join, Join::new(buffers, target),
+            Some(builder.scope()),
+            join,
+            Join::new(buffers, target),
         ));
 
         Output::new(builder.scope, target)

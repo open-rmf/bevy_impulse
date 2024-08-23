@@ -15,20 +15,20 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component, World};
+use bevy_ecs::prelude::{Component, Entity, World};
 
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap},
     sync::Arc,
 };
 
 use smallvec::SmallVec;
 
 use crate::{
-    Operation, OperationRequest, OperationReachability, OperationResult,
-    Buffered, OperationSetup, InputBundle, SingleTargetStorage, OrBroken,
-    SingleInputStorage, Input, ManageInput, ChannelQueue, ScopeStorage,
-    OperationCleanup, ReachabilityResult, OperationError, BufferKeyBuilder,
+    BufferKeyBuilder, Buffered, ChannelQueue, Input, InputBundle, ManageInput, Operation,
+    OperationCleanup, OperationError, OperationReachability, OperationRequest, OperationResult,
+    OperationSetup, OrBroken, ReachabilityResult, ScopeStorage, SingleInputStorage,
+    SingleTargetStorage,
 };
 
 pub(crate) struct OperateBufferAccess<T, B>
@@ -38,7 +38,7 @@ where
 {
     buffers: B,
     target: Entity,
-    _ignore: std::marker::PhantomData<(T, B)>,
+    _ignore: std::marker::PhantomData<fn(T, B)>,
 }
 
 impl<T, B> OperateBufferAccess<T, B>
@@ -47,7 +47,11 @@ where
     B: Buffered,
 {
     pub(crate) fn new(buffers: B, target: Entity) -> Self {
-        Self { buffers, target, _ignore: Default::default() }
+        Self {
+            buffers,
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -62,7 +66,10 @@ pub(crate) struct BufferAccessStorage<B: Buffered> {
 
 impl<B: Buffered> BufferAccessStorage<B> {
     pub(crate) fn new(buffers: B) -> Self {
-        Self { buffers, keys: HashMap::new() }
+        Self {
+            buffers,
+            keys: HashMap::new(),
+        }
     }
 }
 
@@ -73,7 +80,9 @@ where
     B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         self.buffers.add_accessor(source, world)?;
@@ -88,17 +97,24 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
-        let Input { session, data } = world.get_entity_mut(source).or_broken()?
+        let Input { session, data } = world
+            .get_entity_mut(source)
+            .or_broken()?
             .take_input::<T>()?;
 
         let keys = get_access_keys::<B>(source, session, world)?;
 
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
-        world.get_entity_mut(target).or_broken()?.give_input(
-            session, (data, keys), roster,
-        )
+        world
+            .get_entity_mut(target)
+            .or_broken()?
+            .give_input(session, (data, keys), roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
@@ -128,18 +144,20 @@ where
     let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
     let sender = world
         .get_resource_or_insert_with(|| ChannelQueue::default())
-        .sender.clone();
+        .sender
+        .clone();
 
-    let mut storage = world.get_mut::<BufferAccessStorage<B>>(source).or_broken()?;
+    let mut storage = world
+        .get_mut::<BufferAccessStorage<B>>(source)
+        .or_broken()?;
     let s = storage.as_mut();
     let mut made_key = false;
     let keys = match s.keys.entry(session) {
         Entry::Occupied(occupied) => B::deep_clone_key(occupied.get()),
         Entry::Vacant(vacant) => {
             made_key = true;
-            let builder = BufferKeyBuilder::with_tracking(
-                scope, session, source, sender, Arc::new(()),
-            );
+            let builder =
+                BufferKeyBuilder::with_tracking(scope, session, source, sender, Arc::new(()));
             let new_key = vacant.insert(s.buffers.create_key(&builder));
             B::deep_clone_key(new_key)
         }
@@ -165,8 +183,11 @@ where
     B: Buffered + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
-    let key = world.get::<BufferAccessStorage<B>>(accessor).or_broken()?
-        .keys.get(&session);
+    let key = world
+        .get::<BufferAccessStorage<B>>(accessor)
+        .or_broken()?
+        .keys
+        .get(&session);
     if let Some(key) = key {
         if B::is_key_in_use(key) {
             return Ok(true);

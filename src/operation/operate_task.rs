@@ -16,36 +16,27 @@
 */
 
 use bevy_ecs::{
-    prelude::{Component, Entity, World, Resource},
+    prelude::{Component, Entity, Resource, World},
     system::Command,
 };
 use bevy_hierarchy::{BuildWorldChildren, DespawnRecursiveExt};
 
-use std::{
-    task::Poll,
-    future::Future,
-    pin::Pin,
-    task::Context,
-    sync::Arc,
-};
+use std::{future::Future, pin::Pin, sync::Arc, task::Context, task::Poll};
 
 use futures::task::{waker_ref, ArcWake};
 
 use tokio::sync::mpsc::{
-    unbounded_channel,
-    UnboundedSender as TokioSender,
-    UnboundedReceiver as TokioReceiver,
+    unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
 
 use smallvec::SmallVec;
 
 use crate::{
-    OperationRoster, Blocker, ManageInput, ChannelQueue, UnhandledErrors,
-    OperationSetup, OperationRequest, OperationResult, Operation, AddOperation,
-    OrBroken, OperationCleanup, ChannelItem, OperationError, Broken, ScopeStorage,
-    OperationReachability, ReachabilityResult, emit_disposal, Disposal, StreamPack,
-    Cleanup,
-    async_execution::{task_cancel_sender, TaskHandle, CancelSender},
+    async_execution::{task_cancel_sender, CancelSender, TaskHandle},
+    emit_disposal, AddOperation, Blocker, Broken, ChannelItem, ChannelQueue, Cleanup, Disposal,
+    ManageInput, Operation, OperationCleanup, OperationError, OperationReachability,
+    OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
+    ReachabilityResult, ScopeStorage, StreamPack, UnhandledErrors,
 };
 
 struct JobWaker {
@@ -88,7 +79,7 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPa
     disposal: Option<Disposal>,
     being_cleaned: Option<Cleanup>,
     finished_normally: bool,
-    _ignore: std::marker::PhantomData<Streams>,
+    _ignore: std::marker::PhantomData<fn(Streams)>,
 }
 
 impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response, Streams> {
@@ -158,16 +149,26 @@ where
                 disposed = true;
                 task.cancel().await;
             }
-            sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                cleanup_task::<Response>(source, node, unblock, being_cleaned, world, roster);
+            sender
+                .send(Box::new(
+                    move |world: &mut World, roster: &mut OperationRoster| {
+                        cleanup_task::<Response>(
+                            source,
+                            node,
+                            unblock,
+                            being_cleaned,
+                            world,
+                            roster,
+                        );
 
-                if disposed {
-                    let disposal = disposal.unwrap_or_else(|| {
-                        Disposal::task_despawned(source, node)
-                    });
-                    emit_disposal(node, session, disposal, world, roster);
-                }
-            })).ok();
+                        if disposed {
+                            let disposal =
+                                disposal.unwrap_or_else(|| Disposal::task_despawned(source, node));
+                            emit_disposal(node, session, disposal, world, roster);
+                        }
+                    },
+                ))
+                .ok();
         });
     }
 }
@@ -197,12 +198,20 @@ where
 
         let mut node_mut = world.get_entity_mut(node).or_broken()?;
         let mut tasks = node_mut.get_mut::<ActiveTasksStorage>().or_broken()?;
-        tasks.list.push(ActiveTask { task_id: source, session, being_cleaned: None });
+        tasks.list.push(ActiveTask {
+            task_id: source,
+            session,
+            being_cleaned: None,
+        });
         Ok(())
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         // It's possible for a task to get into the roster after it has despawned
         // so we'll just exit early when that happens. However this should not
@@ -211,7 +220,9 @@ where
         let mut source_mut = world.get_entity_mut(source).or_not_ready()?;
         // If the task has been stopped / cancelled then OperateTask will have
         // been removed, even if it has not despawned yet.
-        let mut operation = source_mut.get_mut::<OperateTask<Response, Streams>>().or_not_ready()?;
+        let mut operation = source_mut
+            .get_mut::<OperateTask<Response, Streams>>()
+            .or_not_ready()?;
         if operation.being_cleaned.is_some() {
             // The operation is being cleaned up, so the task will not be
             // available and there will be nothing for us to do here. We should
@@ -239,15 +250,18 @@ where
             waker
         };
 
-        match Pin::new(&mut task).poll(
-            &mut Context::from_waker(&waker_ref(&waker))
-        ) {
+        match Pin::new(&mut task).poll(&mut Context::from_waker(&waker_ref(&waker))) {
             Poll::Ready(result) => {
                 // Task has finished. We will defer its input until after the
                 // ChannelQueue has been processed so that any streams from this
                 // task will be delivered before the final output.
-                let r = world.entity_mut(target).defer_input(session, result, roster);
-                world.get_mut::<OperateTask<Response, Streams>>(source).or_broken()?.finished_normally = true;
+                let r = world
+                    .entity_mut(target)
+                    .defer_input(session, result, roster);
+                world
+                    .get_mut::<OperateTask<Response, Streams>>(source)
+                    .or_broken()?
+                    .finished_normally = true;
                 cleanup_task::<Response>(source, node, unblock, being_cleaned, world, roster);
 
                 if Streams::has_streams() {
@@ -275,7 +289,8 @@ where
             }
             Poll::Pending => {
                 // Task is still running
-                if let Some(mut operation) = world.get_mut::<OperateTask<Response, Streams>>(source) {
+                if let Some(mut operation) = world.get_mut::<OperateTask<Response, Streams>>(source)
+                {
                     operation.task = Some(task);
                     operation.blocker = unblock;
                     world.entity_mut(source).insert(JobWakerStorage(waker));
@@ -286,14 +301,22 @@ where
                         // outside of it. Since this task was blocking a service
                         // we should recreate the OperateTask object with
                         // everything filled in, and then drop it according.
-                        let sender = world.get_resource_or_insert_with(
-                            || ChannelQueue::default()
-                        ).sender.clone();
+                        let sender = world
+                            .get_resource_or_insert_with(|| ChannelQueue::default())
+                            .sender
+                            .clone();
 
                         let cancel_sender = task_cancel_sender(world);
 
                         let operation = OperateTask::<_, Streams>::new(
-                            source, session, node, target, task, cancel_sender, unblock, sender,
+                            source,
+                            session,
+                            node,
+                            target,
+                            task,
+                            cancel_sender,
+                            unblock,
+                            sender,
                         );
 
                         // Dropping this operation will trigger the task cancellation
@@ -310,7 +333,9 @@ where
         let cleanup = clean.cleanup;
         let source = clean.source;
         let mut source_mut = clean.world.get_entity_mut(source).or_broken()?;
-        let mut operation = source_mut.get_mut::<OperateTask<Response, Streams>>().or_broken()?;
+        let mut operation = source_mut
+            .get_mut::<OperateTask<Response, Streams>>()
+            .or_broken()?;
         operation.being_cleaned = Some(cleanup);
         operation.finished_normally = true;
         let node = operation.node;
@@ -320,23 +345,43 @@ where
         if let Some(task) = task {
             operation.cancel_sender.send(move || async move {
                 task.cancel().await;
-                if let Err(err) = sender.send(Box::new(move |world: &mut World, roster: &mut OperationRoster| {
-                    cleanup_task::<Response>(source, node, unblock, Some(cleanup), world, roster);
-                })) {
+                if let Err(err) = sender.send(Box::new(
+                    move |world: &mut World, roster: &mut OperationRoster| {
+                        cleanup_task::<Response>(
+                            source,
+                            node,
+                            unblock,
+                            Some(cleanup),
+                            world,
+                            roster,
+                        );
+                    },
+                )) {
                     eprintln!("Failed to send a command to cleanup a task: {err}");
                 }
             });
         } else {
-            cleanup_task::<Response>(source, node, unblock, Some(cleanup), clean.world, clean.roster);
+            cleanup_task::<Response>(
+                source,
+                node,
+                unblock,
+                Some(cleanup),
+                clean.world,
+                clean.roster,
+            );
         }
 
         Ok(())
     }
 
     fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
-        let session = reachability.world
-            .get_entity(reachability.source).or_broken()?
-            .get::<OperateTask<Response, Streams>>().or_broken()?.session;
+        let session = reachability
+            .world
+            .get_entity(reachability.source)
+            .or_broken()?
+            .get::<OperateTask<Response, Streams>>()
+            .or_broken()?
+            .session;
         Ok(session == reachability.session)
     }
 }
@@ -357,7 +402,11 @@ fn cleanup_task<Response>(
         if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
             let mut cleanup_ready = true;
             active_tasks.list.retain(
-                |ActiveTask { task_id: id, being_cleaned: other_being_cleaned, .. }| {
+                |ActiveTask {
+                     task_id: id,
+                     being_cleaned: other_being_cleaned,
+                     ..
+                 }| {
                     if *id == source {
                         return false;
                     }
@@ -370,14 +419,15 @@ fn cleanup_task<Response>(
                         }
                     }
                     true
-                }
+                },
             );
 
             if cleanup_ready {
                 if let Some(being_cleaned) = being_cleaned {
                     let r = being_cleaned.notify_cleaned(world, roster);
                     if let Err(OperationError::Broken(backtrace)) = r {
-                        world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                        world
+                            .get_resource_or_insert_with(|| UnhandledErrors::default())
                             .broken
                             .push(Broken { node, backtrace });
                     }
@@ -437,7 +487,12 @@ impl ActiveTasksStorage {
         let mut active_tasks = source_mut.get_mut::<Self>().or_broken()?;
         let mut to_cleanup: SmallVec<[Entity; 16]> = SmallVec::new();
         let mut cleanup_ready = true;
-        for ActiveTask { task_id: id, session, being_cleaned } in &mut active_tasks.list {
+        for ActiveTask {
+            task_id: id,
+            session,
+            being_cleaned,
+        } in &mut active_tasks.list
+        {
             if *session == clean.cleanup.session {
                 *being_cleaned = Some(clean.cleanup);
                 to_cleanup.push(*id);
@@ -460,11 +515,17 @@ impl ActiveTasksStorage {
     }
 
     pub fn contains_session(r: &OperationReachability) -> ReachabilityResult {
-        let active_tasks = &r.world.get_entity(r.source).or_broken()?
-            .get::<Self>().or_broken()?.list;
+        let active_tasks = &r
+            .world
+            .get_entity(r.source)
+            .or_broken()?
+            .get::<Self>()
+            .or_broken()?
+            .list;
 
-        Ok(active_tasks.iter().find(
-            |task| task.session == r.session
-        ).is_some())
+        Ok(active_tasks
+            .iter()
+            .find(|task| task.session == r.session)
+            .is_some())
     }
 }

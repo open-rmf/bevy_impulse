@@ -16,16 +16,12 @@
 */
 
 use crate::{
-    ServiceBuilder, Service, ServiceRequest, OperationResult,
-    service::service_builder::{SerialChosen, ParallelChosen},
+    service::service_builder::{ParallelChosen, SerialChosen},
+    OperationResult, Service, ServiceBuilder, ServiceRequest,
 };
 
-use bevy_ecs::{
-    world::EntityWorldMut,
-    system::EntityCommands,
-    schedule::SystemConfigs,
-};
 use bevy_app::prelude::App;
+use bevy_ecs::{schedule::SystemConfigs, system::EntityCommands, world::EntityWorldMut};
 
 pub trait ServiceTrait {
     // TODO(@mxgrey): Are we using these associated types anymore?
@@ -60,7 +56,9 @@ pub trait IntoServiceBuilder<M> {
     type With;
     type Also;
     type Configure;
-    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure>;
+    fn into_service_builder(
+        self,
+    ) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure>;
 }
 
 /// This trait allows users to immediately begin building a service off of a suitable system
@@ -76,7 +74,10 @@ pub trait QuickContinuousServiceBuild<M> {
     type Service;
     fn with<With>(self, with: With) -> ServiceBuilder<Self::Service, (), With, (), ()>;
     fn also<Also>(self, also: Also) -> ServiceBuilder<Self::Service, (), (), Also, ()>;
-    fn configure<Configure>(self, configure: Configure) -> ServiceBuilder<Self::Service, (), (), (), Configure>;
+    fn configure<Configure>(
+        self,
+        configure: Configure,
+    ) -> ServiceBuilder<Self::Service, (), (), (), Configure>;
 }
 
 /// This trait allows async service systems to be converted into a builder
@@ -90,10 +91,12 @@ pub trait ChooseAsyncServiceDelivery<M> {
 /// This trait is used to set the delivery mode of a service.
 pub trait DeliveryChoice {
     fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityWorldMut<'w>,
+        self,
+        entity_mut: &mut EntityWorldMut<'w>,
     );
     fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
-        self, entity_commands: &mut EntityCommands<'w, 's, 'a>,
+        self,
+        entity_commands: &mut EntityCommands<'w, 's, 'a>,
     );
 }
 

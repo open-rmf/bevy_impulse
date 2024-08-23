@@ -16,7 +16,7 @@
 */
 
 use bevy_ecs::{
-    prelude::{Entity, Component, Bundle, World},
+    prelude::{Bundle, Component, Entity, World},
     world::EntityWorldMut,
 };
 
@@ -27,8 +27,8 @@ use thiserror::Error as ThisError;
 use std::sync::Arc;
 
 use crate::{
-    Disposal, Filtered, OperationError, ScopeStorage, CancelFailure,
-    OperationResult, OperationRoster, Supplanted, UnhandledErrors,
+    CancelFailure, Disposal, Filtered, OperationError, OperationResult, OperationRoster,
+    ScopeStorage, Supplanted, UnhandledErrors,
 };
 
 /// Information about the cancellation that occurred.
@@ -44,19 +44,27 @@ pub struct Cancellation {
 
 impl Cancellation {
     pub fn from_cause(cause: CancellationCause) -> Self {
-        Self { cause: Arc::new(cause), while_cancelling: Default::default() }
+        Self {
+            cause: Arc::new(cause),
+            while_cancelling: Default::default(),
+        }
     }
 
-    pub fn unreachable(
-        scope: Entity,
-        session: Entity,
-        disposals: Vec<Disposal>,
-    ) -> Self {
-        Unreachability { scope, session, disposals }.into()
+    pub fn unreachable(scope: Entity, session: Entity, disposals: Vec<Disposal>) -> Self {
+        Unreachability {
+            scope,
+            session,
+            disposals,
+        }
+        .into()
     }
 
     pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
-        Filtered { filtered_at_node, reason }.into()
+        Filtered {
+            filtered_at_node,
+            reason,
+        }
+        .into()
     }
 
     pub fn supplanted(
@@ -64,19 +72,23 @@ impl Cancellation {
         supplanted_by_node: Entity,
         supplanting_session: Entity,
     ) -> Self {
-        Supplanted { supplanted_at_node, supplanted_by_node, supplanting_session }.into()
+        Supplanted {
+            supplanted_at_node,
+            supplanted_by_node,
+            supplanting_session,
+        }
+        .into()
     }
 
-    pub fn invalid_span(
-        from_point: Entity,
-        to_point: Option<Entity>,
-    ) -> Self {
-        InvalidSpan { from_point, to_point }.into()
+    pub fn invalid_span(from_point: Entity, to_point: Option<Entity>) -> Self {
+        InvalidSpan {
+            from_point,
+            to_point,
+        }
+        .into()
     }
 
-    pub fn circular_collect(
-        conflicts: Vec<[Entity; 2]>,
-    ) -> Self {
+    pub fn circular_collect(conflicts: Vec<[Entity; 2]>) -> Self {
         CircularCollect { conflicts }.into()
     }
 
@@ -87,7 +99,10 @@ impl Cancellation {
 
 impl<T: Into<CancellationCause>> From<T> for Cancellation {
     fn from(value: T) -> Self {
-        Cancellation { cause: Arc::new(value.into()), while_cancelling: Default::default() }
+        Cancellation {
+            cause: Arc::new(value.into()),
+            while_cancelling: Default::default(),
+        }
     }
 }
 
@@ -191,18 +206,15 @@ impl Cancel {
         self
     }
 
-    pub(crate) fn trigger(
-        self,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) {
+    pub(crate) fn trigger(self, world: &mut World, roster: &mut OperationRoster) {
         if let Err(failure) = self.try_trigger(world, roster) {
             // We were unable to deliver the cancellation to the intended target.
             // We should move this into the unhandled errors resource so that it
             // does not get lost.
             world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
-            .cancellations.push(failure);
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .cancellations
+                .push(failure);
         }
     }
 
@@ -215,10 +227,12 @@ impl Cancel {
             let cancel = cancel.0;
             // TODO(@mxgrey): Figure out a way to structure this so we don't
             // need to always clone self.
-            return (cancel)(OperationCancel { cancel: self.clone(), world, roster })
-                .map_err(|error| {
-                    CancelFailure::new(error, self)
-                });
+            return (cancel)(OperationCancel {
+                cancel: self.clone(),
+                world,
+                roster,
+            })
+            .map_err(|error| CancelFailure::new(error, self));
         } else {
             return Err(CancelFailure::new(
                 OperationError::Broken(Some(Backtrace::new())),
@@ -241,7 +255,11 @@ pub struct Unreachability {
 
 impl Unreachability {
     pub fn new(scope: Entity, session: Entity, disposals: Vec<Disposal>) -> Self {
-        Self { scope, session, disposals }
+        Self {
+            scope,
+            session,
+            disposals,
+        }
     }
 }
 
@@ -287,11 +305,7 @@ pub trait ManageCancellation {
         roster: &mut OperationRoster,
     );
 
-    fn emit_broken(
-        &mut self,
-        backtrace: Option<Backtrace>,
-        roster: &mut OperationRoster,
-    );
+    fn emit_broken(&mut self, backtrace: Option<Backtrace>, roster: &mut OperationRoster);
 }
 
 impl<'w> ManageCancellation for EntityWorldMut<'w> {
@@ -307,26 +321,27 @@ impl<'w> ManageCancellation for EntityWorldMut<'w> {
             // so that it does not get lost.
             self.world_scope(move |world| {
                 world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .cancellations.push(failure);
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .cancellations
+                    .push(failure);
             });
         }
     }
 
-    fn emit_broken(
-        &mut self,
-        backtrace: Option<Backtrace>,
-        roster: &mut OperationRoster,
-    ) {
-        let cause = Broken { node: self.id(), backtrace };
+    fn emit_broken(&mut self, backtrace: Option<Backtrace>, roster: &mut OperationRoster) {
+        let cause = Broken {
+            node: self.id(),
+            backtrace,
+        };
         if let Err(failure) = try_emit_cancel(self, None, cause.into(), roster) {
             // We were unable to emit the cancel according to the normal
             // procedure. We should move this into the unhandled errors resource
             // so that it does not get lost.
             self.world_scope(move |world| {
                 world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .cancellations.push(failure);
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .cancellations
+                    .push(failure);
             });
         }
     }
@@ -342,17 +357,21 @@ pub fn try_emit_broken(
         source_mut.emit_broken(backtrace, roster);
     } else {
         world
-        .get_resource_or_insert_with(|| UnhandledErrors::default())
-        .cancellations
-        .push(CancelFailure {
-            error: OperationError::Broken(Some(Backtrace::new())),
-            cancel: Cancel {
-                origin: source,
-                target: source,
-                session: None,
-                cancellation: Broken { node: source, backtrace }.into(),
-            }
-        });
+            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .cancellations
+            .push(CancelFailure {
+                error: OperationError::Broken(Some(Backtrace::new())),
+                cancel: Cancel {
+                    origin: source,
+                    target: source,
+                    session: None,
+                    cancellation: Broken {
+                        node: source,
+                        backtrace,
+                    }
+                    .into(),
+                },
+            });
     }
 }
 
@@ -367,11 +386,21 @@ fn try_emit_cancel(
         // The cancellation is happening inside a scope, so we should cancel
         // the scope
         let scope = scope.get();
-        roster.cancel(Cancel { origin: source, target: scope, session, cancellation });
+        roster.cancel(Cancel {
+            origin: source,
+            target: scope,
+            session,
+            cancellation,
+        });
     } else if let Some(session) = session {
         // The cancellation is not happening inside a scope, so we should tell
         // the session itself to cancel.
-        roster.cancel(Cancel { origin: source, target: session, session: Some(session), cancellation });
+        roster.cancel(Cancel {
+            origin: source,
+            target: session,
+            session: Some(session),
+            cancellation,
+        });
     } else {
         return Err(CancelFailure::new(
             OperationError::Broken(Some(Backtrace::new())),
@@ -380,7 +409,7 @@ fn try_emit_cancel(
                 target: source,
                 session,
                 cancellation,
-            }
+            },
         ));
     }
 
@@ -403,6 +432,8 @@ pub struct Cancellable {
 
 impl Cancellable {
     pub fn new(cancel: fn(OperationCancel) -> OperationResult) -> Self {
-        Cancellable { cancel: OperationCancelStorage(cancel) }
+        Cancellable {
+            cancel: OperationCancelStorage(cancel),
+        }
     }
 }

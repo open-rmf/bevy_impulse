@@ -24,9 +24,8 @@ use bevy_hierarchy::BuildChildren;
 use std::future::Future;
 
 use crate::{
-    UnusedTarget, StreamPack, ProvideOnce, IntoBlockingMapOnce, IntoAsyncMap,
-    Impulse, Detached, InputCommand, Cancellable, ImpulseMarker, SessionStatus,
-    cancel_impulse,
+    cancel_impulse, Cancellable, Detached, Impulse, ImpulseMarker, InputCommand, IntoAsyncMap,
+    IntoBlockingMapOnce, ProvideOnce, SessionStatus, StreamPack, UnusedTarget,
 };
 
 /// Extensions for creating impulse chains by making a request to a provider or
@@ -66,10 +65,7 @@ pub trait RequestExt<'w, 's> {
 
     /// Call this on [`Commands`] to begin building an impulse chain from a
     /// value without calling any provider.
-    fn provide<'a, T: 'static + Send + Sync>(
-        &'a mut self,
-        value: T,
-    ) -> Impulse<'w, 's, 'a, T, ()> {
+    fn provide<'a, T: 'static + Send + Sync>(&'a mut self, value: T) -> Impulse<'w, 's, 'a, T, ()> {
         self.request(value, provide_value.into_blocking_map_once())
     }
 
@@ -98,11 +94,9 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         P::Response: 'static + Send + Sync,
         P::Streams: StreamPack,
     {
-        let target = self.spawn((
-            Detached::default(),
-            UnusedTarget,
-            ImpulseMarker,
-        )).id();
+        let target = self
+            .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
+            .id();
 
         let source = self
             .spawn((
@@ -116,7 +110,11 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             .id();
 
         provider.connect(None, source, target, self);
-        self.add(InputCommand { session: source, target: source, data: request });
+        self.add(InputCommand {
+            session: source,
+            target: source,
+            data: request,
+        });
 
         Impulse {
             source,
@@ -151,7 +149,7 @@ async fn async_server<T: Future>(value: T) -> T::Output {
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
 
     #[test]
     fn simple_spawn() {

@@ -21,7 +21,7 @@ use tokio::sync::mpsc::UnboundedSender as TokioSender;
 
 use std::sync::Arc;
 
-use crate::{OperationRoster, ChannelItem, Disposal, emit_disposal};
+use crate::{emit_disposal, ChannelItem, Disposal, OperationRoster};
 
 /// This is used as a field inside of [`crate::BufferKey`] which keeps track of
 /// when a key that was sent out into the world gets fully dropped from use. We
@@ -50,7 +50,14 @@ impl BufferAccessLifecycle {
         sender: TokioSender<ChannelItem>,
         tracker: Arc<()>,
     ) -> Self {
-        Self { scope, accessor, session, buffer, sender, tracker }
+        Self {
+            scope,
+            accessor,
+            session,
+            buffer,
+            sender,
+            tracker,
+        }
     }
 
     pub(crate) fn is_in_use(&self) -> bool {
@@ -65,18 +72,16 @@ impl Drop for BufferAccessLifecycle {
             let accessor = self.accessor;
             let session = self.session;
             let buffer = self.buffer;
-            if let Err(err) = self.sender.send(
-                Box::new(move |world: &mut World, roster: &mut OperationRoster| {
+            if let Err(err) = self.sender.send(Box::new(
+                move |world: &mut World, roster: &mut OperationRoster| {
                     let disposal = Disposal::buffer_key(accessor, buffer);
                     emit_disposal(accessor, session, disposal, world, roster);
-                })
-            ) {
+                },
+            )) {
                 eprintln!(
                     "Failed to send disposal notice for dropped buffer key in \
                     scope [{:?}] for session [{:?}]: {}",
-                    scope,
-                    session,
-                    err,
+                    scope, session, err,
                 );
             }
         }
