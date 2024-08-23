@@ -1,6 +1,11 @@
 name: ci_web
 
 on:
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    # The final 1 indicates that we want to run this test on Tuesdays, making
+    # this a weekly test.
+    - cron:  '30 2 * * 1'
   pull_request:
   workflow_dispatch:
   push:
