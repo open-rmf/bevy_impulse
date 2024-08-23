@@ -34,7 +34,7 @@ use crate::{
 
 pub(crate) struct ForkClone<Response: 'static + Send + Sync + Clone> {
     targets: ForkTargetStorage,
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response: 'static + Send + Sync + Clone> ForkClone<Response> {

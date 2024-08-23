@@ -83,7 +83,7 @@ impl WorkflowStorage {
 }
 
 pub(crate) struct WorkflowService<Request, Response, Streams> {
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Request, Response, Streams> WorkflowService<Request, Response, Streams> {

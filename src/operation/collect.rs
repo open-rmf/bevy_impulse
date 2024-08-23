@@ -32,7 +32,7 @@ pub(crate) struct Collect<T, const N: usize> {
     target: Entity,
     min: usize,
     max: Option<usize>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T, const N: usize> Collect<T, N> {

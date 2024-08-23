@@ -57,7 +57,7 @@ where
 /// implement [`FnOnce`].
 pub struct BlockingMapOnceDef<Def, Request, Response, Streams> {
     def: Def,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Def, Request, Response, Streams> ProvideOnce
@@ -166,7 +166,7 @@ where
 /// implement [`FnOnce`].
 pub struct AsyncMapOnceDef<Def, Request, Task, Streams> {
     def: Def,
-    _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Task, Streams)>,
 }
 
 impl<Def, Request, Task, Streams> ProvideOnce for AsyncMapOnceDef<Def, Request, Task, Streams>

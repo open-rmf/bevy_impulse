@@ -57,7 +57,7 @@ pub struct Impulse<'w, 's, 'a, Response, Streams> {
     pub(crate) source: Entity,
     pub(crate) target: Entity,
     pub(crate) commands: &'a mut Commands<'w, 's>,
-    pub(crate) _ignore: std::marker::PhantomData<(Response, Streams)>,
+    pub(crate) _ignore: std::marker::PhantomData<fn(Response, Streams)>,
 }
 
 impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>

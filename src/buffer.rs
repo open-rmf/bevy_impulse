@@ -52,7 +52,7 @@ pub use manage_buffer::*;
 pub struct Buffer<T> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) _ignore: std::marker::PhantomData<T>,
+    pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Buffer<T> {
@@ -92,7 +92,7 @@ impl<T> Buffer<T> {
 pub struct CloneFromBuffer<T: Clone> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) _ignore: std::marker::PhantomData<T>,
+    pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 /// Settings to describe the behavior of a buffer.
@@ -193,7 +193,7 @@ pub struct BufferKey<T> {
     session: Entity,
     accessor: Entity,
     lifecycle: Option<Arc<BufferAccessLifecycle>>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Clone for BufferKey<T> {

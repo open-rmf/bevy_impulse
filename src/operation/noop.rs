@@ -25,7 +25,7 @@ use crate::{
 
 pub(crate) struct Noop<T> {
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Noop<T> {

@@ -26,7 +26,7 @@ use crate::{
 #[derive(Component)]
 pub(crate) struct Store<T> {
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Store<T> {

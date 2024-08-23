@@ -28,7 +28,7 @@ use thiserror::Error as ThisError;
 pub struct Branching<Input, Outputs, F> {
     activator: F,
     targets: ForkTargetStorage,
-    _ignore: std::marker::PhantomData<(Input, Outputs)>,
+    _ignore: std::marker::PhantomData<fn(Input, Outputs)>,
 }
 
 pub(crate) fn make_result_branching<T, E>(

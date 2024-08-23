@@ -47,7 +47,7 @@ pub struct Node<Request, Response, Streams: StreamPack = ()> {
 pub struct InputSlot<Request> {
     scope: Entity,
     source: Entity,
-    _ignore: std::marker::PhantomData<Request>,
+    _ignore: std::marker::PhantomData<fn(Request)>,
 }
 
 impl<T> Clone for InputSlot<T> {
@@ -95,7 +95,7 @@ impl<Request> InputSlot<Request> {
 pub struct Output<Response> {
     scope: Entity,
     target: Entity,
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response> std::fmt::Debug for Output<Response> {
@@ -164,7 +164,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
 pub struct ForkCloneOutput<Response> {
     scope: Entity,
     source: Entity,
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {

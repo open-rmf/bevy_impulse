@@ -38,7 +38,7 @@ where
 {
     buffers: B,
     target: Entity,
-    _ignore: std::marker::PhantomData<(T, B)>,
+    _ignore: std::marker::PhantomData<fn(T, B)>,
 }
 
 impl<T, B> OperateBufferAccess<T, B>

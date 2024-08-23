@@ -273,7 +273,7 @@ pub struct StreamRequest<'a> {
 /// a service.
 #[derive(Component)]
 pub struct StreamAvailable<T: Stream> {
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> Default for StreamAvailable<T> {
@@ -288,7 +288,7 @@ impl<T: Stream> Default for StreamAvailable<T> {
 #[derive(Component)]
 pub struct StreamTargetStorage<T: Stream> {
     index: usize,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> Clone for StreamTargetStorage<T> {
@@ -955,7 +955,7 @@ pub trait StreamFilter {
 ///
 /// See [`StreamFilter`] for a usage example.
 pub struct Require<T> {
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: StreamPack> StreamFilter for Require<T> {

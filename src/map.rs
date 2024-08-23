@@ -58,7 +58,7 @@ where
 /// implement [`FnMut`].
 pub struct BlockingMapDef<Def, Request, Response, Streams> {
     def: Def,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Def: Clone, Request, Response, Streams> Clone
@@ -200,7 +200,7 @@ where
 /// implement [`FnMut`].
 pub struct AsyncMapDef<Def, Request, Task, Streams> {
     def: Def,
-    _ignore: std::marker::PhantomData<(Request, Task, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Task, Streams)>,
 }
 
 impl<Def: Clone, Request, Task, Streams> Clone for AsyncMapDef<Def, Request, Task, Streams> {

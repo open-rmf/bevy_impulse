@@ -32,7 +32,7 @@ pub(crate) struct GateActionStorage(pub(crate) Gate);
 pub(crate) struct OperateDynamicGate<T, B> {
     buffers: B,
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<B, T> OperateDynamicGate<T, B> {
@@ -128,7 +128,7 @@ pub(crate) struct OperateStaticGate<T, B> {
     buffers: B,
     target: Entity,
     action: Gate,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T, B> OperateStaticGate<T, B> {

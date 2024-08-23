@@ -69,7 +69,7 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
     exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
     finish_scope_cancel: Entity,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 pub(crate) struct ScopeEndpoints {
@@ -852,7 +852,7 @@ struct FinishCleanupForScope(Entity);
 
 pub(crate) struct Terminate<T> {
     scope: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Terminate<T> {
@@ -1215,7 +1215,7 @@ where
 
 pub(crate) struct FinishCleanup<T> {
     from_scope: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> FinishCleanup<T> {
@@ -1621,7 +1621,7 @@ pub(crate) struct ExitTarget {
 
 pub(crate) struct RedirectScopeStream<T: Stream> {
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> RedirectScopeStream<T> {
@@ -1699,7 +1699,7 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
 }
 
 pub(crate) struct RedirectWorkflowStream<T: Stream> {
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> RedirectWorkflowStream<T> {

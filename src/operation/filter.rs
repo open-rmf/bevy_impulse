@@ -83,7 +83,7 @@ pub type FilterResult<T> = Result<T, Option<anyhow::Error>>;
 pub struct CancelFilter<InputT, OutputT, F> {
     filter: F,
     target: Entity,
-    _ignore: std::marker::PhantomData<(InputT, OutputT)>,
+    _ignore: std::marker::PhantomData<fn(InputT, OutputT)>,
 }
 
 pub struct CreateCancelFilter;
@@ -273,7 +273,7 @@ impl CreateDisposalFilter {
 pub struct DisposalFilter<InputT, OutputT, F> {
     filter: F,
     target: Entity,
-    _ignore: std::marker::PhantomData<(InputT, OutputT)>,
+    _ignore: std::marker::PhantomData<fn(InputT, OutputT)>,
 }
 
 impl<InputT, OutputT, F> Operation for DisposalFilter<InputT, OutputT, F>

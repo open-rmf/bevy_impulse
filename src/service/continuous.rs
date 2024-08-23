@@ -41,7 +41,7 @@ pub use bevy_ecs::schedule::SystemConfigs;
 
 pub struct ContinuousServiceKey<Request, Response, Streams> {
     provider: Entity,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Request, Response, Streams> ContinuousServiceKey<Request, Response, Streams> {
@@ -596,7 +596,7 @@ impl<Request> std::fmt::Debug for ContinuousOrder<Request> {
 
 struct DeliverResponses<Request, Response, Streams> {
     responses: SmallVec<[DeliverResponse<Response>; 16]>,
-    _ignore: std::marker::PhantomData<(Request, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Streams)>,
 }
 
 struct DeliverResponse<Response> {
@@ -718,7 +718,7 @@ fn try_retire_request<Request: 'static + Send + Sync>(
 }
 
 struct ContinuousServiceImpl<Request, Response, Streams> {
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Request, Response, Streams> ServiceTrait for ContinuousServiceImpl<Request, Response, Streams>
@@ -977,7 +977,7 @@ where
     }
 }
 
-pub struct IntoContinuousServiceBuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct IntoContinuousServiceBuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
 impl<M, Srv> IntoServiceBuilder<IntoContinuousServiceBuilderMarker<M>> for Srv
 where

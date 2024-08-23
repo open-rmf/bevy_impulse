@@ -25,7 +25,7 @@ use bevy_ecs::prelude::Entity;
 
 pub(crate) struct Spread<I> {
     target: Entity,
-    _ignore: std::marker::PhantomData<I>,
+    _ignore: std::marker::PhantomData<fn(I)>,
 }
 
 impl<I> Spread<I> {

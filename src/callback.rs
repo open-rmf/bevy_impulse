@@ -202,7 +202,7 @@ pub trait CallbackTrait<Request, Response, Streams> {
     fn call(&mut self, request: CallbackRequest) -> Result<(), OperationError>;
 }
 
-pub struct BlockingCallbackMarker<M>(std::marker::PhantomData<M>);
+pub struct BlockingCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 
 struct BlockingCallbackSystem<Request, Response, Streams: StreamPack> {
     system: BoxedSystem<BlockingCallback<Request, Streams>, Response>,
@@ -254,7 +254,7 @@ where
     }
 }
 
-pub struct AsyncCallbackMarker<M>(std::marker::PhantomData<M>);
+pub struct AsyncCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 
 struct AsyncCallbackSystem<Request, Task, Streams: StreamPack> {
     system: BoxedSystem<AsyncCallback<Request, Streams>, Task>,
@@ -313,8 +313,8 @@ where
     }
 }
 
-pub struct BlockingMapCallbackMarker<M>(std::marker::PhantomData<M>);
-pub struct AsyncMapCallbackMarker<M>(std::marker::PhantomData<M>);
+pub struct BlockingMapCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
+pub struct AsyncMapCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 
 pub trait AsCallback<M> {
     type Request;

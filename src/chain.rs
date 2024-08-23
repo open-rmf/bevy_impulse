@@ -51,7 +51,7 @@ pub use unzip::*;
 pub struct Chain<'w, 's, 'a, 'b, T> {
     target: Entity,
     builder: &'b mut Builder<'w, 's, 'a>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {

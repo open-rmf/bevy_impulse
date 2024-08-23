@@ -37,7 +37,7 @@ pub(crate) struct Trim<T> {
     /// the nodes report that they're clean.
     target: Entity,
 
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Trim<T> {

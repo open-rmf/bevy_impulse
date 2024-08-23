@@ -79,7 +79,7 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPa
     disposal: Option<Disposal>,
     being_cleaned: Option<Cleanup>,
     finished_normally: bool,
-    _ignore: std::marker::PhantomData<Streams>,
+    _ignore: std::marker::PhantomData<fn(Streams)>,
 }
 
 impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response, Streams> {

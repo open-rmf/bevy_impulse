@@ -63,7 +63,7 @@ impl PendingServiceRequest {
 
 #[derive(Component)]
 pub(crate) struct ServiceMarker<Request, Response> {
-    _ignore: std::marker::PhantomData<(Request, Response)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response)>,
 }
 
 impl<Request, Response> Default for ServiceMarker<Request, Response> {

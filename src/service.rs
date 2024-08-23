@@ -72,7 +72,7 @@ pub(crate) use workflow::*;
 pub struct Service<Request, Response, Streams = ()> {
     provider: Entity,
     instructions: Option<DeliveryInstructions>,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Req, Res, S> Clone for Service<Req, Res, S> {

@@ -36,7 +36,7 @@ use std::collections::HashMap;
 
 pub(crate) struct Injection<Request, Response, Streams> {
     target: Entity,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Request, Response, Streams> Operation for Injection<Request, Response, Streams>
@@ -304,7 +304,7 @@ struct Injected {
 struct InjectionSource(Entity);
 
 struct InjectionFinish<Response> {
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response> InjectionFinish<Response> {

@@ -28,7 +28,7 @@ use crate::{
     ServiceBundle, ServiceRequest, ServiceTrait, StreamPack, UnusedStreams,
 };
 
-pub struct Blocking<M>(std::marker::PhantomData<M>);
+pub struct Blocking<M>(std::marker::PhantomData<fn(M)>);
 
 #[derive(Component)]
 struct BlockingServiceStorage<Request, Response, Streams: StreamPack>(

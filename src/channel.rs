@@ -132,7 +132,7 @@ impl Default for ChannelQueue {
 pub struct StreamChannel<T> {
     target: Option<Entity>,
     inner: Arc<InnerChannel>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> StreamChannel<T> {

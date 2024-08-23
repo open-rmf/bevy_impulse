@@ -201,7 +201,7 @@ where
     }
 }
 
-pub struct BuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct BuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
 impl<M, Srv: IntoService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<BuilderMarker<M>>
     for ServiceBuilder<Srv, Deliver, With, Also, Configure>
@@ -219,7 +219,7 @@ impl<M, Srv: IntoService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<
     }
 }
 
-pub struct ContinuousBuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct ContinuousBuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
 impl<M, Srv: IntoContinuousService<M>, Deliver, With, Also, Configure>
     IntoServiceBuilder<ContinuousBuilderMarker<M>>
@@ -238,7 +238,7 @@ impl<M, Srv: IntoContinuousService<M>, Deliver, With, Also, Configure>
     }
 }
 
-pub struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct IntoBuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
 impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Service = Srv;

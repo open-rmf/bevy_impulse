@@ -27,7 +27,7 @@ use crate::{
 pub(crate) struct Push<T> {
     target: Entity,
     is_stream: bool,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Push<T> {

@@ -42,7 +42,7 @@ where
     f: BlockingMapOnceStorage<F>,
     target: SingleTargetStorage,
     #[bundle(ignore)]
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<F, Request, Response, Streams> ImpulseBlockingMap<F, Request, Response, Streams>

@@ -24,7 +24,7 @@ use crate::{
 };
 
 pub(crate) struct SendEvent<T> {
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> SendEvent<T> {

@@ -36,7 +36,7 @@ pub(crate) struct OperateService<Request> {
     provider: Entity,
     instructions: Option<DeliveryInstructions>,
     target: Entity,
-    _ignore: std::marker::PhantomData<Request>,
+    _ignore: std::marker::PhantomData<fn(Request)>,
 }
 
 impl<Request: 'static + Send + Sync> OperateService<Request> {

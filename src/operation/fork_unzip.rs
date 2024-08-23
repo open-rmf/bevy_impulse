@@ -23,7 +23,7 @@ use crate::{
 
 pub(crate) struct ForkUnzip<T> {
     targets: ForkTargetStorage,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> ForkUnzip<T> {
