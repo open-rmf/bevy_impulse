@@ -15,16 +15,16 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component, Bundle};
+use bevy_ecs::prelude::{Bundle, Component, Entity};
 
 use std::future::Future;
 
 use crate::{
-    Impulsive, OperationSetup, OperationRequest, SingleTargetStorage, StreamPack,
-    InputBundle, OperationResult, OrBroken, Input, ManageInput, Sendish,
-    ChannelQueue, BlockingMap, AsyncMap, Channel, OperateTask, ActiveTasksStorage,
-    CallBlockingMapOnce, CallAsyncMapOnce, UnusedStreams, make_stream_buffer_from_world,
-    async_execution::{spawn_task, task_cancel_sender}
+    async_execution::{spawn_task, task_cancel_sender},
+    make_stream_buffer_from_world, ActiveTasksStorage, AsyncMap, BlockingMap, CallAsyncMapOnce,
+    CallBlockingMapOnce, Channel, ChannelQueue, Impulsive, Input, InputBundle, ManageInput,
+    OperateTask, OperationRequest, OperationResult, OperationSetup, OrBroken, Sendish,
+    SingleTargetStorage, StreamPack, UnusedStreams,
 };
 
 /// The key difference between this and [`crate::OperateBlockingMap`] is that
@@ -74,32 +74,47 @@ where
     F: CallBlockingMapOnce<Request, Response, Streams> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert((
-            self,
-            InputBundle::<Request>::new(),
-        ));
+        world
+            .entity_mut(source)
+            .insert((self, InputBundle::<Request>::new()));
         Ok(())
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
-        let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let f = source_mut.take::<BlockingMapOnceStorage<F>>().or_broken()?.f;
+        let Input {
+            session,
+            data: request,
+        } = source_mut.take_input::<Request>()?;
+        let f = source_mut
+            .take::<BlockingMapOnceStorage<F>>()
+            .or_broken()?
+            .f;
 
-        let response = f.call(BlockingMap { request, streams: streams.clone(), source, session });
+        let response = f.call(BlockingMap {
+            request,
+            streams: streams.clone(),
+            source,
+            session,
+        });
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_buffer(
-            streams, source, session, &mut unused_streams, world, roster
-        )?;
+        Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
         // Note: We do not need to emit a disposal for any unused streams since
         // this is only used for impulses, not workflows.
 
-        world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
+        world
+            .get_entity_mut(target)
+            .or_broken()?
+            .give_input(session, response, roster)?;
         Ok(())
     }
 }
@@ -160,26 +175,51 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
-        let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        let sender = world
+            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .sender
+            .clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: request } = source_mut.take_input::<Request>()?;
+        let Input {
+            session,
+            data: request,
+        } = source_mut.take_input::<Request>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let f = source_mut.take::<AsyncMapOnceStorage<F>>().or_broken()?.f;
 
         let channel = Channel::new(source, session, sender.clone());
         let streams = channel.for_streams::<Streams>(&world)?;
 
-        let task = spawn_task(f.call(AsyncMap {
-            request, streams, channel, source, session,
-        }), world);
+        let task = spawn_task(
+            f.call(AsyncMap {
+                request,
+                streams,
+                channel,
+                source,
+                session,
+            }),
+            world,
+        );
         let cancel_sender = task_cancel_sender(world);
 
         let task_source = world.spawn(()).id();
         OperateTask::<_, Streams>::new(
-            task_source, session, source, target, task, cancel_sender, None, sender,
-        ).add(world, roster);
+            task_source,
+            session,
+            source,
+            target,
+            task,
+            cancel_sender,
+            None,
+            sender,
+        )
+        .add(world, roster);
         Ok(())
     }
 }

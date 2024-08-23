@@ -16,18 +16,15 @@
 */
 
 use bevy_ecs::{
-    prelude::{World, Entity, Component, Resource},
+    prelude::{Component, Entity, Resource, World},
     system::Command,
-
 };
 use bevy_hierarchy::DespawnRecursiveExt;
 
 use backtrace::Backtrace;
 
 use tokio::sync::mpsc::{
-    unbounded_channel,
-    UnboundedSender as TokioSender,
-    UnboundedReceiver as TokioReceiver,
+    unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
 
 use smallvec::SmallVec;
@@ -37,10 +34,9 @@ use anyhow::anyhow;
 use std::sync::Arc;
 
 use crate::{
-    OperationSetup, OperationRequest, OperationResult, OperationCancel,
-    OperationExecuteStorage, OperationError, Cancellable, ManageCancellation,
-    UnhandledErrors, CancelFailure, Cancel, Broken, SingleTargetStorage,
-    UnusedTarget, MiscellaneousFailure, SetupFailure,
+    Broken, Cancel, CancelFailure, Cancellable, ManageCancellation, MiscellaneousFailure,
+    OperationCancel, OperationError, OperationExecuteStorage, OperationRequest, OperationResult,
+    OperationSetup, SetupFailure, SingleTargetStorage, UnhandledErrors, UnusedTarget,
 };
 
 pub(crate) trait Impulsive {
@@ -64,12 +60,20 @@ impl<I: Impulsive> AddImpulse<I> {
 
 impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
     fn apply(self, world: &mut World) {
-        if let Err(error) = self.impulse.setup(OperationSetup { source: self.source, world }) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+        if let Err(error) = self.impulse.setup(OperationSetup {
+            source: self.source,
+            world,
+        }) {
+            world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .setup
-                .push(SetupFailure { broken_node: self.source, error });
+                .push(SetupFailure {
+                    broken_node: self.source,
+                    error,
+                });
         }
-        world.entity_mut(self.source)
+        world
+            .entity_mut(self.source)
             .insert((
                 OperationExecuteStorage(perform_impulse::<I>),
                 Cancellable::new(cancel_impulse),
@@ -80,9 +84,17 @@ impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
 }
 
 fn perform_impulse<I: Impulsive>(
-    OperationRequest { source, world, roster }: OperationRequest,
+    OperationRequest {
+        source,
+        world,
+        roster,
+    }: OperationRequest,
 ) {
-    match I::execute(OperationRequest { source, world, roster }) {
+    match I::execute(OperationRequest {
+        source,
+        world,
+        roster,
+    }) {
         Ok(()) => {
             // Do nothing
         }
@@ -94,24 +106,32 @@ fn perform_impulse<I: Impulsive>(
                 source_mut.emit_broken(backtrace, roster);
             } else {
                 world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .cancellations
-                .push(CancelFailure {
-                    error: OperationError::Broken(Some(Backtrace::new())),
-                    cancel: Cancel {
-                        origin: source,
-                        target: source,
-                        session: None,
-                        cancellation: Broken { node: source, backtrace }.into(),
-                    }
-                });
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .cancellations
+                    .push(CancelFailure {
+                        error: OperationError::Broken(Some(Backtrace::new())),
+                        cancel: Cancel {
+                            origin: source,
+                            target: source,
+                            session: None,
+                            cancellation: Broken {
+                                node: source,
+                                backtrace,
+                            }
+                            .into(),
+                        },
+                    });
             }
         }
     }
 }
 
 pub(crate) fn cancel_impulse(
-    OperationCancel { cancel, world, roster }: OperationCancel,
+    OperationCancel {
+        cancel,
+        world,
+        roster,
+    }: OperationCancel,
 ) -> OperationResult {
     // We cancel an impulse by travelling to its terminal and
     let mut terminal = cancel.target;
@@ -125,18 +145,22 @@ pub(crate) fn cancel_impulse(
     if let Some(on_cancel) = world.get::<OnTerminalCancelled>(terminal) {
         let on_cancel = on_cancel.0;
         let cancel = cancel.for_target(terminal);
-        match on_cancel(OperationCancel { cancel: cancel.clone(), world, roster }) {
+        match on_cancel(OperationCancel {
+            cancel: cancel.clone(),
+            world,
+            roster,
+        }) {
             Ok(()) | Err(OperationError::NotReady) => {
                 // Do nothing
             }
             Err(OperationError::Broken(backtrace)) => {
                 world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .cancellations
-                .push(CancelFailure {
-                    error: OperationError::Broken(backtrace),
-                    cancel,
-                });
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .cancellations
+                    .push(CancelFailure {
+                        error: OperationError::Broken(backtrace),
+                        cancel,
+                    });
             }
         }
     }
@@ -198,11 +222,7 @@ impl Drop for ImpulseLifecycle {
     }
 }
 
-pub(crate) fn add_lifecycle_dependency<'a>(
-    source: Entity,
-    target: Entity,
-    world: &'a mut World,
-) {
+pub(crate) fn add_lifecycle_dependency<'a>(source: Entity, target: Entity, world: &'a mut World) {
     let sender = world
         .get_resource_or_insert_with(|| ImpulseLifecycleChannel::default())
         .sender
@@ -215,10 +235,13 @@ pub(crate) fn add_lifecycle_dependency<'a>(
     } else {
         // The target is already despawned
         if let Err(err) = sender.send(source) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .miscellaneous
                 .push(MiscellaneousFailure {
-                    error: Arc::new(anyhow!("Failed to notify that a target is already despawned: {err}")),
+                    error: Arc::new(anyhow!(
+                        "Failed to notify that a target is already despawned: {err}"
+                    )),
                     backtrace: Some(Backtrace::new()),
                 })
         }

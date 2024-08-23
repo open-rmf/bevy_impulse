@@ -18,8 +18,8 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::{
-    StreamPack, Chain, Builder, UnusedTarget, AddBranchToForkClone, ForkClone,
-    AddOperation, ForkTargetStorage, SingleInputStorage,
+    AddBranchToForkClone, AddOperation, Builder, Chain, ForkClone, ForkTargetStorage,
+    SingleInputStorage, StreamPack, UnusedTarget,
 };
 
 /// A collection of all the inputs and outputs for a node within a workflow.
@@ -79,7 +79,11 @@ impl<Request> InputSlot<Request> {
         self.scope
     }
     pub(crate) fn new(scope: Entity, source: Entity) -> Self {
-        Self { scope, source, _ignore: Default::default() }
+        Self {
+            scope,
+            source,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -146,7 +150,11 @@ impl<Response: 'static + Send + Sync> Output<Response> {
     }
 
     pub(crate) fn new(scope: Entity, target: Entity) -> Self {
-        Self { scope, target, _ignore: Default::default() }
+        Self {
+            scope,
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -162,10 +170,10 @@ pub struct ForkCloneOutput<Response> {
 impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
     pub fn clone_output(&self, builder: &mut Builder) -> Output<Response> {
         assert_eq!(self.scope, builder.scope);
-        let target = builder.commands.spawn((
-            SingleInputStorage::new(self.id()),
-            UnusedTarget,
-        )).id();
+        let target = builder
+            .commands
+            .spawn((SingleInputStorage::new(self.id()), UnusedTarget))
+            .id();
         builder.commands.add(AddBranchToForkClone {
             source: self.source,
             target,
@@ -191,6 +199,10 @@ impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
     }
 
     pub(crate) fn new(scope: Entity, source: Entity) -> Self {
-        Self { scope, source, _ignore: Default::default() }
+        Self {
+            scope,
+            source,
+            _ignore: Default::default(),
+        }
     }
 }

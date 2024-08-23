@@ -17,17 +17,16 @@
 
 use bevy_ecs::prelude::World;
 
-pub(crate) use bevy_tasks::Task as TaskHandle;
 use async_task::Runnable;
+pub(crate) use bevy_tasks::Task as TaskHandle;
 use tokio::sync::mpsc::{
-    unbounded_channel,
-    UnboundedSender as TokioSender,
-    UnboundedReceiver as TokioReceiver,
+    unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
 
 use std::{future::Future, pin::Pin};
 
-type CancellingTask = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static>;
+type CancellingTask =
+    Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static>;
 
 pub(crate) struct SingleThreadedExecution {
     cancel_sender: TokioSender<CancellingTask>,
@@ -40,7 +39,12 @@ impl SingleThreadedExecution {
     fn new() -> Self {
         let (cancel_sender, cancel_receiver) = unbounded_channel();
         let (runnable_sender, runnable_receiver) = unbounded_channel();
-        Self { cancel_sender, cancel_receiver, runnable_sender, runnable_receiver }
+        Self {
+            cancel_sender,
+            cancel_receiver,
+            runnable_sender,
+            runnable_receiver,
+        }
     }
 
     pub(crate) fn get(world: &mut World) -> &Self {
@@ -54,7 +58,9 @@ impl SingleThreadedExecution {
         if !world.contains_non_send::<SingleThreadedExecution>() {
             world.insert_non_send_resource(SingleThreadedExecution::new());
         }
-        world.non_send_resource_mut::<SingleThreadedExecution>().poll(limit);
+        world
+            .non_send_resource_mut::<SingleThreadedExecution>()
+            .poll(limit);
     }
 
     pub(crate) fn poll(&mut self, limit: Option<usize>) {
@@ -62,8 +68,9 @@ impl SingleThreadedExecution {
         while let Ok(f) = self.cancel_receiver.try_recv() {
             let sender = self.runnable_sender.clone();
             let future = f();
-            let (runnable, task) = async_task::spawn_local(
-                future, move |runnable| { sender.send(runnable).ok(); });
+            let (runnable, task) = async_task::spawn_local(future, move |runnable| {
+                sender.send(runnable).ok();
+            });
             runnable.run();
             task.detach();
 
@@ -88,17 +95,14 @@ impl SingleThreadedExecution {
         }
     }
 
-    pub(crate) fn spawn<T>(
-        &self,
-        future: impl Future<Output = T> + 'static,
-    ) -> TaskHandle<T>
+    pub(crate) fn spawn<T>(&self, future: impl Future<Output = T> + 'static) -> TaskHandle<T>
     where
         T: Send + 'static,
     {
         let sender = self.runnable_sender.clone();
-        let (runnable, task) = async_task::spawn_local(
-            future, move |runnable| { sender.send(runnable).ok(); },
-        );
+        let (runnable, task) = async_task::spawn_local(future, move |runnable| {
+            sender.send(runnable).ok();
+        });
         let _ = self.runnable_sender.send(runnable);
         TaskHandle::new(task)
     }
@@ -115,12 +119,9 @@ pub(crate) struct SingleThreadedExecutionSender {
 }
 
 impl SingleThreadedExecutionSender {
-    pub(crate) fn send<F>(
-        &self,
-        f: impl FnOnce() -> F + Send + 'static,
-    )
+    pub(crate) fn send<F>(&self, f: impl FnOnce() -> F + Send + 'static)
     where
-        F: Future<Output = ()> + Send + 'static
+        F: Future<Output = ()> + Send + 'static,
     {
         let u: CancellingTask = Box::new(move || Box::pin(f()));
         self.sender.send(u).ok();

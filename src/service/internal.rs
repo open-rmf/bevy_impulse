@@ -15,12 +15,10 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component, Bundle, World, Resource};
+use bevy_ecs::prelude::{Bundle, Component, Entity, Resource, World};
 
 use tokio::sync::mpsc::{
-    unbounded_channel,
-    UnboundedSender as TokioSender,
-    UnboundedReceiver as TokioReceiver,
+    unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
 
 use anyhow::anyhow;
@@ -28,9 +26,8 @@ use anyhow::anyhow;
 use std::{collections::VecDeque, sync::Arc};
 
 use crate::{
-    OperationRoster, OperationRequest, PendingOperationRequest, ServiceTrait,
-    OperationError, UnhandledErrors, MiscellaneousFailure, DeliveryInstructions,
-    dispose_for_despawned_service,
+    dispose_for_despawned_service, DeliveryInstructions, MiscellaneousFailure, OperationError,
+    OperationRequest, OperationRoster, PendingOperationRequest, ServiceTrait, UnhandledErrors,
 };
 
 pub struct ServiceRequest<'a> {
@@ -53,7 +50,7 @@ impl PendingServiceRequest {
     fn activate<'a>(
         self,
         world: &'a mut World,
-        roster: &'a mut OperationRoster
+        roster: &'a mut OperationRoster,
     ) -> ServiceRequest<'a> {
         ServiceRequest {
             provider: self.provider,
@@ -71,7 +68,9 @@ pub(crate) struct ServiceMarker<Request, Response> {
 
 impl<Request, Response> Default for ServiceMarker<Request, Response> {
     fn default() -> Self {
-        Self { _ignore: Default::default() }
+        Self {
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -83,7 +82,10 @@ pub(crate) struct ServiceHook {
 
 impl ServiceHook {
     pub(crate) fn new(callback: fn(ServiceRequest)) -> Self {
-        Self { trigger: callback, lifecycle: None }
+        Self {
+            trigger: callback,
+            lifecycle: None,
+        }
     }
 }
 
@@ -144,17 +146,26 @@ impl<Srv: ServiceTrait + 'static + Send + Sync> ServiceBundle<Srv> {
 
 fn service_hook<Srv: ServiceTrait>(
     ServiceRequest {
-            provider,
-            target,
-            instructions,
-            operation: OperationRequest { source, world, roster }
-        }: ServiceRequest,
+        provider,
+        target,
+        instructions,
+        operation:
+            OperationRequest {
+                source,
+                world,
+                roster,
+            },
+    }: ServiceRequest,
 ) {
     match Srv::serve(ServiceRequest {
         provider,
         target,
         instructions,
-        operation: OperationRequest { source, world, roster }
+        operation: OperationRequest {
+            source,
+            world,
+            roster,
+        },
     }) {
         Ok(()) | Err(OperationError::NotReady) => {
             // Do nothing
@@ -180,7 +191,10 @@ struct ServiceQueue {
 
 impl ServiceQueue {
     fn new() -> Self {
-        Self { is_delivering: false, queue: VecDeque::new() }
+        Self {
+            is_delivering: false,
+            queue: VecDeque::new(),
+        }
     }
 }
 
@@ -189,11 +203,19 @@ pub(crate) fn dispatch_service(
         provider,
         target,
         instructions,
-        operation: OperationRequest { source, world, roster }
+        operation:
+            OperationRequest {
+                source,
+                world,
+                roster,
+            },
     }: ServiceRequest,
 ) {
     let pending = PendingServiceRequest {
-        provider, target, instructions, operation: PendingOperationRequest { source }
+        provider,
+        target,
+        instructions,
+        operation: PendingOperationRequest { source },
     };
     let mut service_queue = world.get_resource_or_insert_with(|| ServiceQueue::new());
     service_queue.queue.push_back(pending);

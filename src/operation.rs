@@ -16,20 +16,19 @@
 */
 
 use crate::{
-    DeliveryLabelId, Cancel, InspectInput, UnhandledErrors, Broken, SetupFailure,
-    StreamTargetMap,
-    try_emit_broken,
+    try_emit_broken, Broken, Cancel, DeliveryLabelId, InspectInput, SetupFailure, StreamTargetMap,
+    UnhandledErrors,
 };
 
 use bevy_ecs::{
-    prelude::{Entity, World, Component},
+    prelude::{Component, Entity, World},
     system::Command,
 };
 use bevy_hierarchy::prelude::BuildWorldChildren;
 
 use backtrace::Backtrace;
 
-use std::collections::{VecDeque, HashSet, HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap, HashSet, VecDeque};
 
 use smallvec::SmallVec;
 
@@ -152,7 +151,7 @@ impl FunnelInputStorage {
         &self.0
     }
 
-    pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
+    pub fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
         Self(SmallVec::from_iter(iter))
     }
 }
@@ -190,7 +189,7 @@ impl ForkTargetStorage {
         Self(SmallVec::new())
     }
 
-    pub fn from_iter<T: IntoIterator<Item=Entity>>(iter: T) -> Self {
+    pub fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
         Self(SmallVec::from_iter(iter))
     }
 }
@@ -245,7 +244,11 @@ impl OperationRoster {
     }
 
     pub fn disposed(&mut self, scope: Entity, origin: Entity, session: Entity) {
-        self.disposed.push(DisposalNotice { source: scope, origin, session });
+        self.disposed.push(DisposalNotice {
+            source: scope,
+            origin,
+            session,
+        });
     }
 
     pub fn cleanup_finished(&mut self, cleanup: Cleanup) {
@@ -254,12 +257,12 @@ impl OperationRoster {
 
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
-        && self.awake.is_empty()
-        && self.deferred_queue.is_empty()
-        && self.cancel.is_empty()
-        && self.unblock.is_empty()
-        && self.disposed.is_empty()
-        && self.cleanup_finished.is_empty()
+            && self.awake.is_empty()
+            && self.deferred_queue.is_empty()
+            && self.cancel.is_empty()
+            && self.unblock.is_empty()
+            && self.disposed.is_empty()
+            && self.cleanup_finished.is_empty()
     }
 
     pub fn append(&mut self, other: &mut Self) {
@@ -356,7 +359,6 @@ pub struct OperationReachability<'a> {
 }
 
 impl<'a> OperationReachability<'a> {
-
     pub fn new(
         session: Entity,
         source: Entity,
@@ -364,7 +366,13 @@ impl<'a> OperationReachability<'a> {
         world: &'a World,
         visited: &'a mut HashMap<Entity, bool>,
     ) -> OperationReachability<'a> {
-        Self { session, source, disposed, world, visited }
+        Self {
+            session,
+            source,
+            disposed,
+            world,
+            visited,
+        }
     }
 
     pub fn check_upstream(&mut self, source: Entity) -> ReachabilityResult {
@@ -381,15 +389,20 @@ impl<'a> OperationReachability<'a> {
             }
         }
 
-        let reachabiility = self.world.get_entity(source).or_broken()?
-            .get::<OperationReachabilityStorage>().or_broken()?.0;
+        let reachabiility = self
+            .world
+            .get_entity(source)
+            .or_broken()?
+            .get::<OperationReachabilityStorage>()
+            .or_broken()?
+            .0;
 
         let is_reachable = reachabiility(OperationReachability {
             source,
             session: self.session,
             disposed: self.disposed,
             world: self.world,
-            visited: self.visited
+            visited: self.visited,
         })?;
 
         if is_reachable {
@@ -400,7 +413,9 @@ impl<'a> OperationReachability<'a> {
     }
 
     pub fn has_input<T: 'static + Send + Sync>(&self) -> ReachabilityResult {
-        self.world.get_entity(self.source).or_broken()?
+        self.world
+            .get_entity(self.source)
+            .or_broken()?
             .has_input::<T>(self.session)
     }
 
@@ -424,7 +439,13 @@ pub fn check_reachability(
     world: &World,
 ) -> ReachabilityResult {
     let mut visited = HashMap::new();
-    let mut r = OperationReachability { source, session, disposed, world, visited: &mut visited };
+    let mut r = OperationReachability {
+        source,
+        session,
+        disposed,
+        world,
+        visited: &mut visited,
+    };
     r.check_upstream(source)
 }
 
@@ -442,7 +463,7 @@ impl PendingOperationRequest {
         OperationRequest {
             source: self.source,
             world,
-            roster
+            roster,
         }
     }
 }
@@ -535,35 +556,51 @@ pub(crate) struct AddOperation<Op: Operation> {
 
 impl<Op: Operation> AddOperation<Op> {
     pub(crate) fn new(scope: Option<Entity>, source: Entity, operation: Op) -> Self {
-        Self { scope, source, operation }
+        Self {
+            scope,
+            source,
+            operation,
+        }
     }
 }
 
 impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
     fn apply(self, world: &mut World) {
-        if let Err(error) = self.operation.setup(OperationSetup { source: self.source, world }) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+        if let Err(error) = self.operation.setup(OperationSetup {
+            source: self.source,
+            world,
+        }) {
+            world
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .setup
-                .push(SetupFailure { broken_node: self.source, error });
+                .push(SetupFailure {
+                    broken_node: self.source,
+                    error,
+                });
         }
 
         let mut source_mut = world.entity_mut(self.source);
-        source_mut
-            .insert((
-                OperationExecuteStorage(perform_operation::<Op>),
-                OperationCleanupStorage(Op::cleanup),
-                OperationReachabilityStorage(Op::is_reachable),
-            ));
+        source_mut.insert((
+            OperationExecuteStorage(perform_operation::<Op>),
+            OperationCleanupStorage(Op::cleanup),
+            OperationReachabilityStorage(Op::is_reachable),
+        ));
         if let Some(scope) = self.scope {
-            source_mut.insert(ScopeStorage::new(scope)).set_parent(scope);
+            source_mut
+                .insert(ScopeStorage::new(scope))
+                .set_parent(scope);
             match world.get_mut::<ScopeContents>(scope).or_broken() {
                 Ok(mut contents) => {
                     contents.add_node(self.source);
                 }
                 Err(error) => {
-                    world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                    world
+                        .get_resource_or_insert_with(|| UnhandledErrors::default())
                         .setup
-                        .push(SetupFailure { broken_node: self.source, error });
+                        .push(SetupFailure {
+                            broken_node: self.source,
+                            error,
+                        });
                 }
             }
         }
@@ -574,9 +611,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
 pub(crate) struct OperationExecuteStorage(pub(crate) fn(OperationRequest));
 
 #[derive(Component)]
-pub(crate) struct OperationReachabilityStorage(
-    fn(OperationReachability) -> ReachabilityResult
-);
+pub(crate) struct OperationReachabilityStorage(fn(OperationReachability) -> ReachabilityResult);
 
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
@@ -588,11 +623,13 @@ pub fn execute_operation(request: OperationRequest) {
             if request.world.get_entity(request.source).is_some() {
                 // The node does not have an operation and is not an unused target,
                 // so this is broken somehow.
-                request.world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                request
+                    .world
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
                     .broken
                     .push(Broken {
                         node: request.source,
-                        backtrace: Some(Backtrace::new())
+                        backtrace: Some(Backtrace::new()),
                     });
             }
         }
@@ -612,9 +649,17 @@ pub fn awaken_task(request: OperationRequest) {
 }
 
 fn perform_operation<Op: Operation>(
-    OperationRequest { source, world, roster }: OperationRequest
+    OperationRequest {
+        source,
+        world,
+        roster,
+    }: OperationRequest,
 ) {
-    match Op::execute(OperationRequest { source, world, roster }) {
+    match Op::execute(OperationRequest {
+        source,
+        world,
+        roster,
+    }) {
         Ok(()) => {
             // Do nothing
         }
@@ -662,10 +707,7 @@ impl<'a> Iterator for DownstreamFinishIter<'a> {
     }
 }
 
-pub fn immediately_downstream_of<'a>(
-    source: Entity,
-    world: &'a World,
-) -> DownstreamIter<'a> {
+pub fn immediately_downstream_of<'a>(source: Entity, world: &'a World) -> DownstreamIter<'a> {
     let output = if let Some(target) = world.get::<SingleTargetStorage>(source) {
         DownstreamFinishIter::Single(Some(target.get()))
     } else if let Some(fork) = world.get::<ForkTargetStorage>(source) {
@@ -684,11 +726,7 @@ pub fn immediately_downstream_of<'a>(
 /// for cycles where both operations can be seen as downstream of each other.
 ///
 /// If `source` and `target` are the same then this immediately returns false.
-pub fn is_downstream_of(
-    source: Entity,
-    target: Entity,
-    world: &World,
-) -> bool {
+pub fn is_downstream_of(source: Entity, target: Entity, world: &World) -> bool {
     if source == target {
         return false;
     }

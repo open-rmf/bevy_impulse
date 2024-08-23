@@ -44,14 +44,14 @@ impl TrimBranch {
     /// In the event of any cycles, any nodes between the scope entry point and
     /// the initial trim point will not be included.
     pub fn downstream(from_point: impl Into<TrimPoint>) -> Self {
-        Self { from_point: from_point.into(), policy: TrimPolicy::Downstream }
+        Self {
+            from_point: from_point.into(),
+            policy: TrimPolicy::Downstream,
+        }
     }
 
     /// Trim the nodes that fill the span between two points.
-    pub fn between(
-        from_point: impl Into<TrimPoint>,
-        to_point: impl Into<TrimPoint>,
-    ) -> Self {
+    pub fn between(from_point: impl Into<TrimPoint>, to_point: impl Into<TrimPoint>) -> Self {
         Self::span(from_point, [to_point])
     }
 
@@ -62,19 +62,14 @@ impl TrimBranch {
     /// point without also leading to one of the endpoints will not be included.
     ///
     /// If the set of endpoints are emtpy, this behaves the same as [`Self::single_point`].
-    pub fn span<Endpoints>(
-        from_point: impl Into<TrimPoint>,
-        endpoints: Endpoints,
-    ) -> Self
+    pub fn span<Endpoints>(from_point: impl Into<TrimPoint>, endpoints: Endpoints) -> Self
     where
         Endpoints: IntoIterator,
         Endpoints::Item: Into<TrimPoint>,
     {
         Self {
             from_point: from_point.into(),
-            policy: TrimPolicy::Span(
-                endpoints.into_iter().map(|p| p.into()).collect()
-            ),
+            policy: TrimPolicy::Span(endpoints.into_iter().map(|p| p.into()).collect()),
         }
     }
 
@@ -113,7 +108,11 @@ impl TrimPoint {
     // during the connection command. This is doable but seems error prone, so
     // we are deprioritizing it for now.
     pub fn new<T>(input: &InputSlot<T>, inclusive: bool) -> Self {
-        Self { id: input.id(), scope: input.scope(), inclusive }
+        Self {
+            id: input.id(),
+            scope: input.scope(),
+            inclusive,
+        }
     }
 
     /// Define where a trim will begin or end, and include the point as part of
@@ -157,7 +156,7 @@ pub(crate) enum TrimPolicy {
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
     use std::sync::mpsc::channel;
 
     #[test]
@@ -168,11 +167,8 @@ mod tests {
             let fork_input = scope.input.fork_clone(builder);
 
             let noop = fork_input.clone_chain(builder).noop_node();
-            let doubler_a = builder.create_node((
-                |value| async move {
-                    2.0 * value
-                }
-            ).into_async_map());
+            let doubler_a =
+                builder.create_node((|value| async move { 2.0 * value }).into_async_map());
             builder.connect(noop.output, doubler_a.input);
             builder.connect(doubler_a.output, scope.terminate);
 
@@ -184,11 +180,8 @@ mod tests {
             builder.connect(doubler_b.output, doubler_a.input);
         });
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request(2.0, workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request(2.0, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|v| v == 8.0));
@@ -196,20 +189,21 @@ mod tests {
 
         let delay = context.spawn_delay::<i32>(Duration::from_secs(20));
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let injection: Node<_, _, StreamOf<()>> = scope.input.chain(builder).then_injection_node();
-            injection.output.chain(builder)
-                .connect(scope.terminate);
+            let injection: Node<_, _, StreamOf<()>> =
+                scope.input.chain(builder).then_injection_node();
+            injection.output.chain(builder).connect(scope.terminate);
 
-            injection.streams.chain(builder)
+            injection
+                .streams
+                .chain(builder)
                 .map(print_debug("About to trim"))
                 .then_trim(Some(TrimBranch::single_point(&injection.input)))
                 .map_block(|_| 2)
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands|
-            commands.request((1, delay), workflow).take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((1, delay), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
         assert!(promise.take().available().is_some_and(|v| v == 2));
@@ -223,7 +217,9 @@ mod tests {
 
             let buffer = builder.create_buffer::<()>(BufferSettings::keep_all());
             builder.on_cancel(buffer, |scope, builder| {
-                scope.input.chain(builder)
+                scope
+                    .input
+                    .chain(builder)
                     .map_block(move |_| {
                         // This is the real test: That the cleanup of the
                         // workflow worked as intended.
@@ -233,9 +229,11 @@ mod tests {
             });
         });
 
-        let mut promise = context.command(|commands|
-            commands.request((1, inner_workflow), workflow).take_response()
-        );
+        let mut promise = context.command(|commands| {
+            commands
+                .request((1, inner_workflow), workflow)
+                .take_response()
+        });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
         assert!(promise.take().available().is_some_and(|v| v == 2));

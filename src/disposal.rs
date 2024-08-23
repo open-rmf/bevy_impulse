@@ -16,8 +16,8 @@
 */
 
 use bevy_ecs::{
-    prelude::{Entity, Component, World},
-    world::{EntityWorldMut, EntityRef},
+    prelude::{Component, Entity, World},
+    world::{EntityRef, EntityWorldMut},
 };
 
 use backtrace::Backtrace;
@@ -29,8 +29,8 @@ use smallvec::SmallVec;
 use thiserror::Error as ThisError;
 
 use crate::{
-    OperationRoster, operation::ScopeStorage, Cancellation, UnhandledErrors,
-    DisposalFailure, ImpulseMarker, Cancel, OperationResult, OrBroken,
+    operation::ScopeStorage, Cancel, Cancellation, DisposalFailure, ImpulseMarker, OperationResult,
+    OperationRoster, OrBroken, UnhandledErrors,
 };
 
 #[derive(ThisError, Debug, Clone)]
@@ -41,7 +41,9 @@ pub struct Disposal {
 
 impl<T: Into<DisposalCause>> From<T> for Disposal {
     fn from(value: T) -> Self {
-        Disposal { cause: Arc::new(value.into())}
+        Disposal {
+            cause: Arc::new(value.into()),
+        }
     }
 }
 
@@ -59,14 +61,20 @@ impl Disposal {
         disposed_for_target: Entity,
         reason: Option<anyhow::Error>,
     ) -> Disposal {
-        DisposedBranch { branched_at_node, disposed_for_target, reason }.into()
+        DisposedBranch {
+            branched_at_node,
+            disposed_for_target,
+            reason,
+        }
+        .into()
     }
 
-    pub fn buffer_key(
-        accessor_node: Entity,
-        key_for_buffer: Entity,
-    ) -> Disposal {
-        DisposedBufferKey { accessor_node, key_for_buffer }.into()
+    pub fn buffer_key(accessor_node: Entity, key_for_buffer: Entity) -> Disposal {
+        DisposedBufferKey {
+            accessor_node,
+            key_for_buffer,
+        }
+        .into()
     }
 
     pub fn supplanted(
@@ -74,36 +82,45 @@ impl Disposal {
         supplanted_by_node: Entity,
         supplanting_session: Entity,
     ) -> Disposal {
-        Supplanted { supplanted_at_node, supplanted_by_node, supplanting_session }.into()
+        Supplanted {
+            supplanted_at_node,
+            supplanted_by_node,
+            supplanting_session,
+        }
+        .into()
     }
 
     pub fn filtered(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
-        Filtered { filtered_at_node, reason }.into()
+        Filtered {
+            filtered_at_node,
+            reason,
+        }
+        .into()
     }
 
     pub fn trimming(trimmer: Entity, nodes: SmallVec<[Entity; 16]>) -> Self {
         Trimming { trimmer, nodes }.into()
     }
 
-    pub fn closed_gate(
-        gate_node: Entity,
-        closed_buffers: SmallVec<[Entity; 8]>,
-    ) -> Self {
-        ClosedGate { gate_node, closed_buffers }.into()
+    pub fn closed_gate(gate_node: Entity, closed_buffers: SmallVec<[Entity; 8]>) -> Self {
+        ClosedGate {
+            gate_node,
+            closed_buffers,
+        }
+        .into()
     }
 
-    pub fn empty_spread(
-        spread_node: Entity,
-    ) -> Self {
+    pub fn empty_spread(spread_node: Entity) -> Self {
         EmptySpread { spread_node }.into()
     }
 
-    pub fn deficient_collection(
-        collect_node: Entity,
-        min: usize,
-        actual: usize,
-    ) -> Self {
-        DeficientCollection { collect_node, min, actual }.into()
+    pub fn deficient_collection(collect_node: Entity, min: usize, actual: usize) -> Self {
+        DeficientCollection {
+            collect_node,
+            min,
+            actual,
+        }
+        .into()
     }
 }
 
@@ -178,7 +195,11 @@ impl Supplanted {
         supplanting_node: Entity,
         supplanting_session: Entity,
     ) -> Self {
-        Self { supplanted_at_node: cancelled_at_node, supplanted_by_node: supplanting_node, supplanting_session }
+        Self {
+            supplanted_at_node: cancelled_at_node,
+            supplanted_by_node: supplanting_node,
+            supplanting_session,
+        }
     }
 }
 
@@ -199,7 +220,10 @@ pub struct Filtered {
 
 impl Filtered {
     pub fn new(filtered_at_node: Entity, reason: Option<anyhow::Error>) -> Self {
-        Self { filtered_at_node, reason }
+        Self {
+            filtered_at_node,
+            reason,
+        }
     }
 }
 
@@ -292,7 +316,10 @@ pub struct UnusedStreams {
 
 impl UnusedStreams {
     pub fn new(node: Entity) -> Self {
-        Self { node, streams: Default::default() }
+        Self {
+            node,
+            streams: Default::default(),
+        }
     }
 }
 
@@ -361,12 +388,7 @@ impl From<DeficientCollection> for DisposalCause {
 }
 
 pub trait ManageDisposal {
-    fn emit_disposal(
-        &mut self,
-        session: Entity,
-        disposal: Disposal,
-        roster: &mut OperationRoster,
-    );
+    fn emit_disposal(&mut self, session: Entity, disposal: Disposal, roster: &mut OperationRoster);
 
     fn clear_disposals(&mut self, session: Entity);
 
@@ -380,12 +402,7 @@ pub trait InspectDisposals {
 }
 
 impl<'w> ManageDisposal for EntityWorldMut<'w> {
-    fn emit_disposal(
-        &mut self,
-        session: Entity,
-        disposal: Disposal,
-        roster: &mut OperationRoster,
-    ) {
+    fn emit_disposal(&mut self, session: Entity, disposal: Disposal, roster: &mut OperationRoster) {
         let Some(scope) = self.get::<ScopeStorage>() else {
             if self.contains::<ImpulseMarker>() {
                 // If an impulse has been supplanted, we trigger a cancellation
@@ -395,7 +412,12 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
                 // unused streams, not because the actual result is undeliverable.
                 if let DisposalCause::Supplanted(supplanted) = disposal.cause.as_ref() {
                     let cancellation: Cancellation = (*supplanted).into();
-                    roster.cancel(Cancel { origin: self.id(), target: session, session: Some(session), cancellation });
+                    roster.cancel(Cancel {
+                        origin: self.id(),
+                        target: session,
+                        session: Some(session),
+                        cancellation,
+                    });
                 }
                 // TODO(@mxgrey): Consider whether there is a more sound way to
                 // decide whether a disposal should be converted into a
@@ -406,11 +428,13 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
                 let broken_node = self.id();
                 self.world_scope(|world| {
                     world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
-                    .disposals
-                    .push(DisposalFailure {
-                        disposal, broken_node, backtrace: Some(Backtrace::new())
-                    });
+                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .disposals
+                        .push(DisposalFailure {
+                            disposal,
+                            broken_node,
+                            backtrace: Some(Backtrace::new()),
+                        });
                 });
             }
             return;
@@ -491,13 +515,13 @@ pub fn emit_disposal(
         source_mut.emit_disposal(session, disposal, roster);
     } else {
         world
-        .get_resource_or_insert_with(|| UnhandledErrors::default())
-        .disposals
-        .push(DisposalFailure {
-            disposal,
-            broken_node: source,
-            backtrace: Some(Backtrace::new()),
-        });
+            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .disposals
+            .push(DisposalFailure {
+                disposal,
+                broken_node: source,
+                backtrace: Some(Backtrace::new()),
+            });
     }
 }
 

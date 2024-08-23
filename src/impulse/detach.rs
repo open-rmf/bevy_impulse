@@ -16,7 +16,7 @@
 */
 
 use bevy_ecs::{
-    prelude::{Entity, Component, World},
+    prelude::{Component, Entity, World},
     system::Command,
 };
 
@@ -26,7 +26,7 @@ use backtrace::Backtrace;
 
 use std::sync::Arc;
 
-use crate::{MiscellaneousFailure, UnusedTarget, UnhandledErrors};
+use crate::{MiscellaneousFailure, UnhandledErrors, UnusedTarget};
 
 #[derive(Component)]
 pub(crate) struct Detached(bool);
@@ -70,7 +70,8 @@ impl Command for Detach {
             error: Arc::new(anyhow!("Unable to detach target {:?}", self.target)),
             backtrace: Some(backtrace),
         };
-        world.get_resource_or_insert_with(|| UnhandledErrors::default())
+        world
+            .get_resource_or_insert_with(|| UnhandledErrors::default())
             .miscellaneous
             .push(failure);
     }

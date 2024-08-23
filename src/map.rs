@@ -16,11 +16,11 @@
 */
 
 use crate::{
-    Provider, BlockingMap, AsyncMap, AddOperation, OperateBlockingMap,
-    OperateAsyncMap, StreamPack, ProvideOnce, Sendish,
+    AddOperation, AsyncMap, BlockingMap, OperateAsyncMap, OperateBlockingMap, ProvideOnce,
+    Provider, Sendish, StreamPack,
 };
 
-use bevy_ecs::prelude::{Entity, Commands};
+use bevy_ecs::prelude::{Commands, Entity};
 
 use std::future::Future;
 
@@ -52,7 +52,6 @@ where
     }
 }
 
-
 /// A newtype to mark the definition of a BlockingMap.
 ///
 /// Maps cannot contain Bevy Systems; they can only contain objects that
@@ -62,7 +61,9 @@ pub struct BlockingMapDef<Def, Request, Response, Streams> {
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Def: Clone, Request, Response, Streams> Clone for BlockingMapDef<Def, Request, Response, Streams> {
+impl<Def: Clone, Request, Response, Streams> Clone
+    for BlockingMapDef<Def, Request, Response, Streams>
+{
     fn clone(&self) -> Self {
         Self {
             def: self.def.clone(),
@@ -71,7 +72,8 @@ impl<Def: Clone, Request, Response, Streams> Clone for BlockingMapDef<Def, Reque
     }
 }
 
-impl<Def, Request, Response, Streams> ProvideOnce for BlockingMapDef<Def, Request, Response, Streams>
+impl<Def, Request, Response, Streams> ProvideOnce
+    for BlockingMapDef<Def, Request, Response, Streams>
 where
     Def: CallBlockingMap<Request, Response, Streams> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -82,8 +84,18 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(scope, source, OperateBlockingMap::new(target, self.def)));
+    fn connect(
+        self,
+        scope: Option<Entity>,
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) {
+        commands.add(AddOperation::new(
+            scope,
+            source,
+            OperateBlockingMap::new(target, self.def),
+        ));
     }
 }
 
@@ -94,7 +106,6 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-
 }
 
 pub struct BlockingMapMarker;
@@ -108,7 +119,10 @@ where
 {
     type MapType = BlockingMapDef<MapDef<F>, Request, Response, Streams>;
     fn as_map(self) -> Self::MapType {
-        BlockingMapDef { def: MapDef(self), _ignore: Default::default() }
+        BlockingMapDef {
+            def: MapDef(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -127,7 +141,10 @@ where
 {
     type MapType = BlockingMapDef<BlockingMapAdapter<F>, Request, Response, Streams>;
     fn into_blocking_map(self) -> Self::MapType {
-        BlockingMapDef { def: BlockingMapAdapter(self), _ignore: Default::default() }
+        BlockingMapDef {
+            def: BlockingMapAdapter(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -137,7 +154,7 @@ impl<F, Request, Response> CallBlockingMap<Request, Response, ()> for BlockingMa
 where
     F: FnMut(Request) -> Response,
 {
-    fn call(&mut self, BlockingMap{ request, .. }: BlockingMap<Request, ()>) -> Response {
+    fn call(&mut self, BlockingMap { request, .. }: BlockingMap<Request, ()>) -> Response {
         (self.0)(request)
     }
 }
@@ -170,7 +187,10 @@ where
 {
     type MapType = AsyncMapDef<MapDef<F>, Request, Task, Streams>;
     fn as_map(self) -> Self::MapType {
-        AsyncMapDef { def: MapDef(self), _ignore: Default::default() }
+        AsyncMapDef {
+            def: MapDef(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -204,8 +224,18 @@ where
     type Response = Task::Output;
     type Streams = Streams;
 
-    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(scope, source, OperateAsyncMap::new(target, self.def)));
+    fn connect(
+        self,
+        scope: Option<Entity>,
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) {
+        commands.add(AddOperation::new(
+            scope,
+            source,
+            OperateAsyncMap::new(target, self.def),
+        ));
     }
 }
 
@@ -217,7 +247,6 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
-
 }
 
 pub trait IntoAsyncMap<M> {
@@ -234,7 +263,10 @@ where
 {
     type MapType = AsyncMapDef<AsyncMapAdapter<F>, Request, Task, ()>;
     fn into_async_map(self) -> Self::MapType {
-        AsyncMapDef { def: AsyncMapAdapter(self), _ignore: Default::default() }
+        AsyncMapDef {
+            def: AsyncMapAdapter(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -245,7 +277,7 @@ where
     F: FnMut(Request) -> Task + 'static + Send + Sync,
     Task: Future + 'static + Sendish,
 {
-    fn call(&mut self, AsyncMap{ request, .. }: AsyncMap<Request, ()>) -> Task {
+    fn call(&mut self, AsyncMap { request, .. }: AsyncMap<Request, ()>) -> Task {
         (self.0)(request)
     }
 }

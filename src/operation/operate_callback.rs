@@ -16,14 +16,13 @@
 */
 
 use crate::{
-    Operation, SingleTargetStorage, Callback, CallbackRequest, PendingCallbackRequest,
-    StreamPack, SingleInputStorage, OperationResult, OrBroken, InputBundle,
-    OperationSetup, OperationRequest, ActiveTasksStorage, OperationCleanup,
-    OperationReachability, ReachabilityResult, OperationError,
-    try_emit_broken,
+    try_emit_broken, ActiveTasksStorage, Callback, CallbackRequest, InputBundle, Operation,
+    OperationCleanup, OperationError, OperationReachability, OperationRequest, OperationResult,
+    OperationSetup, OrBroken, PendingCallbackRequest, ReachabilityResult, SingleInputStorage,
+    SingleTargetStorage, StreamPack,
 };
 
-use bevy_ecs::prelude::{Entity, Component};
+use bevy_ecs::prelude::{Component, Entity};
 
 pub(crate) struct OperateCallback<Request, Response, Streams> {
     callback: Callback<Request, Response, Streams>,
@@ -31,10 +30,7 @@ pub(crate) struct OperateCallback<Request, Response, Streams> {
 }
 
 impl<Request, Response, Streams> OperateCallback<Request, Response, Streams> {
-    pub(crate) fn new(
-        callback: Callback<Request, Response, Streams>,
-        target: Entity,
-    ) -> Self {
+    pub(crate) fn new(callback: Callback<Request, Response, Streams>, target: Entity) -> Self {
         Self { callback, target }
     }
 }
@@ -46,12 +42,16 @@ where
     Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
             InputBundle::<Request>::new(),
-            CallbackStorage { callback: self.callback },
+            CallbackStorage {
+                callback: self.callback,
+            },
             SingleTargetStorage::new(self.target),
             ActiveTasksStorage::default(),
         ));
@@ -59,12 +59,19 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let callback = source_mut.get_mut::<CallbackStorage<Request, Response, Streams>>()
-            .or_broken()?.callback.clone();
+        let callback = source_mut
+            .get_mut::<CallbackStorage<Request, Response, Streams>>()
+            .or_broken()?
+            .callback
+            .clone();
 
         let mut callback_impl = {
             let mut inner = callback.inner.lock().or_broken()?;
@@ -73,7 +80,9 @@ where
                 None => {
                     // The callback implementation is not available, so queue up
                     // this request.
-                    inner.queue.push_back(PendingCallbackRequest { source, target });
+                    inner
+                        .queue
+                        .push_back(PendingCallbackRequest { source, target });
                     return Ok(());
                 }
             }
@@ -81,14 +90,21 @@ where
 
         // The callback implementation is available, so run it immediately
         // for this operation.
-        let r = callback_impl.call(CallbackRequest { source, target, world, roster });
+        let r = callback_impl.call(CallbackRequest {
+            source,
+            target,
+            world,
+            roster,
+        });
 
         loop {
             // Empty out the queue in case that was filled up at all from doing the handling
             let mut inner = callback.inner.lock().or_broken()?;
             if let Some(pending) = inner.queue.pop_front() {
                 let source = pending.source;
-                if let Err(OperationError::Broken(backtrace)) = callback_impl.call(pending.activate(world, roster)) {
+                if let Err(OperationError::Broken(backtrace)) =
+                    callback_impl.call(pending.activate(world, roster))
+                {
                     try_emit_broken(source, backtrace, world, roster);
                 }
             } else {

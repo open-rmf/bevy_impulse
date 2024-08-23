@@ -54,7 +54,6 @@ where
 }
 
 pub(crate) fn task_cancel_sender(_world: &mut World) -> CancelSender {
-
     #[cfg(not(feature = "single_threaded_async"))]
     {
         AsyncComputeTaskPoolSender
@@ -73,10 +72,7 @@ pub(crate) struct AsyncComputeTaskPoolSender;
 impl AsyncComputeTaskPoolSender {
     /// This is only used to create a task to cancel an existing task, so we
     /// always detach
-    pub(crate) fn send<F>(
-        &self,
-        f: impl FnOnce() -> F,
-    )
+    pub(crate) fn send<F>(&self, f: impl FnOnce() -> F)
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,

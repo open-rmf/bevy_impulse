@@ -16,9 +16,9 @@
 */
 
 use crate::{
-    ForkTargetStorage, Operation, Unzippable, SingleInputStorage,
-    OperationResult, OperationRequest, OperationSetup, OrBroken,
-    OperationCleanup, OperationReachability, ReachabilityResult, InputBundle,
+    ForkTargetStorage, InputBundle, Operation, OperationCleanup, OperationReachability,
+    OperationRequest, OperationResult, OperationSetup, OrBroken, ReachabilityResult,
+    SingleInputStorage, Unzippable,
 };
 
 pub(crate) struct ForkUnzip<T> {
@@ -28,20 +28,24 @@ pub(crate) struct ForkUnzip<T> {
 
 impl<T> ForkUnzip<T> {
     pub(crate) fn new(targets: ForkTargetStorage) -> Self {
-        Self { targets, _ignore: Default::default() }
+        Self {
+            targets,
+            _ignore: Default::default(),
+        }
     }
 }
 
 impl<T: Unzippable + 'static + Send + Sync> Operation for ForkUnzip<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
-            world.get_entity_mut(*target).or_broken()?
+            world
+                .get_entity_mut(*target)
+                .or_broken()?
                 .insert(SingleInputStorage::new(source));
         }
-        world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
-            self.targets,
-        ));
+        world
+            .entity_mut(source)
+            .insert((InputBundle::<T>::new(), self.targets));
         Ok(())
     }
 

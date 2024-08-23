@@ -19,15 +19,14 @@ use bevy_ecs::prelude::{Component, Entity, World};
 
 use smallvec::SmallVec;
 
-use std::collections::{HashMap, hash_map::Entry, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use crate::{
-    Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
-    OperationReachability, ReachabilityResult, OperationSetup, SingleInputStorage,
-    SingleTargetStorage, OrBroken, OperationCleanup, Cancellation, ManageCancellation,
-    Disposal, OperationError, TrimBranch, TrimPoint, TrimPolicy, CleanupContents,
-    FinalizeCleanup, FinalizeCleanupRequest, ScopeStorage, ScopeEntryStorage,
-    immediately_downstream_of, emit_disposal,
+    emit_disposal, immediately_downstream_of, Cancellation, CleanupContents, Disposal,
+    FinalizeCleanup, FinalizeCleanupRequest, Input, InputBundle, ManageCancellation, ManageInput,
+    Operation, OperationCleanup, OperationError, OperationReachability, OperationRequest,
+    OperationResult, OperationSetup, OrBroken, ReachabilityResult, ScopeEntryStorage, ScopeStorage,
+    SingleInputStorage, SingleTargetStorage, TrimBranch, TrimPoint, TrimPolicy,
 };
 
 pub(crate) struct Trim<T> {
@@ -42,11 +41,12 @@ pub(crate) struct Trim<T> {
 }
 
 impl<T> Trim<T> {
-    pub(crate) fn new(
-        branches: SmallVec<[TrimBranch; 16]>,
-        target: Entity
-    ) -> Self {
-        Self { branches, target, _ignore: Default::default() }
+    pub(crate) fn new(branches: SmallVec<[TrimBranch; 16]>, target: Entity) -> Self {
+        Self {
+            branches,
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -71,24 +71,31 @@ struct TrimStorage {
 #[derive(Component)]
 struct HoldingStorage<T> {
     // The key of this map is a cleanup_id
-    map: HashMap<Entity, Input<T>>
+    map: HashMap<Entity, Input<T>>,
 }
 
 impl<T> Default for HoldingStorage<T> {
     fn default() -> Self {
-        Self { map: Default::default() }
+        Self {
+            map: Default::default(),
+        }
     }
 }
 
 impl TrimStorage {
     fn new(branches: SmallVec<[TrimBranch; 16]>) -> Self {
-        Self { branches, nodes: None }
+        Self {
+            branches,
+            nodes: None,
+        }
     }
 }
 
 impl<T: 'static + Send + Sync> Operation for Trim<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -104,9 +111,15 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
-        let Input { session, data } = world.get_entity_mut(source).or_broken()?
+        let Input { session, data } = world
+            .get_entity_mut(source)
+            .or_broken()?
             .take_input::<T>()?;
 
         let source_ref = world.get_entity(source).or_broken()?;
@@ -115,8 +128,11 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
             Some(Ok(nodes)) => nodes.clone(),
             Some(Err(cancellation)) => {
                 let cancellation = cancellation.clone();
-                world.get_entity_mut(source).or_broken()?
-                    .emit_cancel(session, cancellation, roster);
+                world.get_entity_mut(source).or_broken()?.emit_cancel(
+                    session,
+                    cancellation,
+                    roster,
+                );
                 return Ok(());
             }
             None => {
@@ -124,15 +140,16 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
                 let scope_entry = world.get::<ScopeEntryStorage>(scope).or_broken()?.0;
                 match calculate_nodes(scope_entry, &trim.branches, world) {
                     Ok(Ok(nodes)) => {
-                        world.get_mut::<TrimStorage>(source).or_broken()?.nodes = Some(Ok(nodes.clone()));
+                        world.get_mut::<TrimStorage>(source).or_broken()?.nodes =
+                            Some(Ok(nodes.clone()));
                         nodes
                     }
                     Ok(Err(cancellation)) => {
                         // There is something broken in how the branches to be
                         // trimmed re defined, so we should cancel the workflow.
                         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-                        source_mut.get_mut::<TrimStorage>().or_broken()?
-                            .nodes = Some(Err(cancellation.clone()));
+                        source_mut.get_mut::<TrimStorage>().or_broken()?.nodes =
+                            Some(Err(cancellation.clone()));
 
                         source_mut.emit_cancel(session, cancellation, roster);
                         return Ok(());
@@ -145,10 +162,16 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
         };
 
         let cleanup_id = world.spawn(()).id();
-        world.get_mut::<HoldingStorage<T>>(source).or_broken()?
-            .map.insert(cleanup_id, Input { data, session });
+        world
+            .get_mut::<HoldingStorage<T>>(source)
+            .or_broken()?
+            .map
+            .insert(cleanup_id, Input { data, session });
 
-        world.get_mut::<CleanupContents>(source).or_broken()?.add_cleanup(cleanup_id, nodes.clone());
+        world
+            .get_mut::<CleanupContents>(source)
+            .or_broken()?
+            .add_cleanup(cleanup_id, nodes.clone());
         for node in nodes {
             OperationCleanup::new(source, node, session, cleanup_id, world, roster).clean();
         }
@@ -160,8 +183,12 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
         clean.cleanup_inputs::<T>()?;
         clean.cleanup_disposals()?;
         let session = clean.cleanup.session;
-        clean.world.get_mut::<HoldingStorage<T>>(clean.source).or_broken()?
-            .map.retain(|_, input| input.session != session);
+        clean
+            .world
+            .get_mut::<HoldingStorage<T>>(clean.source)
+            .or_broken()?
+            .map
+            .retain(|_, input| input.session != session);
         clean.notify_cleaned()
     }
 
@@ -176,16 +203,25 @@ impl<T: 'static + Send + Sync> Operation for Trim<T> {
 
 impl<T: 'static + Send + Sync> Trim<T> {
     fn finalize_trim(
-        FinalizeCleanupRequest { cleanup, world, roster }: FinalizeCleanupRequest,
+        FinalizeCleanupRequest {
+            cleanup,
+            world,
+            roster,
+        }: FinalizeCleanupRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(cleanup.cleaner).or_broken()?;
         let Input { session, data } = source_mut
-            .get_mut::<HoldingStorage<T>>().or_broken()?
+            .get_mut::<HoldingStorage<T>>()
+            .or_broken()?
             // It's possible for the entry to be erased if this trim node gets
             // cleaned up while this cleanup is happening.
-            .map.remove(&cleanup.cleanup_id).or_not_ready()?;
+            .map
+            .remove(&cleanup.cleanup_id)
+            .or_not_ready()?;
 
-        let nodes = source_mut.get::<TrimStorage>().or_broken()?
+        let nodes = source_mut
+            .get::<TrimStorage>()
+            .or_broken()?
             .nodes
             .clone()
             .map(|n| n.ok())
@@ -197,7 +233,10 @@ impl<T: 'static + Send + Sync> Trim<T> {
         let disposal = Disposal::trimming(cleanup.cleaner, nodes);
         emit_disposal(cleanup.cleaner, cleanup.session, disposal, world, roster);
 
-        world.get_entity_mut(target).or_broken()?.give_input(session, data, roster)
+        world
+            .get_entity_mut(target)
+            .or_broken()?
+            .give_input(session, data, roster)
     }
 }
 
@@ -209,12 +248,10 @@ fn calculate_nodes(
     let mut all_nodes: SmallVec<[Entity; 16]> = SmallVec::new();
     for branch in branches {
         let result = match branch.policy() {
-            TrimPolicy::Downstream => calculate_downstream(
-                scope_entry, branch.from_point(), world,
-            ),
-            TrimPolicy::Span(span) => calculate_all_spans(
-                scope_entry, branch.from_point(), span, world,
-            ),
+            TrimPolicy::Downstream => calculate_downstream(scope_entry, branch.from_point(), world),
+            TrimPolicy::Span(span) => {
+                calculate_all_spans(scope_entry, branch.from_point(), span, world)
+            }
         };
 
         match result? {
@@ -241,9 +278,7 @@ fn calculate_downstream(
     // First calculate the span from the scope entry to the initial point so we
     // can filter those nodes out while we calculate the downstream.
     let filter = {
-        let mut filter = calculate_span(
-            scope_entry, initial_point.id(), &HashSet::new(), world,
-        );
+        let mut filter = calculate_span(scope_entry, initial_point.id(), &HashSet::new(), world);
         filter.remove(&initial_point.id());
         filter
     };
@@ -268,7 +303,10 @@ fn calculate_downstream(
         return Ok(Err(Cancellation::invalid_span(initial_point.id(), None)));
     }
 
-    Ok(Ok(visited.into_iter().filter(|n| initial_point.accept(*n)).collect()))
+    Ok(Ok(visited
+        .into_iter()
+        .filter(|n| initial_point.accept(*n))
+        .collect()))
 }
 
 fn calculate_all_spans(
@@ -310,13 +348,15 @@ fn calculate_span_nodes(
     let span = calculate_span(initial_point.id(), to_point.id(), &filter, world);
     if span.is_empty() {
         return Ok(Err(Cancellation::invalid_span(
-            initial_point.id(), Some(to_point.id()),
+            initial_point.id(),
+            Some(to_point.id()),
         )));
     }
 
-    Ok(Ok(span.into_iter().filter(|n| {
-        initial_point.accept(*n) && to_point.accept(*n)
-    }).collect()))
+    Ok(Ok(span
+        .into_iter()
+        .filter(|n| initial_point.accept(*n) && to_point.accept(*n))
+        .collect()))
 }
 
 fn calculate_span(

@@ -17,9 +17,7 @@
 
 use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
-use crate::{
-    Impulsive, OperationSetup, OperationRequest, OperationResult, OrBroken,
-};
+use crate::{Impulsive, OperationRequest, OperationResult, OperationSetup, OrBroken};
 
 /// During an impulse flush, this impulse gets automatically added to the end of
 /// any chain which has an unused target but was also marked as detached. This
@@ -32,11 +30,12 @@ impl Impulsive for Finished {
         Ok(())
     }
 
-    fn execute(
-        OperationRequest { source, world, .. }: OperationRequest,
-    ) -> OperationResult {
+    fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         // If this gets triggered that means the impulse chain is finished
-        world.get_entity_mut(source).or_broken()?.despawn_recursive();
+        world
+            .get_entity_mut(source)
+            .or_broken()?
+            .despawn_recursive();
         Ok(())
     }
 }

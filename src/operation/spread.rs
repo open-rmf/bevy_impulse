@@ -16,10 +16,9 @@
 */
 
 use crate::{
-    Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
-    OperationReachability, ReachabilityResult, OperationSetup, Disposal,
-    SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
-    emit_disposal,
+    emit_disposal, Disposal, Input, InputBundle, ManageInput, Operation, OperationCleanup,
+    OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
+    ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -31,7 +30,10 @@ pub(crate) struct Spread<I> {
 
 impl<I> Spread<I> {
     pub(crate) fn new(target: Entity) -> Self {
-        Self { target, _ignore: Default::default() }
+        Self {
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -41,7 +43,9 @@ where
     I::Item: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -53,7 +57,11 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<I>()?;

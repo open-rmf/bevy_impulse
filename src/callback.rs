@@ -16,23 +16,21 @@
 */
 
 use crate::{
-    BlockingCallback, AsyncCallback, Channel, ChannelQueue,
-    OperationRoster, StreamPack, Input, Provider, ProvideOnce,
-    AddOperation, OperateCallback, ManageInput, OperationError,
-    OrBroken, OperateTask, UnusedStreams, ManageDisposal, Sendish,
-    make_stream_buffer_from_world,
-    async_execution::{spawn_task, task_cancel_sender}
+    async_execution::{spawn_task, task_cancel_sender},
+    make_stream_buffer_from_world, AddOperation, AsyncCallback, BlockingCallback, Channel,
+    ChannelQueue, Input, ManageDisposal, ManageInput, OperateCallback, OperateTask, OperationError,
+    OperationRoster, OrBroken, ProvideOnce, Provider, Sendish, StreamPack, UnusedStreams,
 };
 
 use bevy_ecs::{
-    prelude::{World, Entity, In, Commands},
-    system::{IntoSystem, BoxedSystem},
+    prelude::{Commands, Entity, In, World},
+    system::{BoxedSystem, IntoSystem},
 };
 
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
     future::Future,
+    sync::{Arc, Mutex},
 };
 
 /// A Callback is similar to a [`Service`](crate::Service) except it is not
@@ -74,26 +72,27 @@ pub struct Callback<Request, Response, Streams = ()> {
 
 impl<Request, Response, Streams> Clone for Callback<Request, Response, Streams> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
 impl<Request, Response, Streams> Callback<Request, Response, Streams> {
     pub fn new(callback: impl CallbackTrait<Request, Response, Streams> + 'static + Send) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(
-                InnerCallback {
-                    queue: VecDeque::new(),
-                    callback: Some(Box::new(callback)),
-                }
-            ))
+            inner: Arc::new(Mutex::new(InnerCallback {
+                queue: VecDeque::new(),
+                callback: Some(Box::new(callback)),
+            })),
         }
     }
 }
 
 pub(crate) struct InnerCallback<Request, Response, Streams> {
     pub(crate) queue: VecDeque<PendingCallbackRequest>,
-    pub(crate) callback: Option<Box<dyn CallbackTrait<Request, Response, Streams> + 'static + Send>>,
+    pub(crate) callback:
+        Option<Box<dyn CallbackTrait<Request, Response, Streams> + 'static + Send>>,
 }
 
 pub struct CallbackRequest<'a> {
@@ -105,10 +104,11 @@ pub struct CallbackRequest<'a> {
 
 impl<'a> CallbackRequest<'a> {
     fn get_request<Request: 'static + Send + Sync>(
-        &mut self
+        &mut self,
     ) -> Result<Input<Request>, OperationError> {
         self.world
-            .get_entity_mut(self.source).or_broken()?
+            .get_entity_mut(self.source)
+            .or_broken()?
             .take_input()
     }
 
@@ -119,12 +119,15 @@ impl<'a> CallbackRequest<'a> {
         unused_streams: UnusedStreams,
     ) -> Result<(), OperationError> {
         if !unused_streams.streams.is_empty() {
-            self.world.get_entity_mut(self.source).or_broken()?
+            self.world
+                .get_entity_mut(self.source)
+                .or_broken()?
                 .emit_disposal(session, unused_streams.into(), self.roster);
         }
 
         self.world
-            .get_entity_mut(self.target).or_broken()?
+            .get_entity_mut(self.target)
+            .or_broken()?
             .give_input(session, response, self.roster)?;
 
         Ok(())
@@ -138,14 +141,25 @@ impl<'a> CallbackRequest<'a> {
     where
         Task::Output: Send + Sync,
     {
-        let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        let sender = self
+            .world
+            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .sender
+            .clone();
         let task = spawn_task(task, self.world);
         let task_id = self.world.spawn(()).id();
         let cancel_sender = task_cancel_sender(self.world);
         OperateTask::<_, Streams>::new(
-            task_id, session, self.source, self.target, task, cancel_sender, None, sender
+            task_id,
+            session,
+            self.source,
+            self.target,
+            task,
+            cancel_sender,
+            None,
+            sender,
         )
-            .add(self.world, self.roster);
+        .add(self.world, self.roster);
         Ok(())
     }
 
@@ -153,7 +167,11 @@ impl<'a> CallbackRequest<'a> {
         &mut self,
         session: Entity,
     ) -> Result<(Channel, Streams::Channel), OperationError> {
-        let sender = self.world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        let sender = self
+            .world
+            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .sender
+            .clone();
         let channel = Channel::new(self.source, session, sender);
         let streams = channel.for_streams::<Streams>(&self.world)?;
         Ok((channel, streams))
@@ -191,14 +209,18 @@ struct BlockingCallbackSystem<Request, Response, Streams: StreamPack> {
     initialized: bool,
 }
 
-impl<Request, Response, Streams> CallbackTrait<Request, Response, Streams> for BlockingCallbackSystem<Request, Response, Streams>
+impl<Request, Response, Streams> CallbackTrait<Request, Response, Streams>
+    for BlockingCallbackSystem<Request, Response, Streams>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
     fn call(&mut self, mut input: CallbackRequest) -> Result<(), OperationError> {
-        let Input { session, data: request } = input.get_request()?;
+        let Input {
+            session,
+            data: request,
+        } = input.get_request()?;
 
         if !self.initialized {
             self.system.initialize(&mut input.world);
@@ -207,14 +229,25 @@ where
 
         let streams = make_stream_buffer_from_world::<Streams>(input.source, input.world)?;
 
-        let response = self.system.run(BlockingCallback {
-            request, streams: streams.clone(), source: input.source, session,
-        }, input.world);
+        let response = self.system.run(
+            BlockingCallback {
+                request,
+                streams: streams.clone(),
+                source: input.source,
+                session,
+            },
+            input.world,
+        );
         self.system.apply_deferred(&mut input.world);
 
         let mut unused_streams = UnusedStreams::new(input.source);
         Streams::process_buffer(
-            streams, input.source, session, &mut unused_streams, input.world, input.roster
+            streams,
+            input.source,
+            session,
+            &mut unused_streams,
+            input.world,
+            input.roster,
         )?;
 
         input.give_response(session, response, unused_streams)
@@ -228,7 +261,8 @@ struct AsyncCallbackSystem<Request, Task, Streams: StreamPack> {
     initialized: bool,
 }
 
-impl<Request, Task, Streams> CallbackTrait<Request, Task::Output, Streams> for AsyncCallbackSystem<Request, Task, Streams>
+impl<Request, Task, Streams> CallbackTrait<Request, Task::Output, Streams>
+    for AsyncCallbackSystem<Request, Task, Streams>
 where
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
@@ -236,7 +270,10 @@ where
     Streams: StreamPack,
 {
     fn call(&mut self, mut input: CallbackRequest) -> Result<(), OperationError> {
-        let Input { session, data: request } = input.get_request()?;
+        let Input {
+            session,
+            data: request,
+        } = input.get_request()?;
 
         let (channel, streams) = input.get_channel::<Streams>(session)?;
 
@@ -244,9 +281,16 @@ where
             self.system.initialize(&mut input.world);
         }
 
-        let task = self.system.run(AsyncCallback {
-            request, streams, channel, source: input.source, session,
-        }, &mut input.world);
+        let task = self.system.run(
+            AsyncCallback {
+                request,
+                streams,
+                channel,
+                source: input.source,
+                session,
+            },
+            &mut input.world,
+        );
         self.system.apply_deferred(&mut input.world);
 
         input.give_task::<_, Streams>(session, task)
@@ -279,7 +323,8 @@ pub trait AsCallback<M> {
     fn as_callback(self) -> Callback<Self::Request, Self::Response, Self::Streams>;
 }
 
-impl<Request, Response, Streams, M, Sys> AsCallback<BlockingCallbackMarker<(Request, Response, Streams, M)>> for Sys
+impl<Request, Response, Streams, M, Sys>
+    AsCallback<BlockingCallbackMarker<(Request, Response, Streams, M)>> for Sys
 where
     Sys: IntoSystem<BlockingCallback<Request, Streams>, Response, M>,
     Request: 'static + Send + Sync,
@@ -298,7 +343,8 @@ where
     }
 }
 
-impl<Request, Task, Streams, M, Sys> AsCallback<AsyncCallbackMarker<(Request, Task, Streams, M)>> for Sys
+impl<Request, Task, Streams, M, Sys> AsCallback<AsyncCallbackMarker<(Request, Task, Streams, M)>>
+    for Sys
 where
     Sys: IntoSystem<AsyncCallback<Request, Streams>, Task, M>,
     Task: Future + 'static + Sendish,
@@ -318,7 +364,8 @@ where
     }
 }
 
-impl<Request, Response, Streams, F> AsCallback<BlockingMapCallbackMarker<(Request, Response, Streams)>> for F
+impl<Request, Response, Streams, F>
+    AsCallback<BlockingMapCallbackMarker<(Request, Response, Streams)>> for F
 where
     F: FnMut(BlockingCallback<Request, Streams>) -> Response + 'static + Send,
     Request: 'static + Send + Sync,
@@ -331,15 +378,26 @@ where
 
     fn as_callback(mut self) -> Callback<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: CallbackRequest| {
-            let Input { session, data: request } = input.get_request::<Self::Request>()?;
+            let Input {
+                session,
+                data: request,
+            } = input.get_request::<Self::Request>()?;
             let streams = make_stream_buffer_from_world::<Streams>(input.source, input.world)?;
             let response = (self)(BlockingCallback {
-                request, streams: streams.clone(), source: input.source, session,
+                request,
+                streams: streams.clone(),
+                source: input.source,
+                session,
             });
 
             let mut unused_streams = UnusedStreams::new(input.source);
             Streams::process_buffer(
-                streams, input.source, session, &mut unused_streams, input.world, input.roster
+                streams,
+                input.source,
+                session,
+                &mut unused_streams,
+                input.world,
+                input.roster,
             )?;
             input.give_response(session, response, unused_streams)
         };
@@ -361,10 +419,17 @@ where
 
     fn as_callback(mut self) -> Callback<Self::Request, Self::Response, Self::Streams> {
         let callback = move |mut input: CallbackRequest| {
-            let Input { session, data: request } = input.get_request::<Self::Request>()?;
+            let Input {
+                session,
+                data: request,
+            } = input.get_request::<Self::Request>()?;
             let (channel, streams) = input.get_channel::<Streams>(session)?;
             let task = (self)(AsyncCallback {
-                request, streams, channel, source: input.source, session,
+                request,
+                streams,
+                channel,
+                source: input.source,
+                session,
             });
             input.give_task::<_, Streams>(session, task)
         };
@@ -379,7 +444,8 @@ pub trait IntoBlockingCallback<M> {
     fn into_blocking_callback(self) -> Callback<Self::Request, Self::Response, ()>;
 }
 
-impl<Request, Response, M, Sys> IntoBlockingCallback<BlockingCallbackMarker<(Request, Response, M)>> for Sys
+impl<Request, Response, M, Sys> IntoBlockingCallback<BlockingCallbackMarker<(Request, Response, M)>>
+    for Sys
 where
     Sys: IntoSystem<Request, Response, M>,
     Request: 'static + Send + Sync,
@@ -392,11 +458,14 @@ where
     }
 }
 
-fn peel_blocking<Request>(In(BlockingCallback { request, .. }): In<BlockingCallback<Request>>) -> Request {
+fn peel_blocking<Request>(
+    In(BlockingCallback { request, .. }): In<BlockingCallback<Request>>,
+) -> Request {
     request
 }
 
-impl<Request, Response, F> IntoBlockingCallback<BlockingMapCallbackMarker<(Request, Response)>> for F
+impl<Request, Response, F> IntoBlockingCallback<BlockingMapCallbackMarker<(Request, Response)>>
+    for F
 where
     F: FnMut(Request) -> Response + 'static + Send,
     Request: 'static + Send + Sync,
@@ -405,9 +474,7 @@ where
     type Request = Request;
     type Response = Response;
     fn into_blocking_callback(mut self) -> Callback<Self::Request, Self::Response, ()> {
-        let f = move |BlockingCallback { request, .. }| {
-            (self)(request)
-        };
+        let f = move |BlockingCallback { request, .. }| (self)(request);
 
         f.as_callback()
     }
@@ -433,7 +500,9 @@ where
     }
 }
 
-fn peel_async<Request>(In(AsyncCallback { request, .. }): In<AsyncCallback<Request, ()>>) -> Request {
+fn peel_async<Request>(
+    In(AsyncCallback { request, .. }): In<AsyncCallback<Request, ()>>,
+) -> Request {
     request
 }
 
@@ -447,9 +516,7 @@ where
     type Request = Request;
     type Response = Task::Output;
     fn into_async_callback(mut self) -> Callback<Self::Request, Self::Response, ()> {
-        let f = move |AsyncCallback { request, .. }| {
-            (self)(request)
-        };
+        let f = move |AsyncCallback { request, .. }| (self)(request);
 
         f.as_callback()
     }
@@ -465,8 +532,18 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(scope, source, OperateCallback::new(self, target)));
+    fn connect(
+        self,
+        scope: Option<Entity>,
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) {
+        commands.add(AddOperation::new(
+            scope,
+            source,
+            OperateCallback::new(self, target),
+        ));
     }
 }
 
@@ -476,5 +553,4 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-
 }

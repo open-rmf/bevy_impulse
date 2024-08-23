@@ -16,16 +16,15 @@
 */
 
 use crate::{
-    Operation, SingleTargetStorage, Service, OperationRoster, ServiceRequest,
-    SingleInputStorage, dispatch_service, OperationCleanup, WorkflowHooks,
-    OperationResult, OrBroken, OperationSetup, OperationRequest,
-    ActiveTasksStorage, OperationReachability, ReachabilityResult,
-    InputBundle, Input, ManageDisposal, Disposal, ManageInput, UnhandledErrors,
-    DisposalFailure, ActiveContinuousSessions, DeliveryInstructions, Delivery,
+    dispatch_service, ActiveContinuousSessions, ActiveTasksStorage, Delivery, DeliveryInstructions,
+    Disposal, DisposalFailure, Input, InputBundle, ManageDisposal, ManageInput, Operation,
+    OperationCleanup, OperationReachability, OperationRequest, OperationResult, OperationRoster,
+    OperationSetup, OrBroken, ReachabilityResult, Service, ServiceRequest, SingleInputStorage,
+    SingleTargetStorage, UnhandledErrors, WorkflowHooks,
 };
 
 use bevy_ecs::{
-    prelude::{Component, Entity, World, Query},
+    prelude::{Component, Entity, Query, World},
     system::SystemState,
 };
 
@@ -56,7 +55,9 @@ impl<Request: 'static + Send + Sync> OperateService<Request> {
 
 impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -78,7 +79,12 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
         let provider = source_ref.get::<ProviderStorage>().or_broken()?.0;
         let instructions = source_ref.get::<DeliveryInstructions>().cloned();
 
-        dispatch_service(ServiceRequest { provider, target, instructions, operation });
+        dispatch_service(ServiceRequest {
+            provider,
+            target,
+            instructions,
+            operation,
+        });
         Ok(())
     }
 
@@ -143,9 +149,13 @@ pub(crate) fn dispose_for_despawned_service(
     world: &mut World,
     roster: &mut OperationRoster,
 ) {
-    let mut providers_state: SystemState<Query<
-        (Entity, &ProviderStorage, Option<&DisposeForUnavailableService>)
-    >> = SystemState::new(world);
+    let mut providers_state: SystemState<
+        Query<(
+            Entity,
+            &ProviderStorage,
+            Option<&DisposeForUnavailableService>,
+        )>,
+    > = SystemState::new(world);
     let providers = providers_state.get(world);
     let mut needs_disposal: SmallVec<[_; 16]> = SmallVec::new();
     for (source, ProviderStorage(provider), disposer) in &providers {
@@ -159,19 +169,21 @@ pub(crate) fn dispose_for_despawned_service(
             (disposer.0)(source, despawned_service, world, roster);
         } else {
             world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
-            .disposals
-            .push(DisposalFailure {
-                disposal: Disposal::service_unavailable(despawned_service, source),
-                broken_node: source,
-                backtrace: Some(Backtrace::new()),
-            });
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .disposals
+                .push(DisposalFailure {
+                    disposal: Disposal::service_unavailable(despawned_service, source),
+                    broken_node: source,
+                    backtrace: Some(Backtrace::new()),
+                });
         }
     }
 }
 
 #[derive(Component, Clone, Copy)]
-pub(crate) struct DisposeForUnavailableService(fn(Entity, Entity, &mut World, &mut OperationRoster));
+pub(crate) struct DisposeForUnavailableService(
+    fn(Entity, Entity, &mut World, &mut OperationRoster),
+);
 
 impl DisposeForUnavailableService {
     pub(crate) fn new<T: 'static + Send + Sync>() -> Self {
@@ -192,12 +204,12 @@ fn dispose_for_unavailable_service<T: 'static + Send + Sync>(
         }
     } else {
         world
-        .get_resource_or_insert_with(|| UnhandledErrors::default())
-        .disposals
-        .push(DisposalFailure {
-            disposal,
-            broken_node: source,
-            backtrace: Some(Backtrace::new()),
-        });
+            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .disposals
+            .push(DisposalFailure {
+                disposal,
+                broken_node: source,
+                backtrace: Some(Backtrace::new()),
+            });
     }
 }

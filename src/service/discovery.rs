@@ -16,12 +16,12 @@
 */
 
 use bevy_ecs::{
-    prelude::{Query, Entity, With},
-    query::{ReadOnlyWorldQuery, QueryIter, QueryEntityError},
+    prelude::{Entity, Query, With},
+    query::{QueryEntityError, QueryIter, ReadOnlyWorldQuery},
     system::SystemParam,
 };
 
-use crate::{ServiceMarker, StreamFilter, Service};
+use crate::{Service, ServiceMarker, StreamFilter};
 
 /// `ServiceDiscovery` is a system parameter that lets you find services that
 /// exist in the world.
@@ -45,11 +45,12 @@ where
             With<ServiceMarker<Request, Response>>,
             <Streams as StreamFilter>::Filter,
             Filter,
-        )
+        ),
     >,
 }
 
-impl<'w, 's, Request, Response, Streams, Filter> ServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
+impl<'w, 's, Request, Response, Streams, Filter>
+    ServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -62,7 +63,10 @@ where
         }
     }
 
-    pub fn get(&self, entity: Entity) -> Result<Service<Request, Response, Streams>, QueryEntityError> {
+    pub fn get(
+        &self,
+        entity: Entity,
+    ) -> Result<Service<Request, Response, Streams>, QueryEntityError> {
         self.query.get(entity).map(|e| Service::new(e))
     }
 }
@@ -82,12 +86,12 @@ where
             With<ServiceMarker<Request, Response>>,
             <Streams as StreamFilter>::Filter,
             Filter,
-        )
-    >
+        ),
+    >,
 }
 
 impl<'w, 's, Request, Response, Streams, Filter> Iterator
-for IterServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
+    for IterServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
@@ -104,8 +108,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::{testing::*, *};
     use bevy_ecs::prelude::With;
-    use crate::{*, testing::*};
 
     type NumberStreams = (StreamOf<u32>, StreamOf<i32>, StreamOf<f32>);
 
@@ -126,13 +130,12 @@ mod tests {
             commands.spawn_service(
                 |_: BlockingServiceInput<()>, discover: ServiceDiscovery<f64, f64, ()>| {
                     discover.iter().next()
-                }
+                },
             )
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         let found_service = found_service.take().available().flatten().unwrap();
@@ -140,15 +143,15 @@ mod tests {
 
         let service_finder = context.command(|commands| {
             commands.spawn_service(
-                |_: BlockingServiceInput<()>, discover: ServiceDiscovery<f64, f64, Require<NumberStreams>>| {
+                |_: BlockingServiceInput<()>,
+                 discover: ServiceDiscovery<f64, f64, Require<NumberStreams>>| {
                     discover.iter().next()
-                }
+                },
             )
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         let found_service = found_service.take().available().flatten().unwrap();
@@ -156,15 +159,15 @@ mod tests {
 
         let service_finder = context.command(|commands| {
             commands.spawn_service(
-                |_: BlockingServiceInput<()>, discover: ServiceDiscovery<f64, f64, Option<NumberStreams>>| {
+                |_: BlockingServiceInput<()>,
+                 discover: ServiceDiscovery<f64, f64, Option<NumberStreams>>| {
                     discover.iter().next()
-                }
+                },
             )
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         let found_service = found_service.take().available().flatten().unwrap();
@@ -172,51 +175,50 @@ mod tests {
 
         let service_finder = context.command(|commands| {
             commands.spawn_service(
-                |_: BlockingServiceInput<()>, discover: ServiceDiscovery<f64, f64, Require<StreamOf<String>>>| {
+                |_: BlockingServiceInput<()>,
+                 discover: ServiceDiscovery<f64, f64, Require<StreamOf<String>>>| {
                     discover.iter().next()
-                }
+                },
             )
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         assert!(found_service.take().available().flatten().is_none());
 
         let service_finder = context.command(|commands| {
             commands.spawn_service(
-                |
-                    _: BlockingServiceInput<()>,
-                    discover: ServiceDiscovery<f64, f64, (Require<StreamOf<String>>, Option<StreamOf<f32>>)>,
-                | {
-                    discover.iter().next()
-                }
+                |_: BlockingServiceInput<()>,
+                 discover: ServiceDiscovery<
+                    f64,
+                    f64,
+                    (Require<StreamOf<String>>, Option<StreamOf<f32>>),
+                >| { discover.iter().next() },
             )
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         assert!(found_service.take().available().flatten().is_none());
 
         let service_finder = context.command(|commands| {
             commands.spawn_service(
-                |
-                    _: BlockingServiceInput<()>,
-                    discover: ServiceDiscovery<f64, f64, Require<NumberStreams>, With<TestComponent>>,
-                | {
-                    discover.iter().next()
-                }
+                |_: BlockingServiceInput<()>,
+                 discover: ServiceDiscovery<
+                    f64,
+                    f64,
+                    Require<NumberStreams>,
+                    With<TestComponent>,
+                >| { discover.iter().next() },
             )
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         assert!(found_service.take().available().flatten().is_none());
@@ -224,12 +226,13 @@ mod tests {
         // Add the missing component that's filtering the discovery and then try
         // running the service finder again.
         context.command(|commands| {
-            commands.entity(doubling_service.provider()).insert(TestComponent);
+            commands
+                .entity(doubling_service.provider())
+                .insert(TestComponent);
         });
 
-        let mut found_service = context.command(|commands| {
-            commands.request((), service_finder).take_response()
-        });
+        let mut found_service =
+            context.command(|commands| commands.request((), service_finder).take_response());
 
         context.run_while_pending(&mut found_service);
         let found_service = found_service.take().available().flatten().unwrap();

@@ -15,20 +15,19 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component};
+use bevy_ecs::prelude::{Component, Entity};
 
-use smallvec::{SmallVec, Drain};
+use smallvec::{Drain, SmallVec};
 
 use std::collections::HashMap;
 
 use std::{
-    slice::{Iter, IterMut},
     iter::Rev,
     ops::RangeBounds,
+    slice::{Iter, IterMut},
 };
 
 use crate::{BufferSettings, RetentionPolicy};
-
 
 #[derive(Component)]
 pub(crate) struct BufferStorage<T> {
@@ -71,7 +70,7 @@ impl<T> BufferStorage<T> {
                 if reverse_queue.len() >= n {
                     // We're at the limit for inputs in this queue so just send
                     // this back
-                    return Some(value)
+                    return Some(value);
                 }
 
                 None
@@ -86,9 +85,7 @@ impl<T> BufferStorage<T> {
                     None
                 }
             }
-            RetentionPolicy::KeepAll => {
-                None
-            }
+            RetentionPolicy::KeepAll => None,
         };
 
         reverse_queue.insert(0, value);
@@ -115,9 +112,7 @@ impl<T> BufferStorage<T> {
 
                 None
             }
-            RetentionPolicy::KeepAll => {
-                None
-            }
+            RetentionPolicy::KeepAll => None,
         };
 
         reverse_queue.push(value);
@@ -153,7 +148,10 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn count(&self, session: Entity) -> usize {
-        self.reverse_queues.get(&session).map(|q| q.len()).unwrap_or(0)
+        self.reverse_queues
+            .get(&session)
+            .map(|q| q.len())
+            .unwrap_or(0)
     }
 
     pub(crate) fn iter<'b>(&'b self, session: Entity) -> IterBufferView<'b, T>
@@ -161,7 +159,7 @@ impl<T> BufferStorage<T> {
         T: 'static + Send + Sync,
     {
         IterBufferView {
-            iter: self.reverse_queues.get(&session).map(|q| q.iter().rev())
+            iter: self.reverse_queues.get(&session).map(|q| q.iter().rev()),
         }
     }
 
@@ -170,7 +168,10 @@ impl<T> BufferStorage<T> {
         T: 'static + Send + Sync,
     {
         IterBufferMut {
-            iter: self.reverse_queues.get_mut(&session).map(|q| q.iter_mut().rev())
+            iter: self
+                .reverse_queues
+                .get_mut(&session)
+                .map(|q| q.iter_mut().rev()),
         }
     }
 
@@ -180,16 +181,25 @@ impl<T> BufferStorage<T> {
         R: RangeBounds<usize>,
     {
         DrainBuffer {
-            drain: self.reverse_queues.get_mut(&session).map(|q| q.drain(range).rev())
+            drain: self
+                .reverse_queues
+                .get_mut(&session)
+                .map(|q| q.drain(range).rev()),
         }
     }
 
     pub(crate) fn oldest(&self, session: Entity) -> Option<&T> {
-        self.reverse_queues.get(&session).map(|q| q.last()).flatten()
+        self.reverse_queues
+            .get(&session)
+            .map(|q| q.last())
+            .flatten()
     }
 
     pub(crate) fn newest(&self, session: Entity) -> Option<&T> {
-        self.reverse_queues.get(&session).map(|q| q.first()).flatten()
+        self.reverse_queues
+            .get(&session)
+            .map(|q| q.first())
+            .flatten()
     }
 
     pub(crate) fn get(&self, session: Entity, index: usize) -> Option<&T> {
@@ -206,11 +216,17 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn oldest_mut(&mut self, session: Entity) -> Option<&mut T> {
-        self.reverse_queues.get_mut(&session).map(|q| q.last_mut()).flatten()
+        self.reverse_queues
+            .get_mut(&session)
+            .map(|q| q.last_mut())
+            .flatten()
     }
 
     pub(crate) fn newest_mut(&mut self, session: Entity) -> Option<&mut T> {
-        self.reverse_queues.get_mut(&session).map(|q| q.first_mut()).flatten()
+        self.reverse_queues
+            .get_mut(&session)
+            .map(|q| q.first_mut())
+            .flatten()
     }
 
     pub(crate) fn get_mut(&mut self, session: Entity, index: usize) -> Option<&mut T> {
@@ -227,10 +243,7 @@ impl<T> BufferStorage<T> {
     }
 
     pub(crate) fn active_sessions(&self) -> SmallVec<[Entity; 16]> {
-        self.reverse_queues
-            .iter()
-            .map(|(e, _)| *e)
-            .collect()
+        self.reverse_queues.iter().map(|(e, _)| *e).collect()
     }
 
     pub(crate) fn ensure_session(&mut self, session: Entity) {
@@ -254,7 +267,7 @@ where
 
 impl<'b, T> Iterator for IterBufferView<'b, T>
 where
-    T: 'static + Send + Sync
+    T: 'static + Send + Sync,
 {
     type Item = &'b T;
 

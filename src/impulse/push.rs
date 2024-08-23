@@ -15,14 +15,12 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component};
+use bevy_ecs::prelude::{Component, Entity};
 use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
-    Impulsive, OperationSetup, OperationRequest, Storage,
-    OperationResult, OrBroken, Input, ManageInput,
-    Collection, InputBundle,
-    add_lifecycle_dependency,
+    add_lifecycle_dependency, Collection, Impulsive, Input, InputBundle, ManageInput,
+    OperationRequest, OperationResult, OperationSetup, OrBroken, Storage,
 };
 
 #[derive(Component)]
@@ -34,7 +32,11 @@ pub(crate) struct Push<T> {
 
 impl<T> Push<T> {
     pub(crate) fn new(target: Entity, is_stream: bool) -> Self {
-        Self { target, is_stream, _ignore: Default::default() }
+        Self {
+            target,
+            is_stream,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -43,16 +45,13 @@ impl<T: 'static + Send + Sync> Impulsive for Push<T> {
         if !self.is_stream {
             add_lifecycle_dependency(source, self.target, world);
         }
-        world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
-            self
-        ));
+        world
+            .entity_mut(source)
+            .insert((InputBundle::<T>::new(), self));
         Ok(())
     }
 
-    fn execute(
-        OperationRequest { source, world, .. }: OperationRequest,
-    ) -> OperationResult {
+    fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
         let target = source_mut.get::<Push<T>>().or_broken()?.target;
@@ -68,4 +67,3 @@ impl<T: 'static + Send + Sync> Impulsive for Push<T> {
         Ok(())
     }
 }
-

@@ -15,13 +15,14 @@
  *
 */
 
-use crate::{Promise, PromiseState, Cancellation, CancellationCause};
+use crate::{Cancellation, CancellationCause, Promise, PromiseState};
 
 use std::{
-    task::Waker,
     sync::{
-        Arc, Weak, Mutex, MutexGuard, Condvar, atomic::{AtomicBool, Ordering}
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex, MutexGuard, Weak,
     },
+    task::Waker,
 };
 
 pub(crate) struct Sender<Response> {
@@ -31,7 +32,10 @@ pub(crate) struct Sender<Response> {
 
 impl<T> Sender<T> {
     pub(super) fn new(target: Weak<PromiseTarget<T>>) -> Self {
-        Self { target, sent: false }
+        Self {
+            target,
+            sent: false,
+        }
     }
 
     pub(crate) fn send(mut self, value: T) -> Result<(), PromiseResult<T>> {
@@ -93,13 +97,17 @@ impl<T> Promise<T> {
     pub(crate) fn new() -> (Sender<T>, Self) {
         let target = Arc::new(PromiseTarget::new());
         let sender = Sender::new(Arc::downgrade(&target));
-        let promise = Self { state: PromiseState::Pending, target, dependencies: Vec::new() };
+        let promise = Self {
+            state: PromiseState::Pending,
+            target,
+            dependencies: Vec::new(),
+        };
         (sender, promise)
     }
 
     pub(super) fn impl_wait<'a>(
         target: &'a PromiseTarget<T>,
-        interrupt: Option<Arc<AtomicBool>>
+        interrupt: Option<Arc<AtomicBool>>,
     ) -> Option<MutexGuard<'a, PromiseTargetInner<T>>> {
         let guard = match target.inner.lock() {
             Ok(guard) => guard,
@@ -114,14 +122,18 @@ impl<T> Promise<T> {
             return None;
         }
 
-        target.cv.wait_while(guard, |inner| {
-            if interrupt.as_ref().is_some_and(
-                |interrupt| interrupt.load(Ordering::Relaxed)
-            ) {
-                return false;
-            }
-            inner.result.is_none()
-        }).ok()
+        target
+            .cv
+            .wait_while(guard, |inner| {
+                if interrupt
+                    .as_ref()
+                    .is_some_and(|interrupt| interrupt.load(Ordering::Relaxed))
+                {
+                    return false;
+                }
+                inner.result.is_none()
+            })
+            .ok()
     }
 
     pub(super) fn impl_try_take_result(
@@ -171,15 +183,14 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
                                 let inner_state = inner_promise.state.take();
                                 if inner_state.is_pending() {
                                     inner_promise_dependency = true;
-                                    inner_target.on_result_arrival = Some(Box::new(move |result| {
-                                        let _ = flat_sender.set(result);
-                                    }));
+                                    inner_target.on_result_arrival =
+                                        Some(Box::new(move |result| {
+                                            let _ = flat_sender.set(result);
+                                        }));
                                 }
                                 inner_state
                             }
-                            Err(_) => {
-                                PromiseState::make_poisoned()
-                            }
+                            Err(_) => PromiseState::make_poisoned(),
                         };
 
                         if inner_promise_dependency {
@@ -193,14 +204,16 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
                         let future_dependency = Arc::new(Mutex::new(None));
                         self.dependencies.push(Box::new(future_dependency.clone()));
 
-                        outer_target.on_result_arrival = Some(Box::new(move |inner_result| {
-                            match inner_result {
+                        outer_target.on_result_arrival =
+                            Some(Box::new(move |inner_result| match inner_result {
                                 PromiseResult::Available(mut inner_promise) => {
                                     let mut inner_promise_dependency = false;
                                     match inner_promise.target.inner.lock() {
                                         Ok(mut inner_target) => {
                                             if inner_promise.state.is_pending() {
-                                                inner_promise.state.update(inner_target.result.take());
+                                                inner_promise
+                                                    .state
+                                                    .update(inner_target.result.take());
                                             }
 
                                             match inner_promise.state.take() {
@@ -209,9 +222,10 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
                                                 }
                                                 PromiseState::Pending => {
                                                     inner_promise_dependency = true;
-                                                    inner_target.on_result_arrival = Some(Box::new(move |result| {
-                                                        let _ = flat_sender.set(result);
-                                                    }));
+                                                    inner_target.on_result_arrival =
+                                                        Some(Box::new(move |result| {
+                                                            let _ = flat_sender.set(result);
+                                                        }));
                                                 }
                                                 PromiseState::Cancelled(cause) => {
                                                     let _ = flat_sender.cancel(cause);
@@ -222,9 +236,9 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
                                             }
                                         }
                                         Err(_) => {
-                                            let _ = flat_sender.cancel(
-                                                Cancellation::from_cause(CancellationCause::PoisonedMutexInPromise)
-                                            );
+                                            let _ = flat_sender.cancel(Cancellation::from_cause(
+                                                CancellationCause::PoisonedMutexInPromise,
+                                            ));
                                         }
                                     }
 
@@ -238,8 +252,7 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
                                 PromiseResult::Disposed => {
                                     drop(flat_sender);
                                 }
-                            }
-                        }));
+                            }));
 
                         PromiseState::Pending
                     }
@@ -250,11 +263,9 @@ impl<T: 'static + Send + Sync> Promise<Promise<T>> {
 
                 flat_state
             }
-            Err(_) => {
-                PromiseState::Cancelled(
-                    Cancellation::from_cause(CancellationCause::PoisonedMutexInPromise)
-                )
-            }
+            Err(_) => PromiseState::Cancelled(Cancellation::from_cause(
+                CancellationCause::PoisonedMutexInPromise,
+            )),
         };
 
         if outer_promise_dependency {
@@ -281,7 +292,12 @@ pub(super) struct PromiseTargetInner<T> {
 
 impl<T> PromiseTargetInner<T> {
     pub(super) fn new() -> Self {
-        Self { result: None, waker: None, on_promise_drop: None, on_result_arrival: None }
+        Self {
+            result: None,
+            waker: None,
+            on_promise_drop: None,
+            on_result_arrival: None,
+        }
     }
 }
 
@@ -327,6 +343,9 @@ impl InterrupterInner {
 
 impl Default for InterrupterInner {
     fn default() -> Self {
-        Self { triggered: false, waiters: Vec::new() }
+        Self {
+            triggered: false,
+            waiters: Vec::new(),
+        }
     }
 }

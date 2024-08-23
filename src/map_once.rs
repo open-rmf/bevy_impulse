@@ -16,11 +16,11 @@
 */
 
 use crate::{
-    BlockingMap, AsyncMap, AddImpulse, ImpulseBlockingMap, ImpulseAsyncMap,
-    StreamPack, ProvideOnce, BlockingMapMarker, AsyncMapMarker, Sendish,
+    AddImpulse, AsyncMap, AsyncMapMarker, BlockingMap, BlockingMapMarker, ImpulseAsyncMap,
+    ImpulseBlockingMap, ProvideOnce, Sendish, StreamPack,
 };
 
-use bevy_ecs::prelude::{Entity, Commands};
+use bevy_ecs::prelude::{Commands, Entity};
 
 use std::future::Future;
 
@@ -38,7 +38,8 @@ pub(crate) trait CallBlockingMapOnce<Request, Response, Streams: StreamPack> {
     fn call(self, input: BlockingMap<Request, Streams>) -> Response;
 }
 
-impl<F, Request, Response, Streams> CallBlockingMapOnce<Request, Response, Streams> for MapOnceDef<F>
+impl<F, Request, Response, Streams> CallBlockingMapOnce<Request, Response, Streams>
+    for MapOnceDef<F>
 where
     F: FnOnce(BlockingMap<Request, Streams>) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -59,7 +60,8 @@ pub struct BlockingMapOnceDef<Def, Request, Response, Streams> {
     _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
 }
 
-impl<Def, Request, Response, Streams> ProvideOnce for BlockingMapOnceDef<Def, Request, Response, Streams>
+impl<Def, Request, Response, Streams> ProvideOnce
+    for BlockingMapOnceDef<Def, Request, Response, Streams>
 where
     Def: CallBlockingMapOnce<Request, Response, Streams> + 'static + Send + Sync,
     Request: 'static + Send + Sync,
@@ -71,7 +73,10 @@ where
     type Streams = ();
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddImpulse::new(source, ImpulseBlockingMap::new(target, self.def)));
+        commands.add(AddImpulse::new(
+            source,
+            ImpulseBlockingMap::new(target, self.def),
+        ));
     }
 }
 
@@ -84,7 +89,10 @@ where
 {
     type MapType = BlockingMapOnceDef<MapOnceDef<F>, Request, Response, Streams>;
     fn as_map_once(self) -> Self::MapType {
-        BlockingMapOnceDef { def: MapOnceDef(self), _ignore: Default::default() }
+        BlockingMapOnceDef {
+            def: MapOnceDef(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -102,7 +110,10 @@ where
 {
     type MapType = BlockingMapOnceDef<BlockingMapOnceAdapter<F>, Request, Response, ()>;
     fn into_blocking_map_once(self) -> Self::MapType {
-        BlockingMapOnceDef { def: BlockingMapOnceAdapter(self), _ignore: Default::default() }
+        BlockingMapOnceDef {
+            def: BlockingMapOnceAdapter(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -142,7 +153,10 @@ where
 {
     type MapType = AsyncMapOnceDef<MapOnceDef<F>, Request, Task, Streams>;
     fn as_map_once(self) -> Self::MapType {
-        AsyncMapOnceDef { def: MapOnceDef(self), _ignore: Default::default() }
+        AsyncMapOnceDef {
+            def: MapOnceDef(self),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -168,7 +182,10 @@ where
     type Streams = Streams;
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddImpulse::new(source, ImpulseAsyncMap::new(target, self.def)));
+        commands.add(AddImpulse::new(
+            source,
+            ImpulseAsyncMap::new(target, self.def),
+        ));
     }
 }
 
@@ -186,7 +203,10 @@ where
 {
     type MapType = AsyncMapOnceDef<AsyncMapOnceAdapter<F>, Request, Task, ()>;
     fn into_async_map_once(self) -> Self::MapType {
-        AsyncMapOnceDef { def: AsyncMapOnceAdapter(self), _ignore: Default::default() }
+        AsyncMapOnceDef {
+            def: AsyncMapOnceAdapter(self),
+            _ignore: Default::default(),
+        }
     }
 }
 

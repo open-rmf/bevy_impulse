@@ -16,27 +16,25 @@
 */
 
 use crate::{
-    Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
-    OperationReachability, ReachabilityResult, OperationSetup, StreamPack,
-    SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
-    Cancellation, Unreachability, InspectDisposals, execute_operation,
-    Cancellable, OperationRoster, ManageCancellation, CleanupContents,
-    OperationError, OperationCancel, Cancel, UnhandledErrors, check_reachability,
-    Blocker, Stream, StreamTargetStorage, StreamRequest, AddOperation,
-    ScopeSettings, StreamTargetMap, ClearBufferFn, UnusedTarget, Cleanup,
-    Buffered, BufferKeyBuilder, FinalizeCleanup, FinalizeCleanupRequest,
-    DisposalListener, DisposalUpdate, CollectMarker,
-    is_downstream_of,
+    check_reachability, execute_operation, is_downstream_of, AddOperation, Blocker,
+    BufferKeyBuilder, Buffered, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents,
+    ClearBufferFn, CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup,
+    FinalizeCleanupRequest, Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput,
+    Operation, OperationCancel, OperationCleanup, OperationError, OperationReachability,
+    OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
+    ReachabilityResult, ScopeSettings, SingleInputStorage, SingleTargetStorage, Stream, StreamPack,
+    StreamRequest, StreamTargetMap, StreamTargetStorage, UnhandledErrors, Unreachability,
+    UnusedTarget,
 };
 
 use backtrace::Backtrace;
 
-use bevy_ecs::prelude::{Component, Entity, World, Commands};
+use bevy_ecs::prelude::{Commands, Component, Entity, World};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 
 #[derive(Component)]
 pub struct ParentSession(Entity);
@@ -91,7 +89,11 @@ pub(crate) struct ScopedSession {
 
 impl ScopedSession {
     pub fn ongoing(parent_session: Entity, scoped_session: Entity) -> Self {
-        Self { parent_session, scoped_session, status: ScopedSessionStatus::Ongoing }
+        Self {
+            parent_session,
+            scoped_session,
+            status: ScopedSessionStatus::Ongoing,
+        }
     }
 }
 
@@ -192,7 +194,6 @@ where
     Response: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-
         let mut source_mut = world.entity_mut(source);
         source_mut.insert((
             InputBundle::<Request>::new(),
@@ -211,7 +212,9 @@ where
         if let Some(exit_scope) = self.exit_scope {
             source_mut.insert(SingleTargetStorage::new(exit_scope));
 
-            world.get_entity_mut(exit_scope).or_broken()?
+            world
+                .get_entity_mut(exit_scope)
+                .or_broken()?
                 .insert(SingleInputStorage::new(source));
         } else {
             source_mut.insert(ExitTargetStorage::default());
@@ -221,24 +224,38 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
-        let input = world.get_entity_mut(source).or_broken()?
+        let input = world
+            .get_entity_mut(source)
+            .or_broken()?
             .take_input::<Request>()?;
 
-        let scoped_session = world.spawn((
-            ParentSession(input.session),
-            SessionStatus::Active,
-        )).id();
+        let scoped_session = world
+            .spawn((ParentSession(input.session), SessionStatus::Active))
+            .id();
         begin_scope::<Request, Response, Streams>(
             input,
             scoped_session,
-            OperationRequest { source, world, roster },
+            OperationRequest {
+                source,
+                world,
+                roster,
+            },
         )
     }
 
     fn cleanup(
-        OperationCleanup { source, cleanup, world, roster }: OperationCleanup
+        OperationCleanup {
+            source,
+            cleanup,
+            world,
+            roster,
+        }: OperationCleanup,
     ) -> OperationResult {
         let parent_session = cleanup.session;
 
@@ -246,7 +263,10 @@ where
         source_mut.cleanup_inputs::<Request>(cleanup.session);
 
         let uninterruptible = source_mut
-            .get::<ScopeSettingsStorage>().or_broken()?.0.is_uninterruptible();
+            .get::<ScopeSettingsStorage>()
+            .or_broken()?
+            .0
+            .is_uninterruptible();
 
         let relevant_scoped_sessions: SmallVec<[_; 16]> = source_mut
             .get_mut::<ScopedSessionStorage>()
@@ -266,12 +286,22 @@ where
         if relevant_scoped_sessions.is_empty() {
             // We have no record of the mentioned session in this scope, so it
             // is already clean.
-            return OperationCleanup { source, cleanup, world, roster }.notify_cleaned();
+            return OperationCleanup {
+                source,
+                cleanup,
+                world,
+                roster,
+            }
+            .notify_cleaned();
         };
 
         cleanup_entire_scope(
-            source, cleanup, FinishStatus::EarlyCleanup,
-            relevant_scoped_sessions, world, roster,
+            source,
+            cleanup,
+            FinishStatus::EarlyCleanup,
+            relevant_scoped_sessions,
+            world,
+            roster,
         )
     }
 
@@ -280,11 +310,17 @@ where
             return Ok(true);
         }
 
-        let source_ref = reachability.world.get_entity(reachability.source).or_broken()?;
+        let source_ref = reachability
+            .world
+            .get_entity(reachability.source)
+            .or_broken()?;
 
         if let Some(pair) = source_ref
-            .get::<ScopedSessionStorage>().or_broken()?
-            .0.iter().find(|pair| pair.parent_session == reachability.session)
+            .get::<ScopedSessionStorage>()
+            .or_broken()?
+            .0
+            .iter()
+            .find(|pair| pair.parent_session == reachability.session)
         {
             let mut visited = HashMap::new();
             let mut scoped_reachability = OperationReachability::new(
@@ -308,7 +344,11 @@ where
 pub(crate) fn begin_scope<Request, Response, Streams>(
     input: Input<Request>,
     scoped_session: Entity,
-    OperationRequest { source, world, roster }: OperationRequest,
+    OperationRequest {
+        source,
+        world,
+        roster,
+    }: OperationRequest,
 ) -> OperationResult
 where
     Request: 'static + Send + Sync,
@@ -318,7 +358,11 @@ where
     let result = begin_scope_impl(
         input,
         scoped_session,
-        OperationRequest { source, world, roster },
+        OperationRequest {
+            source,
+            world,
+            roster,
+        },
     );
 
     if result.is_err() {
@@ -333,7 +377,11 @@ where
     if let Some(reachability) = world.get::<InitialReachability>(source) {
         if let InitialReachability::Error(cancellation) = reachability {
             OperateScope::<Request, Response, Streams>::cancel_one(
-                scoped_session, source, cancellation.clone(), world, roster,
+                scoped_session,
+                source,
+                cancellation.clone(),
+                world,
+                roster,
             )?;
             return Ok(());
         }
@@ -343,7 +391,13 @@ where
             // terminal point from its start point, so we should trigger the
             // reachability check to begin the cancellation process right away.
             OperateScope::<Request, Response, Streams>::validate_scope_reachability(
-                ValidationRequest { source, origin: source, session: scoped_session, world, roster },
+                ValidationRequest {
+                    source,
+                    origin: source,
+                    session: scoped_session,
+                    world,
+                    roster,
+                },
             )?;
         }
     } else {
@@ -352,11 +406,16 @@ where
             // There are circular collect operations in this workflow, making it
             // invalid, so we will cancel this workflow without running it.
             let cancellation = Cancellation::circular_collect(circular_collects);
-            world.get_entity_mut(source).or_broken()?.insert(
-                InitialReachability::Error(cancellation.clone())
-            );
+            world
+                .get_entity_mut(source)
+                .or_broken()?
+                .insert(InitialReachability::Error(cancellation.clone()));
             OperateScope::<Request, Response, Streams>::cancel_one(
-                scoped_session, source, cancellation, world, roster,
+                scoped_session,
+                source,
+                cancellation,
+                world,
+                roster,
             )?;
             return Ok(());
         }
@@ -365,12 +424,19 @@ where
         // reached from the scope entry node. As long as this passes, we will
         // not run it again.
         let is_reachable = OperateScope::<Request, Response, Streams>::validate_scope_reachability(
-            ValidationRequest { source, origin: source, session: scoped_session, world, roster },
+            ValidationRequest {
+                source,
+                origin: source,
+                session: scoped_session,
+                world,
+                roster,
+            },
         )?;
 
-        world.get_entity_mut(source).or_broken()?.insert(
-            InitialReachability::new(is_reachable)
-        );
+        world
+            .get_entity_mut(source)
+            .or_broken()?
+            .insert(InitialReachability::new(is_reachable));
     }
 
     Ok(())
@@ -387,18 +453,19 @@ fn find_circular_collects(
             continue;
         }
 
-        for node_j in &nodes[i+1..] {
+        for node_j in &nodes[i + 1..] {
             if world.get::<CollectMarker>(*node_j).is_none() {
                 continue;
             }
 
-            if is_downstream_of(*node_i, *node_j, world) && is_downstream_of(*node_j, *node_i, world) {
+            if is_downstream_of(*node_i, *node_j, world)
+                && is_downstream_of(*node_j, *node_i, world)
+            {
                 // Both nodes are downstream of each other, which means they
                 // exist in a cycle. Both are collect operations, so these are
                 // circular connect operations, which are not allowed.
                 conflicts.push([*node_i, *node_j]);
             }
-
         }
     }
 
@@ -406,9 +473,16 @@ fn find_circular_collects(
 }
 
 fn begin_scope_impl<Request>(
-    Input { session: parent_session, data }: Input<Request>,
+    Input {
+        session: parent_session,
+        data,
+    }: Input<Request>,
     scoped_session: Entity,
-    OperationRequest { source, world, roster }: OperationRequest,
+    OperationRequest {
+        source,
+        world,
+        roster,
+    }: OperationRequest,
 ) -> OperationResult
 where
     Request: 'static + Send + Sync,
@@ -418,12 +492,14 @@ where
 
     source_mut
         .get_mut::<ScopedSessionStorage>()
-        .or_broken()?.0
+        .or_broken()?
+        .0
         .push(ScopedSession::ongoing(parent_session, scoped_session));
 
-    world.get_entity_mut(enter_scope).or_broken()?.give_input(
-        scoped_session, data, roster,
-    )?;
+    world
+        .get_entity_mut(enter_scope)
+        .or_broken()?
+        .give_input(scoped_session, data, roster)?;
 
     Ok(())
 }
@@ -440,14 +516,13 @@ where
         exit_scope: Option<Entity>,
         commands: &mut Commands,
     ) -> ScopeEndpoints {
-        let enter_scope = commands.spawn((
-            EntryForScope(scope_id),
-            UnusedTarget,
-        )).id();
+        let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
 
         let terminal = commands.spawn(()).set_parent(scope_id).id();
-        let finish_scope_cancel = commands.spawn(FinishCleanupForScope(scope_id))
-            .set_parent(scope_id).id();
+        let finish_scope_cancel = commands
+            .spawn(FinishCleanupForScope(scope_id))
+            .set_parent(scope_id)
+            .id();
 
         let scope = OperateScope::<Request, Response, Streams> {
             enter_scope,
@@ -487,9 +562,15 @@ where
 
     fn receive_cancel(
         OperationCancel {
-            cancel: Cancel { origin: _origin, target: source, session, cancellation },
+            cancel:
+                Cancel {
+                    origin: _origin,
+                    target: source,
+                    session,
+                    cancellation,
+                },
             world,
-            roster
+            roster,
         }: OperationCancel,
     ) -> OperationResult {
         if let Some(session) = session {
@@ -499,19 +580,22 @@ where
 
         // We need to cancel all sessions. This is usually because a workflow
         // is fundamentally broken.
-        let all_scoped_sessions: SmallVec<[Entity; 16]> = world.get::<ScopedSessionStorage>(source)
-            .or_broken()?.0
+        let all_scoped_sessions: SmallVec<[Entity; 16]> = world
+            .get::<ScopedSessionStorage>(source)
+            .or_broken()?
+            .0
             .iter()
             .map(|p| p.scoped_session)
             .collect();
 
         for scoped_session in all_scoped_sessions {
-            if let Err(error) = Self::cancel_one(
-                scoped_session, source, cancellation.clone(), world, roster
-            ) {
+            if let Err(error) =
+                Self::cancel_one(scoped_session, source, cancellation.clone(), world, roster)
+            {
                 world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .operations.push(error);
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .operations
+                    .push(error);
             }
         }
 
@@ -544,25 +628,50 @@ where
             })
             .collect();
 
-        let cleanup = Cleanup { cleaner: source, node: source, session, cleanup_id: session };
+        let cleanup = Cleanup {
+            cleaner: source,
+            node: source,
+            session,
+            cleanup_id: session,
+        };
         cleanup_entire_scope(
-            source, cleanup, FinishStatus::Cancelled(cancellation),
-            relevant_scoped_sessions, world, roster,
+            source,
+            cleanup,
+            FinishStatus::Cancelled(cancellation),
+            relevant_scoped_sessions,
+            world,
+            roster,
         )
     }
 
     /// Check if the terminal node of the scope can be reached. If not, cancel
     /// the scope immediately.
     fn validate_scope_reachability(
-        ValidationRequest { source, origin, session, world, roster }: ValidationRequest,
+        ValidationRequest {
+            source,
+            origin,
+            session,
+            world,
+            roster,
+        }: ValidationRequest,
     ) -> ReachabilityResult {
-        let nodes = world.get::<ScopeContents>(source).or_broken()?.nodes().clone();
+        let nodes = world
+            .get::<ScopeContents>(source)
+            .or_broken()?
+            .nodes()
+            .clone();
         for node in nodes.iter() {
             let Some(disposal_listener) = world.get::<DisposalListener>(*node) else {
                 continue;
             };
             let f = disposal_listener.0;
-            f(DisposalUpdate { source: *node, origin, session, world, roster })?;
+            f(DisposalUpdate {
+                source: *node,
+                origin,
+                session,
+                world,
+                roster,
+            })?;
         }
 
         let scoped_session = session;
@@ -576,7 +685,8 @@ where
         // The terminal node cannot be reached so we should cancel this scope.
         let mut disposals = Vec::new();
         for node in nodes.iter() {
-            if let Some(node_disposals) = world.get_entity(*node)
+            if let Some(node_disposals) = world
+                .get_entity(*node)
                 .or_broken()?
                 .get_disposals(scoped_session)
             {
@@ -586,7 +696,8 @@ where
 
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let mut sessions = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
-        let pair = sessions.0
+        let pair = sessions
+            .0
             .iter_mut()
             .find(|pair| pair.scoped_session == scoped_session)
             .or_not_ready()?;
@@ -595,7 +706,8 @@ where
             scope: source,
             session: pair.parent_session,
             disposals,
-        }.into();
+        }
+        .into();
         if pair.status.to_cancelled() {
             let cleanup = Cleanup {
                 cleaner: source,
@@ -604,8 +716,12 @@ where
                 cleanup_id: scoped_session,
             };
             cleanup_entire_scope(
-                source, cleanup, FinishStatus::Cancelled(cancellation),
-                SmallVec::from_iter([scoped_session]), world, roster,
+                source,
+                cleanup,
+                FinishStatus::Cancelled(cancellation),
+                SmallVec::from_iter([scoped_session]),
+                world,
+                roster,
             )?;
         }
 
@@ -613,19 +729,34 @@ where
     }
 
     fn begin_cleanup_workflows(
-        FinalizeCleanupRequest { cleanup, world, roster }: FinalizeCleanupRequest
+        FinalizeCleanupRequest {
+            cleanup,
+            world,
+            roster,
+        }: FinalizeCleanupRequest,
     ) -> OperationResult {
         let scope = cleanup.cleaner;
         let scoped_session = cleanup.session;
         let mut scope_mut = world.get_entity_mut(scope).or_broken()?;
-        scope_mut.get_mut::<ScopedSessionStorage>().or_broken()?.0
+        scope_mut
+            .get_mut::<ScopedSessionStorage>()
+            .or_broken()?
+            .0
             .retain(|p| p.scoped_session != scoped_session);
 
-        let finish_cleanup = scope_mut.get::<FinishCleanupWorkflowStorage>().or_broken()?.0;
-        let begin_cleanup_workflows = scope_mut.get::<BeginCleanupWorkflowStorage>().or_broken()?.0.clone();
+        let finish_cleanup = scope_mut
+            .get::<FinishCleanupWorkflowStorage>()
+            .or_broken()?
+            .0;
+        let begin_cleanup_workflows = scope_mut
+            .get::<BeginCleanupWorkflowStorage>()
+            .or_broken()?
+            .0
+            .clone();
         let mut finish_cleanup_workflow_mut = world.get_entity_mut(finish_cleanup).or_broken()?;
         let mut awaiting_storage = finish_cleanup_workflow_mut
-            .get_mut::<AwaitingCleanupStorage>().or_broken()?;
+            .get_mut::<AwaitingCleanupStorage>()
+            .or_broken()?;
         let awaiting = awaiting_storage.get(scoped_session).or_broken()?;
         awaiting.cleanup_workflow_sessions = Some(Default::default());
 
@@ -638,15 +769,13 @@ where
             // use this session as input despite not being active because we are
             // passing it to an operation that will only use it to begin a
             // cleanup workflow.
-            finish_cleanup_workflow_mut.sneak_input(
-                scoped_session, CheckAwaitingSession, false
-            )?;
+            finish_cleanup_workflow_mut.sneak_input(scoped_session, CheckAwaitingSession, false)?;
             roster.queue(finish_cleanup);
         }
 
         for begin in begin_cleanup_workflows {
-            let run_this_workflow = (is_terminated && begin.on_terminate)
-                || (!is_terminated && begin.on_cancelled);
+            let run_this_workflow =
+                (is_terminated && begin.on_terminate) || (!is_terminated && begin.on_cancelled);
 
             if !run_this_workflow {
                 continue;
@@ -658,10 +787,16 @@ where
             unsafe {
                 // INVARIANT: We can use sneak_input here because we execute the
                 // recipient node immediately after giving the input.
-                world.get_entity_mut(begin.source).or_broken()?
-                .sneak_input(scoped_session, (), false)?;
+                world
+                    .get_entity_mut(begin.source)
+                    .or_broken()?
+                    .sneak_input(scoped_session, (), false)?;
             }
-            execute_operation(OperationRequest { source: begin.source, world, roster });
+            execute_operation(OperationRequest {
+                source: begin.source,
+                world,
+                roster,
+            });
         }
 
         Ok(())
@@ -722,7 +857,10 @@ pub(crate) struct Terminate<T> {
 
 impl<T> Terminate<T> {
     pub(crate) fn new(scope: Entity) -> Self {
-        Self { scope, _ignore: Default::default() }
+        Self {
+            scope,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -735,16 +873,32 @@ fn cleanup_entire_scope(
     roster: &mut OperationRoster,
 ) -> OperationResult {
     let scope_ref = world.get_entity(scope).or_broken()?;
-    let nodes = scope_ref.get::<ScopeContents>().or_broken()?.nodes().clone();
+    let nodes = scope_ref
+        .get::<ScopeContents>()
+        .or_broken()?
+        .nodes()
+        .clone();
     let finish_cleanup_workflow = scope_ref
-        .get::<FinishCleanupWorkflowStorage>().or_broken()?.0;
+        .get::<FinishCleanupWorkflowStorage>()
+        .or_broken()?
+        .0;
 
     for scoped_session in relevant_scoped_sessions {
-        let parent_session = world.get::<ParentSession>(scoped_session).or_broken()?.get();
-        world.get_mut::<AwaitingCleanupStorage>(finish_cleanup_workflow).or_broken()?.0
+        let parent_session = world
+            .get::<ParentSession>(scoped_session)
+            .or_broken()?
+            .get();
+        world
+            .get_mut::<AwaitingCleanupStorage>(finish_cleanup_workflow)
+            .or_broken()?
+            .0
             .push(AwaitingCleanup::new(
                 scoped_session,
-                CleanupInfo { parent_session, cleanup, status: status.clone() },
+                CleanupInfo {
+                    parent_session,
+                    cleanup,
+                    status: status.clone(),
+                },
             ));
 
         if nodes.is_empty() {
@@ -758,11 +912,21 @@ fn cleanup_entire_scope(
                 cleanup_id: cleanup.cleanup_id,
             });
         } else {
-            world.get_mut::<CleanupContents>(scope).or_broken()?
+            world
+                .get_mut::<CleanupContents>(scope)
+                .or_broken()?
                 .add_cleanup(cleanup.cleanup_id, nodes.clone());
 
             for node in nodes.iter() {
-                OperationCleanup::new(scope, *node, scoped_session, cleanup.cleanup_id, world, roster).clean();
+                OperationCleanup::new(
+                    scope,
+                    *node,
+                    scoped_session,
+                    cleanup.cleanup_id,
+                    world,
+                    roster,
+                )
+                .clean();
             }
         }
 
@@ -774,7 +938,7 @@ fn cleanup_entire_scope(
 
 impl<T> Operation for Terminate<T>
 where
-    T: 'static + Send + Sync
+    T: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
@@ -787,10 +951,17 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
+        let Input {
+            session: scoped_session,
+            data,
+        } = source_mut.take_input::<T>()?;
 
         let mut staging = source_mut.get_mut::<Staging<T>>().or_broken()?;
         match staging.0.entry(scoped_session) {
@@ -806,7 +977,8 @@ where
 
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
         let mut pairs = world.get_mut::<ScopedSessionStorage>(scope).or_broken()?;
-        let pair = pairs.0
+        let pair = pairs
+            .0
             .iter_mut()
             .find(|pair| pair.scoped_session == scoped_session)
             .or_broken()?;
@@ -824,8 +996,12 @@ where
             session: scoped_session,
         };
         cleanup_entire_scope(
-            scope, cleanup, FinishStatus::Terminated,
-            SmallVec::from_iter([scoped_session]), world, roster,
+            scope,
+            cleanup,
+            FinishStatus::Terminated,
+            SmallVec::from_iter([scoped_session]),
+            world,
+            roster,
         )
     }
 
@@ -841,7 +1017,10 @@ where
             return Ok(true);
         }
 
-        let staging = reachability.world.get::<Staging<T>>(reachability.source).or_broken()?;
+        let staging = reachability
+            .world
+            .get::<Staging<T>>(reachability.source)
+            .or_broken()?;
         if staging.0.contains_key(&reachability.session) {
             return Ok(true);
         }
@@ -865,7 +1044,6 @@ impl<T> std::fmt::Debug for Staging<T> {
         f.debug_set().entries(self.0.keys()).finish()
     }
 }
-
 
 /// The scope that the node exists inside of.
 #[derive(Component, Clone, Copy)]
@@ -932,7 +1110,13 @@ impl<B> BeginCleanupWorkflow<B> {
         on_terminate: bool,
         on_cancelled: bool,
     ) -> Self {
-        Self { from_scope, buffer, target, on_terminate, on_cancelled }
+        Self {
+            from_scope,
+            buffer,
+            target,
+            on_terminate,
+            on_cancelled,
+        }
     }
 }
 
@@ -942,7 +1126,9 @@ where
     B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -952,9 +1138,13 @@ where
             InputBundle::<()>::new(),
         ));
 
-        world.get_entity_mut(self.from_scope).or_broken()?
-            .get_mut::<BeginCleanupWorkflowStorage>().or_broken()?.0
-            .push(CleanupWorkflow{
+        world
+            .get_entity_mut(self.from_scope)
+            .or_broken()?
+            .get_mut::<BeginCleanupWorkflowStorage>()
+            .or_broken()?
+            .0
+            .push(CleanupWorkflow {
                 source,
                 on_terminate: self.on_terminate,
                 on_cancelled: self.on_cancelled,
@@ -964,32 +1154,49 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session: scoped_session, .. } = source_mut.take_input::<()>()?;
-        let buffers = source_mut.get::<CleanupInputBufferStorage<B>>().or_broken()?;
+        let Input {
+            session: scoped_session,
+            ..
+        } = source_mut.take_input::<()>()?;
+        let buffers = source_mut
+            .get::<CleanupInputBufferStorage<B>>()
+            .or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let from_scope = source_mut.get::<CleanupForScope>().or_broken()?.0;
 
-        let key_builder = BufferKeyBuilder::without_tracking(
-            from_scope, scoped_session, source
-        );
+        let key_builder = BufferKeyBuilder::without_tracking(from_scope, scoped_session, source);
 
         let keys = buffers.0.create_key(&key_builder);
 
-        let cancellation_session = world.spawn((
-            ParentSession(scoped_session),
-            SessionStatus::Active,
-        )).id();
-        world.get_entity_mut(target).or_broken()?
+        let cancellation_session = world
+            .spawn((ParentSession(scoped_session), SessionStatus::Active))
+            .id();
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(cancellation_session, keys, roster)?;
 
-        let finish_cleanup = world.get::<FinishCleanupWorkflowStorage>(from_scope).or_broken()?.0;
-        world.get_entity_mut(finish_cleanup).or_broken()?
-            .get_mut::<AwaitingCleanupStorage>().or_broken()?
-            .get(scoped_session).or_broken()?
-            .cleanup_workflow_sessions.as_mut().or_broken()?
+        let finish_cleanup = world
+            .get::<FinishCleanupWorkflowStorage>(from_scope)
+            .or_broken()?
+            .0;
+        world
+            .get_entity_mut(finish_cleanup)
+            .or_broken()?
+            .get_mut::<AwaitingCleanupStorage>()
+            .or_broken()?
+            .get(scoped_session)
+            .or_broken()?
+            .cleanup_workflow_sessions
+            .as_mut()
+            .or_broken()?
             .push(cancellation_session);
 
         Ok(())
@@ -1013,7 +1220,10 @@ pub(crate) struct FinishCleanup<T> {
 
 impl<T> FinishCleanup<T> {
     fn new(from_scope: Entity) -> Self {
-        Self { from_scope, _ignore: Default::default() }
+        Self {
+            from_scope,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -1030,27 +1240,47 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        if let Some(Input { session: new_scoped_session, .. }) = source_mut.try_take_input::<CheckAwaitingSession>()? {
+        if let Some(Input {
+            session: new_scoped_session,
+            ..
+        }) = source_mut.try_take_input::<CheckAwaitingSession>()?
+        {
             let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
-            if let Some((index, a)) = awaiting.0.iter_mut().enumerate().find(
-                |(_, a)| a.scoped_session == new_scoped_session)
+            if let Some((index, a)) = awaiting
+                .0
+                .iter_mut()
+                .enumerate()
+                .find(|(_, a)| a.scoped_session == new_scoped_session)
             {
-                if a.cleanup_workflow_sessions.as_ref().is_some_and(|s| s.is_empty()) {
+                if a.cleanup_workflow_sessions
+                    .as_ref()
+                    .is_some_and(|s| s.is_empty())
+                {
                     // No cancellation sessions were started for this scoped
                     // session so we can immediately clean it up.
                     Self::finalize_scoped_session(
                         index,
-                        OperationRequest { source, world, roster },
+                        OperationRequest {
+                            source,
+                            world,
+                            roster,
+                        },
                     )?;
                 }
             }
-        } else if let Some(Input { session: cancellation_session, .. }) = source_mut.try_take_input::<()>()? {
-            Self::deduct_finished_cleanup(
-                source, cancellation_session, world, roster, None,
-            )?;
+        } else if let Some(Input {
+            session: cancellation_session,
+            ..
+        }) = source_mut.try_take_input::<()>()?
+        {
+            Self::deduct_finished_cleanup(source, cancellation_session, world, roster, None)?;
         }
 
         Ok(())
@@ -1072,9 +1302,15 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
 impl<T: 'static + Send + Sync> FinishCleanup<T> {
     fn receive_cancel(
         OperationCancel {
-            cancel: Cancel { origin: _origin, target: source, session, cancellation },
+            cancel:
+                Cancel {
+                    origin: _origin,
+                    target: source,
+                    session,
+                    cancellation,
+                },
             world,
-            roster
+            roster,
         }: OperationCancel,
     ) -> OperationResult {
         if let Some(cancellation_session) = session {
@@ -1082,14 +1318,20 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             // cancellation signal for a FinishCleanup always comes from a child
             // cancellation session, never from an outside source.
             return Self::deduct_finished_cleanup(
-                source, cancellation_session, world, roster, Some(cancellation),
+                source,
+                cancellation_session,
+                world,
+                roster,
+                Some(cancellation),
             );
         }
 
         // All cleanup workflows need to be wiped out. This usually implies
         // that some workflow has broken entities.
         let cancellation_sessions: SmallVec<[Entity; 16]> = world
-            .get::<AwaitingCleanupStorage>(source).or_broken()?.0
+            .get::<AwaitingCleanupStorage>(source)
+            .or_broken()?
+            .0
             .iter()
             .flat_map(|a| a.cleanup_workflow_sessions.iter().flat_map(|w| w.iter()))
             .copied()
@@ -1100,11 +1342,16 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             // This is a pretty extreme edge case so it would be tricky to wind
             // this down correctly.
             if let Err(error) = Self::deduct_finished_cleanup(
-                source, cancellation_session, world, roster, Some(cancellation.clone())
+                source,
+                cancellation_session,
+                world,
+                roster,
+                Some(cancellation.clone()),
             ) {
                 world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
-                .operations.push(error);
+                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .operations
+                    .push(error);
             }
         }
 
@@ -1120,11 +1367,12 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
-        if let Some((index, a)) = awaiting.0.iter_mut().enumerate().find(
-            |(_, a)| a.cleanup_workflow_sessions.iter().find(
-                |w| w.iter().find(|s| **s == cancellation_session).is_some()
-            ).is_some()
-        ) {
+        if let Some((index, a)) = awaiting.0.iter_mut().enumerate().find(|(_, a)| {
+            a.cleanup_workflow_sessions
+                .iter()
+                .find(|w| w.iter().find(|s| **s == cancellation_session).is_some())
+                .is_some()
+        }) {
             if let Some(inner_cancellation) = inner_cancellation {
                 match &mut a.info.status {
                     FinishStatus::Cancelled(cancellation) => {
@@ -1149,7 +1397,11 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
                     // finished so we can clean it up now.
                     Self::finalize_scoped_session(
                         index,
-                        OperationRequest { source, world, roster }
+                        OperationRequest {
+                            source,
+                            world,
+                            roster,
+                        },
                     )?;
                 }
             }
@@ -1159,7 +1411,11 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
 
     fn finalize_scoped_session(
         index: usize,
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let scope = source_mut.get::<FinishCleanupForScope>().or_broken()?.0;
@@ -1193,7 +1449,11 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
         let mut cleaning_finished = true;
         for a in &source_mut.get::<AwaitingCleanupStorage>().or_broken()?.0 {
             if a.info.cleanup.cleanup_id == cleanup_id {
-                if !a.cleanup_workflow_sessions.as_ref().is_some_and(|s| s.is_empty()) {
+                if !a
+                    .cleanup_workflow_sessions
+                    .as_ref()
+                    .is_some_and(|s| s.is_empty())
+                {
                     cleaning_finished = false;
                 }
 
@@ -1213,9 +1473,12 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             let scope = source_mut.get::<CleanupForScope>().or_broken()?.0;
             let scope_ref = world.get_entity(scope).or_broken()?;
             let pairs = scope_ref.get::<ScopedSessionStorage>().or_broken()?;
-            if pairs.0.iter().find(
-                |pair| pair.parent_session == parent_session
-            ).is_some() {
+            if pairs
+                .0
+                .iter()
+                .find(|pair| pair.parent_session == parent_session)
+                .is_some()
+            {
                 cleaning_finished = false;
             }
         }
@@ -1224,39 +1487,47 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             // The cleaning is finished so we can purge all memory of the
             // parent session and then notify the parent scope that it's
             // clean.
-            let mut awaiting = world.get_mut::<AwaitingCleanupStorage>(source).or_broken()?;
-            awaiting.0.retain(|p| p.info.parent_session != parent_session);
+            let mut awaiting = world
+                .get_mut::<AwaitingCleanupStorage>(source)
+                .or_broken()?;
+            awaiting
+                .0
+                .retain(|p| p.info.parent_session != parent_session);
             cleanup.notify_cleaned(world, roster)?;
         }
 
         let mut scope_mut = world.get_entity_mut(scope).or_broken()?;
         let terminal = scope_mut.get::<TerminalStorage>().or_broken()?.0;
-        let (target, blocker) = scope_mut.get_mut::<ExitTargetStorage>()
+        let (target, blocker) = scope_mut
+            .get_mut::<ExitTargetStorage>()
             .and_then(|mut storage| storage.map.remove(&scoped_session))
             .map(|exit| (exit.target, exit.blocker))
             .or_else(|| {
                 scope_mut
-                .get::<SingleTargetStorage>()
-                .map(|target| (target.get(), None))
+                    .get::<SingleTargetStorage>()
+                    .map(|target| (target.get(), None))
             })
             .or_broken()?;
 
         if terminating {
-            let mut staging = world
-                .get_mut::<Staging<T>>(terminal).or_broken()?;
+            let mut staging = world.get_mut::<Staging<T>>(terminal).or_broken()?;
 
-            let response = staging.0
-                .remove(&scoped_session).or_broken()?;
+            let response = staging.0.remove(&scoped_session).or_broken()?;
 
             world.get_entity_mut(target).or_broken()?.give_input(
-                parent_session, response, roster,
+                parent_session,
+                response,
+                roster,
             )?;
         } else {
             // Make certain there is nothing related to the scoped session
             // lingering in the terminal node.
             let mut terminal_mut = world.get_entity_mut(terminal).or_broken()?;
             terminal_mut.cleanup_inputs::<T>(scoped_session);
-            terminal_mut.get_mut::<Staging<T>>().or_broken()?.0
+            terminal_mut
+                .get_mut::<Staging<T>>()
+                .or_broken()?
+                .0
                 .remove(&scoped_session);
         }
 
@@ -1277,12 +1548,12 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
     }
 }
 
-fn clear_scope_buffers(
-    scope: Entity,
-    session: Entity,
-    world: &mut World,
-) -> OperationResult {
-    let nodes = world.get::<ScopeContents>(scope).or_broken()?.nodes().clone();
+fn clear_scope_buffers(scope: Entity, session: Entity, world: &mut World) -> OperationResult {
+    let nodes = world
+        .get::<ScopeContents>(scope)
+        .or_broken()?
+        .nodes()
+        .clone();
     for node in nodes {
         if let Some(clear_buffer) = world.get::<ClearBufferFn>(node) {
             let clear_buffer = clear_buffer.0;
@@ -1305,7 +1576,9 @@ struct AwaitingCleanupStorage(SmallVec<[AwaitingCleanup; 8]>);
 
 impl AwaitingCleanupStorage {
     fn get(&mut self, scoped_session: Entity) -> Option<&mut AwaitingCleanup> {
-        self.0.iter_mut().find(|a| a.scoped_session == scoped_session)
+        self.0
+            .iter_mut()
+            .find(|a| a.scoped_session == scoped_session)
     }
 }
 
@@ -1353,13 +1626,18 @@ pub(crate) struct RedirectScopeStream<T: Stream> {
 
 impl<T: Stream> RedirectScopeStream<T> {
     pub(crate) fn new(target: Entity) -> Self {
-        Self { target, _ignore: Default::default() }
+        Self {
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
 impl<T: Stream> Operation for RedirectScopeStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -1370,7 +1648,11 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
 
@@ -1378,14 +1660,20 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
         // there is no target listening, because streams may have custom sending
         // behavior
         let target = source_mut.get::<SingleTargetStorage>().map(|t| t.get());
-        let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
-        let parent_session = world.get::<ParentSession>(scoped_session).or_broken()?.get();
+        let Input {
+            session: scoped_session,
+            data,
+        } = source_mut.take_input::<T>()?;
+        let parent_session = world
+            .get::<ParentSession>(scoped_session)
+            .or_broken()?
+            .get();
         data.send(StreamRequest {
             source,
             session: parent_session,
             target,
             world,
-            roster
+            roster,
         })
     }
 
@@ -1416,26 +1704,36 @@ pub(crate) struct RedirectWorkflowStream<T: Stream> {
 
 impl<T: Stream> RedirectWorkflowStream<T> {
     pub(crate) fn new() -> Self {
-        Self { _ignore: Default::default() }
+        Self {
+            _ignore: Default::default(),
+        }
     }
 }
 
 impl<T: Stream> Operation for RedirectWorkflowStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert(
-            InputBundle::<T>::new(),
-        );
+        world.entity_mut(source).insert(InputBundle::<T>::new());
         Ok(())
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session: scoped_session, data } = source_mut.take_input::<T>()?;
+        let Input {
+            session: scoped_session,
+            data,
+        } = source_mut.take_input::<T>()?;
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
-        let exit = world.get::<ExitTargetStorage>(scope).or_broken()?
-            .map.get(&scoped_session)
+        let exit = world
+            .get::<ExitTargetStorage>(scope)
+            .or_broken()?
+            .map
+            .get(&scoped_session)
             // If the map does not have this session in it, that should simply
             // mean that the workflow has terminated, so we should discard this
             // stream data.
@@ -1446,7 +1744,8 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
         let parent_session = exit.parent_session;
 
         let stream_target_map = world.get::<StreamTargetMap>(exit_source).or_broken()?;
-        let stream_target = world.get::<StreamTargetStorage<T>>(exit_source)
+        let stream_target = world
+            .get::<StreamTargetStorage<T>>(exit_source)
             .map(|target| stream_target_map.get(target.get()))
             .flatten();
 

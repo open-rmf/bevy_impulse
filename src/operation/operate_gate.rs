@@ -18,10 +18,9 @@
 use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
-    OperationReachability, ReachabilityResult, OperationSetup, SingleInputStorage,
-    SingleTargetStorage, OrBroken, OperationCleanup, Disposal, Gate,
-    GateRequest, Buffered, emit_disposal,
+    emit_disposal, Buffered, Disposal, Gate, GateRequest, Input, InputBundle, ManageInput,
+    Operation, OperationCleanup, OperationReachability, OperationRequest, OperationResult,
+    OperationSetup, OrBroken, ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
 
 #[derive(Component)]
@@ -38,7 +37,11 @@ pub(crate) struct OperateDynamicGate<T, B> {
 
 impl<B, T> OperateDynamicGate<T, B> {
     pub(crate) fn new(buffers: B, target: Entity) -> Self {
-        Self { buffers, target, _ignore: Default::default() }
+        Self {
+            buffers,
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -48,7 +51,9 @@ where
     B: Buffered + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -67,19 +72,30 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: GateRequest { action, data } } = source_mut
-            .take_input::<GateRequest<T>>()?;
+        let Input {
+            session,
+            data: GateRequest { action, data },
+        } = source_mut.take_input::<GateRequest<T>>()?;
 
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
-        let buffers = source_mut.get::<BufferRelationStorage<B>>().or_broken()?
-            .0.clone();
+        let buffers = source_mut
+            .get::<BufferRelationStorage<B>>()
+            .or_broken()?
+            .0
+            .clone();
 
         buffers.gate_action(session, action, world, roster)?;
 
-        world.get_entity_mut(target).or_broken()?
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(session, data, roster)?;
 
         if action.is_closed() {
@@ -116,12 +132,13 @@ pub(crate) struct OperateStaticGate<T, B> {
 }
 
 impl<T, B> OperateStaticGate<T, B> {
-    pub(crate) fn new(
-        buffers: B,
-        target: Entity,
-        action: Gate,
-    ) -> Self {
-        Self { buffers, target, action, _ignore: Default::default() }
+    pub(crate) fn new(buffers: B, target: Entity, action: Gate) -> Self {
+        Self {
+            buffers,
+            target,
+            action,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -131,7 +148,9 @@ where
     T: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -145,19 +164,28 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
 
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let action = source_mut.get::<GateActionStorage>().or_broken()?.0;
-        let buffers = source_mut.get::<BufferRelationStorage<B>>().or_broken()?
-            .0.clone();
+        let buffers = source_mut
+            .get::<BufferRelationStorage<B>>()
+            .or_broken()?
+            .0
+            .clone();
 
         buffers.gate_action(session, action, world, roster)?;
 
-        world.get_entity_mut(target).or_broken()?
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(session, data, roster)?;
 
         if action.is_closed() {

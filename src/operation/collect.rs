@@ -15,18 +15,17 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component, World};
+use bevy_ecs::prelude::{Component, Entity, World};
 
 use std::collections::HashMap;
 
 use smallvec::SmallVec;
 
 use crate::{
-    Operation, Input, ManageInput, InputBundle, OperationRequest, OperationResult,
-    OperationReachability, ReachabilityResult, OperationSetup, Disposal,
-    SingleInputStorage, SingleTargetStorage, OrBroken, OperationCleanup,
-    DisposalListener, DisposalUpdate, OperationRoster,
-    emit_disposal, is_downstream_of,
+    emit_disposal, is_downstream_of, Disposal, DisposalListener, DisposalUpdate, Input,
+    InputBundle, ManageInput, Operation, OperationCleanup, OperationReachability, OperationRequest,
+    OperationResult, OperationRoster, OperationSetup, OrBroken, ReachabilityResult,
+    SingleInputStorage, SingleTargetStorage,
 };
 
 pub(crate) struct Collect<T, const N: usize> {
@@ -38,7 +37,12 @@ pub(crate) struct Collect<T, const N: usize> {
 
 impl<T, const N: usize> Collect<T, N> {
     pub(crate) fn new(target: Entity, min: usize, max: Option<usize>) -> Self {
-        Self { target, min, max, _ignore: Default::default() }
+        Self {
+            target,
+            min,
+            max,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -50,7 +54,9 @@ where
     T: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         if let Some(max) = self.max {
@@ -70,12 +76,18 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
-        let mut collection = source_mut.get_mut::<CollectionStorage<T, N>>().or_broken()?;
+        let mut collection = source_mut
+            .get_mut::<CollectionStorage<T, N>>()
+            .or_broken()?;
         let min = collection.min;
         let max = collection.max;
         let progress = collection.map.entry(session).or_default();
@@ -85,7 +97,9 @@ where
         if max.is_some_and(|max| len >= max) {
             // We have obtained enough elements to send off the collection.
             let output: SmallVec<[T; N]> = progress.drain(..).collect();
-            world.get_entity_mut(target).or_broken()?
+            world
+                .get_entity_mut(target)
+                .or_broken()?
                 .give_input(session, output, roster)?;
             return Ok(());
         }
@@ -95,9 +109,7 @@ where
         if !is_upstream_active::<T>(session, source, None, world)? {
             // This node is not reachable, so we need to either give an output
             // or emit a disposal.
-            on_unreachable_collection::<T, N>(
-                source, session, target, min, len, world, roster,
-            )?;
+            on_unreachable_collection::<T, N>(source, session, target, min, len, world, roster)?;
         }
 
         // The collection node is still reachable so we can just wait until the
@@ -108,8 +120,12 @@ where
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         clean.cleanup_inputs::<T>()?;
         clean.cleanup_disposals()?;
-        clean.world.get_mut::<CollectionStorage<T, N>>(clean.source).or_broken()?
-            .map.remove(&clean.cleanup.session);
+        clean
+            .world
+            .get_mut::<CollectionStorage<T, N>>(clean.source)
+            .or_broken()?
+            .map
+            .remove(&clean.cleanup.session);
         clean.notify_cleaned()
     }
 
@@ -124,8 +140,10 @@ where
         // triggered by a disposal, then it may get called before THIS collect
         // operation has processed the disposal. In that case we need to account
         // for whether the current contents will be sent off due to a disposal.
-        let collection = reachability.world()
-            .get::<CollectionStorage<T, N>>(source).or_broken()?;
+        let collection = reachability
+            .world()
+            .get::<CollectionStorage<T, N>>(source)
+            .or_broken()?;
 
         if let Some(progress) = collection.map.get(&session) {
             if collection.min <= progress.len() {
@@ -156,12 +174,22 @@ struct CollectionStorage<T, const N: usize> {
 
 impl<T, const N: usize> CollectionStorage<T, N> {
     fn new(min: usize, max: Option<usize>) -> Self {
-        Self { map: Default::default(), min, max }
+        Self {
+            map: Default::default(),
+            min,
+            max,
+        }
     }
 }
 
 fn collection_disposal_listener<T, const N: usize>(
-    DisposalUpdate { source, origin, session, world, roster }: DisposalUpdate,
+    DisposalUpdate {
+        source,
+        origin,
+        session,
+        world,
+        roster,
+    }: DisposalUpdate,
 ) -> OperationResult
 where
     T: 'static + Send + Sync,
@@ -201,7 +229,11 @@ fn is_upstream_active<T: 'static + Send + Sync>(
     let mut visited = HashMap::new();
     visited.insert(source, false);
     let mut r = OperationReachability {
-        source, session, disposed, world, visited: &mut visited
+        source,
+        session,
+        disposed,
+        world,
+        visited: &mut visited,
     };
 
     if r.has_input::<T>()? {
@@ -234,11 +266,19 @@ fn on_unreachable_collection<T: 'static + Send + Sync, const N: usize>(
 
     // The size of the collection is not smaller than the minimum length
     // which means we can go ahead and send it.
-    let mut collection = world.get_mut::<CollectionStorage<T, N>>(source).or_broken()?;
-    let output: SmallVec<[T; N]> = collection.map.entry(session).or_default()
-        .drain(..).collect();
+    let mut collection = world
+        .get_mut::<CollectionStorage<T, N>>(source)
+        .or_broken()?;
+    let output: SmallVec<[T; N]> = collection
+        .map
+        .entry(session)
+        .or_default()
+        .drain(..)
+        .collect();
 
-    world.get_entity_mut(target).or_broken()?
+    world
+        .get_entity_mut(target)
+        .or_broken()?
         .give_input(session, output, roster)?;
     return Ok(());
 }

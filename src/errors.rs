@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_ecs::prelude::{Resource, Entity};
+use bevy_ecs::prelude::{Entity, Resource};
 
 use backtrace::Backtrace;
 
@@ -23,7 +23,7 @@ use anyhow::Error as Anyhow;
 
 use std::sync::Arc;
 
-use crate::{OperationError, Cancel, Disposal, Broken};
+use crate::{Broken, Cancel, Disposal, OperationError};
 
 /// This resource stores errors that have occurred that could not be handled
 /// internally or communicated to the user by any other means.
@@ -43,14 +43,14 @@ pub struct UnhandledErrors {
 impl UnhandledErrors {
     pub fn is_empty(&self) -> bool {
         self.setup.is_empty()
-        && self.cancellations.is_empty()
-        && self.operations.is_empty()
-        && self.disposals.is_empty()
-        && self.stop_tasks.is_empty()
-        && self.broken.is_empty()
-        && self.unused_targets.is_empty()
-        && self.connections.is_empty()
-        && self.miscellaneous.is_empty()
+            && self.cancellations.is_empty()
+            && self.operations.is_empty()
+            && self.disposals.is_empty()
+            && self.stop_tasks.is_empty()
+            && self.broken.is_empty()
+            && self.unused_targets.is_empty()
+            && self.connections.is_empty()
+            && self.miscellaneous.is_empty()
     }
 }
 
@@ -69,10 +69,7 @@ pub struct CancelFailure {
 }
 
 impl CancelFailure {
-    pub fn new(
-        error: OperationError,
-        cancel: Cancel,
-    ) -> Self {
+    pub fn new(error: OperationError, cancel: Cancel) -> Self {
         Self { error, cancel }
     }
 }
