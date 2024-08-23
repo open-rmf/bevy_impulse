@@ -25,5 +25,11 @@ jobs:
     - name: style
       run: cargo fmt --all --check
 
-    - name: minimal feature build
-      run: cargo check --no-default-features
+    - name: default features check
+      run: cargo check
+
+    - name: single_threaded_async check
+      run: cargo check --features single_threaded_async
+
+    - name: clippy
+      run: cargo clippy
