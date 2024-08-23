@@ -29,6 +29,7 @@ pub struct MapOnceDef<F>(F);
 
 /// Convert an [`FnOnce`] that takes in a [`BlockingMap`] or an [`AsyncMap`]
 /// into a recognized map type.
+#[allow(clippy::wrong_self_convention)]
 pub trait AsMapOnce<M> {
     type MapType;
     fn as_map_once(self) -> Self::MapType;

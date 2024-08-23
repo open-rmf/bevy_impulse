@@ -59,8 +59,7 @@ impl<T> InputStorage<T> {
     pub fn contains_session(&self, session: Entity) -> bool {
         self.reverse_queue
             .iter()
-            .find(|input| input.session == session)
-            .is_some()
+            .any(|input| input.session == session)
     }
 }
 
@@ -80,6 +79,12 @@ impl<T: 'static + Send + Sync> InputBundle<T> {
         Self {
             storage: Default::default(),
         }
+    }
+}
+
+impl<T: 'static + Send + Sync> Default for InputBundle<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -108,6 +113,13 @@ pub trait ManageInput {
     /// should not generally be used. It's only for special cases where we know
     /// the node will be manually run after giving this input. It's marked
     /// unsafe to bring attention to this requirement.
+    ///
+    /// # Safety
+    ///
+    /// After calling this function you must make sure to either add the target
+    /// operation to the queue or run the operation explicitly. Failing to do
+    /// one of these could mean that this input (or one that follows it) will
+    /// never be processed, which could cause a workflow to hang forever.
     unsafe fn sneak_input<T: 'static + Send + Sync>(
         &mut self,
         session: Entity,
@@ -284,7 +296,7 @@ impl<T: 'static + Send + Sync> Command for InputCommand<T> {
                 );
 
                 world
-                    .get_resource_or_insert_with(|| DeferredRoster::default())
+                    .get_resource_or_insert_with(DeferredRoster::default)
                     .queue(self.target);
             }
             None => {
@@ -300,7 +312,7 @@ impl<T: 'static + Send + Sync> Command for InputCommand<T> {
                 };
 
                 world
-                    .get_resource_or_insert_with(|| DeferredRoster::default())
+                    .get_resource_or_insert_with(DeferredRoster::default)
                     .cancel(cancel);
             }
         }

@@ -30,6 +30,7 @@ use crate::{Service, ServiceMarker, StreamFilter};
 /// and output are required to match. You can optionally specify a [`StreamFilter`]
 /// to indicate which streams you are interested in.
 #[derive(SystemParam)]
+#[allow(clippy::type_complexity)]
 pub struct ServiceDiscovery<'w, 's, Request, Response, Streams = (), Filter = ()>
 where
     Request: 'static + Send + Sync,
@@ -71,6 +72,7 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct IterServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
 where
     Request: 'static + Send + Sync,

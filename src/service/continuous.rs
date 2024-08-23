@@ -61,10 +61,7 @@ impl<Request, Response, Streams> ContinuousServiceKey<Request, Response, Streams
 
 impl<Request, Response, Streams> Clone for ContinuousServiceKey<Request, Response, Streams> {
     fn clone(&self) -> Self {
-        Self {
-            provider: self.provider,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -145,7 +142,7 @@ struct Delivered<Response> {
 
 impl<Response> DeliveredQueue<Response> {
     fn contains_key(&self, key: &usize) -> bool {
-        self.queue.iter().find(|d| d.index == *key).is_some()
+        self.queue.iter().any(|d| d.index == *key)
     }
 
     fn len(&self) -> usize {
@@ -296,8 +293,8 @@ where
             streams: Some(streams),
             provider: self.provider,
             request: item,
-            delivered: &mut self.delivered,
-            commands: &mut self.commands,
+            delivered: self.delivered,
+            commands: self.commands,
         })
     }
 
@@ -317,8 +314,8 @@ where
                 streams: Some(streams),
                 provider: self.provider,
                 request: item,
-                delivered: &mut self.delivered,
-                commands: &mut self.commands,
+                delivered: self.delivered,
+                commands: self.commands,
             });
         }
     }
@@ -349,8 +346,8 @@ where
                 streams: Some(streams),
                 provider: self.provider,
                 request: item,
-                delivered: &mut self.delivered,
-                commands: &mut self.commands,
+                delivered: self.delivered,
+                commands: self.commands,
             });
 
             output.push((index, u));
@@ -513,11 +510,7 @@ impl<Request> ContinuousQueueStorage<Request> {
             return Ok(false);
         };
 
-        Ok(queue
-            .inner
-            .iter()
-            .find(|order| order.session == session)
-            .is_some())
+        Ok(queue.inner.iter().any(|order| order.session == session))
     }
 
     fn cleanup(provider: Entity, session: Entity, world: &mut World) -> OperationResult
@@ -615,7 +608,7 @@ where
     Streams: StreamPack,
 {
     fn apply(self, world: &mut World) {
-        world.get_resource_or_insert_with(|| DeferredRoster::default());
+        world.get_resource_or_insert_with(DeferredRoster::default);
         world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
             let mut remove: SmallVec<[(usize, Entity); 16]> = SmallVec::new();
             for DeliverResponse {
@@ -628,10 +621,10 @@ where
             } in self.responses
             {
                 remove.push((index, provider));
-                let r = try_give_response(source, session, data, world, &mut *deferred);
+                let r = try_give_response(source, session, data, world, &mut deferred);
                 if let Err(OperationError::Broken(backtrace)) = r {
                     world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .get_resource_or_insert_with(UnhandledErrors::default)
                         .broken
                         .push(Broken {
                             node: provider,
@@ -665,10 +658,10 @@ where
             // valid.
             remove.sort_by(|(index_a, _), (index_b, _)| index_b.cmp(index_a));
             for (index, provider) in remove {
-                let r = try_retire_request::<Request>(provider, index, world, &mut *deferred);
+                let r = try_retire_request::<Request>(provider, index, world, &mut deferred);
                 if let Err(OperationError::Broken(backtrace)) = r {
                     world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .get_resource_or_insert_with(UnhandledErrors::default)
                         .broken
                         .push(Broken {
                             node: provider,
@@ -805,8 +798,7 @@ where
                     // Immediately queue up an unblocking because continuous services
                     // cancel immediately.
                     if let Some(unblock) = stopped_index
-                        .map(|i| queue.inner.remove(i).unblock)
-                        .flatten()
+                        .and_then(|i| queue.inner.remove(i).unblock)
                     {
                         let f = unblock.serve_next;
                         f(unblock, world, roster);
@@ -833,7 +825,7 @@ where
             }
         };
 
-        serve_continuous_request::<Request, Response, Streams>(
+        serve_continuous_request::<Request>(
             request,
             blocker,
             session,
@@ -852,7 +844,7 @@ where
     }
 }
 
-fn serve_continuous_request<Request, Response, Streams>(
+fn serve_continuous_request<Request>(
     request: Request,
     blocker: Option<Blocker>,
     session: Entity,
@@ -865,8 +857,6 @@ fn serve_continuous_request<Request, Response, Streams>(
 ) -> OperationResult
 where
     Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync,
-    Streams: StreamPack,
 {
     // All we have to do is move the request into the service's active queue
     let mut queue = world
@@ -921,7 +911,7 @@ fn serve_next_continuous_request<Request, Response, Streams>(
         };
         let target = target.get();
 
-        if serve_continuous_request::<Request, Response, Streams>(
+        if serve_continuous_request::<Request>(
             request,
             Some(blocker),
             session,
@@ -962,7 +952,7 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn into_system_config<'w>(self, entity_mut: &mut EntityWorldMut<'w>) -> SystemConfigs {
+    fn into_system_config(self, entity_mut: &mut EntityWorldMut) -> SystemConfigs {
         let provider = entity_mut
             .insert((
                 ContinuousQueueStorage::<Request>::new(),
@@ -995,12 +985,12 @@ where
 }
 
 /// Implementation for [`crate::AddContinuousServicesExt::spawn_event_streaming_service`]
-pub fn event_streaming_service<E: Event>(
+pub fn event_streaming_service<E>(
     In(ContinuousService { key }): ContinuousServiceInput<(), (), StreamOf<E>>,
     mut requests: ContinuousQuery<(), (), StreamOf<E>>,
     mut events: EventReader<E>,
 ) where
-    E: 'static + Send + Sync + Unpin + Clone,
+    E: Event + 'static + Send + Sync + Unpin + Clone,
 {
     let Some(mut requests) = requests.get_mut(&key) else {
         return;

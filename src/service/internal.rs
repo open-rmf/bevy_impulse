@@ -171,7 +171,7 @@ fn service_hook<Srv: ServiceTrait>(
             // Do nothing
         }
         Err(OperationError::Broken(backtrace)) => {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world.get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(
@@ -217,7 +217,7 @@ pub(crate) fn dispatch_service(
         instructions,
         operation: PendingOperationRequest { source },
     };
-    let mut service_queue = world.get_resource_or_insert_with(|| ServiceQueue::new());
+    let mut service_queue = world.get_resource_or_insert_with(ServiceQueue::new);
     service_queue.queue.push_back(pending);
     if service_queue.is_delivering {
         // Services are already being delivered, so to keep things simple we

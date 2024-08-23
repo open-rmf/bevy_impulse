@@ -60,14 +60,14 @@ where
     type Streams = Streams;
     type DefaultDeliver = ();
 
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands) {
         entity_commands.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
         ));
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
@@ -176,7 +176,7 @@ where
 
                     if let Err(OperationError::Broken(backtrace)) = result {
                         world
-                            .get_resource_or_insert_with(|| UnhandledErrors::default())
+                            .get_resource_or_insert_with(UnhandledErrors::default)
                             .stop_tasks
                             .push(StopTaskFailure {
                                 task: stop.task_id,
@@ -252,25 +252,23 @@ where
                 .0
                 .take()
                 .expect("Async service is missing while attempting to serve")
-        } else {
-            if let Some(uninit) =
-                provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>()
-            {
-                // We need to initialize the service
-                let mut service = uninit.0;
-                service.initialize(world);
+        } else if let Some(uninit) = provider_mut
+            .take::<UninitAsyncServiceStorage<Request, Streams, Task>>()
+        {
+            // We need to initialize the service
+            let mut service = uninit.0;
+            service.initialize(world);
 
-                // Re-obtain the provider since we needed to mutably borrow the world a moment ago
-                let mut provider_mut = world.entity_mut(provider);
-                provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
-                service
-            } else {
-                // The provider has had its service removed, so we treat this request as cancelled.
-                dispose_for_despawned_service(provider, world, roster);
-                // We've already issued the disposal, but we need to return an
-                // error so that serve_next_async_request continues iterating.
-                return Err(OperationError::NotReady);
-            }
+            // Re-obtain the provider since we needed to mutably borrow the world a moment ago
+            let mut provider_mut = world.entity_mut(provider);
+            provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
+            service
+        } else {
+            // The provider has had its service removed, so we treat this request as cancelled.
+            dispose_for_despawned_service(provider, world, roster);
+            // We've already issued the disposal, but we need to return an
+            // error so that serve_next_async_request continues iterating.
+            return Err(OperationError::NotReady);
         }
     } else {
         // If the provider has been despawned then we treat this request as cancelled.
@@ -281,7 +279,7 @@ where
     };
 
     let sender = world
-        .get_resource_or_insert_with(|| ChannelQueue::new())
+        .get_resource_or_insert_with(ChannelQueue::new)
         .sender
         .clone();
     let channel = Channel::new(source, session, sender.clone());
@@ -430,13 +428,13 @@ where
     type Streams = ();
     type DefaultDeliver = ();
 
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands) {
         peel_async
             .pipe(self.0)
             .insert_service_commands(entity_commands)
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut) {
         peel_async.pipe(self.0).insert_service_mut(entity_mut)
     }
 }

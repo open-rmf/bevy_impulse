@@ -65,7 +65,7 @@ impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
             world,
         }) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .setup
                 .push(SetupFailure {
                     broken_node: self.source,
@@ -106,7 +106,7 @@ fn perform_impulse<I: Impulsive>(
                 source_mut.emit_broken(backtrace, roster);
             } else {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .cancellations
                     .push(CancelFailure {
                         error: OperationError::Broken(Some(Backtrace::new())),
@@ -155,7 +155,7 @@ pub(crate) fn cancel_impulse(
             }
             Err(OperationError::Broken(backtrace)) => {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .cancellations
                     .push(CancelFailure {
                         error: OperationError::Broken(backtrace),
@@ -222,9 +222,9 @@ impl Drop for ImpulseLifecycle {
     }
 }
 
-pub(crate) fn add_lifecycle_dependency<'a>(source: Entity, target: Entity, world: &'a mut World) {
+pub(crate) fn add_lifecycle_dependency(source: Entity, target: Entity, world: &mut World) {
     let sender = world
-        .get_resource_or_insert_with(|| ImpulseLifecycleChannel::default())
+        .get_resource_or_insert_with(ImpulseLifecycleChannel::default)
         .sender
         .clone();
 
@@ -236,7 +236,7 @@ pub(crate) fn add_lifecycle_dependency<'a>(source: Entity, target: Entity, world
         // The target is already despawned
         if let Err(err) = sender.send(source) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(

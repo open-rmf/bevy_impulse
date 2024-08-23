@@ -31,7 +31,7 @@ pub struct BufferKeyBuilder {
 impl BufferKeyBuilder {
     pub(crate) fn build<T>(&self, buffer: Entity) -> BufferKey<T> {
         BufferKey {
-            buffer: buffer,
+            buffer,
             session: self.session,
             accessor: self.accessor,
             lifecycle: self.lifecycle.as_ref().map(|(sender, tracker)| {

@@ -33,7 +33,7 @@ pub trait SpawnWorkflow {
     /// Spawn a workflow.
     ///
     /// * `build` - A function that takes in a [`Scope`] and a [`Builder`] to
-    /// build the workflow
+    ///    build the workflow
     ///
     /// If you want any particular settings for your workflow, specify that with
     /// the return value of `build`. Returning nothing `()` will use default

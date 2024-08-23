@@ -65,21 +65,19 @@ where
     // to deliver then we will assign it later in this function.
     serial.delivering = None;
 
-    let Some(DeliveryOrder {
+    let DeliveryOrder {
         source,
         session,
         task_id,
         request,
         instructions,
-    }) = serial.queue.pop_front()
-    else {
-        return None;
-    };
+    } = serial.queue.pop_front()?;
+
     let blocker = Blocker {
         provider,
         source,
         session,
-        label: instructions.as_ref().map(|x| x.label.clone()),
+        label: instructions.as_ref().map(|x| x.label),
         serve_next,
     };
 
@@ -89,11 +87,11 @@ where
         task_id,
         instructions,
     });
-    return Some(Deliver {
+    Some(Deliver {
         request,
         task_id,
         blocker,
-    });
+    })
 }
 
 pub struct Deliver<Request> {
@@ -191,8 +189,7 @@ impl<Request> SerialDelivery<Request> {
     fn contains_session(&self, session: Entity) -> bool {
         self.queue
             .iter()
-            .find(|order| order.session == session)
-            .is_some()
+            .any(|order| order.session == session)
     }
     fn cleanup(&mut self, session: Entity) {
         self.queue.retain(|order| order.session != session);
@@ -224,8 +221,7 @@ impl<Request> ParallelDelivery<Request> {
     fn contains_session(&self, session: Entity) -> bool {
         self.labeled
             .values()
-            .find(|serial| serial.contains_session(session))
-            .is_some()
+            .any(|serial| serial.contains_session(session))
     }
     fn cleanup(&mut self, session: Entity) {
         for serial in self.labeled.values_mut() {
@@ -234,6 +230,7 @@ impl<Request> ParallelDelivery<Request> {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum DeliveryUpdate<Request> {
     /// The new request should be delivered immediately
     Immediate {
@@ -267,7 +264,7 @@ pub fn insert_new_order<Request>(
         Delivery::Serial(serial) => insert_serial_order(serial, order),
         Delivery::Parallel(parallel) => match &order.instructions {
             Some(instructions) => {
-                let label = instructions.label.clone();
+                let label = instructions.label;
                 insert_serial_order(parallel.labeled.entry(label).or_default(), order)
             }
             None => DeliveryUpdate::Immediate {

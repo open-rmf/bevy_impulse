@@ -280,5 +280,5 @@ fn on_unreachable_collection<T: 'static + Send + Sync, const N: usize>(
         .get_entity_mut(target)
         .or_broken()?
         .give_input(session, output, roster)?;
-    return Ok(());
+    Ok(())
 }

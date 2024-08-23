@@ -26,9 +26,10 @@ use crate::{
     AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferItem, BufferKeys, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
     GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
-    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output, ProvideOnce,
+    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output,
     Provider, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service,
-    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget, RequestOfMap, ResponseOfMap,
+    StreamsOfMap,
 };
 
 pub(crate) mod connect;
@@ -54,7 +55,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// Create a node for a provider. This will give access to an input slot, an
     /// output slots, and a pack of stream outputs which can all be connected to
     /// other nodes.
-    #[must_use]
     pub fn create_node<P: Provider>(
         &mut self,
         provider: P,
@@ -113,16 +113,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_map<M, F: AsMap<M>>(
         &mut self,
         f: F,
-    ) -> Node<
-        <F::MapType as ProvideOnce>::Request,
-        <F::MapType as ProvideOnce>::Response,
-        <F::MapType as ProvideOnce>::Streams,
-    >
+    ) -> Node<RequestOfMap<M, F>, ResponseOfMap<M, F>, StreamsOfMap<M, F>>
     where
         F::MapType: Provider,
-        <F::MapType as ProvideOnce>::Request: 'static + Send + Sync,
-        <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
-        <F::MapType as ProvideOnce>::Streams: StreamPack,
+        RequestOfMap<M, F>: 'static + Send + Sync,
+        ResponseOfMap<M, F>: 'static + Send + Sync,
+        StreamsOfMap<M, F>: StreamPack,
     {
         self.create_node(f.as_map())
     }
@@ -218,9 +214,9 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
     /// Create a node that clones its inputs and sends them off to any number of
     /// targets.
-    pub fn create_fork_clone<T: Clone>(&mut self) -> (InputSlot<T>, ForkCloneOutput<T>)
+    pub fn create_fork_clone<T>(&mut self) -> (InputSlot<T>, ForkCloneOutput<T>)
     where
-        T: 'static + Send + Sync,
+        T: Clone + 'static + Send + Sync,
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
@@ -269,7 +265,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         B::BufferType: 'static + Send + Sync,
         BufferKeys<B>: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self);
+        let buffers = buffers.into_buffer(self);
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
@@ -456,7 +452,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         );
 
         let begin_cancel = self.commands.spawn(()).set_parent(self.scope).id();
-        let buffers = from_buffers.as_buffer(self);
+        let buffers = from_buffers.into_buffer(self);
         buffers.verify_scope(self.scope);
         self.commands.add(AddOperation::new(
             None,
@@ -512,7 +508,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self);
+        let buffers = buffers.into_buffer(self);
         buffers.verify_scope(self.scope);
 
         let source = self.commands.spawn(()).id();
@@ -542,7 +538,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self);
+        let buffers = buffers.into_buffer(self);
         buffers.verify_scope(self.scope);
 
         let source = self.commands.spawn(()).id();
@@ -591,7 +587,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
     /// Borrow the commands for the builder
     pub fn commands(&mut self) -> &mut Commands<'w, 's> {
-        &mut self.commands
+        self.commands
     }
 
     /// Used internally to create scopes in different ways.

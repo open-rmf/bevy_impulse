@@ -114,6 +114,7 @@ pub(crate) enum ScopedSessionStatus {
 }
 
 impl ScopedSessionStatus {
+    #[allow(clippy::wrong_self_convention)]
     fn to_cleanup(&mut self, uninterruptible: bool) -> bool {
         if matches!(self, Self::Cleanup) {
             return false;
@@ -121,13 +122,14 @@ impl ScopedSessionStatus {
 
         if uninterruptible {
             *self = Self::DeferredCleanup;
-            return false;
+            false
         } else {
             *self = Self::Cleanup;
-            return true;
+            true
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_finished(&mut self) -> bool {
         // Only switch it to finished if it was still ongoing. Anything else
         // should not get converted to a finished status.
@@ -146,6 +148,7 @@ impl ScopedSessionStatus {
         false
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn to_cancelled(&mut self) -> bool {
         if matches!(self, Self::Ongoing | Self::DeferredCleanup) {
             *self = Self::Cancelled;
@@ -593,7 +596,7 @@ where
                 Self::cancel_one(scoped_session, source, cancellation.clone(), world, roster)
             {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .operations
                     .push(error);
             }
@@ -1349,7 +1352,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
                 Some(cancellation.clone()),
             ) {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .operations
                     .push(error);
             }
@@ -1370,8 +1373,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
         if let Some((index, a)) = awaiting.0.iter_mut().enumerate().find(|(_, a)| {
             a.cleanup_workflow_sessions
                 .iter()
-                .find(|w| w.iter().find(|s| **s == cancellation_session).is_some())
-                .is_some()
+                .any(|w| w.iter().any(|s| *s == cancellation_session))
         }) {
             if let Some(inner_cancellation) = inner_cancellation {
                 match &mut a.info.status {
@@ -1476,8 +1478,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
             if pairs
                 .0
                 .iter()
-                .find(|pair| pair.parent_session == parent_session)
-                .is_some()
+                .any(|pair| pair.parent_session == parent_session)
             {
                 cleaning_finished = false;
             }
@@ -1746,8 +1747,7 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
         let stream_target_map = world.get::<StreamTargetMap>(exit_source).or_broken()?;
         let stream_target = world
             .get::<StreamTargetStorage<T>>(exit_source)
-            .map(|target| stream_target_map.get(target.get()))
-            .flatten();
+            .and_then(|target| stream_target_map.get(target.get()));
 
         data.send(StreamRequest {
             source,

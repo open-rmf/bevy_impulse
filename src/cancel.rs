@@ -212,7 +212,7 @@ impl Cancel {
             // We should move this into the unhandled errors resource so that it
             // does not get lost.
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .cancellations
                 .push(failure);
         }
@@ -227,17 +227,17 @@ impl Cancel {
             let cancel = cancel.0;
             // TODO(@mxgrey): Figure out a way to structure this so we don't
             // need to always clone self.
-            return (cancel)(OperationCancel {
+            (cancel)(OperationCancel {
                 cancel: self.clone(),
                 world,
                 roster,
             })
-            .map_err(|error| CancelFailure::new(error, self));
+            .map_err(|error| CancelFailure::new(error, self))
         } else {
-            return Err(CancelFailure::new(
+            Err(CancelFailure::new(
                 OperationError::Broken(Some(Backtrace::new())),
                 self,
-            ));
+            ))
         }
     }
 }
@@ -321,7 +321,7 @@ impl<'w> ManageCancellation for EntityWorldMut<'w> {
             // so that it does not get lost.
             self.world_scope(move |world| {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .cancellations
                     .push(failure);
             });
@@ -339,7 +339,7 @@ impl<'w> ManageCancellation for EntityWorldMut<'w> {
             // so that it does not get lost.
             self.world_scope(move |world| {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .cancellations
                     .push(failure);
             });
@@ -357,7 +357,7 @@ pub fn try_emit_broken(
         source_mut.emit_broken(backtrace, roster);
     } else {
         world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .cancellations
             .push(CancelFailure {
                 error: OperationError::Broken(Some(Backtrace::new())),

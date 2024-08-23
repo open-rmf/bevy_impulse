@@ -139,19 +139,21 @@ impl SingleInputStorage {
 /// Keep track of the sources that funnel into this link of the impulse chain.
 /// This is for links that draw from multiple sources simultaneously, such as
 /// join and race.
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Default)]
 pub struct FunnelInputStorage(pub(crate) SmallVec<[Entity; 8]>);
 
 impl FunnelInputStorage {
     pub fn new() -> Self {
-        Self(SmallVec::new())
+        Self::default()
     }
 
     pub fn get(&self) -> &SmallVec<[Entity; 8]> {
         &self.0
     }
+}
 
-    pub fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
+impl FromIterator<Entity> for FunnelInputStorage {
+    fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
         Self(SmallVec::from_iter(iter))
     }
 }
@@ -181,15 +183,17 @@ impl SingleTargetStorage {
 }
 
 /// Keep track of the targets for a fork in a impulse chain
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Default)]
 pub struct ForkTargetStorage(pub SmallVec<[Entity; 8]>);
 
 impl ForkTargetStorage {
     pub fn new() -> Self {
-        Self(SmallVec::new())
+        Self::default()
     }
+}
 
-    pub fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
+impl FromIterator<Entity> for ForkTargetStorage {
+    fn from_iter<T: IntoIterator<Item = Entity>>(iter: T) -> Self {
         Self(SmallVec::from_iter(iter))
     }
 }
@@ -536,14 +540,14 @@ impl<T, E> OrBroken for Result<T, E> {
 impl<T> OrBroken for Option<T> {
     type Value = T;
     fn or_not_ready(self) -> Result<Self::Value, OperationError> {
-        self.ok_or_else(|| OperationError::NotReady)
+        self.ok_or(OperationError::NotReady)
     }
 
     fn or_broken_impl(self, with_backtrace: bool) -> Result<T, OperationError> {
         if with_backtrace {
             self.ok_or_else(|| OperationError::Broken(Some(Backtrace::new())))
         } else {
-            self.ok_or_else(|| OperationError::Broken(None))
+            self.ok_or(OperationError::Broken(None))
         }
     }
 }
@@ -571,7 +575,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
             world,
         }) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .setup
                 .push(SetupFailure {
                     broken_node: self.source,
@@ -595,7 +599,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
                 }
                 Err(error) => {
                     world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .get_resource_or_insert_with(UnhandledErrors::default)
                         .setup
                         .push(SetupFailure {
                             broken_node: self.source,
@@ -625,7 +629,7 @@ pub fn execute_operation(request: OperationRequest) {
                 // so this is broken somehow.
                 request
                     .world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .broken
                     .push(Broken {
                         node: request.source,
@@ -707,7 +711,7 @@ impl<'a> Iterator for DownstreamFinishIter<'a> {
     }
 }
 
-pub fn immediately_downstream_of<'a>(source: Entity, world: &'a World) -> DownstreamIter<'a> {
+pub fn immediately_downstream_of(source: Entity, world: &World) -> DownstreamIter<'_> {
     let output = if let Some(target) = world.get::<SingleTargetStorage>(source) {
         DownstreamFinishIter::Single(Some(target.get()))
     } else if let Some(fork) = world.get::<ForkTargetStorage>(source) {

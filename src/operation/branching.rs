@@ -31,6 +31,7 @@ pub struct Branching<Input, Outputs, F> {
     _ignore: std::marker::PhantomData<fn(Input, Outputs)>,
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn make_result_branching<T, E>(
     targets: ForkTargetStorage,
 ) -> Branching<Result<T, E>, (T, E), fn(Result<T, E>) -> (BranchResult<T>, BranchResult<E>)> {
@@ -41,6 +42,7 @@ pub(crate) fn make_result_branching<T, E>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn make_option_branching<T>(
     targets: ForkTargetStorage,
 ) -> Branching<Option<T>, (T, ()), fn(Option<T>) -> (BranchResult<T>, BranchResult<()>)> {
@@ -137,6 +139,7 @@ where
         roster: &'a mut OperationRoster,
     ) -> OperationResult {
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
+        #[allow(clippy::get_first)]
         let target_a = *targets.0.get(0).or_broken()?;
         let target_b = *targets.0.get(1).or_broken()?;
 

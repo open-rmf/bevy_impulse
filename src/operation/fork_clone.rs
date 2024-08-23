@@ -119,14 +119,14 @@ pub(crate) struct AddBranchToForkClone {
 impl Command for AddBranchToForkClone {
     fn apply(self, world: &mut World) {
         if let Err(OperationError::Broken(backtrace)) = try_add_branch_to_fork_clone(self, world) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world.get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(
                         "Unable to create a new branch for a fork clone, source: {:?}, target: {:?}",
                         self.source, self.target,
                     )),
-                    backtrace: Some(backtrace.unwrap_or_else(|| Backtrace::new()))
+                    backtrace: Some(backtrace.unwrap_or_else(Backtrace::new))
                 })
         }
     }

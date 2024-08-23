@@ -36,8 +36,8 @@ pub trait IntoService<M> {
     type Streams;
     type DefaultDeliver: Default;
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>);
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut);
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands);
 }
 
 pub trait IntoContinuousService<M> {
@@ -45,11 +45,12 @@ pub trait IntoContinuousService<M> {
     type Response;
     type Streams;
 
-    fn into_system_config<'w>(self, entity_mut: &mut EntityWorldMut<'w>) -> SystemConfigs;
+    fn into_system_config(self, entity_mut: &mut EntityWorldMut) -> SystemConfigs;
 }
 
 /// This trait allows service systems to be converted into a builder that
 /// can be used to customize how the service is configured.
+#[allow(clippy::type_complexity)]
 pub trait IntoServiceBuilder<M> {
     type Service;
     type Deliver;
@@ -90,32 +91,32 @@ pub trait ChooseAsyncServiceDelivery<M> {
 
 /// This trait is used to set the delivery mode of a service.
 pub trait DeliveryChoice {
-    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
+    fn apply_entity_mut<Request: 'static + Send + Sync>(
         self,
-        entity_mut: &mut EntityWorldMut<'w>,
+        entity_mut: &mut EntityWorldMut,
     );
-    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
+    fn apply_entity_commands<Request: 'static + Send + Sync>(
         self,
-        entity_commands: &mut EntityCommands<'w, 's, 'a>,
+        entity_commands: &mut EntityCommands,
     );
 }
 
 /// This trait is used to accept anything that can be executed on an EntityWorldMut,
 /// used when adding a service with the App interface.
 pub trait WithEntityWorldMut {
-    fn apply<'w>(self, entity_mut: EntityWorldMut<'w>);
+    fn apply(self, entity_mut: EntityWorldMut);
 }
 
 /// This trait is used to accept anything that can be executed on an
 /// EntityCommands.
 pub trait WithEntityCommands {
-    fn apply<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>);
+    fn apply(self, entity_commands: &mut EntityCommands);
 }
 
 /// This trait allows users to perform more operations with a service
 /// provider while adding it to an App.
 pub trait AlsoAdd<Request, Response, Streams> {
-    fn apply<'w>(self, app: &mut App, provider: Service<Request, Response, Streams>);
+    fn apply(self, app: &mut App, provider: Service<Request, Response, Streams>);
 }
 
 pub trait ConfigureContinuousService {

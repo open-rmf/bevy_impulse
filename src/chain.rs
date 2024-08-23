@@ -61,7 +61,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Note that if you do not connect some path of your workflow into the
     /// `terminate` slot of your [`Scope`] then the workflow will not be able
     /// to run.
-    #[must_use]
     pub fn output(self) -> Output<T> {
         Output::new(self.scope(), self.target)
     }
@@ -69,7 +68,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Get the raw [`Output`] slot for the current link in the chain, along with
     /// the builder. This can be used to do more complex building inside of
     /// chain builder functions.
-    #[must_use]
     pub fn unpack(self) -> (Output<T>, &'b mut Builder<'w, 's, 'a>) {
         (Output::new(self.scope(), self.target), self.builder)
     }
@@ -92,7 +90,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Connect the response at the end of the chain into a new provider. Get
     /// the response of the new provider as a chain so you can continue chaining
     /// operations.
-    #[must_use]
     pub fn then<P: Provider<Request = T>>(self, provider: P) -> Chain<'w, 's, 'a, 'b, P::Response>
     where
         P::Response: 'static + Send + Sync,
@@ -110,7 +107,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Connect the response in the chain into a new provider. Get the node
     /// slots that wrap around the new provider.
-    #[must_use]
     pub fn then_node<P: Provider<Request = T>>(
         self,
         provider: P,
@@ -136,7 +132,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Apply a function whose input is [`BlockingMap<T>`](crate::BlockingMap)
     /// or [`AsyncMap<T>`](crate::AsyncMap).
-    #[must_use]
     pub fn map<M, F: AsMap<M>>(
         self,
         f: F,
@@ -150,7 +145,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map`] but receive the new node instead of continuing a
     /// chain.
-    #[must_use]
     pub fn map_node<M, F: AsMap<M>>(
         self,
         f: F,
@@ -169,7 +163,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This takes in a regular blocking function rather than an async function,
     /// so while the function is executing, it will block all systems and all
     /// other workflows from running.
-    #[must_use]
     pub fn map_block<U>(
         self,
         f: impl FnMut(T) -> U + 'static + Send + Sync,
@@ -182,7 +175,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map_block`] but receive the new node instead of
     /// continuing a chain.
-    #[must_use]
     pub fn map_block_node<U>(self, f: impl FnMut(T) -> U + 'static + Send + Sync) -> Node<T, U, ()>
     where
         U: 'static + Send + Sync,
@@ -194,7 +186,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool) (unless
     /// the `single_threaded_async` feature is active). The output of the Future
     /// will be the Response of the returned Chain.
-    #[must_use]
     pub fn map_async<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
@@ -208,7 +199,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map_async`] but receive the new node instead of
     /// continuing a chain.
-    #[must_use]
     pub fn map_async_node<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
@@ -224,7 +214,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// If you want to connect to the stream outputs or be able to loop back
     /// to the input of this scope, use [`Self::then_scope_node`] instead.
-    #[must_use]
     pub fn then_scope<Response, Streams, Settings>(
         self,
         build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder) -> Settings,
@@ -259,7 +248,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// From the current target in the chain, build a [scoped](Scope) workflow
     /// and then get back a node that represents that scoped workflow.
-    #[must_use]
     pub fn then_scope_node<Response, Streams, Settings>(
         self,
         build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder) -> Settings,
@@ -314,7 +302,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         B::BufferType: 'static + Send + Sync,
         BufferKeys<B>: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self.builder);
+        let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
 
         let source = self.target;
@@ -347,7 +335,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This is conceptually similar to [`Iterator::filter_map`]. You can also
     /// use [`Chain::disposal_filter`] to dispose of the value instead of
     /// cancelling the entire scope.
-    #[must_use]
     pub fn cancellation_filter<ThenResponse, F>(
         self,
         filter_provider: F,
@@ -385,7 +372,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This can only be applied when `Response` can be cloned.
     ///
     /// See also [`Chain::fork_clone`]
-    #[must_use]
     pub fn branch_clone(self, build: impl FnOnce(Chain<T>)) -> Chain<'w, 's, 'a, 'b, T>
     where
         T: Clone,
@@ -570,7 +556,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self.builder);
+        let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
 
         let source = self.target;
@@ -607,13 +593,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the chain's response implements the [`Future`] trait, applying
     /// `.flatten()` to the chain will yield the output of that Future as the
     /// chain's response.
-    #[must_use]
     pub fn flatten(self) -> Chain<'w, 's, 'a, 'b, T::Output>
     where
         T: Future,
         T::Output: 'static + Send + Sync,
     {
-        self.map_async(|r| async { r.await })
+        self.map_async(|r| r)
     }
 
     /// Add a [no-op][1] to the current end of the chain.
@@ -624,7 +609,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// [trimming](Self::then_trim).
     ///
     /// [1]: `<https://en.wikipedia.org/wiki/NOP_(code)>`
-    #[must_use]
     pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
@@ -679,7 +663,6 @@ where
     ///
     /// This function returns a chain that will be activated if the result was
     /// [`Ok`] so you can continue building your response to the [`Ok`] case.
-    #[must_use]
     pub fn branch_for_err(self, build_err: impl FnOnce(Chain<E>)) -> Chain<'w, 's, 'a, 'b, T> {
         Chain::<Result<T, E>>::new(self.target, self.builder)
             .fork_result(|chain| chain.output(), build_err)
@@ -760,7 +743,6 @@ where
     /// context.run_while_pending(&mut promise);
     /// assert!(promise.peek().is_cancelled());
     /// ```
-    #[must_use]
     pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, 'b, T>
     where
         E: Error,
@@ -781,7 +763,6 @@ where
     /// that do not implement [`Error`]. The catch is that their error message
     /// will not be included in the [`Filtered`](crate::Filtered) information
     /// that gets propagated outward.
-    #[must_use]
     pub fn cancel_on_quiet_err(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
@@ -801,7 +782,6 @@ where
     /// not be triggered, but the workflow is not necessarily cancelled. If a
     /// disposal makes it impossible for the workflow to terminate, then the
     /// workflow will be cancelled immediately.
-    #[must_use]
     pub fn dispose_on_err(self) -> Chain<'w, 's, 'a, 'b, T>
     where
         E: Error,
@@ -861,7 +841,6 @@ where
     ///
     /// This function returns a chain that will be activated if the result was
     /// [`Some`] so you can continue building your response to the [`Some`] case.
-    #[must_use]
     pub fn branch_for_none(self, build_none: impl FnOnce(Chain<()>)) -> Chain<'w, 's, 'a, 'b, T> {
         Chain::<Option<T>>::new(self.target, self.builder)
             .fork_option(|chain| chain.output(), build_none)
@@ -1015,7 +994,7 @@ where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self.builder);
+        let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
 
         let source = self.target;

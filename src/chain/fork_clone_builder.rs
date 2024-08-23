@@ -66,7 +66,7 @@ macro_rules! impl_forkclonebuilder_for_tuple {
                     $(
                         {
                             let res = ($F)(Chain::new(targets[_idx], builder));
-                            _idx = _idx + 1;
+                            _idx += 1;
                             res
                         },
                     )*

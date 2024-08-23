@@ -259,13 +259,14 @@ struct AwaitingCleanup {
 
 impl InjectionStorage {
     fn contains_session(r: &OperationReachability) -> ReachabilityResult {
-        Ok(r.world()
+        Ok(
+            r.world()
             .get::<Self>(r.source())
             .or_broken()?
             .list
             .iter()
-            .find(|injected| injected.session == r.session)
-            .is_some())
+            .any(|injected| injected.session == r.session)
+        )
     }
 }
 

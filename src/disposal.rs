@@ -428,7 +428,7 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
                 let broken_node = self.id();
                 self.world_scope(|world| {
                     world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .get_resource_or_insert_with(UnhandledErrors::default)
                         .disposals
                         .push(DisposalFailure {
                             disposal,
@@ -515,7 +515,7 @@ pub fn emit_disposal(
         source_mut.emit_disposal(session, disposal, roster);
     } else {
         world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .disposals
             .push(DisposalFailure {
                 disposal,

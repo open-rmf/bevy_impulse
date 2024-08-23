@@ -183,7 +183,7 @@ impl<T: Stream> Clone for StreamBuffer<T> {
     fn clone(&self) -> Self {
         Self {
             container: Rc::clone(&self.container),
-            target: self.target.clone(),
+            target: self.target,
         }
     }
 }
@@ -293,10 +293,7 @@ pub struct StreamTargetStorage<T: Stream> {
 
 impl<T: Stream> Clone for StreamTargetStorage<T> {
     fn clone(&self) -> Self {
-        Self {
-            index: self.index,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -393,8 +390,8 @@ pub trait StreamPack: 'static + Send + Sync {
 
     fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
 
-    fn make_buffer<'a>(
-        target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'a>,
+    fn make_buffer(
+        target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
         target_map: Option<&StreamTargetMap>,
     ) -> Self::Buffer;
 
@@ -478,23 +475,20 @@ impl<T: Stream + Unpin> StreamPack for T {
             .get::<StreamTargetStorage<Self>>(inner.source())
             .map(|t| t.index);
         let target = index
-            .map(|index| {
+            .and_then(|index| {
                 world
                     .get::<StreamTargetMap>(inner.source())
-                    .map(|t| t.get(index))
-                    .flatten()
-            })
-            .flatten();
+                    .and_then(|t| t.get(index))
+            });
         StreamChannel::new(target, Arc::clone(inner))
     }
 
-    fn make_buffer<'a>(
-        target_index: Option<&'a StreamTargetStorage<Self>>,
+    fn make_buffer(
+        target_index: Option<&StreamTargetStorage<Self>>,
         target_map: Option<&StreamTargetMap>,
     ) -> Self::Buffer {
         let target = target_index
-            .map(|s| target_map.map(|t| t.map.get(s.index)))
-            .flatten()
+            .and_then(|s| target_map.map(|t| t.map.get(s.index)))
             .flatten()
             .copied();
 
@@ -584,7 +578,7 @@ impl StreamPack for () {
     }
 
     fn spawn_workflow_streams(_: &mut Builder) -> Self::StreamInputPack {
-        ()
+        // Just return ()
     }
 
     fn spawn_node_streams(
@@ -616,15 +610,15 @@ impl StreamPack for () {
         _: &mut StreamTargetMap,
         _: &mut Commands,
     ) -> Self::StreamStorageBundle {
-        ()
+        // Just return ()
     }
 
     fn make_channel(_: &Arc<InnerChannel>, _: &World) -> Self::Channel {
-        ()
+        // Just return ()
     }
 
     fn make_buffer(_: Self::TargetIndexQuery, _: Option<&StreamTargetMap>) -> Self::Buffer {
-        ()
+        // Just return ()
     }
 
     fn process_buffer(
@@ -788,8 +782,8 @@ macro_rules! impl_streampack_for_tuple {
                 )
             }
 
-            fn make_buffer<'a>(
-                target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'a>,
+            fn make_buffer(
+                target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
                 target_map: Option<&StreamTargetMap>,
             ) -> Self::Buffer {
                 let ($($T,)*) = target_index;
@@ -837,7 +831,6 @@ macro_rules! impl_streampack_for_tuple {
                     join!($(
                         $T::forward_channels($T, $U),
                     )*);
-                    ()
                 };
 
                 StreamPackForward{ inner: Box::pin(inner) }
@@ -883,7 +876,7 @@ struct SendStreams<S: Stream> {
 
 impl<S: Stream> Command for SendStreams<S> {
     fn apply(self, world: &mut World) {
-        world.get_resource_or_insert_with(|| DeferredRoster::default());
+        world.get_resource_or_insert_with(DeferredRoster::default);
         world.resource_scope::<DeferredRoster, _>(|world, mut deferred| {
             for data in self.container {
                 let r = data.send(StreamRequest {
@@ -891,12 +884,12 @@ impl<S: Stream> Command for SendStreams<S> {
                     session: self.session,
                     target: self.target,
                     world,
-                    roster: &mut *deferred,
+                    roster: &mut deferred,
                 });
 
                 if let Err(OperationError::Broken(backtrace)) = r {
                     world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .get_resource_or_insert_with(UnhandledErrors::default)
                         .broken
                         .push(Broken {
                             node: self.source,

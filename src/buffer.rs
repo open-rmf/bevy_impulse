@@ -159,11 +159,7 @@ impl Default for RetentionPolicy {
 
 impl<T> Clone for Buffer<T> {
     fn clone(&self) -> Self {
-        Self {
-            scope: self.scope,
-            source: self.source,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -171,11 +167,7 @@ impl<T> Copy for Buffer<T> {}
 
 impl<T: Clone> Clone for CloneFromBuffer<T> {
     fn clone(&self) -> Self {
-        Self {
-            scope: self.scope,
-            source: self.source,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -202,7 +194,7 @@ impl<T> Clone for BufferKey<T> {
             buffer: self.buffer,
             session: self.session,
             accessor: self.accessor,
-            lifecycle: self.lifecycle.as_ref().map(|l| Arc::clone(l)),
+            lifecycle: self.lifecycle.as_ref().map(Arc::clone),
             _ignore: Default::default(),
         }
     }
@@ -322,7 +314,7 @@ where
     T: 'static + Send + Sync,
 {
     /// Iterate over the contents in the buffer
-    pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
+    pub fn iter(&self) -> IterBufferView<'_, T> {
         self.storage.iter(self.session)
     }
 
@@ -402,7 +394,7 @@ where
     }
 
     /// Iterate over the contents in the buffer.
-    pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
+    pub fn iter(&self) -> IterBufferView<'_, T> {
         self.storage.iter(self.session)
     }
 
@@ -442,7 +434,7 @@ where
     }
 
     /// Iterate over mutable borrows of the contents in the buffer.
-    pub fn iter_mut<'b>(&'b mut self) -> IterBufferMut<'b, T> {
+    pub fn iter_mut(&mut self) -> IterBufferMut<'_, T> {
         self.modified = true;
         self.storage.iter_mut(self.session)
     }
@@ -467,7 +459,7 @@ where
     }
 
     /// Drain items out of the buffer
-    pub fn drain<'b, R>(&'b mut self, range: R) -> DrainBuffer<'b, T>
+    pub fn drain<R>(&mut self, range: R) -> DrainBuffer<'_, T>
     where
         R: RangeBounds<usize>,
     {

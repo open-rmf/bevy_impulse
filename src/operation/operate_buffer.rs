@@ -199,10 +199,8 @@ impl RelatedGateNodes {
 
         for gate in &gate_nodes.0 {
             let action = r.world.get::<GateActionStorage>(*gate).or_broken()?.0;
-            if action.is_open() {
-                if r.check_upstream(*gate)? {
-                    return Ok(true);
-                }
+            if action.is_open() && r.check_upstream(*gate)? {
+                return Ok(true);
             }
         }
 
@@ -243,7 +241,7 @@ impl Command for OnNewBufferValue {
 impl OnNewBufferValue {
     fn on_failure(self, world: &mut World) {
         world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .miscellaneous
             .push(MiscellaneousFailure {
                 error: Arc::new(anyhow!(
@@ -313,6 +311,7 @@ fn check_buffer_size<T: 'static + Send + Sync>(
 
 #[derive(Component)]
 pub struct GetBufferedSessionsFn(
+    #[allow(clippy::type_complexity)]
     pub fn(Entity, &World) -> Result<SmallVec<[Entity; 16]>, OperationError>,
 );
 
@@ -361,7 +360,7 @@ impl Command for NotifyBufferUpdate {
                     return;
                 }
 
-                world.get_resource_or_insert_with(|| DeferredRoster::default());
+                world.get_resource_or_insert_with(DeferredRoster::default);
                 world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
                     // We filter out the target that produced the key that was used to
                     // make the modification. This prevents unintentional infinite loops
@@ -391,7 +390,7 @@ impl Command for NotifyBufferUpdate {
 
         if let Err(OperationError::Broken(backtrace)) = r {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .broken
                 .push(Broken {
                     node: self.buffer,

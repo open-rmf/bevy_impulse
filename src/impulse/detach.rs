@@ -28,14 +28,8 @@ use std::sync::Arc;
 
 use crate::{MiscellaneousFailure, UnhandledErrors, UnusedTarget};
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub(crate) struct Detached(bool);
-
-impl Default for Detached {
-    fn default() -> Self {
-        Detached(false)
-    }
-}
 
 impl Detached {
     pub fn is_detached(&self) -> bool {
@@ -71,7 +65,7 @@ impl Command for Detach {
             backtrace: Some(backtrace),
         };
         world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .miscellaneous
             .push(failure);
     }
