@@ -44,12 +44,12 @@ impl Command for Connect {
     fn apply(self, world: &mut World) {
         if let Err(OperationError::Broken(backtrace)) = try_connect(self, world) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .connections
                 .push(ConnectionFailure {
                     original_target: self.original_target,
                     new_target: self.new_target,
-                    backtrace: backtrace.unwrap_or_else(|| Backtrace::new()),
+                    backtrace: backtrace.unwrap_or_else(Backtrace::new),
                 })
         }
     }
@@ -119,7 +119,7 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
 
         if !connection_happened {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .broken
                 .push(Broken {
                     node: input,

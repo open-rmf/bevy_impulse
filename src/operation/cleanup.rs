@@ -71,7 +71,7 @@ impl<'a> OperationCleanup<'a> {
             roster: self.roster,
         }) {
             self.world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .operations
                 .push(error);
         }
@@ -213,7 +213,7 @@ impl Cleanup {
             }
             None => {
                 world
-                    .get_resource_or_insert_with(|| UnhandledErrors::default())
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .miscellaneous
                     .push(MiscellaneousFailure {
                         error: Arc::new(anyhow!("Failed to clear cleanup tracker: {self:?}")),
@@ -231,7 +231,7 @@ impl Cleanup {
             roster,
         }) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!("Failed to finalize cleanup: {self:?}")),

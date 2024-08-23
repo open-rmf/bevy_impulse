@@ -106,7 +106,6 @@ where
     }
 
     /// Take only the response data that comes out of the request.
-    #[must_use]
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(

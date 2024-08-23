@@ -83,6 +83,7 @@ pub(crate) struct OperateTask<Response: 'static + Send + Sync, Streams: StreamPa
 }
 
 impl<Response: 'static + Send + Sync, Streams: StreamPack> OperateTask<Response, Streams> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         source: Entity,
         session: Entity,
@@ -152,14 +153,7 @@ where
             sender
                 .send(Box::new(
                     move |world: &mut World, roster: &mut OperationRoster| {
-                        cleanup_task::<Response>(
-                            source,
-                            node,
-                            unblock,
-                            being_cleaned,
-                            world,
-                            roster,
-                        );
+                        cleanup_task(source, node, unblock, being_cleaned, world, roster);
 
                         if disposed {
                             let disposal =
@@ -179,7 +173,7 @@ where
     Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        let wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
+        let wake_queue = world.get_resource_or_insert_with(WakeQueue::new);
         let waker = Arc::new(JobWaker {
             sender: wake_queue.sender.clone(),
             entity: source,
@@ -242,12 +236,11 @@ where
         let waker = if let Some(waker) = source_mut.take::<JobWakerStorage>() {
             waker.0.clone()
         } else {
-            let wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
-            let waker = Arc::new(JobWaker {
+            let wake_queue = world.get_resource_or_insert_with(WakeQueue::new);
+            Arc::new(JobWaker {
                 sender: wake_queue.sender.clone(),
                 entity: source,
-            });
-            waker
+            })
         };
 
         match Pin::new(&mut task).poll(&mut Context::from_waker(&waker_ref(&waker))) {
@@ -262,7 +255,7 @@ where
                     .get_mut::<OperateTask<Response, Streams>>(source)
                     .or_broken()?
                     .finished_normally = true;
-                cleanup_task::<Response>(source, node, unblock, being_cleaned, world, roster);
+                cleanup_task(source, node, unblock, being_cleaned, world, roster);
 
                 if Streams::has_streams() {
                     if let Some(scope) = world.get::<ScopeStorage>(node) {
@@ -294,34 +287,32 @@ where
                     operation.task = Some(task);
                     operation.blocker = unblock;
                     world.entity_mut(source).insert(JobWakerStorage(waker));
-                } else {
-                    if unblock.is_some() {
-                        // Somehow the task entity and/or the OperateTask
-                        // component has dropped while the task information was
-                        // outside of it. Since this task was blocking a service
-                        // we should recreate the OperateTask object with
-                        // everything filled in, and then drop it according.
-                        let sender = world
-                            .get_resource_or_insert_with(|| ChannelQueue::default())
-                            .sender
-                            .clone();
+                } else if unblock.is_some() {
+                    // Somehow the task entity and/or the OperateTask
+                    // component has dropped while the task information was
+                    // outside of it. Since this task was blocking a service
+                    // we should recreate the OperateTask object with
+                    // everything filled in, and then drop it according.
+                    let sender = world
+                        .get_resource_or_insert_with(ChannelQueue::default)
+                        .sender
+                        .clone();
 
-                        let cancel_sender = task_cancel_sender(world);
+                    let cancel_sender = task_cancel_sender(world);
 
-                        let operation = OperateTask::<_, Streams>::new(
-                            source,
-                            session,
-                            node,
-                            target,
-                            task,
-                            cancel_sender,
-                            unblock,
-                            sender,
-                        );
+                    let operation = OperateTask::<_, Streams>::new(
+                        source,
+                        session,
+                        node,
+                        target,
+                        task,
+                        cancel_sender,
+                        unblock,
+                        sender,
+                    );
 
-                        // Dropping this operation will trigger the task cancellation
-                        drop(operation);
-                    }
+                    // Dropping this operation will trigger the task cancellation
+                    drop(operation);
                 }
             }
         }
@@ -347,21 +338,14 @@ where
                 task.cancel().await;
                 if let Err(err) = sender.send(Box::new(
                     move |world: &mut World, roster: &mut OperationRoster| {
-                        cleanup_task::<Response>(
-                            source,
-                            node,
-                            unblock,
-                            Some(cleanup),
-                            world,
-                            roster,
-                        );
+                        cleanup_task(source, node, unblock, Some(cleanup), world, roster);
                     },
                 )) {
                     eprintln!("Failed to send a command to cleanup a task: {err}");
                 }
             });
         } else {
-            cleanup_task::<Response>(
+            cleanup_task(
                 source,
                 node,
                 unblock,
@@ -386,7 +370,7 @@ where
     }
 }
 
-fn cleanup_task<Response>(
+fn cleanup_task(
     source: Entity,
     node: Entity,
     unblock: Option<Blocker>,
@@ -427,7 +411,7 @@ fn cleanup_task<Response>(
                     let r = being_cleaned.notify_cleaned(world, roster);
                     if let Err(OperationError::Broken(backtrace)) = r {
                         world
-                            .get_resource_or_insert_with(|| UnhandledErrors::default())
+                            .get_resource_or_insert_with(UnhandledErrors::default)
                             .broken
                             .push(Broken { node, backtrace });
                     }
@@ -523,9 +507,6 @@ impl ActiveTasksStorage {
             .or_broken()?
             .list;
 
-        Ok(active_tasks
-            .iter()
-            .find(|task| task.session == r.session)
-            .is_some())
+        Ok(active_tasks.iter().any(|task| task.session == r.session))
     }
 }

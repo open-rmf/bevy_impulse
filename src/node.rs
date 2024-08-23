@@ -52,11 +52,7 @@ pub struct InputSlot<Request> {
 
 impl<T> Clone for InputSlot<T> {
     fn clone(&self) -> Self {
-        Self {
-            scope: self.scope,
-            source: self.source,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -122,11 +118,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
 
     /// Create a node that will fork the output along multiple branches, giving
     /// a clone of the output to each branch.
-    #[must_use]
-    pub fn fork_clone<'w, 's, 'a, 'b>(
-        self,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> ForkCloneOutput<Response>
+    pub fn fork_clone(self, builder: &mut Builder) -> ForkCloneOutput<Response>
     where
         Response: Clone,
     {

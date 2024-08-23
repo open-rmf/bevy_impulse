@@ -37,8 +37,9 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response>
+    pub fn query<P>(&self, request: P::Request, provider: P) -> Promise<P::Response>
     where
+        P: Provider,
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: 'static + StreamPack,

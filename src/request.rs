@@ -132,7 +132,7 @@ pub trait RunCommandsOnWorldExt {
 impl RunCommandsOnWorldExt for World {
     fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
         let mut command_queue = CommandQueue::default();
-        let mut commands = Commands::new(&mut command_queue, &self);
+        let mut commands = Commands::new(&mut command_queue, self);
         let u = f(&mut commands);
         command_queue.apply(self);
         u

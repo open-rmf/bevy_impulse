@@ -143,7 +143,7 @@ impl<'a> CallbackRequest<'a> {
     {
         let sender = self
             .world
-            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .get_resource_or_insert_with(ChannelQueue::new)
             .sender
             .clone();
         let task = spawn_task(task, self.world);
@@ -169,11 +169,11 @@ impl<'a> CallbackRequest<'a> {
     ) -> Result<(Channel, Streams::Channel), OperationError> {
         let sender = self
             .world
-            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .get_resource_or_insert_with(ChannelQueue::new)
             .sender
             .clone();
         let channel = Channel::new(self.source, session, sender);
-        let streams = channel.for_streams::<Streams>(&self.world)?;
+        let streams = channel.for_streams::<Streams>(self.world)?;
         Ok((channel, streams))
     }
 }
@@ -223,7 +223,7 @@ where
         } = input.get_request()?;
 
         if !self.initialized {
-            self.system.initialize(&mut input.world);
+            self.system.initialize(input.world);
             self.initialized = true;
         }
 
@@ -238,7 +238,7 @@ where
             },
             input.world,
         );
-        self.system.apply_deferred(&mut input.world);
+        self.system.apply_deferred(input.world);
 
         let mut unused_streams = UnusedStreams::new(input.source);
         Streams::process_buffer(
@@ -278,7 +278,7 @@ where
         let (channel, streams) = input.get_channel::<Streams>(session)?;
 
         if !self.initialized {
-            self.system.initialize(&mut input.world);
+            self.system.initialize(input.world);
         }
 
         let task = self.system.run(
@@ -289,9 +289,9 @@ where
                 source: input.source,
                 session,
             },
-            &mut input.world,
+            input.world,
         );
-        self.system.apply_deferred(&mut input.world);
+        self.system.apply_deferred(input.world);
 
         input.give_task::<_, Streams>(session, task)
     }
@@ -316,6 +316,7 @@ where
 pub struct BlockingMapCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 pub struct AsyncMapCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 
+#[allow(clippy::wrong_self_convention)]
 pub trait AsCallback<M> {
     type Request;
     type Response;

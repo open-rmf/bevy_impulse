@@ -143,7 +143,7 @@ where
 {
     let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
     let sender = world
-        .get_resource_or_insert_with(|| ChannelQueue::default())
+        .get_resource_or_insert_with(ChannelQueue::default)
         .sender
         .clone();
 

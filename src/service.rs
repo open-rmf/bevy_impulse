@@ -77,11 +77,7 @@ pub struct Service<Request, Response, Streams = ()> {
 
 impl<Req, Res, S> Clone for Service<Req, Res, S> {
     fn clone(&self) -> Self {
-        Self {
-            provider: self.provider,
-            instructions: self.instructions,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -346,32 +342,24 @@ impl<T: Into<DeliveryInstructions>> AsDeliveryInstructions for T {
 /// any system.
 pub trait SpawnServicesExt<'w, 's> {
     /// Call this with Commands to create a new async service from any system.
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
-        &'a mut self,
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
+        &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityCommands,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack;
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack;
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
-        &'a mut self,
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
+        &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
@@ -385,14 +373,10 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for World {
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
-        &'a mut self,
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
+        &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
@@ -417,14 +401,10 @@ pub trait AddServicesExt {
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams,
-        >,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack,
+        B::Also: AlsoAdd<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>,
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack,
     {
         self.spawn_service(builder);
         self
@@ -434,50 +414,40 @@ pub trait AddServicesExt {
     fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure = ()>>(
         &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams,
-        >,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack;
+        B::Also: AlsoAdd<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>,
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack;
 }
 
 impl AddServicesExt for App {
     fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure = ()>>(
         &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams,
-        >,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack,
+        B::Also: AlsoAdd<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>,
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack,
     {
         builder.into_service_builder().spawn_app_service(self)
     }
 }
+
+type RequestOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Request;
+type ResponseOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Response;
+type StreamsOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Streams;
+type ServiceOf<M1, M2, B> =
+    Service<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>;
 
 pub trait AddContinuousServicesExt {
     /// Spawn a continuous service. This needs to be used from [`App`] because
@@ -487,24 +457,16 @@ pub trait AddContinuousServicesExt {
         &mut self,
         schedule: impl ScheduleLabel,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoContinuousService<M2>>::Request,
-        <B::Service as IntoContinuousService<M2>>::Response,
-        <B::Service as IntoContinuousService<M2>>::Streams,
-    >
+    ) -> ServiceOfC<M1, M2, B>
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
+        B::Also: AlsoAdd<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>,
         B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
+        RequestOfC<M1, M2, B>: 'static + Send + Sync,
+        ResponseOfC<M1, M2, B>: 'static + Send + Sync,
+        StreamsOfC<M1, M2, B>: StreamPack;
 
     /// Add a continuous service to an [`App`].
     fn add_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
@@ -516,15 +478,11 @@ pub trait AddContinuousServicesExt {
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
+        B::Also: AlsoAdd<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>,
         B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
+        RequestOfC<M1, M2, B>: 'static + Send + Sync,
+        ResponseOfC<M1, M2, B>: 'static + Send + Sync,
+        StreamsOfC<M1, M2, B>: StreamPack,
     {
         self.spawn_continuous_service(schedule, builder);
         self
@@ -535,12 +493,12 @@ pub trait AddContinuousServicesExt {
     /// to use the [trim] operation if you want it to stop streaming events.
     ///
     /// [trim]: crate::Builder::create_trim
-    fn spawn_event_streaming_service<E: Event>(
+    fn spawn_event_streaming_service<E>(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> Service<(), (), StreamOf<E>>
     where
-        E: 'static + Send + Sync + Unpin + Clone,
+        E: 'static + Event + Send + Sync + Unpin + Clone,
     {
         self.spawn_continuous_service(schedule, event_streaming_service::<E>)
     }
@@ -551,30 +509,31 @@ impl AddContinuousServicesExt for App {
         &mut self,
         schedule: impl ScheduleLabel,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoContinuousService<M2>>::Request,
-        <B::Service as IntoContinuousService<M2>>::Response,
-        <B::Service as IntoContinuousService<M2>>::Streams,
-    >
+    ) -> ServiceOfC<M1, M2, B>
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
+        B::Also: AlsoAdd<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>,
         B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
+        RequestOfC<M1, M2, B>: 'static + Send + Sync,
+        ResponseOfC<M1, M2, B>: 'static + Send + Sync,
+        StreamsOfC<M1, M2, B>: StreamPack,
     {
         builder
             .into_service_builder()
             .spawn_continuous_service(schedule, self)
     }
 }
+
+type RequestOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Request;
+type ResponseOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Response;
+type StreamsOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Streams;
+type ServiceOfC<M1, M2, B> =
+    Service<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>;
 
 impl<Request, Response, Streams> ProvideOnce for Service<Request, Response, Streams>
 where

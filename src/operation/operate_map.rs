@@ -201,7 +201,7 @@ where
         }: OperationRequest,
     ) -> OperationResult {
         let sender = world
-            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .get_resource_or_insert_with(ChannelQueue::new)
             .sender
             .clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
@@ -218,7 +218,7 @@ where
             .or_broken()?;
 
         let channel = Channel::new(source, session, sender.clone());
-        let streams = channel.for_streams::<Streams>(&world)?;
+        let streams = channel.for_streams::<Streams>(world)?;
 
         let task = spawn_task(
             f.call(AsyncMap {
@@ -266,7 +266,7 @@ where
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_session(&mut reachability)? {
+        if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
         SingleInputStorage::is_reachable(&mut reachability)

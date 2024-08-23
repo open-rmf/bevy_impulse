@@ -134,7 +134,7 @@ impl<T> Promise<T> {
             }
         }
 
-        return self;
+        self
     }
 
     /// Update the internal state of the promise if it is still pending. This
@@ -188,11 +188,8 @@ impl<T: Unpin> Future for Promise<T> {
         let self_mut = self.get_mut();
         let state = self_mut.take();
         if state.is_pending() {
-            match self_mut.target.inner.lock() {
-                Ok(mut inner) => {
-                    inner.waker = Some(cx.waker().clone());
-                }
-                Err(_) => {}
+            if let Ok(mut inner) = self_mut.target.inner.lock() {
+                inner.waker = Some(cx.waker().clone());
             }
             Poll::Pending
         } else {
@@ -328,6 +325,7 @@ pub struct Interrupter {
     inner: Arc<Mutex<InterrupterInner>>,
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 impl Interrupter {
     pub fn new() -> Self {
         Self {

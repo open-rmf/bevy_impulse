@@ -39,13 +39,11 @@ impl<T> Sender<T> {
     }
 
     pub(crate) fn send(mut self, value: T) -> Result<(), PromiseResult<T>> {
-        let result = self.set(PromiseResult::Available(value));
-        result
+        self.set(PromiseResult::Available(value))
     }
 
     pub(crate) fn cancel(mut self, cause: Cancellation) -> Result<(), PromiseResult<T>> {
-        let result = self.set(PromiseResult::Cancelled(cause));
-        result
+        self.set(PromiseResult::Cancelled(cause))
     }
 
     pub(crate) fn set(&mut self, result: PromiseResult<T>) -> Result<(), PromiseResult<T>> {
@@ -105,10 +103,10 @@ impl<T> Promise<T> {
         (sender, promise)
     }
 
-    pub(super) fn impl_wait<'a>(
-        target: &'a PromiseTarget<T>,
+    pub(super) fn impl_wait(
+        target: &PromiseTarget<T>,
         interrupt: Option<Arc<AtomicBool>>,
-    ) -> Option<MutexGuard<'a, PromiseTargetInner<T>>> {
+    ) -> Option<MutexGuard<'_, PromiseTargetInner<T>>> {
         let guard = match target.inner.lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -143,19 +141,17 @@ impl<T> Promise<T> {
         match result.take() {
             Some(PromiseResult::Available(response)) => {
                 *state = PromiseState::Available(response);
-                return false;
+                false
             }
             Some(PromiseResult::Cancelled(cause)) => {
                 *state = PromiseState::Cancelled(cause);
-                return false;
+                false
             }
             Some(PromiseResult::Disposed) => {
                 *state = PromiseState::Disposed;
-                return false;
+                false
             }
-            None => {
-                return true;
-            }
+            None => true,
         }
     }
 }
@@ -330,6 +326,7 @@ pub(super) struct Interruptee {
     pub(super) interruptible: Arc<dyn Interruptible>,
 }
 
+#[derive(Default)]
 pub(super) struct InterrupterInner {
     pub(super) triggered: bool,
     pub(super) waiters: Vec<Interruptee>,
@@ -338,14 +335,5 @@ pub(super) struct InterrupterInner {
 impl InterrupterInner {
     pub(super) fn new() -> Self {
         Self::default()
-    }
-}
-
-impl Default for InterrupterInner {
-    fn default() -> Self {
-        Self {
-            triggered: false,
-            waiters: Vec::new(),
-        }
     }
 }

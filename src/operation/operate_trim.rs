@@ -224,8 +224,7 @@ impl<T: 'static + Send + Sync> Trim<T> {
             .or_broken()?
             .nodes
             .clone()
-            .map(|n| n.ok())
-            .flatten()
+            .and_then(|n| n.ok())
             .unwrap_or(SmallVec::new());
 
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();

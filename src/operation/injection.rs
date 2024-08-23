@@ -264,8 +264,7 @@ impl InjectionStorage {
             .or_broken()?
             .list
             .iter()
-            .find(|injected| injected.session == r.session)
-            .is_some())
+            .any(|injected| injected.session == r.session))
     }
 }
 

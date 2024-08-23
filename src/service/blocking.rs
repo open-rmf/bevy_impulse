@@ -53,14 +53,14 @@ where
     type Streams = Streams;
     type DefaultDeliver = BlockingChosen;
 
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands) {
         entity_commands.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<BlockingServiceStorage<Request, Response, Streams>>::new(),
         ));
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert((
             UninitBlockingServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<BlockingServiceStorage<Request, Response, Streams>>::new(),
@@ -213,13 +213,13 @@ where
     type Streams = ();
     type DefaultDeliver = BlockingChosen;
 
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands) {
         peel_blocking
             .pipe(self.0)
             .insert_service_commands(entity_commands)
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut) {
         peel_blocking.pipe(self.0).insert_service_mut(entity_mut)
     }
 }

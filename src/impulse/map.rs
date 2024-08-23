@@ -182,7 +182,7 @@ where
         }: OperationRequest,
     ) -> OperationResult {
         let sender = world
-            .get_resource_or_insert_with(|| ChannelQueue::new())
+            .get_resource_or_insert_with(ChannelQueue::new)
             .sender
             .clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
@@ -194,7 +194,7 @@ where
         let f = source_mut.take::<AsyncMapOnceStorage<F>>().or_broken()?.f;
 
         let channel = Channel::new(source, session, sender.clone());
-        let streams = channel.for_streams::<Streams>(&world)?;
+        let streams = channel.for_streams::<Streams>(world)?;
 
         let task = spawn_task(
             f.call(AsyncMap {

@@ -447,7 +447,7 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
             }
         }
 
-        return false;
+        false
     }
 }
 
@@ -540,6 +540,6 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
             }
         }
 
-        return false;
+        false
     }
 }

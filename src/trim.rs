@@ -149,6 +149,7 @@ impl<T> From<InputSlot<T>> for TrimPoint {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum TrimPolicy {
     Downstream,
     Span(SmallVec<[TrimPoint; 16]>),

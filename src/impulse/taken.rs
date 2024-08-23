@@ -40,7 +40,7 @@ impl<T> TakenResponse<T> {
 impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
     fn setup(mut self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         let lifecycle_sender = world
-            .get_resource_or_insert_with(|| ImpulseLifecycleChannel::default())
+            .get_resource_or_insert_with(ImpulseLifecycleChannel::default)
             .sender
             .clone();
         self.sender.on_promise_drop(move || {

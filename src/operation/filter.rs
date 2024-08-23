@@ -88,6 +88,7 @@ pub struct CancelFilter<InputT, OutputT, F> {
 
 pub struct CreateCancelFilter;
 
+#[allow(clippy::type_complexity)]
 impl CreateCancelFilter {
     pub fn on_err<T, E>(
         target: Entity,
@@ -200,6 +201,7 @@ where
 
 pub struct CreateDisposalFilter;
 
+#[allow(clippy::type_complexity)]
 impl CreateDisposalFilter {
     pub fn on_err<T, E>(
         target: Entity,

@@ -49,9 +49,9 @@ impl TestingContext {
         let mut app = App::new();
         app.add_plugins((
             TaskPoolPlugin::default(),
-            TypeRegistrationPlugin::default(),
-            FrameCountPlugin::default(),
-            TimePlugin::default(),
+            TypeRegistrationPlugin,
+            FrameCountPlugin,
+            TimePlugin,
             ScheduleRunnerPlugin::default(),
         ))
         .add_systems(Update, flush_impulses());
@@ -62,7 +62,7 @@ impl TestingContext {
     pub fn set_flush_loop_limit(&mut self, limit: Option<usize>) {
         self.app
             .world
-            .get_resource_or_insert_with(|| FlushParameters::default())
+            .get_resource_or_insert_with(FlushParameters::default)
             .flush_loop_limit = limit;
     }
 
@@ -142,7 +142,7 @@ impl TestingContext {
             self.app.update();
         }
 
-        return true;
+        true
     }
 
     pub fn no_unhandled_errors(&self) -> bool {

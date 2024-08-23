@@ -75,7 +75,7 @@ fn flush_impulses_impl(
     world: &mut World,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
-    let parameters = world.get_resource_or_insert_with(|| FlushParameters::default());
+    let parameters = world.get_resource_or_insert_with(FlushParameters::default);
     let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
     let mut roster = OperationRoster::new();
     collect_from_channels(
@@ -87,14 +87,14 @@ fn flush_impulses_impl(
 
     let mut loop_count = 0;
     while !roster.is_empty() {
-        let parameters = world.get_resource_or_insert_with(|| FlushParameters::default());
+        let parameters = world.get_resource_or_insert_with(FlushParameters::default);
         let flush_loop_limit = parameters.flush_loop_limit;
         let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
         if flush_loop_limit.is_some_and(|limit| limit <= loop_count) {
             // We have looped beyoond the limit, so we will defer anything that
             // remains in the roster and stop looping from here.
             world
-                .get_resource_or_insert_with(|| DeferredRoster::default())
+                .get_resource_or_insert_with(DeferredRoster::default)
                 .append(&mut roster);
             break;
         }
@@ -154,7 +154,7 @@ fn collect_from_channels(
 ) {
     // Get the receiver for async task commands
     while let Ok(item) = world
-        .get_resource_or_insert_with(|| ChannelQueue::new())
+        .get_resource_or_insert_with(ChannelQueue::new)
         .receiver
         .try_recv()
     {
@@ -164,7 +164,7 @@ fn collect_from_channels(
     roster.process_deferals();
 
     let mut removed_services: SmallVec<[Entity; 8]> = SmallVec::new();
-    world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
+    world.get_resource_or_insert_with(ServiceLifecycleChannel::new);
     world.resource_scope::<ServiceLifecycleChannel, ()>(|world, mut lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.
         while let Ok(removed_service) = lifecycles.receiver.try_recv() {
@@ -191,11 +191,11 @@ fn collect_from_channels(
     }
 
     // Queue any operations that needed to be deferred
-    let mut deferred = world.get_resource_or_insert_with(|| DeferredRoster::default());
+    let mut deferred = world.get_resource_or_insert_with(DeferredRoster::default);
     roster.append(&mut deferred);
 
     // Collect any tasks that are ready to be woken
-    let mut wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
+    let mut wake_queue = world.get_resource_or_insert_with(WakeQueue::new);
     while let Ok(wakeable) = wake_queue.receiver.try_recv() {
         roster.awake(wakeable);
     }
@@ -223,7 +223,7 @@ fn collect_from_channels(
         drop_target(target, world, roster, true);
     }
 
-    let mut lifecycles = world.get_resource_or_insert_with(|| ImpulseLifecycleChannel::default());
+    let mut lifecycles = world.get_resource_or_insert_with(ImpulseLifecycleChannel::default);
     let mut dropped_targets: SmallVec<[Entity; 8]> = SmallVec::new();
     while let Ok(dropped_target) = lifecycles.receiver.try_recv() {
         dropped_targets.push(dropped_target);
@@ -241,7 +241,7 @@ fn collect_from_channels(
     {
         let Some(validate) = world.get::<ValidateScopeReachability>(source) else {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(
@@ -263,7 +263,7 @@ fn collect_from_channels(
         };
         if let Err(OperationError::Broken(backtrace)) = validate(req) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(
@@ -334,7 +334,7 @@ fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, 
 
     if unused {
         world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .unused_targets
             .push(UnusedTargetDrop {
                 unused_target: target,

@@ -169,7 +169,7 @@ pub(crate) fn dispose_for_despawned_service(
             (disposer.0)(source, despawned_service, world, roster);
         } else {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .disposals
                 .push(DisposalFailure {
                     disposal: Disposal::service_unavailable(despawned_service, source),
@@ -204,7 +204,7 @@ fn dispose_for_unavailable_service<T: 'static + Send + Sync>(
         }
     } else {
         world
-            .get_resource_or_insert_with(|| UnhandledErrors::default())
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .disposals
             .push(DisposalFailure {
                 disposal,

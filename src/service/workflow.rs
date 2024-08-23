@@ -65,7 +65,7 @@ impl WorkflowHooks {
             return Ok(false);
         };
         let scope = workflow.scope;
-        return reachability.check_upstream(scope);
+        reachability.check_upstream(scope)
     }
 }
 
@@ -239,6 +239,7 @@ where
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn begin_workflow<Request, Response, Streams>(
     input: Input<Request>,
     source: Entity,

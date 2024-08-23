@@ -30,10 +30,15 @@ pub struct MapDef<F>(F);
 
 /// Convert an [`FnMut`] that takes in a [`BlockingMap`] or an [`AsyncMap`] into
 /// a recognized map type.
+#[allow(clippy::wrong_self_convention)]
 pub trait AsMap<M> {
     type MapType;
     fn as_map(self) -> Self::MapType;
 }
+
+pub type RequestOfMap<M, F> = <<F as AsMap<M>>::MapType as ProvideOnce>::Request;
+pub type ResponseOfMap<M, F> = <<F as AsMap<M>>::MapType as ProvideOnce>::Response;
+pub type StreamsOfMap<M, F> = <<F as AsMap<M>>::MapType as ProvideOnce>::Streams;
 
 /// A trait that all different ways of defining a Blocking Map must funnel into.
 pub(crate) trait CallBlockingMap<Request, Response, Streams: StreamPack> {
