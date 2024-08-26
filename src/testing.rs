@@ -19,7 +19,7 @@ use bevy_app::ScheduleRunnerPlugin;
 pub use bevy_app::{App, Update};
 use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
 pub use bevy_ecs::{
-    prelude::{Commands, Component, Entity, In, Local, Query, ResMut},
+    prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource},
     system::{CommandQueue, IntoSystem},
 };
 use bevy_time::TimePlugin;
@@ -34,8 +34,8 @@ use smallvec::SmallVec;
 use crate::{
     flush_impulses, AddContinuousServicesExt, AsyncServiceInput, BlockingMap, BlockingServiceInput,
     Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflow, StreamOf,
-    StreamPack, UnhandledErrors, WorkflowSettings,
+    GetBufferedSessionsFn, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt,
+    StreamOf, StreamPack, UnhandledErrors, WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -473,3 +473,8 @@ pub fn repeat_service(
 
 #[derive(Component)]
 pub struct TestComponent;
+
+#[derive(Component, Resource)]
+pub struct Integer {
+    pub value: i32,
+}

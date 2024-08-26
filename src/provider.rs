@@ -20,12 +20,35 @@ use bevy_ecs::prelude::{Commands, Entity};
 /// The `Provider` trait encapsulates the idea of providing a response to a
 /// request. There are three different provider types with different advantages:
 /// - [`Service`](crate::Service)
+///   - Stored in the [`World`][4], associated with its own unique [`Entity`]
+///   - You can add [`Components`][1] to the [`Entity`] of the service to "configure" the service
+///   - You can lookup services in the `World` using the [`ServiceDiscovery`](crate::ServiceDiscovery) parameter
+///   - Services can view and modify anything in the `World` while running
 /// - [`Callback`](crate::Callback)
-/// - [`AsyncMap`](crate::AsyncMap)
-/// - [`BlockingMap`](crate::BlockingMap)
+///   - Exist as objects that can be shared and passed around, not associated with an [`Entity`]
+///   - Can be stored inside [`Components`][1] or [`Resources`][2]
+///   - Callbacks can view and modify anything in the `World` while running
+/// - [`Map`](crate::AsMap)
+///   - Simple function to transform data
+///   - Any single-input function, regular or async, can be used as a map
+///   - Cannot view or modify the world (except by using the [async channel][3]) but has less overhead than `Services` or `Callbacks`
 ///
 /// Types that implement this trait can be used to create nodes in a workflow or
 /// impulses in an impulse chain.
+///
+/// Across these three types of providers there are three flavors to choose from:
+///
+/// | Type        | Description  | Advantage | Service | Callback | Map |
+/// | ------------|--------------|-----------|---------|----------|-----|
+/// | Blocking    | Execute one-at-a-time, preventing the execution of any other systems while running. | No thread-switching overhead. <br> A sequence of blocking providers will finish in one flush. | ✅ | ✅ | ✅ |
+/// | Async       | Executed in an async thread pool. <br> Able to modify the [`World`][4] using a [`Channel`][5] while running in the thread pool. | Long-running tasks won't block other systems from running. <br> Can use `.await`, making them good for filesystem or network i/o. | ✅ | ✅ | ✅ |
+/// | Continuous  | Run every update cycle inside a specified [`App`](bevy_app::App) schedule. <br> Receive a queue of ongoing requests to fulfill. | Can run in parallel with other Bevy systems according to normal schedule logic. <br> Good for services that need to incrementally fulfill requests. | ✅ | ❌ | ❌ |
+///
+/// [1]: bevy_ecs::prelude::Component
+/// [2]: bevy_ecs::prelude::Resource
+/// [3]: crate::AsyncMap::channel
+/// [4]: bevy_ecs::prelude::World
+/// [5]: crate::Channel
 pub trait Provider: ProvideOnce {}
 
 /// Similar to [`Provider`] but can be used for functions that are only able to
@@ -49,7 +72,7 @@ pub trait ProvideOnce {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
     use bevy_ecs::{prelude::*, system::SystemState};
     use std::future::Future;
 

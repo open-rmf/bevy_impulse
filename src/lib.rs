@@ -15,29 +15,37 @@
  *
 */
 
-//! `bevy_impulse` is an extension to the [Bevy](https://bevyengine.org) game
+//! ![sense-think-act workflow](https://raw.githubusercontent.com/open-rmf/bevy_impulse/update_docs/assets/figures/sense-think-act_workflow.svg)
+//!
+//! Bevy impulse is an extension to the [Bevy](https://bevyengine.org) game
 //! engine that allows you to transform [bevy systems](https://bevyengine.org/learn/quick-start/getting-started/ecs/)
 //! into services and workflows that can be used for reactive service-oriented
 //! programming.
 //!
 //! ## Services
 //!
-//! One primitive of reactive programming is a [service](https://en.wikipedia.org/wiki/Service_(systems_architecture)).
-//! In `bevy_impulse`, a service is a bevy system that is associated with an
+//! One primitive element of reactive programming is a [service](https://en.wikipedia.org/wiki/Service_(systems_architecture)).
+//! In bevy impulse, a [`Service`] is a bevy system that is associated with an
 //! entity and can be created using [`Commands::spawn_service`](SpawnServicesExt::spawn_service)
 //! or [`App::add_service`](AddServicesExt::add_service).
 //!
-//! When you [spawn](SpawnServicesExt::spawn_service) a service you will
-//! immediately receive a [`Service`] object which can be used to refer to it.
-//! If you do not want to hang onto the service object, you can find previously
-//! spawned services later using the [`ServiceDiscovery`] system parameter.
+//! When you spawn a service you will immediately receive a [`Service`] object
+//! which references the newly spawned service. If you do not want to hang onto the [`Service`]
+//! object, you can find previously spawned services later using the [`ServiceDiscovery`]
+//! system parameter.
+//!
+//! Sometimes [`Service`] is not quite the right fit for your use case, so bevy impulse
+//! offers a generalization of services callled [`Provider`] which has some
+//! more options for defining a reactive element.
 //!
 //! ## Workflows
 //!
 //! For complex async workflows, a single bevy system may not be sufficient.
-//! You can instead build workflows using [`Command::spawn_workflow`](SpawnWorkflow::spawn_workflow).
+//! You can instead build workflows using [`.spawn_workflow`](SpawnWorkflowExt::spawn_workflow)
+//! on [`Commands`](bevy_ecs::prelude::Commands) or [`World`](bevy_ecs::prelude::World).
 //! A workflow lets you create a graph of [nodes](Node) where each node is a
-//! service with an input, an output, and possibly streams.
+//! [service](Service) (or more generally a [provider](Provider)) with an input,
+//! an output, and possibly streams.
 //!
 //! There are various operations that can be performed between nodes, such as
 //! forking and joining. These operations are built using [`Chain`].
@@ -54,8 +62,8 @@
 //! [`Impulse::then`]. Any impulse chain that you create will only run exactly
 //! once.
 //!
-//! Once you've finished creating your chain, use [`Impulse::detach`] to let it
-//! run freely, or use [`Impulse::take`] to receive a [`Promise`] of the final
+//! Once you've finished building your chain, use [`Impulse::detach`] to let it
+//! run freely, or use [`Impulse::take`] to get a [`Recipient`] of the final
 //! result.
 
 mod async_execution;
@@ -149,7 +157,7 @@ use bevy_ecs::prelude::{Entity, In};
 ///
 /// ```
 /// use bevy_ecs::prelude::*;
-/// use bevy_impulse::*;
+/// use bevy_impulse::prelude::*;
 ///
 /// #[derive(Component, Resource)]
 /// struct Precision(i32);
@@ -256,7 +264,7 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
     pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously.
+    /// callback executes asynchronously.
     pub channel: Channel,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
@@ -297,7 +305,7 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
     pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously.
+    /// map executes asynchronously.
     pub channel: Channel,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
@@ -318,4 +326,35 @@ impl Plugin for ImpulsePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, flush_impulses());
     }
+}
+
+pub mod prelude {
+    pub use crate::{
+        buffer::{
+            Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferSettings, Bufferable, Buffered,
+            IterBufferable, RetentionPolicy,
+        },
+        builder::Builder,
+        callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
+        chain::{Chain, ForkCloneBuilder, UnzipBuilder, Unzippable},
+        flush::flush_impulses,
+        impulse::{Impulse, Recipient},
+        map::{AsMap, IntoAsyncMap, IntoBlockingMap},
+        map_once::{AsMapOnce, IntoAsyncMapOnce, IntoBlockingMapOnce},
+        node::{ForkCloneOutput, InputSlot, Node, Output},
+        promise::{Promise, PromiseState},
+        provider::{ProvideOnce, Provider},
+        request::{RequestExt, RunCommandsOnWorldExt},
+        service::{
+            traits::*, AddContinuousServicesExt, AddServicesExt, AsDeliveryInstructions,
+            DeliveryInstructions, DeliveryLabel, DeliveryLabelId, IntoAsyncService,
+            IntoBlockingService, Service, ServiceDiscovery, SpawnServicesExt,
+        },
+        stream::{Stream, StreamFilter, StreamOf, StreamPack},
+        trim::{TrimBranch, TrimPoint},
+        workflow::{DeliverySettings, Scope, ScopeSettings, SpawnWorkflowExt, WorkflowSettings},
+        AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
+        BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
+        BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
+    };
 }

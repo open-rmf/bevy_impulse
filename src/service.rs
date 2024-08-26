@@ -51,23 +51,30 @@ pub use discovery::*;
 pub(crate) mod internal;
 pub(crate) use internal::*;
 
-mod traits;
+pub mod traits;
 pub use traits::*;
 
 mod workflow;
 pub(crate) use workflow::*;
 
 /// [`Service`] is the public API handle for referring to an existing service
-/// provider. Downstream users can obtain a Provider using
-/// - [`crate::ServiceDiscovery`].iter()
-/// - [`bevy::prelude::App`]`.`[`add_*_service(~)`][1]
-/// - [`bevy::prelude::Commands`]`.`[`spawn_*_service(~)`][2]
+/// provider. You can obtain a service using:
+/// - [`App`]`.`[`add_service(~)`][1]: Add a service to an `App` as part of a chain.
+/// - [`App`]`.`[`spawn_service(~)`][2]: Spawn a service using an `App`.
+/// - [`App`]`.`[`spawn_continuous_service(~)`][3]: Spawn a service that runs continuously in the regular App schedule.
+/// - [`Commands`]`.`[`spawn_service(~)`][4]: Spawn a service using `Commands`. This can be done while the application is running. This cannot spawn continuous services.
+/// - [`ServiceDiscovery`]`.iter()`: Search for compatible services that already exist within the [`World`].
 ///
-/// To use a provider, call [`bevy::prelude::Commands`]`.`[`request(provider, request)`][3].
+/// To use a service, call [`Commands`]`.`[`request(input, service)`][5].
 ///
 /// [1]: crate::AddServicesExt::add_service
-/// [2]: SpawnServicesExt::spawn_service
-/// [3]: crate::RequestExt::request
+/// [2]: crate::AddServicesExt::spawn_service
+/// [3]: crate::AddContinuousServicesExt::spawn_continuous_service
+/// [4]: SpawnServicesExt::spawn_service
+/// [5]: crate::RequestExt::request
+/// [App]: bevy_app::prelude::App
+/// [Commands]: bevy_ecs::prelude::Commands
+/// [World]: bevy_ecs::prelude::World
 #[derive(Debug, PartialEq, Eq)]
 pub struct Service<Request, Response, Streams = ()> {
     provider: Entity,
@@ -101,15 +108,18 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
         self.instructions.as_ref()
     }
 
-    /// Give [`DeliveryInstructions`] for this service.
+    /// Create a new reference to the same service provider, but with new [`DeliveryInstructions`].
+    /// This has no effect on the original [`Service`] instance.
     pub fn instruct(mut self, instructions: impl Into<DeliveryInstructions>) -> Self {
         self.instructions = Some(instructions.into());
         self
     }
 
-    /// Cast the streams of this service into a different stream pack. This will
-    /// fail if the target stream pack contains stream types that were not
-    /// present in the original.
+    /// Create a new reference to the same service provider, but cast the streams
+    /// into a different stream pack. This will fail if the target stream pack
+    /// contains stream types that were not present in the original [`Service`]
+    /// instance, regardless of whether or not the underlying service provider
+    /// is able to provide the target stream types.
     ///
     /// If you are okay with misrepresenting the streams of the service, use
     /// [`Self::optional_stream_cast`]. Note that misrepresenting the service's
@@ -143,12 +153,13 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
         })
     }
 
-    /// Cast the streams of this service into a different stream pack. This will
-    /// succeed even if the original streams do not match the target streams.
+    /// Create a new reference to the same service provider, but cast the streams
+    /// of this service into a different stream pack. This will succeed even if
+    /// the original streams do not match the target streams.
     ///
     /// Be careful when using this since the service will not output anything to
-    /// streams that it was not originally equipped with. This could lead to
-    /// confusing results for anyone trying to use the resulting service.
+    /// streams that the service provider was not originally equipped with. This
+    /// could lead to confusing results for anyone trying to use the resulting service.
     ///
     /// There is never a risk of undefined behavior from performing this cast,
     /// only the unexpected absence of advertised streams, but stream data is
@@ -565,7 +576,7 @@ impl<Request, Response, Streams> Provider for Service<Request, Response, Streams
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*, ServiceMarker};
     use bevy_app::{PostUpdate, PreUpdate, Startup};
     use bevy_ecs::{
         prelude::*,

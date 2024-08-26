@@ -690,7 +690,7 @@ impl CleanupWorkflowConditions {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*, CancellationCause};
     use smallvec::SmallVec;
 
     #[test]

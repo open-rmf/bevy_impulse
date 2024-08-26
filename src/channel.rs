@@ -31,12 +31,15 @@ use crate::{
     StreamRequest,
 };
 
+/// Provides asynchronous access to the [`World`], allowing you to issue queries
+/// or commands and then await the result.
 #[derive(Clone)]
 pub struct Channel {
     inner: Arc<InnerChannel>,
 }
 
 impl Channel {
+    /// Run a query in the world and receive the promise of the query's output.
     pub fn query<P>(&self, request: P::Request, provider: P) -> Promise<P::Response>
     where
         P: Provider,
@@ -49,6 +52,7 @@ impl Channel {
             .flatten()
     }
 
+    /// Get access to a [`Commands`] for the [`World`]
     pub fn command<F, U>(&self, f: F) -> Promise<U>
     where
         F: FnOnce(&mut Commands) -> U + 'static + Send,
@@ -170,7 +174,7 @@ impl<T: Stream> StreamChannel<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
     use bevy_ecs::system::EntityCommands;
     use std::time::Duration;
 

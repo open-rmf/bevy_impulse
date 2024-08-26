@@ -913,7 +913,7 @@ impl<S: Stream> Command for SendStreams<S> {
 /// optional stream data.
 ///
 /// ```
-/// use bevy_impulse::{*, testing::*};
+/// use bevy_impulse::{Require, prelude::*, testing::*};
 ///
 /// fn service_discovery_system(
 ///     discover: ServiceDiscovery<
@@ -976,7 +976,7 @@ all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
 
     #[test]
     fn test_single_stream() {
