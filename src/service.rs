@@ -58,7 +58,7 @@ mod workflow;
 pub(crate) use workflow::*;
 
 /// [`Service`] is the public API handle for referring to an existing service
-/// provider. Downstream users can obtain a service using:
+/// provider. You can obtain a service using:
 /// - [`App`]`.`[`add_service(~)`][1]: Add a service to an `App` as part of a chain.
 /// - [`App`]`.`[`spawn_service(~)`][2]: Spawn a service using an `App`.
 /// - [`App`]`.`[`spawn_continuous_service(~)`][3]: Spawn a service that runs continuously in the regular App schedule.

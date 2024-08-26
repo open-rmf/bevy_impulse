@@ -29,21 +29,23 @@
 //! entity and can be created using [`Commands::spawn_service`](SpawnServicesExt::spawn_service)
 //! or [`App::add_service`](AddServicesExt::add_service).
 //!
-//! When you [spawn](SpawnServicesExt::spawn_service) a service you will
-//! immediately receive a [`Service`] object which can be used to refer to it.
-//! If you do not want to hang onto the service object, you can find previously
-//! spawned services later using the [`ServiceDiscovery`] system parameter.
+//! When you spawn a service you will immediately receive a [`Service`] object
+//! which references the newly spawned service. If you do not want to hang onto the [`Service`]
+//! object, you can find previously spawned services later using the [`ServiceDiscovery`]
+//! system parameter.
 //!
 //! Sometimes [`Service`] is not quite the right fit for your use case, so bevy impulse
-//! offers a generalization of services callled [`Provider`] which has a few
+//! offers a generalization of services callled [`Provider`] which has some
 //! more options for defining a reactive element.
 //!
 //! ## Workflows
 //!
 //! For complex async workflows, a single bevy system may not be sufficient.
-//! You can instead build workflows using [`Command::spawn_workflow`](SpawnWorkflow::spawn_workflow).
+//! You can instead build workflows using [`.spawn_workflow`](SpawnWorkflowExt::spawn_workflow)
+//! on [`Commands`](bevy_ecs::prelude::Commands) or [`World`](bevy_ecs::prelude::World).
 //! A workflow lets you create a graph of [nodes](Node) where each node is a
-//! service with an input, an output, and possibly streams.
+//! [service](Service) (or more generally a [provider](Provider)) with an input,
+//! an output, and possibly streams.
 //!
 //! There are various operations that can be performed between nodes, such as
 //! forking and joining. These operations are built using [`Chain`].
@@ -60,8 +62,8 @@
 //! [`Impulse::then`]. Any impulse chain that you create will only run exactly
 //! once.
 //!
-//! Once you've finished creating your chain, use [`Impulse::detach`] to let it
-//! run freely, or use [`Impulse::take`] to receive a [`Promise`] of the final
+//! Once you've finished building your chain, use [`Impulse::detach`] to let it
+//! run freely, or use [`Impulse::take`] to get a [`Recipient`] of the final
 //! result.
 
 mod async_execution;
@@ -262,7 +264,7 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
     pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously.
+    /// callback executes asynchronously.
     pub channel: Channel,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
@@ -303,7 +305,7 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
     pub streams: Streams::Channel,
     /// The channel that allows querying and syncing with the world while the
-    /// service runs asynchronously.
+    /// map executes asynchronously.
     pub channel: Channel,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,

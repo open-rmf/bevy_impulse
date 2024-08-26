@@ -29,7 +29,7 @@ use crate::{
 mod internal;
 
 /// Trait to allow workflows to be spawned from a [`Commands`] or a [`World`].
-pub trait SpawnWorkflow {
+pub trait SpawnWorkflowExt {
     /// Spawn a workflow.
     ///
     /// * `build` - A function that takes in a [`Scope`] and a [`Builder`] to
@@ -217,7 +217,7 @@ impl From<()> for ScopeSettings {
     }
 }
 
-impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
+impl<'w, 's> SpawnWorkflowExt for Commands<'w, 's> {
     fn spawn_workflow<Request, Response, Streams, Settings>(
         &mut self,
         build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> Settings,
@@ -268,7 +268,7 @@ impl<'w, 's> SpawnWorkflow for Commands<'w, 's> {
     }
 }
 
-impl SpawnWorkflow for World {
+impl SpawnWorkflowExt for World {
     fn spawn_workflow<Request, Response, Streams, W>(
         &mut self,
         build: impl FnOnce(Scope<Request, Response, Streams>, &mut Builder) -> W,

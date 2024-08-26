@@ -63,8 +63,8 @@ impl Gate {
 /// [2]: crate::Chain::then_gate
 /// [3]: crate::Builder::create_gate_open
 /// [4]: crate::Builder::create_gate_close
-/// [5]: crate::chain::then_gate_open
-/// [6]: crate::chain::then_gate_close
+/// [5]: crate::Chain::then_gate_open
+/// [6]: crate::Chain::then_gate_close
 pub struct GateRequest<T> {
     /// Indicate what action the gate should take
     pub action: Gate,

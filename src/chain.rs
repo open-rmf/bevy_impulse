@@ -183,7 +183,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 
     /// Apply a map whose output is a Future that will be run in the
-    /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool) (unless
+    /// [`AsyncComputeTaskPool`](bevy_tasks::AsyncComputeTaskPool) (unless
     /// the `single_threaded_async` feature is active). The output of the Future
     /// will be the Response of the returned Chain.
     pub fn map_async<Task>(
@@ -959,7 +959,7 @@ where
     /// various reasons, this returns a [`Result`]. Follow this with
     /// `.dispose_on_err` to filter away errors.
     ///
-    /// To access the streams of the service, use [`Chain::then_request_node`].
+    /// To access the streams of the service, use [`Chain::then_injection_node`].
     pub fn then_injection(self) -> Chain<'w, 's, 'a, 'b, Response> {
         let source = self.target;
         let node = self

@@ -164,7 +164,7 @@ where
     /// feature is active). The output of the [`Future`] will be the Response of
     /// the returned Impulse.
     ///
-    /// [1]: bevy::tasks::AsyncComputeTaskPool
+    /// [1]: bevy_tasks::AsyncComputeTaskPool
     #[must_use]
     pub fn map_async<Task>(
         self,
