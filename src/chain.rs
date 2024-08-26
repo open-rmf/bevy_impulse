@@ -723,7 +723,7 @@ where
     /// that trait, then you can use [`Self::cancel_on_quiet_err`] instead.
     ///
     /// ```
-    /// use bevy_impulse::{*, testing::*};
+    /// use bevy_impulse::{prelude::*, testing::*};
     ///
     /// let mut context = TestingContext::minimal_plugins();
     ///
@@ -1032,7 +1032,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
     use smallvec::SmallVec;
 
     #[test]

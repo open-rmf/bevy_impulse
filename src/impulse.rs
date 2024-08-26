@@ -335,7 +335,7 @@ impl<T> Default for Collection<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*, ContinuousQueueView};
     use bevy_utils::label::DynEq;
     use smallvec::SmallVec;
     use std::{

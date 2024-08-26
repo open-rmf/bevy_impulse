@@ -157,7 +157,7 @@ pub(crate) enum TrimPolicy {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
     use std::sync::mpsc::channel;
 
     #[test]

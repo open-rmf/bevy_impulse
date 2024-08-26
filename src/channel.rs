@@ -174,7 +174,7 @@ impl<T: Stream> StreamChannel<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
     use bevy_ecs::system::EntityCommands;
     use std::time::Duration;
 

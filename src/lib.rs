@@ -157,7 +157,7 @@ use bevy_ecs::prelude::{Entity, In};
 ///
 /// ```
 /// use bevy_ecs::prelude::*;
-/// use bevy_impulse::*;
+/// use bevy_impulse::prelude::*;
 ///
 /// #[derive(Component, Resource)]
 /// struct Precision(i32);
@@ -326,4 +326,35 @@ impl Plugin for ImpulsePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, flush_impulses());
     }
+}
+
+pub mod prelude {
+    pub use crate::{
+        BlockingService, BlockingServiceInput, AsyncService, AsyncServiceInput,
+        ContinuousService, ContinuousServiceInput, ContinuousQuery,
+        BlockingCallback, BlockingCallbackInput, AsyncCallback, AsyncCallbackInput,
+        BlockingMap, AsyncMap,
+        buffer::{Buffer, BufferKey, BufferAccess, BufferAccessMut, BufferSettings, RetentionPolicy, Buffered, Bufferable, IterBufferable},
+        builder::Builder,
+        callback::{Callback, AsCallback, IntoBlockingCallback, IntoAsyncCallback},
+        chain::{Chain, ForkCloneBuilder, UnzipBuilder, Unzippable},
+        flush::flush_impulses,
+        impulse::{Impulse, Recipient},
+        map::{AsMap, IntoBlockingMap, IntoAsyncMap},
+        map_once::{AsMapOnce, IntoBlockingMapOnce, IntoAsyncMapOnce},
+        node::{Node, InputSlot, Output, ForkCloneOutput},
+        promise::{Promise, PromiseState},
+        provider::{ProvideOnce, Provider},
+        request::{RequestExt, RunCommandsOnWorldExt},
+        service::{
+            traits::*,
+            Service, ServiceDiscovery,
+            DeliveryLabel, DeliveryLabelId, DeliveryInstructions, AsDeliveryInstructions,
+            SpawnServicesExt, AddServicesExt, AddContinuousServicesExt,
+            IntoBlockingService, IntoAsyncService,
+        },
+        stream::{Stream, StreamPack, StreamOf, StreamFilter},
+        workflow::{SpawnWorkflowExt, Scope, ScopeSettings, WorkflowSettings, DeliverySettings},
+        trim::{TrimBranch, TrimPoint},
+    };
 }

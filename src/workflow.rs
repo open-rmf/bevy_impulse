@@ -289,7 +289,7 @@ impl SpawnWorkflowExt for World {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
 
     #[test]
     fn test_simple_workflows() {

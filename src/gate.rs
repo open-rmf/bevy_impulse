@@ -75,7 +75,7 @@ pub struct GateRequest<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
 
     #[test]
     fn test_gate_actions() {

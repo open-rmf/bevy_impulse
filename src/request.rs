@@ -39,7 +39,7 @@ pub trait RequestExt<'w, 's> {
     /// the other terminating operations mentioned in [the chart](Impulse::detach).
     ///
     /// ```
-    /// use bevy_impulse::{*, testing::*};
+    /// use bevy_impulse::{prelude::*, testing::*};
     /// let mut context = TestingContext::minimal_plugins();
     /// let mut promise = context.command(|commands| {
     ///     let service = commands.spawn_service(spawn_test_entities);
@@ -149,7 +149,7 @@ async fn async_server<T: Future>(value: T) -> T::Output {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
 
     #[test]
     fn simple_spawn() {

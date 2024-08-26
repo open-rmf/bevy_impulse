@@ -51,7 +51,7 @@ pub use discovery::*;
 pub(crate) mod internal;
 pub(crate) use internal::*;
 
-mod traits;
+pub mod traits;
 pub use traits::*;
 
 mod workflow;
@@ -576,7 +576,7 @@ impl<Request, Response, Streams> Provider for Service<Request, Response, Streams
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*, ServiceMarker};
     use bevy_app::{PostUpdate, PreUpdate, Startup};
     use bevy_ecs::{
         prelude::*,

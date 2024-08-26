@@ -29,14 +29,14 @@ use std::future::Future;
 pub struct MapDef<F>(F);
 
 /// Maps are used to perform simple transformations of data which do not require
-/// any direct [`World`][4] access or any persistent system state. They are more
-/// efficient than [`Service`][5] or [`Callback`][6] when suitable.
+/// any direct [`World`] access or any persistent system state. They are more
+/// efficient than [`Service`] or [`Callback`] when suitable.
 ///
 /// There are two kinds of functions that can be used as maps:
 /// * **Blocking**: A regular function with a single input and any output.
 ///   All system execution will be blocked while this is running, similar to flushing [`Commands`].
 /// * **Async**: A function that takes a single input and returns something that implements the [`Future`] trait.
-///   The [`Future`] will be executed in the [`AsyncComputeTaskPool`][7] unless the `single_threaded_async` feature is active.
+///   The [`Future`] will be executed in the [`AsyncComputeTaskPool`] unless the `single_threaded_async` feature is active.
 ///
 /// If you want to insert a map into a workflow or impulse chain, you can pass your function into one of the following,
 /// depending on whether you want blocking or async:
@@ -46,7 +46,7 @@ pub struct MapDef<F>(F);
 ///   * [`Builder::create_map_block`](crate::Builder::create_map_block)
 ///   * [`Impulse::map_block`](crate::Impulse::map_block)
 /// * **Async**
-///   * [`Chain::map_async`](crate::Chain::map_async)
+///   * [`Chain::map_async`](crate::Chain:::map_async)
 ///   * [`Chain::map_async_node`](crate::Chain::map_async_node)
 ///   * [`Builder::create_map_async`](crate::Builder::create_map_async)
 ///   * [`Impulse::map_async`](crate::Impulse::map_async)
@@ -65,10 +65,10 @@ pub struct MapDef<F>(F);
 /// [1]: AsMap::as_map
 /// [2]: IntoBlockingMap::into_blocking_map
 /// [3]: IntoAsyncMap::into_async_map
-/// [4]: bevy_ecs::prelude::World
-/// [5]: crate::Service
-/// [6]: crate::Callback
-/// [7]: bevy_tasks::AsyncComputeTaskPool
+/// [World]: bevy_ecs::prelude::World
+/// [Service]: crate::Service
+/// [Callback]: crate::Callback
+/// [AsyncComputeTaskPool]: bevy_tasks::AsyncComputeTaskPool
 #[allow(clippy::wrong_self_convention)]
 pub trait AsMap<M> {
     type MapType;
@@ -178,13 +178,14 @@ pub trait IntoBlockingMap<M> {
     fn into_blocking_map(self) -> Self::MapType;
 }
 
-impl<F, Request, Response> IntoBlockingMap<(Request, Response, ())> for F
+impl<F, Request, Response, Streams> IntoBlockingMap<(Request, Response, Streams)> for F
 where
     F: FnMut(Request) -> Response + 'static + Send + Sync,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
+    Streams: StreamPack,
 {
-    type MapType = BlockingMapDef<BlockingMapAdapter<F>, Request, Response, ()>;
+    type MapType = BlockingMapDef<BlockingMapAdapter<F>, Request, Response, Streams>;
     /// Convert any single input function into a [`Provider`] whose request type
     /// is the single input type of the function and whose response type is the
     /// return type of the function.
@@ -310,10 +311,7 @@ where
     Task::Output: 'static + Send + Sync,
 {
     type MapType = AsyncMapDef<AsyncMapAdapter<F>, Request, Task, ()>;
-    /// Convert any single input function whose return type implements the
-    /// [`Future`] trait into a [`Provider`] whose request type is the single
-    /// input type of the function and whose response type is the [`Future::Output`]
-    /// of its return type.
+    /// Convert any
     fn into_async_map(self) -> Self::MapType {
         AsyncMapDef {
             def: AsyncMapAdapter(self),

@@ -72,7 +72,7 @@ pub trait ProvideOnce {
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*};
     use bevy_ecs::{prelude::*, system::SystemState};
     use std::future::Future;
 

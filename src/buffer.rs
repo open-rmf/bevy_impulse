@@ -571,7 +571,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::*, *};
+    use crate::{prelude::*, testing::*, Gate};
     use std::future::Future;
 
     #[test]
