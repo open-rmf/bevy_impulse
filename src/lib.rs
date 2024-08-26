@@ -15,15 +15,17 @@
  *
 */
 
-//! `bevy_impulse` is an extension to the [Bevy](https://bevyengine.org) game
+//! ![sense-think-act workflow](https://raw.githubusercontent.com/open-rmf/bevy_impulse/update_docs/assets/figures/sense-think-act_workflow.svg)
+//!
+//! Bevy impulse is an extension to the [Bevy](https://bevyengine.org) game
 //! engine that allows you to transform [bevy systems](https://bevyengine.org/learn/quick-start/getting-started/ecs/)
 //! into services and workflows that can be used for reactive service-oriented
 //! programming.
 //!
 //! ## Services
 //!
-//! One primitive of reactive programming is a [service](https://en.wikipedia.org/wiki/Service_(systems_architecture)).
-//! In `bevy_impulse`, a service is a bevy system that is associated with an
+//! One primitive element of reactive programming is a [service](https://en.wikipedia.org/wiki/Service_(systems_architecture)).
+//! In bevy impulse, a [`Service`] is a bevy system that is associated with an
 //! entity and can be created using [`Commands::spawn_service`](SpawnServicesExt::spawn_service)
 //! or [`App::add_service`](AddServicesExt::add_service).
 //!
@@ -31,6 +33,10 @@
 //! immediately receive a [`Service`] object which can be used to refer to it.
 //! If you do not want to hang onto the service object, you can find previously
 //! spawned services later using the [`ServiceDiscovery`] system parameter.
+//!
+//! Sometimes [`Service`] is not quite the right fit for your use case, so bevy impulse
+//! offers a generalization of services callled [`Provider`] which has a few
+//! more options for defining a reactive element.
 //!
 //! ## Workflows
 //!
