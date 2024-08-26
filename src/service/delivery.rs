@@ -16,16 +16,15 @@
 */
 
 use crate::{
-    Blocker, OperationRoster, DeliveryInstructions, DeliveryLabelId,
-    OperationCleanup, OperationResult, OperationReachability,
-    ReachabilityResult, ProviderStorage, OrBroken,
+    Blocker, DeliveryInstructions, DeliveryLabelId, OperationCleanup, OperationReachability,
+    OperationResult, OperationRoster, OrBroken, ProviderStorage, ReachabilityResult,
 };
 
-use bevy_ecs::prelude::{Entity, Component, World};
+use bevy_ecs::prelude::{Component, Entity, World};
 
 use smallvec::SmallVec;
 
-use std::collections::{VecDeque, HashMap};
+use std::collections::{HashMap, VecDeque};
 
 pub(crate) fn pop_next_delivery<Request>(
     provider: Entity,
@@ -38,18 +37,16 @@ where
 {
     let mut delivery = world.get_mut::<Delivery<Request>>(provider)?;
     match &mut *delivery {
-        Delivery::Serial(serial) => {
-            pop_next_delivery_impl::<Request>(provider, serial, serve_next)
-        }
+        Delivery::Serial(serial) => pop_next_delivery_impl::<Request>(provider, serial, serve_next),
         Delivery::Parallel(parallel) => {
             let label = label.expect(
                 "A request in a parallel async service was blocking without a label. \
-                Please report this to the bevy_impulse maintainers; this should not be possible."
+                Please report this to the bevy_impulse maintainers; this should not be possible.",
             );
             let serial = parallel.labeled.get_mut(&label).expect(
                 "A labeled request in a parallel async service finished but the queue \
                 for its label has been erased. Please report this to the bevy_impulse \
-                maintainers; this should not be possible."
+                maintainers; this should not be possible.",
             );
             pop_next_delivery_impl::<Request>(provider, serial, serve_next)
         }
@@ -68,19 +65,33 @@ where
     // to deliver then we will assign it later in this function.
     serial.delivering = None;
 
-    let Some(DeliveryOrder { source, session, task_id, request, instructions }) = serial.queue.pop_front() else {
-        return None;
-    };
+    let DeliveryOrder {
+        source,
+        session,
+        task_id,
+        request,
+        instructions,
+    } = serial.queue.pop_front()?;
+
     let blocker = Blocker {
         provider,
         source,
         session,
-        label: instructions.as_ref().map(|x| x.label.clone()),
+        label: instructions.as_ref().map(|x| x.label),
         serve_next,
     };
 
-    serial.delivering = Some(ActiveDelivery { source, session, task_id, instructions });
-    return Some(Deliver { request, task_id, blocker });
+    serial.delivering = Some(ActiveDelivery {
+        source,
+        session,
+        task_id,
+        instructions,
+    });
+    Some(Deliver {
+        request,
+        task_id,
+        blocker,
+    })
 }
 
 pub struct Deliver<Request> {
@@ -131,7 +142,11 @@ impl<Request> Delivery<Request> {
     where
         Request: 'static + Send + Sync,
     {
-        let provider = r.world().get::<ProviderStorage>(r.source()).or_broken()?.get();
+        let provider = r
+            .world()
+            .get::<ProviderStorage>(r.source())
+            .or_broken()?
+            .get();
         let Some(delivery) = r.world().get::<Self>(provider) else {
             return Ok(false);
         };
@@ -147,7 +162,11 @@ impl<Request> Delivery<Request> {
         Request: 'static + Send + Sync,
     {
         let source = clean.source;
-        let provider = clean.world.get::<ProviderStorage>(source).or_broken()?.get();
+        let provider = clean
+            .world
+            .get::<ProviderStorage>(source)
+            .or_broken()?
+            .get();
         let Some(mut delivery) = clean.world.get_mut::<Delivery<Request>>(provider) else {
             return Ok(());
         };
@@ -168,7 +187,7 @@ pub(crate) struct SerialDelivery<Request> {
 
 impl<Request> SerialDelivery<Request> {
     fn contains_session(&self, session: Entity) -> bool {
-        self.queue.iter().find(|order| order.session == session).is_some()
+        self.queue.iter().any(|order| order.session == session)
     }
     fn cleanup(&mut self, session: Entity) {
         self.queue.retain(|order| order.session != session);
@@ -190,13 +209,17 @@ pub struct ParallelDelivery<Request> {
 
 impl<Request> Default for ParallelDelivery<Request> {
     fn default() -> Self {
-        Self { labeled: Default::default() }
+        Self {
+            labeled: Default::default(),
+        }
     }
 }
 
 impl<Request> ParallelDelivery<Request> {
     fn contains_session(&self, session: Entity) -> bool {
-        self.labeled.values().find(|serial| serial.contains_session(session)).is_some()
+        self.labeled
+            .values()
+            .any(|serial| serial.contains_session(session))
     }
     fn cleanup(&mut self, session: Entity) {
         for serial in self.labeled.values_mut() {
@@ -205,6 +228,7 @@ impl<Request> ParallelDelivery<Request> {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum DeliveryUpdate<Request> {
     /// The new request should be delivered immediately
     Immediate {
@@ -219,7 +243,7 @@ pub enum DeliveryUpdate<Request> {
         stop: Option<DeliveryStoppage>,
         /// The label that the blocking is based on
         label: Option<DeliveryLabelId>,
-    }
+    },
 }
 
 pub struct DeliveryStoppage {
@@ -235,23 +259,17 @@ pub fn insert_new_order<Request>(
     order: DeliveryOrder<Request>,
 ) -> DeliveryUpdate<Request> {
     match delivery {
-        Delivery::Serial(serial) => {
-            insert_serial_order(serial, order)
-        }
-        Delivery::Parallel(parallel) => {
-            match &order.instructions {
-                Some(instructions) => {
-                    let label = instructions.label.clone();
-                    insert_serial_order(
-                        parallel.labeled.entry(label).or_default(),
-                        order,
-                    )
-                }
-                None => {
-                    DeliveryUpdate::Immediate { request: order.request, blocking: None }
-                }
+        Delivery::Serial(serial) => insert_serial_order(serial, order),
+        Delivery::Parallel(parallel) => match &order.instructions {
+            Some(instructions) => {
+                let label = instructions.label;
+                insert_serial_order(parallel.labeled.entry(label).or_default(), order)
             }
-        }
+            None => DeliveryUpdate::Immediate {
+                request: order.request,
+                blocking: None,
+            },
+        },
     }
 }
 
@@ -268,10 +286,13 @@ fn insert_serial_order<Request>(
             source: order.source,
             session: order.session,
             task_id: order.task_id,
-            instructions: order.instructions
+            instructions: order.instructions,
         });
         let label = order.instructions.map(|i| i.label);
-        return DeliveryUpdate::Immediate { blocking: Some(label), request: order.request };
+        return DeliveryUpdate::Immediate {
+            blocking: Some(label),
+            request: order.request,
+        };
     };
 
     let Some(incoming_instructions) = order.instructions else {
@@ -287,8 +308,7 @@ fn insert_serial_order<Request>(
     let mut stop = None;
 
     let should_discard = |prior_instructions: &DeliveryInstructions| {
-        prior_instructions.label == incoming_instructions.label
-        && !prior_instructions.ensure
+        prior_instructions.label == incoming_instructions.label && !prior_instructions.ensure
     };
 
     if incoming_instructions.preempt {
@@ -317,5 +337,9 @@ fn insert_serial_order<Request>(
     serial.queue.push_back(order);
     let label = Some(incoming_instructions.label);
 
-    DeliveryUpdate::Queued { cancelled, stop, label }
+    DeliveryUpdate::Queued {
+        cancelled,
+        stop,
+        label,
+    }
 }

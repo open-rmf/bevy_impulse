@@ -16,14 +16,12 @@
 */
 
 use crate::{
-    Operation, SingleTargetStorage, Service, ServiceRequest,
-    SingleInputStorage, dispatch_service, OperationCleanup,
-    OperationResult, OrBroken, OperationSetup, OperationRequest, StreamPack,
-    ActiveTasksStorage, OperationReachability, ReachabilityResult,
-    InputBundle, Input, ManageDisposal, ManageInput,
-    DisposeForUnavailableService, Impulsive, AddImpulse, StreamTargetMap,
-    CleanupContents, FinalizeCleanup, FinalizeCleanupRequest, ProviderStorage,
-    ScopeStorage, OperateService, Cleanup,
+    dispatch_service, ActiveTasksStorage, AddImpulse, Cleanup, CleanupContents,
+    DisposeForUnavailableService, FinalizeCleanup, FinalizeCleanupRequest, Impulsive, Input,
+    InputBundle, ManageDisposal, ManageInput, OperateService, Operation, OperationCleanup,
+    OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
+    ProviderStorage, ReachabilityResult, ScopeStorage, Service, ServiceRequest, SingleInputStorage,
+    SingleTargetStorage, StreamPack, StreamTargetMap,
 };
 
 use bevy_ecs::{
@@ -38,7 +36,7 @@ use std::collections::HashMap;
 
 pub(crate) struct Injection<Request, Response, Streams> {
     target: Entity,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Request, Response, Streams> Operation for Injection<Request, Response, Streams>
@@ -48,7 +46,9 @@ where
     Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -64,11 +64,17 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: (request, service) } = source_mut
-            .take_input::<(Request, Service<Request, Response, Streams>)>()?;
+        let Input {
+            session,
+            data: (request, service),
+        } = source_mut.take_input::<(Request, Service<Request, Response, Streams>)>()?;
 
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
         let provider = service.provider();
@@ -82,44 +88,59 @@ where
                 // workflow is being built.
                 let streams = Streams::extract_target_storage(source, world)?;
                 let map = world.get::<StreamTargetMap>(source).or_broken()?.clone();
-                world.entity_mut(source).insert(InjectionStreams::<Streams>::new(
-                    streams.clone(),
-                    map.clone(),
-                ));
+                world
+                    .entity_mut(source)
+                    .insert(InjectionStreams::<Streams>::new(
+                        streams.clone(),
+                        map.clone(),
+                    ));
                 (streams, map)
             }
         };
 
-        let finish = world.spawn((
-            InputBundle::<Response>::new(),
-            InjectionSource(source),
-        )).id();
+        let finish = world
+            .spawn((InputBundle::<Response>::new(), InjectionSource(source)))
+            .id();
         AddImpulse::new(finish, InjectionFinish::<Response>::new()).apply(world);
 
-        let task = world.spawn((
-            InputBundle::<Request>::new(),
-            ProviderStorage(provider),
-            SingleTargetStorage::new(finish),
-            ActiveTasksStorage::default(),
-            DisposeForUnavailableService::new::<Request>(),
-            ScopeStorage::new(scope),
-            streams,
-            stream_map,
-        )).id();
+        let task = world
+            .spawn((
+                InputBundle::<Request>::new(),
+                ProviderStorage(provider),
+                SingleTargetStorage::new(finish),
+                ActiveTasksStorage::default(),
+                DisposeForUnavailableService::new::<Request>(),
+                ScopeStorage::new(scope),
+                streams,
+                stream_map,
+            ))
+            .id();
 
         // SAFETY: We must do a sneak_input here because we do not want the
         // roster to register the task as an operation. In fact it does not
         // implement Operation at all. It is just a temporary container for the
         // input and the stream targets.
-        unsafe { world.entity_mut(task).sneak_input(session, request, false)?; }
+        unsafe {
+            world
+                .entity_mut(task)
+                .sneak_input(session, request, false)?;
+        }
 
         let mut storage = world.get_mut::<InjectionStorage>(source).or_broken()?;
-        storage.list.push(Injected { session, task, finish });
+        storage.list.push(Injected {
+            session,
+            task,
+            finish,
+        });
         dispatch_service(ServiceRequest {
             provider,
             target: finish,
             instructions,
-            operation: OperationRequest { source: task, world, roster }
+            operation: OperationRequest {
+                source: task,
+                world,
+                roster,
+            },
         });
 
         Ok(())
@@ -129,19 +150,26 @@ where
         clean.cleanup_inputs::<(Request, Service<Request, Response, Streams>)>()?;
         clean.cleanup_disposals()?;
 
-        let OperationCleanup { source, cleanup, world, roster } = clean;
+        let OperationCleanup {
+            source,
+            cleanup,
+            world,
+            roster,
+        } = clean;
         let session = cleanup.session;
         let cleanup_id = cleanup.cleanup_id;
         let mut storage = world.get_mut::<InjectionStorage>(source).or_broken()?;
-        let nodes: SmallVec<[Entity; 16]> = storage.list.iter().filter_map(
-            |injected| {
+        let nodes: SmallVec<[Entity; 16]> = storage
+            .list
+            .iter()
+            .filter_map(|injected| {
                 if injected.session == session {
                     Some(injected.task)
                 } else {
                     None
                 }
-            }
-        ).collect();
+            })
+            .collect();
         storage.list.retain(|injected| injected.session != session);
 
         if nodes.is_empty() {
@@ -150,14 +178,29 @@ where
             return Ok(());
         }
 
-        world.get_mut::<CleanupContents>(source).or_broken()?
+        world
+            .get_mut::<CleanupContents>(source)
+            .or_broken()?
             .add_cleanup(cleanup_id, nodes.clone());
-        world.get_mut::<AwaitingCleanup>(source).or_broken()?
-            .map.insert(cleanup_id, cleanup);
+        world
+            .get_mut::<AwaitingCleanup>(source)
+            .or_broken()?
+            .map
+            .insert(cleanup_id, cleanup);
 
         for node in nodes.iter().copied() {
-            let cleanup = Cleanup { cleaner: source, node, session, cleanup_id };
-            let clean = OperationCleanup { source: node, cleanup, world, roster };
+            let cleanup = Cleanup {
+                cleaner: source,
+                node,
+                session,
+                cleanup_id,
+            };
+            let clean = OperationCleanup {
+                source: node,
+                cleanup,
+                world,
+                roster,
+            };
             OperateService::<Request>::cleanup(clean)?;
         }
 
@@ -179,16 +222,27 @@ where
 
 impl<Request, Response, Streams> Injection<Request, Response, Streams> {
     fn finalize_cleanup(
-        FinalizeCleanupRequest { cleanup, world, roster }: FinalizeCleanupRequest,
+        FinalizeCleanupRequest {
+            cleanup,
+            world,
+            roster,
+        }: FinalizeCleanupRequest,
     ) -> OperationResult {
         let source = cleanup.cleaner;
-        let parent_cleanup = world.get_mut::<AwaitingCleanup>(source).or_broken()?
-            .map.remove(&cleanup.cleanup_id).or_broken()?;
+        let parent_cleanup = world
+            .get_mut::<AwaitingCleanup>(source)
+            .or_broken()?
+            .map
+            .remove(&cleanup.cleanup_id)
+            .or_broken()?;
         parent_cleanup.notify_cleaned(world, roster)
     }
 
     pub(crate) fn new(target: Entity) -> Self {
-        Self { target, _ignore: Default::default() }
+        Self {
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -205,9 +259,12 @@ struct AwaitingCleanup {
 
 impl InjectionStorage {
     fn contains_session(r: &OperationReachability) -> ReachabilityResult {
-        Ok(r.world().get::<Self>(r.source()).or_broken()?.list.iter().find(
-            |injected| injected.session == r.session
-        ).is_some())
+        Ok(r.world()
+            .get::<Self>(r.source())
+            .or_broken()?
+            .list
+            .iter()
+            .any(|injected| injected.session == r.session))
     }
 }
 
@@ -227,11 +284,11 @@ impl<Streams: StreamPack> Clone for InjectionStreams<Streams> {
 }
 
 impl<Streams: StreamPack> InjectionStreams<Streams> {
-    fn new(
-        streams: Streams::StreamStorageBundle,
-        stream_map: StreamTargetMap,
-    ) -> Self {
-        Self { streams, stream_map }
+    fn new(streams: Streams::StreamStorageBundle, stream_map: StreamTargetMap) -> Self {
+        Self {
+            streams,
+            stream_map,
+        }
     }
 }
 
@@ -246,12 +303,14 @@ struct Injected {
 struct InjectionSource(Entity);
 
 struct InjectionFinish<Response> {
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response> InjectionFinish<Response> {
     fn new() -> Self {
-        Self { _ignore: Default::default() }
+        Self {
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -264,7 +323,11 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<Response>()?;
@@ -273,7 +336,9 @@ where
         let mut injector_mut = world.get_entity_mut(injector).or_broken()?;
         let target = injector_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let mut storage = injector_mut.get_mut::<InjectionStorage>().or_broken()?;
-        let injected = *storage.list.iter()
+        let injected = *storage
+            .list
+            .iter()
             .find(|injected| injected.finish == source)
             .or_broken()?;
         storage.list.retain(|injected| injected.finish != source);
@@ -281,7 +346,10 @@ where
         task_mut.transfer_disposals(injector)?;
         task_mut.despawn_recursive();
 
-        world.get_entity_mut(target).or_broken()?.give_input(session, data, roster)?;
+        world
+            .get_entity_mut(target)
+            .or_broken()?
+            .give_input(session, data, roster)?;
 
         Ok(())
     }

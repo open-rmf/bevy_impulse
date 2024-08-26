@@ -17,19 +17,12 @@
 
 use bevy_utils::all_tuples;
 
-use crate::{
-    Chain, UnusedTarget, AddOperation, ForkClone, ForkTargetStorage, Builder,
-    Output,
-};
+use crate::{AddOperation, Builder, Chain, ForkClone, ForkTargetStorage, Output, UnusedTarget};
 
 pub trait ForkCloneBuilder<Response> {
     type Outputs;
 
-    fn build_fork_clone(
-        self,
-        source: Output<Response>,
-        builder: &mut Builder,
-    ) -> Self::Outputs;
+    fn build_fork_clone(self, source: Output<Response>, builder: &mut Builder) -> Self::Outputs;
 }
 
 macro_rules! impl_forkclonebuilder_for_tuple {
@@ -73,7 +66,7 @@ macro_rules! impl_forkclonebuilder_for_tuple {
                     $(
                         {
                             let res = ($F)(Chain::new(targets[_idx], builder));
-                            _idx = _idx + 1;
+                            _idx += 1;
                             res
                         },
                     )*

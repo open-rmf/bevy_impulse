@@ -16,11 +16,11 @@
 */
 
 use bevy_ecs::{
-    prelude::{Bundle, Entity, World, Component},
+    prelude::{Bundle, Component, Entity, World},
     system::Command,
 };
 
-use std::{sync::Arc, collections::HashMap};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::anyhow;
 
@@ -29,12 +29,11 @@ use backtrace::Backtrace;
 use smallvec::SmallVec;
 
 use crate::{
-    BufferStorage, Operation, OperationSetup, OperationRequest, OperationResult,
-    OperationCleanup, OperationReachability, ReachabilityResult, OrBroken,
-    ManageInput, ForkTargetStorage, SingleInputStorage, BufferSettings,
-    UnhandledErrors, MiscellaneousFailure, InputBundle, OperationError,
-    Input, ManageBuffer, InspectBuffer, DeferredRoster, Broken, BufferAccessors,
-    GateActionStorage, Gate, OperationRoster,
+    Broken, BufferAccessors, BufferSettings, BufferStorage, DeferredRoster, ForkTargetStorage,
+    Gate, GateActionStorage, Input, InputBundle, InspectBuffer, ManageBuffer, ManageInput,
+    MiscellaneousFailure, Operation, OperationCleanup, OperationError, OperationReachability,
+    OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
+    ReachabilityResult, SingleInputStorage, UnhandledErrors,
 };
 
 #[derive(Bundle)]
@@ -44,7 +43,9 @@ pub(crate) struct OperateBuffer<T: 'static + Send + Sync> {
 
 impl<T: 'static + Send + Sync> OperateBuffer<T> {
     pub(crate) fn new(settings: BufferSettings) -> Self {
-        Self { storage: BufferStorage::new(settings) }
+        Self {
+            storage: BufferStorage::new(settings),
+        }
     }
 }
 
@@ -70,20 +71,30 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
         let mut buffer = source_mut.get_mut::<BufferStorage<T>>().or_broken()?;
         buffer.force_push(session, data);
 
-        if source_mut.get::<GateState>().or_broken()?.is_closed(session) {
+        if source_mut
+            .get::<GateState>()
+            .or_broken()?
+            .is_closed(session)
+        {
             return Ok(());
         }
 
         let targets = source_mut.get::<ForkTargetStorage>().or_broken()?.0.clone();
         for target in targets {
-            world.get_entity_mut(target).or_broken()?
+            world
+                .get_entity_mut(target)
+                .or_broken()?
                 .give_input(session, (), roster)?;
         }
 
@@ -145,11 +156,16 @@ impl GateState {
         if state.is_open() {
             // The gate has opened up, so we should immediately wake up all
             // listeners.
-            let targets = world.get::<ForkTargetStorage>(buffer)
-                .or_broken()?.0.clone();
+            let targets = world
+                .get::<ForkTargetStorage>(buffer)
+                .or_broken()?
+                .0
+                .clone();
 
             for target in targets {
-                world.get_entity_mut(target).or_broken()?
+                world
+                    .get_entity_mut(target)
+                    .or_broken()?
                     .give_input(session, (), roster)?;
             }
         }
@@ -183,10 +199,8 @@ impl RelatedGateNodes {
 
         for gate in &gate_nodes.0 {
             let action = r.world.get::<GateActionStorage>(*gate).or_broken()?.0;
-            if action.is_open() {
-                if r.check_upstream(*gate)? {
-                    return Ok(true);
-                }
+            if action.is_open() && r.check_upstream(*gate)? {
+                return Ok(true);
             }
         }
 
@@ -226,7 +240,8 @@ impl Command for OnNewBufferValue {
 
 impl OnNewBufferValue {
     fn on_failure(self, world: &mut World) {
-        world.get_resource_or_insert_with(|| UnhandledErrors::default())
+        world
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .miscellaneous
             .push(MiscellaneousFailure {
                 error: Arc::new(anyhow!(
@@ -268,7 +283,10 @@ fn clear_buffer<T: 'static + Send + Sync>(
     session: Entity,
     world: &mut World,
 ) -> OperationResult {
-    world.get_entity_mut(source).or_broken()?.clear_buffer::<T>(session)
+    world
+        .get_entity_mut(source)
+        .or_broken()?
+        .clear_buffer::<T>(session)
 }
 
 #[derive(Component)]
@@ -285,11 +303,17 @@ fn check_buffer_size<T: 'static + Send + Sync>(
     session: Entity,
     world: &World,
 ) -> Result<usize, OperationError> {
-    world.get_entity(source).or_broken()?.buffered_count::<T>(session)
+    world
+        .get_entity(source)
+        .or_broken()?
+        .buffered_count::<T>(session)
 }
 
 #[derive(Component)]
-pub struct GetBufferedSessionsFn(pub fn(Entity, &World) -> Result<SmallVec<[Entity; 16]>, OperationError>);
+pub struct GetBufferedSessionsFn(
+    #[allow(clippy::type_complexity)]
+    pub  fn(Entity, &World) -> Result<SmallVec<[Entity; 16]>, OperationError>,
+);
 
 impl GetBufferedSessionsFn {
     fn new<T: 'static + Send + Sync>() -> Self {
@@ -301,7 +325,10 @@ fn get_buffered_sessions<T: 'static + Send + Sync>(
     source: Entity,
     world: &World,
 ) -> Result<SmallVec<[Entity; 16]>, OperationError> {
-    world.get_entity(source).or_broken()?.buffered_sessions::<T>()
+    world
+        .get_entity(source)
+        .or_broken()?
+        .buffered_sessions::<T>()
 }
 
 pub(crate) struct NotifyBufferUpdate {
@@ -317,7 +344,11 @@ pub(crate) struct NotifyBufferUpdate {
 
 impl NotifyBufferUpdate {
     pub(crate) fn new(buffer: Entity, session: Entity, accessor: Option<Entity>) -> Self {
-        Self { buffer, session, accessor }
+        Self {
+            buffer,
+            session,
+            accessor,
+        }
     }
 }
 
@@ -329,35 +360,42 @@ impl Command for NotifyBufferUpdate {
                     return;
                 }
 
-                world.get_resource_or_insert_with(|| DeferredRoster::default());
+                world.get_resource_or_insert_with(DeferredRoster::default);
                 world.resource_scope::<DeferredRoster, _>(|world: &mut World, mut deferred| {
                     // We filter out the target that produced the key that was used to
                     // make the modification. This prevents unintentional infinite loops
                     // from forming in the workflow.
                     let targets: SmallVec<[_; 16]> = world
-                        .get::<ForkTargetStorage>(self.buffer).or_broken()?.0
+                        .get::<ForkTargetStorage>(self.buffer)
+                        .or_broken()?
+                        .0
                         .iter()
                         .filter(|t| !self.accessor.is_some_and(|a| a == **t))
                         .cloned()
                         .collect();
 
                     for target in targets {
-                        world.get_entity_mut(target).or_broken()?
-                            .give_input(self.session, (), &mut deferred.0)?;
+                        world.get_entity_mut(target).or_broken()?.give_input(
+                            self.session,
+                            (),
+                            &mut deferred.0,
+                        )?;
                     }
 
                     Ok(())
                 })
             }
-            None => {
-                None.or_broken()
-            }
+            None => None.or_broken(),
         };
 
         if let Err(OperationError::Broken(backtrace)) = r {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .broken
-                .push(Broken { node: self.buffer, backtrace });
+                .push(Broken {
+                    node: self.buffer,
+                    backtrace,
+                });
         }
     }
 }

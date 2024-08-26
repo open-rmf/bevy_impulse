@@ -18,8 +18,8 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::{
-    StreamPack, Chain, Builder, UnusedTarget, AddBranchToForkClone, ForkClone,
-    AddOperation, ForkTargetStorage, SingleInputStorage,
+    AddBranchToForkClone, AddOperation, Builder, Chain, ForkClone, ForkTargetStorage,
+    SingleInputStorage, StreamPack, UnusedTarget,
 };
 
 /// A collection of all the inputs and outputs for a node within a workflow.
@@ -47,16 +47,12 @@ pub struct Node<Request, Response, Streams: StreamPack = ()> {
 pub struct InputSlot<Request> {
     scope: Entity,
     source: Entity,
-    _ignore: std::marker::PhantomData<Request>,
+    _ignore: std::marker::PhantomData<fn(Request)>,
 }
 
 impl<T> Clone for InputSlot<T> {
     fn clone(&self) -> Self {
-        Self {
-            scope: self.scope,
-            source: self.source,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -79,7 +75,11 @@ impl<Request> InputSlot<Request> {
         self.scope
     }
     pub(crate) fn new(scope: Entity, source: Entity) -> Self {
-        Self { scope, source, _ignore: Default::default() }
+        Self {
+            scope,
+            source,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -91,7 +91,7 @@ impl<Request> InputSlot<Request> {
 pub struct Output<Response> {
     scope: Entity,
     target: Entity,
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response> std::fmt::Debug for Output<Response> {
@@ -118,11 +118,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
 
     /// Create a node that will fork the output along multiple branches, giving
     /// a clone of the output to each branch.
-    #[must_use]
-    pub fn fork_clone<'w, 's, 'a, 'b>(
-        self,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> ForkCloneOutput<Response>
+    pub fn fork_clone(self, builder: &mut Builder) -> ForkCloneOutput<Response>
     where
         Response: Clone,
     {
@@ -146,7 +142,11 @@ impl<Response: 'static + Send + Sync> Output<Response> {
     }
 
     pub(crate) fn new(scope: Entity, target: Entity) -> Self {
-        Self { scope, target, _ignore: Default::default() }
+        Self {
+            scope,
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -156,16 +156,16 @@ impl<Response: 'static + Send + Sync> Output<Response> {
 pub struct ForkCloneOutput<Response> {
     scope: Entity,
     source: Entity,
-    _ignore: std::marker::PhantomData<Response>,
+    _ignore: std::marker::PhantomData<fn(Response)>,
 }
 
 impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
     pub fn clone_output(&self, builder: &mut Builder) -> Output<Response> {
         assert_eq!(self.scope, builder.scope);
-        let target = builder.commands.spawn((
-            SingleInputStorage::new(self.id()),
-            UnusedTarget,
-        )).id();
+        let target = builder
+            .commands
+            .spawn((SingleInputStorage::new(self.id()), UnusedTarget))
+            .id();
         builder.commands.add(AddBranchToForkClone {
             source: self.source,
             target,
@@ -191,6 +191,10 @@ impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
     }
 
     pub(crate) fn new(scope: Entity, source: Entity) -> Self {
-        Self { scope, source, _ignore: Default::default() }
+        Self {
+            scope,
+            source,
+            _ignore: Default::default(),
+        }
     }
 }

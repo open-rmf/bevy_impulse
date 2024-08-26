@@ -15,13 +15,12 @@
  *
 */
 
-use bevy_ecs::prelude::{Component, World, Entity};
+use bevy_ecs::prelude::{Component, Entity, World};
 
 use crate::{
-    Operation, OperationRoster, ForkTargetStorage, SingleInputStorage,
-    OperationResult, OrBroken, OperationRequest, OperationSetup, OperationCleanup,
-    ManageInput, Input, OperationReachability, ReachabilityResult, InputBundle,
-    Disposal, ManageDisposal,
+    Disposal, ForkTargetStorage, Input, InputBundle, ManageDisposal, ManageInput, Operation,
+    OperationCleanup, OperationReachability, OperationRequest, OperationResult, OperationRoster,
+    OperationSetup, OrBroken, ReachabilityResult, SingleInputStorage,
 };
 
 use thiserror::Error as ThisError;
@@ -29,11 +28,12 @@ use thiserror::Error as ThisError;
 pub struct Branching<Input, Outputs, F> {
     activator: F,
     targets: ForkTargetStorage,
-    _ignore: std::marker::PhantomData<(Input, Outputs)>,
+    _ignore: std::marker::PhantomData<fn(Input, Outputs)>,
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn make_result_branching<T, E>(
-    targets: ForkTargetStorage
+    targets: ForkTargetStorage,
 ) -> Branching<Result<T, E>, (T, E), fn(Result<T, E>) -> (BranchResult<T>, BranchResult<E>)> {
     Branching {
         activator: branch_result,
@@ -42,8 +42,9 @@ pub(crate) fn make_result_branching<T, E>(
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn make_option_branching<T>(
-    targets: ForkTargetStorage
+    targets: ForkTargetStorage,
 ) -> Branching<Option<T>, (T, ()), fn(Option<T>) -> (BranchResult<T>, BranchResult<()>)> {
     Branching {
         activator: branch_option,
@@ -63,7 +64,9 @@ where
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         for target in &self.targets.0 {
-            world.get_entity_mut(*target).or_broken()?
+            world
+                .get_entity_mut(*target)
+                .or_broken()?
                 .insert(SingleInputStorage::new(source));
         }
         world.entity_mut(source).insert((
@@ -75,10 +78,17 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: input } = source_mut.take_input::<InputT>()?;
+        let Input {
+            session,
+            data: input,
+        } = source_mut.take_input::<InputT>()?;
         let BranchingActivatorStorage::<F>(activator) = source_mut.get().copied().or_broken()?;
 
         let activation = activator(input);
@@ -129,6 +139,7 @@ where
         roster: &'a mut OperationRoster,
     ) -> OperationResult {
         let targets = world.get::<ForkTargetStorage>(source).or_broken()?;
+        #[allow(clippy::get_first)]
         let target_a = *targets.0.get(0).or_broken()?;
         let target_b = *targets.0.get(1).or_broken()?;
 

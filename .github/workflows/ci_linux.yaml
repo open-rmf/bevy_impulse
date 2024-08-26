@@ -1,0 +1,33 @@
+name: ci_linux
+
+on:
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    # The final 1 indicates that we want to run this test on Tuesdays, making
+    # this a weekly test.
+    - cron:  '30 2 * * 1'
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Build default features
+      run: cargo build
+    - name: Test default features
+      run: cargo test
+
+    - name: Build single_threaded_async
+      run: cargo build --features single_threaded_async
+    - name: Test single_threaded_async
+      run: cargo test --features single_threaded_async

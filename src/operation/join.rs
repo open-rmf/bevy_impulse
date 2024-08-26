@@ -15,13 +15,12 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component};
+use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    Input, ManageInput, InputBundle, FunnelInputStorage,
-    SingleTargetStorage, Operation, OperationError,
-    SingleInputStorage, OperationResult, OrBroken, OperationRequest, OperationSetup,
-    OperationCleanup, OperationReachability, ReachabilityResult, Buffered,
+    Buffered, FunnelInputStorage, Input, InputBundle, ManageInput, Operation, OperationCleanup,
+    OperationError, OperationReachability, OperationRequest, OperationResult, OperationSetup,
+    OrBroken, ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
 
 pub(crate) struct Join<Buffers> {
@@ -30,10 +29,7 @@ pub(crate) struct Join<Buffers> {
 }
 
 impl<Buffers> Join<Buffers> {
-    pub(crate) fn new(
-        buffers: Buffers,
-        target: Entity,
-    ) -> Self {
+    pub(crate) fn new(buffers: Buffers, target: Entity) -> Self {
         Self { buffers, target }
     }
 }
@@ -46,7 +42,9 @@ where
     Buffers::Item: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         self.buffers.add_listener(source, world)?;
@@ -61,18 +59,28 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, .. } = source_mut.take_input::<()>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
-        let buffers = source_mut.get::<BufferStorage<Buffers>>().or_broken()?.0.clone();
+        let buffers = source_mut
+            .get::<BufferStorage<Buffers>>()
+            .or_broken()?
+            .0
+            .clone();
         if buffers.buffered_count(session, world)? < 1 {
             return Err(OperationError::NotReady);
         }
 
         let output = buffers.pull(session, world)?;
-        world.get_entity_mut(target).or_broken()?
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(session, output, roster)
     }
 
@@ -82,8 +90,12 @@ where
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        let inputs = r.world.get_entity(r.source).or_broken()?
-            .get::<FunnelInputStorage>().or_broken()?;
+        let inputs = r
+            .world
+            .get_entity(r.source)
+            .or_broken()?
+            .get::<FunnelInputStorage>()
+            .or_broken()?;
         for input in &inputs.0 {
             if !r.check_upstream(*input)? {
                 return Ok(false);

@@ -16,17 +16,15 @@
 */
 
 use crate::{
-    ServiceTrait, ServiceRequest, OperationRequest, OperationResult, StreamPack,
-    OrBroken, Input, ManageInput, ParentSession, SessionStatus,
-    OperationError, Delivery, DeliveryOrder, DeliveryUpdate, Blocker,
-    OperationRoster, Disposal, Cancellation, Cancel, Deliver, SingleTargetStorage,
-    ExitTargetStorage, ExitTarget, Service, OperationCleanup,
-    OperationReachability, ReachabilityResult, ProviderStorage,
-    begin_scope, dispose_for_despawned_service, insert_new_order, emit_disposal,
-    pop_next_delivery,
+    begin_scope, dispose_for_despawned_service, emit_disposal, insert_new_order, pop_next_delivery,
+    Blocker, Cancel, Cancellation, Deliver, Delivery, DeliveryOrder, DeliveryUpdate, Disposal,
+    ExitTarget, ExitTargetStorage, Input, ManageInput, OperationCleanup, OperationError,
+    OperationReachability, OperationRequest, OperationResult, OperationRoster, OrBroken,
+    ParentSession, ProviderStorage, ReachabilityResult, Service, ServiceRequest, ServiceTrait,
+    SessionStatus, SingleTargetStorage, StreamPack,
 };
 
-use bevy_ecs::prelude::{Entity, World, Component};
+use bevy_ecs::prelude::{Component, Entity, World};
 use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
 pub(crate) struct WorkflowHooks {}
@@ -34,7 +32,11 @@ pub(crate) struct WorkflowHooks {}
 impl WorkflowHooks {
     pub(crate) fn cleanup(clean: &mut OperationCleanup) -> Result<bool, OperationError> {
         let source = clean.source;
-        let provider = clean.world.get::<ProviderStorage>(source).or_broken()?.get();
+        let provider = clean
+            .world
+            .get::<ProviderStorage>(source)
+            .or_broken()?
+            .get();
         let Some(workflow) = clean.world.get::<WorkflowStorage>(provider) else {
             // The provider is not a workflow, so we have nothing to do here
             return Ok(true);
@@ -46,19 +48,24 @@ impl WorkflowHooks {
             cleanup: clean.cleanup,
             world: clean.world,
             roster: clean.roster,
-        }.clean();
+        }
+        .clean();
         Ok(false)
     }
 
     pub(crate) fn is_reachable(reachability: &mut OperationReachability) -> ReachabilityResult {
         let source = reachability.source();
-        let provider = reachability.world().get::<ProviderStorage>(source).or_broken()?.get();
+        let provider = reachability
+            .world()
+            .get::<ProviderStorage>(source)
+            .or_broken()?
+            .get();
         let Some(workflow) = reachability.world().get::<WorkflowStorage>(provider) else {
             // The provider is not a workflow, so we have nothing to do here
             return Ok(false);
         };
         let scope = workflow.scope;
-        return reachability.check_upstream(scope)
+        reachability.check_upstream(scope)
     }
 }
 
@@ -76,7 +83,7 @@ impl WorkflowStorage {
 }
 
 pub(crate) struct WorkflowService<Request, Response, Streams> {
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Request, Response, Streams> WorkflowService<Request, Response, Streams> {
@@ -98,15 +105,22 @@ where
             provider,
             target,
             instructions,
-            operation: OperationRequest { source, world, roster }
+            operation:
+                OperationRequest {
+                    source,
+                    world,
+                    roster,
+                },
         }: ServiceRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: request } = source_mut.take_input::<Request>()?;
-        let scoped_session = world.spawn((
-            ParentSession::new(session),
-            SessionStatus::Active,
-        )).id();
+        let Input {
+            session,
+            data: request,
+        } = source_mut.take_input::<Request>()?;
+        let scoped_session = world
+            .spawn((ParentSession::new(session), SessionStatus::Active))
+            .id();
 
         let result = serve_workflow_impl::<Request, Response, Streams>(
             request,
@@ -116,8 +130,12 @@ where
                 provider,
                 target,
                 instructions,
-                operation: OperationRequest { source, world, roster },
-            }
+                operation: OperationRequest {
+                    source,
+                    world,
+                    roster,
+                },
+            },
         );
 
         if result.is_err() {
@@ -138,7 +156,12 @@ fn serve_workflow_impl<Request, Response, Streams>(
         provider,
         target,
         instructions,
-        operation: OperationRequest { source, world, roster }
+        operation:
+            OperationRequest {
+                source,
+                world,
+                roster,
+            },
     }: ServiceRequest,
 ) -> OperationResult
 where
@@ -161,7 +184,7 @@ where
             session: parent_session,
             task_id: scoped_session,
             request,
-            instructions
+            instructions,
         },
     );
 
@@ -177,7 +200,9 @@ where
             });
             (request, blocker)
         }
-        DeliveryUpdate::Queued { cancelled, stop, .. } => {
+        DeliveryUpdate::Queued {
+            cancelled, stop, ..
+        } => {
             for cancelled in cancelled {
                 let disposal = Disposal::supplanted(cancelled.source, source, parent_session);
                 emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
@@ -189,9 +214,7 @@ where
                     origin: source,
                     target: workflow.scope,
                     session: Some(stop.session),
-                    cancellation: Cancellation::supplanted(
-                        stop.source, source, parent_session,
-                    ),
+                    cancellation: Cancellation::supplanted(stop.source, source, parent_session),
                 });
             }
 
@@ -200,7 +223,10 @@ where
         }
     };
 
-    let input = Input { session: parent_session, data: request };
+    let input = Input {
+        session: parent_session,
+        data: request,
+    };
     begin_workflow::<Request, Response, Streams>(
         input,
         source,
@@ -209,10 +235,11 @@ where
         workflow.scope,
         blocker,
         world,
-        roster
+        roster,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn begin_workflow<Request, Response, Streams>(
     input: Input<Request>,
     source: Entity,
@@ -230,11 +257,23 @@ where
 {
     let mut exit_target = world.get_mut::<ExitTargetStorage>(scope).or_broken()?;
     let parent_session = input.session;
-    exit_target.map.insert(scoped_session, ExitTarget { target, source, parent_session, blocker });
+    exit_target.map.insert(
+        scoped_session,
+        ExitTarget {
+            target,
+            source,
+            parent_session,
+            blocker,
+        },
+    );
     begin_scope::<Request, Response, Streams>(
         input,
         scoped_session,
-        OperationRequest { source: scope, world, roster },
+        OperationRequest {
+            source: scope,
+            world,
+            roster,
+        },
     )
 }
 
@@ -242,22 +281,31 @@ fn serve_next_workflow_request<Request, Response, Streams>(
     unblock: Blocker,
     world: &mut World,
     roster: &mut OperationRoster,
-)
-where
+) where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    let Blocker { provider, label, .. } = unblock;
+    let Blocker {
+        provider, label, ..
+    } = unblock;
     let Some(workflow) = world.get::<WorkflowStorage>(provider) else {
         return;
     };
     let workflow = *workflow;
 
     loop {
-        let Some(Deliver { request, task_id: scoped_session, blocker }) = pop_next_delivery::<Request>(
-            provider, label, serve_next_workflow_request::<Request, Response, Streams>, world,
-        ) else {
+        let Some(Deliver {
+            request,
+            task_id: scoped_session,
+            blocker,
+        }) = pop_next_delivery::<Request>(
+            provider,
+            label,
+            serve_next_workflow_request::<Request, Response, Streams>,
+            world,
+        )
+        else {
             // No more deliveries to pop, so we should return
             return;
         };
@@ -273,7 +321,10 @@ where
         let target = target.get();
 
         if begin_workflow::<Request, Response, Streams>(
-            Input { session: parent_session, data: request },
+            Input {
+                session: parent_session,
+                data: request,
+            },
             source,
             target,
             scoped_session,
@@ -281,7 +332,9 @@ where
             Some(blocker),
             world,
             roster,
-        ).is_err() {
+        )
+        .is_err()
+        {
             // The workflow will not run, so we should despawn the scoped session
             if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
                 scoped_session_mut.despawn_recursive();

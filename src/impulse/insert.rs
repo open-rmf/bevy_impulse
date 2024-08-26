@@ -15,40 +15,39 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, Component, Bundle};
+use bevy_ecs::prelude::{Bundle, Component, Entity};
 use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
-    Impulsive, OperationSetup, OperationRequest, OperationResult, OrBroken,
-    Input, ManageInput, InputBundle,
-    add_lifecycle_dependency,
+    add_lifecycle_dependency, Impulsive, Input, InputBundle, ManageInput, OperationRequest,
+    OperationResult, OperationSetup, OrBroken,
 };
 
 #[derive(Component)]
 pub(crate) struct Insert<T> {
     target: Entity,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Insert<T> {
     pub(crate) fn new(target: Entity) -> Self {
-        Self { target, _ignore: Default::default() }
+        Self {
+            target,
+            _ignore: Default::default(),
+        }
     }
 }
 
 impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         add_lifecycle_dependency(source, self.target, world);
-        world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
-            self,
-        ));
+        world
+            .entity_mut(source)
+            .insert((InputBundle::<T>::new(), self));
         Ok(())
     }
 
-    fn execute(
-        OperationRequest { source, world, .. }: OperationRequest,
-    ) -> OperationResult {
+    fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let target = source_mut.get::<Insert<T>>().or_broken()?.target;

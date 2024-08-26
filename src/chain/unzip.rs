@@ -21,8 +21,8 @@ use itertools::Itertools;
 use smallvec::SmallVec;
 
 use crate::{
-    UnusedTarget, ForkTargetStorage, OperationRequest, Input, ManageInput,
-    ForkUnzip, AddOperation, OperationResult, OrBroken, Output, Chain, Builder,
+    AddOperation, Builder, Chain, ForkTargetStorage, ForkUnzip, Input, ManageInput,
+    OperationRequest, OperationResult, OrBroken, Output, UnusedTarget,
 };
 
 /// A trait for response types that can be unzipped

@@ -16,19 +16,19 @@
 */
 
 use crate::{
-    StreamPack, AddOperation, OperateService, Provider, ProvideOnce, StreamOf,
-    RunCommandsOnWorldExt,
+    AddOperation, OperateService, ProvideOnce, Provider, RunCommandsOnWorldExt, StreamOf,
+    StreamPack,
 };
 
-use bevy_ecs::{
-    prelude::{Entity, Commands, Component, World, Event},
-    schedule::ScheduleLabel,
-};
 use bevy_app::prelude::App;
 use bevy_derive::{Deref, DerefMut};
-use bevy_utils::{intern::Interned, define_label};
-use thiserror::Error as ThisError;
+use bevy_ecs::{
+    prelude::{Commands, Component, Entity, Event, World},
+    schedule::ScheduleLabel,
+};
+use bevy_utils::{define_label, intern::Interned};
 use std::{any::TypeId, collections::HashSet};
+use thiserror::Error as ThisError;
 
 mod async_srv;
 pub use async_srv::*;
@@ -72,16 +72,12 @@ pub(crate) use workflow::*;
 pub struct Service<Request, Response, Streams = ()> {
     provider: Entity,
     instructions: Option<DeliveryInstructions>,
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<Req, Res, S> Clone for Service<Req, Res, S> {
     fn clone(&self) -> Self {
-        Self {
-            provider: self.provider,
-            instructions: self.instructions,
-            _ignore: Default::default()
-        }
+        *self
     }
 }
 
@@ -106,10 +102,7 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
     }
 
     /// Give [`DeliveryInstructions`] for this service.
-    pub fn instruct(
-        mut self,
-        instructions: impl Into<DeliveryInstructions>,
-    ) -> Self {
+    pub fn instruct(mut self, instructions: impl Into<DeliveryInstructions>) -> Self {
         self.instructions = Some(instructions.into());
         self
     }
@@ -177,7 +170,11 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
     /// - Commands::spawn_workflow
     /// - ServiceDiscovery::iter()
     fn new(entity: Entity) -> Self {
-        Self { provider: entity, instructions: None, _ignore: Default::default() }
+        Self {
+            provider: entity,
+            instructions: None,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -345,32 +342,24 @@ impl<T: Into<DeliveryInstructions>> AsDeliveryInstructions for T {
 /// any system.
 pub trait SpawnServicesExt<'w, 's> {
     /// Call this with Commands to create a new async service from any system.
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
-        &'a mut self,
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
+        &mut self,
         builder: B,
-    ) -> Service<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams,
-        >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityCommands,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack;
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack;
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
-        &'a mut self,
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
+        &mut self,
         builder: B,
-    ) -> Service<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams,
-        >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
@@ -384,14 +373,10 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for Commands<'w, 's> {
 }
 
 impl<'w, 's> SpawnServicesExt<'w, 's> for World {
-    fn spawn_service<'a, M1, M2, B: IntoServiceBuilder<M1, Also=(), Configure=()>>(
-        &'a mut self,
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Also = (), Configure = ()>>(
+        &mut self,
         builder: B,
-    ) -> Service<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams,
-        >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
@@ -400,9 +385,7 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for World {
         <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
         <B::Service as IntoService<M2>>::Streams: StreamPack,
     {
-        self.command(move |commands| {
-            commands.spawn_service(builder)
-        })
+        self.command(move |commands| commands.spawn_service(builder))
     }
 }
 
@@ -410,72 +393,61 @@ impl<'w, 's> SpawnServicesExt<'w, 's> for World {
 /// configuring an App.
 pub trait AddServicesExt {
     /// Call this on an App to create a service that is available immediately.
-    fn add_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(&mut self, builder: B) -> &mut Self
+    fn add_service<M1, M2, B: IntoServiceBuilder<M1, Configure = ()>>(
+        &mut self,
+        builder: B,
+    ) -> &mut Self
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams
-        >,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack,
+        B::Also: AlsoAdd<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>,
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack,
     {
         self.spawn_service(builder);
         self
     }
 
     /// Call this on an App to create a service that is available immediately.
-    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure = ()>>(
         &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams
-        >,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack;
+        B::Also: AlsoAdd<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>,
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack;
 }
 
 impl AddServicesExt for App {
-    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure=()>>(
+    fn spawn_service<M1, M2, B: IntoServiceBuilder<M1, Configure = ()>>(
         &mut self,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoService<M2>>::Request,
-        <B::Service as IntoService<M2>>::Response,
-        <B::Service as IntoService<M2>>::Streams,
-    >
+    ) -> ServiceOf<M1, M2, B>
     where
         B::Service: IntoService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoService<M2>>::Request,
-            <B::Service as IntoService<M2>>::Response,
-            <B::Service as IntoService<M2>>::Streams
-        >,
-        <B::Service as IntoService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoService<M2>>::Streams: StreamPack,
+        B::Also: AlsoAdd<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>,
+        RequestOf<M1, M2, B>: 'static + Send + Sync,
+        ResponseOf<M1, M2, B>: 'static + Send + Sync,
+        StreamsOf<M1, M2, B>: StreamPack,
     {
         builder.into_service_builder().spawn_app_service(self)
     }
 }
+
+type RequestOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Request;
+type ResponseOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Response;
+type StreamsOf<M1, M2, B> = <<B as IntoServiceBuilder<M1>>::Service as IntoService<M2>>::Streams;
+type ServiceOf<M1, M2, B> =
+    Service<RequestOf<M1, M2, B>, ResponseOf<M1, M2, B>, StreamsOf<M1, M2, B>>;
 
 pub trait AddContinuousServicesExt {
     /// Spawn a continuous service. This needs to be used from [`App`] because
@@ -485,24 +457,16 @@ pub trait AddContinuousServicesExt {
         &mut self,
         schedule: impl ScheduleLabel,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoContinuousService<M2>>::Request,
-        <B::Service as IntoContinuousService<M2>>::Response,
-        <B::Service as IntoContinuousService<M2>>::Streams,
-    >
+    ) -> ServiceOfC<M1, M2, B>
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
+        B::Also: AlsoAdd<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>,
         B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack;
+        RequestOfC<M1, M2, B>: 'static + Send + Sync,
+        ResponseOfC<M1, M2, B>: 'static + Send + Sync,
+        StreamsOfC<M1, M2, B>: StreamPack;
 
     /// Add a continuous service to an [`App`].
     fn add_continuous_service<M1, M2, B: IntoServiceBuilder<M1>>(
@@ -514,15 +478,11 @@ pub trait AddContinuousServicesExt {
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
+        B::Also: AlsoAdd<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>,
         B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
+        RequestOfC<M1, M2, B>: 'static + Send + Sync,
+        ResponseOfC<M1, M2, B>: 'static + Send + Sync,
+        StreamsOfC<M1, M2, B>: StreamPack,
     {
         self.spawn_continuous_service(schedule, builder);
         self
@@ -533,12 +493,12 @@ pub trait AddContinuousServicesExt {
     /// to use the [trim] operation if you want it to stop streaming events.
     ///
     /// [trim]: crate::Builder::create_trim
-    fn spawn_event_streaming_service<E: Event>(
+    fn spawn_event_streaming_service<E>(
         &mut self,
-        schedule: impl ScheduleLabel
+        schedule: impl ScheduleLabel,
     ) -> Service<(), (), StreamOf<E>>
     where
-        E: 'static + Send + Sync + Unpin + Clone,
+        E: 'static + Event + Send + Sync + Unpin + Clone,
     {
         self.spawn_continuous_service(schedule, event_streaming_service::<E>)
     }
@@ -549,28 +509,31 @@ impl AddContinuousServicesExt for App {
         &mut self,
         schedule: impl ScheduleLabel,
         builder: B,
-    ) -> Service<
-        <B::Service as IntoContinuousService<M2>>::Request,
-        <B::Service as IntoContinuousService<M2>>::Response,
-        <B::Service as IntoContinuousService<M2>>::Streams,
-    >
+    ) -> ServiceOfC<M1, M2, B>
     where
         B::Service: IntoContinuousService<M2>,
         B::Deliver: DeliveryChoice,
         B::With: WithEntityWorldMut,
-        B::Also: AlsoAdd<
-            <B::Service as IntoContinuousService<M2>>::Request,
-            <B::Service as IntoContinuousService<M2>>::Response,
-            <B::Service as IntoContinuousService<M2>>::Streams,
-        >,
+        B::Also: AlsoAdd<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>,
         B::Configure: ConfigureContinuousService,
-        <B::Service as IntoContinuousService<M2>>::Request: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Response: 'static + Send + Sync,
-        <B::Service as IntoContinuousService<M2>>::Streams: StreamPack,
+        RequestOfC<M1, M2, B>: 'static + Send + Sync,
+        ResponseOfC<M1, M2, B>: 'static + Send + Sync,
+        StreamsOfC<M1, M2, B>: StreamPack,
     {
-        builder.into_service_builder().spawn_continuous_service(schedule, self)
+        builder
+            .into_service_builder()
+            .spawn_continuous_service(schedule, self)
     }
 }
+
+type RequestOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Request;
+type ResponseOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Response;
+type StreamsOfC<M1, M2, B> =
+    <<B as IntoServiceBuilder<M1>>::Service as IntoContinuousService<M2>>::Streams;
+type ServiceOfC<M1, M2, B> =
+    Service<RequestOfC<M1, M2, B>, ResponseOfC<M1, M2, B>, StreamsOfC<M1, M2, B>>;
 
 impl<Request, Response, Streams> ProvideOnce for Service<Request, Response, Streams>
 where
@@ -580,29 +543,37 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn connect(self, scope: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddOperation::new(scope, source, OperateService::new(self, target)));
+    fn connect(
+        self,
+        scope: Option<Entity>,
+        source: Entity,
+        target: Entity,
+        commands: &mut Commands,
+    ) {
+        commands.add(AddOperation::new(
+            scope,
+            source,
+            OperateService::new(self, target),
+        ));
     }
 }
 
-impl<Request, Response, Streams> Provider for Service<Request, Response, Streams>
-where
-    Request: 'static + Send + Sync,
+impl<Request, Response, Streams> Provider for Service<Request, Response, Streams> where
+    Request: 'static + Send + Sync
 {
-
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
+    use bevy_app::{PostUpdate, PreUpdate, Startup};
     use bevy_ecs::{
         prelude::*,
+        system::{StaticSystemParam, SystemParam},
         world::EntityWorldMut,
-        system::{SystemParam, StaticSystemParam},
     };
-    use bevy_app::{Startup, PreUpdate, PostUpdate};
-    use std::future::Future;
     use smallvec::SmallVec;
+    use std::future::Future;
 
     #[derive(Component)]
     struct TestPeople {
@@ -625,8 +596,7 @@ mod tests {
     #[test]
     fn test_spawn_async_service() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
+        app.insert_resource(TestSystemRan(false))
             .add_systems(Startup, sys_spawn_async_service)
             .add_systems(Update, sys_find_service);
 
@@ -637,8 +607,7 @@ mod tests {
     #[test]
     fn test_add_async_service() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
+        app.insert_resource(TestSystemRan(false))
             .add_service(sys_async_service)
             .add_systems(Update, sys_find_service);
 
@@ -649,8 +618,7 @@ mod tests {
     #[test]
     fn test_add_async_service_serial() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
+        app.insert_resource(TestSystemRan(false))
             .add_service(sys_async_service.serial())
             .add_systems(Update, sys_find_service);
 
@@ -661,14 +629,10 @@ mod tests {
     #[test]
     fn test_add_built_async_service() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
-            .add_service(
-                sys_async_service
-                .also(|app: &mut App, provider| {
-                    app.insert_resource(MyServiceProvider { provider });
-                })
-            )
+        app.insert_resource(TestSystemRan(false))
+            .add_service(sys_async_service.also(|app: &mut App, provider| {
+                app.insert_resource(MyServiceProvider { provider });
+            }))
             .add_systems(Update, sys_use_my_service_provider);
 
         app.update();
@@ -678,8 +642,7 @@ mod tests {
     #[test]
     fn test_spawn_blocking_service() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
+        app.insert_resource(TestSystemRan(false))
             .add_systems(Startup, sys_spawn_blocking_service)
             .add_systems(Update, sys_find_service);
 
@@ -690,8 +653,7 @@ mod tests {
     #[test]
     fn test_add_simple_blocking_service() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
+        app.insert_resource(TestSystemRan(false))
             .add_service(sys_blocking_system.into_blocking_service())
             .add_systems(Update, sys_find_service);
 
@@ -702,14 +664,10 @@ mod tests {
     #[test]
     fn test_add_self_aware_blocking_service() {
         let mut app = App::new();
-        app
-            .insert_resource(TestSystemRan(false))
-            .add_service(
-                sys_blocking_service
-                .with(|mut entity_mut: EntityWorldMut| {
-                    entity_mut.insert(Multiplier(2));
-                })
-            )
+        app.insert_resource(TestSystemRan(false))
+            .add_service(sys_blocking_service.with(|mut entity_mut: EntityWorldMut| {
+                entity_mut.insert(Multiplier(2));
+            }))
             .add_systems(Update, sys_find_service);
 
         app.update();
@@ -717,9 +675,9 @@ mod tests {
     }
 
     fn sys_async_service(
-        In(AsyncService{ request, .. }): AsyncServiceInput<String>,
+        In(AsyncService { request, .. }): AsyncServiceInput<String>,
         people: Query<&TestPeople>,
-    ) -> impl Future<Output=u64> {
+    ) -> impl Future<Output = u64> {
         let mut matching_people = Vec::new();
         for person in &people {
             if person.name == request {
@@ -727,19 +685,17 @@ mod tests {
             }
         }
 
-        async move {
-            matching_people.into_iter().fold(0, |sum, age| sum + age)
-        }
+        async move { matching_people.into_iter().fold(0, |sum, age| sum + age) }
     }
 
-    fn sys_spawn_async_service(
-        mut commands: Commands,
-    ) {
+    fn sys_spawn_async_service(mut commands: Commands) {
         commands.spawn_service(sys_async_service);
     }
 
     fn sys_blocking_service(
-        In(BlockingService{ request, provider, .. }): BlockingServiceInput<String>,
+        In(BlockingService {
+            request, provider, ..
+        }): BlockingServiceInput<String>,
         people: Query<&TestPeople>,
         multipliers: Query<&Multiplier>,
     ) -> u64 {
@@ -753,10 +709,7 @@ mod tests {
         sum
     }
 
-    fn sys_blocking_system(
-        In(name): In<String>,
-        people: Query<&TestPeople>,
-    ) -> u64 {
+    fn sys_blocking_system(In(name): In<String>, people: Query<&TestPeople>) -> u64 {
         let mut sum = 0;
         for person in &people {
             if person.name == name {
@@ -766,16 +719,11 @@ mod tests {
         sum
     }
 
-    fn sys_spawn_blocking_service(
-        mut commands: Commands,
-    ) {
+    fn sys_spawn_blocking_service(mut commands: Commands) {
         commands.spawn_service(sys_blocking_service);
     }
 
-    fn sys_find_service(
-        query: Query<&ServiceMarker<String, u64>>,
-        mut ran: ResMut<TestSystemRan>,
-    ) {
+    fn sys_find_service(query: Query<&ServiceMarker<String, u64>>, mut ran: ResMut<TestSystemRan>) {
         assert!(!query.is_empty());
         ran.0 = true;
     }
@@ -788,22 +736,23 @@ mod tests {
         ran.0 = true;
     }
     #[derive(SystemParam)]
-    struct CustomParamA<'w ,'s> {
-        _commands: Commands<'w ,'s>
+    struct CustomParamA<'w, 's> {
+        _commands: Commands<'w, 's>,
     }
 
     fn service_with_generic<P: SystemParam>(
-        In(BlockingService{ .. }): BlockingServiceInput<()>,
+        In(BlockingService { .. }): BlockingServiceInput<()>,
         _: StaticSystemParam<P>,
     ) {
-
     }
 
     #[test]
     fn test_generic_service() {
         // Test that we can add services with generics
         let mut context = TestingContext::minimal_plugins();
-        context.app.add_service(service_with_generic::<CustomParamA>);
+        context
+            .app
+            .add_service(service_with_generic::<CustomParamA>);
     }
 
     #[test]
@@ -816,11 +765,11 @@ mod tests {
         context.app.add_systems(PostUpdate, flush_impulses());
 
         context.app.add_event::<CustomEvent>();
-        let event_streamer = context.app.spawn_event_streaming_service::<CustomEvent>(Update);
+        let event_streamer = context
+            .app
+            .spawn_event_streaming_service::<CustomEvent>(Update);
 
-        let mut recipient = context.command(|commands|
-            commands.request((), event_streamer).take()
-        );
+        let mut recipient = context.command(|commands| commands.request((), event_streamer).take());
 
         context.app.world.send_event(CustomEvent(0));
         context.app.world.send_event(CustomEvent(1));
@@ -832,7 +781,7 @@ mod tests {
         // never end.
         let mut result: SmallVec<[_; 3]> = SmallVec::new();
         while let Ok(r) = recipient.streams.try_recv() {
-            result.push(r.0.0);
+            result.push(r.0 .0);
         }
         assert_eq!(&result[..], &[0, 1, 2]);
     }

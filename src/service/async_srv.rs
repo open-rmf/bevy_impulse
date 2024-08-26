@@ -16,33 +16,36 @@
 */
 
 use crate::{
-    AsyncService, AsyncServiceInput, IntoService, ServiceTrait, ServiceBundle, ServiceRequest,
-    Channel, ChannelQueue, OperationRoster, Blocker, Sendish,
-    StreamPack, ServiceBuilder, ChooseAsyncServiceDelivery, OperationRequest,
-    OperationError, OrBroken, ManageInput, Input, OperateTask,
-    SingleTargetStorage, dispose_for_despawned_service,
-    service::service_builder::{SerialChosen, ParallelChosen}, Disposal, emit_disposal,
-    StopTask, UnhandledErrors, StopTaskFailure, Delivery,
-    Deliver, DeliveryOrder, DeliveryUpdate, insert_new_order, pop_next_delivery,
-    OperationResult, async_execution::{spawn_task, task_cancel_sender}
+    async_execution::{spawn_task, task_cancel_sender},
+    dispose_for_despawned_service, emit_disposal, insert_new_order, pop_next_delivery,
+    service::service_builder::{ParallelChosen, SerialChosen},
+    AsyncService, AsyncServiceInput, Blocker, Channel, ChannelQueue, ChooseAsyncServiceDelivery,
+    Deliver, Delivery, DeliveryOrder, DeliveryUpdate, Disposal, Input, IntoService, ManageInput,
+    OperateTask, OperationError, OperationRequest, OperationResult, OperationRoster, OrBroken,
+    Sendish, ServiceBuilder, ServiceBundle, ServiceRequest, ServiceTrait, SingleTargetStorage,
+    StopTask, StopTaskFailure, StreamPack, UnhandledErrors,
 };
 
 use bevy_ecs::{
-    prelude::{Component, In, World, Entity},
+    prelude::{Component, Entity, In, World},
+    system::{BoxedSystem, EntityCommands, IntoSystem},
     world::EntityWorldMut,
-    system::{IntoSystem, BoxedSystem, EntityCommands},
 };
 use bevy_hierarchy::prelude::DespawnRecursiveExt;
 
 use std::future::Future;
 
-pub trait IsAsyncService<M> { }
+pub trait IsAsyncService<M> {}
 
 #[derive(Component)]
-struct AsyncServiceStorage<Request, Streams: StreamPack, Task>(Option<BoxedSystem<AsyncService<Request, Streams>, Task>>);
+struct AsyncServiceStorage<Request, Streams: StreamPack, Task>(
+    Option<BoxedSystem<AsyncService<Request, Streams>, Task>>,
+);
 
 #[derive(Component)]
-struct UninitAsyncServiceStorage<Request, Streams: StreamPack, Task>(BoxedSystem<AsyncService<Request, Streams>, Task>);
+struct UninitAsyncServiceStorage<Request, Streams: StreamPack, Task>(
+    BoxedSystem<AsyncService<Request, Streams>, Task>,
+);
 
 impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> for Sys
 where
@@ -57,14 +60,14 @@ where
     type Streams = Streams;
     type DefaultDeliver = ();
 
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands) {
         entity_commands.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
         ));
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert((
             UninitAsyncServiceStorage(Box::new(IntoSystem::into_system(self))),
             ServiceBundle::<AsyncServiceStorage<Request, Streams, Task>>::new(),
@@ -80,7 +83,6 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
-
 }
 
 impl<Request, Streams, Task> ServiceTrait for AsyncServiceStorage<Request, Streams, Task>
@@ -97,11 +99,19 @@ where
             provider,
             target,
             instructions,
-            operation: OperationRequest { source, world, roster },
+            operation:
+                OperationRequest {
+                    source,
+                    world,
+                    roster,
+                },
         }: ServiceRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: request } = source_mut.take_input::<Request>()?;
+        let Input {
+            session,
+            data: request,
+        } = source_mut.take_input::<Request>()?;
         let task_id = world.spawn(()).id();
 
         let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
@@ -112,16 +122,32 @@ where
 
         let update = insert_new_order::<Request>(
             delivery.as_mut(),
-            DeliveryOrder { source, session, task_id, request, instructions },
+            DeliveryOrder {
+                source,
+                session,
+                task_id,
+                request,
+                instructions,
+            },
         );
 
         let (request, blocker) = match update {
             DeliveryUpdate::Immediate { blocking, request } => {
                 let serve_next = serve_next_async_request::<Request, Streams, Task>;
-                let blocker = blocking.map(|label| Blocker { provider, source, session, label, serve_next });
+                let blocker = blocking.map(|label| Blocker {
+                    provider,
+                    source,
+                    session,
+                    label,
+                    serve_next,
+                });
                 (request, blocker)
             }
-            DeliveryUpdate::Queued { cancelled, stop, label } => {
+            DeliveryUpdate::Queued {
+                cancelled,
+                stop,
+                label,
+            } => {
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
@@ -132,27 +158,40 @@ where
                 if let Some(stop) = stop {
                     // This task is already running and we need to stop it at the
                     // task source level
-                    let result = world.get_entity(stop.task_id).or_broken()
+                    let result = world
+                        .get_entity(stop.task_id)
+                        .or_broken()
                         .and_then(|task_ref| task_ref.get::<StopTask>().or_broken().copied())
                         .and_then(|stop_task| {
                             let disposal = Disposal::supplanted(stop.source, source, session);
                             (stop_task.0)(
-                                OperationRequest { source: stop.task_id, world, roster },
+                                OperationRequest {
+                                    source: stop.task_id,
+                                    world,
+                                    roster,
+                                },
                                 disposal,
                             )
                         });
 
                     if let Err(OperationError::Broken(backtrace)) = result {
                         world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
-                        .stop_tasks
-                        .push(StopTaskFailure { task: stop.task_id, backtrace });
+                            .get_resource_or_insert_with(UnhandledErrors::default)
+                            .stop_tasks
+                            .push(StopTaskFailure {
+                                task: stop.task_id,
+                                backtrace,
+                            });
 
                         // Immediately queue up an unblocking, otherwise the next
                         // task will never be able to run.
                         let serve_next = serve_next_async_request::<Request, Streams, Task>;
                         roster.unblock(Blocker {
-                            provider, source: stop.source, session: stop.session, label, serve_next
+                            provider,
+                            source: stop.source,
+                            session: stop.session,
+                            label,
+                            serve_next,
                         });
                     }
                 }
@@ -171,8 +210,12 @@ where
                 provider,
                 target,
                 instructions,
-                operation: OperationRequest { source, world, roster },
-            }
+                operation: OperationRequest {
+                    source,
+                    world,
+                    roster,
+                },
+            },
         )
     }
 }
@@ -190,27 +233,42 @@ where
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    let ServiceRequest { provider, target, instructions: _, operation: OperationRequest { source, world, roster } } = cmd;
+    let ServiceRequest {
+        provider,
+        target,
+        instructions: _,
+        operation:
+            OperationRequest {
+                source,
+                world,
+                roster,
+            },
+    } = cmd;
     let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
-        if let Some(mut storage) = provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>() {
-            storage.0.take().expect("Async service is missing while attempting to serve")
-        } else {
-            if let Some(uninit) = provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>() {
-                // We need to initialize the service
-                let mut service = uninit.0;
-                service.initialize(world);
+        if let Some(mut storage) =
+            provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>()
+        {
+            storage
+                .0
+                .take()
+                .expect("Async service is missing while attempting to serve")
+        } else if let Some(uninit) =
+            provider_mut.take::<UninitAsyncServiceStorage<Request, Streams, Task>>()
+        {
+            // We need to initialize the service
+            let mut service = uninit.0;
+            service.initialize(world);
 
-                // Re-obtain the provider since we needed to mutably borrow the world a moment ago
-                let mut provider_mut = world.entity_mut(provider);
-                provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
-                service
-            } else {
-                // The provider has had its service removed, so we treat this request as cancelled.
-                dispose_for_despawned_service(provider, world, roster);
-                // We've already issued the disposal, but we need to return an
-                // error so that serve_next_async_request continues iterating.
-                return Err(OperationError::NotReady);
-            }
+            // Re-obtain the provider since we needed to mutably borrow the world a moment ago
+            let mut provider_mut = world.entity_mut(provider);
+            provider_mut.insert(AsyncServiceStorage::<Request, Streams, Task>(None));
+            service
+        } else {
+            // The provider has had its service removed, so we treat this request as cancelled.
+            dispose_for_despawned_service(provider, world, roster);
+            // We've already issued the disposal, but we need to return an
+            // error so that serve_next_async_request continues iterating.
+            return Err(OperationError::NotReady);
         }
     } else {
         // If the provider has been despawned then we treat this request as cancelled.
@@ -220,13 +278,28 @@ where
         return Err(OperationError::NotReady);
     };
 
-    let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+    let sender = world
+        .get_resource_or_insert_with(ChannelQueue::new)
+        .sender
+        .clone();
     let channel = Channel::new(source, session, sender.clone());
     let streams = channel.for_streams::<Streams>(world)?;
-    let job = service.run(AsyncService { request, streams, channel, provider, source, session }, world);
+    let job = service.run(
+        AsyncService {
+            request,
+            streams,
+            channel,
+            provider,
+            source,
+            session,
+        },
+        world,
+    );
     service.apply_deferred(world);
 
-    if let Some(mut service_storage) = world.get_mut::<AsyncServiceStorage<Request, Streams, Task>>(provider) {
+    if let Some(mut service_storage) =
+        world.get_mut::<AsyncServiceStorage<Request, Streams, Task>>(provider)
+    {
         service_storage.0 = Some(service);
     } else {
         // We've already done everything we need to do with the service, but
@@ -241,8 +314,16 @@ where
     let cancel_sender = task_cancel_sender(world);
 
     OperateTask::<_, Streams>::new(
-        task_id, session, source, target, task, cancel_sender, blocker, sender,
-    ).add(world, roster);
+        task_id,
+        session,
+        source,
+        target,
+        task,
+        cancel_sender,
+        blocker,
+        sender,
+    )
+    .add(world, roster);
     Ok(())
 }
 
@@ -250,18 +331,27 @@ pub(crate) fn serve_next_async_request<Request, Streams, Task>(
     unblock: Blocker,
     world: &mut World,
     roster: &mut OperationRoster,
-)
-where
+) where
     Request: 'static + Send + Sync,
     Task: Future + 'static + Sendish,
     Task::Output: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    let Blocker { provider, label, .. } = unblock;
+    let Blocker {
+        provider, label, ..
+    } = unblock;
     loop {
-        let Some(Deliver { request, task_id, blocker }) = pop_next_delivery::<Request>(
-            provider, label, serve_next_async_request::<Request, Streams, Task>, world,
-        ) else {
+        let Some(Deliver {
+            request,
+            task_id,
+            blocker,
+        }) = pop_next_delivery::<Request>(
+            provider,
+            label,
+            serve_next_async_request::<Request, Streams, Task>,
+            world,
+        )
+        else {
             // No more deliveries to pop, so we should return
             return;
         };
@@ -286,9 +376,15 @@ where
                 target,
                 // Instructions are already being handled by the delivery queue
                 instructions: None,
-                operation: OperationRequest { source, world, roster }
+                operation: OperationRequest {
+                    source,
+                    world,
+                    roster,
+                },
             },
-        ).is_err() {
+        )
+        .is_err()
+        {
             // The service did not launch so we should move onto the next item
             // in the queue.
             continue;
@@ -332,11 +428,13 @@ where
     type Streams = ();
     type DefaultDeliver = ();
 
-    fn insert_service_commands<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
-        peel_async.pipe(self.0).insert_service_commands(entity_commands)
+    fn insert_service_commands(self, entity_commands: &mut EntityCommands) {
+        peel_async
+            .pipe(self.0)
+            .insert_service_commands(entity_commands)
     }
 
-    fn insert_service_mut<'w>(self, entity_mut: &mut EntityWorldMut<'w>) {
+    fn insert_service_mut(self, entity_mut: &mut EntityWorldMut) {
         peel_async.pipe(self.0).insert_service_mut(entity_mut)
     }
 }
@@ -348,7 +446,6 @@ where
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
 {
-
 }
 
 impl<M, Srv> ChooseAsyncServiceDelivery<M> for Srv

@@ -21,16 +21,14 @@ use bevy_ecs::{
 };
 
 use tokio::sync::mpsc::{
-    unbounded_channel,
-    UnboundedSender as TokioSender,
-    UnboundedReceiver as TokioReceiver,
+    unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
 
 use std::sync::Arc;
 
 use crate::{
-    Stream, StreamPack, StreamRequest, Provider, Promise, RequestExt,
-    OperationRoster, OperationError,
+    OperationError, OperationRoster, Promise, Provider, RequestExt, Stream, StreamPack,
+    StreamRequest,
 };
 
 #[derive(Clone)]
@@ -39,16 +37,16 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub fn query<P: Provider>(&self, request: P::Request, provider: P) -> Promise<P::Response>
+    pub fn query<P>(&self, request: P::Request, provider: P) -> Promise<P::Response>
     where
+        P: Provider,
         P::Request: 'static + Send + Sync,
         P::Response: 'static + Send + Sync,
         P::Streams: 'static + StreamPack,
         P: 'static + Send + Sync,
     {
-        self.command(move |commands| {
-            commands.request(request, provider).take().response
-        }).flatten()
+        self.command(move |commands| commands.request(request, provider).take().response)
+            .flatten()
     }
 
     pub fn command<F, U>(&self, f: F) -> Promise<U>
@@ -57,15 +55,18 @@ impl Channel {
         U: 'static + Send,
     {
         let (sender, promise) = Promise::new();
-        self.inner.sender.send(Box::new(
-            move |world: &mut World, _: &mut OperationRoster| {
-                let mut command_queue = CommandQueue::default();
-                let mut commands = Commands::new(&mut command_queue, world);
-                let u = f(&mut commands);
-                command_queue.apply(world);
-                let _ = sender.send(u);
-            }
-        )).ok();
+        self.inner
+            .sender
+            .send(Box::new(
+                move |world: &mut World, _: &mut OperationRoster| {
+                    let mut command_queue = CommandQueue::default();
+                    let mut commands = Commands::new(&mut command_queue, world);
+                    let u = f(&mut commands);
+                    command_queue.apply(world);
+                    let _ = sender.send(u);
+                },
+            ))
+            .ok();
 
         promise
     }
@@ -77,13 +78,13 @@ impl Channel {
         Ok(Streams::make_channel(&self.inner, world))
     }
 
-    pub(crate) fn new(
-        source: Entity,
-        session: Entity,
-        sender: TokioSender<ChannelItem>,
-    ) -> Self {
+    pub(crate) fn new(source: Entity, session: Entity, sender: TokioSender<ChannelItem>) -> Self {
         Self {
-            inner: Arc::new(InnerChannel { source, session, sender }),
+            inner: Arc::new(InnerChannel {
+                source,
+                session,
+                sender,
+            }),
         }
     }
 }
@@ -132,7 +133,7 @@ impl Default for ChannelQueue {
 pub struct StreamChannel<T> {
     target: Option<Entity>,
     inner: Arc<InnerChannel>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: Stream> StreamChannel<T> {
@@ -141,21 +142,35 @@ impl<T: Stream> StreamChannel<T> {
         let source = self.inner.source;
         let session = self.inner.session;
         let target = self.target;
-        self.inner.sender.send(Box::new(
-            move |world: &mut World, roster: &mut OperationRoster| {
-                data.send(StreamRequest { source, session, target, world, roster }).ok();
-            }
-        )).ok();
+        self.inner
+            .sender
+            .send(Box::new(
+                move |world: &mut World, roster: &mut OperationRoster| {
+                    data.send(StreamRequest {
+                        source,
+                        session,
+                        target,
+                        world,
+                        roster,
+                    })
+                    .ok();
+                },
+            ))
+            .ok();
     }
 
     pub(crate) fn new(target: Option<Entity>, inner: Arc<InnerChannel>) -> Self {
-        Self { target, inner, _ignore: Default::default() }
+        Self {
+            target,
+            inner,
+            _ignore: Default::default(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
     use bevy_ecs::system::EntityCommands;
     use std::time::Duration;
 
@@ -164,31 +179,33 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let (hello, repeat) = context.command(|commands| {
-            let hello = commands.spawn_service(
-                say_hello
-                .with(|entity_cmds: &mut EntityCommands| {
+            let hello =
+                commands.spawn_service(say_hello.with(|entity_cmds: &mut EntityCommands| {
                     entity_cmds.insert((
                         Salutation("Guten tag, ".into()),
                         Name("tester".into()),
                         RunCount(0),
                     ));
-                })
-            );
-            let repeat = commands.spawn_service(
-                repeat_service
-                .with(|entity_cmds: &mut EntityCommands| {
+                }));
+            let repeat =
+                commands.spawn_service(repeat_service.with(|entity_cmds: &mut EntityCommands| {
                     entity_cmds.insert(RunCount(0));
-                })
-            );
+                }));
             (hello, repeat)
         });
 
         for _ in 0..5 {
             let mut promise = context.command(|commands| {
-                commands.request(
-                    RepeatRequest { service: hello, count: 5 },
-                    repeat,
-                ).take().response
+                commands
+                    .request(
+                        RepeatRequest {
+                            service: hello,
+                            count: 5,
+                        },
+                        repeat,
+                    )
+                    .take()
+                    .response
             });
 
             context.run_with_conditions(
@@ -200,10 +217,20 @@ mod tests {
             assert!(context.no_unhandled_errors());
         }
 
-        let count = context.app.world.get::<RunCount>(hello.provider()).unwrap().0;
+        let count = context
+            .app
+            .world
+            .get::<RunCount>(hello.provider())
+            .unwrap()
+            .0;
         assert_eq!(count, 25);
 
-        let count = context.app.world.get::<RunCount>(repeat.provider()).unwrap().0;
+        let count = context
+            .app
+            .world
+            .get::<RunCount>(repeat.provider())
+            .unwrap()
+            .0;
         assert_eq!(count, 5);
     }
 }

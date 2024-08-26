@@ -15,14 +15,14 @@
  *
 */
 
-use crate::{Service, IntoService, IntoContinuousService, Delivery, stream::*};
+use crate::{stream::*, Delivery, IntoContinuousService, IntoService, Service};
 
-use bevy_ecs::{
-    world::EntityWorldMut,
-    system::{Commands, EntityCommands},
-    schedule::{ScheduleLabel, SystemConfigs},
-};
 use bevy_app::prelude::App;
+use bevy_ecs::{
+    schedule::{ScheduleLabel, SystemConfigs},
+    system::{Commands, EntityCommands},
+    world::EntityWorldMut,
+};
 
 use super::traits::*;
 
@@ -99,7 +99,10 @@ impl<Srv, Deliver, With, Configure> ServiceBuilder<Srv, Deliver, With, (), Confi
 }
 
 impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
-    pub fn configure<M, Configure>(self, configure: Configure) -> ServiceBuilder<Srv, Deliver, With, Also, Configure>
+    pub fn configure<M, Configure>(
+        self,
+        configure: Configure,
+    ) -> ServiceBuilder<Srv, Deliver, With, Also, Configure>
     where
         Srv: IntoContinuousService<M>,
     {
@@ -131,7 +134,8 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
         self.service.insert_service_mut(&mut entity_mut);
         let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         entity_mut.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
-        self.deliver.apply_entity_mut::<Srv::Request>(&mut entity_mut);
+        self.deliver
+            .apply_entity_mut::<Srv::Request>(&mut entity_mut);
         self.with.apply(entity_mut);
         self.also.apply(app, service);
         service
@@ -161,7 +165,8 @@ where
         let provider = entity_mut.id();
         let config = self.service.into_system_config(&mut entity_mut);
         let config = self.configure.apply(config);
-        self.deliver.apply_entity_mut::<Srv::Request>(&mut entity_mut);
+        self.deliver
+            .apply_entity_mut::<Srv::Request>(&mut entity_mut);
         self.with.apply(entity_mut);
         let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(provider);
         app.add_systems(schedule, config);
@@ -174,7 +179,10 @@ impl<Srv, Deliver, With> ServiceBuilder<Srv, Deliver, With, (), ()>
 where
     Deliver: DeliveryChoice,
 {
-    pub(crate) fn spawn_service<M>(self, commands: &mut Commands) -> Service<Srv::Request, Srv::Response, Srv::Streams>
+    pub(crate) fn spawn_service<M>(
+        self,
+        commands: &mut Commands,
+    ) -> Service<Srv::Request, Srv::Response, Srv::Streams>
     where
         Srv: IntoService<M>,
         With: WithEntityCommands,
@@ -186,41 +194,51 @@ where
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
         entity_cmds.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
-        self.deliver.apply_entity_commands::<Srv::Request>(&mut entity_cmds);
+        self.deliver
+            .apply_entity_commands::<Srv::Request>(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);
         provider
     }
 }
 
-pub struct BuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct BuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
-impl<M, Srv: IntoService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<BuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also, Configure> {
+impl<M, Srv: IntoService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<BuilderMarker<M>>
+    for ServiceBuilder<Srv, Deliver, With, Also, Configure>
+{
     type Service = Srv;
     type Deliver = Deliver;
     type With = With;
     type Also = Also;
     type Configure = Configure;
 
-    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure> {
+    fn into_service_builder(
+        self,
+    ) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure> {
         self
     }
 }
 
-pub struct ContinuousBuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct ContinuousBuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
-impl<M, Srv: IntoContinuousService<M>, Deliver, With, Also, Configure> IntoServiceBuilder<ContinuousBuilderMarker<M>> for ServiceBuilder<Srv, Deliver, With, Also, Configure> {
+impl<M, Srv: IntoContinuousService<M>, Deliver, With, Also, Configure>
+    IntoServiceBuilder<ContinuousBuilderMarker<M>>
+    for ServiceBuilder<Srv, Deliver, With, Also, Configure>
+{
     type Service = Srv;
     type Deliver = Deliver;
     type With = With;
     type Also = Also;
     type Configure = Configure;
 
-    fn into_service_builder(self) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure> {
+    fn into_service_builder(
+        self,
+    ) -> ServiceBuilder<Self::Service, Self::Deliver, Self::With, Self::Also, Self::Configure> {
         self
     }
 }
 
-pub struct IntoBuilderMarker<M>(std::marker::PhantomData<M>);
+pub struct IntoBuilderMarker<M>(std::marker::PhantomData<fn(M)>);
 
 impl<M, Srv: IntoService<M>> IntoServiceBuilder<IntoBuilderMarker<M>> for Srv {
     type Service = Srv;
@@ -262,7 +280,10 @@ where
         self.into_service_builder().also(also)
     }
 
-    fn configure<Configure>(self, configure: Configure) -> ServiceBuilder<Self::Service, (), (), (), Configure> {
+    fn configure<Configure>(
+        self,
+        configure: Configure,
+    ) -> ServiceBuilder<Self::Service, (), (), (), Configure> {
         self.into_service_builder().configure(configure)
     }
 }
@@ -273,14 +294,13 @@ where
 pub struct SerialChosen;
 
 impl DeliveryChoice for SerialChosen {
-    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityWorldMut<'w>
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert(Delivery::<Request>::serial());
     }
 
-    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
-        self, entity_commands: &mut EntityCommands<'w, 's, 'a>
+    fn apply_entity_commands<Request: 'static + Send + Sync>(
+        self,
+        entity_commands: &mut EntityCommands,
     ) {
         entity_commands.insert(Delivery::<Request>::serial());
     }
@@ -292,14 +312,13 @@ impl DeliveryChoice for SerialChosen {
 pub struct ParallelChosen;
 
 impl DeliveryChoice for ParallelChosen {
-    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityWorldMut<'w>
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         entity_mut.insert(Delivery::<Request>::parallel());
     }
 
-    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
-        self, entity_commands: &mut EntityCommands<'w, 's, 'a>
+    fn apply_entity_commands<Request: 'static + Send + Sync>(
+        self,
+        entity_commands: &mut EntityCommands,
     ) {
         entity_commands.insert(Delivery::<Request>::parallel());
     }
@@ -312,59 +331,54 @@ impl DeliveryChoice for ParallelChosen {
 pub struct BlockingChosen;
 
 impl DeliveryChoice for BlockingChosen {
-    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
-        self, _: &mut EntityCommands<'w, 's, 'a>
-    ) {
+    fn apply_entity_commands<Request: 'static + Send + Sync>(self, _: &mut EntityCommands) {
         // Do nothing
     }
 
-    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, _: &mut EntityWorldMut<'w>
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, _: &mut EntityWorldMut) {
         // Do nothing
     }
 }
 
 impl DeliveryChoice for () {
-    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
-        self, entity_commands: &mut EntityCommands<'w, 's, 'a>
+    fn apply_entity_commands<Request: 'static + Send + Sync>(
+        self,
+        entity_commands: &mut EntityCommands,
     ) {
         ParallelChosen.apply_entity_commands::<Request>(entity_commands)
     }
-    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityWorldMut<'w>
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         ParallelChosen.apply_entity_mut::<Request>(entity_mut)
     }
 }
 
 impl<T: FnOnce(EntityWorldMut)> WithEntityWorldMut for T {
-    fn apply<'w>(self, entity_mut: EntityWorldMut<'w>) {
+    fn apply(self, entity_mut: EntityWorldMut) {
         self(entity_mut);
     }
 }
 
 impl WithEntityWorldMut for () {
-    fn apply<'w>(self, _: EntityWorldMut<'w>) {
+    fn apply(self, _: EntityWorldMut) {
         // Do nothing
     }
 }
 
 impl<T: FnOnce(&mut EntityCommands)> WithEntityCommands for T {
-    fn apply<'w, 's, 'a>(self, entity_commands: &mut EntityCommands<'w, 's, 'a>) {
+    fn apply(self, entity_commands: &mut EntityCommands) {
         self(entity_commands);
     }
 }
 
 impl WithEntityCommands for () {
-    fn apply<'w, 's, 'a>(self, _: &mut EntityCommands<'w, 's ,'a>) {
+    fn apply(self, _: &mut EntityCommands) {
         // Do nothing
     }
 }
 
 impl<Request, Response, Streams, T> AlsoAdd<Request, Response, Streams> for T
 where
-    T: FnOnce(&mut App, Service<Request, Response, Streams>)
+    T: FnOnce(&mut App, Service<Request, Response, Streams>),
 {
     fn apply<'w>(self, app: &mut App, provider: Service<Request, Response, Streams>) {
         self(app, provider)
@@ -379,7 +393,7 @@ impl<Request, Response, Streams> AlsoAdd<Request, Response, Streams> for () {
 
 impl<T> ConfigureContinuousService for T
 where
-    T: FnOnce(SystemConfigs) -> SystemConfigs
+    T: FnOnce(SystemConfigs) -> SystemConfigs,
 {
     fn apply(self, config: SystemConfigs) -> SystemConfigs {
         (self)(config)

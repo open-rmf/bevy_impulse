@@ -15,13 +15,13 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Entity, World, Query, QueryState, Added, With, Resource},
-    system::{SystemState, Command},
-    schedule::{SystemConfigs, IntoSystemConfigs},
-};
 use bevy_derive::{Deref, DerefMut};
-use bevy_hierarchy::{Children, BuildWorldChildren, DespawnRecursiveExt};
+use bevy_ecs::{
+    prelude::{Added, Entity, Query, QueryState, Resource, With, World},
+    schedule::{IntoSystemConfigs, SystemConfigs},
+    system::{Command, SystemState},
+};
+use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -32,11 +32,11 @@ use backtrace::Backtrace;
 use std::sync::Arc;
 
 use crate::{
-    ChannelQueue, WakeQueue, OperationRoster, ServiceHook, Detached, DisposalNotice,
-    UnusedTarget, ServiceLifecycle, ServiceLifecycleChannel, MiscellaneousFailure,
-    OperationRequest, ImpulseLifecycleChannel, AddImpulse, Finished, UnhandledErrors,
-    UnusedTargetDrop, ValidateScopeReachability, OperationError, ValidationRequest,
-    execute_operation, awaken_task, dispose_for_despawned_service,
+    awaken_task, dispose_for_despawned_service, execute_operation, AddImpulse, ChannelQueue,
+    Detached, DisposalNotice, Finished, ImpulseLifecycleChannel, MiscellaneousFailure,
+    OperationError, OperationRequest, OperationRoster, ServiceHook, ServiceLifecycle,
+    ServiceLifecycleChannel, UnhandledErrors, UnusedTarget, UnusedTargetDrop,
+    ValidateScopeReachability, ValidationRequest, WakeQueue,
 };
 
 #[cfg(feature = "single_threaded_async")]
@@ -75,20 +75,26 @@ fn flush_impulses_impl(
     world: &mut World,
     new_service_query: &mut QueryState<(Entity, &mut ServiceHook), Added<ServiceHook>>,
 ) {
-    let parameters = world.get_resource_or_insert_with(|| FlushParameters::default());
+    let parameters = world.get_resource_or_insert_with(FlushParameters::default);
     let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
     let mut roster = OperationRoster::new();
-    collect_from_channels(single_threaded_poll_limit, new_service_query, world, &mut roster);
+    collect_from_channels(
+        single_threaded_poll_limit,
+        new_service_query,
+        world,
+        &mut roster,
+    );
 
     let mut loop_count = 0;
     while !roster.is_empty() {
-        let parameters = world.get_resource_or_insert_with(|| FlushParameters::default());
+        let parameters = world.get_resource_or_insert_with(FlushParameters::default);
         let flush_loop_limit = parameters.flush_loop_limit;
         let single_threaded_poll_limit = parameters.single_threaded_poll_limit;
         if flush_loop_limit.is_some_and(|limit| limit <= loop_count) {
             // We have looped beyoond the limit, so we will defer anything that
             // remains in the roster and stop looping from here.
-            world.get_resource_or_insert_with(|| DeferredRoster::default())
+            world
+                .get_resource_or_insert_with(DeferredRoster::default)
                 .append(&mut roster);
             break;
         }
@@ -104,17 +110,28 @@ fn flush_impulses_impl(
         }
 
         while let Some(source) = roster.queue.pop_front() {
-            execute_operation(OperationRequest { source, world, roster: &mut roster });
+            execute_operation(OperationRequest {
+                source,
+                world,
+                roster: &mut roster,
+            });
             garbage_cleanup(world, &mut roster);
         }
 
         while let Some(source) = roster.awake.pop_front() {
-            awaken_task(OperationRequest { source, world, roster: &mut roster });
+            awaken_task(OperationRequest {
+                source,
+                world,
+                roster: &mut roster,
+            });
             garbage_cleanup(world, &mut roster);
         }
 
         collect_from_channels(
-            single_threaded_poll_limit, new_service_query, world, &mut roster,
+            single_threaded_poll_limit,
+            new_service_query,
+            world,
+            &mut roster,
         );
     }
 }
@@ -136,14 +153,18 @@ fn collect_from_channels(
     roster: &mut OperationRoster,
 ) {
     // Get the receiver for async task commands
-    while let Ok(item) = world.get_resource_or_insert_with(|| ChannelQueue::new()).receiver.try_recv() {
+    while let Ok(item) = world
+        .get_resource_or_insert_with(ChannelQueue::new)
+        .receiver
+        .try_recv()
+    {
         (item)(world, roster);
     }
 
     roster.process_deferals();
 
     let mut removed_services: SmallVec<[Entity; 8]> = SmallVec::new();
-    world.get_resource_or_insert_with(|| ServiceLifecycleChannel::new());
+    world.get_resource_or_insert_with(ServiceLifecycleChannel::new);
     world.resource_scope::<ServiceLifecycleChannel, ()>(|world, mut lifecycles| {
         // Clean up the dangling requests of any services that have been despawned.
         while let Ok(removed_service) = lifecycles.receiver.try_recv() {
@@ -170,11 +191,11 @@ fn collect_from_channels(
     }
 
     // Queue any operations that needed to be deferred
-    let mut deferred = world.get_resource_or_insert_with(|| DeferredRoster::default());
+    let mut deferred = world.get_resource_or_insert_with(DeferredRoster::default);
     roster.append(&mut deferred);
 
     // Collect any tasks that are ready to be woken
-    let mut wake_queue = world.get_resource_or_insert_with(|| WakeQueue::new());
+    let mut wake_queue = world.get_resource_or_insert_with(WakeQueue::new);
     while let Ok(wakeable) = wake_queue.receiver.try_recv() {
         roster.awake(wakeable);
     }
@@ -202,7 +223,7 @@ fn collect_from_channels(
         drop_target(target, world, roster, true);
     }
 
-    let mut lifecycles = world.get_resource_or_insert_with(|| ImpulseLifecycleChannel::default());
+    let mut lifecycles = world.get_resource_or_insert_with(ImpulseLifecycleChannel::default);
     let mut dropped_targets: SmallVec<[Entity; 8]> = SmallVec::new();
     while let Ok(dropped_target) = lifecycles.receiver.try_recv() {
         dropped_targets.push(dropped_target);
@@ -212,9 +233,15 @@ fn collect_from_channels(
         drop_target(target, world, roster, false);
     }
 
-    while let Some(DisposalNotice { source, origin, session }) = roster.disposed.pop() {
+    while let Some(DisposalNotice {
+        source,
+        origin,
+        session,
+    }) = roster.disposed.pop()
+    {
         let Some(validate) = world.get::<ValidateScopeReachability>(source) else {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(
@@ -227,9 +254,16 @@ fn collect_from_channels(
         };
 
         let validate = validate.0;
-        let req = ValidationRequest { source, origin, session, world, roster };
+        let req = ValidationRequest {
+            source,
+            origin,
+            session,
+            world,
+            roster,
+        };
         if let Err(OperationError::Broken(backtrace)) = validate(req) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+            world
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!(
@@ -244,21 +278,14 @@ fn collect_from_channels(
     SingleThreadedExecution::world_poll(world, _single_threaded_poll_limit);
 }
 
-fn drop_target(
-    target: Entity,
-    world: &mut World,
-    roster: &mut OperationRoster,
-    unused: bool,
-) {
+fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, unused: bool) {
     roster.purge(target);
     let mut dropped_impulses = Vec::new();
     let mut detached_impulse = None;
 
     let mut impulse = target;
-    let mut search_state: SystemState<(
-        Query<&Children>,
-        Query<&Detached>,
-    )> = SystemState::new(world);
+    let mut search_state: SystemState<(Query<&Children>, Query<&Detached>)> =
+        SystemState::new(world);
 
     let (q_children, q_detached) = search_state.get(world);
     loop {
@@ -306,9 +333,13 @@ fn drop_target(
     }
 
     if unused {
-        world.get_resource_or_insert_with(|| UnhandledErrors::default())
+        world
+            .get_resource_or_insert_with(UnhandledErrors::default)
             .unused_targets
-            .push(UnusedTargetDrop { unused_target: target, dropped_impulses });
+            .push(UnusedTargetDrop {
+                unused_target: target,
+                dropped_impulses,
+            });
     }
 }
 

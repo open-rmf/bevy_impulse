@@ -18,15 +18,13 @@
 use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    Operation, SingleTargetStorage, InputBundle,
-    SingleInputStorage, Input, ManageInput, OperationResult,
-    OrBroken, OperationRequest, OperationSetup, OperationCleanup,
-    OperationReachability, ReachabilityResult, ManageCancellation,
-    Cancellation, Disposal, ManageDisposal,
+    Cancellation, Disposal, Input, InputBundle, ManageCancellation, ManageDisposal, ManageInput,
+    Operation, OperationCleanup, OperationReachability, OperationRequest, OperationResult,
+    OperationSetup, OrBroken, ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
 
-use thiserror::Error as ThisError;
 use std::error::Error;
+use thiserror::Error as ThisError;
 
 #[derive(ThisError, Debug)]
 #[error("An unacceptable None value was received")]
@@ -85,13 +83,16 @@ pub type FilterResult<T> = Result<T, Option<anyhow::Error>>;
 pub struct CancelFilter<InputT, OutputT, F> {
     filter: F,
     target: Entity,
-    _ignore: std::marker::PhantomData<(InputT, OutputT)>,
+    _ignore: std::marker::PhantomData<fn(InputT, OutputT)>,
 }
 
 pub struct CreateCancelFilter;
 
+#[allow(clippy::type_complexity)]
 impl CreateCancelFilter {
-    pub fn on_err<T, E>(target: Entity) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
+    pub fn on_err<T, E>(
+        target: Entity,
+    ) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
     where
         T: 'static + Send + Sync,
         E: Error + 'static + Send + Sync,
@@ -103,7 +104,9 @@ impl CreateCancelFilter {
         }
     }
 
-    pub fn on_quiet_err<T, E>(target: Entity) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
+    pub fn on_quiet_err<T, E>(
+        target: Entity,
+    ) -> CancelFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
     where
         T: 'static + Send + Sync,
         E: 'static + Send + Sync,
@@ -115,7 +118,9 @@ impl CreateCancelFilter {
         }
     }
 
-    pub fn on_none<T>(target: Entity) -> CancelFilter<Option<T>, T, fn(Option<T>) -> FilterResult<T>> {
+    pub fn on_none<T>(
+        target: Entity,
+    ) -> CancelFilter<Option<T>, T, fn(Option<T>) -> FilterResult<T>> {
         CancelFilter {
             filter: filter_none::<T>,
             target,
@@ -131,7 +136,9 @@ where
     F: Copy + Fn(InputT) -> FilterResult<OutputT> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -144,10 +151,17 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: input } = source_mut.take_input::<InputT>()?;
+        let Input {
+            session,
+            data: input,
+        } = source_mut.take_input::<InputT>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let FilterStorage::<F>(filter) = *source_mut.get().or_broken()?;
 
@@ -165,7 +179,9 @@ where
 
         // At this point we have the correct type to deliver to the target, so
         // we proceed with doing that.
-        world.get_entity_mut(target).or_broken()?
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(session, output, roster)
     }
 
@@ -185,8 +201,11 @@ where
 
 pub struct CreateDisposalFilter;
 
+#[allow(clippy::type_complexity)]
 impl CreateDisposalFilter {
-    pub fn on_err<T, E>(target: Entity) -> DisposalFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
+    pub fn on_err<T, E>(
+        target: Entity,
+    ) -> DisposalFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
     where
         T: 'static + Send + Sync,
         E: Error + 'static + Send + Sync,
@@ -198,7 +217,9 @@ impl CreateDisposalFilter {
         }
     }
 
-    pub fn on_quiet_err<T, E>(target: Entity) -> DisposalFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
+    pub fn on_quiet_err<T, E>(
+        target: Entity,
+    ) -> DisposalFilter<Result<T, E>, T, fn(Result<T, E>) -> FilterResult<T>>
     where
         T: 'static + Send + Sync,
         E: 'static + Send + Sync,
@@ -210,7 +231,9 @@ impl CreateDisposalFilter {
         }
     }
 
-    pub fn on_ok<T, E>(target: Entity) -> DisposalFilter<Result<T, E>, E, fn(Result<T, E>) -> FilterResult<E>>
+    pub fn on_ok<T, E>(
+        target: Entity,
+    ) -> DisposalFilter<Result<T, E>, E, fn(Result<T, E>) -> FilterResult<E>>
     where
         T: 'static + Send + Sync,
         E: 'static + Send + Sync,
@@ -222,7 +245,9 @@ impl CreateDisposalFilter {
         }
     }
 
-    pub fn on_none<T>(target: Entity) -> DisposalFilter<Option<T>, T, fn(Option<T>) -> FilterResult<T>>
+    pub fn on_none<T>(
+        target: Entity,
+    ) -> DisposalFilter<Option<T>, T, fn(Option<T>) -> FilterResult<T>>
     where
         T: 'static + Send + Sync,
     {
@@ -233,7 +258,9 @@ impl CreateDisposalFilter {
         }
     }
 
-    pub fn on_some<T>(target: Entity) -> DisposalFilter<Option<T>, (), fn(Option<T>) -> FilterResult<()>>
+    pub fn on_some<T>(
+        target: Entity,
+    ) -> DisposalFilter<Option<T>, (), fn(Option<T>) -> FilterResult<()>>
     where
         T: 'static + Send + Sync,
     {
@@ -248,7 +275,7 @@ impl CreateDisposalFilter {
 pub struct DisposalFilter<InputT, OutputT, F> {
     filter: F,
     target: Entity,
-    _ignore: std::marker::PhantomData<(InputT, OutputT)>,
+    _ignore: std::marker::PhantomData<fn(InputT, OutputT)>,
 }
 
 impl<InputT, OutputT, F> Operation for DisposalFilter<InputT, OutputT, F>
@@ -258,7 +285,9 @@ where
     F: Copy + Fn(InputT) -> FilterResult<OutputT> + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -271,10 +300,17 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: input } = source_mut.take_input::<InputT>()?;
+        let Input {
+            session,
+            data: input,
+        } = source_mut.take_input::<InputT>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let FilterStorage::<F>(filter) = *source_mut.get().or_broken()?;
 
@@ -287,7 +323,9 @@ where
             }
         };
 
-        world.get_entity_mut(target).or_broken()?
+        world
+            .get_entity_mut(target)
+            .or_broken()?
             .give_input(session, output, roster)
     }
 

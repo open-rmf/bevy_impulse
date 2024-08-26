@@ -15,14 +15,14 @@
  *
 */
 
-use bevy_ecs::prelude::{Commands, Entity, Bundle, Component, Event};
+use bevy_ecs::prelude::{Bundle, Commands, Component, Entity, Event};
 use bevy_hierarchy::BuildChildren;
 
 use std::future::Future;
 
 use crate::{
-    Promise, ProvideOnce, StreamPack, IntoBlockingMapOnce, IntoAsyncMapOnce,
-    AsMapOnce, UnusedTarget, StreamTargetMap, Cancellable, Sendish,
+    AsMapOnce, Cancellable, IntoAsyncMapOnce, IntoBlockingMapOnce, Promise, ProvideOnce, Sendish,
+    StreamPack, StreamTargetMap, UnusedTarget,
 };
 
 mod detach;
@@ -57,7 +57,7 @@ pub struct Impulse<'w, 's, 'a, Response, Streams> {
     pub(crate) source: Entity,
     pub(crate) target: Entity,
     pub(crate) commands: &'a mut Commands<'w, 's>,
-    pub(crate) _ignore: std::marker::PhantomData<(Response, Streams)>
+    pub(crate) _ignore: std::marker::PhantomData<fn(Response, Streams)>,
 }
 
 impl<'w, 's, 'a, Response, Streams> Impulse<'w, 's, 'a, Response, Streams>
@@ -79,7 +79,9 @@ where
     /// | [`Self::detach`] <br> [`Self::send_event`]                | This will never be dropped                            |
     /// | Using none of the above                                   | The impulse will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
-        self.commands.add(Detach { target: self.target });
+        self.commands.add(Detach {
+            target: self.target,
+        });
         self
     }
 
@@ -93,7 +95,8 @@ where
             TakenResponse::<Response>::new(response_sender),
         ));
         let mut map = StreamTargetMap::default();
-        let (bundle, stream_receivers) = Streams::take_streams(self.target, &mut map, self.commands);
+        let (bundle, stream_receivers) =
+            Streams::take_streams(self.target, &mut map, self.commands);
         self.commands.entity(self.source).insert((bundle, map));
 
         Recipient {
@@ -103,7 +106,6 @@ where
     }
 
     /// Take only the response data that comes out of the request.
-    #[must_use]
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
@@ -120,15 +122,15 @@ where
         provider: P,
     ) -> Impulse<'w, 's, 'a, P::Response, P::Streams> {
         let source = self.target;
-        let target = self.commands.spawn((
-            Detached::default(),
-            UnusedTarget,
-            ImpulseMarker,
-        )).id();
+        let target = self
+            .commands
+            .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
+            .id();
 
         // We should automatically delete the previous step in the chain once
         // this one is finished.
-        self.commands.entity(source)
+        self.commands
+            .entity(source)
             .insert(Cancellable::new(cancel_impulse))
             .set_parent(target);
         provider.connect(None, source, target, self.commands);
@@ -184,7 +186,13 @@ where
     pub fn map<M, F: AsMapOnce<M>>(
         self,
         f: F,
-    ) -> Impulse<'w, 's, 'a, <F::MapType as ProvideOnce>::Response, <F::MapType as ProvideOnce>::Streams>
+    ) -> Impulse<
+        'w,
+        's,
+        'a,
+        <F::MapType as ProvideOnce>::Response,
+        <F::MapType as ProvideOnce>::Streams,
+    >
     where
         F::MapType: ProvideOnce<Request = Response>,
         <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
@@ -202,16 +210,14 @@ where
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
-        self.commands.add(AddImpulse::new(
-            self.target,
-            Store::<Response>::new(target),
-        ));
+        self.commands
+            .add(AddImpulse::new(self.target, Store::<Response>::new(target)));
 
         let mut map = StreamTargetMap::default();
-        let stream_targets = Streams::collect_streams(
-            self.source, target, &mut map, self.commands,
-        );
-        self.commands.entity(self.source).insert((stream_targets, map));
+        let stream_targets = Streams::collect_streams(self.source, target, &mut map, self.commands);
+        self.commands
+            .entity(self.source)
+            .insert((stream_targets, map));
     }
 
     /// Collect the stream data into [`Collection<T>`] components in the
@@ -220,10 +226,10 @@ where
     #[must_use]
     pub fn collect_streams(self, target: Entity) -> Impulse<'w, 's, 'a, Response, ()> {
         let mut map = StreamTargetMap::default();
-        let stream_targets = Streams::collect_streams(
-            self.source, target, &mut map, self.commands,
-        );
-        self.commands.entity(self.source).insert((stream_targets, map));
+        let stream_targets = Streams::collect_streams(self.source, target, &mut map, self.commands);
+        self.commands
+            .entity(self.source)
+            .insert((stream_targets, map));
 
         Impulse {
             source: self.source,
@@ -248,10 +254,10 @@ where
         ));
 
         let mut map = StreamTargetMap::default();
-        let stream_targets = Streams::collect_streams(
-            self.source, target, &mut map, self.commands,
-        );
-        self.commands.entity(self.source).insert((stream_targets, map));
+        let stream_targets = Streams::collect_streams(self.source, target, &mut map, self.commands);
+        self.commands
+            .entity(self.source)
+            .insert((stream_targets, map));
     }
 
     // TODO(@mxgrey): Consider offering ways for users to respond to cancellations.
@@ -291,10 +297,8 @@ where
     ///
     /// Using this will also effectively [detach](Self::detach) the impulse.
     pub fn send_event(self) {
-        self.commands.add(AddImpulse::new(
-            self.target,
-            SendEvent::<Response>::new(),
-        ));
+        self.commands
+            .add(AddImpulse::new(self.target, SendEvent::<Response>::new()));
     }
 }
 
@@ -323,20 +327,22 @@ pub struct Collection<T> {
 
 impl<T> Default for Collection<T> {
     fn default() -> Self {
-        Self { items: Default::default() }
+        Self {
+            items: Default::default(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
-    use std::{
-        time::{Instant, Duration},
-        sync::{Arc, Mutex}
-    };
-    use smallvec::SmallVec;
-    use tokio::sync::mpsc::unbounded_channel;
+    use crate::{testing::*, *};
     use bevy_utils::label::DynEq;
+    use smallvec::SmallVec;
+    use std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[test]
     fn test_dropped_chain() {
@@ -347,24 +353,26 @@ mod tests {
 
         context.command(|commands| {
             let _ = commands
-            .request("hello".to_owned(), to_uppercase.into_blocking_map())
-            .map_block(move |value| {
-                detached_sender.send(value.clone()).unwrap();
-                value
-            })
-            .detach()
-            .map_block(to_lowercase)
-            .map_block(move |value| {
-                attached_sender.send(value.clone()).unwrap();
-                value
-            })
-            .map_block(to_uppercase);
+                .request("hello".to_owned(), to_uppercase.into_blocking_map())
+                .map_block(move |value| {
+                    detached_sender.send(value.clone()).unwrap();
+                    value
+                })
+                .detach()
+                .map_block(to_lowercase)
+                .map_block(move |value| {
+                    attached_sender.send(value.clone()).unwrap();
+                    value
+                })
+                .map_block(to_uppercase);
         });
 
         context.run(1);
         assert_eq!(detached_receiver.try_recv().unwrap(), "HELLO");
         assert!(attached_receiver.try_recv().is_err());
-        assert!(context.get_unhandled_errors().is_some_and(|e| e.unused_targets.len() == 1));
+        assert!(context
+            .get_unhandled_errors()
+            .is_some_and(|e| e.unused_targets.len() == 1));
     }
 
     #[test]
@@ -373,8 +381,8 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .request("hello".to_owned(), to_uppercase.into_blocking_map())
-            .take_response()
+                .request("hello".to_owned(), to_uppercase.into_blocking_map())
+                .take_response()
         });
 
         context.run_while_pending(&mut promise);
@@ -383,8 +391,8 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .request("hello".to_owned(), to_uppercase.into_blocking_map_once())
-            .take_response()
+                .request("hello".to_owned(), to_uppercase.into_blocking_map_once())
+                .take_response()
         });
 
         context.run_while_pending(&mut promise);
@@ -393,9 +401,9 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .provide("hello".to_owned())
-            .map_block(to_uppercase)
-            .take_response()
+                .provide("hello".to_owned())
+                .map_block(to_uppercase)
+                .take_response()
         });
 
         context.run_while_pending(&mut promise);
@@ -404,9 +412,9 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .provide("hello".to_owned())
-            .map_block(|request| request.to_uppercase())
-            .take_response()
+                .provide("hello".to_owned())
+                .map_block(|request| request.to_uppercase())
+                .take_response()
         });
 
         context.run_while_pending(&mut promise);
@@ -423,13 +431,12 @@ mod tests {
             value: "hello".to_owned(),
         };
 
-        let conditions = FlushConditions::new()
-            .with_timeout(Duration::from_secs_f64(5.0));
+        let conditions = FlushConditions::new().with_timeout(Duration::from_secs_f64(5.0));
 
         let mut promise = context.command(|commands| {
             commands
-            .request(request.clone(), wait.into_async_map())
-            .take_response()
+                .request(request.clone(), wait.into_async_map())
+                .take_response()
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
@@ -438,8 +445,8 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .request(request.clone(), wait.into_async_map_once())
-            .take_response()
+                .request(request.clone(), wait.into_async_map_once())
+                .take_response()
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
@@ -448,9 +455,9 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .provide(request.clone())
-            .map_async(wait)
-            .take_response()
+                .provide(request.clone())
+                .map_async(wait)
+                .take_response()
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
@@ -459,17 +466,17 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .provide(request.clone())
-            .map_async(|request| {
-                async move {
-                    let t = Instant::now();
-                    while t.elapsed() < request.duration {
-                        // Busy wait
+                .provide(request.clone())
+                .map_async(|request| {
+                    async move {
+                        let t = Instant::now();
+                        while t.elapsed() < request.duration {
+                            // Busy wait
+                        }
+                        request.value
                     }
-                    request.value
-                }
-            })
-            .take_response()
+                })
+                .take_response()
         });
 
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
@@ -508,7 +515,7 @@ mod tests {
             },
             |view: &ContinuousQueueView<_, ()>| {
                 assert!(view.len() <= 1);
-            }
+            },
         );
 
         verify_delivery_instruction_matrix(service.optional_stream_cast(), &mut context);
@@ -517,7 +524,7 @@ mod tests {
             Duration::from_secs_f32(0.01),
             |counter: Arc<Mutex<u64>>| {
                 *counter.lock().unwrap() += 1;
-            }
+            },
         );
 
         verify_delivery_instruction_matrix(service, &mut context);
@@ -571,19 +578,19 @@ mod tests {
         let counter = Arc::new(Mutex::new(0_u64));
         let mut preempted: SmallVec<[Promise<()>; 16]> = SmallVec::new();
         for _ in 0..preemptions {
-            let promise = context.command(|commands|
+            let promise = context.command(|commands| {
                 commands
-                .request(Arc::clone(&counter), preempted_service)
-                .take_response()
-            );
+                    .request(Arc::clone(&counter), preempted_service)
+                    .take_response()
+            });
             preempted.push(promise);
         }
 
-        let mut final_promise = context.command(|commands|
+        let mut final_promise = context.command(|commands| {
             commands
-            .request(Arc::clone(&counter), preempting_service)
-            .take_response()
-        );
+                .request(Arc::clone(&counter), preempting_service)
+                .take_response()
+        });
 
         for promise in &mut preempted {
             context.run_with_conditions(promise, Duration::from_secs(2));
@@ -604,11 +611,11 @@ mod tests {
         let counter = Arc::new(Mutex::new(0_u64));
         let mut queued: SmallVec<[Promise<()>; 16]> = SmallVec::new();
         for _ in 0..queue_size {
-            let promise = context.command(|commands|
+            let promise = context.command(|commands| {
                 commands
-                .request(Arc::clone(&counter), queuing_service)
-                .take_response()
-            );
+                    .request(Arc::clone(&counter), queuing_service)
+                    .take_response()
+            });
             queued.push(promise);
         }
 
@@ -638,23 +645,17 @@ mod tests {
                 service.instruct(TestLabel)
             };
 
-            let promise = context.command(|commands|
-                commands
-                .request(Arc::clone(&counter), srv)
-                .take_response()
-            );
+            let promise = context
+                .command(|commands| commands.request(Arc::clone(&counter), srv).take_response());
 
             queued_promises.push((promise, ensured));
         }
 
-        let mut preempter = context.command(|commands|
+        let mut preempter = context.command(|commands| {
             commands
-            .request(
-                Arc::clone(&counter),
-                service.instruct(TestLabel.preempt())
-            )
-            .take_response()
-        );
+                .request(Arc::clone(&counter), service.instruct(TestLabel.preempt()))
+                .take_response()
+        });
 
         for (promise, ensured) in &mut queued_promises {
             context.run_with_conditions(promise, Duration::from_secs(2));

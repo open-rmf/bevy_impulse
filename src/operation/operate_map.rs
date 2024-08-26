@@ -15,18 +15,17 @@
  *
 */
 
-use bevy_ecs::prelude::{Component, Entity, Bundle};
+use bevy_ecs::prelude::{Bundle, Component, Entity};
 
 use std::future::Future;
 
 use crate::{
-    BlockingMap, AsyncMap, Operation, ChannelQueue, Channel, Sendish,
-    SingleTargetStorage, StreamPack, Input, ManageInput, OperationCleanup,
-    CallBlockingMap, CallAsyncMap, SingleInputStorage, OperationResult,
-    OrBroken, OperationSetup, OperationRequest, OperateTask, ActiveTasksStorage,
-    OperationReachability, ReachabilityResult, InputBundle, UnusedStreams,
-    ManageDisposal, make_stream_buffer_from_world,
     async_execution::{spawn_task, task_cancel_sender},
+    make_stream_buffer_from_world, ActiveTasksStorage, AsyncMap, BlockingMap, CallAsyncMap,
+    CallBlockingMap, Channel, ChannelQueue, Input, InputBundle, ManageDisposal, ManageInput,
+    OperateTask, Operation, OperationCleanup, OperationReachability, OperationRequest,
+    OperationResult, OperationSetup, OrBroken, ReachabilityResult, Sendish, SingleInputStorage,
+    SingleTargetStorage, StreamPack, UnusedStreams,
 };
 
 #[derive(Bundle)]
@@ -40,7 +39,7 @@ where
     storage: BlockingMapStorage<F>,
     target: SingleTargetStorage,
     #[bundle(ignore)]
-    _ignore: std::marker::PhantomData<(Request, Response, Streams)>,
+    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
 }
 
 impl<F, Request, Response, Streams> OperateBlockingMap<F, Request, Response, Streams>
@@ -72,39 +71,56 @@ where
     Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target.0).or_broken()?
+        world
+            .get_entity_mut(self.target.0)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
-        world.entity_mut(source).insert((
-            self,
-            InputBundle::<Request>::new(),
-        ));
+        world
+            .entity_mut(source)
+            .insert((self, InputBundle::<Request>::new()));
         Ok(())
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let Input { session, data: request } = source_mut.take_input::<Request>()?;
+        let Input {
+            session,
+            data: request,
+        } = source_mut.take_input::<Request>()?;
         let mut map = source_mut.get_mut::<BlockingMapStorage<F>>().or_broken()?;
         let mut f = map.f.take().or_broken()?;
 
-        let response = f.call(BlockingMap { request, streams: streams.clone(), source, session });
+        let response = f.call(BlockingMap {
+            request,
+            streams: streams.clone(),
+            source,
+            session,
+        });
         map.f = Some(f);
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_buffer(
-            streams, source, session, &mut unused_streams, world, roster
-        )?;
+        Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
         if !unused_streams.streams.is_empty() {
-            world.get_entity_mut(source).or_broken()?
-                .emit_disposal(session, unused_streams.into(), roster);
+            world.get_entity_mut(source).or_broken()?.emit_disposal(
+                session,
+                unused_streams.into(),
+                roster,
+            );
         }
 
-        world.get_entity_mut(target).or_broken()?.give_input(session, response, roster)?;
+        world
+            .get_entity_mut(target)
+            .or_broken()?
+            .give_input(session, response, roster)?;
         Ok(())
     }
 
@@ -163,7 +179,9 @@ where
     Streams: StreamPack,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target.0).or_broken()?
+        world
+            .get_entity_mut(self.target.0)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
@@ -176,30 +194,62 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
-        let sender = world.get_resource_or_insert_with(|| ChannelQueue::new()).sender.clone();
+        let sender = world
+            .get_resource_or_insert_with(ChannelQueue::new)
+            .sender
+            .clone();
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Input { session, data: request } = source_mut.take_input::<Request>()?;
+        let Input {
+            session,
+            data: request,
+        } = source_mut.take_input::<Request>()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
-        let mut f = source_mut.get_mut::<AsyncMapStorage<F>>().or_broken()?
-            .f.take().or_broken()?;
+        let mut f = source_mut
+            .get_mut::<AsyncMapStorage<F>>()
+            .or_broken()?
+            .f
+            .take()
+            .or_broken()?;
 
         let channel = Channel::new(source, session, sender.clone());
-        let streams = channel.for_streams::<Streams>(&world)?;
+        let streams = channel.for_streams::<Streams>(world)?;
 
-        let task = spawn_task(f.call(AsyncMap {
-            request, streams, channel, source, session,
-        }), world);
+        let task = spawn_task(
+            f.call(AsyncMap {
+                request,
+                streams,
+                channel,
+                source,
+                session,
+            }),
+            world,
+        );
         let cancel_sender = task_cancel_sender(world);
-        world.get_entity_mut(source).or_broken()?
-            .get_mut::<AsyncMapStorage<F>>().or_broken()?
+        world
+            .get_entity_mut(source)
+            .or_broken()?
+            .get_mut::<AsyncMapStorage<F>>()
+            .or_broken()?
             .f = Some(f);
 
         let task_source = world.spawn(()).id();
         OperateTask::<_, Streams>::new(
-            task_source, session, source, target, task, cancel_sender, None, sender,
-        ).add(world, roster);
+            task_source,
+            session,
+            source,
+            target,
+            task,
+            cancel_sender,
+            None,
+            sender,
+        )
+        .add(world, roster);
         Ok(())
     }
 
@@ -216,7 +266,7 @@ where
         if reachability.has_input::<Request>()? {
             return Ok(true);
         }
-        if ActiveTasksStorage::contains_session(&mut reachability)? {
+        if ActiveTasksStorage::contains_session(&reachability)? {
             return Ok(true);
         }
         SingleInputStorage::is_reachable(&mut reachability)

@@ -24,14 +24,12 @@ use smallvec::SmallVec;
 use std::error::Error;
 
 use crate::{
-    UnusedTarget, AddOperation, Node, InputSlot, Builder, IntoBlockingCallback,
-    StreamPack, Provider, ProvideOnce, Scope, StreamOf, Trim, TrimBranch,
-    AsMap, IntoBlockingMap, IntoAsyncMap, Output, Noop,
-    ForkTargetStorage, StreamTargetMap, ScopeSettings, CreateCancelFilter,
-    CreateDisposalFilter, Bufferable, BufferKey, BufferKeys, OperateBufferAccess,
-    GateRequest, OperateDynamicGate, OperateStaticGate, Gate, Buffered,
-    Spread, Collect, Sendish, Service, Buffer,
-    make_result_branching, make_option_branching,
+    make_option_branching, make_result_branching, AddOperation, AsMap, Buffer, BufferKey,
+    BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
+    ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
+    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateStaticGate,
+    Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf,
+    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -43,7 +41,6 @@ use premade::*;
 pub mod unzip;
 pub use unzip::*;
 
-
 /// Chain operations onto the output of a workflow node.
 ///
 /// Make sure to use [`Self::connect`] when you're done chaining so that the
@@ -54,7 +51,7 @@ pub use unzip::*;
 pub struct Chain<'w, 's, 'a, 'b, T> {
     target: Entity,
     builder: &'b mut Builder<'w, 's, 'a>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
@@ -64,7 +61,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Note that if you do not connect some path of your workflow into the
     /// `terminate` slot of your [`Scope`] then the workflow will not be able
     /// to run.
-    #[must_use]
     pub fn output(self) -> Output<T> {
         Output::new(self.scope(), self.target)
     }
@@ -72,7 +68,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Get the raw [`Output`] slot for the current link in the chain, along with
     /// the builder. This can be used to do more complex building inside of
     /// chain builder functions.
-    #[must_use]
     pub fn unpack(self) -> (Output<T>, &'b mut Builder<'w, 's, 'a>) {
         (Output::new(self.scope(), self.target), self.builder)
     }
@@ -95,23 +90,23 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Connect the response at the end of the chain into a new provider. Get
     /// the response of the new provider as a chain so you can continue chaining
     /// operations.
-    #[must_use]
-    pub fn then<P: Provider<Request = T>>(
-        self,
-        provider: P,
-    ) -> Chain<'w, 's, 'a, 'b, P::Response>
+    pub fn then<P: Provider<Request = T>>(self, provider: P) -> Chain<'w, 's, 'a, 'b, P::Response>
     where
         P::Response: 'static + Send + Sync,
     {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        provider.connect(Some(self.builder.scope), source, target, self.builder.commands);
+        provider.connect(
+            Some(self.builder.scope),
+            source,
+            target,
+            self.builder.commands,
+        );
         Chain::new(target, self.builder)
     }
 
     /// Connect the response in the chain into a new provider. Get the node
     /// slots that wrap around the new provider.
-    #[must_use]
     pub fn then_node<P: Provider<Request = T>>(
         self,
         provider: P,
@@ -125,9 +120,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         provider.connect(Some(self.scope()), source, target, self.builder.commands);
 
         let mut map = StreamTargetMap::default();
-        let (bundle, streams) = <P::Streams as StreamPack>::spawn_node_streams(
-            source, &mut map, self.builder,
-        );
+        let (bundle, streams) =
+            <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self.builder);
         self.builder.commands.entity(source).insert((bundle, map));
         Node {
             input: InputSlot::new(self.builder.scope, source),
@@ -138,13 +132,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Apply a function whose input is [`BlockingMap<T>`](crate::BlockingMap)
     /// or [`AsyncMap<T>`](crate::AsyncMap).
-    #[must_use]
     pub fn map<M, F: AsMap<M>>(
         self,
         f: F,
     ) -> Chain<'w, 's, 'a, 'b, <F::MapType as ProvideOnce>::Response>
     where
-        F::MapType: Provider<Request=T>,
+        F::MapType: Provider<Request = T>,
         <F::MapType as ProvideOnce>::Response: 'static + Send + Sync,
     {
         self.then(f.as_map())
@@ -152,7 +145,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map`] but receive the new node instead of continuing a
     /// chain.
-    #[must_use]
     pub fn map_node<M, F: AsMap<M>>(
         self,
         f: F,
@@ -171,7 +163,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This takes in a regular blocking function rather than an async function,
     /// so while the function is executing, it will block all systems and all
     /// other workflows from running.
-    #[must_use]
     pub fn map_block<U>(
         self,
         f: impl FnMut(T) -> U + 'static + Send + Sync,
@@ -184,11 +175,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map_block`] but receive the new node instead of
     /// continuing a chain.
-    #[must_use]
-    pub fn map_block_node<U>(
-        self,
-        f: impl FnMut(T) -> U + 'static + Send + Sync,
-    ) -> Node<T, U, ()>
+    pub fn map_block_node<U>(self, f: impl FnMut(T) -> U + 'static + Send + Sync) -> Node<T, U, ()>
     where
         U: 'static + Send + Sync,
     {
@@ -199,7 +186,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// [`AsyncComputeTaskPool`](bevy::tasks::AsyncComputeTaskPool) (unless
     /// the `single_threaded_async` feature is active). The output of the Future
     /// will be the Response of the returned Chain.
-    #[must_use]
     pub fn map_async<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
@@ -213,7 +199,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Same as [`Self::map_async`] but receive the new node instead of
     /// continuing a chain.
-    #[must_use]
     pub fn map_async_node<Task>(
         self,
         f: impl FnMut(T) -> Task + 'static + Send + Sync,
@@ -229,7 +214,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// If you want to connect to the stream outputs or be able to loop back
     /// to the input of this scope, use [`Self::then_scope_node`] instead.
-    #[must_use]
     pub fn then_scope<Response, Streams, Settings>(
         self,
         build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder) -> Settings,
@@ -240,9 +224,10 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Settings: Into<ScopeSettings>,
     {
         let exit_scope = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.create_scope_impl::<T, Response, Streams, Settings>(
-            self.target, exit_scope, build,
-        ).output.chain(self.builder)
+        self.builder
+            .create_scope_impl::<T, Response, Streams, Settings>(self.target, exit_scope, build)
+            .output
+            .chain(self.builder)
     }
 
     /// Simplified version of [`Self::then_scope`] limited to a simple input and
@@ -263,7 +248,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// From the current target in the chain, build a [scoped](Scope) workflow
     /// and then get back a node that represents that scoped workflow.
-    #[must_use]
     pub fn then_scope_node<Response, Streams, Settings>(
         self,
         build: impl FnOnce(Scope<T, Response, Streams>, &mut Builder) -> Settings,
@@ -274,9 +258,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         Settings: Into<ScopeSettings>,
     {
         let exit_scope = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.create_scope_impl::<T, Response, Streams, Settings>(
-            self.target, exit_scope, build,
-        )
+        self.builder
+            .create_scope_impl::<T, Response, Streams, Settings>(self.target, exit_scope, build)
     }
 
     /// Simplified version of [`Self::then_scope_node`] limited to a simple
@@ -313,16 +296,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ///
     /// To obtain a set of buffer keys each time a buffer is modified, use
     /// [`listen`](crate::Bufferable::listen).
-    pub fn with_access<B>(
-        self,
-        buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
+    pub fn with_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
         BufferKeys<B>: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self.builder);
+        let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
 
         let source = self.target;
@@ -338,18 +318,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// After the previous operation is finished, trigger a new operation whose
     /// input is simply the access keys for one or more buffers.
-    pub fn then_access<B>(
-        self,
-        buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
+    pub fn then_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
         BufferKeys<B>: 'static + Send + Sync,
     {
-        self
-        .with_access(buffers)
-        .map_block(|(_, key)| key)
+        self.with_access(buffers).map_block(|(_, key)| key)
     }
 
     /// Apply a [`Provider`] that filters the response by returning an [`Option`].
@@ -360,10 +335,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This is conceptually similar to [`Iterator::filter_map`]. You can also
     /// use [`Chain::disposal_filter`] to dispose of the value instead of
     /// cancelling the entire scope.
-    #[must_use]
     pub fn cancellation_filter<ThenResponse, F>(
         self,
-        filter_provider: F
+        filter_provider: F,
     ) -> Chain<'w, 's, 'a, 'b, ThenResponse>
     where
         ThenResponse: 'static + Send + Sync,
@@ -398,19 +372,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// This can only be applied when `Response` can be cloned.
     ///
     /// See also [`Chain::fork_clone`]
-    #[must_use]
-    pub fn branch_clone(
-        self,
-        build: impl FnOnce(Chain<T>),
-    ) -> Chain<'w, 's, 'a, 'b, T>
+    pub fn branch_clone(self, build: impl FnOnce(Chain<T>)) -> Chain<'w, 's, 'a, 'b, T>
     where
         T: Clone,
     {
         Chain::<T>::new(self.target, self.builder)
-            .fork_clone((
-                |chain: Chain<T>| chain.output(),
-                build,
-            )).0
+            .fork_clone((|chain: Chain<T>| chain.output(), build))
+            .0
             .chain(self.builder)
     }
 
@@ -424,10 +392,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// [`Output`] then you can easily continue chaining more operations using
     /// [`join`](crate::Bufferable::join), or destructure them into individual
     /// outputs that you can continue to build with.
-    pub fn fork_clone<Build: ForkCloneBuilder<T>>(
-        self,
-        build: Build,
-    ) -> Build::Outputs
+    pub fn fork_clone<Build: ForkCloneBuilder<T>>(self, build: Build) -> Build::Outputs
     where
         T: Clone,
     {
@@ -454,7 +419,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// will be passed back the zipped return values of all the builder functions.
     pub fn fork_unzip<Build>(self, build: Build) -> Build::ReturnType
     where
-        Build: UnzipBuilder<T>
+        Build: UnzipBuilder<T>,
     {
         build.fork_unzip(Output::<T>::new(self.scope(), self.target), self.builder)
     }
@@ -539,7 +504,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// See also: [`Self::then_trim_node`], [`Builder::create_trim`].
     pub fn then_trim(
         self,
-        branches: impl IntoIterator<Item=TrimBranch>,
+        branches: impl IntoIterator<Item = TrimBranch>,
     ) -> Chain<'w, 's, 'a, 'b, T> {
         let branches: SmallVec<[_; 16]> = branches.into_iter().collect();
         for branch in &branches {
@@ -561,10 +526,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// return a [`Node`] so you can connect other inputs into the operation.
     ///
     /// See also: [`Self::then_trim`], [`Builder::create_trim`].
-    pub fn then_trim_node(
-        self,
-        branches: impl IntoIterator<Item = TrimBranch>,
-    ) -> Node<T, T> {
+    pub fn then_trim_node(self, branches: impl IntoIterator<Item = TrimBranch>) -> Node<T, T> {
         let source = self.target;
         let scope = self.builder.scope;
         let target = self.then_trim(branches).output().id();
@@ -589,16 +551,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// Apply a [gate action](Gate) to one or more buffers at this point
     /// in the workflow.
-    pub fn then_gate_action<B>(
-        self,
-        action: Gate,
-        buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, T>
+    pub fn then_gate_action<B>(self, action: Gate, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self.builder);
+        let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
 
         let source = self.target;
@@ -635,13 +593,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the chain's response implements the [`Future`] trait, applying
     /// `.flatten()` to the chain will yield the output of that Future as the
     /// chain's response.
-    #[must_use]
     pub fn flatten(self) -> Chain<'w, 's, 'a, 'b, T::Output>
     where
         T: Future,
         T::Output: 'static + Send + Sync,
     {
-        self.map_async(|r| async { r.await })
+        self.map_async(|r| r)
     }
 
     /// Add a [no-op][1] to the current end of the chain.
@@ -652,13 +609,14 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// [trimming](Self::then_trim).
     ///
     /// [1]: `<https://en.wikipedia.org/wiki/NOP_(code)>`
-    #[must_use]
     pub fn noop(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
         self.builder.commands.add(AddOperation::new(
-            Some(self.scope()), source, Noop::<T>::new(target),
+            Some(self.scope()),
+            source,
+            Noop::<T>::new(target),
         ));
         Chain::new(target, self.builder)
     }
@@ -705,17 +663,11 @@ where
     ///
     /// This function returns a chain that will be activated if the result was
     /// [`Ok`] so you can continue building your response to the [`Ok`] case.
-    #[must_use]
-    pub fn branch_for_err(
-        self,
-        build_err: impl FnOnce(Chain<E>),
-    ) -> Chain<'w, 's, 'a, 'b, T> {
-        Chain::<Result<T, E>>::new(
-            self.target, self.builder,
-        ).fork_result(
-            |chain| chain.output(),
-            build_err,
-        ).0.chain(self.builder)
+    pub fn branch_for_err(self, build_err: impl FnOnce(Chain<E>)) -> Chain<'w, 's, 'a, 'b, T> {
+        Chain::<Result<T, E>>::new(self.target, self.builder)
+            .fork_result(|chain| chain.output(), build_err)
+            .0
+            .chain(self.builder)
     }
 
     /// Build two branching chains, one for the case where the response is [`Ok`]
@@ -737,9 +689,7 @@ where
         self.builder.commands.add(AddOperation::new(
             Some(self.scope()),
             source,
-            make_result_branching::<T, E>(
-                ForkTargetStorage::from_iter([target_ok, target_err])
-            ),
+            make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
         ));
 
         let u = build_ok(Chain::new(target_ok, self.builder));
@@ -754,18 +704,11 @@ where
     ///
     /// This is meant to replicate the `?` operator used in normal Rust
     /// programming.
-    pub fn connect_on_err<U>(
-        self,
-        input: InputSlot<Result<U, E>>,
-    ) -> Chain<'w, 's, 'a, 'b, T>
+    pub fn connect_on_err<U>(self, input: InputSlot<Result<U, E>>) -> Chain<'w, 's, 'a, 'b, T>
     where
         U: 'static + Send + Sync,
     {
-        self.branch_for_err(move |chain: Chain<E>|
-            chain
-            .map_block(|err| Err(err))
-            .connect(input)
-        )
+        self.branch_for_err(move |chain: Chain<E>| chain.map_block(|err| Err(err)).connect(input))
     }
 
     /// If the result contains an [`Err`] value then the entire scope that
@@ -800,7 +743,6 @@ where
     /// context.run_while_pending(&mut promise);
     /// assert!(promise.peek().is_cancelled());
     /// ```
-    #[must_use]
     pub fn cancel_on_err(self) -> Chain<'w, 's, 'a, 'b, T>
     where
         E: Error,
@@ -821,7 +763,6 @@ where
     /// that do not implement [`Error`]. The catch is that their error message
     /// will not be included in the [`Filtered`](crate::Filtered) information
     /// that gets propagated outward.
-    #[must_use]
     pub fn cancel_on_quiet_err(self) -> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
@@ -841,7 +782,6 @@ where
     /// not be triggered, but the workflow is not necessarily cancelled. If a
     /// disposal makes it impossible for the workflow to terminate, then the
     /// workflow will be cancelled immediately.
-    #[must_use]
     pub fn dispose_on_err(self) -> Chain<'w, 's, 'a, 'b, T>
     where
         E: Error,
@@ -901,17 +841,11 @@ where
     ///
     /// This function returns a chain that will be activated if the result was
     /// [`Some`] so you can continue building your response to the [`Some`] case.
-    #[must_use]
-    pub fn branch_for_none(
-        self,
-        build_none: impl FnOnce(Chain<()>),
-    ) -> Chain<'w, 's, 'a, 'b, T> {
-        Chain::<Option<T>>::new(
-            self.target, self.builder,
-        ).fork_option(
-            |chain| chain.output(),
-            build_none,
-        ).0.chain(self.builder)
+    pub fn branch_for_none(self, build_none: impl FnOnce(Chain<()>)) -> Chain<'w, 's, 'a, 'b, T> {
+        Chain::<Option<T>>::new(self.target, self.builder)
+            .fork_option(|chain| chain.output(), build_none)
+            .0
+            .chain(self.builder)
     }
 
     /// Build two branching chains, one for the case where the response is [`Some`]
@@ -933,9 +867,7 @@ where
         self.builder.commands.add(AddOperation::new(
             Some(self.scope()),
             source,
-            make_option_branching::<T>(
-                ForkTargetStorage::from_iter([target_some, target_none])
-            ),
+            make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
         ));
 
         let u = build_some(Chain::new(target_some, self.builder));
@@ -950,18 +882,11 @@ where
     ///
     /// This is meant to replicate the `?` operator used in normal Rust
     /// programming.
-    pub fn connect_on_none<U>(
-        self,
-        input: InputSlot<Option<U>>,
-    ) -> Chain<'w, 's, 'a, 'b, T>
+    pub fn connect_on_none<U>(self, input: InputSlot<Option<U>>) -> Chain<'w, 's, 'a, 'b, T>
     where
         U: 'static + Send + Sync,
     {
-        self.branch_for_none(move |chain: Chain<()>|
-            chain
-            .map_block(|_| None)
-            .connect(input)
-        )
+        self.branch_for_none(move |chain: Chain<()>| chain.map_block(|_| None).connect(input))
     }
 
     /// If the result contains a [`None`] value then the chain will be cancelled
@@ -1017,7 +942,8 @@ where
     }
 }
 
-impl<'w, 's, 'a, 'b, Request, Response, Streams> Chain<'w, 's, 'a, 'b, (Request, Service<Request, Response, Streams>)>
+impl<'w, 's, 'a, 'b, Request, Response, Streams>
+    Chain<'w, 's, 'a, 'b, (Request, Service<Request, Response, Streams>)>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync + Unpin,
@@ -1036,7 +962,9 @@ where
     /// To access the streams of the service, use [`Chain::then_request_node`].
     pub fn then_injection(self) -> Chain<'w, 's, 'a, 'b, Response> {
         let source = self.target;
-        let node = self.builder.create_injection_impl::<Request, Response, Streams>(source);
+        let node = self
+            .builder
+            .create_injection_impl::<Request, Response, Streams>(source);
         node.output.chain(self.builder)
     }
 
@@ -1049,10 +977,11 @@ where
     /// fail for various reasons, this returns a [`Result`]. Follow this with
     /// `.dispose_on_err` to filter away errors.
     pub fn then_injection_node(
-        self
+        self,
     ) -> Node<(Request, Service<Request, Response, Streams>), Response, Streams> {
         let source = self.target;
-        self.builder.create_injection_impl::<Request, Response, Streams>(source)
+        self.builder
+            .create_injection_impl::<Request, Response, Streams>(source)
     }
 }
 
@@ -1065,7 +994,7 @@ where
         B: Bufferable,
         B::BufferType: 'static + Send + Sync,
     {
-        let buffers = buffers.as_buffer(self.builder);
+        let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
 
         let source = self.target;
@@ -1092,21 +1021,18 @@ where
 impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Used internally to create a [`Chain`] that can accept a label
     /// and hook into streams.
-    pub(crate) fn new(
-        target: Entity,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Self {
+    pub(crate) fn new(target: Entity, builder: &'b mut Builder<'w, 's, 'a>) -> Self {
         Self {
             target,
             builder,
-            _ignore: Default::default()
+            _ignore: Default::default(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
     use smallvec::SmallVec;
 
     #[test]
@@ -1114,25 +1040,29 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 // (2.0, 2.0)
                 .fork_unzip((
-                    |chain: Chain<f64>| chain
-                        // 2.0
-                        .map_block(|value|
-                            WaitRequest {
-                                duration: Duration::from_secs_f64(value/100.0),
+                    |chain: Chain<f64>| {
+                        chain
+                            // 2.0
+                            .map_block(|value| WaitRequest {
+                                duration: Duration::from_secs_f64(value / 100.0),
                                 value,
-                            }
-                        )
-                        .map_async(wait)
-                        // 2.0
-                        .output(),
-                    |chain: Chain<f64>| chain
-                        // 2.0
-                        .map_block(|value| 2.0*value)
-                        // 4.0
-                        .output(),
+                            })
+                            .map_async(wait)
+                            // 2.0
+                            .output()
+                    },
+                    |chain: Chain<f64>| {
+                        chain
+                            // 2.0
+                            .map_block(|value| 2.0 * value)
+                            // 4.0
+                            .output()
+                    },
                 ))
                 .join(builder)
                 // (2.0, 4.0)
@@ -1141,11 +1071,8 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((2.0, 2.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 2.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|value| value == 6.0));
@@ -1157,50 +1084,51 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
-            // (2.0, 2.0)
-            .map_block(add)
-            // 4.0
-            .then_io_scope(|scope, builder| {
-                scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
+                // (2.0, 2.0)
+                .map_block(add)
                 // 4.0
-                .fork_clone((
-                    |chain: Chain<f64>| {
+                .then_io_scope(|scope, builder| {
+                    scope
+                        .input
+                        .chain(builder)
                         // 4.0
-                        chain.map_block(|value|
-                            WaitRequest {
-                                duration: Duration::from_secs_f64(0.01*value),
-                                value,
-                            }
-                        )
-                        .map_async(wait)
-                        // 4.0
-                        .connect(scope.terminate);
-                    },
-                    |chain: Chain<f64>| {
-                        // 4.0
-                        chain.map_block(|a| (a, a))
-                        // (4.0, 4.0)
-                        .map_block(add)
-                        // 8.0
-                        .connect(scope.terminate);
-                    }
-                ));
-            })
-            // This should be won by the 8.0 branch because it does not wait,
-            // while the 4.0 branch should wait for 0.04s.
-            .map_block(|a| (a, a))
-            // (8.0, 8.0)
-            .map_block(add)
-            // 16.0
-            .connect(scope.terminate);
+                        .fork_clone((
+                            |chain: Chain<f64>| {
+                                // 4.0
+                                chain
+                                    .map_block(|value| WaitRequest {
+                                        duration: Duration::from_secs_f64(0.01 * value),
+                                        value,
+                                    })
+                                    .map_async(wait)
+                                    // 4.0
+                                    .connect(scope.terminate);
+                            },
+                            |chain: Chain<f64>| {
+                                // 4.0
+                                chain
+                                    .map_block(|a| (a, a))
+                                    // (4.0, 4.0)
+                                    .map_block(add)
+                                    // 8.0
+                                    .connect(scope.terminate);
+                            },
+                        ));
+                })
+                // This should be won by the 8.0 branch because it does not wait,
+                // while the 4.0 branch should wait for 0.04s.
+                .map_block(|a| (a, a))
+                // (8.0, 8.0)
+                .map_block(add)
+                // 16.0
+                .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((2.0, 2.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 2.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
 
@@ -1213,39 +1141,35 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
-            .map_block(add)
-            .map_block(|v| (v, 2.0*v))
-            .then_io_scope(|scope, builder| {
-                scope.input.chain(builder)
-                .fork_unzip((
-                    |chain: Chain<f64>| {
-                        chain
-                        .map_block(|v| (v, 10.0))
-                        .map_block(add)
-                        .connect(scope.terminate);
-                    },
-                    |chain: Chain<f64>| {
-                        chain
-                        .map_block(|value|
-                            WaitRequest{
-                                duration: std::time::Duration::from_secs_f64(0.01),
-                                value,
-                            }
-                        )
-                        .map_async(wait)
-                        .connect(scope.terminate);
-                    },
-                ));
-            })
-            .connect(scope.terminate);
+            scope
+                .input
+                .chain(builder)
+                .map_block(add)
+                .map_block(|v| (v, 2.0 * v))
+                .then_io_scope(|scope, builder| {
+                    scope.input.chain(builder).fork_unzip((
+                        |chain: Chain<f64>| {
+                            chain
+                                .map_block(|v| (v, 10.0))
+                                .map_block(add)
+                                .connect(scope.terminate);
+                        },
+                        |chain: Chain<f64>| {
+                            chain
+                                .map_block(|value| WaitRequest {
+                                    duration: std::time::Duration::from_secs_f64(0.01),
+                                    value,
+                                })
+                                .map_async(wait)
+                                .connect(scope.terminate);
+                        },
+                    ));
+                })
+                .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request((2.0, 3.0), workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 3.0), workflow).take_response());
 
         context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available(), Some(15.0));
@@ -1257,7 +1181,9 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .map_block(duplicate)
                 .map_block(add)
                 .map_block(produce_none)
@@ -1267,18 +1193,17 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request(2.0, workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request(2.0, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.peek().is_cancelled());
         assert!(context.no_unhandled_errors());
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .map_block(duplicate)
                 .map_block(add)
                 .map_block(produce_err)
@@ -1288,11 +1213,8 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request(2.0, workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request(2.0, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.peek().is_cancelled());
@@ -1304,7 +1226,9 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .map_block(duplicate)
                 .map_block(add)
                 .map_block(produce_none)
@@ -1314,11 +1238,8 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request(2.0, workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request(2.0, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.peek().is_cancelled());
@@ -1326,29 +1247,22 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(
             |scope: Scope<Result<f64, Result<f64, TestError>>, f64>, builder| {
-                scope.input.chain(builder)
-                    .fork_result(
-                        |chain| chain.connect(scope.terminate),
-                        |chain|
-                            chain.dispose_on_err().connect(scope.terminate)
-                    );
-        });
+                scope.input.chain(builder).fork_result(
+                    |chain| chain.connect(scope.terminate),
+                    |chain| chain.dispose_on_err().connect(scope.terminate),
+                );
+            },
+        );
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request(Ok(1.0), workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request(Ok(1.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|v| v == 1.0));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.command(|commands| {
-            commands
-            .request(Err(Ok(5.0)), workflow)
-            .take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request(Err(Ok(5.0)), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|v| v == 5.0));
@@ -1356,8 +1270,8 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-            .request(Err(Err(TestError)), workflow)
-            .take_response()
+                .request(Err(Err(TestError)), workflow)
+                .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
@@ -1372,7 +1286,9 @@ mod tests {
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
 
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .map_block(|value| {
                     let mut duplicated_values: SmallVec<[i32; 16]> = SmallVec::new();
                     for _ in 0..value {
@@ -1383,23 +1299,20 @@ mod tests {
                 .spread()
                 .connect(buffer.input_slot());
 
-            buffer.listen(builder)
+            buffer
+                .listen(builder)
                 .then(watch_for_quantity.into_blocking_callback())
                 .dispose_on_none()
                 .connect(scope.terminate);
-
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(7, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(7, workflow).take_response());
 
         context.run_with_conditions(&mut promise, 1);
-        assert!(promise.take().available().is_some_and(|v| {
-            v.len() == 7 && v.iter().find(|a| **a != 7).is_none()
-        }));
+        assert!(promise
+            .take()
+            .available()
+            .is_some_and(|v| { v.len() == 7 && v.iter().find(|a| **a != 7).is_none() }));
         assert!(context.no_unhandled_errors());
     }
 
@@ -1424,47 +1337,48 @@ mod tests {
     fn test_collect() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.spawn_io_workflow(|scope, builder| {
-            let node = scope.input.chain(builder).map_node(
-                |input: BlockingMap<i32, StreamOf<i32>>| {
-                    for _ in 0..input.request {
-                        input.streams.send(StreamOf(input.request));
-                    }
-                }
-            );
+        let workflow =
+            context.spawn_io_workflow(|scope, builder| {
+                let node = scope.input.chain(builder).map_node(
+                    |input: BlockingMap<i32, StreamOf<i32>>| {
+                        for _ in 0..input.request {
+                            input.streams.send(StreamOf(input.request));
+                        }
+                    },
+                );
 
-            node.streams.chain(builder)
-                .inner()
-                .collect_all::<16>()
-                .connect(scope.terminate);
-        });
+                node.streams
+                    .chain(builder)
+                    .inner()
+                    .collect_all::<16>()
+                    .connect(scope.terminate);
+            });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(8, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(8, workflow).take_response());
 
         context.run_with_conditions(&mut promise, 1);
-        assert!(promise.take().available().is_some_and(|v| {
-            v.len() == 8 && v.iter().find(|a| **a != 8).is_none()
-        }));
+        assert!(promise
+            .take()
+            .available()
+            .is_some_and(|v| { v.len() == 8 && v.iter().find(|a| **a != 8).is_none() }));
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.spawn_io_workflow(|scope, builder| {
-            let node = scope.input.chain(builder).map_node(
-                |input: BlockingMap<i32, StreamOf<i32>>| {
-                    for _ in 0..input.request {
-                        input.streams.send(StreamOf(input.request));
-                    }
-                }
-            );
+        let workflow =
+            context.spawn_io_workflow(|scope, builder| {
+                let node = scope.input.chain(builder).map_node(
+                    |input: BlockingMap<i32, StreamOf<i32>>| {
+                        for _ in 0..input.request {
+                            input.streams.send(StreamOf(input.request));
+                        }
+                    },
+                );
 
-            node.streams.chain(builder)
-                .inner()
-                .collect::<16>(4, None)
-                .connect(scope.terminate);
-        });
+                node.streams
+                    .chain(builder)
+                    .inner()
+                    .collect::<16>(4, None)
+                    .connect(scope.terminate);
+            });
 
         check_collection(0, 4, workflow, &mut context);
         check_collection(2, 4, workflow, &mut context);
@@ -1475,63 +1389,59 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let bogus_node = builder.create_map_block(|v: i32| v);
-            bogus_node.output.chain(builder)
+            bogus_node
+                .output
+                .chain(builder)
                 .collect_all::<16>()
                 .connect(scope.terminate);
 
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .map_block(|v: i32| Some(v))
                 .fork_option(
-                    |chain: Chain<i32>| chain
-                        .map_async(|v| async move { v })
-                        .collect_all::<16>()
-                        .connect(scope.terminate),
-                    |chain: Chain<()>| chain
-                        .map_block(|()| unreachable!())
-                        .unused(),
+                    |chain: Chain<i32>| {
+                        chain
+                            .map_async(|v| async move { v })
+                            .collect_all::<16>()
+                            .connect(scope.terminate)
+                    },
+                    |chain: Chain<()>| chain.map_block(|()| unreachable!()).unused(),
                 );
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(2, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(2, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.take().available().is_some_and(|v|
-            v.len() == 1 && v.iter().find(|a| **a != 2).is_none()
-        ));
+        assert!(promise
+            .take()
+            .available()
+            .is_some_and(|v| v.len() == 1 && v.iter().find(|a| **a != 2).is_none()));
         assert!(context.no_unhandled_errors());
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .map_block(|v| if v < 4 { None } else { Some(v) })
                 .dispose_on_none()
                 .collect_all::<8>()
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(2, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(2, workflow).take_response());
 
         context.run_with_conditions(&mut promise, 1);
         assert!(promise.take().available().is_some_and(|v| v.is_empty()));
         assert!(context.no_unhandled_errors());
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(5, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(5, workflow).take_response());
 
         context.run_with_conditions(&mut promise, 1);
-        assert!(promise.take().available().is_some_and(|v|
-            v.len() == 1 && v.iter().find(|a| **a != 5).is_none()
-        ));
+        assert!(promise
+            .take()
+            .available()
+            .is_some_and(|v| v.len() == 1 && v.iter().find(|a| **a != 5).is_none()));
         assert!(context.no_unhandled_errors());
     }
 
@@ -1541,11 +1451,8 @@ mod tests {
         workflow: Service<i32, SmallVec<[i32; 16]>>,
         context: &mut TestingContext,
     ) {
-        let mut promise = context.command(|commands|
-            commands
-            .request(value, workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request(value, workflow).take_response());
 
         context.run_with_conditions(&mut promise, 1);
         if value < min {

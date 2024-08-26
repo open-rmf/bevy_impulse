@@ -18,11 +18,10 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::{
-    Operation, OperationRequest, OperationReachability, OperationResult,
-    Buffered, OperationSetup, InputBundle, SingleTargetStorage, OrBroken,
-    SingleInputStorage, Input, ManageInput, OperationCleanup, ReachabilityResult,
-    BufferKeyUsage, BufferAccessStorage, FunnelInputStorage,
-    buffer_key_usage, get_access_keys,
+    buffer_key_usage, get_access_keys, BufferAccessStorage, BufferKeyUsage, Buffered,
+    FunnelInputStorage, Input, InputBundle, ManageInput, Operation, OperationCleanup,
+    OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
+    ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
 
 pub(crate) struct Listen<B> {
@@ -42,7 +41,9 @@ where
     B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.get_entity_mut(self.target).or_broken()?
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
             .insert(SingleInputStorage::new(source));
 
         self.buffers.add_accessor(source, world)?;
@@ -60,17 +61,24 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
-        let Input { session, .. } = world.get_entity_mut(source).or_broken()?
+        let Input { session, .. } = world
+            .get_entity_mut(source)
+            .or_broken()?
             .take_input::<()>()?;
 
         let keys = get_access_keys::<B>(source, session, world)?;
 
         let target = world.get::<SingleTargetStorage>(source).or_broken()?.get();
-        world.get_entity_mut(target).or_broken()?.give_input(
-            session, keys, roster,
-        )
+        world
+            .get_entity_mut(target)
+            .or_broken()?
+            .give_input(session, keys, roster)
     }
 
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {

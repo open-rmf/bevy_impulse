@@ -16,17 +16,13 @@
 */
 
 use crate::{
-    ManageInput, UnhandledErrors, ManageDisposal, MiscellaneousFailure, OperationRoster,
-    OperationResult, OperationError, ScopeStorage, OrBroken, BufferAccessStorage,
-    Buffered,
+    BufferAccessStorage, Buffered, ManageDisposal, ManageInput, MiscellaneousFailure,
+    OperationError, OperationResult, OperationRoster, OrBroken, ScopeStorage, UnhandledErrors,
 };
 
-use bevy_ecs::prelude::{Entity, World, Component};
+use bevy_ecs::prelude::{Component, Entity, World};
 
-use std::{
-    sync::Arc,
-    collections::HashMap,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::anyhow;
 
@@ -48,8 +44,18 @@ impl<'a> OperationCleanup<'a> {
         world: &'a mut World,
         roster: &'a mut OperationRoster,
     ) -> Self {
-        let cleanup = Cleanup { cleaner, node, session, cleanup_id };
-        Self { source: node, cleanup, world, roster }
+        let cleanup = Cleanup {
+            cleaner,
+            node,
+            session,
+            cleanup_id,
+        };
+        Self {
+            source: node,
+            cleanup,
+            world,
+            roster,
+        }
     }
 
     pub fn clean(&mut self) {
@@ -62,25 +68,25 @@ impl<'a> OperationCleanup<'a> {
             source: self.source,
             cleanup: self.cleanup,
             world: self.world,
-            roster: self.roster
+            roster: self.roster,
         }) {
             self.world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .operations
                 .push(error);
         }
     }
 
     pub fn cleanup_inputs<T: 'static + Send + Sync>(&mut self) -> OperationResult {
-        self.world.get_entity_mut(self.source)
+        self.world
+            .get_entity_mut(self.source)
             .or_broken()?
             .cleanup_inputs::<T>(self.cleanup.session);
         Ok(())
     }
 
     pub fn cleanup_disposals(&mut self) -> OperationResult {
-        let mut source_mut = self.world.get_entity_mut(self.source)
-            .or_broken()?;
+        let mut source_mut = self.world.get_entity_mut(self.source).or_broken()?;
 
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
         if self.cleanup.cleaner == scope {
@@ -95,13 +101,20 @@ impl<'a> OperationCleanup<'a> {
         B: Buffered + 'static + Send + Sync,
         B::Key: 'static + Send + Sync,
     {
-        let scope = self.world.get::<ScopeStorage>(self.source).or_broken()?.get();
+        let scope = self
+            .world
+            .get::<ScopeStorage>(self.source)
+            .or_broken()?
+            .get();
         if self.cleanup.cleaner == scope {
             // If the scope is telling us to clean up, then we should fully
             // remove the key for this session. Otherwise we should not remove
             // it because it's important that we can continue to track the keys.
-            self.world.get_mut::<BufferAccessStorage<B>>(self.source).or_broken()?
-                .keys.remove(&self.cleanup.session);
+            self.world
+                .get_mut::<BufferAccessStorage<B>>(self.source)
+                .or_broken()?
+                .keys
+                .remove(&self.cleanup.session);
         }
         Ok(())
     }
@@ -130,11 +143,7 @@ impl CleanupContents {
         Self::default()
     }
 
-    pub fn add_cleanup(
-        &mut self,
-        cleanup_id: Entity,
-        nodes: SmallVec<[Entity; 16]>,
-    ) {
+    pub fn add_cleanup(&mut self, cleanup_id: Entity, nodes: SmallVec<[Entity; 16]>) {
         self.awaiting_cleanup.insert(cleanup_id, nodes);
     }
 
@@ -182,7 +191,11 @@ pub struct Cleanup {
 }
 
 impl Cleanup {
-    pub(crate) fn notify_cleaned(&self, world: &mut World, roster: &mut OperationRoster) -> OperationResult {
+    pub(crate) fn notify_cleaned(
+        &self,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
         let mut cleaner_mut = world.get_entity_mut(self.cleaner).or_broken()?;
         let mut scope_contents = cleaner_mut.get_mut::<CleanupContents>().or_broken()?;
         if scope_contents.register_cleanup_of_node(self.cleanup_id, self.node) {
@@ -199,7 +212,8 @@ impl Cleanup {
                 contents.awaiting_cleanup.remove(&self.cleanup_id);
             }
             None => {
-                world.get_resource_or_insert_with(|| UnhandledErrors::default())
+                world
+                    .get_resource_or_insert_with(UnhandledErrors::default)
                     .miscellaneous
                     .push(MiscellaneousFailure {
                         error: Arc::new(anyhow!("Failed to clear cleanup tracker: {self:?}")),
@@ -208,14 +222,16 @@ impl Cleanup {
             }
         }
 
-
         let Some(FinalizeCleanup(f)) = world.get::<FinalizeCleanup>(self.cleaner).copied() else {
             return;
         };
-        if let Err(OperationError::Broken(backtrace)) = (f)(
-            FinalizeCleanupRequest { cleanup: self, world, roster }
-        ) {
-            world.get_resource_or_insert_with(|| UnhandledErrors::default())
+        if let Err(OperationError::Broken(backtrace)) = (f)(FinalizeCleanupRequest {
+            cleanup: self,
+            world,
+            roster,
+        }) {
+            world
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow!("Failed to finalize cleanup: {self:?}")),

@@ -16,20 +16,16 @@
 */
 
 use bevy_ecs::{
-    prelude::{Entity, Query, Commands},
-    system::SystemParam,
     change_detection::Mut,
+    prelude::{Commands, Entity, Query},
     query::QueryEntityError,
+    system::SystemParam,
 };
 
-use std::{
-    sync::Arc,
-    ops::RangeBounds,
-};
+use std::{ops::RangeBounds, sync::Arc};
 
 use crate::{
-    Builder, Chain, UnusedTarget, OnNewBufferValue, InputSlot, NotifyBufferUpdate,
-    GateState, Gate,
+    Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
 };
 
 mod buffer_access_lifecycle;
@@ -56,18 +52,20 @@ pub use manage_buffer::*;
 pub struct Buffer<T> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) _ignore: std::marker::PhantomData<T>,
+    pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Buffer<T> {
     /// Get a unit `()` trigger output each time a new value is added to the buffer.
     pub fn on_new_value<'w, 's, 'a, 'b>(
         &self,
-        builder: &'b mut Builder<'w, 's, 'a>
+        builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Chain<'w, 's, 'a, 'b, ()> {
         assert_eq!(self.scope, builder.scope);
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(OnNewBufferValue::new(self.source, target));
+        builder
+            .commands
+            .add(OnNewBufferValue::new(self.source, target));
         Chain::new(target, builder)
     }
 
@@ -81,7 +79,7 @@ impl<T> Buffer<T> {
         CloneFromBuffer {
             scope: self.scope,
             source: self.source,
-            _ignore: Default::default()
+            _ignore: Default::default(),
         }
     }
 
@@ -94,7 +92,7 @@ impl<T> Buffer<T> {
 pub struct CloneFromBuffer<T: Clone> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) _ignore: std::marker::PhantomData<T>,
+    pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 /// Settings to describe the behavior of a buffer.
@@ -161,11 +159,7 @@ impl Default for RetentionPolicy {
 
 impl<T> Clone for Buffer<T> {
     fn clone(&self) -> Self {
-        Self {
-            scope: self.scope,
-            source: self.source,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -173,11 +167,7 @@ impl<T> Copy for Buffer<T> {}
 
 impl<T: Clone> Clone for CloneFromBuffer<T> {
     fn clone(&self) -> Self {
-        Self {
-            scope: self.scope,
-            source: self.source,
-            _ignore: Default::default(),
-        }
+        *self
     }
 }
 
@@ -195,7 +185,7 @@ pub struct BufferKey<T> {
     session: Entity,
     accessor: Entity,
     lifecycle: Option<Arc<BufferAccessLifecycle>>,
-    _ignore: std::marker::PhantomData<T>,
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Clone for BufferKey<T> {
@@ -204,7 +194,7 @@ impl<T> Clone for BufferKey<T> {
             buffer: self.buffer,
             session: self.session,
             accessor: self.accessor,
-            lifecycle: self.lifecycle.as_ref().map(|l| Arc::clone(l)),
+            lifecycle: self.lifecycle.as_ref().map(Arc::clone),
             _ignore: Default::default(),
         }
     }
@@ -235,7 +225,10 @@ impl<T> BufferKey<T> {
     // when the workflow has dropped them.
     pub(crate) fn deep_clone(&self) -> Self {
         let mut deep = self.clone();
-        deep.lifecycle = self.lifecycle.as_ref().map(|l| Arc::new(l.as_ref().clone()));
+        deep.lifecycle = self
+            .lifecycle
+            .as_ref()
+            .map(|l| Arc::new(l.as_ref().clone()));
         deep
     }
 }
@@ -253,12 +246,15 @@ where
 }
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
-    pub fn get<'a>(
-        &'a self,
-        key: &BufferKey<T>,
-    ) -> Result<BufferView<'a, T>, QueryEntityError> {
+    pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
         let session = key.session;
-        self.query.get(key.buffer).map(|(storage, gate)| BufferView { storage, gate, session })
+        self.query
+            .get(key.buffer)
+            .map(|(storage, gate)| BufferView {
+                storage,
+                gate,
+                session,
+            })
     }
 }
 
@@ -279,12 +275,15 @@ impl<'w, 's, T> BufferAccessMut<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    pub fn get<'a>(
-        &'a self,
-        key: &BufferKey<T>,
-    ) -> Result<BufferView<'a, T>, QueryEntityError> {
+    pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
         let session = key.session;
-        self.query.get(key.buffer).map(|(storage, gate)| BufferView { storage, gate, session })
+        self.query
+            .get(key.buffer)
+            .map(|(storage, gate)| BufferView {
+                storage,
+                gate,
+                session,
+            })
     }
 
     pub fn get_mut<'a>(
@@ -294,11 +293,9 @@ where
         let buffer = key.buffer;
         let session = key.session;
         let accessor = key.accessor;
-        self.query
-            .get_mut(key.buffer)
-            .map(|(storage, gate)| BufferMut::new(
-                storage, gate, buffer, session, accessor, &mut self.commands,
-            ))
+        self.query.get_mut(key.buffer).map(|(storage, gate)| {
+            BufferMut::new(storage, gate, buffer, session, accessor, &mut self.commands)
+        })
     }
 }
 
@@ -317,7 +314,7 @@ where
     T: 'static + Send + Sync,
 {
     /// Iterate over the contents in the buffer
-    pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
+    pub fn iter(&self) -> IterBufferView<'_, T> {
         self.storage.iter(self.session)
     }
 
@@ -351,7 +348,11 @@ where
     pub fn gate(&self) -> Gate {
         // Gate buffers are open by default, so pretend it's open if a session
         // has never touched this buffer gate.
-        self.gate.map.get(&self.session).copied().unwrap_or(Gate::Open)
+        self.gate
+            .map
+            .get(&self.session)
+            .copied()
+            .unwrap_or(Gate::Open)
     }
 }
 
@@ -393,7 +394,7 @@ where
     }
 
     /// Iterate over the contents in the buffer.
-    pub fn iter<'b>(&'b self) -> IterBufferView<'b, T> {
+    pub fn iter(&self) -> IterBufferView<'_, T> {
         self.storage.iter(self.session)
     }
 
@@ -425,11 +426,15 @@ where
 
     /// Check whether the gate of this buffer is open or closed
     pub fn gate(&self) -> Gate {
-        self.gate.map.get(&self.session).copied().unwrap_or(Gate::Open)
+        self.gate
+            .map
+            .get(&self.session)
+            .copied()
+            .unwrap_or(Gate::Open)
     }
 
     /// Iterate over mutable borrows of the contents in the buffer.
-    pub fn iter_mut<'b>(&'b mut self) -> IterBufferMut<'b, T> {
+    pub fn iter_mut(&mut self) -> IterBufferMut<'_, T> {
         self.modified = true;
         self.storage.iter_mut(self.session)
     }
@@ -454,7 +459,7 @@ where
     }
 
     /// Drain items out of the buffer
-    pub fn drain<'b, R>(&'b mut self, range: R) -> DrainBuffer<'b, T>
+    pub fn drain<R>(&mut self, range: R) -> DrainBuffer<'_, T>
     where
         R: RangeBounds<usize>,
     {
@@ -537,7 +542,15 @@ where
         accessor: Entity,
         commands: &'a mut Commands<'w, 's>,
     ) -> Self {
-        Self { storage, gate, buffer, session, accessor: Some(accessor), commands, modified: false }
+        Self {
+            storage,
+            gate,
+            buffer,
+            session,
+            accessor: Some(accessor),
+            commands,
+            modified: false,
+        }
     }
 }
 
@@ -548,7 +561,9 @@ where
     fn drop(&mut self) {
         if self.modified {
             self.commands.add(NotifyBufferUpdate::new(
-                self.buffer, self.session, self.accessor,
+                self.buffer,
+                self.session,
+                self.accessor,
             ));
         }
     }
@@ -556,7 +571,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
     use std::future::Future;
 
     #[test]
@@ -567,84 +582,77 @@ mod tests {
         let add_from_buffer_cb = add_from_buffer.into_blocking_callback();
         let multiply_buffers_by_copy_cb = multiply_buffers_by_copy.into_blocking_callback();
 
-        let workflow = context.spawn_io_workflow(
-            |scope: Scope<(f64, f64), f64>, builder| {
-                scope.input.chain(builder)
-                    .unzip()
-                    .listen(builder)
-                    .then(multiply_buffers_by_copy_cb)
-                    .connect(scope.terminate);
-            }
-        );
+        let workflow = context.spawn_io_workflow(|scope: Scope<(f64, f64), f64>, builder| {
+            scope
+                .input
+                .chain(builder)
+                .unzip()
+                .listen(builder)
+                .then(multiply_buffers_by_copy_cb)
+                .connect(scope.terminate);
+        });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((2.0, 3.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 3.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|value| value == 6.0));
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.spawn_io_workflow(
-            |scope: Scope<(f64, f64), f64>, builder| {
-                scope.input.chain(builder)
-                    .unzip()
-                    .listen(builder)
-                    .then(add_buffers_by_pull_cb)
-                    .dispose_on_none()
-                    .connect(scope.terminate);
-            }
-        );
+        let workflow = context.spawn_io_workflow(|scope: Scope<(f64, f64), f64>, builder| {
+            scope
+                .input
+                .chain(builder)
+                .unzip()
+                .listen(builder)
+                .then(add_buffers_by_pull_cb)
+                .dispose_on_none()
+                .connect(scope.terminate);
+        });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((4.0, 5.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((4.0, 5.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|value| value == 9.0));
         assert!(context.no_unhandled_errors());
 
-        let workflow = context.spawn_io_workflow(
-            |scope: Scope<(f64, f64), Result<f64, f64>>, builder| {
+        let workflow =
+            context.spawn_io_workflow(|scope: Scope<(f64, f64), Result<f64, f64>>, builder| {
                 let (branch_to_adder, branch_to_buffer) = scope.input.chain(builder).unzip();
                 let buffer = builder.create_buffer::<f64>(BufferSettings::keep_first(10));
                 builder.connect(branch_to_buffer, buffer.input_slot());
 
-                let adder_node = branch_to_adder.chain(builder)
+                let adder_node = branch_to_adder
+                    .chain(builder)
                     .with_access(buffer)
                     .then_node(add_from_buffer_cb.clone());
 
-                adder_node.output.chain(builder)
-                    .fork_result(
-                        // If the buffer had an item in it, we send it to another
-                        // node that tries to pull a second time (we expect the
-                        // buffer to be empty this second time) and then
-                        // terminates.
-                        |chain| chain
+                adder_node.output.chain(builder).fork_result(
+                    // If the buffer had an item in it, we send it to another
+                    // node that tries to pull a second time (we expect the
+                    // buffer to be empty this second time) and then
+                    // terminates.
+                    |chain| {
+                        chain
                             .with_access(buffer)
                             .then(add_from_buffer_cb.clone())
-                            .connect(scope.terminate),
-                        // If the buffer was empty, keep looping back until there
-                        // is a value available.
-                        |chain| chain
-                            .with_access(buffer)
-                            .connect(adder_node.input),
-                    );
-            }
-        );
+                            .connect(scope.terminate)
+                    },
+                    // If the buffer was empty, keep looping back until there
+                    // is a value available.
+                    |chain| chain.with_access(buffer).connect(adder_node.input),
+                );
+            });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((2.0, 3.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 3.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.take().available().is_some_and(|value| value.is_err_and(|n| n == 5.0)));
+        assert!(promise
+            .take()
+            .available()
+            .is_some_and(|value| value.is_err_and(|n| n == 5.0)));
         assert!(context.no_unhandled_errors());
 
         // Same as previous test, but using Builder::create_buffer_access instead
@@ -655,14 +663,18 @@ mod tests {
 
             let access = builder.create_buffer_access(buffer);
             builder.connect(branch_to_adder, access.input);
-            access.output.chain(builder)
+            access
+                .output
+                .chain(builder)
                 .then(add_from_buffer_cb.clone())
                 .fork_result(
                     |ok| {
                         let (output, builder) = ok.unpack();
                         let second_access = builder.create_buffer_access(buffer);
                         builder.connect(output, second_access.input);
-                        second_access.output.chain(builder)
+                        second_access
+                            .output
+                            .chain(builder)
                             .then(add_from_buffer_cb.clone())
                             .connect(scope.terminate);
                     },
@@ -670,16 +682,15 @@ mod tests {
                 );
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request((2.0, 3.0), workflow)
-            .take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request((2.0, 3.0), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.take().available().is_some_and(|value| value.is_err_and(|n| n == 5.0)));
+        assert!(promise
+            .take()
+            .available()
+            .is_some_and(|value| value.is_err_and(|n| n == 5.0)));
         assert!(context.no_unhandled_errors());
-
     }
 
     fn add_from_buffer(
@@ -695,7 +706,7 @@ mod tests {
         access: BufferAccess<f64>,
     ) -> f64 {
         *access.get(&key_a).unwrap().oldest().unwrap()
-        * *access.get(&key_b).unwrap().oldest().unwrap()
+            * *access.get(&key_b).unwrap().oldest().unwrap()
     }
 
     fn add_buffers_by_pull(
@@ -725,14 +736,17 @@ mod tests {
             let buffer = builder.create_buffer::<Register>(BufferSettings::keep_all());
 
             // The only path to termination is from listening to the buffer.
-            builder.listen(buffer)
+            builder
+                .listen(buffer)
                 .then(pull_register_from_buffer.into_blocking_callback())
                 .dispose_on_none()
                 .connect(scope.terminate);
 
             let decrement_register_cb = decrement_register.into_blocking_callback();
             let async_decrement_register_cb = async_decrement_register.as_callback();
-            scope.input.chain(builder)
+            scope
+                .input
+                .chain(builder)
                 .with_access(buffer)
                 .then(decrement_register_cb.clone())
                 .with_access(buffer)
@@ -760,14 +774,19 @@ mod tests {
             let buffer = builder.create_buffer::<Register>(BufferSettings::keep_all());
 
             // The only path to termination is from listening to the buffer.
-            builder.listen(buffer)
+            builder
+                .listen(buffer)
                 .then(pull_register_from_buffer.into_blocking_callback())
                 .dispose_on_none()
                 .connect(scope.terminate);
 
-            let decrement_register_and_pass_keys_cb = decrement_register_and_pass_keys.into_blocking_callback();
-            let async_decrement_register_and_pass_keys_cb = async_decrement_register_and_pass_keys.as_callback();
-            let (loose_end, dead_end): (_, Output<Option<Register>>) = scope.input.chain(builder)
+            let decrement_register_and_pass_keys_cb =
+                decrement_register_and_pass_keys.into_blocking_callback();
+            let async_decrement_register_and_pass_keys_cb =
+                async_decrement_register_and_pass_keys.as_callback();
+            let (loose_end, dead_end): (_, Output<Option<Register>>) = scope
+                .input
+                .chain(builder)
                 .with_access(buffer)
                 .then(decrement_register_and_pass_keys_cb.clone())
                 .then(async_decrement_register_and_pass_keys_cb.clone())
@@ -778,7 +797,8 @@ mod tests {
             // Force the workflow to trigger a disposal while the key is still in flight
             dead_end.chain(builder).dispose_on_none().unused();
 
-            loose_end.chain(builder)
+            loose_end
+                .chain(builder)
                 .then(async_decrement_register_and_pass_keys_cb)
                 .dispose_on_none()
                 .then(decrement_register_and_pass_keys_cb)
@@ -800,15 +820,18 @@ mod tests {
         expect_success: bool,
         context: &mut TestingContext,
     ) {
-        let mut promise = context.command(|commands|
+        let mut promise = context.command(|commands| {
             commands
-            .request(Register::new(initial_value), workflow)
-            .take_response()
-        );
+                .request(Register::new(initial_value), workflow)
+                .take_response()
+        });
 
         context.run_while_pending(&mut promise);
         if expect_success {
-            assert!(promise.take().available().is_some_and(|r| r.finished_with(initial_value)));
+            assert!(promise
+                .take()
+                .available()
+                .is_some_and(|r| r.finished_with(initial_value)));
         } else {
             assert!(promise.take().is_cancelled());
         }
@@ -827,7 +850,10 @@ mod tests {
 
     impl Register {
         fn new(start_from: u64) -> Self {
-            Self { in_slot: start_from, out_slot: 0 }
+            Self {
+                in_slot: start_from,
+                out_slot: 0,
+            }
         }
 
         fn finished_with(&self, out_slot: u64) -> bool {
@@ -874,10 +900,11 @@ mod tests {
         In(input): In<AsyncCallback<(Register, BufferKey<Register>)>>,
     ) -> impl Future<Output = Option<Register>> {
         async move {
-            input.channel.query(
-                input.request,
-                decrement_register.into_blocking_callback(),
-            ).await.available()
+            input
+                .channel
+                .query(input.request, decrement_register.into_blocking_callback())
+                .await
+                .available()
         }
     }
 
@@ -885,10 +912,14 @@ mod tests {
         In(input): In<AsyncCallback<(Register, BufferKey<Register>)>>,
     ) -> impl Future<Output = Option<(Register, BufferKey<Register>)>> {
         async move {
-            input.channel.query(
-                input.request,
-                decrement_register_and_pass_keys.into_blocking_callback(),
-            ).await.available()
+            input
+                .channel
+                .query(
+                    input.request,
+                    decrement_register_and_pass_keys.into_blocking_callback(),
+                )
+                .await
+                .available()
         }
     }
 
@@ -901,7 +932,8 @@ mod tests {
 
             let buffer = builder.create_buffer(BufferSettings::keep_all());
             builder.connect(scope.input, buffer.input_slot());
-            builder.listen(buffer)
+            builder
+                .listen(buffer)
                 .then_gate_close(buffer)
                 .then(service)
                 .fork_unzip((
@@ -910,11 +942,7 @@ mod tests {
                 ));
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(0, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(0, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|v| v == 5));
@@ -954,28 +982,24 @@ mod tests {
         let delay = context.spawn_delay(Duration::from_secs_f32(0.1));
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let service = builder.commands().spawn_service(gate_access_test_closed_loop);
+            let service = builder
+                .commands()
+                .spawn_service(gate_access_test_closed_loop);
 
             let buffer = builder.create_buffer(BufferSettings::keep_all());
             builder.connect(scope.input, buffer.input_slot());
-            builder.listen(buffer)
-                .then(service)
-                .fork_unzip((
-                    |chain: Chain<_>| chain
+            builder.listen(buffer).then(service).fork_unzip((
+                |chain: Chain<_>| {
+                    chain
                         .dispose_on_none()
                         .then(delay)
-                        .connect(buffer.input_slot()),
-                    |chain: Chain<_>| chain
-                        .dispose_on_none()
-                        .connect(scope.terminate),
-                ));
+                        .connect(buffer.input_slot())
+                },
+                |chain: Chain<_>| chain.dispose_on_none().connect(scope.terminate),
+            ));
         });
 
-        let mut promise = context.command(|commands|
-            commands
-            .request(3, workflow)
-            .take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(3, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(promise.take().available().is_some_and(|v| v == 0));

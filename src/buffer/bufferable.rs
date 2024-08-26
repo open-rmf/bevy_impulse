@@ -19,9 +19,8 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, CloneFromBuffer, Output, Builder, BufferSettings, Buffered, Join,
-    UnusedTarget, AddOperation, Chain, Listen, Scope, ScopeSettings,
-    CleanupWorkflowConditions,
+    AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain, CleanupWorkflowConditions,
+    CloneFromBuffer, Join, Listen, Output, Scope, ScopeSettings, UnusedTarget,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
@@ -32,7 +31,7 @@ pub trait Bufferable {
 
     /// Convert these bufferable workflow elements into buffers if they are not
     /// buffers already.
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType;
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType;
 
     /// Join these bufferable workflow elements. Each time every buffer contains
     /// at least one element, this will pull the oldest element from each buffer
@@ -50,13 +49,15 @@ pub trait Bufferable {
         BufferItem<Self>: 'static + Send + Sync,
     {
         let scope = builder.scope();
-        let buffers = self.as_buffer(builder);
+        let buffers = self.into_buffer(builder);
         buffers.verify_scope(scope);
 
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(scope), join, Join::new(buffers, target)
+            Some(scope),
+            join,
+            Join::new(buffers, target),
         ));
 
         Output::new(scope, target).chain(builder)
@@ -79,7 +80,7 @@ pub trait Bufferable {
         BufferKeys<Self>: 'static + Send + Sync,
     {
         let scope = builder.scope();
-        let buffers = self.as_buffer(builder);
+        let buffers = self.into_buffer(builder);
         buffers.verify_scope(scope);
 
         let listen = builder.commands.spawn(()).id();
@@ -94,12 +95,11 @@ pub trait Bufferable {
     }
 
     /// Alternative way to call [`Builder::on_cleanup`].
-    fn on_cleanup<'w, 's, 'a, Settings>(
+    fn on_cleanup<Settings>(
         self,
-        builder: &mut Builder<'w, 's, 'a>,
+        builder: &mut Builder,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -109,12 +109,11 @@ pub trait Bufferable {
     }
 
     /// Alternative way to call [`Builder::on_cancel`].
-    fn on_cancel<'w, 's, 'a, Settings>(
+    fn on_cancel<Settings>(
         self,
-        builder: &mut Builder<'w, 's, 'a>,
+        builder: &mut Builder,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -124,12 +123,11 @@ pub trait Bufferable {
     }
 
     /// Alternative way to call [`Builder::on_terminate`].
-    fn on_terminate<'w, 's, 'a, Settings>(
+    fn on_terminate<Settings>(
         self,
-        builder: &mut Builder<'w, 's, 'a>,
+        builder: &mut Builder,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -139,13 +137,12 @@ pub trait Bufferable {
     }
 
     /// Alternative way to call [`Builder::on_cleanup_if`].
-    fn on_cleanup_if<'w, 's, 'a, Settings>(
+    fn on_cleanup_if<Settings>(
         self,
-        builder: &mut Builder<'w, 's, 'a>,
+        builder: &mut Builder,
         conditions: CleanupWorkflowConditions,
         build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    )
-    where
+    ) where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
         BufferKeys<Self>: 'static + Send + Sync,
@@ -157,7 +154,7 @@ pub trait Bufferable {
 
 impl<T: 'static + Send + Sync> Bufferable for Buffer<T> {
     type BufferType = Self;
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
         assert_eq!(self.scope, builder.scope());
         self
     }
@@ -165,7 +162,7 @@ impl<T: 'static + Send + Sync> Bufferable for Buffer<T> {
 
 impl<T: 'static + Send + Sync + Clone> Bufferable for CloneFromBuffer<T> {
     type BufferType = Self;
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
         assert_eq!(self.scope, builder.scope());
         self
     }
@@ -173,7 +170,7 @@ impl<T: 'static + Send + Sync + Clone> Bufferable for CloneFromBuffer<T> {
 
 impl<T: 'static + Send + Sync> Bufferable for Output<T> {
     type BufferType = Buffer<T>;
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
         assert_eq!(self.scope(), builder.scope());
         let buffer = builder.create_buffer::<T>(BufferSettings::default());
         builder.connect(self, buffer.input_slot());
@@ -187,10 +184,10 @@ macro_rules! impl_bufferable_for_tuple {
         impl<$($T: Bufferable),*> Bufferable for ($($T,)*)
         {
             type BufferType = ($($T::BufferType,)*);
-            fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
+            fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
                 let ($($T,)*) = self;
                 ($(
-                    $T.as_buffer(builder),
+                    $T.into_buffer(builder),
                 )*)
             }
 
@@ -204,8 +201,8 @@ all_tuples!(impl_bufferable_for_tuple, 2, 12, T);
 
 impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
     type BufferType = [T::BufferType; N];
-    fn as_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        self.map(|b| b.as_buffer(builder))
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
+        self.map(|b| b.into_buffer(builder))
     }
 }
 
@@ -214,7 +211,7 @@ pub trait IterBufferable {
 
     /// Convert an iterable collection of bufferable workflow elements into
     /// buffers if they are not buffers already.
-    fn as_buffer_vec<const N: usize>(
+    fn into_buffer_vec<const N: usize>(
         self,
         builder: &mut Builder,
     ) -> SmallVec<[Self::BufferType; N]>;
@@ -233,11 +230,13 @@ pub trait IterBufferable {
         Self::BufferType: 'static + Send + Sync,
         <Self::BufferType as Buffered>::Item: 'static + Send + Sync,
     {
-        let buffers = self.as_buffer_vec::<N>(builder);
+        let buffers = self.into_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(builder.scope()), join, Join::new(buffers, target),
+            Some(builder.scope()),
+            join,
+            Join::new(buffers, target),
         ));
 
         Output::new(builder.scope, target)

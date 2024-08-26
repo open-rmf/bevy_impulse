@@ -16,9 +16,14 @@
 */
 
 use std::{
-    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
-    future::Future, task::{Context, Poll}, pin::Pin,
     any::Any,
+    future::Future,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    task::{Context, Poll},
 };
 
 use crate::{Cancellation, CancellationCause};
@@ -115,10 +120,7 @@ impl<T> Promise<T> {
         self
     }
 
-    pub fn interruptible_wait_mut(
-        &mut self,
-        interrupter: &Interrupter
-    ) -> &mut Self
+    pub fn interruptible_wait_mut(&mut self, interrupter: &Interrupter) -> &mut Self
     where
         T: 'static,
     {
@@ -132,7 +134,7 @@ impl<T> Promise<T> {
             }
         }
 
-        return self;
+        self
     }
 
     /// Update the internal state of the promise if it is still pending. This
@@ -186,11 +188,8 @@ impl<T: Unpin> Future for Promise<T> {
         let self_mut = self.get_mut();
         let state = self_mut.take();
         if state.is_pending() {
-            match self_mut.target.inner.lock() {
-                Ok(mut inner) => {
-                    inner.waker = Some(cx.waker().clone());
-                }
-                Err(_) => { }
+            if let Ok(mut inner) = self_mut.target.inner.lock() {
+                inner.waker = Some(cx.waker().clone());
             }
             Poll::Pending
         } else {
@@ -262,21 +261,11 @@ impl<T> PromiseState<T> {
 
     pub fn take(&mut self) -> PromiseState<T> {
         let next_value = match self {
-            Self::Available(_) => {
-                Self::Taken
-            }
-            Self::Pending => {
-                Self::Pending
-            }
-            Self::Cancelled(cancellation) => {
-                Self::Cancelled(cancellation.clone())
-            }
-            Self::Disposed => {
-                Self::Disposed
-            }
-            Self::Taken => {
-                Self::Taken
-            }
+            Self::Available(_) => Self::Taken,
+            Self::Pending => Self::Pending,
+            Self::Cancelled(cancellation) => Self::Cancelled(cancellation.clone()),
+            Self::Disposed => Self::Disposed,
+            Self::Taken => Self::Taken,
         };
 
         std::mem::replace(self, next_value)
@@ -284,21 +273,11 @@ impl<T> PromiseState<T> {
 
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> PromiseState<U> {
         match self {
-            Self::Available(x) => {
-                PromiseState::Available(f(x))
-            }
-            Self::Pending => {
-                PromiseState::Pending
-            }
-            Self::Cancelled(cause) => {
-                PromiseState::Cancelled(cause)
-            }
-            Self::Disposed => {
-                PromiseState::Disposed
-            }
-            Self::Taken => {
-                PromiseState::Taken
-            }
+            Self::Available(x) => PromiseState::Available(f(x)),
+            Self::Pending => PromiseState::Pending,
+            Self::Cancelled(cause) => PromiseState::Cancelled(cause),
+            Self::Disposed => PromiseState::Disposed,
+            Self::Taken => PromiseState::Taken,
         }
     }
 
@@ -324,9 +303,9 @@ impl<T> PromiseState<T> {
     }
 
     fn make_poisoned() -> Self {
-        Self::Cancelled(
-            Cancellation::from_cause(CancellationCause::PoisonedMutexInPromise)
-        )
+        Self::Cancelled(Cancellation::from_cause(
+            CancellationCause::PoisonedMutexInPromise,
+        ))
     }
 }
 
@@ -346,9 +325,12 @@ pub struct Interrupter {
     inner: Arc<Mutex<InterrupterInner>>,
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 impl Interrupter {
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(InterrupterInner::new())) }
+        Self {
+            inner: Arc::new(Mutex::new(InterrupterInner::new())),
+        }
     }
 
     /// Tell all waiters that are listening to this Interrupter to interrupt
@@ -389,10 +371,7 @@ impl Interrupter {
         }
     }
 
-    fn push<T: 'static>(
-        &self,
-        target: Arc<PromiseTarget<T>>
-    ) -> Option<Arc<AtomicBool>> {
+    fn push<T: 'static>(&self, target: Arc<PromiseTarget<T>>) -> Option<Arc<AtomicBool>> {
         let mut guard = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
@@ -534,7 +513,14 @@ mod tests {
             let (outer_sender, outer_promise) = Promise::new();
             let (mid_sender, mid_promise) = Promise::new();
             let (inner_sender, inner_promise) = Promise::new();
-            Self { outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender }
+            Self {
+                outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            }
         }
     }
 
@@ -542,7 +528,14 @@ mod tests {
     fn test_promise_double_flatten() {
         // Flatten, Flatten, Outer, Mid, Inner
         {
-            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             let mut flat_promise = outer_promise.flatten().flatten();
             assert!(flat_promise.peek().is_pending());
             assert!(outer_sender.send(mid_promise).is_ok());
@@ -555,7 +548,14 @@ mod tests {
 
         // Flatten, Outer, Flatten, Mid, Inner
         {
-            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             let mut flat_promise = outer_promise.flatten();
             assert!(flat_promise.peek().is_pending());
             assert!(outer_sender.send(mid_promise).is_ok());
@@ -570,7 +570,14 @@ mod tests {
 
         // Outer, Flatten, Flatten, Mid, Inner
         {
-            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             assert!(outer_sender.send(mid_promise).is_ok());
             let mut flat_promise = outer_promise.flatten().flatten();
             assert!(flat_promise.peek().is_pending());
@@ -582,7 +589,14 @@ mod tests {
 
         // Outer, Mid, Flatten, Flatten, Inner
         {
-            let DoubleFlattenPairs{ mut outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                mut outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             assert!(outer_sender.send(mid_promise).is_ok());
             assert!(outer_promise.peek().is_available());
             assert!(mid_sender.send(inner_promise).is_ok());
@@ -594,7 +608,14 @@ mod tests {
 
         // Outer, Mid, Inner, Flatten, Flatten
         {
-            let DoubleFlattenPairs{ mut outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                mut outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             assert!(outer_sender.send(mid_promise).is_ok());
             assert!(outer_promise.peek().is_available());
             assert!(mid_sender.send(inner_promise).is_ok());
@@ -605,7 +626,14 @@ mod tests {
 
         // Mid, Flatten, Flatten, Inner, Outer
         {
-            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             assert!(mid_sender.send(inner_promise).is_ok());
             let mut flat_promise = outer_promise.flatten().flatten();
             assert!(flat_promise.peek().is_pending());
@@ -617,7 +645,14 @@ mod tests {
 
         // Inner, Flatten, Flatten, Outer, Mid
         {
-            let DoubleFlattenPairs{ outer_promise, outer_sender, mid_promise, mid_sender, inner_promise, inner_sender } = DoubleFlattenPairs::new();
+            let DoubleFlattenPairs {
+                outer_promise,
+                outer_sender,
+                mid_promise,
+                mid_sender,
+                inner_promise,
+                inner_sender,
+            } = DoubleFlattenPairs::new();
             assert!(inner_sender.send("hello").is_ok());
             let mut flat_promise = outer_promise.flatten().flatten();
             assert!(flat_promise.peek().is_pending());

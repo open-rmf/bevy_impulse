@@ -21,10 +21,9 @@ use bevy_hierarchy::DespawnRecursiveExt;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 use crate::{
-    Impulsive, OperationSetup, OperationRequest,
-    InputBundle, OperationCancel, OperationResult, OrBroken, Input, ManageInput,
-    OnTerminalCancelled, ImpulseLifecycleChannel,
-    promise::private::Sender as PromiseSender,
+    promise::private::Sender as PromiseSender, ImpulseLifecycleChannel, Impulsive, Input,
+    InputBundle, ManageInput, OnTerminalCancelled, OperationCancel, OperationRequest,
+    OperationResult, OperationSetup, OrBroken,
 };
 
 #[derive(Component)]
@@ -41,9 +40,12 @@ impl<T> TakenResponse<T> {
 impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
     fn setup(mut self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         let lifecycle_sender = world
-            .get_resource_or_insert_with(|| ImpulseLifecycleChannel::default())
-            .sender.clone();
-        self.sender.on_promise_drop(move || { lifecycle_sender.send(source).ok(); });
+            .get_resource_or_insert_with(ImpulseLifecycleChannel::default)
+            .sender
+            .clone();
+        self.sender.on_promise_drop(move || {
+            lifecycle_sender.send(source).ok();
+        });
 
         world.entity_mut(source).insert((
             InputBundle::<T>::new(),
@@ -53,9 +55,7 @@ impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
         Ok(())
     }
 
-    fn execute(
-        OperationRequest { source, world, .. }: OperationRequest,
-    ) -> OperationResult {
+    fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let sender = source_mut.take::<TakenResponse<T>>().or_broken()?.sender;
@@ -79,16 +79,13 @@ impl<T> TakenStream<T> {
 
 impl<T: 'static + Send + Sync> Impulsive for TakenStream<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
-            self,
-        ));
+        world
+            .entity_mut(source)
+            .insert((InputBundle::<T>::new(), self));
         Ok(())
     }
 
-    fn execute(
-        OperationRequest { source, world, .. }: OperationRequest,
-    ) -> OperationResult {
+    fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let stream = source_mut.get::<TakenStream<T>>().or_broken()?;
@@ -97,9 +94,7 @@ impl<T: 'static + Send + Sync> Impulsive for TakenStream<T> {
     }
 }
 
-fn cancel_taken_target<T>(
-    OperationCancel { cancel, world, .. }: OperationCancel,
-) -> OperationResult
+fn cancel_taken_target<T>(OperationCancel { cancel, world, .. }: OperationCancel) -> OperationResult
 where
     T: 'static + Send + Sync,
 {

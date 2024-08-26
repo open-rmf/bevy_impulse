@@ -21,33 +21,20 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, CloneFromBuffer, OperationError, OrBroken, InspectBuffer,
-    ManageBuffer, OperationResult, ForkTargetStorage, BufferKey, BufferAccessors,
-    BufferStorage, SingleInputStorage, BufferKeyBuilder, Gate, GateState,
-    OperationRoster,
+    Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferStorage, CloneFromBuffer,
+    ForkTargetStorage, Gate, GateState, InspectBuffer, ManageBuffer, OperationError,
+    OperationResult, OperationRoster, OrBroken, SingleInputStorage,
 };
 
 pub trait Buffered: Clone {
     fn verify_scope(&self, scope: Entity);
 
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError>;
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError>;
 
     type Item;
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError>;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError>;
 
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult;
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult;
 
     fn gate_action(
         &self,
@@ -60,22 +47,11 @@ pub trait Buffered: Clone {
     fn as_input(&self) -> SmallVec<[Entity; 8]>;
 
     type Key: Clone;
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult;
 
-    fn create_key(
-        &self,
-        builder: &BufferKeyBuilder,
-    ) -> Self::Key;
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key;
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult;
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult;
 
     fn deep_clone_key(key: &Self::Key) -> Self::Key;
 
@@ -88,25 +64,21 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        world.get_entity(self.source).or_broken()?
+        world
+            .get_entity(self.source)
+            .or_broken()?
             .buffered_count::<T>(session)
     }
 
     type Item = T;
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        world.get_entity_mut(self.source).or_broken()?
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        world
+            .get_entity_mut(self.source)
+            .or_broken()?
             .pull_from_buffer::<T>(session)
     }
 
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         let mut targets = world
             .get_mut::<ForkTargetStorage>(self.source)
             .or_broken()?;
@@ -117,7 +89,9 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
             input_storage.add(self.source);
         } else {
-            world.get_entity_mut(listener).or_broken()?
+            world
+                .get_entity_mut(listener)
+                .or_broken()?
                 .insert(SingleInputStorage::new(self.source));
         }
 
@@ -139,14 +113,8 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     }
 
     type Key = BufferKey<T>;
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        let mut accessors = world
-            .get_mut::<BufferAccessors>(self.source)
-            .or_broken()?;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
+        let mut accessors = world.get_mut::<BufferAccessors>(self.source).or_broken()?;
 
         accessors.0.push(accessor);
         accessors.0.sort();
@@ -154,19 +122,14 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         Ok(())
     }
 
-    fn create_key(
-        &self,
-        builder: &BufferKeyBuilder,
-    ) -> Self::Key {
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
         builder.build(self.source)
     }
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        world
+            .get_mut::<BufferStorage<Self::Item>>(self.source)
+            .or_broken()?
             .ensure_session(session);
         Ok(())
     }
@@ -185,31 +148,23 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         assert_eq!(scope, self.scope);
     }
 
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
-        world.get_entity(self.source).or_broken()?
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
+        world
+            .get_entity(self.source)
+            .or_broken()?
             .buffered_count::<T>(session)
     }
 
     type Item = T;
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        world.get_entity(self.source).or_broken()?
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        world
+            .get_entity(self.source)
+            .or_broken()?
             .try_clone_from_buffer(session)
             .and_then(|r| r.or_broken())
     }
 
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         let mut targets = world
             .get_mut::<ForkTargetStorage>(self.source)
             .or_broken()?;
@@ -220,7 +175,9 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
             input_storage.add(self.source);
         } else {
-            world.get_entity_mut(listener).or_broken()?
+            world
+                .get_entity_mut(listener)
+                .or_broken()?
                 .insert(SingleInputStorage::new(self.source));
         }
         Ok(())
@@ -241,14 +198,8 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     }
 
     type Key = BufferKey<T>;
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        let mut accessors = world
-            .get_mut::<BufferAccessors>(self.source)
-            .or_broken()?;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
+        let mut accessors = world.get_mut::<BufferAccessors>(self.source).or_broken()?;
 
         accessors.0.push(accessor);
         accessors.0.sort();
@@ -256,19 +207,14 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         Ok(())
     }
 
-    fn create_key(
-        &self,
-        builder: &BufferKeyBuilder,
-    ) -> Self::Key {
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
         builder.build(self.source)
     }
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
-        world.get_mut::<BufferStorage<Self::Item>>(self.source).or_broken()?
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        world
+            .get_mut::<BufferStorage<Self::Item>>(self.source)
+            .or_broken()?
             .ensure_session(session);
         Ok(())
     }
@@ -417,11 +363,7 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         }
     }
 
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         let mut min_count = None;
         for buffer in self.iter() {
             let count = buffer.buffered_count(session, world)?;
@@ -436,21 +378,13 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
     // TODO(@mxgrey) We may be able to use [T::Item; N] here instead of SmallVec
     // when try_map is stabilized: https://github.com/rust-lang/rust/issues/79711
     type Item = SmallVec<[T::Item; N]>;
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        self.iter().map(|buffer| {
-            buffer.pull(session, world)
-        }).collect()
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        self.iter()
+            .map(|buffer| buffer.pull(session, world))
+            .collect()
     }
 
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.add_listener(listener, world)?;
         }
@@ -475,21 +409,14 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
     }
 
     type Key = SmallVec<[T::Key; N]>;
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.add_accessor(accessor, world)?;
         }
         Ok(())
     }
 
-    fn create_key(
-        &self,
-        builder: &BufferKeyBuilder,
-    ) -> Self::Key {
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
         let mut keys = SmallVec::new();
         for buffer in self {
             keys.push(buffer.create_key(builder));
@@ -497,11 +424,7 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
         keys
     }
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.ensure_active_session(session, world)?;
         }
@@ -524,7 +447,7 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
             }
         }
 
-        return false;
+        false
     }
 }
 
@@ -535,11 +458,7 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         }
     }
 
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         let mut min_count = None;
         for buffer in self.iter() {
             let count = buffer.buffered_count(session, world)?;
@@ -552,21 +471,13 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
     }
 
     type Item = SmallVec<[T::Item; N]>;
-    fn pull(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self::Item, OperationError> {
-        self.iter().map(|buffer| {
-            buffer.pull(session, world)
-        }).collect()
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        self.iter()
+            .map(|buffer| buffer.pull(session, world))
+            .collect()
     }
 
-    fn add_listener(
-        &self,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.add_listener(listener, world)?;
         }
@@ -591,21 +502,14 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
     }
 
     type Key = SmallVec<[T::Key; N]>;
-    fn add_accessor(
-        &self,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.add_accessor(accessor, world)?;
         }
         Ok(())
     }
 
-    fn create_key(
-        &self,
-        builder: &BufferKeyBuilder,
-    ) -> Self::Key {
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
         let mut keys = SmallVec::new();
         for buffer in self {
             keys.push(buffer.create_key(builder));
@@ -613,11 +517,7 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
         keys
     }
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.ensure_active_session(session, world)?;
         }
@@ -640,6 +540,6 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
             }
         }
 
-        return false;
+        false
     }
 }

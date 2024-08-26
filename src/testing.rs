@@ -15,29 +15,27 @@
  *
 */
 
+use bevy_app::ScheduleRunnerPlugin;
+pub use bevy_app::{App, Update};
+use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
 pub use bevy_ecs::{
-    prelude::{Commands, In, Entity, ResMut, Component, Query, Local},
+    prelude::{Commands, Component, Entity, In, Local, Query, ResMut},
     system::{CommandQueue, IntoSystem},
 };
-pub use bevy_app::{App, Update};
-use bevy_app::ScheduleRunnerPlugin;
-use bevy_core::{TaskPoolPlugin, TypeRegistrationPlugin, FrameCountPlugin};
 use bevy_time::TimePlugin;
 
 use thiserror::Error as ThisError;
 
-pub use std::time::{Duration, Instant};
 use std::collections::HashMap;
+pub use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
 use crate::{
-    Promise, Service, AsyncServiceInput, BlockingServiceInput, UnhandledErrors,
-    Scope, Builder, StreamPack, SpawnWorkflow, WorkflowSettings, BlockingMap,
-    GetBufferedSessionsFn, ContinuousService, ContinuousQuery, StreamOf,
-    AddContinuousServicesExt, ContinuousQueueView, RunCommandsOnWorldExt,
-    FlushParameters,
-    flush_impulses,
+    flush_impulses, AddContinuousServicesExt, AsyncServiceInput, BlockingMap, BlockingServiceInput,
+    Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
+    GetBufferedSessionsFn, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflow, StreamOf,
+    StreamPack, UnhandledErrors, WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -49,21 +47,22 @@ impl TestingContext {
     /// to work properly.
     pub fn minimal_plugins() -> Self {
         let mut app = App::new();
-        app
-            .add_plugins((
-                TaskPoolPlugin::default(),
-                TypeRegistrationPlugin::default(),
-                FrameCountPlugin::default(),
-                TimePlugin::default(),
-                ScheduleRunnerPlugin::default(),
-            ))
-            .add_systems(Update, flush_impulses());
+        app.add_plugins((
+            TaskPoolPlugin::default(),
+            TypeRegistrationPlugin,
+            FrameCountPlugin,
+            TimePlugin,
+            ScheduleRunnerPlugin::default(),
+        ))
+        .add_systems(Update, flush_impulses());
 
         TestingContext { app }
     }
 
     pub fn set_flush_loop_limit(&mut self, limit: Option<usize>) {
-        self.app.world.get_resource_or_insert_with(|| FlushParameters::default())
+        self.app
+            .world
+            .get_resource_or_insert_with(FlushParameters::default)
             .flush_loop_limit = limit;
     }
 
@@ -82,9 +81,7 @@ impl TestingContext {
         Response: 'static + Send + Sync,
         Settings: Into<WorkflowSettings>,
     {
-        self.command(move |commands| {
-            commands.spawn_workflow(f)
-        })
+        self.command(move |commands| commands.spawn_workflow(f))
     }
 
     /// Build any kind of workflow with any settings.
@@ -98,19 +95,14 @@ impl TestingContext {
         Streams: StreamPack,
         Settings: Into<WorkflowSettings>,
     {
-        self.command(move |commands| {
-            commands.spawn_workflow(f)
-        })
+        self.command(move |commands| commands.spawn_workflow(f))
     }
 
     pub fn run(&mut self, conditions: impl Into<FlushConditions>) {
         self.run_impl::<()>(None, conditions);
     }
 
-    pub fn run_while_pending<T>(
-        &mut self,
-        promise: &mut Promise<T>,
-    ) {
+    pub fn run_while_pending<T>(&mut self, promise: &mut Promise<T>) {
         self.run_with_conditions(promise, FlushConditions::new());
     }
 
@@ -150,7 +142,7 @@ impl TestingContext {
             self.app.update();
         }
 
-        return true;
+        true
     }
 
     pub fn no_unhandled_errors(&self) -> bool {
@@ -168,7 +160,8 @@ impl TestingContext {
     // Check that all buffers in the world are empty
     pub fn confirm_buffers_empty(&mut self) -> Result<(), Vec<Entity>> {
         let mut query = self.app.world.query::<(Entity, &GetBufferedSessionsFn)>();
-        let buffers: Vec<_> = query.iter(&self.app.world)
+        let buffers: Vec<_> = query
+            .iter(&self.app.world)
             .map(|(e, get_sessions)| (e, get_sessions.0))
             .collect();
 
@@ -225,11 +218,9 @@ impl TestingContext {
     {
         self.app.spawn_continuous_service(
             Update,
-            move |
-                In(input): In<ContinuousService<T, U, StreamOf<()>>>,
-                mut query: ContinuousQuery<T, U, StreamOf<()>>,
-                mut timers: Local<HashMap<Entity, Instant>>,
-            | {
+            move |In(input): In<ContinuousService<T, U, StreamOf<()>>>,
+                  mut query: ContinuousQuery<T, U, StreamOf<()>>,
+                  mut timers: Local<HashMap<Entity, Instant>>| {
                 if let Some(view) = query.view(&input.key) {
                     viewer(&view);
                 }
@@ -252,24 +243,20 @@ impl TestingContext {
                         timers.remove(&order_id);
                     }
                 });
-            }
+            },
         )
     }
 
     #[cfg(test)]
-    pub fn spawn_async_delayed_map<T, U, F>(
-        &mut self,
-        duration: Duration,
-        f: F,
-    ) -> Service<T, U>
+    pub fn spawn_async_delayed_map<T, U, F>(&mut self, duration: Duration, f: F) -> Service<T, U>
     where
         T: 'static + Send + Sync,
         U: 'static + Send + Sync,
         F: FnOnce(T) -> U + 'static + Send + Sync + Clone,
     {
         use crate::AddServicesExt;
-        self.app.spawn_service(
-            move |In(input): AsyncServiceInput<T>| {
+        self.app
+            .spawn_service(move |In(input): AsyncServiceInput<T>| {
                 let f = f.clone();
                 async move {
                     let start = Instant::now();
@@ -282,8 +269,7 @@ impl TestingContext {
                     }
                     f(input.request)
                 }
-            }
-        )
+            })
     }
 }
 
@@ -341,7 +327,7 @@ pub fn duplicate<T: Clone>(value: T) -> (T, T) {
 }
 
 pub fn double(value: f64) -> f64 {
-    2.0*value
+    2.0 * value
 }
 
 pub fn opposite(value: f64) -> f64 {
@@ -365,7 +351,7 @@ pub fn concat<Values: IntoIterator<Item = String>>(values: Values) -> String {
 }
 
 pub fn string_from_utf8<Values: IntoIterator<Item = u8>>(
-    values: Values
+    values: Values,
 ) -> Result<String, std::string::FromUtf8Error> {
     String::from_utf8(values.into_iter().collect())
 }
@@ -381,7 +367,7 @@ pub fn to_lowercase(value: String) -> String {
 #[derive(Clone, Copy, Debug)]
 pub struct WaitRequest<Value> {
     pub duration: std::time::Duration,
-    pub value: Value
+    pub value: Value,
 }
 
 /// This function is used to force certain branches to lose races in tests or
@@ -402,17 +388,12 @@ pub async fn wait<Value>(request: WaitRequest<Value>) -> Value {
 
 /// Use this to add a blocking map to the chain that simply prints a debug
 /// message and then passes the data along.
-pub fn print_debug<T: std::fmt::Debug>(
-    header: impl Into<String>,
-) -> impl Fn(BlockingMap<T>) -> T {
+pub fn print_debug<T: std::fmt::Debug>(header: impl Into<String>) -> impl Fn(BlockingMap<T>) -> T {
     let header = header.into();
     move |input| {
         println!(
             "[source: {:?}, session: {:?}] {}: {:?}",
-            input.source,
-            input.session,
-            header,
-            input.request,
+            input.source, input.session, header, input.request,
         );
         input.request
     }
@@ -454,13 +435,15 @@ pub fn say_hello(
     name_query: Query<Option<&Name>>,
     mut run_count: Query<Option<&mut RunCount>>,
 ) {
-    let salutation = salutation_query.get(input.provider)
+    let salutation = salutation_query
+        .get(input.provider)
         .ok()
         .flatten()
         .map(|x| &*x.0)
         .unwrap_or("Hello, ");
 
-    let name = name_query.get(input.provider)
+    let name = name_query
+        .get(input.provider)
         .ok()
         .flatten()
         .map(|x| &*x.0)
@@ -476,7 +459,7 @@ pub fn say_hello(
 pub fn repeat_service(
     In(input): AsyncServiceInput<RepeatRequest>,
     mut run_count: Query<Option<&mut RunCount>>,
-) -> impl std::future::Future<Output=()> + 'static + Send + Sync {
+) -> impl std::future::Future<Output = ()> + 'static + Send + Sync {
     if let Ok(Some(mut count)) = run_count.get_mut(input.provider) {
         count.0 += 1;
     }

@@ -15,16 +15,14 @@
  *
 */
 
-use bevy_ecs::{
-    system::EntityCommands,
-    world::EntityWorldMut,
-};
+use bevy_ecs::{system::EntityCommands, world::EntityWorldMut};
 
-use crate::{DeliveryChoice, DeliverySettings, Delivery};
+use crate::{Delivery, DeliveryChoice, DeliverySettings};
 
 impl DeliveryChoice for DeliverySettings {
-    fn apply_entity_commands<'w, 's, 'a, Request: 'static + Send + Sync>(
-        self, entity_commands: &mut EntityCommands<'w, 's, 'a>,
+    fn apply_entity_commands<Request: 'static + Send + Sync>(
+        self,
+        entity_commands: &mut EntityCommands,
     ) {
         match self {
             Self::Serial => {
@@ -36,9 +34,7 @@ impl DeliveryChoice for DeliverySettings {
         }
     }
 
-    fn apply_entity_mut<'w, Request: 'static + Send + Sync>(
-        self, entity_mut: &mut EntityWorldMut<'w>,
-    ) {
+    fn apply_entity_mut<Request: 'static + Send + Sync>(self, entity_mut: &mut EntityWorldMut) {
         match self {
             Self::Serial => {
                 entity_mut.insert(Delivery::<Request>::serial());
