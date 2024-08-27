@@ -46,4 +46,4 @@ bevy_time = "0.12"
 single_threaded_async = ["dep:async-task"]
 
 [dev-dependencies]
-async-std = { version = "*" }
+async-std = { version = "1.12" }
