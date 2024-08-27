@@ -11,7 +11,7 @@ keywords = ["reactive", "workflow", "behavior", "agent", "bevy"]
 categories = ["science::robotics", "asynchronous", "concurrency", "game-development"]
 
 [dependencies]
-bevy_impulse_derive = { path = "macros" }
+bevy_impulse_derive = { path = "macros", version = "0.0.1" }
 bevy_ecs = "0.12"
 bevy_utils = "0.12"
 bevy_hierarchy = "0.12"
