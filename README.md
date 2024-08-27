@@ -27,9 +27,9 @@ Bevy Impulse is supported across several releases of Bevy:
 
 | bevy | bevy_impulse |
 |------|--------------|
-|0.12  | 0.0.x        |
-|0.13  | 0.1          |
 |0.14  | 0.2          |
+|0.13  | 0.1          |
+|0.12  | 0.0.x        |
 
 The `main` branch currently targets bevy version 0.12 (bevy impulse 0.0.x)
 so that new developments are still compatible for users of bevy 0.12. New features
