@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Entity, World},
-    system::Command,
+    world::Command,
 };
 
 use anyhow::anyhow;

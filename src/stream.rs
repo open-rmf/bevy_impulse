@@ -19,7 +19,7 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Bundle, Commands, Component, Entity, With, World},
     query::{QueryFilter, WorldQuery, ReadOnlyQueryData},
-    system::Command,
+    world::Command,
 };
 use bevy_hierarchy::BuildChildren;
 pub use bevy_impulse_derive::Stream;

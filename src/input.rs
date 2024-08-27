@@ -17,8 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Bundle, Component, Entity},
-    system::Command,
-    world::{EntityRef, EntityWorldMut, World},
+    world::{EntityRef, EntityWorldMut, World, Command},
 };
 
 use smallvec::SmallVec;

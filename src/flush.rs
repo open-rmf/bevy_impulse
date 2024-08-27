@@ -19,7 +19,8 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Added, Entity, Query, QueryState, Resource, With, World},
     schedule::{IntoSystemConfigs, SystemConfigs},
-    system::{Command, SystemState},
+    world::Command,
+    system::SystemState,
 };
 use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
 

@@ -25,8 +25,8 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Commands, Component, Entity, Event, World},
     schedule::ScheduleLabel,
+    define_label, intern::Interned
 };
-use bevy_utils::{define_label, intern::Interned};
 use std::{any::TypeId, collections::HashSet};
 use thiserror::Error as ThisError;
 
@@ -612,7 +612,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -623,7 +623,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -634,7 +634,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -647,7 +647,7 @@ mod tests {
             .add_systems(Update, sys_use_my_service_provider);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -658,7 +658,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -682,7 +682,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     fn sys_async_service(
@@ -782,9 +782,9 @@ mod tests {
 
         let mut recipient = context.command(|commands| commands.request((), event_streamer).take());
 
-        context.app.world.send_event(CustomEvent(0));
-        context.app.world.send_event(CustomEvent(1));
-        context.app.world.send_event(CustomEvent(2));
+        context.app.world_mut().send_event(CustomEvent(0));
+        context.app.world_mut().send_event(CustomEvent(1));
+        context.app.world_mut().send_event(CustomEvent(2));
 
         context.run_with_conditions(&mut recipient.response, 1);
 

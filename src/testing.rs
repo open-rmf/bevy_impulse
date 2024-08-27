@@ -20,7 +20,8 @@ pub use bevy_app::{App, Update};
 use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
 pub use bevy_ecs::{
     prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource},
-    system::{CommandQueue, IntoSystem},
+    system::IntoSystem,
+    world::CommandQueue,
 };
 use bevy_time::TimePlugin;
 
@@ -61,13 +62,13 @@ impl TestingContext {
 
     pub fn set_flush_loop_limit(&mut self, limit: Option<usize>) {
         self.app
-            .world
+            .world_mut()
             .get_resource_or_insert_with(FlushParameters::default)
             .flush_loop_limit = limit;
     }
 
     pub fn command<U>(&mut self, f: impl FnOnce(&mut Commands) -> U) -> U {
-        self.app.world.command(f)
+        self.app.world_mut().command(f)
     }
 
     /// Build a simple workflow with a single input and output, and no streams
@@ -146,7 +147,7 @@ impl TestingContext {
     }
 
     pub fn no_unhandled_errors(&self) -> bool {
-        let Some(errors) = self.app.world.get_resource::<UnhandledErrors>() else {
+        let Some(errors) = self.app.world().get_resource::<UnhandledErrors>() else {
             return true;
         };
 
@@ -154,20 +155,20 @@ impl TestingContext {
     }
 
     pub fn get_unhandled_errors(&self) -> Option<&UnhandledErrors> {
-        self.app.world.get_resource::<UnhandledErrors>()
+        self.app.world().get_resource::<UnhandledErrors>()
     }
 
     // Check that all buffers in the world are empty
     pub fn confirm_buffers_empty(&mut self) -> Result<(), Vec<Entity>> {
-        let mut query = self.app.world.query::<(Entity, &GetBufferedSessionsFn)>();
+        let mut query = self.app.world_mut().query::<(Entity, &GetBufferedSessionsFn)>();
         let buffers: Vec<_> = query
-            .iter(&self.app.world)
+            .iter(self.app.world())
             .map(|(e, get_sessions)| (e, get_sessions.0))
             .collect();
 
         let mut non_empty_buffers = Vec::new();
         for (e, get_sessions) in buffers {
-            if !get_sessions(e, &self.app.world).is_ok_and(|s| s.is_empty()) {
+            if !get_sessions(e, self.app.world()).is_ok_and(|s| s.is_empty()) {
                 non_empty_buffers.push(e);
             }
         }

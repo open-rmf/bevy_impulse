@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Component, Entity, Resource, World},
-    system::Command,
+    world::Command,
 };
 use bevy_hierarchy::{BuildWorldChildren, DespawnRecursiveExt};
 

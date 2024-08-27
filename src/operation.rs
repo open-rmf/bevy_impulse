@@ -22,7 +22,7 @@ use crate::{
 
 use bevy_ecs::{
     prelude::{Component, Entity, World},
-    system::Command,
+    world::Command,
 };
 use bevy_hierarchy::prelude::BuildWorldChildren;
 
