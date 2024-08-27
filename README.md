@@ -21,6 +21,24 @@ There are several different categories of problems that bevy impulse sets out to
  * [Bevy Cheat Book](https://bevy-cheatbook.github.io/)
  * [Rust Book](https://doc.rust-lang.org/stable/book/)
 
+# Compatibility
+
+Bevy Impulse is supported across several releases of Bevy:
+
+| bevy | bevy_impulse |
+|------|--------------|
+|0.12  | 0.0.x        |
+|0.13  | 0.1          |
+|0.14  | 0.2          |
+
+The `main` branch currently targets bevy version 0.12 (bevy impulse 0.0.x)
+so that new developments are still compatible for users of bevy 0.12. New features
+will be forward-ported as soon as possible. `main` will move forward to newer
+versions of bevy when we judge that enough of the ecosystem has finished migrating
+forward that there is no longer value in supporting old versions. In the future
+we may come up with a more concrete policy for thism and we are open to input on
+the matter.
+
 # Experimenting
 
 ### Install Rust
