@@ -18,7 +18,7 @@
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Bundle, Commands, Component, Entity, With, World},
-    query::{ReadOnlyWorldQuery, WorldQuery},
+    query::{QueryFilter, WorldQuery, ReadOnlyQueryData},
     system::Command,
 };
 use bevy_hierarchy::BuildChildren;
@@ -346,7 +346,7 @@ impl StreamTargetMap {
 /// streams to be packed together as one generic argument.
 pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
-    type StreamFilter: ReadOnlyWorldQuery;
+    type StreamFilter: QueryFilter;
     type StreamStorageBundle: Bundle + Clone;
     type StreamInputPack;
     type StreamOutputPack;
@@ -354,7 +354,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type Channel: Send;
     type Forward: Future<Output = ()> + Send;
     type Buffer: Clone;
-    type TargetIndexQuery: ReadOnlyWorldQuery;
+    type TargetIndexQuery: ReadOnlyQueryData;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -936,7 +936,7 @@ impl<S: Stream> Command for SendStreams<S> {
 /// }
 /// ```
 pub trait StreamFilter {
-    type Filter: ReadOnlyWorldQuery;
+    type Filter: QueryFilter;
     type Pack: StreamPack;
 }
 

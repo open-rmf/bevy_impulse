@@ -1,23 +1,23 @@
 [package]
 name = "bevy_impulse"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 authors = ["Grey <mxgrey@intrinsic.ai>"]
 
 [dependencies]
 bevy_impulse_derive = { path = "macros" }
-bevy_ecs = "0.12"
-bevy_utils = "0.12"
-bevy_hierarchy = "0.12"
-bevy_derive = "0.12"
-bevy_app = "0.12"
+bevy_ecs = "0.13"
+bevy_utils = "0.13"
+bevy_hierarchy = "0.13"
+bevy_derive = "0.13"
+bevy_app = "0.13"
 
 async-task = { version = "4.7.1", optional = true }
 
 # TODO(@mxgrey) We could probably remove bevy_tasks when the single_threaded_async
 # feature is active, but we'd have to refactor some internal usage of
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
-bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
+bevy_tasks = { version = "0.13", features = ["multi-threaded"] }
 
 arrayvec = "*"
 itertools = "*"
@@ -33,8 +33,8 @@ thiserror = "*"
 # the testing module for doctests, and doctests can only
 # make use of default features, so we're a bit stuck with
 # these for now.
-bevy_core = "0.12"
-bevy_time = "0.12"
+bevy_core = "0.13"
+bevy_time = "0.13"
 
 [features]
 single_threaded_async = ["dep:async-task"]
