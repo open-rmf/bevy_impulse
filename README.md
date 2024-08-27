@@ -36,7 +36,7 @@ so that new developments are still compatible for users of bevy 0.12. New featur
 will be forward-ported as soon as possible. `main` will move forward to newer
 versions of bevy when we judge that enough of the ecosystem has finished migrating
 forward that there is no longer value in supporting old versions. In the future
-we may come up with a more concrete policy for thism and we are open to input on
+we may come up with a more concrete policy for this, and we are open to input on
 the matter.
 
 # Experimenting
