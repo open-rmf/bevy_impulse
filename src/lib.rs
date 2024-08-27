@@ -15,7 +15,7 @@
  *
 */
 
-//! ![sense-think-act workflow](https://raw.githubusercontent.com/open-rmf/bevy_impulse/update_docs/assets/figures/sense-think-act_workflow.svg)
+//! ![sense-think-act workflow](https://raw.githubusercontent.com/open-rmf/bevy_impulse/main/assets/figures/sense-think-act_workflow.svg)
 //!
 //! Bevy impulse is an extension to the [Bevy](https://bevyengine.org) game
 //! engine that allows you to transform [bevy systems](https://bevyengine.org/learn/quick-start/getting-started/ecs/)
