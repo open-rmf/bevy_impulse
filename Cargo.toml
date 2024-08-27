@@ -3,6 +3,12 @@ name = "bevy_impulse"
 version = "0.1.0"
 edition = "2021"
 authors = ["Grey <mxgrey@intrinsic.ai>"]
+license = "Apache-2.0"
+description = "Reactive programming and workflow execution for bevy"
+readme = "README.md"
+repository = "https://github.com/open-rmf/bevy_impulse"
+keywords = ["reactive", "workflow", "behavior", "agent", "bevy"]
+categories = ["science::robotics", "asynchronous", "concurrency", "game-development"]
 
 [dependencies]
 bevy_impulse_derive = { path = "macros" }
@@ -19,14 +25,14 @@ async-task = { version = "4.7.1", optional = true }
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
 bevy_tasks = { version = "0.13", features = ["multi-threaded"] }
 
-arrayvec = "*"
-itertools = "*"
-smallvec = "*"
-tokio = { version = "*", features = ["sync"]}
+arrayvec = "0.7"
+itertools = "0.13"
+smallvec = "1.13"
+tokio = { version = "1.39", features = ["sync"]}
 futures = "0.3"
 backtrace = "0.3"
-anyhow = "*"
-thiserror = "*"
+anyhow = "1.0"
+thiserror = "1.0"
 
 # These dependencies are only used by the testing module.
 # We may want to consider feature-gating them, but we use
@@ -40,4 +46,4 @@ bevy_time = "0.13"
 single_threaded_async = ["dep:async-task"]
 
 [dev-dependencies]
-async-std = { version = "*" }
+async-std = { version = "1.12" }
