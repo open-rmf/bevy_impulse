@@ -3,6 +3,12 @@ name = "bevy_impulse_derive"
 version = "0.0.1"
 edition = "2021"
 authors = ["Grey <mxgrey@intrinsic.ai>"]
+license = "Apache-2.0"
+description = "Procedural macros for bevy_impulse"
+readme = "README.md"
+repository = "https://github.com/open-rmf/bevy_impulse"
+keywords = ["reactive", "workflow", "behavior", "agent", "bevy"]
+categories = ["science::robotics", "asynchronous", "concurrency", "game-development"]
 
 [lib]
 proc-macro = true
