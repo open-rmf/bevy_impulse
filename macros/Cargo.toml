@@ -14,5 +14,5 @@ categories = ["science::robotics", "asynchronous", "concurrency", "game-developm
 proc-macro = true
 
 [dependencies]
-syn = "*"
-quote = "*"
+syn = "2.0"
+quote = "1.0"
