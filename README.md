@@ -17,9 +17,11 @@ There are several different categories of problems that bevy impulse sets out to
 # Helpful Links
 
  * [Introduction to workflows](https://docs.google.com/presentation/d/1_vJTyFKOB1T0ylCbp1jG72tn8AXYQOKgTGh9En9si-w/edit?usp=sharing)
+ * [Bevy Impulse Docs](https://docs.rs/bevy_impulse/latest/bevy_impulse/)
  * [Bevy Engine](https://bevyengine.org/)
  * [Bevy Cheat Book](https://bevy-cheatbook.github.io/)
  * [Rust Book](https://doc.rust-lang.org/stable/book/)
+ * [Install Rust](https://www.rust-lang.org/tools/install)
 
 # Compatibility
 
@@ -38,41 +40,3 @@ versions of bevy when we judge that enough of the ecosystem has finished migrati
 forward that there is no longer value in supporting old versions. In the future
 we may come up with a more concrete policy for this, and we are open to input on
 the matter.
-
-# Experimenting
-
-### Install Rust
-
-Follow [official guidelines](https://www.rust-lang.org/tools/install) to install the Rust language.
-
-### Get source code
-
-```
-$ git clone https://github.com/open-rmf/bevy_impulse
-```
-
-### Build
-
-To build the library simply go to the root directory of the repo and run
-
-```
-$ cargo build
-```
-
-### Test
-
-The library's tests can be run with
-
-```
-$ cargo test
-```
-
-### View Documentation
-
-Like most Rust projects, the library documentation is written into the source code and can be built and viewed with
-
-```
-$ cargo doc --open
-```
-
-After the first release of the library, the documentation will be hosted on docs.rs. We will update this README with a link to that documentation once it is ready.
