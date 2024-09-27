@@ -12,6 +12,9 @@ use super::IntoBlockingService;
 #[derive(Eq, Debug)]
 pub struct ServiceRegistration {
     id: &'static str,
+    // TODO(koonpeng): Add request and response
+    // request_schema: serde_json::Value
+    // response_schema: serde_json::Value
 }
 
 impl PartialEq for ServiceRegistration {
@@ -29,21 +32,21 @@ impl Hash for ServiceRegistration {
 // koonpeng: Do we need Arc like in [`bevy_reflect::TypeRegistryArc`]?
 #[derive(Resource, Default)]
 pub struct ServiceRegistry {
-    registrations: HashMap<TypeId, ServiceRegistration>,
+    registrations: HashMap<&'static str, ServiceRegistration>,
 }
 
-pub trait RegisterServiceExt<M> {
-    fn register_blocking_service<T>(&mut self, service: T) -> &mut Self
+pub trait RegisterServiceExt {
+    fn register_blocking_service<T, M>(&mut self, service: T) -> &mut Self
     where
         T: IntoBlockingService<M> + Any;
 
-    fn service_registration<T>(&self, _: T) -> Option<&ServiceRegistration>
+    fn service_registration<T>(&self, service: T) -> Option<&ServiceRegistration>
     where
-        T: IntoBlockingService<M> + Any;
+        T: Any;
 }
 
-impl<M> RegisterServiceExt<M> for App {
-    fn register_blocking_service<T>(&mut self, service: T) -> &mut Self
+impl RegisterServiceExt for App {
+    fn register_blocking_service<T, M>(&mut self, _service: T) -> &mut Self
     where
         T: IntoBlockingService<M> + Any,
     {
@@ -52,16 +55,16 @@ impl<M> RegisterServiceExt<M> for App {
         let id = std::any::type_name::<T>();
         registry
             .registrations
-            .insert(service.type_id(), ServiceRegistration { id });
+            .insert(id, ServiceRegistration { id });
         self
     }
 
-    fn service_registration<T>(&self, service: T) -> Option<&ServiceRegistration>
+    fn service_registration<T>(&self, _service: T) -> Option<&ServiceRegistration>
     where
-        T: IntoBlockingService<M> + Any,
+        T: Any,
     {
         match self.world.get_resource::<ServiceRegistry>() {
-            Some(registry) => registry.registrations.get(&service.type_id()),
+            Some(registry) => registry.registrations.get(std::any::type_name::<T>()),
             None => None,
         }
     }
