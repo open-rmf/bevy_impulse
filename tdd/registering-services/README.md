@@ -11,7 +11,7 @@ fn hello() {}
 
 fn main() {
     let mut app = App::new();
-    app.register_blocking_service(hello);
+    app.register_service(hello);
 }
 ```
 
@@ -57,14 +57,20 @@ fn main() {
 
 ### Getting the Request, Response and Params
 
-WIP: tldr bevy_reflect
+The request and response types are represented with JSON schema. JSON schema is chosen as it is well supported in many languages (most importantly javascript), this allows us to write more dynamic frontends that can do complex validations.
+
+`schemars` is used to generate the json schema from rust types. In order to make a service serializable, the request and response must implement `JsonSchema` trait, which can be done by adding `#[derive(JsonSchema)]` to a struct.
+
+A `SerializableServiceRequest` trait will be used to mark types that can be serialized, there is a blanket implementation for `JsonSchema` so any `JsonSchema` will also implement `SerializableServiceRequest`.
+
+The `register_service` extension is only implemented for services with request and response that is `SerializableServiceRequest`, this allows us to do compile time checks so that only serializable service can be registered.
 
 ## Alternatives
 
 ### Use procedural macros to register services
 
 ```rs
-#[derive(service)]
+#[derive(Service)]
 fn foo(f: &Foo) {}
 ```
 
