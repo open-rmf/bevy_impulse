@@ -61,9 +61,17 @@ The request and response types are represented with JSON schema. JSON schema is 
 
 `schemars` is used to generate the json schema from rust types. In order to make a service serializable, the request and response must implement `JsonSchema` trait, which can be done by adding `#[derive(JsonSchema)]` to a struct.
 
-A `SerializableServiceRequest` trait will be used to mark types that can be serialized, there is a blanket implementation for `JsonSchema` so any `JsonSchema` will also implement `SerializableServiceRequest`.
+Sometimes service requests may be wrapped, for example, blocking services have their requests wrapped in `BlockingService<...>`, we can't implement `JsonSchema` on `BlockingService` as that will return the schema for the wrapper. To workaround that, a `SerializableServiceRequest` trait is introduced, wrappers like `BlockingService` implements that by forwarding the schema generation to the wrapped requests.
 
-The `register_service` extension is only implemented for services with request and response that is `SerializableServiceRequest`, this allows us to do compile time checks so that only serializable service can be registered.
+### Requests and responses that cannot be serialized
+
+The requests and responses of a service are very flexible, any type that is `Send + Sync` can be used as a request, sometimes, that may include types that cannot be serialized. In order to register such services, we need to mark these request and responses.
+
+A `OpaqueServiceExt` extension trait is used to add several methods to any type that is also `IntoServiceBuilder`, you will be able to use `into_opaque`, `into_opaque_request` and `into_opaque_response` to mark either the request or response as unserializable.
+
+```rs
+app.register_service(unserializable_service.into_opaque());
+```
 
 ## Alternatives
 
