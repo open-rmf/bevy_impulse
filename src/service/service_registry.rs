@@ -372,9 +372,9 @@ mod tests {
         let srv = service_with_request.into_blocking_service();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request.r#type == TestServiceRequest::schema_id());
+        assert!(registration.request.r#type == TestServiceRequest::schema_name());
         assert!(registration.request.serializable);
-        assert!(registration.response.r#type == <()>::schema_id());
+        assert!(registration.response.r#type == <()>::schema_name());
         assert!(registration.response.serializable);
     }
 
@@ -394,9 +394,9 @@ mod tests {
         let srv = service_with_req_resp.into_blocking_service();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request.r#type == TestServiceRequest::schema_id());
+        assert!(registration.request.r#type == TestServiceRequest::schema_name());
         assert!(registration.request.serializable);
-        assert!(registration.response.r#type == TestServiceResponse::schema_id());
+        assert!(registration.response.r#type == TestServiceResponse::schema_name());
         assert!(registration.response.serializable);
     }
 
