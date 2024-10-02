@@ -6,59 +6,73 @@ use std::{
 use bevy_app::App;
 use bevy_utils::HashMap;
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
+use serde::Serialize;
 
-use crate::{AsyncService, BlockingService};
+use crate::{AsyncService, BlockingService, ContinuousService, StreamPack};
 
-use super::{IntoService, IntoServiceBuilder};
+use super::{
+    service_builder::IntoBuilderMarker, IntoContinuousService, IntoContinuousServiceBuilderMarker,
+    IntoService, IntoServiceBuilder,
+};
+
+/// Helper trait to unwrap the request type of a wrapped request.
+trait InferRequest {
+    type Request;
+}
+
+impl<T> InferRequest for T
+where
+    T: JsonSchema,
+{
+    type Request = T;
+}
+
+impl<Request, Streams> InferRequest for BlockingService<Request, Streams>
+where
+    Request: JsonSchema,
+    Streams: StreamPack,
+{
+    type Request = Request;
+}
+
+impl<Request, Streams> InferRequest for AsyncService<Request, Streams>
+where
+    Request: JsonSchema,
+    Streams: StreamPack,
+{
+    type Request = Request;
+}
+
+impl<Request, Streams> InferRequest for ContinuousService<Request, Streams>
+where
+    Request: JsonSchema,
+    Streams: StreamPack,
+{
+    type Request = Request;
+}
 
 pub trait SerializableServiceRequest {
-    type Request: JsonSchema;
+    /// Returns the type name of the request, the type name must be unique across all services.
+    fn type_name() -> String;
 
-    fn type_name() -> String {
-        Self::Request::schema_id().to_string()
-    }
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<Self::Request>()
-    }
+    /// If the request is serializable, add the request type into the schema generator and return
+    /// the json schema, returns `None` if the request is not serializable.
+    fn try_json_schema(gen: &mut SchemaGenerator) -> Option<Schema>;
 }
 
 impl<T> SerializableServiceRequest for T
 where
-    T: JsonSchema,
-{
-    type Request = T;
-}
-
-impl<T> SerializableServiceRequest for BlockingService<T>
-where
-    T: JsonSchema,
-{
-    type Request = T;
-}
-
-impl<T> SerializableServiceRequest for AsyncService<T>
-where
-    T: JsonSchema,
-{
-    type Request = T;
-}
-
-pub trait MaybeSerializableServiceRequest {
-    fn type_name() -> String;
-    fn try_json_schema(_gen: &mut SchemaGenerator) -> Option<Schema>;
-}
-
-impl<T> MaybeSerializableServiceRequest for T
-where
-    T: SerializableServiceRequest,
+    T: InferRequest,
+    T::Request: JsonSchema,
 {
     fn type_name() -> String {
-        T::type_name()
+        // We need to use `schema_name` instead of `schema_id` as the definitions generated
+        // by schemars using the name. But schemars will ensure the names are unique.
+        T::Request::schema_name()
     }
 
     fn try_json_schema(gen: &mut SchemaGenerator) -> Option<Schema> {
-        Some(T::json_schema(gen))
+        Some(gen.subschema_for::<T::Request>())
     }
 }
 
@@ -66,7 +80,7 @@ pub struct NonSerializableServiceRequest<T> {
     _unused: PhantomData<T>,
 }
 
-impl<T> MaybeSerializableServiceRequest for NonSerializableServiceRequest<T> {
+impl<T> SerializableServiceRequest for NonSerializableServiceRequest<T> {
     fn type_name() -> String {
         std::any::type_name::<T>().to_string()
     }
@@ -83,8 +97,8 @@ pub struct OpaqueService<M> {
 impl<Request, Response> SerializableService<OpaqueService<(Request, Response)>>
     for OpaqueService<(Request, Response)>
 where
-    Request: MaybeSerializableServiceRequest,
-    Response: MaybeSerializableServiceRequest,
+    Request: SerializableServiceRequest,
+    Response: SerializableServiceRequest,
 {
     type Request = Request;
     type Response = Response;
@@ -175,28 +189,47 @@ where
 }
 
 pub trait SerializableService<M> {
-    type Request: MaybeSerializableServiceRequest;
-    type Response: MaybeSerializableServiceRequest;
+    type Request: SerializableServiceRequest;
+    type Response: SerializableServiceRequest;
 }
 
-impl<T, M, M2> SerializableService<(M, M2)> for T
+impl<T, M, M2> SerializableService<IntoBuilderMarker<(M, M2)>> for T
 where
     T: IntoServiceBuilder<M>,
     T::Service: IntoService<M2>,
-    <T::Service as IntoService<M2>>::Request: MaybeSerializableServiceRequest,
-    <T::Service as IntoService<M2>>::Response: MaybeSerializableServiceRequest,
+    <T::Service as IntoService<M2>>::Request: SerializableServiceRequest,
+    <T::Service as IntoService<M2>>::Response: SerializableServiceRequest,
 {
     type Request = <T::Service as IntoService<M2>>::Request;
     type Response = <T::Service as IntoService<M2>>::Response;
 }
 
-#[derive(Debug)]
+impl<T, M, M2> SerializableService<IntoContinuousServiceBuilderMarker<(M, M2)>> for T
+where
+    T: IntoServiceBuilder<M>,
+    T::Service: IntoContinuousService<M2>,
+    <T::Service as IntoContinuousService<M2>>::Request: SerializableServiceRequest,
+    <T::Service as IntoContinuousService<M2>>::Response: SerializableServiceRequest,
+{
+    type Request = <T::Service as IntoContinuousService<M2>>::Request;
+    type Response = <T::Service as IntoContinuousService<M2>>::Response;
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServiceRequestDefinition {
+    /// The type of the request, if the request is serializable, this will be the json schema
+    /// type, if it is not serializable, it will be the rust type.
+    r#type: String,
+
+    /// Indicates if the request is serializable.
+    serializable: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ServiceRegistration {
-    id: &'static str,
-    request_type: String,
-    request_serializable: bool,
-    response_type: String,
-    response_serializable: bool,
+    id: ServiceId,
+    request: ServiceRequestDefinition,
+    response: ServiceRequestDefinition,
 }
 
 impl PartialEq for ServiceRegistration {
@@ -211,10 +244,25 @@ impl Hash for ServiceRegistration {
     }
 }
 
-// koonpeng: Do we need Arc like in [`bevy_reflect::TypeRegistryArc`]?
-#[derive(Default)]
+/// Service id must be fixed and (most likely) known at compile time.
+type ServiceId = &'static str;
+
+fn serialize_service_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    gen.definitions().serialize(s)
+}
+
+#[derive(Default, Serialize)]
 pub struct ServiceRegistry {
-    registrations: HashMap<&'static str, ServiceRegistration>,
+    /// List of services registered.
+    services: HashMap<ServiceId, ServiceRegistration>,
+
+    /// List of all request and response types used in all registered services, this only
+    /// contains serializable types, non serializable types are opaque and is only compatible
+    /// with itself.
+    #[serde(rename = "types", serialize_with = "serialize_service_registry_types")]
     gen: SchemaGenerator,
 }
 
@@ -229,6 +277,8 @@ pub trait RegisterServiceExt {
     fn service_registration<T, M>(&self, service: &T) -> Option<&ServiceRegistration>
     where
         T: SerializableService<M>;
+
+    fn service_registry(&mut self) -> &ServiceRegistry;
 }
 
 impl RegisterServiceExt for App {
@@ -239,24 +289,28 @@ impl RegisterServiceExt for App {
         self.init_non_send_resource::<ServiceRegistry>(); // nothing happens if the resource already exist
         let mut registry = self.world.non_send_resource_mut::<ServiceRegistry>();
         let id = std::any::type_name::<T>();
-        let request_type = <T::Request as MaybeSerializableServiceRequest>::type_name();
+        let request_type = <T::Request as SerializableServiceRequest>::type_name();
         let request_serializable = match T::Request::try_json_schema(&mut registry.gen) {
             Some(_) => true,
             None => false,
         };
-        let response_type = <T::Response as MaybeSerializableServiceRequest>::type_name();
+        let response_type = <T::Response as SerializableServiceRequest>::type_name();
         let response_serializable = match T::Response::try_json_schema(&mut registry.gen) {
             Some(_) => true,
             None => false,
         };
-        registry.registrations.insert(
+        registry.services.insert(
             id,
             ServiceRegistration {
                 id,
-                request_type,
-                request_serializable,
-                response_type,
-                response_serializable,
+                request: ServiceRequestDefinition {
+                    r#type: request_type,
+                    serializable: request_serializable,
+                },
+                response: ServiceRequestDefinition {
+                    r#type: response_type,
+                    serializable: response_serializable,
+                },
             },
         );
         self
@@ -267,9 +321,14 @@ impl RegisterServiceExt for App {
         T: SerializableService<M>,
     {
         match self.world.get_non_send_resource::<ServiceRegistry>() {
-            Some(registry) => registry.registrations.get(std::any::type_name::<T>()),
+            Some(registry) => registry.services.get(std::any::type_name::<T>()),
             None => None,
         }
+    }
+
+    fn service_registry(&mut self) -> &ServiceRegistry {
+        self.init_non_send_resource::<ServiceRegistry>(); // nothing happens if the resource already exist
+        self.world.non_send_resource::<ServiceRegistry>()
     }
 }
 
@@ -279,7 +338,10 @@ mod tests {
 
     use bevy_app::App;
 
-    use crate::{AsyncServiceInput, BlockingServiceInput, IntoAsyncService, IntoBlockingService};
+    use crate::{
+        AsyncServiceInput, BlockingServiceInput, ContinuousServiceInput, IntoAsyncService,
+        IntoBlockingService,
+    };
 
     use super::*;
 
@@ -292,8 +354,8 @@ mod tests {
         assert!(app.service_registration(&srv).is_none());
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request_serializable);
-        assert!(registration.response_serializable);
+        assert!(registration.request.serializable);
+        assert!(registration.response.serializable);
     }
 
     #[allow(dead_code)]
@@ -310,10 +372,10 @@ mod tests {
         let srv = service_with_request.into_blocking_service();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request_type == TestServiceRequest::schema_id());
-        assert!(registration.request_serializable);
-        assert!(registration.response_type == <()>::schema_id());
-        assert!(registration.response_serializable);
+        assert!(registration.request.r#type == TestServiceRequest::schema_id());
+        assert!(registration.request.serializable);
+        assert!(registration.response.r#type == <()>::schema_id());
+        assert!(registration.response.serializable);
     }
 
     #[allow(dead_code)]
@@ -332,10 +394,10 @@ mod tests {
         let srv = service_with_req_resp.into_blocking_service();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request_type == TestServiceRequest::schema_id());
-        assert!(registration.request_serializable);
-        assert!(registration.response_type == TestServiceResponse::schema_id());
-        assert!(registration.response_serializable);
+        assert!(registration.request.r#type == TestServiceRequest::schema_id());
+        assert!(registration.request.serializable);
+        assert!(registration.response.r#type == TestServiceResponse::schema_id());
+        assert!(registration.response.serializable);
     }
 
     struct TestNonSerializableRequest {}
@@ -348,8 +410,8 @@ mod tests {
         let srv = opaque_request_service.into_opaque_request();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(!registration.request_serializable);
-        assert!(registration.response_serializable);
+        assert!(!registration.request.serializable);
+        assert!(registration.response.serializable);
     }
 
     fn opaque_response_service(
@@ -364,8 +426,8 @@ mod tests {
         let srv = opaque_response_service.into_opaque_response();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request_serializable);
-        assert!(!registration.response_serializable);
+        assert!(registration.request.serializable);
+        assert!(!registration.response.serializable);
     }
 
     fn full_opaque_service(
@@ -380,8 +442,8 @@ mod tests {
         let srv = full_opaque_service.into_opaque();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(!registration.request_serializable);
-        assert!(!registration.response_serializable);
+        assert!(!registration.request.serializable);
+        assert!(!registration.response.serializable);
     }
 
     fn async_service(_: AsyncServiceInput<()>) -> impl Future<Output = ()> {
@@ -394,7 +456,51 @@ mod tests {
         let srv = async_service.into_async_service();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
-        assert!(registration.request_serializable);
-        assert!(registration.response_serializable);
+        assert!(registration.request.serializable);
+        assert!(registration.response.serializable);
+    }
+
+    fn continous_service(_: ContinuousServiceInput<(), ()>) {}
+
+    #[test]
+    fn test_register_continuous_service() {
+        let mut app = App::new();
+        let srv = continous_service;
+        app.register_service(&srv);
+        let registration = app.service_registration(&srv).unwrap();
+        assert!(registration.request.serializable);
+        assert!(registration.response.serializable);
+    }
+
+    #[test]
+    fn test_serialize_service_registry() {
+        let mut app = App::new();
+        let srv = service_with_req_resp.into_blocking_service();
+        app.register_service(&srv);
+        let registry = app.service_registry();
+        let json = serde_json::to_string(registry).unwrap();
+        let deserialized: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            deserialized
+                .as_object()
+                .unwrap()
+                .get("services")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len()
+                == 1
+        );
+        assert!(
+            deserialized
+                .as_object()
+                .unwrap()
+                .get("types")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len()
+                == 2
+        );
     }
 }
