@@ -1,11 +1,14 @@
 use std::{
+    collections::HashMap,
     hash::{Hash, Hasher},
     marker::PhantomData,
 };
 
 use bevy_app::App;
-use bevy_utils::HashMap;
-use schemars::{gen::SchemaGenerator, JsonSchema};
+use schemars::{
+    gen::{SchemaGenerator, SchemaSettings},
+    JsonSchema,
+};
 use serde::Serialize;
 
 use crate::{AsyncService, BlockingService, ContinuousService, StreamPack};
@@ -365,7 +368,7 @@ where
     gen.definitions().serialize(s)
 }
 
-#[derive(Default, Serialize)]
+#[derive(Serialize)]
 pub struct ServiceRegistry {
     /// List of services registered.
     services: HashMap<ServiceId, ServiceRegistration>,
@@ -375,6 +378,17 @@ pub struct ServiceRegistry {
     /// with itself.
     #[serde(rename = "types", serialize_with = "serialize_service_registry_types")]
     gen: SchemaGenerator,
+}
+
+impl Default for ServiceRegistry {
+    fn default() -> Self {
+        let mut settings = SchemaSettings::default();
+        settings.definitions_path = "#/types/".to_string();
+        ServiceRegistry {
+            services: HashMap::<ServiceId, ServiceRegistration>::default(),
+            gen: SchemaGenerator::new(settings),
+        }
+    }
 }
 
 pub trait RegisterServiceExt {
@@ -593,5 +607,23 @@ mod tests {
                 .len()
                 == 2
         );
+    }
+
+    #[allow(dead_code)]
+    #[derive(JsonSchema)]
+    struct TestNestedRequest {
+        inner: TestServiceRequest,
+    }
+
+    fn nested_request_service(_: BlockingServiceInput<TestNestedRequest>) {}
+
+    #[test]
+    fn test_type_definition_pointers() {
+        let mut app = App::new();
+        let srv = nested_request_service.into_blocking_service();
+        app.register_service(&srv);
+        let json = serde_json::to_value(app.service_registry()).unwrap();
+        let json_str = serde_json::to_string(&json).unwrap();
+        assert!(json_str.contains("#/types/TestServiceRequest"));
     }
 }
