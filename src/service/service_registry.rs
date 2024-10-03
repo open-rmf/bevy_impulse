@@ -5,7 +5,7 @@ use std::{
 
 use bevy_app::App;
 use bevy_utils::HashMap;
-use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
+use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::Serialize;
 
 use crate::{AsyncService, BlockingService, ContinuousService, StreamPack};
@@ -14,6 +14,16 @@ use super::{
     service_builder::IntoBuilderMarker, IntoContinuousService, IntoContinuousServiceBuilderMarker,
     IntoService, IntoServiceBuilder,
 };
+
+#[derive(Debug, Serialize)]
+pub struct ServiceRequestDefinition {
+    /// The type of the request, if the request is serializable, this will be the json schema
+    /// type, if it is not serializable, it will be the rust type.
+    r#type: String,
+
+    /// Indicates if the request is serializable.
+    serializable: bool,
+}
 
 /// Helper trait to unwrap the request type of a wrapped request.
 trait InferRequest {
@@ -55,9 +65,8 @@ pub trait SerializableServiceRequest {
     /// Returns the type name of the request, the type name must be unique across all services.
     fn type_name() -> String;
 
-    /// If the request is serializable, add the request type into the schema generator and return
-    /// the json schema, returns `None` if the request is not serializable.
-    fn try_json_schema(gen: &mut SchemaGenerator) -> Option<Schema>;
+    /// Insert the request type into the schema generator and return the request definition.
+    fn insert_json_schema(gen: &mut SchemaGenerator) -> ServiceRequestDefinition;
 }
 
 impl<T> SerializableServiceRequest for T
@@ -71,8 +80,76 @@ where
         T::Request::schema_name()
     }
 
-    fn try_json_schema(gen: &mut SchemaGenerator) -> Option<Schema> {
-        Some(gen.subschema_for::<T::Request>())
+    fn insert_json_schema(gen: &mut SchemaGenerator) -> ServiceRequestDefinition {
+        gen.subschema_for::<T::Request>();
+        ServiceRequestDefinition {
+            r#type: T::Request::schema_name(),
+            serializable: true,
+        }
+    }
+}
+
+pub trait SerializableService<M> {
+    fn insert_into_registry(registry: &mut ServiceRegistry);
+}
+
+fn extract_service_name(id: ServiceId) -> String {
+    // get the original function name, this is a very naive implementation that assumes that
+    // there is never more than 1 param in any of the generics. If this proves to be
+    // insufficient, consider using the `syn` crate to do actual parsing.
+    match id.rsplit_once("::") {
+        Some((_, suffix)) => suffix.trim_end_matches(">").to_string(),
+        None => "".to_string(),
+    }
+}
+
+fn insert_into_registry_impl<Service, Request, Response>(registry: &mut ServiceRegistry)
+where
+    Request: SerializableServiceRequest,
+    Response: SerializableServiceRequest,
+{
+    let id = std::any::type_name::<Service>();
+    let name = extract_service_name(id);
+    registry.services.insert(
+        id,
+        ServiceRegistration {
+            id,
+            name,
+            request: Request::insert_json_schema(&mut registry.gen),
+            response: Response::insert_json_schema(&mut registry.gen),
+        },
+    );
+}
+
+impl<T, M, M2> SerializableService<IntoBuilderMarker<(M, M2)>> for T
+where
+    T: IntoServiceBuilder<M>,
+    T::Service: IntoService<M2>,
+    <T::Service as IntoService<M2>>::Request: SerializableServiceRequest,
+    <T::Service as IntoService<M2>>::Response: SerializableServiceRequest,
+{
+    fn insert_into_registry(registry: &mut ServiceRegistry) {
+        insert_into_registry_impl::<
+            T,
+            <T::Service as IntoService<M2>>::Request,
+            <T::Service as IntoService<M2>>::Response,
+        >(registry);
+    }
+}
+
+impl<T, M, M2> SerializableService<IntoContinuousServiceBuilderMarker<(M, M2)>> for T
+where
+    T: IntoServiceBuilder<M>,
+    T::Service: IntoContinuousService<M2>,
+    <T::Service as IntoContinuousService<M2>>::Request: SerializableServiceRequest,
+    <T::Service as IntoContinuousService<M2>>::Response: SerializableServiceRequest,
+{
+    fn insert_into_registry(registry: &mut ServiceRegistry) {
+        insert_into_registry_impl::<
+            T,
+            <T::Service as IntoContinuousService<M2>>::Request,
+            <T::Service as IntoContinuousService<M2>>::Response,
+        >(registry);
     }
 }
 
@@ -80,13 +157,12 @@ pub struct NonSerializableServiceRequest<T> {
     _unused: PhantomData<T>,
 }
 
-impl<T> SerializableServiceRequest for NonSerializableServiceRequest<T> {
-    fn type_name() -> String {
-        std::any::type_name::<T>().to_string()
-    }
-
-    fn try_json_schema(_gen: &mut SchemaGenerator) -> Option<Schema> {
-        None
+impl<T> NonSerializableServiceRequest<T> {
+    pub fn request_definition() -> ServiceRequestDefinition {
+        ServiceRequestDefinition {
+            r#type: std::any::type_name::<T>().to_string(),
+            serializable: false,
+        }
     }
 }
 
@@ -94,18 +170,79 @@ pub struct OpaqueService<M> {
     _unused: PhantomData<M>,
 }
 
-impl<Request, Response> SerializableService<OpaqueService<(Request, Response)>>
-    for OpaqueService<(Request, Response)>
+pub type OpaqueRequestService<Service, Request, Response> =
+    OpaqueService<(Service, NonSerializableServiceRequest<Request>, Response)>;
+
+impl<Service, Request, Response>
+    SerializableService<OpaqueRequestService<Service, Request, Response>>
+    for OpaqueRequestService<Service, Request, Response>
 where
-    Request: SerializableServiceRequest,
     Response: SerializableServiceRequest,
 {
-    type Request = Request;
-    type Response = Response;
+    fn insert_into_registry(registry: &mut ServiceRegistry) {
+        let id = std::any::type_name::<OpaqueRequestService<Service, Request, Response>>();
+        let name = extract_service_name(std::any::type_name::<Service>());
+        registry.services.insert(
+            id,
+            ServiceRegistration {
+                id,
+                name,
+                request: NonSerializableServiceRequest::<Request>::request_definition(),
+                response: Response::insert_json_schema(&mut registry.gen),
+            },
+        );
+    }
+}
+
+pub type OpaqueResponseService<Service, Request, Response> =
+    OpaqueService<(Service, Request, NonSerializableServiceRequest<Response>)>;
+
+impl<Service, Request, Response>
+    SerializableService<OpaqueResponseService<Service, Request, Response>>
+    for OpaqueResponseService<Service, Request, Response>
+where
+    Request: SerializableServiceRequest,
+{
+    fn insert_into_registry(registry: &mut ServiceRegistry) {
+        let id = std::any::type_name::<OpaqueResponseService<Service, Request, Response>>();
+        let name = extract_service_name(std::any::type_name::<Service>());
+        registry.services.insert(
+            id,
+            ServiceRegistration {
+                id,
+                name,
+                request: Request::insert_json_schema(&mut registry.gen),
+                response: NonSerializableServiceRequest::<Response>::request_definition(),
+            },
+        );
+    }
+}
+
+pub type FullOpaqueService<Service, Request, Response> = OpaqueService<(
+    Service,
+    NonSerializableServiceRequest<Request>,
+    NonSerializableServiceRequest<Response>,
+)>;
+
+impl<Service, Request, Response> SerializableService<FullOpaqueService<Service, Request, Response>>
+    for FullOpaqueService<Service, Request, Response>
+{
+    fn insert_into_registry(registry: &mut ServiceRegistry) {
+        let id = std::any::type_name::<FullOpaqueService<Service, Request, Response>>();
+        let name = extract_service_name(std::any::type_name::<Service>());
+        registry.services.insert(
+            id,
+            ServiceRegistration {
+                id,
+                name,
+                request: NonSerializableServiceRequest::<Request>::request_definition(),
+                response: NonSerializableServiceRequest::<Response>::request_definition(),
+            },
+        );
+    }
 }
 
 type RequestOf<B, M, M2> = <<B as IntoServiceBuilder<M>>::Service as IntoService<M2>>::Request;
-
 type ResponseOf<B, M, M2> = <<B as IntoServiceBuilder<M>>::Service as IntoService<M2>>::Response;
 
 pub trait OpaqueRequestExt<B, M, M2>
@@ -119,6 +256,7 @@ where
     fn into_opaque(
         &self,
     ) -> OpaqueService<(
+        B::Service,
         NonSerializableServiceRequest<RequestOf<B, M, M2>>,
         NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
     )>;
@@ -127,6 +265,7 @@ where
     fn into_opaque_request(
         self,
     ) -> OpaqueService<(
+        B::Service,
         NonSerializableServiceRequest<RequestOf<B, M, M2>>,
         ResponseOf<B, M, M2>,
     )>;
@@ -135,6 +274,7 @@ where
     fn into_opaque_response(
         &self,
     ) -> OpaqueService<(
+        B::Service,
         RequestOf<B, M, M2>,
         NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
     )>;
@@ -148,10 +288,12 @@ where
     fn into_opaque(
         &self,
     ) -> OpaqueService<(
+        B::Service,
         NonSerializableServiceRequest<RequestOf<B, M, M2>>,
         NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
     )> {
         OpaqueService::<(
+            B::Service,
             NonSerializableServiceRequest<RequestOf<B, M, M2>>,
             NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
         )> {
@@ -162,10 +304,12 @@ where
     fn into_opaque_request(
         self,
     ) -> OpaqueService<(
+        B::Service,
         NonSerializableServiceRequest<RequestOf<B, M, M2>>,
         ResponseOf<B, M, M2>,
     )> {
         OpaqueService::<(
+            B::Service,
             NonSerializableServiceRequest<RequestOf<B, M, M2>>,
             ResponseOf<B, M, M2>,
         )> {
@@ -176,10 +320,12 @@ where
     fn into_opaque_response(
         &self,
     ) -> OpaqueService<(
+        B::Service,
         RequestOf<B, M, M2>,
         NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
     )> {
         OpaqueService::<(
+            B::Service,
             RequestOf<B, M, M2>,
             NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
         )> {
@@ -188,46 +334,11 @@ where
     }
 }
 
-pub trait SerializableService<M> {
-    type Request: SerializableServiceRequest;
-    type Response: SerializableServiceRequest;
-}
-
-impl<T, M, M2> SerializableService<IntoBuilderMarker<(M, M2)>> for T
-where
-    T: IntoServiceBuilder<M>,
-    T::Service: IntoService<M2>,
-    <T::Service as IntoService<M2>>::Request: SerializableServiceRequest,
-    <T::Service as IntoService<M2>>::Response: SerializableServiceRequest,
-{
-    type Request = <T::Service as IntoService<M2>>::Request;
-    type Response = <T::Service as IntoService<M2>>::Response;
-}
-
-impl<T, M, M2> SerializableService<IntoContinuousServiceBuilderMarker<(M, M2)>> for T
-where
-    T: IntoServiceBuilder<M>,
-    T::Service: IntoContinuousService<M2>,
-    <T::Service as IntoContinuousService<M2>>::Request: SerializableServiceRequest,
-    <T::Service as IntoContinuousService<M2>>::Response: SerializableServiceRequest,
-{
-    type Request = <T::Service as IntoContinuousService<M2>>::Request;
-    type Response = <T::Service as IntoContinuousService<M2>>::Response;
-}
-
-#[derive(Debug, Serialize)]
-pub struct ServiceRequestDefinition {
-    /// The type of the request, if the request is serializable, this will be the json schema
-    /// type, if it is not serializable, it will be the rust type.
-    r#type: String,
-
-    /// Indicates if the request is serializable.
-    serializable: bool,
-}
-
 #[derive(Debug, Serialize)]
 pub struct ServiceRegistration {
     id: ServiceId,
+    /// Friendly name for the service, may not be unique.
+    name: String,
     request: ServiceRequestDefinition,
     response: ServiceRequestDefinition,
 }
@@ -288,31 +399,7 @@ impl RegisterServiceExt for App {
     {
         self.init_non_send_resource::<ServiceRegistry>(); // nothing happens if the resource already exist
         let mut registry = self.world.non_send_resource_mut::<ServiceRegistry>();
-        let id = std::any::type_name::<T>();
-        let request_type = <T::Request as SerializableServiceRequest>::type_name();
-        let request_serializable = match T::Request::try_json_schema(&mut registry.gen) {
-            Some(_) => true,
-            None => false,
-        };
-        let response_type = <T::Response as SerializableServiceRequest>::type_name();
-        let response_serializable = match T::Response::try_json_schema(&mut registry.gen) {
-            Some(_) => true,
-            None => false,
-        };
-        registry.services.insert(
-            id,
-            ServiceRegistration {
-                id,
-                request: ServiceRequestDefinition {
-                    r#type: request_type,
-                    serializable: request_serializable,
-                },
-                response: ServiceRequestDefinition {
-                    r#type: response_type,
-                    serializable: response_serializable,
-                },
-            },
-        );
+        T::insert_into_registry(&mut registry);
         self
     }
 
@@ -356,6 +443,7 @@ mod tests {
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.serializable);
         assert!(registration.response.serializable);
+        assert!(registration.name == "service_with_no_request");
     }
 
     #[allow(dead_code)]
@@ -376,6 +464,7 @@ mod tests {
         assert!(registration.request.serializable);
         assert!(registration.response.r#type == <()>::schema_name());
         assert!(registration.response.serializable);
+        assert!(registration.name == "service_with_request");
     }
 
     #[allow(dead_code)]
@@ -398,6 +487,7 @@ mod tests {
         assert!(registration.request.serializable);
         assert!(registration.response.r#type == TestServiceResponse::schema_name());
         assert!(registration.response.serializable);
+        assert!(registration.name == "service_with_req_resp");
     }
 
     struct TestNonSerializableRequest {}
@@ -405,13 +495,14 @@ mod tests {
     fn opaque_request_service(_: BlockingServiceInput<TestNonSerializableRequest>) {}
 
     #[test]
-    fn test_register_opaque_service() {
+    fn test_register_opaque_request_service() {
         let mut app = App::new();
         let srv = opaque_request_service.into_opaque_request();
         app.register_service(&srv);
         let registration = app.service_registration(&srv).unwrap();
         assert!(!registration.request.serializable);
         assert!(registration.response.serializable);
+        assert!(registration.name == "opaque_request_service");
     }
 
     fn opaque_response_service(
