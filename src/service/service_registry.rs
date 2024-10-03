@@ -617,6 +617,7 @@ mod tests {
 
     fn nested_request_service(_: BlockingServiceInput<TestNestedRequest>) {}
 
+    /// test that $ref pointers use the correct path
     #[test]
     fn test_type_definition_pointers() {
         let mut app = App::new();
