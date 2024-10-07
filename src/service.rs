@@ -42,9 +42,6 @@ pub use continuous::*;
 mod service_builder;
 pub use service_builder::ServiceBuilder;
 
-mod service_registry;
-pub use service_registry::*;
-
 pub(crate) mod delivery;
 pub(crate) use delivery::*;
 

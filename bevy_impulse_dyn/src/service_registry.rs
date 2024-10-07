@@ -1,21 +1,15 @@
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-};
-
 use bevy_app::App;
+use bevy_impulse::{AsyncService, BlockingService, ContinuousService, StreamPack};
+use bevy_impulse::{IntoContinuousService, IntoService, IntoServiceBuilder};
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
     JsonSchema,
 };
 use serde::Serialize;
-
-use crate::{AsyncService, BlockingService, ContinuousService, StreamPack};
-
-use super::{
-    service_builder::IntoBuilderMarker, IntoContinuousService, IntoContinuousServiceBuilderMarker,
-    IntoService, IntoServiceBuilder,
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
 };
 
 #[derive(Debug, Serialize)]
@@ -29,18 +23,20 @@ pub struct ServiceRequestDefinition {
 }
 
 /// Helper trait to unwrap the request type of a wrapped request.
-trait InferRequest {
-    type Request;
+trait InferRequest<M> {
+    type Request: JsonSchema;
 }
 
-impl<T> InferRequest for T
+impl<T> InferRequest<T> for T
 where
     T: JsonSchema,
 {
     type Request = T;
 }
 
-impl<Request, Streams> InferRequest for BlockingService<Request, Streams>
+struct InferredMarker {}
+
+impl<Request, Streams> InferRequest<InferredMarker> for BlockingService<Request, Streams>
 where
     Request: JsonSchema,
     Streams: StreamPack,
@@ -48,7 +44,7 @@ where
     type Request = Request;
 }
 
-impl<Request, Streams> InferRequest for AsyncService<Request, Streams>
+impl<Request, Streams> InferRequest<InferredMarker> for AsyncService<Request, Streams>
 where
     Request: JsonSchema,
     Streams: StreamPack,
@@ -56,7 +52,7 @@ where
     type Request = Request;
 }
 
-impl<Request, Streams> InferRequest for ContinuousService<Request, Streams>
+impl<Request, Streams> InferRequest<InferredMarker> for ContinuousService<Request, Streams>
 where
     Request: JsonSchema,
     Streams: StreamPack,
@@ -64,7 +60,7 @@ where
     type Request = Request;
 }
 
-pub trait SerializableServiceRequest {
+pub trait SerializableServiceRequest<M> {
     /// Returns the type name of the request, the type name must be unique across all services.
     fn type_name() -> String;
 
@@ -72,10 +68,28 @@ pub trait SerializableServiceRequest {
     fn insert_json_schema(gen: &mut SchemaGenerator) -> ServiceRequestDefinition;
 }
 
-impl<T> SerializableServiceRequest for T
+// impl<T> SerializableServiceRequest<DirectMarker<M>> for T
+// where
+//     T: JsonSchema,
+// {
+//     fn type_name() -> String {
+//         // We need to use `schema_name` instead of `schema_id` as the definitions generated
+//         // by schemars using the name. But schemars will ensure the names are unique.
+//         T::schema_name()
+//     }
+
+//     fn insert_json_schema(gen: &mut SchemaGenerator) -> ServiceRequestDefinition {
+//         gen.subschema_for::<T>();
+//         ServiceRequestDefinition {
+//             r#type: T::schema_name(),
+//             serializable: true,
+//         }
+//     }
+// }
+
+impl<T, M> SerializableServiceRequest<M> for T
 where
-    T: InferRequest,
-    T::Request: JsonSchema,
+    T: InferRequest<M>,
 {
     fn type_name() -> String {
         // We need to use `schema_name` instead of `schema_id` as the definitions generated
@@ -106,10 +120,11 @@ fn extract_service_name(id: ServiceId) -> String {
     }
 }
 
-fn insert_into_registry_impl<Service, Request, Response>(registry: &mut ServiceRegistry)
-where
-    Request: SerializableServiceRequest,
-    Response: SerializableServiceRequest,
+fn insert_into_registry_impl<Service, Request, Response, ReqMarker, RespMarker>(
+    registry: &mut ServiceRegistry,
+) where
+    Request: SerializableServiceRequest<ReqMarker>,
+    Response: SerializableServiceRequest<RespMarker>,
 {
     let id = std::any::type_name::<Service>();
     let name = extract_service_name(id);
@@ -124,34 +139,47 @@ where
     );
 }
 
-impl<T, M, M2> SerializableService<IntoBuilderMarker<(M, M2)>> for T
+struct IntoServiceBuilderMarker<M> {
+    _unused: PhantomData<M>,
+}
+
+impl<T, M, M2, M3, M4> SerializableService<IntoServiceBuilderMarker<(M, M2, M3, M4)>> for T
 where
     T: IntoServiceBuilder<M>,
     T::Service: IntoService<M2>,
-    <T::Service as IntoService<M2>>::Request: SerializableServiceRequest,
-    <T::Service as IntoService<M2>>::Response: SerializableServiceRequest,
+    <T::Service as IntoService<M2>>::Request: SerializableServiceRequest<M3>,
+    <T::Service as IntoService<M2>>::Response: SerializableServiceRequest<M4>,
 {
     fn insert_into_registry(registry: &mut ServiceRegistry) {
         insert_into_registry_impl::<
             T,
             <T::Service as IntoService<M2>>::Request,
             <T::Service as IntoService<M2>>::Response,
+            M3,
+            M4,
         >(registry);
     }
 }
 
-impl<T, M, M2> SerializableService<IntoContinuousServiceBuilderMarker<(M, M2)>> for T
+struct IntoContinuousServiceBuilderMarker<M> {
+    _unused: PhantomData<M>,
+}
+
+impl<T, M, M2, M3, M4> SerializableService<IntoContinuousServiceBuilderMarker<(M, M2, M3, M4)>>
+    for T
 where
     T: IntoServiceBuilder<M>,
     T::Service: IntoContinuousService<M2>,
-    <T::Service as IntoContinuousService<M2>>::Request: SerializableServiceRequest,
-    <T::Service as IntoContinuousService<M2>>::Response: SerializableServiceRequest,
+    <T::Service as IntoContinuousService<M2>>::Request: SerializableServiceRequest<M3>,
+    <T::Service as IntoContinuousService<M2>>::Response: SerializableServiceRequest<M4>,
 {
     fn insert_into_registry(registry: &mut ServiceRegistry) {
         insert_into_registry_impl::<
             T,
             <T::Service as IntoContinuousService<M2>>::Request,
             <T::Service as IntoContinuousService<M2>>::Response,
+            M3,
+            M4,
         >(registry);
     }
 }
@@ -169,18 +197,18 @@ impl<T> NonSerializableServiceRequest<T> {
     }
 }
 
-pub struct OpaqueService<M> {
+pub struct OpaqueService<const OPAQUE_REQUEST: bool, const OPAQUE_RESPONSE: bool, M> {
     _unused: PhantomData<M>,
 }
 
-pub type OpaqueRequestService<Service, Request, Response> =
-    OpaqueService<(Service, NonSerializableServiceRequest<Request>, Response)>;
+type OpaqueRequestService<Service, Request, Response> =
+    OpaqueService<true, false, (Service, Request, Response)>;
 
-impl<Service, Request, Response>
-    SerializableService<OpaqueRequestService<Service, Request, Response>>
+impl<Service, Request, Response, M>
+    SerializableService<(OpaqueRequestService<Service, Request, Response>, M)>
     for OpaqueRequestService<Service, Request, Response>
 where
-    Response: SerializableServiceRequest,
+    Response: SerializableServiceRequest<M>,
 {
     fn insert_into_registry(registry: &mut ServiceRegistry) {
         let id = std::any::type_name::<OpaqueRequestService<Service, Request, Response>>();
@@ -197,14 +225,14 @@ where
     }
 }
 
-pub type OpaqueResponseService<Service, Request, Response> =
-    OpaqueService<(Service, Request, NonSerializableServiceRequest<Response>)>;
+type OpaqueResponseService<Service, Request, Response> =
+    OpaqueService<false, true, (Service, Request, Response)>;
 
-impl<Service, Request, Response>
-    SerializableService<OpaqueResponseService<Service, Request, Response>>
+impl<Service, Request, Response, M>
+    SerializableService<(OpaqueResponseService<Service, Request, Response>, M)>
     for OpaqueResponseService<Service, Request, Response>
 where
-    Request: SerializableServiceRequest,
+    Request: SerializableServiceRequest<M>,
 {
     fn insert_into_registry(registry: &mut ServiceRegistry) {
         let id = std::any::type_name::<OpaqueResponseService<Service, Request, Response>>();
@@ -221,11 +249,8 @@ where
     }
 }
 
-pub type FullOpaqueService<Service, Request, Response> = OpaqueService<(
-    Service,
-    NonSerializableServiceRequest<Request>,
-    NonSerializableServiceRequest<Response>,
-)>;
+type FullOpaqueService<Service, Request, Response> =
+    OpaqueService<true, true, (Service, Request, Response)>;
 
 impl<Service, Request, Response> SerializableService<FullOpaqueService<Service, Request, Response>>
     for FullOpaqueService<Service, Request, Response>
@@ -258,29 +283,17 @@ where
     /// their request and response types are undefined and cannot be transformed.
     fn into_opaque(
         &self,
-    ) -> OpaqueService<(
-        B::Service,
-        NonSerializableServiceRequest<RequestOf<B, M, M2>>,
-        NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
-    )>;
+    ) -> FullOpaqueService<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>>;
 
     /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the request as opaque.
     fn into_opaque_request(
         self,
-    ) -> OpaqueService<(
-        B::Service,
-        NonSerializableServiceRequest<RequestOf<B, M, M2>>,
-        ResponseOf<B, M, M2>,
-    )>;
+    ) -> OpaqueRequestService<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>>;
 
     /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the response as opaque.
     fn into_opaque_response(
         &self,
-    ) -> OpaqueService<(
-        B::Service,
-        RequestOf<B, M, M2>,
-        NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
-    )>;
+    ) -> OpaqueResponseService<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>>;
 }
 
 impl<B, M, M2> OpaqueRequestExt<B, M, M2> for B
@@ -290,48 +303,24 @@ where
 {
     fn into_opaque(
         &self,
-    ) -> OpaqueService<(
-        B::Service,
-        NonSerializableServiceRequest<RequestOf<B, M, M2>>,
-        NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
-    )> {
-        OpaqueService::<(
-            B::Service,
-            NonSerializableServiceRequest<RequestOf<B, M, M2>>,
-            NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
-        )> {
+    ) -> FullOpaqueService<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>> {
+        FullOpaqueService::<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>> {
             _unused: PhantomData,
         }
     }
 
     fn into_opaque_request(
         self,
-    ) -> OpaqueService<(
-        B::Service,
-        NonSerializableServiceRequest<RequestOf<B, M, M2>>,
-        ResponseOf<B, M, M2>,
-    )> {
-        OpaqueService::<(
-            B::Service,
-            NonSerializableServiceRequest<RequestOf<B, M, M2>>,
-            ResponseOf<B, M, M2>,
-        )> {
+    ) -> OpaqueRequestService<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>> {
+        OpaqueRequestService::<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>> {
             _unused: PhantomData,
         }
     }
 
     fn into_opaque_response(
         &self,
-    ) -> OpaqueService<(
-        B::Service,
-        RequestOf<B, M, M2>,
-        NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
-    )> {
-        OpaqueService::<(
-            B::Service,
-            RequestOf<B, M, M2>,
-            NonSerializableServiceRequest<ResponseOf<B, M, M2>>,
-        )> {
+    ) -> OpaqueResponseService<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>> {
+        OpaqueResponseService::<B::Service, RequestOf<B, M, M2>, ResponseOf<B, M, M2>> {
             _unused: PhantomData,
         }
     }
@@ -435,16 +424,13 @@ impl RegisterServiceExt for App {
 
 #[cfg(test)]
 mod tests {
-    use std::future::Future;
-
+    use super::*;
     use bevy_app::App;
-
-    use crate::{
+    use bevy_impulse::{
         AsyncServiceInput, BlockingServiceInput, ContinuousServiceInput, IntoAsyncService,
         IntoBlockingService,
     };
-
-    use super::*;
+    use std::future::Future;
 
     fn service_with_no_request() {}
 

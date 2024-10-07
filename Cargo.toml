@@ -42,12 +42,11 @@ thiserror = "1.0"
 bevy_core = "0.12"
 bevy_time = "0.12"
 
-schemars = "0.8.21"
-serde_json = "1.0.128"
-serde = { version = "1.0.210", features = ["derive"] }
-
 [features]
 single_threaded_async = ["dep:async-task"]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
+
+[workspace]
+members = ["bevy_impulse_dyn"]
