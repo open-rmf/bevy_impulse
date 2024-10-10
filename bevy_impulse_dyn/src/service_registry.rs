@@ -68,25 +68,6 @@ pub trait SerializableServiceRequest<M> {
     fn insert_json_schema(gen: &mut SchemaGenerator) -> ServiceRequestDefinition;
 }
 
-// impl<T> SerializableServiceRequest<DirectMarker<M>> for T
-// where
-//     T: JsonSchema,
-// {
-//     fn type_name() -> String {
-//         // We need to use `schema_name` instead of `schema_id` as the definitions generated
-//         // by schemars using the name. But schemars will ensure the names are unique.
-//         T::schema_name()
-//     }
-
-//     fn insert_json_schema(gen: &mut SchemaGenerator) -> ServiceRequestDefinition {
-//         gen.subschema_for::<T>();
-//         ServiceRequestDefinition {
-//             r#type: T::schema_name(),
-//             serializable: true,
-//         }
-//     }
-// }
-
 impl<T, M> SerializableServiceRequest<M> for T
 where
     T: InferRequest<M>,
