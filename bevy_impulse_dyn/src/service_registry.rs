@@ -8,8 +8,7 @@ use bevy_impulse::{
 use schemars::JsonSchema;
 
 use crate::{
-    extract_provider_name, IntoOpaqueExt, OpaqueProvider, ProviderId, ProviderRegistry,
-    Serializable, ServiceRegistration,
+    IntoOpaqueExt, OpaqueProvider, ProviderId, ProviderRegistry, Serializable, ServiceRegistration,
 };
 
 /// Helper trait to unwrap the request type of a wrapped request.
@@ -35,14 +34,30 @@ where
 }
 
 pub trait SerializableService<M> {
-    fn service_id() -> ProviderId;
+    type Source;
+    type Request: Serializable;
+    type Response: Serializable;
 
-    fn service_name() -> String {
-        extract_provider_name(Self::service_id())
+    fn provider_id() -> ProviderId {
+        std::any::type_name::<Self::Source>()
     }
 
-    fn insert_into_registry(registry: &mut ProviderRegistry);
+    fn insert_into_registry(registry: &mut ProviderRegistry, name: &'static str) {
+        let id = Self::provider_id();
+        registry.services.insert(
+            id,
+            ServiceRegistration {
+                id,
+                name,
+                request: Self::Request::insert_json_schema(&mut registry.gen),
+                response: Self::Response::insert_json_schema(&mut registry.gen),
+                configure: None,
+            },
+        );
+    }
 }
+
+// impl<T, M> SerializableService<M> for T where T: SerializableProvider<M> {}
 
 struct IntoServiceBuilderMarker<M> {
     _unused: PhantomData<M>,
@@ -58,24 +73,9 @@ where
     <T::Service as IntoService<M2>>::Request: InferRequest<Request>,
     <T::Service as IntoService<M2>>::Response: InferRequest<Response>,
 {
-    fn service_id() -> ProviderId {
-        std::any::type_name::<T::Service>()
-    }
-
-    fn insert_into_registry(registry: &mut ProviderRegistry) {
-        let id = Self::service_id();
-        let name = Self::service_name();
-        registry.services.insert(
-            id,
-            ServiceRegistration {
-                id,
-                name,
-                request: Request::insert_json_schema(&mut registry.gen),
-                response: Response::insert_json_schema(&mut registry.gen),
-                configure: None,
-            },
-        );
-    }
+    type Source = T;
+    type Request = Request;
+    type Response = Response;
 }
 
 struct IntoContinuousServiceBuilderMarker<M> {
@@ -92,33 +92,20 @@ where
     <T::Service as IntoContinuousService<M2>>::Request: InferRequest<Request>,
     <T::Service as IntoContinuousService<M2>>::Response: InferRequest<Response>,
 {
-    fn service_id() -> ProviderId {
-        std::any::type_name::<T::Service>()
-    }
-
-    fn insert_into_registry(registry: &mut ProviderRegistry) {
-        let id = Self::service_id();
-        let name = Self::service_name();
-        registry.services.insert(
-            id,
-            ServiceRegistration {
-                id,
-                name,
-                request: Request::insert_json_schema(&mut registry.gen),
-                response: Response::insert_json_schema(&mut registry.gen),
-                configure: None,
-            },
-        );
-    }
+    type Source = T;
+    type Request = Request;
+    type Response = Response;
 }
 
-struct OpaqueServiceMarker;
+struct OpaqueServiceMarker<M> {
+    _unused: PhantomData<M>,
+}
 
 impl<T, M, M2>
     IntoOpaqueExt<
         <T::Service as IntoService<M2>>::Request,
         <T::Service as IntoService<M2>>::Response,
-        (OpaqueServiceMarker, T::Service, M, M2),
+        OpaqueServiceMarker<(T::Service, M, M2)>,
     > for T
 where
     T: IntoServiceBuilder<M>,
@@ -126,43 +113,21 @@ where
 {
 }
 
-impl<Request, Response, Service, M, M2>
-    SerializableService<OpaqueProvider<Request, Response, (OpaqueServiceMarker, Service, M, M2)>>
-    for OpaqueProvider<Request, Response, (OpaqueServiceMarker, Service, M, M2)>
+impl<Request, Response, Service, M, M2> SerializableService<OpaqueServiceMarker<(Service, M, M2)>>
+    for OpaqueProvider<Request, Response, OpaqueServiceMarker<(Service, M, M2)>>
 where
     Request: Serializable,
     Response: Serializable,
 {
-    fn service_id() -> ProviderId {
-        std::any::type_name::<
-            OpaqueProvider<Request, Response, (OpaqueServiceMarker, Service, M, M2)>,
-        >()
-    }
-
-    fn service_name() -> String {
-        extract_provider_name(std::any::type_name::<Service>())
-    }
-
-    fn insert_into_registry(registry: &mut ProviderRegistry) {
-        let id = Self::service_id();
-        let name = Self::service_name();
-        registry.services.insert(
-            id,
-            ServiceRegistration {
-                id,
-                name,
-                request: Request::insert_json_schema(&mut registry.gen),
-                response: Response::insert_json_schema(&mut registry.gen),
-                configure: None,
-            },
-        );
-    }
+    type Source = Service;
+    type Request = Request;
+    type Response = Response;
 }
 
 pub trait RegisterServiceExt {
     /// Register a service into the service registry. In order to run a serialized workflow,
     /// all services in it must be registered.
-    fn register_service<T, M>(&mut self, service: &T) -> &mut Self
+    fn register_service<T, M>(&mut self, service: &T, name: &'static str) -> &mut Self
     where
         T: SerializableService<M>;
 
@@ -170,18 +135,16 @@ pub trait RegisterServiceExt {
     fn service_registration<T, M>(&self, service: &T) -> Option<&ServiceRegistration>
     where
         T: SerializableService<M>;
-
-    fn service_registry(&mut self) -> &ProviderRegistry;
 }
 
 impl RegisterServiceExt for App {
-    fn register_service<T, M>(&mut self, _service: &T) -> &mut Self
+    fn register_service<T, M>(&mut self, _service: &T, name: &'static str) -> &mut Self
     where
         T: SerializableService<M>,
     {
         self.init_non_send_resource::<ProviderRegistry>(); // nothing happens if the resource already exist
         let mut registry = self.world.non_send_resource_mut::<ProviderRegistry>();
-        T::insert_into_registry(&mut registry);
+        T::insert_into_registry(&mut registry, name);
         self
     }
 
@@ -190,28 +153,25 @@ impl RegisterServiceExt for App {
         T: SerializableService<M>,
     {
         match self.world.get_non_send_resource::<ProviderRegistry>() {
-            Some(registry) => registry.services.get(T::service_id()),
+            Some(registry) => registry.services.get(T::provider_id()),
             None => None,
         }
-    }
-
-    fn service_registry(&mut self) -> &ProviderRegistry {
-        self.init_non_send_resource::<ProviderRegistry>(); // nothing happens if the resource already exist
-        self.world.non_send_resource::<ProviderRegistry>()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use bevy_app::App;
+    use std::future::Future;
+
     use bevy_impulse::{
         AsyncServiceInput, BlockingServiceInput, ContinuousServiceInput, IntoAsyncService,
         IntoBlockingService,
     };
-    use schemars::JsonSchema;
     use serde::Serialize;
-    use std::future::Future;
+
+    use crate::ProviderRegistryExt;
+
+    use super::*;
 
     fn service_with_no_request() {}
 
@@ -220,7 +180,7 @@ mod tests {
         let mut app = App::new();
         let srv = service_with_no_request.into_blocking_service();
         assert!(app.service_registration(&srv).is_none());
-        app.register_service(&srv);
+        app.register_service(&srv, "service_with_no_request");
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.serializable);
         assert!(registration.response.serializable);
@@ -239,7 +199,7 @@ mod tests {
     fn test_register_service_with_request() {
         let mut app = App::new();
         let srv = service_with_request.into_blocking_service();
-        app.register_service(&srv);
+        app.register_service(&srv, "service_with_request");
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.r#type == TestServiceRequest::schema_name());
         assert!(registration.request.serializable);
@@ -262,7 +222,7 @@ mod tests {
     fn test_service_with_req_resp() {
         let mut app = App::new();
         let srv = service_with_req_resp.into_blocking_service();
-        app.register_service(&srv);
+        app.register_service(&srv, "service_with_req_resp");
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.r#type == TestServiceRequest::schema_name());
         assert!(registration.request.serializable);
@@ -279,7 +239,7 @@ mod tests {
     fn test_register_opaque_request_service() {
         let mut app = App::new();
         let srv = opaque_request_service.into_opaque_request();
-        app.register_service(&srv);
+        app.register_service(&srv, "opaque_request_service");
         let registration = app.service_registration(&srv).unwrap();
         assert!(!registration.request.serializable);
         assert!(registration.response.serializable);
@@ -296,7 +256,7 @@ mod tests {
     fn test_opaque_response_service() {
         let mut app = App::new();
         let srv = opaque_response_service.into_opaque_response();
-        app.register_service(&srv);
+        app.register_service(&srv, "opaque_response_service");
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.serializable);
         assert!(!registration.response.serializable);
@@ -312,7 +272,7 @@ mod tests {
     fn test_full_opaque_service() {
         let mut app = App::new();
         let srv = full_opaque_service.into_opaque();
-        app.register_service(&srv);
+        app.register_service(&srv, "full_opaque_service");
         let registration = app.service_registration(&srv).unwrap();
         assert!(!registration.request.serializable);
         assert!(!registration.response.serializable);
@@ -326,7 +286,7 @@ mod tests {
     fn test_register_async_service() {
         let mut app = App::new();
         let srv = async_service.into_async_service();
-        app.register_service(&srv);
+        app.register_service(&srv, "async_service");
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.serializable);
         assert!(registration.response.serializable);
@@ -338,7 +298,7 @@ mod tests {
     fn test_register_continuous_service() {
         let mut app = App::new();
         let srv = continous_service;
-        app.register_service(&srv);
+        app.register_service(&srv, "continous_service");
         let registration = app.service_registration(&srv).unwrap();
         assert!(registration.request.serializable);
         assert!(registration.response.serializable);
@@ -348,8 +308,8 @@ mod tests {
     fn test_serialize_service_registry() {
         let mut app = App::new();
         let srv = service_with_req_resp.into_blocking_service();
-        app.register_service(&srv);
-        let registry = app.service_registry();
+        app.register_service(&srv, "service_with_req_resp");
+        let registry = app.provider_registry();
         let json = serde_json::to_string(registry).unwrap();
         let deserialized: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(
@@ -389,8 +349,8 @@ mod tests {
     fn test_type_definition_pointers() {
         let mut app = App::new();
         let srv = nested_request_service.into_blocking_service();
-        app.register_service(&srv);
-        let json = serde_json::to_value(app.service_registry()).unwrap();
+        app.register_service(&srv, "nested_request_service");
+        let json = serde_json::to_value(app.provider_registry()).unwrap();
         let json_str = serde_json::to_string(&json).unwrap();
         assert!(json_str.contains("#/types/TestServiceRequest"));
     }

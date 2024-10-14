@@ -1,32 +1,23 @@
-use bevy_impulse::Provider;
-use schemars::gen::{SchemaGenerator, SchemaSettings};
-use serde::Serialize;
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
     marker::PhantomData,
 };
 
+use bevy_app::App;
+use schemars::gen::{SchemaGenerator, SchemaSettings};
+use serde::Serialize;
+
 use crate::{MessageMetadata, NonSerializableMessage};
 
 /// Provider id must be fixed and (most likely) known at compile time.
 pub type ProviderId = &'static str;
 
-pub fn extract_provider_name(id: ProviderId) -> String {
-    // get the original function name, this is a very naive implementation that assumes that
-    // there is never more than 1 param in any of the generics. If this proves to be
-    // insufficient, consider using the `syn` crate to do actual parsing.
-    match id.rsplit_once("::") {
-        Some((_, suffix)) => suffix.trim_end_matches(">").to_string(),
-        None => "".to_string(),
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub struct ProviderRegistration {
     pub id: ProviderId,
     /// Friendly name for the provider, may not be unique.
-    pub name: String,
+    pub name: &'static str,
     pub request: MessageMetadata,
     pub response: MessageMetadata,
 }
@@ -46,7 +37,7 @@ impl Hash for ProviderRegistration {
 #[derive(Serialize)]
 pub struct ServiceRegistration {
     pub id: ProviderId,
-    pub name: String,
+    pub name: &'static str,
     pub request: MessageMetadata,
     pub response: MessageMetadata,
     /// type name of the `configure` type
@@ -103,20 +94,6 @@ pub trait IntoOpaqueExt<Request, Response, M> {
     }
 }
 
-struct OpaqueProviderMarker;
-
-impl<T, Request, Response> IntoOpaqueExt<Request, Response, OpaqueProviderMarker> for T where
-    T: Provider
-{
-}
-
-#[derive(Debug, Serialize)]
-pub enum ProviderType {
-    Service,
-    Callback,
-    Map,
-}
-
 fn serialize_provider_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -152,5 +129,16 @@ impl Default for ProviderRegistry {
             maps: HashMap::<ProviderId, ProviderRegistration>::default(),
             gen: SchemaGenerator::new(settings),
         }
+    }
+}
+
+pub trait ProviderRegistryExt {
+    fn provider_registry(&mut self) -> &ProviderRegistry;
+}
+
+impl ProviderRegistryExt for App {
+    fn provider_registry(&mut self) -> &ProviderRegistry {
+        self.init_non_send_resource::<ProviderRegistry>(); // nothing happens if the resource already exist
+        self.world.non_send_resource::<ProviderRegistry>()
     }
 }
