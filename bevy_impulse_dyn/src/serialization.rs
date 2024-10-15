@@ -38,11 +38,11 @@ where
     }
 }
 
-pub struct NonSerializableMessage<T> {
+pub struct OpaqueMessage<T> {
     _unused: PhantomData<T>,
 }
 
-impl<T> Serializable for NonSerializableMessage<T> {
+impl<T> Serializable for OpaqueMessage<T> {
     fn type_name() -> String {
         std::any::type_name::<T>().to_string()
     }

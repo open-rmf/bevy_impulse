@@ -7,9 +7,7 @@ use bevy_impulse::{
 };
 use schemars::JsonSchema;
 
-use crate::{
-    IntoOpaqueExt, OpaqueProvider, ProviderId, ProviderRegistry, Serializable, ServiceRegistration,
-};
+use crate::{IntoOpaqueExt, OpaqueProvider, ProviderRegistry, Serializable, ServiceRegistration};
 
 /// Helper trait to unwrap the request type of a wrapped request.
 trait InferRequest<T> {}
@@ -38,7 +36,7 @@ pub trait SerializableService<M> {
     type Request: Serializable;
     type Response: Serializable;
 
-    fn provider_id() -> ProviderId {
+    fn provider_id() -> &'static str {
         std::any::type_name::<Self::Source>()
     }
 

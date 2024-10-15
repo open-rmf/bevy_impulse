@@ -8,14 +8,11 @@ use bevy_app::App;
 use schemars::gen::{SchemaGenerator, SchemaSettings};
 use serde::Serialize;
 
-use crate::{MessageMetadata, NonSerializableMessage};
-
-/// Provider id must be fixed and (most likely) known at compile time.
-pub type ProviderId = &'static str;
+use crate::{MessageMetadata, OpaqueMessage, Serializable};
 
 #[derive(Debug, Serialize)]
 pub struct ProviderRegistration {
-    pub id: ProviderId,
+    pub id: &'static str,
     /// Friendly name for the provider, may not be unique.
     pub name: &'static str,
     pub request: MessageMetadata,
@@ -36,7 +33,7 @@ impl Hash for ProviderRegistration {
 
 #[derive(Serialize)]
 pub struct ServiceRegistration {
-    pub id: ProviderId,
+    pub id: &'static str,
     pub name: &'static str,
     pub request: MessageMetadata,
     pub response: MessageMetadata,
@@ -56,18 +53,22 @@ impl Hash for ServiceRegistration {
     }
 }
 
-pub struct OpaqueProvider<Request, Response, M> {
+pub struct OpaqueProvider<Request, Response, M>
+where
+    Request: Serializable,
+    Response: Serializable,
+{
     _unused: PhantomData<(Request, Response, M)>,
 }
 
 pub type FullOpaqueProvider<Request, Response, M> =
-    OpaqueProvider<NonSerializableMessage<Request>, NonSerializableMessage<Response>, M>;
+    OpaqueProvider<OpaqueMessage<Request>, OpaqueMessage<Response>, M>;
 
 pub type OpaqueRequestProvider<Request, Response, M> =
-    OpaqueProvider<NonSerializableMessage<Request>, Response, M>;
+    OpaqueProvider<OpaqueMessage<Request>, Response, M>;
 
 pub type OpaqueResponseProvider<Request, Response, M> =
-    OpaqueProvider<Request, NonSerializableMessage<Response>, M>;
+    OpaqueProvider<Request, OpaqueMessage<Response>, M>;
 
 pub trait IntoOpaqueExt<Request, Response, M> {
     /// Mark this provider as fully opaque, this means that both the request and response cannot
@@ -80,14 +81,20 @@ pub trait IntoOpaqueExt<Request, Response, M> {
     }
 
     /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the request as opaque.
-    fn into_opaque_request(&self) -> OpaqueRequestProvider<Request, Response, M> {
+    fn into_opaque_request(&self) -> OpaqueRequestProvider<Request, Response, M>
+    where
+        Response: Serializable,
+    {
         OpaqueRequestProvider::<Request, Response, M> {
             _unused: PhantomData,
         }
     }
 
     /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the response as opaque.
-    fn into_opaque_response(&self) -> OpaqueResponseProvider<Request, Response, M> {
+    fn into_opaque_response(&self) -> OpaqueResponseProvider<Request, Response, M>
+    where
+        Request: Serializable,
+    {
         OpaqueResponseProvider::<Request, Response, M> {
             _unused: PhantomData,
         }
@@ -104,13 +111,13 @@ where
 #[derive(Serialize)]
 pub struct ProviderRegistry {
     /// List of services registered.
-    pub services: HashMap<ProviderId, ServiceRegistration>,
+    pub services: HashMap<&'static str, ServiceRegistration>,
 
     /// List of callbacks registered.
-    pub callbacks: HashMap<ProviderId, ProviderRegistration>,
+    pub callbacks: HashMap<&'static str, ProviderRegistration>,
 
     /// List of maps registered.
-    pub maps: HashMap<ProviderId, ProviderRegistration>,
+    pub maps: HashMap<&'static str, ProviderRegistration>,
 
     /// List of all request and response types used in all registered services, this only
     /// contains serializable types, non serializable types are opaque and is only compatible
@@ -124,9 +131,9 @@ impl Default for ProviderRegistry {
         let mut settings = SchemaSettings::default();
         settings.definitions_path = "#/types/".to_string();
         ProviderRegistry {
-            services: HashMap::<ProviderId, ServiceRegistration>::default(),
-            callbacks: HashMap::<ProviderId, ProviderRegistration>::default(),
-            maps: HashMap::<ProviderId, ProviderRegistration>::default(),
+            services: HashMap::<&'static str, ServiceRegistration>::default(),
+            callbacks: HashMap::<&'static str, ProviderRegistration>::default(),
+            maps: HashMap::<&'static str, ProviderRegistration>::default(),
             gen: SchemaGenerator::new(settings),
         }
     }
