@@ -1,13 +1,71 @@
-use std::marker::PhantomData;
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+};
 
 use bevy_app::App;
 use bevy_impulse::{
     AsyncService, BlockingService, ContinuousService, IntoContinuousService, IntoService,
     IntoServiceBuilder, StreamPack,
 };
-use schemars::JsonSchema;
+use schemars::{
+    gen::{SchemaGenerator, SchemaSettings},
+    JsonSchema,
+};
+use serde::Serialize;
 
-use crate::{IntoOpaqueExt, OpaqueProvider, ProviderRegistry, Serializable, ServiceRegistration};
+use crate::{MessageMetadata, OpaqueMessage, Serializable};
+
+#[derive(Serialize)]
+pub struct ServiceRegistration {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub request: MessageMetadata,
+    pub response: MessageMetadata,
+}
+
+impl PartialEq for ServiceRegistration {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Hash for ServiceRegistration {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+fn serialize_service_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    gen.definitions().serialize(s)
+}
+
+#[derive(Serialize)]
+pub struct ServiceRegistry {
+    /// List of services registered.
+    pub services: HashMap<&'static str, ServiceRegistration>,
+
+    /// List of all request and response types used in all registered services, this only
+    /// contains serializable types, non serializable types are opaque and is only compatible
+    /// with itself.
+    #[serde(rename = "types", serialize_with = "serialize_service_registry_types")]
+    pub(crate) gen: SchemaGenerator,
+}
+
+impl Default for ServiceRegistry {
+    fn default() -> Self {
+        let mut settings = SchemaSettings::default();
+        settings.definitions_path = "#/types/".to_string();
+        ServiceRegistry {
+            services: HashMap::<&'static str, ServiceRegistration>::default(),
+            gen: SchemaGenerator::new(settings),
+        }
+    }
+}
 
 /// Helper trait to unwrap the request type of a wrapped request.
 trait InferRequest<T> {}
@@ -40,7 +98,7 @@ pub trait SerializableService<M> {
         std::any::type_name::<Self::Source>()
     }
 
-    fn insert_into_registry(registry: &mut ProviderRegistry, name: &'static str) {
+    fn insert_into_registry(registry: &mut ServiceRegistry, name: &'static str) {
         let id = Self::provider_id();
         registry.services.insert(
             id,
@@ -49,7 +107,6 @@ pub trait SerializableService<M> {
                 name,
                 request: Self::Request::insert_json_schema(&mut registry.gen),
                 response: Self::Response::insert_json_schema(&mut registry.gen),
-                configure: None,
             },
         );
     }
@@ -95,15 +152,59 @@ where
     type Response = Response;
 }
 
-struct OpaqueServiceMarker<M> {
-    _unused: PhantomData<M>,
+pub struct OpaqueService<Request, Response, M>
+where
+    Request: Serializable,
+    Response: Serializable,
+{
+    _unused: PhantomData<(Request, Response, M)>,
+}
+
+pub type FullOpaqueProvider<Request, Response, M> =
+    OpaqueService<OpaqueMessage<Request>, OpaqueMessage<Response>, M>;
+
+pub type OpaqueRequestProvider<Request, Response, M> =
+    OpaqueService<OpaqueMessage<Request>, Response, M>;
+
+pub type OpaqueResponseProvider<Request, Response, M> =
+    OpaqueService<Request, OpaqueMessage<Response>, M>;
+
+pub trait IntoOpaqueExt<Request, Response, M> {
+    /// Mark this provider as fully opaque, this means that both the request and response cannot
+    /// be serialized. Opaque services can still be registered into the service registry but
+    /// their request and response types are undefined and cannot be transformed.
+    fn into_opaque(&self) -> FullOpaqueProvider<Request, Response, M> {
+        FullOpaqueProvider::<Request, Response, M> {
+            _unused: Default::default(),
+        }
+    }
+
+    /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the request as opaque.
+    fn into_opaque_request(&self) -> OpaqueRequestProvider<Request, Response, M>
+    where
+        Response: Serializable,
+    {
+        OpaqueRequestProvider::<Request, Response, M> {
+            _unused: PhantomData,
+        }
+    }
+
+    /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the response as opaque.
+    fn into_opaque_response(&self) -> OpaqueResponseProvider<Request, Response, M>
+    where
+        Request: Serializable,
+    {
+        OpaqueResponseProvider::<Request, Response, M> {
+            _unused: PhantomData,
+        }
+    }
 }
 
 impl<T, M, M2>
     IntoOpaqueExt<
         <T::Service as IntoService<M2>>::Request,
         <T::Service as IntoService<M2>>::Response,
-        OpaqueServiceMarker<(T::Service, M, M2)>,
+        (T::Service, M, M2),
     > for T
 where
     T: IntoServiceBuilder<M>,
@@ -111,8 +212,8 @@ where
 {
 }
 
-impl<Request, Response, Service, M, M2> SerializableService<OpaqueServiceMarker<(Service, M, M2)>>
-    for OpaqueProvider<Request, Response, OpaqueServiceMarker<(Service, M, M2)>>
+impl<Request, Response, Service, M, M2> SerializableService<(Service, M, M2)>
+    for OpaqueService<Request, Response, (Service, M, M2)>
 where
     Request: Serializable,
     Response: Serializable,
@@ -133,6 +234,8 @@ pub trait RegisterServiceExt {
     fn service_registration<T, M>(&self, service: &T) -> Option<&ServiceRegistration>
     where
         T: SerializableService<M>;
+
+    fn service_registry(&mut self) -> &ServiceRegistry;
 }
 
 impl RegisterServiceExt for App {
@@ -140,8 +243,8 @@ impl RegisterServiceExt for App {
     where
         T: SerializableService<M>,
     {
-        self.init_non_send_resource::<ProviderRegistry>(); // nothing happens if the resource already exist
-        let mut registry = self.world.non_send_resource_mut::<ProviderRegistry>();
+        self.init_non_send_resource::<ServiceRegistry>(); // nothing happens if the resource already exist
+        let mut registry = self.world.non_send_resource_mut::<ServiceRegistry>();
         T::insert_into_registry(&mut registry, name);
         self
     }
@@ -150,10 +253,15 @@ impl RegisterServiceExt for App {
     where
         T: SerializableService<M>,
     {
-        match self.world.get_non_send_resource::<ProviderRegistry>() {
+        match self.world.get_non_send_resource::<ServiceRegistry>() {
             Some(registry) => registry.services.get(T::provider_id()),
             None => None,
         }
+    }
+
+    fn service_registry(&mut self) -> &ServiceRegistry {
+        self.init_non_send_resource::<ServiceRegistry>(); // nothing happens if the resource already exist
+        self.world.non_send_resource::<ServiceRegistry>()
     }
 }
 
@@ -165,9 +273,7 @@ mod tests {
         AsyncServiceInput, BlockingServiceInput, ContinuousServiceInput, IntoAsyncService,
         IntoBlockingService,
     };
-    use serde::Serialize;
-
-    use crate::ProviderRegistryExt;
+    use serde::Deserialize;
 
     use super::*;
 
@@ -186,7 +292,7 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    #[derive(JsonSchema, Serialize)]
+    #[derive(JsonSchema, Deserialize)]
     struct TestServiceRequest {
         msg: String,
     }
@@ -207,7 +313,7 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    #[derive(JsonSchema, Serialize)]
+    #[derive(JsonSchema, Deserialize)]
     struct TestServiceResponse {
         ok: bool,
     }
@@ -307,7 +413,7 @@ mod tests {
         let mut app = App::new();
         let srv = service_with_req_resp.into_blocking_service();
         app.register_service(&srv, "service_with_req_resp");
-        let registry = app.provider_registry();
+        let registry = app.service_registry();
         let json = serde_json::to_string(registry).unwrap();
         let deserialized: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(
@@ -335,7 +441,7 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    #[derive(JsonSchema, Serialize)]
+    #[derive(JsonSchema, Deserialize)]
     struct TestNestedRequest {
         inner: TestServiceRequest,
     }
@@ -348,7 +454,7 @@ mod tests {
         let mut app = App::new();
         let srv = nested_request_service.into_blocking_service();
         app.register_service(&srv, "nested_request_service");
-        let json = serde_json::to_value(app.provider_registry()).unwrap();
+        let json = serde_json::to_value(app.service_registry()).unwrap();
         let json_str = serde_json::to_string(&json).unwrap();
         assert!(json_str.contains("#/types/TestServiceRequest"));
     }

@@ -3,7 +3,7 @@ use std::future::Future;
 use bevy_app::App;
 use bevy_impulse::{AsyncMapDef, AsyncMapOnceDef, BlockingMapDef, BlockingMapOnceDef};
 
-use crate::{IntoOpaqueExt, OpaqueProvider, ProviderRegistration, ProviderRegistry, Serializable};
+use crate::{IntoOpaqueExt, OpaqueNode, ProviderRegistration, ProviderRegistry, Serializable};
 
 pub trait SerializableMap {
     type Request: Serializable;
@@ -69,7 +69,7 @@ impl<Def, Request, Response, Streams> IntoOpaqueExt<Request, Response, OpaqueMap
 {
 }
 
-impl<Request, Response> SerializableMap for OpaqueProvider<Request, Response, OpaqueMapMarker>
+impl<Request, Response> SerializableMap for OpaqueNode<Request, Response, OpaqueMapMarker>
 where
     Request: Serializable,
     Response: Serializable,

@@ -1,7 +1,7 @@
 use bevy_app::App;
 use bevy_impulse::Callback;
 
-use crate::{IntoOpaqueExt, OpaqueProvider, ProviderRegistration, ProviderRegistry, Serializable};
+use crate::{IntoOpaqueExt, OpaqueNode, ProviderRegistration, ProviderRegistry, Serializable};
 
 pub trait SerializableCallback {
     type Request: Serializable;
@@ -36,8 +36,7 @@ impl<Request, Response, Streams> IntoOpaqueExt<Request, Response, OpaqueCallback
 {
 }
 
-impl<Request, Response> SerializableCallback
-    for OpaqueProvider<Request, Response, OpaqueCallbackMarker>
+impl<Request, Response> SerializableCallback for OpaqueNode<Request, Response, OpaqueCallbackMarker>
 where
     Request: Serializable,
     Response: Serializable,

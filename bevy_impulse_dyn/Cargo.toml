@@ -11,6 +11,7 @@ categories = ["science::robotics", "asynchronous", "concurrency", "game-developm
 
 [dependencies]
 bevy_app = "0.12"
+bevy_ecs = "0.12"
 bevy_impulse = { version = "0.0.1", path = ".." }
 schemars = "0.8.21"
 serde = { version = "1.0.210", features = ["derive"] }

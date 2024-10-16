@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use schemars::{gen::SchemaGenerator, JsonSchema};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub struct MessageMetadata {
@@ -21,9 +21,9 @@ pub trait Serializable {
     fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata;
 }
 
-impl<T> Serializable for T
+impl<'de, T> Serializable for T
 where
-    T: JsonSchema + Serialize,
+    T: JsonSchema + Deserialize<'de>,
 {
     fn type_name() -> String {
         T::schema_name()
