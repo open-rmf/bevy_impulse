@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use schemars::{gen::SchemaGenerator, JsonSchema};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct MessageMetadata {
@@ -13,24 +13,24 @@ pub struct MessageMetadata {
     pub serializable: bool,
 }
 
-pub trait Serializable {
-    /// Returns the type name of the request, the type name must be unique across all services.
+pub trait DynType {
+    /// Returns the type name of the request. Note that the type name must be unique.
     fn type_name() -> String;
 
-    /// Insert the request type into the schema generator and returns the request metadata
+    /// Insert the request type into the schema generator and returns the request metadata.
     fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata;
 }
 
-impl<'de, T> Serializable for T
+impl<T> DynType for T
 where
-    T: JsonSchema + Deserialize<'de>,
+    T: JsonSchema,
 {
     fn type_name() -> String {
-        T::schema_name()
+        <()>::schema_name()
     }
 
     fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata {
-        gen.subschema_for::<T>();
+        gen.subschema_for::<()>();
         MessageMetadata {
             r#type: Self::type_name(),
             serializable: true,
@@ -42,7 +42,7 @@ pub struct OpaqueMessage<T> {
     _unused: PhantomData<T>,
 }
 
-impl<T> Serializable for OpaqueMessage<T> {
+impl<T> DynType for OpaqueMessage<T> {
     fn type_name() -> String {
         std::any::type_name::<T>().to_string()
     }
@@ -54,3 +54,12 @@ impl<T> Serializable for OpaqueMessage<T> {
         }
     }
 }
+
+/// Helper trait to unwrap the request type of a wrapped request like `BlockingMap<Request, _>`.
+pub trait InferDynRequest<Request>
+where
+    Request: DynType,
+{
+}
+
+impl<Request> InferDynRequest<Request> for Request where Request: DynType {}

@@ -9,13 +9,10 @@ use bevy_impulse::{
     AsyncService, BlockingService, ContinuousService, IntoContinuousService, IntoService,
     IntoServiceBuilder, StreamPack,
 };
-use schemars::{
-    gen::{SchemaGenerator, SchemaSettings},
-    JsonSchema,
-};
+use schemars::gen::{SchemaGenerator, SchemaSettings};
 use serde::Serialize;
 
-use crate::{MessageMetadata, OpaqueMessage, Serializable};
+use crate::{DynType, InferDynRequest, MessageMetadata, OpaqueMessage};
 
 #[derive(Serialize)]
 pub struct ServiceRegistration {
@@ -67,32 +64,32 @@ impl Default for ServiceRegistry {
     }
 }
 
-/// Helper trait to unwrap the request type of a wrapped request.
-trait InferRequest<T> {}
-
-impl<T> InferRequest<T> for T where T: JsonSchema {}
-
-impl<Request, Streams> InferRequest<Request> for BlockingService<Request, Streams> where
-    Streams: StreamPack
+impl<Request, Streams> InferDynRequest<Request> for BlockingService<Request, Streams>
+where
+    Request: DynType,
+    Streams: StreamPack,
 {
 }
 
-impl<Request, Streams> InferRequest<Request> for AsyncService<Request, Streams> where
-    Streams: StreamPack
+impl<Request, Streams> InferDynRequest<Request> for AsyncService<Request, Streams>
+where
+    Request: DynType,
+    Streams: StreamPack,
 {
 }
 
-impl<Request, Response, Streams> InferRequest<Request>
+impl<Request, Response, Streams> InferDynRequest<Request>
     for ContinuousService<Request, Response, Streams>
 where
+    Request: DynType,
     Streams: StreamPack,
 {
 }
 
 pub trait SerializableService<M> {
     type Source;
-    type Request: Serializable;
-    type Response: Serializable;
+    type Request: DynType;
+    type Response: DynType;
 
     fn provider_id() -> &'static str {
         std::any::type_name::<Self::Source>()
@@ -122,11 +119,11 @@ impl<T, Request, Response, M, M2>
     SerializableService<IntoServiceBuilderMarker<(Request, Response, M, M2)>> for T
 where
     T: IntoServiceBuilder<M>,
-    Request: Serializable,
-    Response: Serializable,
+    Request: DynType,
+    Response: DynType,
     T::Service: IntoService<M2>,
-    <T::Service as IntoService<M2>>::Request: InferRequest<Request>,
-    <T::Service as IntoService<M2>>::Response: InferRequest<Response>,
+    <T::Service as IntoService<M2>>::Request: InferDynRequest<Request>,
+    <T::Service as IntoService<M2>>::Response: InferDynRequest<Response>,
 {
     type Source = T;
     type Request = Request;
@@ -141,11 +138,11 @@ impl<T, Request, Response, M, M2>
     SerializableService<IntoContinuousServiceBuilderMarker<(Request, Response, M, M2)>> for T
 where
     T: IntoServiceBuilder<M>,
-    Request: Serializable,
-    Response: Serializable,
+    Request: DynType,
+    Response: DynType,
     T::Service: IntoContinuousService<M2>,
-    <T::Service as IntoContinuousService<M2>>::Request: InferRequest<Request>,
-    <T::Service as IntoContinuousService<M2>>::Response: InferRequest<Response>,
+    <T::Service as IntoContinuousService<M2>>::Request: InferDynRequest<Request>,
+    <T::Service as IntoContinuousService<M2>>::Response: InferDynRequest<Response>,
 {
     type Source = T;
     type Request = Request;
@@ -154,47 +151,47 @@ where
 
 pub struct OpaqueService<Request, Response, M>
 where
-    Request: Serializable,
-    Response: Serializable,
+    Request: DynType,
+    Response: DynType,
 {
     _unused: PhantomData<(Request, Response, M)>,
 }
 
-pub type FullOpaqueProvider<Request, Response, M> =
+pub type FullOpaqueService<Request, Response, M> =
     OpaqueService<OpaqueMessage<Request>, OpaqueMessage<Response>, M>;
 
-pub type OpaqueRequestProvider<Request, Response, M> =
+pub type OpaqueRequestService<Request, Response, M> =
     OpaqueService<OpaqueMessage<Request>, Response, M>;
 
-pub type OpaqueResponseProvider<Request, Response, M> =
+pub type OpaqueResponseService<Request, Response, M> =
     OpaqueService<Request, OpaqueMessage<Response>, M>;
 
 pub trait IntoOpaqueExt<Request, Response, M> {
     /// Mark this provider as fully opaque, this means that both the request and response cannot
     /// be serialized. Opaque services can still be registered into the service registry but
     /// their request and response types are undefined and cannot be transformed.
-    fn into_opaque(&self) -> FullOpaqueProvider<Request, Response, M> {
-        FullOpaqueProvider::<Request, Response, M> {
+    fn into_opaque(&self) -> FullOpaqueService<Request, Response, M> {
+        FullOpaqueService::<Request, Response, M> {
             _unused: Default::default(),
         }
     }
 
     /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the request as opaque.
-    fn into_opaque_request(&self) -> OpaqueRequestProvider<Request, Response, M>
+    fn into_opaque_request(&self) -> OpaqueRequestService<Request, Response, M>
     where
-        Response: Serializable,
+        Response: DynType,
     {
-        OpaqueRequestProvider::<Request, Response, M> {
+        OpaqueRequestService::<Request, Response, M> {
             _unused: PhantomData,
         }
     }
 
     /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the response as opaque.
-    fn into_opaque_response(&self) -> OpaqueResponseProvider<Request, Response, M>
+    fn into_opaque_response(&self) -> OpaqueResponseService<Request, Response, M>
     where
-        Request: Serializable,
+        Request: DynType,
     {
-        OpaqueResponseProvider::<Request, Response, M> {
+        OpaqueResponseService::<Request, Response, M> {
             _unused: PhantomData,
         }
     }
@@ -215,8 +212,8 @@ where
 impl<Request, Response, Service, M, M2> SerializableService<(Service, M, M2)>
     for OpaqueService<Request, Response, (Service, M, M2)>
 where
-    Request: Serializable,
-    Response: Serializable,
+    Request: DynType,
+    Response: DynType,
 {
     type Source = Service;
     type Request = Request;
@@ -273,6 +270,7 @@ mod tests {
         AsyncServiceInput, BlockingServiceInput, ContinuousServiceInput, IntoAsyncService,
         IntoBlockingService,
     };
+    use schemars::JsonSchema;
     use serde::Deserialize;
 
     use super::*;
