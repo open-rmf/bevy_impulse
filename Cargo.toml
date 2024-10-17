@@ -47,3 +47,6 @@ single_threaded_async = ["dep:async-task"]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
+
+[workspace]
+members = ["bevy_impulse_dyn"]
