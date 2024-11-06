@@ -1,10 +1,40 @@
-use std::marker::PhantomData;
+use std::{error::Error, fmt::Display};
 
 use schemars::{gen::SchemaGenerator, JsonSchema};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
+
+#[derive(Debug)]
+pub(crate) enum SerializationError {
+    NotSupported,
+    JsonError(serde_json::Error),
+}
+
+impl Display for SerializationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotSupported => f.write_str("not supported"),
+            Self::JsonError(err) => err.fmt(f),
+        }
+    }
+}
+
+impl Error for SerializationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::NotSupported => None,
+            Self::JsonError(err) => Some(err),
+        }
+    }
+}
+
+impl From<serde_json::Error> for SerializationError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::JsonError(value)
+    }
+}
 
 #[derive(Debug, Serialize)]
-pub struct MessageMetadata {
+pub(crate) struct MessageMetadata {
     /// The type of the message, if the message is serializable, this will be the json schema
     /// type, if it is not serializable, it will be the rust type.
     pub r#type: String,
@@ -13,12 +43,11 @@ pub struct MessageMetadata {
     pub serializable: bool,
 }
 
-pub trait DynType {
+pub trait DynType: Sized {
     /// Returns the type name of the request. Note that the type name must be unique.
     fn type_name() -> String;
 
-    /// Insert the request type into the schema generator and returns the request metadata.
-    fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata;
+    fn json_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema;
 }
 
 impl<T> DynType for T
@@ -29,37 +58,65 @@ where
         <()>::schema_name()
     }
 
-    fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata {
-        gen.subschema_for::<()>();
-        MessageMetadata {
-            r#type: Self::type_name(),
-            serializable: true,
-        }
+    fn json_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+        gen.subschema_for::<()>()
     }
 }
 
-pub struct OpaqueMessage<T> {
-    _unused: PhantomData<T>,
+pub(crate) trait Serializer<T> {
+    fn type_name() -> String;
+
+    fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata;
+
+    fn from_json(json: serde_json::Value) -> Result<T, SerializationError>;
+
+    fn to_json(v: &T) -> Result<serde_json::Value, SerializationError>;
 }
 
-impl<T> DynType for OpaqueMessage<T> {
+impl<T> Serializer<T> for T
+where
+    T: DynType + Serialize + DeserializeOwned,
+{
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata {
+        T::json_schema(gen);
+        MessageMetadata {
+            r#type: T::type_name(),
+            serializable: true,
+        }
+    }
+
+    fn from_json(json: serde_json::Value) -> Result<Self, SerializationError> {
+        serde_json::from_value::<Self>(json).map_err(|err| SerializationError::from(err))
+    }
+
+    fn to_json(v: &Self) -> Result<serde_json::Value, SerializationError> {
+        serde_json::to_value(v).map_err(|err| SerializationError::from(err))
+    }
+}
+
+pub(crate) struct OpaqueMessageSerializer;
+
+impl<T> Serializer<T> for OpaqueMessageSerializer {
     fn type_name() -> String {
         std::any::type_name::<T>().to_string()
     }
 
     fn insert_json_schema(_gen: &mut SchemaGenerator) -> MessageMetadata {
         MessageMetadata {
-            r#type: Self::type_name(),
+            r#type: <OpaqueMessageSerializer as Serializer<T>>::type_name(),
             serializable: false,
         }
     }
-}
 
-/// Helper trait to unwrap the request type of a wrapped request like `BlockingMap<Request, _>`.
-pub trait InferDynRequest<Request>
-where
-    Request: DynType,
-{
-}
+    fn from_json(_json: serde_json::Value) -> Result<T, SerializationError> {
+        Err(SerializationError::NotSupported)
+    }
 
-impl<Request> InferDynRequest<Request> for Request where Request: DynType {}
+    fn to_json(_v: &T) -> Result<serde_json::Value, SerializationError> {
+        Err(SerializationError::NotSupported)
+    }
+}

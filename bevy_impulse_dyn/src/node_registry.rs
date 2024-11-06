@@ -1,35 +1,43 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::collections::HashMap;
 
-use bevy_ecs::{entity::Entity, world::World};
-use bevy_impulse::{Builder, Node, StreamPack};
+use bevy_ecs::entity::Entity;
+use bevy_impulse::{Builder, InputSlot, Node, Output, StreamPack};
 use schemars::gen::{SchemaGenerator, SchemaSettings};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{DynType, InferDynRequest, MessageMetadata, OpaqueMessage};
+use crate::{DynType, MessageMetadata, OpaqueMessageSerializer, Serializer};
 
-pub struct DynInputSlot {
+struct DynInputSlot {
     scope: Entity,
     source: Entity,
 }
 
-pub struct DynOutput {
+struct DynOutput {
     scope: Entity,
     target: Entity,
 }
 
+#[derive(Serialize)]
+struct NodeMetadata {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub request: MessageMetadata,
+    pub response: MessageMetadata,
+}
+
 /// A type erased [`bevy_impulse::Node`]
-pub struct DynNode {
+struct DynNode {
     pub input: DynInputSlot,
     pub output: DynOutput,
 }
 
 impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
 where
-    Response: 'static + Send + Sync,
+    Response: Send + Sync + 'static,
     Streams: StreamPack,
 {
     fn from(value: Node<Request, Response, Streams>) -> Self {
-        DynNode {
+        Self {
             input: DynInputSlot {
                 scope: value.input.scope(),
                 source: value.input.id(),
@@ -42,18 +50,25 @@ where
     }
 }
 
-#[derive(Serialize)]
 pub struct NodeRegistration {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub request: MessageMetadata,
-    pub response: MessageMetadata,
-
-    #[serde(skip)]
+    metadata: NodeMetadata,
     create_node: Box<dyn Fn(&mut Builder) -> DynNode>,
+    create_receiver: Box<dyn Fn(&mut Builder) -> DynNode>,
+    create_sender: Box<dyn Fn(&mut Builder) -> DynNode>,
 }
 
-fn serialize_provider_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
+/// Serializes the node registrations as a map of node metadata.
+fn serialize_node_registry_nodes<S>(
+    nodes: &HashMap<&'static str, NodeRegistration>,
+    s: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.collect_map(nodes.iter().map(|(k, v)| (*k, &v.metadata)))
+}
+
+fn serialize_node_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
@@ -62,12 +77,13 @@ where
 
 #[derive(Serialize)]
 pub struct NodeRegistry {
+    #[serde(serialize_with = "serialize_node_registry_nodes")]
     nodes: HashMap<&'static str, NodeRegistration>,
 
     /// List of all request and response types used in all registered nodes, this only
     /// contains serializable types, non serializable types are opaque and is only compatible
     /// with itself.
-    #[serde(rename = "types", serialize_with = "serialize_provider_registry_types")]
+    #[serde(rename = "types", serialize_with = "serialize_node_registry_types")]
     gen: SchemaGenerator,
 }
 
@@ -82,235 +98,247 @@ impl Default for NodeRegistry {
     }
 }
 
-pub struct OpaqueNode<Request, Response, SourceNode>
-where
-    SourceNode: Into<DynNode>,
-{
-    source: SourceNode,
-    _unused: PhantomData<(Request, Response)>,
-}
-
-impl<Request, Response, SourceNode> From<OpaqueNode<Request, Response, SourceNode>> for DynNode
-where
-    SourceNode: Into<DynNode>,
-{
-    fn from(value: OpaqueNode<Request, Response, SourceNode>) -> Self {
-        value.source.into()
-    }
-}
-
-pub type FullOpaqueNode<Request, Response, Streams> =
-    OpaqueNode<OpaqueMessage<Request>, OpaqueMessage<Response>, Node<Request, Response, Streams>>;
-
-pub type OpaqueRequestNode<Request, Response, Streams> =
-    OpaqueNode<OpaqueMessage<Request>, Response, Node<Request, Response, Streams>>;
-
-pub type OpaqueResponseNode<Request, Response, Streams> =
-    OpaqueNode<Request, OpaqueMessage<Response>, Node<Request, Response, Streams>>;
-
-pub trait IntoOpaqueNodeExt<Request, Response, Streams> {
-    /// Mark this provider as fully opaque, this means that both the request and response cannot
-    /// be serialized. Opaque nodes can still be registered into the node registry but
-    /// their request and response types are undefined and cannot be transformed.
-    fn into_opaque(self) -> FullOpaqueNode<Request, Response, Streams>
-    where
-        Response: 'static + Send + Sync,
-        Streams: StreamPack;
-
-    /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the request as opaque.
-    fn into_opaque_request(self) -> OpaqueRequestNode<Request, Response, Streams>
-    where
-        Response: DynType + 'static + Send + Sync,
-        Streams: StreamPack;
-
-    /// Similar to [`OpaqueRequestExt::into_opaque`] but only mark the response as opaque.
-    fn into_opaque_response<InnerReq>(self) -> OpaqueResponseNode<Request, Response, Streams>
-    where
-        Request: InferDynRequest<InnerReq>,
-        InnerReq: DynType,
-        Response: 'static + Send + Sync,
-        Streams: StreamPack;
-}
-
-impl<Request, Response, Streams> IntoOpaqueNodeExt<Request, Response, Streams>
-    for Node<Request, Response, Streams>
-where
-    Streams: StreamPack,
-{
-    fn into_opaque(self) -> FullOpaqueNode<Request, Response, Streams>
-    where
-        Response: 'static + Send + Sync,
-        Streams: StreamPack,
-    {
-        FullOpaqueNode {
-            source: self,
-            _unused: Default::default(),
-        }
-    }
-
-    fn into_opaque_request(self) -> OpaqueRequestNode<Request, Response, Streams>
-    where
-        Response: DynType + 'static + Send + Sync,
-        Streams: StreamPack,
-    {
-        OpaqueRequestNode {
-            source: self,
-            _unused: Default::default(),
-        }
-    }
-
-    fn into_opaque_response<InnerReq>(self) -> OpaqueResponseNode<Request, Response, Streams>
-    where
-        Request: InferDynRequest<InnerReq>,
-        InnerReq: DynType,
-        Response: 'static + Send + Sync,
-        Streams: StreamPack,
-    {
-        OpaqueResponseNode {
-            source: self,
-            _unused: Default::default(),
-        }
-    }
-}
-
-pub trait SerializableNode<M>: Into<DynNode> {
-    type Request: DynType;
-    type Response: DynType;
-}
-
-impl<Request, InnerReq, Response, Streams> SerializableNode<InnerReq>
-    for Node<Request, Response, Streams>
-where
-    Request: InferDynRequest<InnerReq>,
-    InnerReq: DynType,
-    Response: DynType + 'static + Send + Sync,
-    Streams: StreamPack,
-{
-    type Request = InnerReq;
-    type Response = Response;
-}
-
-impl<Request, InnerReq, Response, SourceNode> SerializableNode<InnerReq>
-    for OpaqueNode<Request, Response, SourceNode>
-where
-    Request: InferDynRequest<InnerReq>,
-    InnerReq: DynType,
-    Response: DynType,
-    SourceNode: Into<DynNode>,
-{
-    type Request = InnerReq;
-    type Response = Response;
-}
-
-pub trait RegisterNodeExt {
-    fn register_node<N, M>(
+impl NodeRegistry {
+    pub fn register_node<Request, Response, Streams>(
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl Fn(&mut Builder) -> N + 'static,
+        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
     ) -> &mut Self
     where
-        N: SerializableNode<M>;
+        Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
+        Response: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
+        Streams: StreamPack,
+    {
+        register_node_impl::<Request, Response, Streams, Request, Response>(id, name, self, f);
+        self
+    }
 
-    fn node_registration(&mut self, id: &'static str) -> Option<&NodeRegistration>;
-}
-
-impl RegisterNodeExt for World {
-    fn register_node<N, M>(
+    pub fn register_opaque_node<Request, Response, Streams>(
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl Fn(&mut Builder) -> N + 'static,
+        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
     ) -> &mut Self
     where
-        N: SerializableNode<M>,
+        Request: Send + Sync + 'static,
+        Response: Send + Sync + 'static,
+        Streams: StreamPack,
     {
-        self.init_non_send_resource::<NodeRegistry>(); // nothing happens if the resource already exist
-        let mut registry = self.non_send_resource_mut::<NodeRegistry>();
-        let request = N::Request::insert_json_schema(&mut registry.gen);
-        let response = N::Response::insert_json_schema(&mut registry.gen);
-        let create_node = Box::new(move |builder: &mut Builder| f(builder).into());
-        registry.nodes.insert(
-            id,
-            NodeRegistration {
-                id,
-                name,
-                request,
-                response,
-                create_node,
-            },
+        register_node_impl::<
+            Request,
+            Response,
+            Streams,
+            OpaqueMessageSerializer,
+            OpaqueMessageSerializer,
+        >(id, name, self, f);
+        self
+    }
+
+    pub fn register_opaque_request_node<Request, Response, Streams>(
+        &mut self,
+        id: &'static str,
+        name: &'static str,
+        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+    ) -> &mut Self
+    where
+        Request: Send + Sync + 'static,
+        Response: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
+        Streams: StreamPack,
+    {
+        register_node_impl::<Request, Response, Streams, OpaqueMessageSerializer, Response>(
+            id, name, self, f,
         );
         self
     }
 
-    fn node_registration(&mut self, id: &'static str) -> Option<&NodeRegistration> {
-        match self.get_non_send_resource::<NodeRegistry>() {
-            Some(registry) => registry.nodes.get(id),
-            None => None,
-        }
+    pub fn register_opaque_response_node<Request, Response, Streams>(
+        &mut self,
+        id: &'static str,
+        name: &'static str,
+        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+    ) -> &mut Self
+    where
+        Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
+        Response: Send + Sync + 'static,
+        Streams: StreamPack,
+    {
+        register_node_impl::<Request, Response, Streams, Request, OpaqueMessageSerializer>(
+            id, name, self, f,
+        );
+        self
+    }
+
+    pub fn get_registration(&self, id: &'static str) -> Option<&NodeRegistration> {
+        self.nodes.get(id)
+    }
+}
+
+fn register_node_impl<Request, Response, Streams, RequestSerializer, ResponseSerializer>(
+    id: &'static str,
+    name: &'static str,
+    registry: &mut NodeRegistry,
+    f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+) where
+    Request: Send + Sync + 'static,
+    Response: Send + Sync + 'static,
+    Streams: StreamPack,
+    RequestSerializer: Serializer<Request>,
+    ResponseSerializer: Serializer<Response>,
+{
+    let request = RequestSerializer::insert_json_schema(&mut registry.gen);
+    let response = ResponseSerializer::insert_json_schema(&mut registry.gen);
+    registry.nodes.insert(
+        id,
+        NodeRegistration {
+            metadata: NodeMetadata {
+                id,
+                name,
+                request,
+                response,
+            },
+            create_node: Box::new(move |builder: &mut Builder| f(builder).into()),
+            create_receiver: Box::new(move |builder| {
+                builder
+                    .create_map_block(|json: serde_json::Value| {
+                        // FIXME(koonpeng): how to fail the workflow?
+                        RequestSerializer::from_json(json).unwrap()
+                    })
+                    .into()
+            }),
+            create_sender: Box::new(move |builder| {
+                builder
+                    .create_map_block(|resp: Response| {
+                        // FIXME(koonpeng): how to fail the workflow?
+                        ResponseSerializer::to_json(&resp).unwrap()
+                    })
+                    .into()
+            }),
+        },
+    );
+}
+
+struct DynWorkflowBuilder<'b, 'w, 's, 'a> {
+    builder: &'b mut Builder<'w, 's, 'a>,
+    registry: &'b NodeRegistry,
+}
+
+impl<'b, 'w, 's, 'a> DynWorkflowBuilder<'b, 'w, 's, 'a> {
+    fn from_serialized_workflow() {
+        panic!("TODO");
+    }
+
+    fn connect(&mut self, output: DynOutput, input: DynInputSlot) {
+        // `InputSlot` and `Output` types are only used for compile time checks, if we could
+        // create `InputSlot` and `Output` directly, then we wouldn't need unsafe.
+        let o: Output<()> = unsafe { std::mem::transmute(output) };
+        let i: InputSlot<()> = unsafe { std::mem::transmute(input) };
+        self.builder.connect(o, i);
+    }
+
+    fn receive(&mut self, output: Output<serde_json::Value>, input: DynInputSlot) {
+        let i: InputSlot<serde_json::Value> = unsafe { std::mem::transmute(input) };
+        self.builder.connect(output, i);
+    }
+
+    fn send(&mut self, output: DynOutput, input: InputSlot<serde_json::Value>) {
+        let o: Output<serde_json::Value> = unsafe { std::mem::transmute(output) };
+        self.builder.connect(o, input);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bevy_app::App;
-    use bevy_impulse::BlockingMap;
+    use std::time::Duration;
+
+    use bevy_impulse::{testing::TestingContext, RequestExt, Scope};
 
     use super::*;
 
+    fn multiply3(i: i64) -> i64 {
+        i * 3
+    }
+
     #[test]
     fn test_register_node() {
-        let test_map = |_: BlockingMap<()>| {};
-
-        let mut app = App::new();
-        app.world
-            .register_node("test_node", "Test Name", move |builder: &mut Builder| {
-                builder.create_map_block(test_map)
-            });
-        let registration = app.world.node_registration("test_node").unwrap();
-        assert!(registration.request.serializable);
-        assert!(registration.response.serializable);
+        let mut registry = NodeRegistry::default();
+        registry.register_node("multiply3", "Test Name", move |builder: &mut Builder| {
+            builder.create_map_block(multiply3)
+        });
+        let registration = registry.get_registration("multiply3").unwrap();
+        assert!(registration.metadata.request.serializable);
+        assert!(registration.metadata.response.serializable);
     }
 
     struct NonSerializableRequest {}
 
     #[test]
     fn test_register_opaque_node() {
-        let opaque_request_map = |_: BlockingMap<NonSerializableRequest>| {};
+        let opaque_request_map = |_: NonSerializableRequest| {};
 
-        let mut app = App::new();
-        app.world
-            .register_node("opaque_request_map", "Test Name", move |builder| {
-                builder
-                    .create_map_block(opaque_request_map)
-                    .into_opaque_request()
-            });
-        assert!(app.world.node_registration("opaque_request_map").is_some());
-        let registration = app.world.node_registration("opaque_request_map").unwrap();
-        assert!(!registration.request.serializable);
-        assert!(registration.response.serializable);
+        let mut registry = NodeRegistry::default();
+        registry.register_opaque_request_node("opaque_request_map", "Test Name", move |builder| {
+            builder.create_map_block(opaque_request_map)
+        });
+        assert!(registry.get_registration("opaque_request_map").is_some());
+        let registration = registry.get_registration("opaque_request_map").unwrap();
+        assert!(!registration.metadata.request.serializable);
+        assert!(registration.metadata.response.serializable);
 
-        let opaque_response_map = |_: BlockingMap<()>| NonSerializableRequest {};
-        app.world
-            .register_node("opaque_response_map", "Test Name", move |builder| {
-                builder
-                    .create_map_block(opaque_response_map)
-                    .into_opaque_response()
-            });
-        assert!(app.world.node_registration("opaque_response_map").is_some());
-        let registration = app.world.node_registration("opaque_response_map").unwrap();
-        assert!(registration.request.serializable);
-        assert!(!registration.response.serializable);
+        let opaque_response_map = |_: ()| NonSerializableRequest {};
+        registry.register_opaque_response_node(
+            "opaque_response_map",
+            "Test Name",
+            move |builder| builder.create_map_block(opaque_response_map),
+        );
+        assert!(registry.get_registration("opaque_response_map").is_some());
+        let registration = registry.get_registration("opaque_response_map").unwrap();
+        assert!(registration.metadata.request.serializable);
+        assert!(!registration.metadata.response.serializable);
 
-        let opaque_req_resp_map =
-            |_: BlockingMap<NonSerializableRequest>| NonSerializableRequest {};
-        app.world
-            .register_node("opaque_req_resp_map", "Test Name", move |builder| {
-                builder.create_map_block(opaque_req_resp_map).into_opaque()
-            });
-        assert!(app.world.node_registration("opaque_req_resp_map").is_some());
-        let registration = app.world.node_registration("opaque_req_resp_map").unwrap();
-        assert!(!registration.request.serializable);
-        assert!(!registration.response.serializable);
+        let opaque_req_resp_map = |_: NonSerializableRequest| NonSerializableRequest {};
+        registry.register_opaque_node("opaque_req_resp_map", "Test Name", move |builder| {
+            builder.create_map_block(opaque_req_resp_map)
+        });
+        assert!(registry.get_registration("opaque_req_resp_map").is_some());
+        let registration = registry.get_registration("opaque_req_resp_map").unwrap();
+        assert!(!registration.metadata.request.serializable);
+        assert!(!registration.metadata.response.serializable);
+    }
+
+    #[test]
+    fn test_run_dyn_workflow() {
+        let mut registry = NodeRegistry::default();
+        let mut context = TestingContext::minimal_plugins();
+
+        registry.register_node("multiply3", "multiply3", |builder| {
+            builder.create_map_block(&multiply3)
+        });
+
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<serde_json::Value, serde_json::Value, ()>, builder: &mut Builder| {
+                let mut dyn_builder = DynWorkflowBuilder {
+                    builder,
+                    registry: &registry,
+                };
+                let builder = &mut dyn_builder.builder;
+
+                let r = registry.get_registration("multiply3").unwrap();
+                let receiver = (r.create_receiver)(builder);
+                let sender = (r.create_sender)(builder);
+                let n = (r.create_node)(builder);
+                dyn_builder.receive(scope.input, receiver.input);
+                dyn_builder.connect(receiver.output, n.input);
+                dyn_builder.connect(n.output, sender.input);
+                dyn_builder.send(sender.output, scope.terminate);
+            },
+        );
+
+        let mut promise = context.command(|cmds| {
+            cmds.request(serde_json::Value::from(4), workflow)
+                .take_response()
+        });
+        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        assert_eq!(promise.take().available().unwrap(), 12);
     }
 }
