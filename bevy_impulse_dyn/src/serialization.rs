@@ -43,7 +43,7 @@ pub(crate) struct MessageMetadata {
     pub serializable: bool,
 }
 
-pub trait DynType: Sized {
+pub trait DynType {
     /// Returns the type name of the request. Note that the type name must be unique.
     fn type_name() -> String;
 
@@ -55,7 +55,7 @@ where
     T: JsonSchema,
 {
     fn type_name() -> String {
-        <()>::schema_name()
+        <T>::schema_name()
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, error::Error, fmt::Display};
 
 use bevy_ecs::entity::Entity;
 use bevy_impulse::{Builder, InputSlot, Node, Output, StreamPack};
@@ -7,14 +7,19 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{DynType, MessageMetadata, OpaqueMessageSerializer, Serializer};
 
-struct DynInputSlot {
+struct DynSlot {
     scope: Entity,
-    source: Entity,
+    id: Entity,
+}
+
+struct DynInput {
+    slot: DynSlot,
+    r#type: String,
 }
 
 struct DynOutput {
-    scope: Entity,
-    target: Entity,
+    slot: DynSlot,
+    r#type: String,
 }
 
 #[derive(Serialize)]
@@ -27,24 +32,34 @@ struct NodeMetadata {
 
 /// A type erased [`bevy_impulse::Node`]
 struct DynNode {
-    pub input: DynInputSlot,
-    pub output: DynOutput,
+    input: DynInput,
+    output: DynOutput,
 }
 
-impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
-where
-    Response: Send + Sync + 'static,
-    Streams: StreamPack,
-{
-    fn from(value: Node<Request, Response, Streams>) -> Self {
+impl DynNode {
+    fn new<Request, Response>(
+        input: InputSlot<Request>,
+        input_type: String,
+        output: Output<Response>,
+        output_type: String,
+    ) -> Self
+    where
+        Response: Send + Sync + 'static,
+    {
         Self {
-            input: DynInputSlot {
-                scope: value.input.scope(),
-                source: value.input.id(),
+            input: DynInput {
+                slot: DynSlot {
+                    scope: input.scope(),
+                    id: input.id(),
+                },
+                r#type: input_type,
             },
             output: DynOutput {
-                scope: value.output.scope(),
-                target: value.output.id(),
+                slot: DynSlot {
+                    scope: output.scope(),
+                    id: output.id(),
+                },
+                r#type: output_type,
             },
         }
     }
@@ -197,26 +212,66 @@ fn register_node_impl<Request, Response, Streams, RequestSerializer, ResponseSer
                 request,
                 response,
             },
-            create_node: Box::new(move |builder: &mut Builder| f(builder).into()),
+            create_node: Box::new(move |builder: &mut Builder| {
+                let n = f(builder);
+                DynNode::new(
+                    n.input,
+                    RequestSerializer::type_name(),
+                    n.output,
+                    ResponseSerializer::type_name(),
+                )
+            }),
             create_receiver: Box::new(move |builder| {
-                builder
-                    .create_map_block(|json: serde_json::Value| {
-                        // FIXME(koonpeng): how to fail the workflow?
-                        RequestSerializer::from_json(json).unwrap()
-                    })
-                    .into()
+                let n = builder.create_map_block(|json: serde_json::Value| {
+                    // FIXME(koonpeng): how to fail the workflow?
+                    RequestSerializer::from_json(json).unwrap()
+                });
+                DynNode::new(
+                    n.input,
+                    std::any::type_name::<serde_json::Value>().to_string(),
+                    n.output,
+                    ResponseSerializer::type_name(),
+                )
             }),
             create_sender: Box::new(move |builder| {
-                builder
-                    .create_map_block(|resp: Response| {
-                        // FIXME(koonpeng): how to fail the workflow?
-                        ResponseSerializer::to_json(&resp).unwrap()
-                    })
-                    .into()
+                let n = builder.create_map_block(|resp: Response| {
+                    // FIXME(koonpeng): how to fail the workflow?
+                    ResponseSerializer::to_json(&resp).unwrap()
+                });
+                DynNode::new(
+                    n.input,
+                    RequestSerializer::type_name(),
+                    n.output,
+                    std::any::type_name::<serde_json::Value>().to_string(),
+                )
             }),
         },
     );
 }
+
+#[derive(Debug)]
+struct TypePair {
+    input: String,
+    output: String,
+}
+
+#[derive(Debug)]
+enum ConnectionError {
+    TypeMismatch(TypePair),
+}
+
+impl Display for ConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TypeMismatch(types) => f.write_fmt(format_args!(
+                "input [{}] does not match output [{}]",
+                types.input, types.output
+            )),
+        }
+    }
+}
+
+impl Error for ConnectionError {}
 
 struct DynWorkflowBuilder<'b, 'w, 's, 'a> {
     builder: &'b mut Builder<'w, 's, 'a>,
@@ -224,33 +279,61 @@ struct DynWorkflowBuilder<'b, 'w, 's, 'a> {
 }
 
 impl<'b, 'w, 's, 'a> DynWorkflowBuilder<'b, 'w, 's, 'a> {
-    fn from_serialized_workflow() {
-        panic!("TODO");
-    }
+    fn connect(&mut self, output: DynOutput, input: DynInput) -> Result<(), ConnectionError> {
+        if output.r#type != input.r#type {
+            return Err(ConnectionError::TypeMismatch(TypePair {
+                output: output.r#type,
+                input: input.r#type,
+            }));
+        }
 
-    fn connect(&mut self, output: DynOutput, input: DynInputSlot) {
         // `InputSlot` and `Output` types are only used for compile time checks, if we could
         // create `InputSlot` and `Output` directly, then we wouldn't need unsafe.
-        let o: Output<()> = unsafe { std::mem::transmute(output) };
-        let i: InputSlot<()> = unsafe { std::mem::transmute(input) };
+        let o: Output<()> = unsafe { std::mem::transmute(output.slot) };
+        let i: InputSlot<()> = unsafe { std::mem::transmute(input.slot) };
         self.builder.connect(o, i);
+        Ok(())
     }
 
-    fn receive(&mut self, output: Output<serde_json::Value>, input: DynInputSlot) {
-        let i: InputSlot<serde_json::Value> = unsafe { std::mem::transmute(input) };
+    fn receive(
+        &mut self,
+        output: Output<serde_json::Value>,
+        input: DynInput,
+    ) -> Result<(), ConnectionError> {
+        let json_type_name = std::any::type_name::<serde_json::Value>().to_string();
+        if input.r#type != json_type_name {
+            return Err(ConnectionError::TypeMismatch(TypePair {
+                output: json_type_name,
+                input: input.r#type,
+            }));
+        }
+
+        let i: InputSlot<serde_json::Value> = unsafe { std::mem::transmute(input.slot) };
         self.builder.connect(output, i);
+        Ok(())
     }
 
-    fn send(&mut self, output: DynOutput, input: InputSlot<serde_json::Value>) {
-        let o: Output<serde_json::Value> = unsafe { std::mem::transmute(output) };
+    fn send(
+        &mut self,
+        output: DynOutput,
+        input: InputSlot<serde_json::Value>,
+    ) -> Result<(), ConnectionError> {
+        let json_type_name = std::any::type_name::<serde_json::Value>().to_string();
+        if output.r#type != json_type_name {
+            return Err(ConnectionError::TypeMismatch(TypePair {
+                output: output.r#type,
+                input: json_type_name,
+            }));
+        }
+
+        let o: Output<serde_json::Value> = unsafe { std::mem::transmute(output.slot) };
         self.builder.connect(o, input);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use bevy_impulse::{testing::TestingContext, RequestExt, Scope};
 
     use super::*;
@@ -327,10 +410,10 @@ mod tests {
                 let receiver = (r.create_receiver)(builder);
                 let sender = (r.create_sender)(builder);
                 let n = (r.create_node)(builder);
-                dyn_builder.receive(scope.input, receiver.input);
-                dyn_builder.connect(receiver.output, n.input);
-                dyn_builder.connect(n.output, sender.input);
-                dyn_builder.send(sender.output, scope.terminate);
+                dyn_builder.receive(scope.input, receiver.input).unwrap();
+                dyn_builder.connect(receiver.output, n.input).unwrap();
+                dyn_builder.connect(n.output, sender.input).unwrap();
+                dyn_builder.send(sender.output, scope.terminate).unwrap();
             },
         );
 
@@ -338,7 +421,48 @@ mod tests {
             cmds.request(serde_json::Value::from(4), workflow)
                 .take_response()
         });
-        context.run_with_conditions(&mut promise, Duration::from_secs(1));
+        context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available().unwrap(), 12);
+    }
+
+    fn echo(s: String) -> String {
+        s
+    }
+
+    #[test]
+    fn test_dyn_workflow_mismatch_types() {
+        let mut registry = NodeRegistry::default();
+        let mut context = TestingContext::minimal_plugins();
+
+        registry.register_node("multiply3", "multiply3", |builder| {
+            builder.create_map_block(&multiply3)
+        });
+        registry.register_node("echo", "echo", |builder| builder.create_map_block(&echo));
+
+        let workflow = context.spawn_io_workflow(
+            |_scope: Scope<serde_json::Value, serde_json::Value, ()>, builder: &mut Builder| {
+                let mut dyn_builder = DynWorkflowBuilder {
+                    builder,
+                    registry: &registry,
+                };
+                let builder = &mut dyn_builder.builder;
+
+                let multiply3 =
+                    (registry.get_registration("multiply3").unwrap().create_node)(builder);
+                let echo = (registry.get_registration("echo").unwrap().create_node)(builder);
+                assert!(dyn_builder
+                    .connect(multiply3.output, echo.input)
+                    .is_err_and(|err| match err {
+                        ConnectionError::TypeMismatch(_) => true,
+                    }));
+            },
+        );
+
+        let mut promise = context.command(|cmds| {
+            cmds.request(serde_json::Value::from(4), workflow)
+                .take_response()
+        });
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available(), None);
     }
 }
