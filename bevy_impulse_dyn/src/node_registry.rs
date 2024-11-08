@@ -94,13 +94,13 @@ pub(crate) struct NodeRegistration {
     pub(crate) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    pub(crate) create_node: Box<dyn Fn(&mut Builder) -> DynNode>,
+    pub(crate) create_node: Box<dyn FnMut(&mut Builder) -> DynNode>,
 
     /// Creates a node that deserializes a [`serde_json::Value`] into the registered node input.
-    pub(crate) create_receiver: Box<dyn Fn(&mut Builder) -> DynNode>,
+    pub(crate) create_receiver: Box<dyn FnMut(&mut Builder) -> DynNode>,
 
     /// Creates a node that serializes the registered node's output to a [`serde_json::Value`].
-    pub(crate) create_sender: Box<dyn Fn(&mut Builder) -> DynNode>,
+    pub(crate) create_sender: Box<dyn FnMut(&mut Builder) -> DynNode>,
 }
 
 /// Serializes the node registrations as a map of node metadata.
@@ -138,7 +138,7 @@ impl Default for NodeRegistry {
         let mut settings = SchemaSettings::default();
         settings.definitions_path = "#/types/".to_string();
         NodeRegistry {
-            nodes: HashMap::<&'static str, NodeRegistration>::default(),
+            nodes: Default::default(),
             gen: SchemaGenerator::new(settings),
         }
     }
@@ -149,7 +149,7 @@ impl NodeRegistry {
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
     ) -> &mut Self
     where
         Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -167,7 +167,7 @@ impl NodeRegistry {
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
     ) -> &mut Self
     where
         Request: Send + Sync + 'static,
@@ -190,7 +190,7 @@ impl NodeRegistry {
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
     ) -> &mut Self
     where
         Request: Send + Sync + 'static,
@@ -209,7 +209,7 @@ impl NodeRegistry {
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
     ) -> &mut Self
     where
         Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -228,13 +228,34 @@ impl NodeRegistry {
     {
         self.nodes.get(id.borrow())
     }
+
+    pub(crate) fn create_node<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
+    where
+        Q: Borrow<str> + ?Sized,
+    {
+        Some((self.nodes.get_mut(id.borrow())?.create_node)(builder))
+    }
+
+    pub(crate) fn create_receiver<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
+    where
+        Q: Borrow<str> + ?Sized,
+    {
+        Some((self.nodes.get_mut(id.borrow())?.create_receiver)(builder))
+    }
+
+    pub(crate) fn create_sender<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
+    where
+        Q: Borrow<str> + ?Sized,
+    {
+        Some((self.nodes.get_mut(id.borrow())?.create_sender)(builder))
+    }
 }
 
 fn register_node_impl<Request, Response, Streams, RequestSerializer, ResponseSerializer>(
     id: &'static str,
     name: &'static str,
     registry: &mut NodeRegistry,
-    f: impl Fn(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+    mut f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
 ) where
     Request: Send + Sync + 'static,
     Response: Send + Sync + 'static,

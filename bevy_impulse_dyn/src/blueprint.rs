@@ -46,7 +46,7 @@ impl Blueprint {
     pub fn spawn_workflow<Streams>(
         &self,
         app: &mut App,
-        registry: &NodeRegistry,
+        registry: &mut NodeRegistry,
     ) -> Result<Service<serde_json::Value, serde_json::Value, Streams>, BlueprintError>
     where
         Streams: StreamPack,
@@ -72,9 +72,7 @@ impl Blueprint {
                     .map(|node_id| {
                         (
                             node_id,
-                            (registry.get_registration(node_id).unwrap().create_node)(
-                                dyn_builder.builder,
-                            ),
+                            registry.create_node(node_id, dyn_builder.builder).unwrap(),
                         )
                     })
                     .collect();
@@ -91,10 +89,9 @@ impl Blueprint {
                             VertexDescription::Node {
                                 node_id: target_node_id,
                             } => {
-                                let target_registration =
-                                    registry.get_registration(target_node_id).unwrap();
-                                let receiver =
-                                    (target_registration.create_receiver)(dyn_builder.builder);
+                                let receiver = registry
+                                    .create_receiver(target_node_id, dyn_builder.builder)
+                                    .unwrap();
                                 let target_input = node_inputs.get(target_node_id).unwrap();
                                 dyn_builder.connect(receiver.output, target_input.clone());
                                 receiver.input
@@ -133,10 +130,9 @@ impl Blueprint {
                                     target_node.input.clone()
                                 }
                                 VertexDescription::Terminate => {
-                                    let source_registration =
-                                        registry.get_registration(source_node_id).unwrap();
-                                    let sender =
-                                        (source_registration.create_sender)(dyn_builder.builder);
+                                    let sender = registry
+                                        .create_sender(source_node_id, dyn_builder.builder)
+                                        .unwrap();
                                     dyn_builder.connect(sender.output, scope.terminate.into());
                                     sender.input
                                 }
@@ -161,7 +157,7 @@ impl Blueprint {
     pub fn spawn_io_workflow(
         &self,
         app: &mut App,
-        registry: &NodeRegistry,
+        registry: &mut NodeRegistry,
     ) -> Result<Service<serde_json::Value, serde_json::Value>, BlueprintError> {
         self.spawn_workflow::<()>(app, registry)
     }
@@ -743,7 +739,7 @@ mod tests {
 
     #[test]
     fn test_run_blueprint() {
-        let registry = new_registry_with_basic_nodes();
+        let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let bp = Blueprint {
@@ -774,7 +770,9 @@ mod tests {
             ]),
         };
 
-        let workflow = bp.spawn_io_workflow(&mut context.app, &registry).unwrap();
+        let workflow = bp
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
 
         let mut promise = context.command(|cmds| {
             cmds.request(serde_json::Value::from(4), workflow)
@@ -786,7 +784,7 @@ mod tests {
 
     #[test]
     fn test_run_serialized_blueprint() {
-        let registry = new_registry_with_basic_nodes();
+        let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let json_str = r#"
@@ -808,7 +806,9 @@ mod tests {
         "#;
 
         let bp = Blueprint::from_json_str(json_str).unwrap();
-        let workflow = bp.spawn_io_workflow(&mut context.app, &registry).unwrap();
+        let workflow = bp
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
 
         let mut promise = context.command(|cmds| {
             cmds.request(serde_json::Value::from(4), workflow)
