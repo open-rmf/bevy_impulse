@@ -6,7 +6,7 @@ use std::{
 };
 
 use bevy_app::App;
-use bevy_impulse::{Builder, Scope, Service, SpawnWorkflowExt};
+use bevy_impulse::{Builder, Scope, Service, SpawnWorkflowExt, StreamPack};
 use serde::{Deserialize, Serialize};
 
 use crate::{DynInputSlot, DynNode, DynOutput, NodeRegistration, NodeRegistry};
@@ -42,16 +42,19 @@ pub enum VertexDescription {
 }
 
 impl Blueprint {
-    pub fn spawn_workflow(
+    pub fn spawn_workflow<Streams>(
         &self,
         app: &mut App,
         registry: &NodeRegistry,
-    ) -> Result<Service<serde_json::Value, serde_json::Value>, BlueprintError> {
+    ) -> Result<Service<serde_json::Value, serde_json::Value, Streams>, BlueprintError>
+    where
+        Streams: StreamPack,
+    {
         let (start_id, _terminate_id, node_vertices_ids) = self.validate(registry)?;
         let start = self.get_vertex(start_id)?;
 
-        let w = app.world.spawn_io_workflow(
-            |scope: Scope<serde_json::Value, serde_json::Value>, builder: &mut Builder| {
+        let w = app.world.spawn_workflow(
+            |scope: Scope<serde_json::Value, serde_json::Value, Streams>, builder: &mut Builder| {
                 let mut dyn_builder = DynWorkflowBuilder { builder };
 
                 // nodes and outputs cannot be cloned, but input can be cloned, so we
@@ -152,6 +155,14 @@ impl Blueprint {
         );
 
         Ok(w)
+    }
+
+    pub fn spawn_io_workflow(
+        &self,
+        app: &mut App,
+        registry: &NodeRegistry,
+    ) -> Result<Service<serde_json::Value, serde_json::Value>, BlueprintError> {
+        self.spawn_workflow::<()>(app, registry)
     }
 
     pub fn from_json_str(s: &str) -> Result<Self, BlueprintError> {
@@ -762,7 +773,7 @@ mod tests {
             ]),
         };
 
-        let workflow = bp.spawn_workflow(&mut context.app, &registry).unwrap();
+        let workflow = bp.spawn_io_workflow(&mut context.app, &registry).unwrap();
 
         let mut promise = context.command(|cmds| {
             cmds.request(serde_json::Value::from(4), workflow)
@@ -796,7 +807,7 @@ mod tests {
         "#;
 
         let bp = Blueprint::from_json_str(json_str).unwrap();
-        let workflow = bp.spawn_workflow(&mut context.app, &registry).unwrap();
+        let workflow = bp.spawn_io_workflow(&mut context.app, &registry).unwrap();
 
         let mut promise = context.command(|cmds| {
             cmds.request(serde_json::Value::from(4), workflow)
