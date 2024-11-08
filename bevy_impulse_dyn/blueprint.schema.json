@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Blueprint",
+  "type": "object",
+  "definitions": {
+    "Vertex": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "start"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "terminate"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "nodeId",
+            "type"
+          ],
+          "properties": {
+            "nodeId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "node"
+              ]
+            }
+          }
+        }
+      ],
+      "required": [
+        "edges"
+      ],
+      "properties": {
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

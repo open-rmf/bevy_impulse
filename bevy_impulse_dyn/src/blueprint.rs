@@ -7,6 +7,7 @@ use std::{
 
 use bevy_app::App;
 use bevy_impulse::{Builder, Scope, Service, SpawnWorkflowExt, StreamPack};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{DynInputSlot, DynNode, DynOutput, NodeRegistration, NodeRegistry};
@@ -14,14 +15,14 @@ use crate::{DynInputSlot, DynNode, DynOutput, NodeRegistration, NodeRegistry};
 pub type NodeId = String;
 pub type VertexId = String;
 
-#[derive(Serialize, Deserialize)]
+#[derive(JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Blueprint {
     #[serde(flatten)]
     vertices: HashMap<String, Vertex>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Vertex {
     edges: Vec<String>,
@@ -30,7 +31,7 @@ pub struct Vertex {
     desc: VertexDescription,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum VertexDescription {
     Start,
