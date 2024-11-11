@@ -148,7 +148,7 @@ impl NodeRegistry {
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static,
     ) -> &mut Self
     where
         Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
@@ -254,7 +254,7 @@ fn register_node_impl<Request, Response, Streams, RequestSerializer, ResponseSer
     id: &'static str,
     name: &'static str,
     registry: &mut NodeRegistry,
-    mut f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
+    mut f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static,
 ) where
     Request: Send + Sync + 'static,
     Response: Send + Sync + 'static,
