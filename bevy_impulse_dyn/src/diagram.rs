@@ -17,7 +17,7 @@ pub type VertexId = String;
 
 #[derive(JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Blueprint {
+pub struct Diagram {
     #[serde(flatten)]
     vertices: HashMap<String, Vertex>,
 }
@@ -42,12 +42,12 @@ pub enum VertexDescription {
     },
 }
 
-impl Blueprint {
+impl Diagram {
     pub fn spawn_workflow<Streams>(
         &self,
         app: &mut App,
         registry: &mut NodeRegistry,
-    ) -> Result<Service<serde_json::Value, serde_json::Value, Streams>, BlueprintError>
+    ) -> Result<Service<serde_json::Value, serde_json::Value, Streams>, DiagramError>
     where
         Streams: StreamPack,
     {
@@ -158,15 +158,15 @@ impl Blueprint {
         &self,
         app: &mut App,
         registry: &mut NodeRegistry,
-    ) -> Result<Service<serde_json::Value, serde_json::Value>, BlueprintError> {
+    ) -> Result<Service<serde_json::Value, serde_json::Value>, DiagramError> {
         self.spawn_workflow::<()>(app, registry)
     }
 
-    pub fn from_json_str(s: &str) -> Result<Self, BlueprintError> {
+    pub fn from_json_str(s: &str) -> Result<Self, DiagramError> {
         Ok(serde_json::from_str(s)?)
     }
 
-    pub fn from_reader<R>(r: R) -> Result<Self, BlueprintError>
+    pub fn from_reader<R>(r: R) -> Result<Self, DiagramError>
     where
         R: Read,
     {
@@ -184,7 +184,7 @@ impl Blueprint {
     fn validate(
         &self,
         registry: &NodeRegistry,
-    ) -> Result<(&VertexId, &VertexId, Vec<&VertexId>), BlueprintError> {
+    ) -> Result<(&VertexId, &VertexId, Vec<&VertexId>), DiagramError> {
         let mut start = None;
         let mut terminate = None;
         let mut nodes = Vec::with_capacity(self.vertices.len());
@@ -193,14 +193,14 @@ impl Blueprint {
             match &v.desc {
                 VertexDescription::Start => {
                     if start.is_some() {
-                        return Err(BlueprintError::MultipleStartTerminate);
+                        return Err(DiagramError::MultipleStartTerminate);
                     }
                     self.validate_start(id, registry)?;
                     start = Some(id);
                 }
                 VertexDescription::Terminate => {
                     if terminate.is_some() {
-                        return Err(BlueprintError::MultipleStartTerminate);
+                        return Err(DiagramError::MultipleStartTerminate);
                     }
                     self.validate_terminate(v)?;
                     terminate = Some(id);
@@ -216,7 +216,7 @@ impl Blueprint {
             self.check_connected(start, terminate)?;
             return Ok((start, terminate, nodes));
         }
-        Err(BlueprintError::DisconnectedGraph)
+        Err(DiagramError::DisconnectedGraph)
     }
 
     /// Checks if there is a path from start to terminate
@@ -224,7 +224,7 @@ impl Blueprint {
         &self,
         start_id: &VertexId,
         terminate_id: &VertexId,
-    ) -> Result<(), BlueprintError> {
+    ) -> Result<(), DiagramError> {
         let mut visited: HashSet<&VertexId> = HashSet::new();
         let mut search: Vec<&VertexId> = vec![&start_id];
 
@@ -242,38 +242,38 @@ impl Blueprint {
             }
         }
 
-        Err(BlueprintError::DisconnectedGraph)
+        Err(DiagramError::DisconnectedGraph)
     }
 
-    fn get_vertex(&self, id: &VertexId) -> Result<&Vertex, BlueprintError> {
+    fn get_vertex(&self, id: &VertexId) -> Result<&Vertex, DiagramError> {
         self.vertices
             .get(id)
-            .ok_or_else(|| BlueprintError::VertexNotFound(id.clone()))
+            .ok_or_else(|| DiagramError::VertexNotFound(id.clone()))
     }
 
     fn get_node_registration<'a>(
         id: &NodeId,
         registry: &'a NodeRegistry,
-    ) -> Result<&'a NodeRegistration, BlueprintError> {
+    ) -> Result<&'a NodeRegistration, DiagramError> {
         registry
             .get_registration(id)
-            .ok_or_else(|| BlueprintError::NodeNotFound(id.clone()))
+            .ok_or_else(|| DiagramError::NodeNotFound(id.clone()))
     }
 
     fn validate_start(
         &self,
         start_id: &VertexId,
         registry: &NodeRegistry,
-    ) -> Result<(), BlueprintError> {
+    ) -> Result<(), DiagramError> {
         let start = self.get_vertex(start_id)?;
         for e in &start.edges {
             let target_vertex = self.get_vertex(e)?;
             match &target_vertex.desc {
-                VertexDescription::Start => return Err(BlueprintError::MultipleStartTerminate),
+                VertexDescription::Start => return Err(DiagramError::MultipleStartTerminate),
                 VertexDescription::Node { node_id } => {
                     let target_node = Self::get_node_registration(&node_id, registry)?;
                     if !target_node.metadata.request.serializable {
-                        return Err(BlueprintError::UnserializableEdge(start_id.clone()));
+                        return Err(DiagramError::UnserializableEdge(start_id.clone()));
                     }
                 }
                 _ => {}
@@ -282,9 +282,9 @@ impl Blueprint {
         Ok(())
     }
 
-    fn validate_terminate(&self, terminate: &Vertex) -> Result<(), BlueprintError> {
+    fn validate_terminate(&self, terminate: &Vertex) -> Result<(), DiagramError> {
         if !terminate.edges.is_empty() {
-            return Err(BlueprintError::InvalidTerminateEdges);
+            return Err(DiagramError::InvalidTerminateEdges);
         }
         Ok(())
     }
@@ -294,17 +294,17 @@ impl Blueprint {
         vertex_id: &VertexId,
         node_id: &NodeId,
         registry: &NodeRegistry,
-    ) -> Result<(), BlueprintError> {
+    ) -> Result<(), DiagramError> {
         let vertex = self.get_vertex(vertex_id)?;
         for target_vertex_id in &vertex.edges {
             let target_vertex = self.get_vertex(target_vertex_id)?;
             // let source_node = Self::get_node_registration(s, registry)
             match &target_vertex.desc {
-                VertexDescription::Start => return Err(BlueprintError::InvalidStartEdges),
+                VertexDescription::Start => return Err(DiagramError::InvalidStartEdges),
                 VertexDescription::Terminate => {
                     let target_node = Self::get_node_registration(&node_id, registry)?;
                     if !target_node.metadata.response.serializable {
-                        return Err(BlueprintError::UnserializableEdge(vertex_id.clone()));
+                        return Err(DiagramError::UnserializableEdge(vertex_id.clone()));
                     }
                 }
                 VertexDescription::Node {
@@ -315,7 +315,7 @@ impl Blueprint {
                     let output_type = &source_node.metadata.response.r#type;
                     let input_type = &target_node.metadata.request.r#type;
                     if output_type != input_type {
-                        return Err(BlueprintError::TypeMismatch(TypeMismatch {
+                        return Err(DiagramError::TypeMismatch(TypeMismatch {
                             source_id: vertex_id.clone(),
                             target_id: target_vertex_id.clone(),
                             output_type: output_type.clone(),
@@ -338,7 +338,7 @@ pub struct TypeMismatch {
 }
 
 #[derive(Debug)]
-pub enum BlueprintError {
+pub enum DiagramError {
     TypeMismatch(TypeMismatch),
     NodeNotFound(NodeId),
     VertexNotFound(VertexId),
@@ -350,7 +350,7 @@ pub enum BlueprintError {
     JsonError(serde_json::Error),
 }
 
-impl Display for BlueprintError {
+impl Display for DiagramError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TypeMismatch(data) => write!(f,
@@ -375,9 +375,9 @@ impl Display for BlueprintError {
     }
 }
 
-impl Error for BlueprintError {}
+impl Error for DiagramError {}
 
-impl From<serde_json::Error> for BlueprintError {
+impl From<serde_json::Error> for DiagramError {
     fn from(json_err: serde_json::Error) -> Self {
         Self::JsonError(json_err)
     }
@@ -446,8 +446,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_blueprint_no_terminate() {
-        let bp = Blueprint {
+    fn test_validate_diagram_no_terminate() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -471,12 +471,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::DisconnectedGraph)));
+            .is_err_and(|err| matches!(err, DiagramError::DisconnectedGraph)));
     }
 
     #[test]
-    fn test_validate_blueprint_no_start() {
-        let bp = Blueprint {
+    fn test_validate_diagram_no_start() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "multiply3".to_string(),
@@ -500,12 +500,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::DisconnectedGraph)));
+            .is_err_and(|err| matches!(err, DiagramError::DisconnectedGraph)));
     }
 
     #[test]
-    fn test_validate_blueprint_extra_terminate_edges() {
-        let bp = Blueprint {
+    fn test_validate_diagram_extra_terminate_edges() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -536,12 +536,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::InvalidTerminateEdges)));
+            .is_err_and(|err| matches!(err, DiagramError::InvalidTerminateEdges)));
     }
 
     #[test]
-    fn test_validate_blueprint_connect_to_start() {
-        let bp = Blueprint {
+    fn test_validate_diagram_connect_to_start() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -572,12 +572,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::InvalidStartEdges)));
+            .is_err_and(|err| matches!(err, DiagramError::InvalidStartEdges)));
     }
 
     #[test]
-    fn test_validate_blueprint_unserializable_start() {
-        let bp = Blueprint {
+    fn test_validate_diagram_unserializable_start() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -608,12 +608,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::UnserializableEdge(_))));
+            .is_err_and(|err| matches!(err, DiagramError::UnserializableEdge(_))));
     }
 
     #[test]
-    fn test_validate_blueprint_unserializable_terminate() {
-        let bp = Blueprint {
+    fn test_validate_diagram_unserializable_terminate() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -644,12 +644,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::UnserializableEdge(_))));
+            .is_err_and(|err| matches!(err, DiagramError::UnserializableEdge(_))));
     }
 
     #[test]
-    fn test_validate_blueprint_mismatch_types() {
-        let bp = Blueprint {
+    fn test_validate_diagram_mismatch_types() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -689,12 +689,12 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::TypeMismatch(_))));
+            .is_err_and(|err| matches!(err, DiagramError::TypeMismatch(_))));
     }
 
     #[test]
-    fn test_validate_blueprint_disconnected() {
-        let bp = Blueprint {
+    fn test_validate_diagram_disconnected() {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -734,15 +734,15 @@ mod tests {
         let registry = new_registry_with_basic_nodes();
         assert!(bp
             .validate(&registry)
-            .is_err_and(|err| matches!(err, BlueprintError::DisconnectedGraph)));
+            .is_err_and(|err| matches!(err, DiagramError::DisconnectedGraph)));
     }
 
     #[test]
-    fn test_run_blueprint() {
+    fn test_run_diagram() {
         let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
-        let bp = Blueprint {
+        let bp = Diagram {
             vertices: HashMap::from([
                 (
                     "start".to_string(),
@@ -783,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_serialized_blueprint() {
+    fn test_run_serialized_diagram() {
         let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
@@ -805,7 +805,7 @@ mod tests {
         }
         "#;
 
-        let bp = Blueprint::from_json_str(json_str).unwrap();
+        let bp = Diagram::from_json_str(json_str).unwrap();
         let workflow = bp
             .spawn_io_workflow(&mut context.app, &mut registry)
             .unwrap();

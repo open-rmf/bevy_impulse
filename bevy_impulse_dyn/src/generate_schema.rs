@@ -1,12 +1,12 @@
-use bevy_impulse_dyn::Blueprint;
+use bevy_impulse_dyn::Diagram;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let schema = schemars::schema_for!(Blueprint);
+    let schema = schemars::schema_for!(Diagram);
     let f = std::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .create(true)
-        .open("blueprint.schema.json")
+        .open("diagram.schema.json")
         .unwrap();
     serde_json::to_writer_pretty(f, &schema)?;
     Ok(())
@@ -19,8 +19,8 @@ mod test {
 
     #[test]
     fn check_schema_changes() -> Result<(), String> {
-        let cur_schema_json = std::fs::read("blueprint.schema.json").unwrap();
-        let schema = schemars::schema_for!(Blueprint);
+        let cur_schema_json = std::fs::read("diagram.schema.json").unwrap();
+        let schema = schemars::schema_for!(Diagram);
         let new_schema_json = serde_json::to_vec_pretty(&schema).unwrap();
 
         if cur_schema_json.len() != new_schema_json.len()
