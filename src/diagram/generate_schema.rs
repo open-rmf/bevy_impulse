@@ -1,4 +1,4 @@
-use bevy_impulse_dyn::Diagram;
+use bevy_impulse::Diagram;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Diagram);

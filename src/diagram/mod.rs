@@ -1,3 +1,11 @@
+mod node_registry;
+mod serialization;
+
+pub use node_registry::*;
+pub use serialization::*;
+
+// ----------
+
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -5,12 +13,10 @@ use std::{
     io::Read,
 };
 
+use crate::{Builder, Scope, Service, SpawnWorkflowExt, StreamPack};
 use bevy_app::App;
-use bevy_impulse::{Builder, Scope, Service, SpawnWorkflowExt, StreamPack};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::{DynInputSlot, DynNode, DynOutput, NodeRegistration, NodeRegistry};
 
 pub type NodeId = String;
 pub type VertexId = String;
@@ -353,25 +359,25 @@ pub enum DiagramError {
 impl Display for DiagramError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TypeMismatch(data) => write!(f,
-                "cannot connect [{}] to [{}], output type [{}] does not match input type [{}]",
-                data.source_id, data.target_id, data.output_type, data.input_type
-            ),
-            Self::NodeNotFound(node_id) => {
-                write!(f, "node [{}] not is not registered", node_id)
-            }
-            Self::VertexNotFound(node_id) => {
-                write!(f, "vertex [{}] is not found", node_id)
-            }
-            Self::MultipleStartTerminate => {
-                f.write_str("there must be exactly one start and terminate")
-            }
-            Self::InvalidStartEdges => f.write_str("[start] cannot receive inputs"),
-            Self::InvalidTerminateEdges => f.write_str("[terminate] cannot send any outputs"),
-            Self::DisconnectedGraph => f.write_str("No path reaches terminate"),
-            Self::UnserializableEdge(vertex_id) => write!(f, "[{}] is connected to start or terminate but it's request or response cannot be serialized", vertex_id),
-            Self::JsonError(err) => err.fmt(f),
-        }
+          Self::TypeMismatch(data) => write!(f,
+              "cannot connect [{}] to [{}], output type [{}] does not match input type [{}]",
+              data.source_id, data.target_id, data.output_type, data.input_type
+          ),
+          Self::NodeNotFound(node_id) => {
+              write!(f, "node [{}] not is not registered", node_id)
+          }
+          Self::VertexNotFound(node_id) => {
+              write!(f, "vertex [{}] is not found", node_id)
+          }
+          Self::MultipleStartTerminate => {
+              f.write_str("there must be exactly one start and terminate")
+          }
+          Self::InvalidStartEdges => f.write_str("[start] cannot receive inputs"),
+          Self::InvalidTerminateEdges => f.write_str("[terminate] cannot send any outputs"),
+          Self::DisconnectedGraph => f.write_str("No path reaches terminate"),
+          Self::UnserializableEdge(vertex_id) => write!(f, "[{}] is connected to start or terminate but it's request or response cannot be serialized", vertex_id),
+          Self::JsonError(err) => err.fmt(f),
+      }
     }
 }
 
@@ -407,7 +413,7 @@ impl<'b, 'w, 's, 'a> DynWorkflowBuilder<'b, 'w, 's, 'a> {
 
 #[cfg(test)]
 mod tests {
-    use bevy_impulse::{testing::TestingContext, RequestExt};
+    use crate::{testing::TestingContext, RequestExt};
 
     use super::*;
 
@@ -788,22 +794,22 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let json_str = r#"
-        {
-            "start": {
-                "type": "start",
-                "edges": ["multiply3"]
-            },
-            "multiply3": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "edges": ["terminate"]
-            },
-            "terminate": {
-                "type": "terminate",
-                "edges": []
-            }
-        }
-        "#;
+      {
+          "start": {
+              "type": "start",
+              "edges": ["multiply3"]
+          },
+          "multiply3": {
+              "type": "node",
+              "nodeId": "multiply3",
+              "edges": ["terminate"]
+          },
+          "terminate": {
+              "type": "terminate",
+              "edges": []
+          }
+      }
+      "#;
 
         let bp = Diagram::from_json_str(json_str).unwrap();
         let workflow = bp

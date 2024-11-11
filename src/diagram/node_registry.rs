@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, collections::HashMap};
 
+use crate::{Builder, InputSlot, Node, Output, StreamPack};
 use bevy_ecs::entity::Entity;
-use bevy_impulse::{Builder, InputSlot, Node, Output, StreamPack};
 use schemars::gen::{SchemaGenerator, SchemaSettings};
 use serde::{de::DeserializeOwned, Serialize};
 

@@ -28,7 +28,7 @@ bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
 arrayvec = "0.7"
 itertools = "0.13"
 smallvec = "1.13"
-tokio = { version = "1.39", features = ["sync"]}
+tokio = { version = "1.39", features = ["sync"] }
 futures = "0.3"
 backtrace = "0.3"
 anyhow = "1.0"
@@ -42,11 +42,21 @@ thiserror = "1.0"
 bevy_core = "0.12"
 bevy_time = "0.12"
 
+schemars = { version = "0.8.21", optional = true }
+serde = { version = "1.0.210", features = ["derive"], optional = true }
+serde_json = { version = "1.0.128", optional = true }
+
 [features]
 single_threaded_async = ["dep:async-task"]
+diagram = ["dep:schemars", "dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
 
 [workspace]
-members = ["bevy_impulse_dyn"]
+
+[[bin]]
+name = "generate_schema"
+path = "src/diagram/generate_schema.rs"
+required-features = ["diagram"]
+doc = false
