@@ -14,14 +14,12 @@ pub(crate) struct DynInputSlot {
     scope: Entity,
 
     #[allow(unused)]
-    id: Entity,
+    source: Entity,
 }
 
 impl DynInputSlot {
     pub(crate) fn into_input<T>(self) -> InputSlot<T> {
-        // `InputSlot` and `Output` types are only used for compile time checks, if we could
-        // create `InputSlot` and `Output` directly, then we wouldn't need unsafe.
-        unsafe { std::mem::transmute(self) }
+        InputSlot::<T>::new(self.scope, self.source)
     }
 }
 
@@ -29,7 +27,7 @@ impl<T> From<InputSlot<T>> for DynInputSlot {
     fn from(value: InputSlot<T>) -> Self {
         DynInputSlot {
             scope: value.scope(),
-            id: value.id(),
+            source: value.id(),
         }
     }
 }
@@ -40,14 +38,15 @@ pub(crate) struct DynOutput {
     scope: Entity,
 
     #[allow(unused)]
-    id: Entity,
+    target: Entity,
 }
 
 impl DynOutput {
-    pub(crate) fn into_output<T>(self) -> Output<T> {
-        // `InputSlot` and `Output` types are only used for compile time checks, if we could
-        // create `InputSlot` and `Output` directly, then we wouldn't need unsafe.
-        unsafe { std::mem::transmute(self) }
+    pub(crate) fn into_output<T>(self) -> Output<T>
+    where
+        T: Send + Sync + 'static,
+    {
+        Output::<T>::new(self.scope, self.target)
     }
 }
 
@@ -58,7 +57,7 @@ where
     fn from(value: Output<T>) -> Self {
         DynOutput {
             scope: value.scope(),
-            id: value.id(),
+            target: value.id(),
         }
     }
 }
