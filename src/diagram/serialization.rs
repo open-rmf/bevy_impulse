@@ -4,7 +4,7 @@ use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(Debug)]
-pub(crate) enum SerializationError {
+pub enum SerializationError {
     NotSupported,
     JsonError(serde_json::Error),
 }
@@ -34,13 +34,13 @@ impl From<serde_json::Error> for SerializationError {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct MessageMetadata {
+pub struct MessageMetadata {
     /// The type of the message, if the message is serializable, this will be the json schema
     /// type, if it is not serializable, it will be the rust type.
-    pub r#type: String,
+    pub(crate) r#type: String,
 
     /// Indicates if the message is serializable.
-    pub serializable: bool,
+    pub(crate) serializable: bool,
 }
 
 pub trait DynType {
@@ -63,60 +63,86 @@ where
     }
 }
 
-pub(crate) trait Serializer<T> {
-    fn type_name() -> String;
-
-    fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata;
-
-    fn from_json(json: serde_json::Value) -> Result<T, SerializationError>;
-
+pub trait SerializeMessage<T> {
     fn to_json(v: &T) -> Result<serde_json::Value, SerializationError>;
+
+    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata;
 }
 
-impl<T> Serializer<T> for T
+#[derive(Default)]
+pub struct DefaultSerializer;
+
+impl<T> SerializeMessage<T> for DefaultSerializer
 where
-    T: DynType + Serialize + DeserializeOwned,
+    T: Serialize + DynType,
 {
-    fn type_name() -> String {
-        T::type_name()
+    fn to_json(v: &T) -> Result<serde_json::Value, SerializationError> {
+        serde_json::to_value(v).map_err(|err| SerializationError::from(err))
     }
 
-    fn insert_json_schema(gen: &mut SchemaGenerator) -> MessageMetadata {
+    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata {
         T::json_schema(gen);
         MessageMetadata {
             r#type: T::type_name(),
             serializable: true,
         }
     }
+}
 
-    fn from_json(json: serde_json::Value) -> Result<Self, SerializationError> {
-        serde_json::from_value::<Self>(json).map_err(|err| SerializationError::from(err))
+pub trait DeserializeMessage<T> {
+    fn from_json(json: serde_json::Value) -> Result<T, SerializationError>;
+
+    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata;
+}
+
+#[derive(Default)]
+pub struct DefaultDeserializer;
+
+impl<T> DeserializeMessage<T> for DefaultDeserializer
+where
+    T: DeserializeOwned + DynType,
+{
+    fn from_json(json: serde_json::Value) -> Result<T, SerializationError> {
+        serde_json::from_value::<T>(json).map_err(|err| SerializationError::from(err))
     }
 
-    fn to_json(v: &Self) -> Result<serde_json::Value, SerializationError> {
-        serde_json::to_value(v).map_err(|err| SerializationError::from(err))
+    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata {
+        T::json_schema(gen);
+        MessageMetadata {
+            r#type: T::type_name(),
+            serializable: true,
+        }
     }
 }
 
-pub(crate) struct OpaqueMessageSerializer;
+#[derive(Default)]
+pub struct OpaqueMessageSerializer;
 
-impl<T> Serializer<T> for OpaqueMessageSerializer {
-    fn type_name() -> String {
-        std::any::type_name::<T>().to_string()
+impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
+    fn to_json(_v: &T) -> Result<serde_json::Value, SerializationError> {
+        Err(SerializationError::NotSupported)
     }
 
-    fn insert_json_schema(_gen: &mut SchemaGenerator) -> MessageMetadata {
+    fn message_metadata(_gen: &mut SchemaGenerator) -> MessageMetadata {
         MessageMetadata {
-            r#type: <OpaqueMessageSerializer as Serializer<T>>::type_name(),
+            r#type: std::any::type_name::<T>().to_string(),
             serializable: false,
         }
     }
+}
 
+#[derive(Default)]
+pub struct OpaqueMessageDeserializer;
+
+impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
     fn from_json(_json: serde_json::Value) -> Result<T, SerializationError> {
         Err(SerializationError::NotSupported)
     }
 
-    fn to_json(_v: &T) -> Result<serde_json::Value, SerializationError> {
-        Err(SerializationError::NotSupported)
+    fn message_metadata(_gen: &mut SchemaGenerator) -> MessageMetadata {
+        MessageMetadata {
+            r#type: std::any::type_name::<T>().to_string(),
+            serializable: false,
+        }
     }
 }

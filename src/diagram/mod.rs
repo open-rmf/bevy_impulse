@@ -439,14 +439,24 @@ mod tests {
         registry.register_node("multiply3", "multiply3", |builder| {
             builder.create_map_block(multiply3)
         });
-        registry.register_opaque_node("opaque", "opaque", |builder| {
-            builder.create_map_block(opaque)
+        registry.register_node("opaque", "opaque", |builder| {
+            builder
+                .create_map_block(opaque)
+                .into_registration_builder()
+                .with_opaque_request()
+                .with_opaque_response()
         });
-        registry.register_opaque_request_node("opaque_request", "opaque_request", |builder| {
-            builder.create_map_block(opaque_request)
+        registry.register_node("opaque_request", "opaque_request", |builder| {
+            builder
+                .create_map_block(opaque_request)
+                .into_registration_builder()
+                .with_opaque_request()
         });
-        registry.register_opaque_response_node("opaque_response", "opaque_response", |builder| {
-            builder.create_map_block(opaque_response)
+        registry.register_node("opaque_response", "opaque_response", |builder| {
+            builder
+                .create_map_block(opaque_response)
+                .into_registration_builder()
+                .with_opaque_response()
         });
         registry
     }

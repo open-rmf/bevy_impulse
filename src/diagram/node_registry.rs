@@ -1,11 +1,16 @@
-use std::{borrow::Borrow, collections::HashMap};
+use std::{borrow::Borrow, collections::HashMap, marker::PhantomData};
 
 use crate::{Builder, InputSlot, Node, Output, StreamPack};
 use bevy_ecs::entity::Entity;
 use schemars::gen::{SchemaGenerator, SchemaSettings};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
 
-use crate::{DynType, MessageMetadata, OpaqueMessageSerializer, Serializer};
+use crate::{MessageMetadata, SerializeMessage};
+
+use super::{
+    DefaultDeserializer, DefaultSerializer, DeserializeMessage, OpaqueMessageDeserializer,
+    OpaqueMessageSerializer,
+};
 
 /// A type erased [`bevy_impulse::InputSlot`]
 #[derive(Copy, Clone)]
@@ -120,6 +125,155 @@ where
     gen.definitions().serialize(s)
 }
 
+pub trait ResponseCloneableTrait {
+    fn cloneable() -> bool;
+}
+
+pub struct ResponseCloneableImpl<const CLONEABLE: bool>;
+
+impl<const CLONEABLE: bool> ResponseCloneableTrait for ResponseCloneableImpl<CLONEABLE> {
+    fn cloneable() -> bool {
+        CLONEABLE
+    }
+}
+
+pub struct RegistrationBuilder<
+    Request,
+    Response,
+    Streams,
+    Deserializer,
+    Serializer,
+    const RESPONSE_CLONEABLE: bool,
+> where
+    Streams: StreamPack,
+{
+    node: Node<Request, Response, Streams>,
+    _unused: PhantomData<(Deserializer, Serializer)>,
+}
+
+impl<Request, Response, Streams, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
+    RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, RESPONSE_CLONEABLE>
+where
+    Streams: StreamPack,
+    Request: Send + Sync,
+    Response: Send + Sync,
+{
+    pub fn with_opaque_request(
+        self,
+    ) -> RegistrationBuilder<
+        Request,
+        Response,
+        Streams,
+        OpaqueMessageDeserializer,
+        Serializer,
+        RESPONSE_CLONEABLE,
+    > {
+        RegistrationBuilder {
+            node: self.node,
+            _unused: Default::default(),
+        }
+    }
+
+    pub fn with_opaque_response(
+        self,
+    ) -> RegistrationBuilder<
+        Request,
+        Response,
+        Streams,
+        Deserializer,
+        OpaqueMessageSerializer,
+        RESPONSE_CLONEABLE,
+    > {
+        RegistrationBuilder {
+            node: self.node,
+            _unused: Default::default(),
+        }
+    }
+
+    pub fn with_response_cloneable(
+        self,
+    ) -> RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, true> {
+        RegistrationBuilder {
+            node: self.node,
+            _unused: Default::default(),
+        }
+    }
+}
+
+pub trait IntoRegistrationBuilder<
+    Request,
+    Response,
+    Streams,
+    Deserializer,
+    Serializer,
+    const RESPONSE_CLONEABLE: bool,
+> where
+    Streams: StreamPack,
+{
+    fn into_registration_builder(
+        self,
+    ) -> RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, RESPONSE_CLONEABLE>;
+}
+
+impl<Request, Response, Streams, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
+    IntoRegistrationBuilder<
+        Request,
+        Response,
+        Streams,
+        Deserializer,
+        Serializer,
+        RESPONSE_CLONEABLE,
+    >
+    for RegistrationBuilder<
+        Request,
+        Response,
+        Streams,
+        Deserializer,
+        Serializer,
+        RESPONSE_CLONEABLE,
+    >
+where
+    Streams: StreamPack,
+{
+    fn into_registration_builder(
+        self,
+    ) -> RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, RESPONSE_CLONEABLE>
+    {
+        self
+    }
+}
+
+impl<Request, Response, Streams>
+    IntoRegistrationBuilder<
+        Request,
+        Response,
+        Streams,
+        DefaultDeserializer,
+        DefaultSerializer,
+        false,
+    > for Node<Request, Response, Streams>
+where
+    Request: Send + Sync,
+    Response: Send + Sync,
+    Streams: StreamPack,
+{
+    fn into_registration_builder(
+        self,
+    ) -> RegistrationBuilder<
+        Request,
+        Response,
+        Streams,
+        DefaultDeserializer,
+        DefaultSerializer,
+        false,
+    > {
+        RegistrationBuilder {
+            node: self,
+            _unused: Default::default(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct NodeRegistry {
     #[serde(serialize_with = "serialize_node_registry_nodes")]
@@ -144,79 +298,66 @@ impl Default for NodeRegistry {
 }
 
 impl NodeRegistry {
-    pub fn register_node<Request, Response, Streams>(
+    pub fn register_node<
+        IntoRegistrationBuilderT,
+        Request,
+        Response,
+        Streams,
+        Deserializer,
+        Serializer,
+        const RESPONSE_CLONEABLE: bool,
+    >(
         &mut self,
         id: &'static str,
         name: &'static str,
-        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static,
+        mut f: impl FnMut(&mut Builder) -> IntoRegistrationBuilderT + 'static,
     ) -> &mut Self
     where
-        Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
-        Response: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
-        Streams: StreamPack,
-    {
-        register_node_impl::<Request, Response, Streams, Request, Response>(id, name, self, f);
-        self
-    }
-
-    /// Registers an opaque node, an opaque node is a node where the request and responses cannot
-    /// be serialized/deserialized. Because of that, opaque nodes can only be connected to
-    /// another opaque node.
-    pub fn register_opaque_node<Request, Response, Streams>(
-        &mut self,
-        id: &'static str,
-        name: &'static str,
-        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
-    ) -> &mut Self
-    where
-        Request: Send + Sync + 'static,
-        Response: Send + Sync + 'static,
-        Streams: StreamPack,
-    {
-        register_node_impl::<
+        IntoRegistrationBuilderT: IntoRegistrationBuilder<
             Request,
             Response,
             Streams,
-            OpaqueMessageSerializer,
-            OpaqueMessageSerializer,
-        >(id, name, self, f);
-        self
-    }
-
-    /// Similar to [`Self::register_opaque_node`] but only the response is opaque, this allows
-    /// non-opaque nodes to connect to this node.
-    pub fn register_opaque_request_node<Request, Response, Streams>(
-        &mut self,
-        id: &'static str,
-        name: &'static str,
-        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
-    ) -> &mut Self
-    where
+            Deserializer,
+            Serializer,
+            RESPONSE_CLONEABLE,
+        >,
         Request: Send + Sync + 'static,
-        Response: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
-        Streams: StreamPack,
-    {
-        register_node_impl::<Request, Response, Streams, OpaqueMessageSerializer, Response>(
-            id, name, self, f,
-        );
-        self
-    }
-
-    /// Similar to [`Self::register_opaque_node`] but only the request is opaque, this allows
-    /// the node to connect to non-opaque nodes.
-    pub fn register_opaque_response_node<Request, Response, Streams>(
-        &mut self,
-        id: &'static str,
-        name: &'static str,
-        f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static + Copy,
-    ) -> &mut Self
-    where
-        Request: DynType + Serialize + DeserializeOwned + Send + Sync + 'static,
         Response: Send + Sync + 'static,
         Streams: StreamPack,
+        Deserializer: DeserializeMessage<Request>,
+        Serializer: SerializeMessage<Response>,
     {
-        register_node_impl::<Request, Response, Streams, Request, OpaqueMessageSerializer>(
-            id, name, self, f,
+        let request = Deserializer::message_metadata(&mut self.gen);
+        let response = Serializer::message_metadata(&mut self.gen);
+
+        self.nodes.insert(
+            id,
+            NodeRegistration {
+                metadata: NodeMetadata {
+                    id,
+                    name,
+                    request,
+                    response,
+                },
+                create_node: Box::new(move |builder: &mut Builder| {
+                    let n = f(builder).into_registration_builder().node;
+                    DynNode::from(n)
+                }),
+                create_receiver: Box::new(move |builder| {
+                    let n = builder.create_map_block(|json: serde_json::Value| {
+                        // FIXME(koonpeng): how to fail the workflow?
+                        Deserializer::from_json(json).unwrap()
+                    });
+                    DynNode::from(n)
+                }),
+                create_sender: Box::new(move |builder| {
+                    let n = builder.create_map_block(|resp: Response| {
+                        // FIXME(koonpeng): how to fail the workflow?
+                        Serializer::to_json(&resp).unwrap()
+                    });
+                    DynNode::from(n)
+                }),
+            },
         );
         self
     }
@@ -250,51 +391,6 @@ impl NodeRegistry {
     }
 }
 
-fn register_node_impl<Request, Response, Streams, RequestSerializer, ResponseSerializer>(
-    id: &'static str,
-    name: &'static str,
-    registry: &mut NodeRegistry,
-    mut f: impl FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static,
-) where
-    Request: Send + Sync + 'static,
-    Response: Send + Sync + 'static,
-    Streams: StreamPack,
-    RequestSerializer: Serializer<Request>,
-    ResponseSerializer: Serializer<Response>,
-{
-    let request = RequestSerializer::insert_json_schema(&mut registry.gen);
-    let response = ResponseSerializer::insert_json_schema(&mut registry.gen);
-    registry.nodes.insert(
-        id,
-        NodeRegistration {
-            metadata: NodeMetadata {
-                id,
-                name,
-                request,
-                response,
-            },
-            create_node: Box::new(move |builder: &mut Builder| {
-                let n = f(builder);
-                DynNode::from(n)
-            }),
-            create_receiver: Box::new(move |builder| {
-                let n = builder.create_map_block(|json: serde_json::Value| {
-                    // FIXME(koonpeng): how to fail the workflow?
-                    RequestSerializer::from_json(json).unwrap()
-                });
-                DynNode::from(n)
-            }),
-            create_sender: Box::new(move |builder| {
-                let n = builder.create_map_block(|resp: Response| {
-                    // FIXME(koonpeng): how to fail the workflow?
-                    ResponseSerializer::to_json(&resp).unwrap()
-                });
-                DynNode::from(n)
-            }),
-        },
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,8 +417,11 @@ mod tests {
         let opaque_request_map = |_: NonSerializableRequest| {};
 
         let mut registry = NodeRegistry::default();
-        registry.register_opaque_request_node("opaque_request_map", "Test Name", move |builder| {
-            builder.create_map_block(opaque_request_map)
+        registry.register_node("opaque_request_map", "Test Name", move |builder| {
+            builder
+                .create_map_block(opaque_request_map)
+                .into_registration_builder()
+                .with_opaque_request()
         });
         assert!(registry.get_registration("opaque_request_map").is_some());
         let registration = registry.get_registration("opaque_request_map").unwrap();
@@ -330,19 +429,24 @@ mod tests {
         assert!(registration.metadata.response.serializable);
 
         let opaque_response_map = |_: ()| NonSerializableRequest {};
-        registry.register_opaque_response_node(
-            "opaque_response_map",
-            "Test Name",
-            move |builder| builder.create_map_block(opaque_response_map),
-        );
+        registry.register_node("opaque_response_map", "Test Name", move |builder| {
+            builder
+                .create_map_block(opaque_response_map)
+                .into_registration_builder()
+                .with_opaque_response()
+        });
         assert!(registry.get_registration("opaque_response_map").is_some());
         let registration = registry.get_registration("opaque_response_map").unwrap();
         assert!(registration.metadata.request.serializable);
         assert!(!registration.metadata.response.serializable);
 
         let opaque_req_resp_map = |_: NonSerializableRequest| NonSerializableRequest {};
-        registry.register_opaque_node("opaque_req_resp_map", "Test Name", move |builder| {
-            builder.create_map_block(opaque_req_resp_map)
+        registry.register_node("opaque_req_resp_map", "Test Name", move |builder| {
+            builder
+                .create_map_block(opaque_req_resp_map)
+                .into_registration_builder()
+                .with_opaque_request()
+                .with_opaque_response()
         });
         assert!(registry.get_registration("opaque_req_resp_map").is_some());
         let registration = registry.get_registration("opaque_req_resp_map").unwrap();
