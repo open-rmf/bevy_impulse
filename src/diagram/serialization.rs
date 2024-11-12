@@ -33,16 +33,6 @@ impl From<serde_json::Error> for SerializationError {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub struct MessageMetadata {
-    /// The type of the message, if the message is serializable, this will be the json schema
-    /// type, if it is not serializable, it will be the rust type.
-    pub(crate) r#type: String,
-
-    /// Indicates if the message is serializable.
-    pub(crate) serializable: bool,
-}
-
 pub trait DynType {
     /// Returns the type name of the request. Note that the type name must be unique.
     fn type_name() -> String;
@@ -63,10 +53,34 @@ where
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct RequestMetadata {
+    /// The type name of the request.
+    pub(super) r#type: String,
+
+    /// Indicates if the request is deserializable.
+    pub(super) deserializable: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResponseMetadata {
+    /// The type name of the response.
+    pub(super) r#type: String,
+
+    /// Indicates if the response is serializable.
+    pub(super) serializable: bool,
+
+    /// Indicates if the response is cloneable, a node must have a cloneable response
+    /// in order to connect it to a "fork clone" operation.
+    pub(super) cloneable: bool,
+}
+
 pub trait SerializeMessage<T> {
+    fn type_name() -> String;
+
     fn to_json(v: &T) -> Result<serde_json::Value, SerializationError>;
 
-    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata;
+    fn serializable() -> bool;
 }
 
 #[derive(Default)]
@@ -76,23 +90,25 @@ impl<T> SerializeMessage<T> for DefaultSerializer
 where
     T: Serialize + DynType,
 {
+    fn type_name() -> String {
+        T::type_name()
+    }
+
     fn to_json(v: &T) -> Result<serde_json::Value, SerializationError> {
         serde_json::to_value(v).map_err(|err| SerializationError::from(err))
     }
 
-    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata {
-        T::json_schema(gen);
-        MessageMetadata {
-            r#type: T::type_name(),
-            serializable: true,
-        }
+    fn serializable() -> bool {
+        true
     }
 }
 
 pub trait DeserializeMessage<T> {
+    fn type_name() -> String;
+
     fn from_json(json: serde_json::Value) -> Result<T, SerializationError>;
 
-    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata;
+    fn deserializable() -> bool;
 }
 
 #[derive(Default)]
@@ -102,16 +118,16 @@ impl<T> DeserializeMessage<T> for DefaultDeserializer
 where
     T: DeserializeOwned + DynType,
 {
+    fn type_name() -> String {
+        T::type_name()
+    }
+
     fn from_json(json: serde_json::Value) -> Result<T, SerializationError> {
         serde_json::from_value::<T>(json).map_err(|err| SerializationError::from(err))
     }
 
-    fn message_metadata(gen: &mut SchemaGenerator) -> MessageMetadata {
-        T::json_schema(gen);
-        MessageMetadata {
-            r#type: T::type_name(),
-            serializable: true,
-        }
+    fn deserializable() -> bool {
+        true
     }
 }
 
@@ -119,15 +135,16 @@ where
 pub struct OpaqueMessageSerializer;
 
 impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
+    fn type_name() -> String {
+        std::any::type_name::<T>().to_string()
+    }
+
     fn to_json(_v: &T) -> Result<serde_json::Value, SerializationError> {
         Err(SerializationError::NotSupported)
     }
 
-    fn message_metadata(_gen: &mut SchemaGenerator) -> MessageMetadata {
-        MessageMetadata {
-            r#type: std::any::type_name::<T>().to_string(),
-            serializable: false,
-        }
+    fn serializable() -> bool {
+        false
     }
 }
 
@@ -135,14 +152,15 @@ impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
 pub struct OpaqueMessageDeserializer;
 
 impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
+    fn type_name() -> String {
+        std::any::type_name::<T>().to_string()
+    }
+
     fn from_json(_json: serde_json::Value) -> Result<T, SerializationError> {
         Err(SerializationError::NotSupported)
     }
 
-    fn message_metadata(_gen: &mut SchemaGenerator) -> MessageMetadata {
-        MessageMetadata {
-            r#type: std::any::type_name::<T>().to_string(),
-            serializable: false,
-        }
+    fn deserializable() -> bool {
+        false
     }
 }

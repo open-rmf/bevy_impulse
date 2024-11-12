@@ -5,16 +5,16 @@ use bevy_ecs::entity::Entity;
 use schemars::gen::{SchemaGenerator, SchemaSettings};
 use serde::Serialize;
 
-use crate::{MessageMetadata, SerializeMessage};
+use crate::{RequestMetadata, SerializeMessage};
 
 use super::{
     DefaultDeserializer, DefaultSerializer, DeserializeMessage, OpaqueMessageDeserializer,
-    OpaqueMessageSerializer,
+    OpaqueMessageSerializer, ResponseMetadata,
 };
 
 /// A type erased [`bevy_impulse::InputSlot`]
 #[derive(Copy, Clone)]
-pub(crate) struct DynInputSlot {
+pub(super) struct DynInputSlot {
     #[allow(unused)]
     scope: Entity,
 
@@ -23,7 +23,7 @@ pub(crate) struct DynInputSlot {
 }
 
 impl DynInputSlot {
-    pub(crate) fn into_input<T>(self) -> InputSlot<T> {
+    pub(super) fn into_input<T>(self) -> InputSlot<T> {
         InputSlot::<T>::new(self.scope, self.source)
     }
 }
@@ -38,7 +38,7 @@ impl<T> From<InputSlot<T>> for DynInputSlot {
 }
 
 /// A type erased [`bevy_impulse::Output`]
-pub(crate) struct DynOutput {
+pub(super) struct DynOutput {
     #[allow(unused)]
     scope: Entity,
 
@@ -47,7 +47,7 @@ pub(crate) struct DynOutput {
 }
 
 impl DynOutput {
-    pub(crate) fn into_output<T>(self) -> Output<T>
+    pub(super) fn into_output<T>(self) -> Output<T>
     where
         T: Send + Sync + 'static,
     {
@@ -68,17 +68,17 @@ where
 }
 
 #[derive(Serialize)]
-pub(crate) struct NodeMetadata {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub request: MessageMetadata,
-    pub response: MessageMetadata,
+pub(super) struct NodeMetadata {
+    pub(super) id: &'static str,
+    pub(super) name: &'static str,
+    pub(super) request: RequestMetadata,
+    pub(super) response: ResponseMetadata,
 }
 
 /// A type erased [`bevy_impulse::Node`]
-pub(crate) struct DynNode {
-    pub(crate) input: DynInputSlot,
-    pub(crate) output: DynOutput,
+pub(super) struct DynNode {
+    pub(super) input: DynInputSlot,
+    pub(super) output: DynOutput,
 }
 
 impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
@@ -94,17 +94,17 @@ where
     }
 }
 
-pub(crate) struct NodeRegistration {
-    pub(crate) metadata: NodeMetadata,
+pub(super) struct NodeRegistration {
+    pub(super) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    pub(crate) create_node: Box<dyn FnMut(&mut Builder) -> DynNode>,
+    pub(super) create_node: Box<dyn FnMut(&mut Builder) -> DynNode>,
 
     /// Creates a node that deserializes a [`serde_json::Value`] into the registered node input.
-    pub(crate) create_receiver: Box<dyn FnMut(&mut Builder) -> DynNode>,
+    pub(super) create_receiver: Box<dyn FnMut(&mut Builder) -> DynNode>,
 
     /// Creates a node that serializes the registered node's output to a [`serde_json::Value`].
-    pub(crate) create_sender: Box<dyn FnMut(&mut Builder) -> DynNode>,
+    pub(super) create_sender: Box<dyn FnMut(&mut Builder) -> DynNode>,
 }
 
 /// Serializes the node registrations as a map of node metadata.
@@ -125,49 +125,17 @@ where
     gen.definitions().serialize(s)
 }
 
-pub trait ResponseCloneableTrait {
-    fn cloneable() -> bool;
-}
-
-pub struct ResponseCloneableImpl<const CLONEABLE: bool>;
-
-impl<const CLONEABLE: bool> ResponseCloneableTrait for ResponseCloneableImpl<CLONEABLE> {
-    fn cloneable() -> bool {
-        CLONEABLE
-    }
-}
-
-pub struct RegistrationBuilder<
-    Request,
-    Response,
-    Streams,
-    Deserializer,
-    Serializer,
-    const RESPONSE_CLONEABLE: bool,
-> where
-    Streams: StreamPack,
-{
-    node: Node<Request, Response, Streams>,
+pub struct RegistrationBuilder<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool> {
+    node: NodeT,
     _unused: PhantomData<(Deserializer, Serializer)>,
 }
 
-impl<Request, Response, Streams, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
-    RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, RESPONSE_CLONEABLE>
-where
-    Streams: StreamPack,
-    Request: Send + Sync,
-    Response: Send + Sync,
+impl<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
+    RegistrationBuilder<NodeT, Deserializer, Serializer, RESPONSE_CLONEABLE>
 {
     pub fn with_opaque_request(
         self,
-    ) -> RegistrationBuilder<
-        Request,
-        Response,
-        Streams,
-        OpaqueMessageDeserializer,
-        Serializer,
-        RESPONSE_CLONEABLE,
-    > {
+    ) -> RegistrationBuilder<NodeT, OpaqueMessageDeserializer, Serializer, RESPONSE_CLONEABLE> {
         RegistrationBuilder {
             node: self.node,
             _unused: Default::default(),
@@ -176,14 +144,7 @@ where
 
     pub fn with_opaque_response(
         self,
-    ) -> RegistrationBuilder<
-        Request,
-        Response,
-        Streams,
-        Deserializer,
-        OpaqueMessageSerializer,
-        RESPONSE_CLONEABLE,
-    > {
+    ) -> RegistrationBuilder<NodeT, Deserializer, OpaqueMessageSerializer, RESPONSE_CLONEABLE> {
         RegistrationBuilder {
             node: self.node,
             _unused: Default::default(),
@@ -192,7 +153,7 @@ where
 
     pub fn with_response_cloneable(
         self,
-    ) -> RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, true> {
+    ) -> RegistrationBuilder<NodeT, Deserializer, Serializer, true> {
         RegistrationBuilder {
             node: self.node,
             _unused: Default::default(),
@@ -200,69 +161,37 @@ where
     }
 }
 
-pub trait IntoRegistrationBuilder<
-    Request,
-    Response,
-    Streams,
-    Deserializer,
-    Serializer,
-    const RESPONSE_CLONEABLE: bool,
-> where
-    Streams: StreamPack,
-{
+pub trait IntoRegistrationBuilder<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool> {
     fn into_registration_builder(
         self,
-    ) -> RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, RESPONSE_CLONEABLE>;
+    ) -> RegistrationBuilder<NodeT, Deserializer, Serializer, RESPONSE_CLONEABLE>;
 }
 
-impl<Request, Response, Streams, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
-    IntoRegistrationBuilder<
-        Request,
-        Response,
-        Streams,
-        Deserializer,
-        Serializer,
-        RESPONSE_CLONEABLE,
-    >
-    for RegistrationBuilder<
-        Request,
-        Response,
-        Streams,
-        Deserializer,
-        Serializer,
-        RESPONSE_CLONEABLE,
-    >
-where
-    Streams: StreamPack,
+impl<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
+    IntoRegistrationBuilder<NodeT, Deserializer, Serializer, RESPONSE_CLONEABLE>
+    for RegistrationBuilder<NodeT, Deserializer, Serializer, RESPONSE_CLONEABLE>
 {
     fn into_registration_builder(
         self,
-    ) -> RegistrationBuilder<Request, Response, Streams, Deserializer, Serializer, RESPONSE_CLONEABLE>
-    {
+    ) -> RegistrationBuilder<NodeT, Deserializer, Serializer, RESPONSE_CLONEABLE> {
         self
     }
 }
 
 impl<Request, Response, Streams>
     IntoRegistrationBuilder<
-        Request,
-        Response,
-        Streams,
+        Node<Request, Response, Streams>,
         DefaultDeserializer,
         DefaultSerializer,
         false,
     > for Node<Request, Response, Streams>
 where
-    Request: Send + Sync,
-    Response: Send + Sync,
     Streams: StreamPack,
 {
     fn into_registration_builder(
         self,
     ) -> RegistrationBuilder<
-        Request,
-        Response,
-        Streams,
+        Node<Request, Response, Streams>,
         DefaultDeserializer,
         DefaultSerializer,
         false,
@@ -314,9 +243,7 @@ impl NodeRegistry {
     ) -> &mut Self
     where
         IntoRegistrationBuilderT: IntoRegistrationBuilder<
-            Request,
-            Response,
-            Streams,
+            Node<Request, Response, Streams>,
             Deserializer,
             Serializer,
             RESPONSE_CLONEABLE,
@@ -327,8 +254,15 @@ impl NodeRegistry {
         Deserializer: DeserializeMessage<Request>,
         Serializer: SerializeMessage<Response>,
     {
-        let request = Deserializer::message_metadata(&mut self.gen);
-        let response = Serializer::message_metadata(&mut self.gen);
+        let request = RequestMetadata {
+            r#type: Deserializer::type_name(),
+            deserializable: Deserializer::deserializable(),
+        };
+        let response = ResponseMetadata {
+            r#type: Serializer::type_name(),
+            serializable: Serializer::serializable(),
+            cloneable: RESPONSE_CLONEABLE,
+        };
 
         self.nodes.insert(
             id,
@@ -362,28 +296,28 @@ impl NodeRegistry {
         self
     }
 
-    pub(crate) fn get_registration<Q>(&self, id: &Q) -> Option<&NodeRegistration>
+    pub(super) fn get_registration<Q>(&self, id: &Q) -> Option<&NodeRegistration>
     where
         Q: Borrow<str> + ?Sized,
     {
         self.nodes.get(id.borrow())
     }
 
-    pub(crate) fn create_node<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
+    pub(super) fn create_node<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
     where
         Q: Borrow<str> + ?Sized,
     {
         Some((self.nodes.get_mut(id.borrow())?.create_node)(builder))
     }
 
-    pub(crate) fn create_receiver<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
+    pub(super) fn create_receiver<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
     where
         Q: Borrow<str> + ?Sized,
     {
         Some((self.nodes.get_mut(id.borrow())?.create_receiver)(builder))
     }
 
-    pub(crate) fn create_sender<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
+    pub(super) fn create_sender<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
     where
         Q: Borrow<str> + ?Sized,
     {
@@ -406,8 +340,24 @@ mod tests {
             builder.create_map_block(multiply3)
         });
         let registration = registry.get_registration("multiply3").unwrap();
-        assert!(registration.metadata.request.serializable);
+        assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
+        assert!(!registration.metadata.response.cloneable);
+    }
+
+    #[test]
+    fn test_register_cloneable_node() {
+        let mut registry = NodeRegistry::default();
+        registry.register_node("multiply3", "Test Name", move |builder: &mut Builder| {
+            builder
+                .create_map_block(multiply3)
+                .into_registration_builder()
+                .with_response_cloneable()
+        });
+        let registration = registry.get_registration("multiply3").unwrap();
+        assert!(registration.metadata.request.deserializable);
+        assert!(registration.metadata.response.serializable);
+        assert!(registration.metadata.response.cloneable);
     }
 
     struct NonSerializableRequest {}
@@ -425,8 +375,9 @@ mod tests {
         });
         assert!(registry.get_registration("opaque_request_map").is_some());
         let registration = registry.get_registration("opaque_request_map").unwrap();
-        assert!(!registration.metadata.request.serializable);
+        assert!(!registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
+        assert!(!registration.metadata.response.cloneable);
 
         let opaque_response_map = |_: ()| NonSerializableRequest {};
         registry.register_node("opaque_response_map", "Test Name", move |builder| {
@@ -437,8 +388,9 @@ mod tests {
         });
         assert!(registry.get_registration("opaque_response_map").is_some());
         let registration = registry.get_registration("opaque_response_map").unwrap();
-        assert!(registration.metadata.request.serializable);
+        assert!(registration.metadata.request.deserializable);
         assert!(!registration.metadata.response.serializable);
+        assert!(!registration.metadata.response.cloneable);
 
         let opaque_req_resp_map = |_: NonSerializableRequest| NonSerializableRequest {};
         registry.register_node("opaque_req_resp_map", "Test Name", move |builder| {
@@ -450,7 +402,8 @@ mod tests {
         });
         assert!(registry.get_registration("opaque_req_resp_map").is_some());
         let registration = registry.get_registration("opaque_req_resp_map").unwrap();
-        assert!(!registration.metadata.request.serializable);
+        assert!(!registration.metadata.request.deserializable);
         assert!(!registration.metadata.response.serializable);
+        assert!(!registration.metadata.response.cloneable);
     }
 }

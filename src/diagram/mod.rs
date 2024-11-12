@@ -57,7 +57,7 @@ impl Diagram {
     where
         Streams: StreamPack,
     {
-        let (start_id, _terminate_id, node_vertices_ids) = self.validate(registry)?;
+        let (start_id, _terminate_id, _) = self.validate(registry)?;
         let start = self.get_vertex(start_id)?;
 
         let w = app.world.spawn_workflow(
@@ -70,16 +70,16 @@ impl Diagram {
                 // from the nodes map but we can borrow and clone the inputs.
                 let mut nodes: HashMap<&VertexId, DynNode> = self
                     .vertices
-                    .values()
-                    .filter_map(|v| match &v.desc {
-                        VertexDescription::Node { node_id } => Some(node_id),
-                        _ => None,
-                    })
-                    .map(|node_id| {
-                        (
-                            node_id,
+                    .iter()
+                    .filter_map(|(vertex_id, vertex)| {
+                        let node_id = match &vertex.desc {
+                            VertexDescription::Node { node_id } => node_id,
+                            _ => return None,
+                        };
+                        Some((
+                            vertex_id,
                             registry.create_node(node_id, dyn_builder.builder).unwrap(),
-                        )
+                        ))
                     })
                     .collect();
                 let node_inputs: HashMap<&VertexId, DynInputSlot> =
@@ -103,7 +103,7 @@ impl Diagram {
                                 receiver.input
                             }
                             VertexDescription::Terminate => scope.terminate.into(),
-                            _ => panic!(),
+                            _ => panic!("start cannot connect to itself"),
                         }
                     })
                     .collect();
@@ -115,13 +115,13 @@ impl Diagram {
                 }
 
                 // connect other vertices
-                for vertex_id in node_vertices_ids {
-                    let vertex = self.get_vertex(vertex_id).unwrap();
-                    let source_node_id = match &vertex.desc {
-                        VertexDescription::Node { node_id } => node_id,
-                        _ => panic!("expected node vertex"),
-                    };
-                    let source_node = nodes.remove(source_node_id).unwrap();
+                for (vertex_id, vertex, source_node_id) in
+                    self.vertices.iter().filter_map(|(id, v)| match &v.desc {
+                        VertexDescription::Node { node_id } => Some((id, v, node_id)),
+                        _ => None,
+                    })
+                {
+                    let source_node = nodes.remove(vertex_id).unwrap();
 
                     let target_inputs: Vec<DynInputSlot> = vertex
                         .edges
@@ -129,10 +129,8 @@ impl Diagram {
                         .map(|target_vertex_id| {
                             let target_vertex = self.vertices.get(target_vertex_id).unwrap();
                             match &target_vertex.desc {
-                                VertexDescription::Node {
-                                    node_id: target_node_id,
-                                } => {
-                                    let target_node = nodes.get(target_node_id).unwrap();
+                                VertexDescription::Node { node_id: _ } => {
+                                    let target_node = nodes.get(target_vertex_id).unwrap();
                                     target_node.input.clone()
                                 }
                                 VertexDescription::Terminate => {
@@ -187,6 +185,7 @@ impl Diagram {
     /// 3. The terminate vertex is no edges to other vertices.
     /// 4. There are no edges into the start vertex.
     /// 5. All the connections are valid (their request and response type matches).
+    /// 6. There can be multiple outgoing edges only if the response is cloneable.
     fn validate(
         &self,
         registry: &NodeRegistry,
@@ -278,7 +277,7 @@ impl Diagram {
                 VertexDescription::Start => return Err(DiagramError::MultipleStartTerminate),
                 VertexDescription::Node { node_id } => {
                     let target_node = Self::get_node_registration(&node_id, registry)?;
-                    if !target_node.metadata.request.serializable {
+                    if !target_node.metadata.request.deserializable {
                         return Err(DiagramError::UnserializableEdge(start_id.clone()));
                     }
                 }
@@ -302,9 +301,13 @@ impl Diagram {
         registry: &NodeRegistry,
     ) -> Result<(), DiagramError> {
         let vertex = self.get_vertex(vertex_id)?;
+        let source_node = Self::get_node_registration(node_id, registry)?;
+        if !source_node.metadata.response.cloneable && vertex.edges.len() > 1 {
+            return Err(DiagramError::NotCloneable(vertex_id.clone()));
+        }
+
         for target_vertex_id in &vertex.edges {
             let target_vertex = self.get_vertex(target_vertex_id)?;
-            // let source_node = Self::get_node_registration(s, registry)
             match &target_vertex.desc {
                 VertexDescription::Start => return Err(DiagramError::InvalidStartEdges),
                 VertexDescription::Terminate => {
@@ -353,6 +356,7 @@ pub enum DiagramError {
     InvalidTerminateEdges,
     DisconnectedGraph,
     UnserializableEdge(VertexId),
+    NotCloneable(VertexId),
     JsonError(serde_json::Error),
 }
 
@@ -376,6 +380,7 @@ impl Display for DiagramError {
           Self::InvalidTerminateEdges => f.write_str("[terminate] cannot send any outputs"),
           Self::DisconnectedGraph => f.write_str("No path reaches terminate"),
           Self::UnserializableEdge(vertex_id) => write!(f, "[{}] is connected to start or terminate but it's request or response cannot be serialized", vertex_id),
+          Self::NotCloneable(vertex_id) => write!(f, "[{}] can only have 1 outgoing edge because it's response cannot be cloned", vertex_id),
           Self::JsonError(err) => err.fmt(f),
       }
     }
@@ -438,6 +443,12 @@ mod tests {
         let mut registry = NodeRegistry::default();
         registry.register_node("multiply3", "multiply3", |builder| {
             builder.create_map_block(multiply3)
+        });
+        registry.register_node("multiply3_cloneable", "multiply3_cloneable", |builder| {
+            builder
+                .create_map_block(multiply3)
+                .into_registration_builder()
+                .with_response_cloneable()
         });
         registry.register_node("opaque", "opaque", |builder| {
             builder
@@ -562,16 +573,16 @@ mod tests {
                 (
                     "start".to_string(),
                     Vertex {
-                        edges: vec!["multiply3".to_string()],
+                        edges: vec!["multiply3_cloneable".to_string()],
                         desc: VertexDescription::Start,
                     },
                 ),
                 (
-                    "multiply3".to_string(),
+                    "multiply3_cloneable".to_string(),
                     Vertex {
                         edges: vec!["start".to_string(), "terminate".to_string()],
                         desc: VertexDescription::Node {
-                            node_id: "multiply3".to_string(),
+                            node_id: "multiply3_cloneable".to_string(),
                         },
                     },
                 ),
@@ -796,6 +807,62 @@ mod tests {
         });
         context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available().unwrap(), 12);
+    }
+
+    #[test]
+    fn test_validate_fork_clone() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let bp = Diagram {
+            vertices: HashMap::from([
+                (
+                    "start".to_string(),
+                    Vertex {
+                        edges: vec!["multiply3".to_string()],
+                        desc: VertexDescription::Start,
+                    },
+                ),
+                (
+                    "multiply3".to_string(),
+                    Vertex {
+                        edges: vec!["multiply3_2".to_string(), "multiply3_3".to_string()],
+                        desc: VertexDescription::Node {
+                            node_id: "multiply3".to_string(),
+                        },
+                    },
+                ),
+                (
+                    "multiply3_2".to_string(),
+                    Vertex {
+                        edges: vec!["terminate".to_string()],
+                        desc: VertexDescription::Node {
+                            node_id: "multiply3".to_string(),
+                        },
+                    },
+                ),
+                (
+                    "multiply3_3".to_string(),
+                    Vertex {
+                        edges: vec!["terminate".to_string()],
+                        desc: VertexDescription::Node {
+                            node_id: "multiply3".to_string(),
+                        },
+                    },
+                ),
+                (
+                    "terminate".to_string(),
+                    Vertex {
+                        edges: vec![],
+                        desc: VertexDescription::Terminate,
+                    },
+                ),
+            ]),
+        };
+
+        assert!(bp
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .is_err_and(|err| matches!(err, DiagramError::NotCloneable(_))));
     }
 
     #[test]
