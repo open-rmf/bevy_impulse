@@ -22,11 +22,13 @@ pub type NodeId = String;
 pub type OperationId = String;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct StartOp {
     next: OperationId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminateOp {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -37,6 +39,7 @@ pub struct NodeOp {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ForkCloneOp {
     next: Vec<OperationId>,
 }
