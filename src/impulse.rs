@@ -683,7 +683,12 @@ mod tests {
         verify_ensured([true, true, false, false], service, label.clone(), context);
         verify_ensured([false, false, true, true], service, label.clone(), context);
         verify_ensured([true, false, false, true], service, label.clone(), context);
-        verify_ensured([false, false, false, false], service, label.clone(), context);
+        verify_ensured(
+            [false, false, false, false],
+            service,
+            label.clone(),
+            context,
+        );
         verify_ensured([true, true, true, true], service, label.clone(), context);
     }
 
@@ -713,7 +718,10 @@ mod tests {
 
         let mut preempter = context.command(|commands| {
             commands
-                .request(Arc::clone(&counter), service.instruct(label.clone().preempt()))
+                .request(
+                    Arc::clone(&counter),
+                    service.instruct(label.clone().preempt()),
+                )
                 .take_response()
         });
 
