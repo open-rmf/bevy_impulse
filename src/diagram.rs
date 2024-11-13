@@ -523,7 +523,7 @@ mod tests {
                 (
                     "start".to_string(),
                     DiagramOperation::Start(StartOp {
-                        next: "multiply3".to_string(),
+                        next: "op_1".to_string(),
                     }),
                 ),
                 (

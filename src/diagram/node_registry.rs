@@ -124,12 +124,24 @@ pub struct RegistrationBuilder<NodeT, Deserializer, Serializer, const RESPONSE_C
     _unused: PhantomData<(Deserializer, Serializer)>,
 }
 
-impl<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
-    RegistrationBuilder<NodeT, Deserializer, Serializer, RESPONSE_CLONEABLE>
+impl<Request, Response, Streams, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
+    RegistrationBuilder<
+        Node<Request, Response, Streams>,
+        Deserializer,
+        Serializer,
+        RESPONSE_CLONEABLE,
+    >
+where
+    Streams: StreamPack,
 {
     pub fn with_opaque_request(
         self,
-    ) -> RegistrationBuilder<NodeT, OpaqueMessageDeserializer, Serializer, RESPONSE_CLONEABLE> {
+    ) -> RegistrationBuilder<
+        Node<Request, Response, Streams>,
+        OpaqueMessageDeserializer,
+        Serializer,
+        RESPONSE_CLONEABLE,
+    > {
         RegistrationBuilder {
             node: self.node,
             _unused: Default::default(),
@@ -138,7 +150,12 @@ impl<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
 
     pub fn with_opaque_response(
         self,
-    ) -> RegistrationBuilder<NodeT, Deserializer, OpaqueMessageSerializer, RESPONSE_CLONEABLE> {
+    ) -> RegistrationBuilder<
+        Node<Request, Response, Streams>,
+        Deserializer,
+        OpaqueMessageSerializer,
+        RESPONSE_CLONEABLE,
+    > {
         RegistrationBuilder {
             node: self.node,
             _unused: Default::default(),
@@ -147,7 +164,10 @@ impl<NodeT, Deserializer, Serializer, const RESPONSE_CLONEABLE: bool>
 
     pub fn with_response_cloneable(
         self,
-    ) -> RegistrationBuilder<NodeT, Deserializer, Serializer, true> {
+    ) -> RegistrationBuilder<Node<Request, Response, Streams>, Deserializer, Serializer, true>
+    where
+        Response: Clone,
+    {
         RegistrationBuilder {
             node: self.node,
             _unused: Default::default(),
