@@ -15,10 +15,7 @@ use super::{
 /// A type erased [`bevy_impulse::InputSlot`]
 #[derive(Copy, Clone)]
 pub(super) struct DynInputSlot {
-    #[allow(unused)]
     scope: Entity,
-
-    #[allow(unused)]
     source: Entity,
 }
 
@@ -39,10 +36,7 @@ impl<T> From<InputSlot<T>> for DynInputSlot {
 
 /// A type erased [`bevy_impulse::Output`]
 pub(super) struct DynOutput {
-    #[allow(unused)]
     scope: Entity,
-
-    #[allow(unused)]
     target: Entity,
 }
 
