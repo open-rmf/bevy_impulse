@@ -485,11 +485,30 @@ mod tests {
     }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-    struct TestLabel;
+    struct UnitLabel;
 
-    // TODO(luca) create a proc-macro for this, because library crates can't
-    // export proc macros we will need to create a new macros only crate
-    impl DeliveryLabel for TestLabel {
+    // TODO(@mxgrey) Figure out how to make the DeliveryLabel macro usable
+    // within the core bevy_impulse library
+    impl DeliveryLabel for UnitLabel {
+        fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
+            Box::new(self.clone())
+        }
+
+        fn as_dyn_eq(&self) -> &dyn DynEq {
+            self
+        }
+
+        fn dyn_hash(&self, mut state: &mut dyn std::hash::Hasher) {
+            let ty_id = std::any::TypeId::of::<Self>();
+            std::hash::Hash::hash(&ty_id, &mut state);
+            std::hash::Hash::hash(self, &mut state);
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct StatefulLabel(u64);
+
+    impl DeliveryLabel for StatefulLabel {
         fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
             Box::new(self.clone())
         }
@@ -534,9 +553,38 @@ mod tests {
         service: Service<Arc<Mutex<u64>>, ()>,
         context: &mut TestingContext,
     ) {
-        let queuing_service = service.instruct(TestLabel);
-        let preempting_service = service.instruct(TestLabel.preempt());
+        // Test for a unit struct
+        verify_preemption_matrix(
+            service.instruct(UnitLabel),
+            service.instruct(UnitLabel.preempt()),
+            context,
+        );
 
+        // Test for a stateful struct
+        verify_preemption_matrix(
+            service.instruct(StatefulLabel(5)),
+            service.instruct(StatefulLabel(5).preempt()),
+            context,
+        );
+
+        // Test for a unit struct
+        verify_queuing_matrix(service.instruct(UnitLabel), context);
+
+        // Test for a stateful struct
+        verify_queuing_matrix(service.instruct(StatefulLabel(7)), context);
+
+        // Test for a unit struct
+        verify_ensured_matrix(service, UnitLabel, context);
+
+        // Test for a stateful struct
+        verify_ensured_matrix(service, StatefulLabel(2), context);
+    }
+
+    fn verify_preemption_matrix(
+        queuing_service: Service<Arc<Mutex<u64>>, ()>,
+        preempting_service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
         // Test by queuing up a bunch of requests before preempting them all at once.
         verify_preemption(1, queuing_service, preempting_service, context);
         verify_preemption(2, queuing_service, preempting_service, context);
@@ -548,25 +596,6 @@ mod tests {
         verify_preemption(2, preempting_service, preempting_service, context);
         verify_preemption(3, preempting_service, preempting_service, context);
         verify_preemption(4, preempting_service, preempting_service, context);
-
-        // Test by queuing up a bunch of requests and making sure they all get
-        // delivered.
-        verify_queuing(2, queuing_service, context);
-        verify_queuing(3, queuing_service, context);
-        verify_queuing(4, queuing_service, context);
-        verify_queuing(5, queuing_service, context);
-
-        // Test by queuing up a mix of ensured and unensured requests, and then
-        // sending in one that preempts them all. The ensured requests should
-        // remain in the queue and execute despite the preempter. The unensured
-        // requests should all be cancelled.
-        verify_ensured([false, true, false, true], service, context);
-        verify_ensured([true, false, false, false], service, context);
-        verify_ensured([true, true, false, false], service, context);
-        verify_ensured([false, false, true, true], service, context);
-        verify_ensured([true, false, false, true], service, context);
-        verify_ensured([false, false, false, false], service, context);
-        verify_ensured([true, true, true, true], service, context);
     }
 
     fn verify_preemption(
@@ -603,6 +632,18 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
+    fn verify_queuing_matrix(
+        queuing_service: Service<Arc<Mutex<u64>>, ()>,
+        context: &mut TestingContext,
+    ) {
+        // Test by queuing up a bunch of requests and making sure they all get
+        // delivered.
+        verify_queuing(2, queuing_service, context);
+        verify_queuing(3, queuing_service, context);
+        verify_queuing(4, queuing_service, context);
+        verify_queuing(5, queuing_service, context);
+    }
+
     fn verify_queuing(
         queue_size: usize,
         queuing_service: Service<Arc<Mutex<u64>>, ()>,
@@ -628,9 +669,28 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    fn verify_ensured(
+    fn verify_ensured_matrix<L: DeliveryLabel + Clone>(
+        service: Service<Arc<Mutex<u64>>, ()>,
+        label: L,
+        context: &mut TestingContext,
+    ) {
+        // Test by queuing up a mix of ensured and unensured requests, and then
+        // sending in one that preempts them all. The ensured requests should
+        // remain in the queue and execute despite the preempter. The unensured
+        // requests should all be cancelled.
+        verify_ensured([false, true, false, true], service, label.clone(), context);
+        verify_ensured([true, false, false, false], service, label.clone(), context);
+        verify_ensured([true, true, false, false], service, label.clone(), context);
+        verify_ensured([false, false, true, true], service, label.clone(), context);
+        verify_ensured([true, false, false, true], service, label.clone(), context);
+        verify_ensured([false, false, false, false], service, label.clone(), context);
+        verify_ensured([true, true, true, true], service, label.clone(), context);
+    }
+
+    fn verify_ensured<L: DeliveryLabel + Clone>(
         queued: impl IntoIterator<Item = bool>,
         service: Service<Arc<Mutex<u64>>, ()>,
+        label: L,
         context: &mut TestingContext,
     ) {
         let counter = Arc::new(Mutex::new(0_u64));
@@ -640,9 +700,9 @@ mod tests {
         for ensured in queued {
             let srv = if ensured {
                 expected_count += 1;
-                service.instruct(TestLabel.ensure())
+                service.instruct(label.clone().ensure())
             } else {
-                service.instruct(TestLabel)
+                service.instruct(label.clone())
             };
 
             let promise = context
@@ -653,7 +713,7 @@ mod tests {
 
         let mut preempter = context.command(|commands| {
             commands
-                .request(Arc::clone(&counter), service.instruct(TestLabel.preempt()))
+                .request(Arc::clone(&counter), service.instruct(label.clone().preempt()))
                 .take_response()
         });
 

@@ -26,6 +26,7 @@ use bevy_ecs::{
     prelude::{Commands, Component, Entity, Event, World},
     schedule::ScheduleLabel,
 };
+pub use bevy_impulse_derive::DeliveryLabel;
 use bevy_utils::{define_label, intern::Interned};
 use std::{any::TypeId, collections::HashSet};
 use thiserror::Error as ThisError;
@@ -195,6 +196,11 @@ define_label!(
     DeliveryLabel,
     DELIVERY_LABEL_INTERNER
 );
+
+pub mod utils {
+    /// Used by the procedural macro for DeliveryLabel
+    pub use bevy_utils::label::DynEq;
+}
 
 /// When using a service, you can bundle in delivery instructions that affect
 /// how multiple requests to the same service may interact with each other.
