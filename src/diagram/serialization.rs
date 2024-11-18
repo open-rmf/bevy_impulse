@@ -53,7 +53,7 @@ where
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct RequestMetadata {
     /// The type name of the request.
     pub(super) r#type: String,
@@ -62,7 +62,7 @@ pub struct RequestMetadata {
     pub(super) deserializable: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ResponseMetadata {
     /// The type name of the response.
     pub(super) r#type: String,
@@ -73,6 +73,10 @@ pub struct ResponseMetadata {
     /// Indicates if the response is cloneable, a node must have a cloneable response
     /// in order to connect it to a "fork clone" operation.
     pub(super) cloneable: bool,
+
+    /// The number of unzip slots that a response have, a value of 0 means that the response
+    /// cannot be unzipped. This should be > 0 only if the response is a tuple.
+    pub(super) unzip_slots: usize,
 }
 
 pub trait SerializeMessage<T> {
