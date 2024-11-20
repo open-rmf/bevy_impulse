@@ -1,16 +1,17 @@
-use std::{borrow::Borrow, collections::HashMap, marker::PhantomData};
+use std::{borrow::Borrow, cell::RefCell, collections::HashMap, marker::PhantomData};
 
 use crate::{Builder, InputSlot, Node, Output, StreamPack};
 use bevy_ecs::entity::Entity;
 use bevy_utils::all_tuples_with_size;
+use log::debug;
 use schemars::gen::{SchemaGenerator, SchemaSettings};
 use serde::Serialize;
 
 use crate::{RequestMetadata, SerializeMessage};
 
 use super::{
-    DefaultDeserializer, DefaultSerializer, DeserializeMessage, OpaqueMessageDeserializer,
-    OpaqueMessageSerializer, ResponseMetadata, ScopeTerminate,
+    DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError,
+    OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata, ScopeTerminate,
 };
 
 /// A type erased [`bevy_impulse::InputSlot`]
@@ -26,6 +27,10 @@ pub struct DynInputSlot {
 impl DynInputSlot {
     pub(super) fn into_input<T>(self) -> InputSlot<T> {
         InputSlot::<T>::new(self.scope, self.source)
+    }
+
+    pub(super) fn id(&self) -> Entity {
+        self.source
     }
 }
 
@@ -54,6 +59,10 @@ impl DynOutput {
         T: Send + Sync + 'static,
     {
         Output::<T>::new(self.scope, self.target)
+    }
+
+    pub(super) fn id(&self) -> Entity {
+        self.target
     }
 }
 
@@ -101,17 +110,87 @@ pub struct NodeRegistration {
     pub(super) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    create_node_impl: Box<dyn FnMut(&mut Builder) -> DynNode>,
+    create_node_impl: RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>,
 
     /// Creates a node that deserializes a [`serde_json::Value`] into the registered node input.
-    create_receiver_impl: Option<Box<dyn FnMut(&mut Builder) -> DynNode>>,
+    create_receiver_impl: Option<RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>>,
 
     /// Creates a node that serializes the registered node's output to a [`serde_json::Value`].
-    create_sender_impl: Option<Box<dyn FnMut(&mut Builder) -> DynNode>>,
+    create_sender_impl: Option<RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>>,
 
-    connect_fork_clone_impl: Option<Box<dyn Fn(&mut Builder, DynOutput, Vec<DynInputSlot>)>>,
+    fork_clone_impl: Option<
+        // RefCell to a Box to a Fn that returns Result<(), DiagramError>
+        RefCell<
+            Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>,
+        >,
+    >,
 
-    connect_unzip_impl: Option<Box<dyn Fn(&mut Builder, DynOutput, Vec<DynInputSlot>)>>,
+    unzip_impl: Option<
+        // RefCell to a Box to a Fn that returns Result<(), DiagramError>
+        RefCell<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
+    >,
+}
+
+impl NodeRegistration {
+    pub(super) fn create_node(&self, builder: &mut Builder) -> DynNode {
+        let n = (self.create_node_impl.borrow_mut())(builder);
+        debug!(
+            "create node [{}], output: [{:?}], input: [{:?}]",
+            self.metadata.id, n.output.target, n.input.source
+        );
+        n
+    }
+
+    pub(super) fn create_receiver(&self, builder: &mut Builder) -> Result<DynNode, DiagramError> {
+        let f = self
+            .create_receiver_impl
+            .as_ref()
+            .ok_or(DiagramError::NotSerializable)?;
+        let n = (f.borrow_mut())(builder);
+        debug!(
+            "create receiver [{}], output: [{:?}], input: [{:?}]",
+            self.metadata.id, n.output.target, n.input.source
+        );
+        Ok(n)
+    }
+
+    pub(super) fn create_sender(&self, builder: &mut Builder) -> Result<DynNode, DiagramError> {
+        let f = self
+            .create_sender_impl
+            .as_ref()
+            .ok_or(DiagramError::NotSerializable)?;
+        let n = (f.borrow_mut())(builder);
+        debug!(
+            "create sender [{}], output: [{:?}], input: [{:?}]",
+            self.metadata.id, n.output.target, n.input.source
+        );
+        Ok(n)
+    }
+
+    pub(super) fn fork_clone(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        amount: usize,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        let f = self
+            .fork_clone_impl
+            .as_ref()
+            .ok_or(DiagramError::NotCloneable)?;
+        (f.borrow_mut())(builder, output, amount)
+    }
+
+    pub(super) fn unzip(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        let f = self
+            .unzip_impl
+            .as_ref()
+            .ok_or(DiagramError::NotUnzippable)?;
+        (f.borrow_mut())(builder, output)
+    }
 }
 
 /// Serializes the node registrations as a map of node metadata.
@@ -132,49 +211,49 @@ where
     gen.definitions().serialize(s)
 }
 
-pub trait ConnectUnzip {
+pub trait DynUnzip {
     const UNZIP_SLOTS: usize;
     type Response;
 
-    fn connect_unzip(self, builder: &mut Builder, inputs: Vec<DynInputSlot>);
+    fn unzip(self, builder: &mut Builder) -> Result<Vec<DynOutput>, DiagramError>;
 }
 
-macro_rules! connect_unzip_impl {
+macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*> ConnectUnzip for Output<($($P,)*)> where $($P: Send + Sync + 'static),* {
+        impl<$($P),*> DynUnzip for Output<($($P,)*)> where $($P: Send + Sync + 'static),* {
             const UNZIP_SLOTS: usize = $len;
             type Response = ($($P,)*);
 
-            fn connect_unzip(
+            fn unzip(
                 self,
                 builder: &mut Builder,
-                inputs: Vec<DynInputSlot>,
-            ) {
-                assert_eq!($len, inputs.len());
-
+            ) -> Result<Vec<DynOutput>, DiagramError> {
+                let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
                 let chain = self.chain(builder);
                 let ($($o,)*) = chain.unzip();
 
-                let mut i: usize = 0;
                 $({
-                    let input = inputs[i];
-                    assert_eq!(std::any::type_name::<$P>(), input.type_name);
-                    builder.connect($o, input.into_input());
-                    #[allow(unused)]
-                    { i += 1; }
+                    outputs.push($o.into());
                 })*
+
+                Ok(outputs)
             }
         }
     };
 }
 
-all_tuples_with_size!(connect_unzip_impl, 1, 12, R, o);
+all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
 
 pub struct RegistrationBuilder<NodeBuilderT, Deserializer, Serializer> {
     build_node: NodeBuilderT,
-    connect_fork_clone: Option<Box<dyn Fn(&mut Builder, DynOutput, Vec<DynInputSlot>)>>,
-
-    connect_unzip: Option<Box<dyn Fn(&mut Builder, DynOutput, Vec<DynInputSlot>)>>,
+    fork_clone: Option<
+        RefCell<
+            Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>,
+        >,
+    >,
+    unzip: Option<
+        RefCell<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
+    >,
     /// The number of inputs that the output can be unzipped to
     unzip_slots: usize,
 
@@ -194,8 +273,8 @@ where
     ) -> RegistrationBuilder<NodeBuilderT, OpaqueMessageDeserializer, Serializer> {
         RegistrationBuilder {
             build_node: self.build_node,
-            connect_fork_clone: self.connect_fork_clone,
-            connect_unzip: self.connect_unzip,
+            fork_clone: self.fork_clone,
+            unzip: self.unzip,
             unzip_slots: self.unzip_slots,
             _unused: Default::default(),
         }
@@ -206,8 +285,8 @@ where
     ) -> RegistrationBuilder<NodeBuilderT, Deserializer, OpaqueMessageSerializer> {
         RegistrationBuilder {
             build_node: self.build_node,
-            connect_fork_clone: self.connect_fork_clone,
-            connect_unzip: self.connect_unzip,
+            fork_clone: self.fork_clone,
+            unzip: self.unzip,
             unzip_slots: self.unzip_slots,
             _unused: Default::default(),
         }
@@ -217,27 +296,26 @@ where
     where
         Response: Clone,
     {
-        self.connect_fork_clone = Some(Box::new(|builder, output, inputs| {
+        self.fork_clone = Some(RefCell::new(Box::new(|builder, output, amount| {
             assert_eq!(output.type_name, std::any::type_name::<Response>());
 
             let fork_clone = output.into_output::<Response>().fork_clone(builder);
-            for input in inputs {
-                let o = fork_clone.clone_output(builder);
-                builder.connect(o, input.into_input::<Response>());
-            }
-        }));
+            Ok((0..amount)
+                .map(|_| fork_clone.clone_output(builder).into())
+                .collect())
+        })));
         self
     }
 
     pub fn with_unzippable(mut self) -> Self
     where
-        Output<Response>: ConnectUnzip,
+        Output<Response>: DynUnzip,
     {
-        self.connect_unzip = Some(Box::new(|builder, output, inputs| {
+        self.unzip = Some(RefCell::new(Box::new(|builder, output| {
             assert_eq!(std::any::type_name::<Response>(), output.type_name);
             let o = output.into_output::<Response>();
-            o.connect_unzip(builder, inputs);
-        }));
+            o.unzip(builder)
+        })));
         self.unzip_slots = Output::<Response>::UNZIP_SLOTS;
         self
     }
@@ -265,7 +343,7 @@ where
         let response = ResponseMetadata {
             r#type: Serializer::type_name(),
             serializable: Serializer::serializable(),
-            cloneable: self.connect_fork_clone.is_some(),
+            cloneable: self.fork_clone.is_some(),
             unzip_slots: self.unzip_slots,
         };
         NodeRegistration {
@@ -275,38 +353,42 @@ where
                 request,
                 response,
             },
-            create_node_impl: Box::new(move |builder| {
+            create_node_impl: RefCell::new(Box::new(move |builder| {
                 let n = (self.build_node)(builder);
                 DynNode::from(n)
-            }),
+            })),
             create_receiver_impl: {
                 if Deserializer::deserializable() {
-                    Some(Box::new(move |builder| {
+                    Some(RefCell::new(Box::new(move |builder| {
                         let n = builder.create_map_block(|json: serde_json::Value| {
-                            // FIXME(koonpeng): how to fail the workflow?
-                            Deserializer::from_json(json).unwrap()
+                            Deserializer::from_json(json)
                         });
-                        DynNode::from(n)
-                    }))
+                        let o = n.output.chain(builder).cancel_on_err().output();
+                        Node::<serde_json::Value, Request, ()> {
+                            input: n.input,
+                            output: o,
+                            streams: n.streams,
+                        }
+                        .into()
+                    })))
                 } else {
                     None
                 }
             },
             create_sender_impl: {
                 if Serializer::serializable() {
-                    Some(Box::new(move |builder| {
+                    Some(RefCell::new(Box::new(move |builder| {
                         let n = builder.create_map_block(|resp: Response| -> ScopeTerminate {
-                            // FIXME(koonpeng): how to fail the workflow?
                             Ok(Serializer::to_json(&resp)?)
                         });
                         DynNode::from(n)
-                    }))
+                    })))
                 } else {
                     None
                 }
             },
-            connect_fork_clone_impl: self.connect_fork_clone,
-            connect_unzip_impl: self.connect_unzip,
+            fork_clone_impl: self.fork_clone,
+            unzip_impl: self.unzip,
         }
     }
 }
@@ -328,8 +410,8 @@ where
     ) -> RegistrationBuilder<F, DefaultDeserializer, DefaultSerializer> {
         RegistrationBuilder {
             build_node: self,
-            connect_fork_clone: None,
-            connect_unzip: None,
+            fork_clone: None,
+            unzip: None,
             unzip_slots: 0,
             _unused: Default::default(),
         }
@@ -378,86 +460,14 @@ impl NodeRegistry {
         self
     }
 
-    pub(super) fn get_registration<Q>(&self, id: &Q) -> Option<&NodeRegistration>
+    pub(super) fn get_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramError>
     where
         Q: Borrow<str> + ?Sized,
     {
-        self.nodes.get(id.borrow())
-    }
-
-    pub(super) fn create_node<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
-    where
-        Q: Borrow<str> + ?Sized,
-    {
-        Some((self.nodes.get_mut(id.borrow())?.create_node_impl)(builder))
-    }
-
-    pub(super) fn create_receiver<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
-    where
-        Q: Borrow<str> + ?Sized,
-    {
-        Some((self
-            .nodes
-            .get_mut(id.borrow())?
-            .create_receiver_impl
-            .as_mut()?)(builder))
-    }
-
-    pub(super) fn create_sender<Q>(&mut self, id: &Q, builder: &mut Builder) -> Option<DynNode>
-    where
-        Q: Borrow<str> + ?Sized,
-    {
-        Some((self
-            .nodes
-            .get_mut(id.borrow())?
-            .create_sender_impl
-            .as_mut()?)(builder))
-    }
-
-    /// Clone the output and connect it to multiple inputs.
-    /// The output *MUST* be from a node created by the same registration.
-    pub(super) fn fork_clone<Q>(
-        &mut self,
-        id: &Q,
-        builder: &mut Builder,
-        output: DynOutput,
-        inputs: Vec<DynInputSlot>,
-    ) -> Result<(), &str>
-    where
-        Q: Borrow<str> + ?Sized,
-    {
-        let connect_fork_clone_impl = self
-            .nodes
-            .get_mut(id.borrow())
-            .ok_or("not found")?
-            .connect_fork_clone_impl
-            .as_mut()
-            .ok_or("not cloneable")?;
-        connect_fork_clone_impl(builder, output, inputs);
-        Ok(())
-    }
-
-    /// Unzip the output and connect it to multiple inputs.
-    /// The output *MUST* be from a node created by the same registration.
-    pub(super) fn unzip<Q>(
-        &mut self,
-        id: &Q,
-        builder: &mut Builder,
-        output: DynOutput,
-        inputs: Vec<DynInputSlot>,
-    ) -> Result<(), &str>
-    where
-        Q: Borrow<str> + ?Sized,
-    {
-        let connect_unzip_impl = self
-            .nodes
-            .get_mut(id.borrow())
-            .ok_or("not found")?
-            .connect_unzip_impl
-            .as_mut()
-            .ok_or("not unzippable")?;
-        connect_unzip_impl(builder, output, inputs);
-        Ok(())
+        let k = id.borrow();
+        self.nodes
+            .get(k)
+            .ok_or(DiagramError::NodeNotFound(k.to_string()))
     }
 }
 
@@ -534,7 +544,7 @@ mod tests {
                 .into_registration_builder()
                 .with_opaque_request(),
         );
-        assert!(registry.get_registration("opaque_request_map").is_some());
+        assert!(registry.get_registration("opaque_request_map").is_ok());
         let registration = registry.get_registration("opaque_request_map").unwrap();
         assert!(!registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
@@ -549,7 +559,7 @@ mod tests {
                 .into_registration_builder()
                 .with_opaque_response(),
         );
-        assert!(registry.get_registration("opaque_response_map").is_some());
+        assert!(registry.get_registration("opaque_response_map").is_ok());
         let registration = registry.get_registration("opaque_response_map").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(!registration.metadata.response.serializable);
@@ -565,7 +575,7 @@ mod tests {
                 .with_opaque_request()
                 .with_opaque_response(),
         );
-        assert!(registry.get_registration("opaque_req_resp_map").is_some());
+        assert!(registry.get_registration("opaque_req_resp_map").is_ok());
         let registration = registry.get_registration("opaque_req_resp_map").unwrap();
         assert!(!registration.metadata.request.deserializable);
         assert!(!registration.metadata.response.serializable);

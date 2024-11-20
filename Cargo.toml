@@ -8,7 +8,12 @@ description = "Reactive programming and workflow execution for bevy"
 readme = "README.md"
 repository = "https://github.com/open-rmf/bevy_impulse"
 keywords = ["reactive", "workflow", "behavior", "agent", "bevy"]
-categories = ["science::robotics", "asynchronous", "concurrency", "game-development"]
+categories = [
+  "science::robotics",
+  "asynchronous",
+  "concurrency",
+  "game-development",
+]
 
 [dependencies]
 bevy_impulse_derive = { path = "macros", version = "0.0.1" }
@@ -45,6 +50,7 @@ bevy_time = "0.12"
 schemars = { version = "0.8.21", optional = true }
 serde = { version = "1.0.210", features = ["derive"], optional = true }
 serde_json = { version = "1.0.128", optional = true }
+log = "0.4.22"
 
 [features]
 single_threaded_async = ["dep:async-task"]
@@ -52,6 +58,7 @@ diagram = ["dep:schemars", "dep:serde", "dep:serde_json"]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
+test-log = "0.2.16"
 
 [workspace]
 

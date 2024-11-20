@@ -2,6 +2,7 @@ mod node_registry;
 mod serialization;
 mod workflow_builder;
 
+use log::debug;
 pub use node_registry::*;
 pub use serialization::*;
 pub use workflow_builder::*;
@@ -18,36 +19,36 @@ use serde::{Deserialize, Serialize};
 pub type NodeId = String;
 pub type OperationId = String;
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOp {
     next: OperationId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminateOp {}
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeOp {
     node_id: NodeId,
     next: OperationId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkCloneOp {
     next: Vec<OperationId>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnzipOp {
     next: Vec<OperationId>,
 }
 
-#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum DiagramOperation {
     Start(StartOp),
@@ -73,7 +74,7 @@ impl Diagram {
         &self,
         app: &mut App,
         registry: &mut NodeRegistry,
-    ) -> Service<ScopeStart, ScopeTerminate, Streams>
+    ) -> Result<Service<ScopeStart, ScopeTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
     {
@@ -94,46 +95,46 @@ impl Diagram {
         let w = app
             .world
             .spawn_workflow(|scope: DynScope<Streams>, builder: &mut Builder| {
-                let mut builder =
+                debug!(
+                    "spawn workflow, scope input: {:?}, terminate: {:?}",
+                    scope.input.id(),
+                    scope.terminate.id()
+                );
+
+                let mut dyn_builder =
                     unwrap_or_return!(WorkflowBuilder::new(&scope, builder, registry, self));
 
                 // connect node operations
-                for op in self.ops.iter().filter_map(|(_, v)| match v {
-                    DiagramOperation::Node(op) => Some(op),
+                for (op_id, op) in self.ops.iter().filter_map(|(op_id, v)| match v {
+                    DiagramOperation::Node(op) => Some((op_id, op)),
                     _ => None,
                 }) {
-                    unwrap_or_return!(builder.connect_node(&scope, op));
+                    debug!("connecting op [{:?}]", op_id);
+                    unwrap_or_return!(dyn_builder.connect_node(&scope, builder, op_id, op));
                 }
 
                 // connect start operation, note that this consumes scope, so we need to do this last
-                if let Some(start_op) = self.ops.iter().find_map(|(_, v)| match v {
-                    DiagramOperation::Start(op) => Some(op),
+                if let Some((op_id, start_op)) = self.ops.iter().find_map(|(op_id, v)| match v {
+                    DiagramOperation::Start(op) => Some((op_id, op)),
                     _ => None,
                 }) {
-                    unwrap_or_return!(builder.connect_start(scope, start_op));
+                    debug!("connecting op [{:?}]", op_id);
+                    unwrap_or_return!(dyn_builder.connect_start(scope, builder, start_op));
                 }
             });
 
         if let Some(err) = err {
-            return app.world.spawn_workflow(
-                move |scope: DynScope<Streams>, builder: &mut Builder| {
-                    let n = builder.create_map_block(move |_: ScopeStart| -> ScopeTerminate {
-                        Err(Box::new(err.clone()))
-                    });
-                    builder.connect(scope.input, n.input);
-                    builder.connect(n.output, scope.terminate);
-                },
-            );
+            return Err(err);
         }
 
-        w
+        Ok(w)
     }
 
     pub fn spawn_io_workflow(
         &self,
         app: &mut App,
         registry: &mut NodeRegistry,
-    ) -> Service<ScopeStart, ScopeTerminate, ()> {
+    ) -> Result<Service<ScopeStart, ScopeTerminate, ()>, DiagramError> {
         self.spawn_workflow::<()>(app, registry)
     }
 
@@ -204,12 +205,26 @@ impl Error for DiagramError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::{testing::TestingContext, CancellationCause, RequestExt};
+    use crate::{testing::TestingContext, CancellationCause, Promise, RequestExt};
+    use test_log::test;
 
     use super::*;
 
+    fn unwrap_promise<T>(mut p: Promise<T>) -> T {
+        let taken = p.take();
+        if taken.is_available() {
+            taken.available().unwrap()
+        } else {
+            panic!("{:?}", taken.cancellation().unwrap())
+        }
+    }
+
     fn multiply3(i: i64) -> i64 {
         i * 3
+    }
+
+    fn multiply3_5(x: i64) -> (i64, i64) {
+        (x * 3, x * 5)
     }
 
     struct Unserializable;
@@ -241,6 +256,13 @@ mod tests {
                 .with_response_cloneable(),
         );
         registry.register_node(
+            "multiply3_5",
+            "multiply3_5",
+            (|builder: &mut Builder| builder.create_map_block(multiply3_5))
+                .into_registration_builder()
+                .with_unzippable(),
+        );
+        registry.register_node(
             "opaque",
             "opaque",
             (|builder: &mut Builder| builder.create_map_block(opaque))
@@ -266,11 +288,11 @@ mod tests {
     }
 
     #[test]
-    fn test_diagram_no_terminate() {
+    fn test_no_terminate() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -288,7 +310,9 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
@@ -299,11 +323,11 @@ mod tests {
     }
 
     #[test]
-    fn test_diagram_no_start() {
+    fn test_no_start() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "op_1".to_string(),
@@ -319,7 +343,9 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
@@ -330,11 +356,11 @@ mod tests {
     }
 
     #[test]
-    fn test_diagram_connect_to_start() {
+    fn test_connect_to_start() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -362,22 +388,18 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = promise.take().available().unwrap();
-        let err = result.unwrap_err();
-        let err = err.downcast_ref::<DiagramError>().unwrap();
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
         assert!(matches!(err, DiagramError::CannotConnectStart), "{:?}", err);
     }
 
     #[test]
-    fn test_diagram_unserializable_start() {
+    fn test_unserializable_start() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -399,22 +421,18 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = promise.take().available().unwrap();
-        let err = result.unwrap_err();
-        let err = err.downcast_ref::<DiagramError>().unwrap();
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
 
     #[test]
-    fn test_diagram_unserializable_terminate() {
+    fn test_unserializable_terminate() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -436,22 +454,18 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = promise.take().available().unwrap();
-        let err = result.unwrap_err();
-        let err = err.downcast_ref::<DiagramError>().unwrap();
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
 
     #[test]
-    fn test_diagram_mismatch_types() {
+    fn test_mismatch_types() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -480,22 +494,18 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = promise.take().available().unwrap();
-        let err = result.unwrap_err();
-        let err = err.downcast_ref::<DiagramError>().unwrap();
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
         assert!(matches!(err, DiagramError::TypeMismatch(_)), "{:?}", err);
     }
 
     #[test]
-    fn test_diagram_disconnected() {
+    fn test_disconnected() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -524,7 +534,9 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
@@ -535,11 +547,11 @@ mod tests {
     }
 
     #[test]
-    fn test_fork_clone() {
+    fn test_fork_clone_uncloneable() {
         let mut context = TestingContext::minimal_plugins();
         let mut registry = new_registry_with_basic_nodes();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -574,22 +586,18 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = promise.take().available().unwrap();
-        let err = result.unwrap_err();
-        let err = err.downcast_ref::<DiagramError>().unwrap();
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
         assert!(matches!(err, DiagramError::NotCloneable), "{:?}", err);
     }
 
     #[test]
-    fn test_run_fork_clone() {
+    fn test_fork_clone() {
         let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
-        let bp = Diagram {
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -607,7 +615,7 @@ mod tests {
                 (
                     "op_2".to_string(),
                     DiagramOperation::ForkClone(ForkCloneOp {
-                        next: vec!["op_3".to_string()],
+                        next: vec!["op_3".to_string(), "terminate".to_string()],
                     }),
                 ),
                 (
@@ -624,31 +632,61 @@ mod tests {
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 12);
+        let result = unwrap_promise(promise);
+        assert_eq!(result.unwrap(), 12);
     }
 
     #[test]
-    fn test_run_unzip() {
+    fn test_unzip_not_unzippable() {
         let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
-        fn multiply3_5(x: i64) -> (i64, i64) {
-            (x * 3, x * 5)
-        }
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["op_2".to_string()],
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
 
-        registry.register_node(
-            "multiply3_5",
-            "multiply3_5",
-            (|builder: &mut Builder| builder.create_map_block(multiply3_5))
-                .into_registration_builder()
-                .with_unzippable(),
-        );
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
+        assert!(matches!(err, DiagramError::NotUnzippable));
+    }
 
-        let bp = Diagram {
+    #[test]
+    fn test_unzip_to_too_many_slots() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let diagram = Diagram {
             ops: HashMap::from([
                 (
                     "start".to_string(),
@@ -666,7 +704,7 @@ mod tests {
                 (
                     "unzip".to_string(),
                     DiagramOperation::Unzip(UnzipOp {
-                        next: vec!["op_2".to_string(), "op_3".to_string()],
+                        next: vec!["op_2".to_string(), "op_3".to_string(), "op_4".to_string()],
                     }),
                 ),
                 (
@@ -684,21 +722,195 @@ mod tests {
                     }),
                 ),
                 (
+                    "op_4".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
                     "terminate".to_string(),
                     DiagramOperation::Terminate(TerminateOp {}),
                 ),
             ]),
         };
 
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 12);
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
+        assert!(matches!(err, DiagramError::NotUnzippable));
     }
 
     #[test]
-    fn test_run_serialized_diagram() {
+    fn test_no_unzip_to_terminate() {
+        // we cannot unzip to terminate because the serialization registered is for (T1, T2, ...) but when we
+        // unzip to terminate we need to serialize T1.
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["terminate".to_string()],
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let err = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap_err();
+        assert!(matches!(err, DiagramError::NotUnzippable));
+    }
+
+    #[test]
+    fn test_unzip() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["op_2".to_string()],
+                    }),
+                ),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap().unwrap(), 36);
+    }
+
+    #[test]
+    fn test_looping_diagram() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_cloneable".to_string(),
+                        next: "fork_clone".to_string(),
+                    }),
+                ),
+                (
+                    "fork_clone".to_string(),
+                    DiagramOperation::ForkClone(ForkCloneOp {
+                        next: vec!["op_1".to_string(), "op_2".to_string()],
+                    }),
+                ),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap().unwrap(), 36);
+    }
+
+    #[test]
+    fn test_noop_diagram() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap().unwrap(), 4);
+    }
+
+    #[test]
+    fn test_serialized_diagram() {
         let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
@@ -719,8 +931,10 @@ mod tests {
         }
         "#;
 
-        let bp = Diagram::from_json_str(json_str).unwrap();
-        let w = bp.spawn_io_workflow(&mut context.app, &mut registry);
+        let diagram = Diagram::from_json_str(json_str).unwrap();
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
