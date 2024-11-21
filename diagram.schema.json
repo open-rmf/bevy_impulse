@@ -3,15 +3,18 @@
   "title": "Diagram",
   "type": "object",
   "definitions": {
-    "Vertex": {
-      "type": "object",
+    "DiagramOperation": {
       "oneOf": [
         {
           "type": "object",
           "required": [
+            "next",
             "type"
           ],
           "properties": {
+            "next": {
+              "type": "string"
+            },
             "type": {
               "type": "string",
               "enum": [
@@ -37,10 +40,15 @@
         {
           "type": "object",
           "required": [
+            "next",
             "nodeId",
             "type"
           ],
           "properties": {
+            "config": true,
+            "next": {
+              "type": "string"
+            },
             "nodeId": {
               "type": "string"
             },
@@ -51,19 +59,50 @@
               ]
             }
           }
-        }
-      ],
-      "required": [
-        "edges"
-      ],
-      "properties": {
-        "edges": {
-          "type": "array",
-          "items": {
-            "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "forkClone"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "unzip"
+              ]
+            }
           }
         }
-      }
+      ]
     }
   }
 }

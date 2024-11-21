@@ -26,7 +26,7 @@ mod test {
         if cur_schema_json.len() != new_schema_json.len()
             || zip(cur_schema_json, new_schema_json).any(|(a, b)| a != b)
         {
-            return Err(String::from("There are changes in the json schema, please run `cargo run generate_schema` to regenerate it"));
+            return Err(String::from("There are changes in the json schema, please run `cargo run -F=diagram generate_schema` to regenerate it"));
         }
         Ok(())
     }
