@@ -163,11 +163,7 @@ impl<'b> WorkflowBuilder<'b> {
             })
             .map(|(op_id, node_op)| {
                 let r = registry.get_registration(&node_op.node_id)?;
-                let config = match &node_op.config {
-                    Some(c) => c.clone(),
-                    None => serde_json::Value::Null,
-                };
-                let n = r.create_node(builder, config)?;
+                let n = r.create_node(builder, node_op.config.clone())?;
                 Ok((op_id, n))
             })
             .collect::<Result<_, DiagramError>>()?;

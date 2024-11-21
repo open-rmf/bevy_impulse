@@ -33,7 +33,8 @@ pub struct TerminateOp {}
 #[serde(rename_all = "camelCase")]
 pub struct NodeOp {
     node_id: NodeId,
-    config: Option<serde_json::Value>,
+    #[serde(default)]
+    config: serde_json::Value,
     next: OperationId,
 }
 
@@ -330,7 +331,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_1".to_string(),
                     }),
                 ),
@@ -360,7 +361,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -400,7 +401,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -440,7 +441,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "opaque_request".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -474,7 +475,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "opaque_response".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -508,7 +509,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -516,7 +517,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "opaque_request".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -550,7 +551,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -558,7 +559,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_1".to_string(),
                     }),
                 ),
@@ -598,7 +599,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -612,7 +613,7 @@ mod tests {
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -646,7 +647,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -660,7 +661,7 @@ mod tests {
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -698,7 +699,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -738,7 +739,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_5".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -752,7 +753,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -760,7 +761,7 @@ mod tests {
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -768,7 +769,7 @@ mod tests {
                     "op_4".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -804,7 +805,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_5".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -844,7 +845,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_5".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -858,7 +859,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -895,7 +896,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "fork_clone".to_string(),
                     }),
                 ),
@@ -909,7 +910,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
-                        config: None,
+                        config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
                 ),
