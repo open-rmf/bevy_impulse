@@ -33,6 +33,7 @@ pub struct TerminateOp {}
 #[serde(rename_all = "camelCase")]
 pub struct NodeOp {
     node_id: NodeId,
+    config: Option<serde_json::Value>,
     next: OperationId,
 }
 
@@ -162,7 +163,7 @@ pub struct TypeMismatch {
     input_type: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum DiagramError {
     NodeNotFound(NodeId),
     OperationNotFound(OperationId),
@@ -173,6 +174,7 @@ pub enum DiagramError {
     NotCloneable,
     NotUnzippable,
     BadInterconnectChain,
+    JsonError(serde_json::Error),
 }
 
 impl Display for DiagramError {
@@ -197,11 +199,25 @@ impl Display for DiagramError {
             Self::BadInterconnectChain => {
                 f.write_str("an interconnect like forkClone cannot connect to another interconnect")
             }
+            Self::JsonError(err) => err.fmt(f),
         }
     }
 }
 
-impl Error for DiagramError {}
+impl Error for DiagramError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::JsonError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<serde_json::Error> for DiagramError {
+    fn from(err: serde_json::Error) -> Self {
+        DiagramError::JsonError(err)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -245,27 +261,37 @@ mod tests {
         registry.register_node(
             "multiply3",
             "multiply3",
-            (|builder: &mut Builder| builder.create_map_block(multiply3))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3))
                 .into_registration_builder(),
         );
         registry.register_node(
             "multiply3_cloneable",
             "multiply3_cloneable",
-            (|builder: &mut Builder| builder.create_map_block(multiply3))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3))
                 .into_registration_builder()
                 .with_response_cloneable(),
         );
         registry.register_node(
             "multiply3_5",
             "multiply3_5",
-            (|builder: &mut Builder| builder.create_map_block(multiply3_5))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5))
                 .into_registration_builder()
                 .with_unzippable(),
         );
+
+        registry.register_node(
+            "multiplyBy",
+            "multiplyBy",
+            (|builder: &mut Builder, config: i64| {
+                builder.create_map_block(move |a: i64| a * config)
+            })
+            .into_registration_builder(),
+        );
+
         registry.register_node(
             "opaque",
             "opaque",
-            (|builder: &mut Builder| builder.create_map_block(opaque))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(opaque))
                 .into_registration_builder()
                 .with_opaque_request()
                 .with_opaque_response(),
@@ -273,14 +299,14 @@ mod tests {
         registry.register_node(
             "opaque_request",
             "opaque_request",
-            (|builder: &mut Builder| builder.create_map_block(opaque_request))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request))
                 .into_registration_builder()
                 .with_opaque_request(),
         );
         registry.register_node(
             "opaque_response",
             "opaque_response",
-            (|builder: &mut Builder| builder.create_map_block(opaque_response))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response))
                 .into_registration_builder()
                 .with_opaque_response(),
         );
@@ -304,6 +330,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "op_1".to_string(),
                     }),
                 ),
@@ -333,6 +360,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -372,6 +400,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
+                        config: None,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -411,6 +440,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "opaque_request".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -444,6 +474,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "opaque_response".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -477,6 +508,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -484,6 +516,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "opaque_request".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -517,6 +550,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -524,6 +558,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "op_1".to_string(),
                     }),
                 ),
@@ -563,6 +598,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -576,6 +612,7 @@ mod tests {
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -609,6 +646,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
+                        config: None,
                         next: "op_2".to_string(),
                     }),
                 ),
@@ -622,6 +660,7 @@ mod tests {
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -659,6 +698,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -698,6 +738,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_5".to_string(),
+                        config: None,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -711,6 +752,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -718,6 +760,7 @@ mod tests {
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -725,6 +768,7 @@ mod tests {
                     "op_4".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -760,6 +804,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_5".to_string(),
+                        config: None,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -799,6 +844,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_5".to_string(),
+                        config: None,
                         next: "unzip".to_string(),
                     }),
                 ),
@@ -812,6 +858,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -848,6 +895,7 @@ mod tests {
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3_cloneable".to_string(),
+                        config: None,
                         next: "fork_clone".to_string(),
                     }),
                 ),
@@ -861,6 +909,7 @@ mod tests {
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
                         node_id: "multiply3".to_string(),
+                        config: None,
                         next: "terminate".to_string(),
                     }),
                 ),
@@ -922,7 +971,8 @@ mod tests {
             },
             "multiply3": {
                 "type": "node",
-                "nodeId": "multiply3",
+                "nodeId": "multiplyBy",
+                "config": 7,
                 "next": "terminate"
             },
             "terminate": {
@@ -938,6 +988,6 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 12);
+        assert_eq!(promise.take().available().unwrap().unwrap(), 28);
     }
 }

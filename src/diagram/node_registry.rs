@@ -5,12 +5,12 @@ use bevy_ecs::entity::Entity;
 use bevy_utils::all_tuples_with_size;
 use log::debug;
 use schemars::gen::{SchemaGenerator, SchemaSettings};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{RequestMetadata, SerializeMessage};
 
 use super::{
-    DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError,
+    DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynType,
     OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata, ScopeTerminate,
 };
 
@@ -85,12 +85,25 @@ pub(super) struct NodeMetadata {
     pub(super) name: &'static str,
     pub(super) request: RequestMetadata,
     pub(super) response: ResponseMetadata,
+    pub(super) config_type: String,
 }
 
 /// A type erased [`bevy_impulse::Node`]
 pub(super) struct DynNode {
     pub(super) input: DynInputSlot,
     pub(super) output: DynOutput,
+}
+
+impl DynNode {
+    fn new<Request, Response>(output: Output<Response>, input: InputSlot<Request>) -> Self
+    where
+        Response: Send + Sync + 'static,
+    {
+        Self {
+            input: input.into(),
+            output: output.into(),
+        }
+    }
 }
 
 impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
@@ -110,7 +123,8 @@ pub struct NodeRegistration {
     pub(super) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    create_node_impl: RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>,
+    create_node_impl:
+        RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>,
 
     /// Creates a node that deserializes a [`serde_json::Value`] into the registered node input.
     create_receiver_impl: Option<RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>>,
@@ -132,13 +146,17 @@ pub struct NodeRegistration {
 }
 
 impl NodeRegistration {
-    pub(super) fn create_node(&self, builder: &mut Builder) -> DynNode {
-        let n = (self.create_node_impl.borrow_mut())(builder);
+    pub(super) fn create_node(
+        &self,
+        builder: &mut Builder,
+        config: serde_json::Value,
+    ) -> Result<DynNode, DiagramError> {
+        let n = (self.create_node_impl.borrow_mut())(builder, config)?;
         debug!(
             "create node [{}], output: [{:?}], input: [{:?}]",
             self.metadata.id, n.output.target, n.input.source
         );
-        n
+        Ok(n)
     }
 
     pub(super) fn create_receiver(&self, builder: &mut Builder) -> Result<DynNode, DiagramError> {
@@ -193,24 +211,6 @@ impl NodeRegistration {
     }
 }
 
-/// Serializes the node registrations as a map of node metadata.
-fn serialize_node_registry_nodes<S>(
-    nodes: &HashMap<&'static str, NodeRegistration>,
-    s: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    s.collect_map(nodes.iter().map(|(k, v)| (*k, &v.metadata)))
-}
-
-fn serialize_node_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    gen.definitions().serialize(s)
-}
-
 pub trait DynUnzip {
     const UNZIP_SLOTS: usize;
     type Response;
@@ -244,7 +244,7 @@ macro_rules! dyn_unzip_impl {
 
 all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
 
-pub struct RegistrationBuilder<NodeBuilderT, Deserializer, Serializer> {
+pub struct RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer> {
     build_node: NodeBuilderT,
     fork_clone: Option<
         RefCell<
@@ -257,20 +257,20 @@ pub struct RegistrationBuilder<NodeBuilderT, Deserializer, Serializer> {
     /// The number of inputs that the output can be unzipped to
     unzip_slots: usize,
 
-    _unused: PhantomData<(Deserializer, Serializer)>,
+    _unused: PhantomData<(ConfigT, Deserializer, Serializer)>,
 }
 
-impl<NodeBuilderT, Request, Response, Streams, Deserializer, Serializer>
-    RegistrationBuilder<NodeBuilderT, Deserializer, Serializer>
+impl<NodeBuilderT, ConfigT, Request, Response, Streams, Deserializer, Serializer>
+    RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer>
 where
-    NodeBuilderT: FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static,
+    NodeBuilderT: FnMut(&mut Builder, ConfigT) -> Node<Request, Response, Streams> + 'static,
     Request: Send + Sync + 'static,
     Response: Send + Sync + 'static,
     Streams: StreamPack,
 {
     pub fn with_opaque_request(
         self,
-    ) -> RegistrationBuilder<NodeBuilderT, OpaqueMessageDeserializer, Serializer> {
+    ) -> RegistrationBuilder<NodeBuilderT, ConfigT, OpaqueMessageDeserializer, Serializer> {
         RegistrationBuilder {
             build_node: self.build_node,
             fork_clone: self.fork_clone,
@@ -282,7 +282,7 @@ where
 
     pub fn with_opaque_response(
         self,
-    ) -> RegistrationBuilder<NodeBuilderT, Deserializer, OpaqueMessageSerializer> {
+    ) -> RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, OpaqueMessageSerializer> {
         RegistrationBuilder {
             build_node: self.build_node,
             fork_clone: self.fork_clone,
@@ -322,20 +322,35 @@ where
 }
 
 pub trait IntoNodeRegistration {
-    fn into_node_registration(self, id: &'static str, name: &'static str) -> NodeRegistration;
+    fn into_node_registration(
+        self,
+        id: &'static str,
+        name: &'static str,
+        gen: &mut SchemaGenerator,
+    ) -> NodeRegistration;
 }
 
-impl<NodeBuilderT, Deserializer, Serializer, Request, Response, Streams> IntoNodeRegistration
-    for RegistrationBuilder<NodeBuilderT, Deserializer, Serializer>
+impl<NodeBuilderT, ConfigT, Deserializer, Serializer, Request, Response, Streams>
+    IntoNodeRegistration for RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer>
 where
-    NodeBuilderT: FnMut(&mut Builder) -> Node<Request, Response, Streams> + 'static,
+    NodeBuilderT: FnMut(&mut Builder, ConfigT) -> Node<Request, Response, Streams> + 'static,
+    ConfigT: DynType + DeserializeOwned,
     Deserializer: DeserializeMessage<Request>,
     Serializer: SerializeMessage<Response>,
     Request: Send + Sync + 'static,
     Response: Send + Sync + 'static,
     Streams: StreamPack,
 {
-    fn into_node_registration(mut self, id: &'static str, name: &'static str) -> NodeRegistration {
+    fn into_node_registration(
+        mut self,
+        id: &'static str,
+        name: &'static str,
+        gen: &mut SchemaGenerator,
+    ) -> NodeRegistration {
+        Deserializer::json_schema(gen);
+        Serializer::json_schema(gen);
+        ConfigT::json_schema(gen);
+
         let request = RequestMetadata {
             r#type: Deserializer::type_name(),
             deserializable: Deserializer::deserializable(),
@@ -352,10 +367,12 @@ where
                 name,
                 request,
                 response,
+                config_type: ConfigT::type_name(),
             },
-            create_node_impl: RefCell::new(Box::new(move |builder| {
-                let n = (self.build_node)(builder);
-                DynNode::from(n)
+            create_node_impl: RefCell::new(Box::new(move |builder, config| {
+                let config = serde_json::from_value(config)?;
+                let n = (self.build_node)(builder, config);
+                Ok(DynNode::new(n.output, n.input))
             })),
             create_receiver_impl: {
                 if Deserializer::deserializable() {
@@ -364,12 +381,7 @@ where
                             Deserializer::from_json(json)
                         });
                         let o = n.output.chain(builder).cancel_on_err().output();
-                        Node::<serde_json::Value, Request, ()> {
-                            input: n.input,
-                            output: o,
-                            streams: n.streams,
-                        }
-                        .into()
+                        DynNode::new(o, n.input)
                     })))
                 } else {
                     None
@@ -393,21 +405,20 @@ where
     }
 }
 
-pub trait IntoRegistrationBuilder<NodeBuilderT, Deserializer, Serializer> {
-    fn into_registration_builder(
-        self,
-    ) -> RegistrationBuilder<NodeBuilderT, Deserializer, Serializer>;
+pub trait IntoRegistrationBuilder<RegistrationBuilderT> {
+    fn into_registration_builder(self) -> RegistrationBuilderT;
 }
 
-impl<F, Request, Response, Streams>
-    IntoRegistrationBuilder<F, DefaultDeserializer, DefaultSerializer> for F
+impl<F, ConfigT, Request, Response, Streams>
+    IntoRegistrationBuilder<RegistrationBuilder<F, ConfigT, DefaultDeserializer, DefaultSerializer>>
+    for F
 where
-    F: FnMut(&mut Builder) -> Node<Request, Response, Streams>,
+    F: FnMut(&mut Builder, ConfigT) -> Node<Request, Response, Streams>,
     Streams: StreamPack,
 {
     fn into_registration_builder(
         self,
-    ) -> RegistrationBuilder<F, DefaultDeserializer, DefaultSerializer> {
+    ) -> RegistrationBuilder<F, ConfigT, DefaultDeserializer, DefaultSerializer> {
         RegistrationBuilder {
             build_node: self,
             fork_clone: None,
@@ -416,6 +427,24 @@ where
             _unused: Default::default(),
         }
     }
+}
+
+/// Serializes the node registrations as a map of node metadata.
+fn serialize_node_registry_nodes<S>(
+    nodes: &HashMap<&'static str, NodeRegistration>,
+    s: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.collect_map(nodes.iter().map(|(k, v)| (*k, &v.metadata)))
+}
+
+fn serialize_node_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    gen.definitions().serialize(s)
 }
 
 #[derive(Serialize)]
@@ -455,8 +484,10 @@ impl NodeRegistry {
         // enough that we can make it a pattern to always call `into_registration_builder()`.
         IntoNodeRegistrationT: IntoNodeRegistration,
     {
-        self.nodes
-            .insert(id, registration_builder.into_node_registration(id, name));
+        self.nodes.insert(
+            id,
+            registration_builder.into_node_registration(id, name, &mut self.gen),
+        );
         self
     }
 
@@ -473,6 +504,9 @@ impl NodeRegistry {
 
 #[cfg(test)]
 mod tests {
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
     use super::*;
 
     fn multiply3(i: i64) -> i64 {
@@ -485,7 +519,7 @@ mod tests {
         registry.register_node(
             "multiply3",
             "Test Name",
-            (|builder: &mut Builder| builder.create_map_block(multiply3))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3))
                 .into_registration_builder(),
         );
         let registration = registry.get_registration("multiply3").unwrap();
@@ -501,7 +535,7 @@ mod tests {
         registry.register_node(
             "multiply3",
             "Test Name",
-            (|builder: &mut Builder| builder.create_map_block(multiply3))
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3))
                 .into_registration_builder()
                 .with_response_cloneable(),
         );
@@ -519,7 +553,7 @@ mod tests {
         registry.register_node(
             "multiply3",
             "Test Name",
-            (move |builder: &mut Builder| builder.create_map_block(tuple_resp))
+            (move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp))
                 .into_registration_builder()
                 .with_unzippable(),
         );
@@ -528,6 +562,26 @@ mod tests {
         assert!(registration.metadata.response.serializable);
         assert!(!registration.metadata.response.cloneable);
         assert_eq!(registration.metadata.response.unzip_slots, 1);
+    }
+
+    #[test]
+    fn test_register_with_config() {
+        let mut registry = NodeRegistry::default();
+
+        #[derive(Deserialize, JsonSchema)]
+        struct Config {
+            by: i64,
+        }
+
+        registry.register_node(
+            "multiply",
+            "Test Name",
+            (move |builder: &mut Builder, config: Config| {
+                builder.create_map_block(move |operand: i64| operand * config.by)
+            })
+            .into_registration_builder(),
+        );
+        assert!(registry.get_registration("multiply").is_ok());
     }
 
     struct NonSerializableRequest {}
@@ -540,9 +594,11 @@ mod tests {
         registry.register_node(
             "opaque_request_map",
             "Test Name",
-            (move |builder: &mut Builder| builder.create_map_block(opaque_request_map))
-                .into_registration_builder()
-                .with_opaque_request(),
+            (move |builder: &mut Builder, _config: ()| {
+                builder.create_map_block(opaque_request_map)
+            })
+            .into_registration_builder()
+            .with_opaque_request(),
         );
         assert!(registry.get_registration("opaque_request_map").is_ok());
         let registration = registry.get_registration("opaque_request_map").unwrap();
@@ -555,9 +611,11 @@ mod tests {
         registry.register_node(
             "opaque_response_map",
             "Test Name",
-            (move |builder: &mut Builder| builder.create_map_block(opaque_response_map))
-                .into_registration_builder()
-                .with_opaque_response(),
+            (move |builder: &mut Builder, _config: ()| {
+                builder.create_map_block(opaque_response_map)
+            })
+            .into_registration_builder()
+            .with_opaque_response(),
         );
         assert!(registry.get_registration("opaque_response_map").is_ok());
         let registration = registry.get_registration("opaque_response_map").unwrap();
@@ -570,10 +628,12 @@ mod tests {
         registry.register_node(
             "opaque_req_resp_map",
             "Test Name",
-            (move |builder: &mut Builder| builder.create_map_block(opaque_req_resp_map))
-                .into_registration_builder()
-                .with_opaque_request()
-                .with_opaque_response(),
+            (move |builder: &mut Builder, _config: ()| {
+                builder.create_map_block(opaque_req_resp_map)
+            })
+            .into_registration_builder()
+            .with_opaque_request()
+            .with_opaque_response(),
         );
         assert!(registry.get_registration("opaque_req_resp_map").is_ok());
         let registration = registry.get_registration("opaque_req_resp_map").unwrap();

@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use schemars::{gen::SchemaGenerator, JsonSchema};
+use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(Debug)]
@@ -82,6 +82,8 @@ pub struct ResponseMetadata {
 pub trait SerializeMessage<T> {
     fn type_name() -> String;
 
+    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema>;
+
     fn to_json(v: &T) -> Result<serde_json::Value, SerializationError>;
 
     fn serializable() -> bool;
@@ -98,6 +100,10 @@ where
         T::type_name()
     }
 
+    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema> {
+        Some(T::json_schema(gen))
+    }
+
     fn to_json(v: &T) -> Result<serde_json::Value, SerializationError> {
         serde_json::to_value(v).map_err(|err| SerializationError::from(err))
     }
@@ -109,6 +115,8 @@ where
 
 pub trait DeserializeMessage<T> {
     fn type_name() -> String;
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema>;
 
     fn from_json(json: serde_json::Value) -> Result<T, SerializationError>;
 
@@ -124,6 +132,10 @@ where
 {
     fn type_name() -> String {
         T::type_name()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema> {
+        Some(T::json_schema(gen))
     }
 
     fn from_json(json: serde_json::Value) -> Result<T, SerializationError> {
@@ -143,6 +155,10 @@ impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
         std::any::type_name::<T>().to_string()
     }
 
+    fn json_schema(_gen: &mut SchemaGenerator) -> Option<Schema> {
+        None
+    }
+
     fn to_json(_v: &T) -> Result<serde_json::Value, SerializationError> {
         Err(SerializationError::NotSupported)
     }
@@ -158,6 +174,10 @@ pub struct OpaqueMessageDeserializer;
 impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
     fn type_name() -> String {
         std::any::type_name::<T>().to_string()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Option<Schema> {
+        None
     }
 
     fn from_json(_json: serde_json::Value) -> Result<T, SerializationError> {
