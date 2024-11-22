@@ -58,6 +58,7 @@ pub enum DiagramOperation {
     Node(NodeOp),
     ForkClone(ForkCloneOp),
     Unzip(UnzipOp),
+    Dispose,
 }
 
 type ScopeStart = serde_json::Value;
@@ -877,6 +878,58 @@ mod tests {
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available().unwrap().unwrap(), 36);
+    }
+
+    #[test]
+    fn test_unzip_with_dispose() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["dispose".to_string(), "op_2".to_string()],
+                    }),
+                ),
+                ("dispose".to_string(), DiagramOperation::Dispose),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap().unwrap(), 60);
     }
 
     #[test]

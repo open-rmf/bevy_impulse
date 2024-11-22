@@ -341,6 +341,7 @@ impl<'b> WorkflowBuilder<'b> {
                         },
                     ));
                 }
+                DiagramOperation::Dispose => {}
             }
         }
 
