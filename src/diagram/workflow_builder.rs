@@ -2,39 +2,49 @@ use std::collections::{HashMap, HashSet};
 
 use log::debug;
 
-use crate::{Builder, InputSlot, Output, StreamPack};
+use crate::{Builder, InputSlot, StreamPack};
 
 use super::{
     Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode, DynOutput, DynScope, NodeOp,
     NodeRegistration, NodeRegistry, OperationId, ScopeStart, ScopeTerminate, StartOp, TypeMismatch,
 };
 
+#[allow(unused_variables)]
 trait ConnectionChainOps {
     fn fork_clone(
         &self,
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError>;
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        Err(DiagramError::NotCloneable)
+    }
 
     fn unzip(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError>;
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        Err(DiagramError::NotUnzippable)
+    }
 
-    fn map_input(
+    fn receiver(
         &self,
         builder: &mut Builder,
+        output: &DynOutput,
         input: DynInputSlot,
-        registration: &NodeRegistration,
-    ) -> Result<DynInputSlot, DiagramError>;
+    ) -> Result<DynInputSlot, DiagramError> {
+        Ok(input)
+    }
 
-    fn terminate_sender(
+    fn sender(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<ScopeTerminate>, DiagramError>;
+        input: &DynInputSlot,
+    ) -> Result<DynOutput, DiagramError> {
+        Ok(output)
+    }
 }
 
 struct NodeConnectionChainOps<'a> {
@@ -65,23 +75,34 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
         self.registration.unzip(builder, output)
     }
 
-    fn map_input(
+    fn receiver(
         &self,
-        _builder: &mut Builder,
+        builder: &mut Builder,
+        output: &DynOutput,
         input: DynInputSlot,
-        _registration: &NodeRegistration,
     ) -> Result<DynInputSlot, DiagramError> {
-        Ok(input)
+        if output.type_name == std::any::type_name::<ScopeStart>() {
+            let receiver = self.registration.create_receiver(builder)?;
+            WorkflowBuilder::connect_output(builder, receiver.output, input)?;
+            Ok(receiver.input)
+        } else {
+            Ok(input)
+        }
     }
 
-    fn terminate_sender(
+    fn sender(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<ScopeTerminate>, DiagramError> {
-        let sender = self.registration.create_sender(builder)?;
-        WorkflowBuilder::connect_output(builder, output, sender.input)?;
-        Ok(sender.output.into_output())
+        input: &DynInputSlot,
+    ) -> Result<DynOutput, DiagramError> {
+        if input.type_name == std::any::type_name::<ScopeTerminate>() {
+            let sender = self.registration.create_sender(builder)?;
+            WorkflowBuilder::connect_output(builder, output, sender.input)?;
+            Ok(sender.output)
+        } else {
+            Ok(output)
+        }
     }
 }
 
@@ -101,33 +122,22 @@ impl ConnectionChainOps for StartConnectionChainOps {
             .collect())
     }
 
-    fn unzip(
-        &self,
-        _builder: &mut Builder,
-        _output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        Err(DiagramError::NotUnzippable)
-    }
-
-    fn map_input(
-        &self,
-        builder: &mut Builder,
-        input: DynInputSlot,
-        registration: &NodeRegistration,
-    ) -> Result<DynInputSlot, DiagramError> {
-        let receiver = registration.create_receiver(builder)?;
-        WorkflowBuilder::connect_output(builder, receiver.output, input)?;
-        Ok(receiver.input)
-    }
-
-    fn terminate_sender(
+    fn sender(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<ScopeTerminate>, DiagramError> {
-        let passthrough = builder.create_map_block(|v: ScopeStart| -> ScopeTerminate { Ok(v) });
-        WorkflowBuilder::connect_output(builder, output, passthrough.input.into())?;
-        Ok(passthrough.output)
+        input: &DynInputSlot,
+    ) -> Result<DynOutput, DiagramError> {
+        if input.type_name == std::any::type_name::<ScopeTerminate>() {
+            Ok(output
+                .into_output::<ScopeStart>()
+                .chain(builder)
+                .map_block_node(|v| -> ScopeTerminate { Ok(v) })
+                .output
+                .into())
+        } else {
+            Ok(output)
+        }
     }
 }
 
@@ -291,15 +301,19 @@ impl<'b> WorkflowBuilder<'b> {
                 DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
                 DiagramOperation::Node(node_op) => {
                     let reg = self.registry.get_registration(&node_op.node_id)?;
-                    let input = ops.map_input(builder, self.inputs[state.op_id], reg)?;
-                    Self::connect_output(builder, state.output, input)?;
+                    let node_conn = NodeConnectionChainOps::new(reg);
+                    let input = self.inputs[state.op_id];
+                    let receiver = node_conn.receiver(builder, &state.output, input)?;
+                    let sender = ops.sender(builder, state.output, &input)?;
+                    Self::connect_output(builder, sender, receiver)?;
                 }
                 DiagramOperation::Terminate(_) => {
                     if let Some(err) = state.can_terminate {
                         return Err(err);
                     }
-                    let sender = ops.terminate_sender(builder, state.output)?;
-                    Self::connect_output(builder, sender.into(), terminate.into())?;
+                    let input = terminate.into();
+                    let sender = ops.sender(builder, state.output, &input)?;
+                    Self::connect_output(builder, sender, input)?;
                 }
                 DiagramOperation::ForkClone(fork_clone_op) => {
                     debug!("fork_clone to {:?}", fork_clone_op.next);
