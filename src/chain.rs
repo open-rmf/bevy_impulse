@@ -29,7 +29,7 @@ use crate::{
     ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
     IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateStaticGate,
     Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf,
-    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget, OperateSplit,
 };
 
 pub mod fork_clone_builder;
@@ -37,6 +37,9 @@ pub use fork_clone_builder::*;
 
 pub(crate) mod premade;
 use premade::*;
+
+pub mod split;
+pub use split::*;
 
 pub mod unzip;
 pub use unzip::*;
@@ -601,6 +604,35 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.map_async(|r| r)
     }
 
+    /// If the chain's response implements the [`Splittable`] trait, then this
+    /// will insert a split operation and provide you with the [`SplitConnector`]
+    /// for it.
+    pub fn split(self) -> SplitConnector<'w, 's, 'a, 'b, T>
+    where
+        T: Splittable,
+    {
+        let source = self.target;
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateSplit::<T>::default(),
+        ));
+
+        SplitConnector::new(source, self.builder)
+    }
+
+    /// If the chain's response can be turned into an iterator with an appropriate
+    /// item type, this will allow it to be split in a list-like way.
+    pub fn split_as_list(self) -> SplitConnector<'w, 's, 'a, 'b, SplitAsList<T>>
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        self
+        .map_block(|v| SplitAsList::new(v))
+        .split()
+    }
+
     /// Add a [no-op][1] to the current end of the chain.
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
@@ -939,6 +971,22 @@ where
         ));
 
         Chain::new(target, self.builder)
+    }
+}
+
+impl<'w, 's, 'a, 'b, K, V, T> Chain<'w, 's, 'a, 'b, T>
+where
+    K: 'static + Send + Sync + Eq + std::hash::Hash + Clone + std::fmt::Debug,
+    V: 'static + Send + Sync,
+    T: 'static + Send + Sync + IntoIterator<Item = (K, V)>,
+{
+    /// If the chain's response type can be turned into an iterator that returns
+    /// `(key, value)` pairs, then this will allow it to be split in a map-like
+    /// way, whether or not it is a conventional map data structure.
+    pub fn split_as_map(self) -> SplitConnector<'w, 's, 'a, 'b, SplitAsMap<K, V, T>> {
+        self
+        .map_block(|v| SplitAsMap::new(v))
+        .split()
     }
 }
 

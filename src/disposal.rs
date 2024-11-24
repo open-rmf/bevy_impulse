@@ -122,6 +122,13 @@ impl Disposal {
         }
         .into()
     }
+
+    pub fn incomplete_split(
+        split_node: Entity,
+        missing_keys: SmallVec<[Option<Arc<str>>; 16]>,
+    ) -> Self {
+        IncompleteSplit { split_node, missing_keys }.into()
+    }
 }
 
 #[derive(Debug)]
@@ -176,6 +183,10 @@ pub enum DisposalCause {
     /// been sent out to indicate that the workflow is blocked up on the
     /// collection.
     DeficientCollection(DeficientCollection),
+
+    /// A split operation took place, but not all connections to the split
+    /// received a value.
+    IncompleteSplit(IncompleteSplit),
 }
 
 /// A variant of [`DisposalCause`]
@@ -384,6 +395,21 @@ pub struct DeficientCollection {
 impl From<DeficientCollection> for DisposalCause {
     fn from(value: DeficientCollection) -> Self {
         Self::DeficientCollection(value)
+    }
+}
+
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct IncompleteSplit {
+    /// The node that does the splitting
+    pub split_node: Entity,
+    /// The debug text of each key that was missing in the split
+    pub missing_keys: SmallVec<[Option<Arc<str>>; 16]>,
+}
+
+impl From<IncompleteSplit> for DisposalCause {
+    fn from(value: IncompleteSplit) -> Self {
+        Self::IncompleteSplit(value)
     }
 }
 
