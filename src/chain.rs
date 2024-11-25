@@ -1120,6 +1120,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 }
 
+impl<'w, 's, 'a, 'b, K, V> Chain<'w, 's, 'a, 'b, (K, V)>
+where
+    K: 'static + Send + Sync,
+    V: 'static + Send + Sync,
+{
+    /// If the chain's response contains a `(key, value)` pair, get the `key`
+    /// component from it (the first element of the tuple).
+    pub fn key(self) -> Chain<'w, 's, 'a, 'b, K> {
+        self.map_block(|(key, _)| key)
+    }
+
+    /// If the chain's response contains a `(key, value)` pair, get the `value`
+    /// component from it (the second element of the tuple).
+    pub fn value(self) -> Chain<'w, 's, 'a, 'b, V> {
+        self.map_block(|(_, value)| value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{prelude::*, testing::*};

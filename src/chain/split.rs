@@ -55,6 +55,15 @@ pub struct SplitBuilder<'w, 's, 'a, 'b, T: Splittable> {
     builder: &'b mut Builder<'w, 's, 'a>,
 }
 
+impl<'w, 's, 'a, 'b, T: Splittable> std::fmt::Debug for SplitBuilder<'w, 's, 'a, 'b, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("SplitBuilder")
+            .field("outputs", &self.outputs)
+            .finish()
+    }
+}
+
 impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     /// Get the state of connections for this split. You can resume building
     /// more connections later by calling [`SplitOutputs::build`] on the
@@ -63,18 +72,73 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
         self.outputs
     }
 
+    /// Unpack the split outputs from the builder so the two can be used
+    /// independently.
+    pub fn unpack(self) -> (SplitOutputs<T>, &'b mut Builder<'w, 's, 'a>) {
+        (self.outputs, self.builder)
+    }
+
     /// Build a branch for one of the keys in the split.
     pub fn branch_for(
         mut self,
-        key: impl Into<T::Key>,
+        key: T::Key,
         f: impl FnOnce(Chain<T::Item>),
-    ) -> Result<SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError> {
-        let output = self.output_for(key)?;
+    ) -> SplitChainResult<'w, 's, 'a, 'b, T> {
+        let output = match self.output_for(key) {
+            Ok(output) => output,
+            Err(err) => return Err((self, err)),
+        };
         f(output.chain(self.builder));
         Ok(self)
     }
 
-    /// Build a branch for the next key in the split, if such an key may
+    /// This is a convenience function for splits whose keys implement
+    /// [`FromSpecific`] to build a branch for a specific key in the split. This
+    /// can be used by [`MapSplitKey`].
+    pub fn specific_branch(
+        self,
+        specific_key: <T::Key as FromSpecific>::SpecificKey,
+        f: impl FnOnce(Chain<T::Item>),
+    ) -> SplitChainResult<'w, 's, 'a, 'b, T>
+    where
+        T::Key: FromSpecific,
+    {
+        self.branch_for(T::Key::from_specific(specific_key), f)
+    }
+
+    /// This is a convenience function for splits whose keys implement
+    /// [`FromSequential`] to build a branch for an anonymous sequential key in
+    /// the split. This can be used by [`ListSplitKey`] and [`MapSplitKey`].
+    pub fn sequential_branch(
+        self,
+        sequence_number: usize,
+        f: impl FnOnce(Chain<T::Item>),
+    ) -> SplitChainResult<'w, 's, 'a, 'b, T>
+    where
+        T::Key: FromSequential,
+    {
+        self.branch_for(T::Key::from_sequential(sequence_number), f)
+    }
+
+    /// This is a convenience function for splits whose keys implement
+    /// [`ForRemaining`] to build a branch that takes in all items that did not
+    /// have a more specific connection available. This can be used by
+    /// [`ListSplitKey`] and [`MapSplitKey`].
+    ///
+    /// This can only be set once, so subsequent attempts to set the remaining
+    /// branch will return an error. It will also return an error after
+    /// [`Self::remaining_output`] has been used.
+    pub fn remaining_branch(
+        self,
+        f: impl FnOnce(Chain<T::Item>),
+    ) -> SplitChainResult<'w, 's, 'a, 'b, T>
+    where
+        T::Key: ForRemaining,
+    {
+        self.branch_for(T::Key::for_remaining(), f)
+    }
+
+    /// Build a branch for the next key in the split, if such a key may
     /// be available. The first argument tells you what the key would be, but
     /// you can safely ignore this if it doesn't matter to you.
     ///
@@ -83,9 +147,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     pub fn next_branch(
         mut self,
         f: impl FnOnce(T::Key, Chain<T::Item>),
-    ) -> Result<SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError> {
+    ) -> SplitChainResult<'w, 's, 'a, 'b, T> {
         let Some((key, output)) = self.next() else {
-            return Err(SplitConnectionError::KeyOutOfBounds);
+            return Err((self, SplitConnectionError::KeyOutOfBounds));
         };
 
         f(key, output.chain(self.builder));
@@ -95,7 +159,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     /// Get the output slot for an element in the split.
     pub fn output_for(
         &mut self,
-        key: impl Into<T::Key>,
+        key: T::Key,
     ) -> Result<Output<T::Item>, SplitConnectionError> {
         let key: T::Key = key.into();
         if !T::validate(&key) {
@@ -115,6 +179,52 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
         Ok(Output::new(self.outputs.scope, target))
     }
 
+    /// This is a convenience function for splits whose keys implement
+    /// [`FromSpecific`] to get the output for a specific key in the split. This
+    /// can be used by [`MapSplitKey`].
+    pub fn specific_output(
+        &mut self,
+        specific_key: <T::Key as FromSpecific>::SpecificKey,
+    ) -> Result<Output<T::Item>, SplitConnectionError>
+    where
+        T::Key: FromSpecific,
+    {
+        self.output_for(T::Key::from_specific(specific_key))
+    }
+
+    /// This is a convenience function for splits whose keys implement
+    /// [`FromSequential`] to get the output for an anonymous sequential key in
+    /// the split. This can be used by [`ListSplitKey`] and [`MapSplitKey`].
+    pub fn sequential_output(
+        &mut self,
+        sequence_number: usize,
+    ) -> Result<Output<T::Item>, SplitConnectionError>
+    where
+        T::Key: FromSequential,
+    {
+        self.output_for(T::Key::from_sequential(sequence_number))
+    }
+
+    /// This is a convenience function for splits whose keys implement
+    /// [`ForRemaining`] to get the output for all keys remaining without a
+    /// connection after all the more specific connections have been considered.
+    /// This can be used by [`ListSplitKey`] and [`MapSplitKey`].
+    ///
+    /// This can only be used once, after which it will return an error. It will
+    /// also return an error after [`Self::remaining_branch`] has been used.
+    pub fn remaining_output(&mut self) -> Result<Output<T::Item>, SplitConnectionError>
+    where
+        T::Key: ForRemaining,
+    {
+        self.output_for(T::Key::for_remaining())
+    }
+
+    /// Explicitly stop building the split by indicating that you it to remain
+    /// unused.
+    pub fn unused(self) {
+        // Do nothing
+    }
+
     /// Used internally to create a new split connector
     pub(crate) fn new(
         source: Entity,
@@ -124,21 +234,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
             outputs: SplitOutputs::new(builder.scope, source),
             builder,
         }
-    }
-}
-
-impl<'w, 's, 'a, 'b, T, K> SplitBuilder<'w, 's, 'a, 'b, T>
-where
-    T: 'static + Splittable<Key = MapSplitKey<K>>,
-{
-    /// This is a convenience function for map-like splits that use [`MapSplitKey`]
-    /// to build a branch for an anonymous sequential element in the split.
-    pub fn sequential_branch(
-        self,
-        sequence_number: usize,
-        f: impl FnOnce(Chain<T::Item>),
-    ) -> Result<SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError> {
-        self.branch_for(MapSplitKey::Sequential(sequence_number), f)
     }
 }
 
@@ -169,7 +264,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> Iterator for SplitBuilder<'w, 's, 
 }
 
 /// This tracks the connections that have been made to a split. This can be
-/// retrieved from [`SplitBuilder`] by calling [`SplitBuilder::connections`].
+/// retrieved from [`SplitBuilder`] by calling [`SplitBuilder::outputs`].
 /// You can then continue building connections by calling [`SplitBuilder::build`].
 #[must_use]
 pub struct SplitOutputs<T: Splittable> {
@@ -177,6 +272,18 @@ pub struct SplitOutputs<T: Splittable> {
     source: Entity,
     last_key: Option<T::Key>,
     used: HashSet<T::Key>,
+}
+
+impl<T: Splittable> std::fmt::Debug for SplitOutputs<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct(&format!("SplitOutputs<{}>", std::any::type_name::<T>()))
+            .field("scope", &self.scope)
+            .field("source", &self.source)
+            .field("last_key", &self.last_key)
+            .field("used", &self.used)
+            .finish()
+    }
 }
 
 impl<T: Splittable> SplitOutputs<T> {
@@ -195,6 +302,37 @@ impl<T: Splittable> SplitOutputs<T> {
             source,
             last_key: None,
             used: Default::default()
+        }
+    }
+}
+
+/// This is a type alias for the result returned by chainable [`SplitBuilder`]
+/// functions. If the last connection succeeded, you will receive [`Ok`] with
+/// the [`SplitBuilder`] which you can keep building off of. Otherwise if the
+/// last connection failed, you will receive an [`Err`] with the [`SplitBuilder`]
+/// bundled with [`SplitConnectionError`] to tell you what went wrong. You can
+/// continue building with the [`SplitBuilder`] even if an error occurred.
+///
+/// You can use `ignore_result` from the [`IgnoreSplitChainResult`] trait to
+/// just keep chaining without checking whether the connection suceeded.
+pub type SplitChainResult<'w, 's, 'a, 'b, T> = Result<
+    SplitBuilder<'w, 's, 'a, 'b, T>,
+    (SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError)
+>;
+
+/// A helper trait that allows users to ignore any failures while chaining
+/// connections to a split.
+pub trait IgnoreSplitChainResult<'w, 's, 'a, 'b, T: Splittable> {
+    /// Ignore whether the result of the chaining connection was [`Ok`] or [`Err`]
+    /// and just keep chaining.
+    fn ignore_result(self) -> SplitBuilder<'w, 's, 'a, 'b, T>;
+}
+
+impl<'w, 's, 'a, 'b, T: Splittable> IgnoreSplitChainResult<'w, 's, 'a, 'b, T> for SplitChainResult<'w, 's, 'a, 'b, T> {
+    fn ignore_result(self) -> SplitBuilder<'w, 's, 'a, 'b, T> {
+        match self {
+            Ok(split) => split,
+            Err((split, _)) => split,
         }
     }
 }
@@ -226,13 +364,12 @@ where
     ///
     /// If there is no connection associated with the specified key, the value
     /// will be returned as [`Err`].
-    pub fn send(
-        &mut self,
-        key: &Key,
-        value: Item,
-    ) -> Result<(), Item> {
+    pub fn outputs_for<'o, 'k>(
+        &'o mut self,
+        key: &'k Key,
+    ) -> Option<&'o mut Vec<Item>> {
         let Some(index) = self.connections.get(key) else {
-            return Err(value);
+            return None;
         };
         let index = *index;
 
@@ -242,9 +379,53 @@ where
             self.outputs.resize_with(index+1, || Vec::new());
         }
 
-        self.outputs[index].push(value);
+        self.outputs.get_mut(index)
+    }
+}
 
-        Ok(())
+/// Turn a sequence index into a split key. Implemented by [`ListSplitKey`] and
+/// [`MapSplitKey`].
+pub trait FromSequential {
+    /// Convert the sequence index into the split key type.
+    fn from_sequential(seq: usize) -> Self;
+}
+
+/// Get the key that represents all remaining/unspecified keys. Implemented by
+/// [`ListSplitKey`] and [`MapSplitKey`].
+pub trait ForRemaining {
+    /// Get the key for remaining items.
+    fn for_remaining() -> Self;
+}
+
+/// Turn a specific key into a split key. Implemented by [`MapSplitKey`].
+pub trait FromSpecific {
+    /// The specific key type
+    type SpecificKey;
+
+    /// Convert the specific key into the split key type
+    fn from_specific(specific: Self::SpecificKey) -> Self;
+}
+
+/// This enum allows users to key into splittable list-like structures based on
+/// the sequence in which an item appears in the list. It also has an option for
+/// keying into any items that were left over in the sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ListSplitKey {
+    /// Key into an item at a specific point in the sequence.
+    Sequential(usize),
+    /// Key into any remaining items that were not covered by the sequential keys.
+    Remaining,
+}
+
+impl FromSequential for ListSplitKey {
+    fn from_sequential(seq: usize) -> Self {
+        ListSplitKey::Sequential(seq)
+    }
+}
+
+impl ForRemaining for ListSplitKey {
+    fn for_remaining() -> Self {
+        ListSplitKey::Remaining
     }
 }
 
@@ -271,8 +452,8 @@ where
     T: 'static + Send + Sync + IntoIterator,
     T::Item: 'static + Send + Sync,
 {
-    type Key = usize;
-    type Item = T::Item;
+    type Key = ListSplitKey;
+    type Item = (usize, T::Item);
 
     fn validate(_: &Self::Key) -> bool {
         // We don't know if there are any restrictions for the iterable, so just
@@ -282,15 +463,27 @@ where
 
     fn next(key: &Option<Self::Key>) -> Option<Self::Key> {
         if let Some(key) = key {
-            Some(*key + 1)
+            match key {
+                ListSplitKey::Sequential(k) => Some(ListSplitKey::Sequential(*k + 1)),
+                ListSplitKey::Remaining => None,
+            }
         } else {
-            Some(0)
+            Some(ListSplitKey::Sequential(0))
         }
     }
 
     fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {
         for (index, value) in self.contents.into_iter().enumerate() {
-            dispatcher.send(&index, value).ok();
+            match dispatcher.outputs_for(&ListSplitKey::Sequential(index)) {
+                Some(outputs) => {
+                    outputs.push((index, value));
+                }
+                None => {
+                    if let Some(outputs) = dispatcher.outputs_for(&ListSplitKey::Remaining) {
+                        outputs.push((index, value));
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -298,8 +491,8 @@ where
 }
 
 impl<T: 'static + Send + Sync> Splittable for Vec<T> {
-    type Key = usize;
-    type Item = T;
+    type Key = ListSplitKey;
+    type Item = (usize, T);
 
     fn validate(_: &Self::Key) -> bool {
         // Vec has no restrictions on what index is valid
@@ -316,8 +509,8 @@ impl<T: 'static + Send + Sync> Splittable for Vec<T> {
 }
 
 impl<T: 'static + Send + Sync, const N: usize> Splittable for smallvec::SmallVec<[T; N]> {
-    type Key = usize;
-    type Item = T;
+    type Key = ListSplitKey;
+    type Item = (usize, T);
 
     fn validate(_: &Self::Key) -> bool {
         // SmallVec has no restrictions on what index is valid
@@ -334,17 +527,20 @@ impl<T: 'static + Send + Sync, const N: usize> Splittable for smallvec::SmallVec
 }
 
 impl<T: 'static + Send + Sync, const N: usize> Splittable for [T; N] {
-    type Key = usize;
-    type Item = T;
+    type Key = ListSplitKey;
+    type Item = (usize, T);
 
     fn validate(key: &Self::Key) -> bool {
         // Static arrays have a firm limit of N
-        return *key < N;
+        match key {
+            ListSplitKey::Sequential(s) => *s < N,
+            ListSplitKey::Remaining => true,
+        }
     }
 
     fn next(key: &Option<Self::Key>) -> Option<Self::Key> {
         // Static arrays have a firm limit of N
-        SplitAsList::<Self>::next(key).take_if(|key| *key < N)
+        SplitAsList::<Self>::next(key).take_if(|key| Self::validate(key))
     }
 
     fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {
@@ -362,11 +558,41 @@ pub enum MapSplitKey<K> {
     /// Key into an anonymous sequential item. Anonymous items are items for
     /// which no specific connection was made to their key.
     Sequential(usize),
+    /// Key into any items that were not covered by one of the other types.
+    Remaining,
+}
+
+impl<K> MapSplitKey<K> {
+    pub fn specific(self) -> Option<K> {
+        match self {
+            MapSplitKey::Specific(key) => Some(key),
+            _ => None,
+        }
+    }
 }
 
 impl<K> From<K> for MapSplitKey<K> {
     fn from(value: K) -> Self {
         MapSplitKey::Specific(value)
+    }
+}
+
+impl<K> FromSpecific for MapSplitKey<K> {
+    type SpecificKey = K;
+    fn from_specific(specific: Self::SpecificKey) -> Self {
+        Self::Specific(specific)
+    }
+}
+
+impl<K> FromSequential for MapSplitKey<K> {
+    fn from_sequential(seq: usize) -> Self {
+        Self::Sequential(seq)
+    }
+}
+
+impl<K> ForRemaining for MapSplitKey<K> {
+    fn for_remaining() -> Self {
+        Self::Remaining
     }
 }
 
@@ -403,7 +629,7 @@ where
     M: 'static + Send + Sync + IntoIterator<Item = (K, V)>,
 {
     type Key = MapSplitKey<K>;
-    type Item = V;
+    type Item = (K, V);
 
     fn validate(_: &Self::Key) -> bool {
         // We have no way of knowing what the key bounds are for an arbitrary map
@@ -419,6 +645,7 @@ where
                     // For an arbitrary map we don't know what would follow a specific key, so
                     // just stop iterating. This should never be reached in practice anyway.
                     MapSplitKey::Specific(_) => None,
+                    MapSplitKey::Remaining => None,
                 }
             }
             None => Some(MapSplitKey::Sequential(0))
@@ -427,14 +654,31 @@ where
 
     fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {
         let mut next_seq = 0;
-        for (key, value) in self.contents.into_iter() {
-            if let Err(value) = dispatcher.send(&MapSplitKey::Specific(key), value) {
-                // The specific key is not being used, so send this as a sequential
-                // value instead.
-                let seq = MapSplitKey::Sequential(next_seq);
-                next_seq += 1;
-                // We don't care if whether we get an error from this
-                dispatcher.send(&seq, value).ok();
+        for (specific_key, value) in self.contents.into_iter() {
+            let key = MapSplitKey::Specific(specific_key);
+            match dispatcher.outputs_for(&key) {
+                Some(outputs) => {
+                    outputs.push((key.specific().unwrap(), value));
+                }
+                None => {
+                    // No connection to the specific key, so let's check for a
+                    // sequential connection.
+                    let seq = MapSplitKey::Sequential(next_seq);
+                    next_seq += 1;
+                    match dispatcher.outputs_for(&seq) {
+                        Some(outputs) => {
+                            outputs.push((key.specific().unwrap(), value));
+                        }
+                        None => {
+                            // No connection to this point in the sequence, so
+                            // let's send it to any remaining connection.
+                            let remaining = MapSplitKey::Remaining;
+                            if let Some(outputs) = dispatcher.outputs_for(&remaining) {
+                                outputs.push((key.specific().unwrap(), value));
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -448,7 +692,7 @@ where
     V: 'static + Send + Sync,
 {
     type Key = MapSplitKey<K>;
-    type Item = V;
+    type Item = (K, V);
 
     fn validate(_: &Self::Key) -> bool {
         true
@@ -469,7 +713,7 @@ where
     V: 'static + Send + Sync,
 {
     type Key = MapSplitKey<K>;
-    type Item = V;
+    type Item = (K, V);
 
     fn validate(_: &Self::Key) -> bool {
         true
@@ -484,3 +728,139 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+    use std::collections::{BTreeMap, HashMap};
+
+    #[test]
+    fn test_split_array() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            scope
+                .input
+                .chain(builder)
+                .split(|split| {
+                    let mut outputs = Vec::new();
+                    split
+                    .sequential_branch(0, |chain| {
+                        outputs.push(chain.value().map_block(|v| v + 0.0).output());
+                    })
+                    .unwrap()
+                    .sequential_branch(2, |chain| {
+                        outputs.push(chain.value().map_async(|v| async move { v + 2.0 }).output());
+                    })
+                    .unwrap()
+                    .sequential_branch(4, |chain| {
+                        outputs.push(chain.value().map_block(|v| v + 4.0).output());
+                    })
+                    .unwrap()
+                    .unused();
+
+                    outputs
+                })
+                .join_vec::<5>(builder)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request([5.0, 4.0, 3.0, 2.0, 1.0], workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, 5);
+        let value = promise.take().available().unwrap();
+        assert_eq!(value, [5.0, 5.0, 5.0].into());
+
+        let workflow = context.spawn_io_workflow(|scope: Scope<[f64; 3], f64>, builder| {
+            scope
+                .input
+                .chain(builder)
+                .split(|split| {
+                    let split = split.sequential_branch(0, |chain| {
+                        chain
+                        // Do some nonsense with the first element in the split
+                        .fork_clone((
+                            |chain: Chain<_>| chain.unused(),
+                            |chain: Chain<_>| chain.unused(),
+                            |chain: Chain<_>| chain.unused(),
+                        ));
+                    })
+                    .unwrap();
+
+                    // This is outside the valid range for the array, so it should
+                    // fail
+                    let err = split.sequential_branch(3, |chain| {
+                        chain.value().connect(scope.terminate);
+                    });
+                    assert!(matches!(&err, Err((_, SplitConnectionError::KeyOutOfBounds))));
+
+                    let split = err
+                        .ignore_result()
+                        .sequential_branch(1, |chain| {
+                            chain.unused();
+                        })
+                        .unwrap();
+
+                    // We already connected to this key, so it should fail
+                    let err = split.sequential_branch(0, |chain| {
+                        chain.value().connect(scope.terminate);
+                    });
+                    assert!(matches!(&err, Err((_, SplitConnectionError::KeyAlreadyUsed))));
+
+                    // Connect the last element in the split to the termination node
+                    err
+                        .ignore_result()
+                        .sequential_branch(2, |chain| {
+                            chain.value().connect(scope.terminate);
+                        })
+                        .unwrap()
+                        .unused();
+                });
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request([1.0, 2.0, 3.0], workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, 1);
+        // Only the third element in the split gets connected to the workflow
+        // termination, the rest are discarded. This ensures that SplitBuilder
+        // connections still work after multiple failed connection attempts.
+        assert_eq!(promise.take().available().unwrap(), 3.0);
+    }
+
+    #[test]
+    fn test_split_map() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let km_to_miles = 0.621371;
+        let per_second_to_per_hour = 3600.0;
+        let convert_speed = move |v: f64| v * km_to_miles * per_second_to_per_hour;
+        let convert_distance = move |d: f64| d * km_to_miles;
+
+        let workflow = context.spawn_io_workflow(|scope: Scope<BTreeMap<String, f64>, _>, builder| {
+            scope
+                .input
+                .chain(builder)
+                .split(|split| {
+                    let mut outputs = Vec::new();
+                    split
+                    .specific_branch("speed".to_owned(), |chain| {
+                        outputs.push(chain.map_block(move |(k, v)| (k, convert_speed(v))).output());
+                    })
+                    .ignore_result()
+                    .specific_branch("velocity".to_owned(), |chain| {
+
+                    })
+                    .ignore_result()
+                    .unused();
+
+                    outputs
+                })
+                .join_vec::<16>(builder)
+                .map_block(|v| HashMap::<String, f64>::from_iter(v))
+                .connect(scope.terminate);
+        });
+    }
+}

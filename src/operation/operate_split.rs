@@ -152,6 +152,8 @@ impl<T: 'static + Splittable> ConnectToSplit<T> {
         let index = target_storage.0.len();
         target_storage.0.push(self.target);
 
+        world.get_entity_mut(self.target).or_broken()?.insert(SingleInputStorage::new(self.source));
+
         let mut split = world.get_mut::<OperateSplit<T>>(self.source).or_broken()?;
         let previous_index = split.connections.insert(self.key.clone(), index);
         split.outputs_cache.as_mut().or_broken()?.resize_with(index + 1, || Vec::new());
