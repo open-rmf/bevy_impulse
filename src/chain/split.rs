@@ -768,7 +768,8 @@ mod tests {
             commands.request([5.0, 4.0, 3.0, 2.0, 1.0], workflow).take_response()
         });
 
-        context.run_with_conditions(&mut promise, 5);
+        context.run_with_conditions(&mut promise, Duration::from_secs(30));
+        assert!(context.no_unhandled_errors());
         let value = promise.take().available().unwrap();
         assert_eq!(value, [5.0, 5.0, 5.0].into());
 
@@ -824,6 +825,7 @@ mod tests {
         });
 
         context.run_with_conditions(&mut promise, 1);
+        assert!(context.no_unhandled_errors());
         // Only the third element in the split gets connected to the workflow
         // termination, the rest are discarded. This ensures that SplitBuilder
         // connections still work after multiple failed connection attempts.
@@ -840,27 +842,86 @@ mod tests {
         let convert_distance = move |d: f64| d * km_to_miles;
 
         let workflow = context.spawn_io_workflow(|scope: Scope<BTreeMap<String, f64>, _>, builder| {
+            let collector = builder.create_collect_all::<_, 16>();
+
             scope
                 .input
                 .chain(builder)
                 .split(|split| {
-                    let mut outputs = Vec::new();
                     split
                     .specific_branch("speed".to_owned(), |chain| {
-                        outputs.push(chain.map_block(move |(k, v)| (k, convert_speed(v))).output());
+                        chain.map_block(move |(k, v)| (k, convert_speed(v))).connect(collector.input);
                     })
                     .ignore_result()
                     .specific_branch("velocity".to_owned(), |chain| {
-
+                        chain.map_async(move |(k, v)| async move { (k, convert_speed(v)) }).connect(collector.input);
                     })
-                    .ignore_result()
+                    .unwrap()
+                    .specific_branch("distance".to_owned(), |chain| {
+                        chain.map_block(move |(k, v)| (k, convert_distance(v))).connect(collector.input);
+                    })
+                    .unwrap()
+                    .sequential_branch(0, |chain| {
+                        chain.map_block(move |(k, v)| (k, 0.0 * v)).connect(collector.input);
+                    })
+                    .unwrap()
+                    .sequential_branch(1, |chain| {
+                        chain.map_async(move |(k, v)| async move { (k, 1.0 * v) }).connect(collector.input);
+                    })
+                    .unwrap()
+                    .sequential_branch(2, |chain| {
+                        chain.map_block(move |(k, v)| (k, 2.0 * v)).connect(collector.input);
+                    })
+                    .unwrap()
+                    .remaining_branch(|chain| {
+                        chain.connect(collector.input);
+                    })
+                    .unwrap()
                     .unused();
+                });
 
-                    outputs
-                })
-                .join_vec::<16>(builder)
+            collector
+                .output
+                .chain(builder)
                 .map_block(|v| HashMap::<String, f64>::from_iter(v))
                 .connect(scope.terminate);
         });
+
+        // We input a BTreeMap so we can ensure the first three sequence items
+        // are always the same: a, b, and c. Make sure that no other keys in the
+        // map come before c alphabetically.
+        let input_map: BTreeMap<String, f64> = [
+            ("a", 3.14159),
+            ("b", 2.71828),
+            ("c", 4.0),
+            ("speed", 16.1),
+            ("velocity", -32.4),
+            ("distance", 4325.78),
+            ("foo", 42.0),
+            ("fib", 78.3),
+            ("dib", -22.1),
+        ]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v))
+            .collect();
+
+        let mut promise = context.command(|commands| {
+            commands.request(input_map.clone(), workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(30));
+        assert!(context.no_unhandled_errors());
+
+        let result = promise.take().available().unwrap();
+        assert_eq!(result.len(), input_map.len());
+        assert_eq!(result["a"], input_map["a"] * 0.0);
+        assert_eq!(result["b"], input_map["b"] * 1.0);
+        assert_eq!(result["c"], input_map["c"] * 2.0);
+        assert_eq!(result["speed"], convert_speed(input_map["speed"]));
+        assert_eq!(result["velocity"], convert_speed(input_map["velocity"]));
+        assert_eq!(result["distance"], convert_distance(input_map["distance"]));
+        assert_eq!(result["foo"], input_map["foo"]);
+        assert_eq!(result["fib"], input_map["fib"]);
+        assert_eq!(result["dib"], input_map["dib"]);
     }
 }
