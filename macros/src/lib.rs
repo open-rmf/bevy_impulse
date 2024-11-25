@@ -24,11 +24,36 @@ pub fn simple_stream_macro(item: TokenStream) -> TokenStream {
     let ast: DeriveInput = syn::parse(item).unwrap();
     let struct_name = &ast.ident;
     let (impl_generics, type_generics, where_clause) = &ast.generics.split_for_impl();
-    // let bevy_impulse_path: Path =
 
     quote! {
-        impl #impl_generics Stream for #struct_name #type_generics #where_clause {
+        impl #impl_generics ::bevy_impulse::Stream for #struct_name #type_generics #where_clause {
             type Container = ::bevy_impulse::DefaultStreamContainer<Self>;
+        }
+    }
+    .into()
+}
+
+#[proc_macro_derive(DeliveryLabel)]
+pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
+    let ast: DeriveInput = syn::parse(item).unwrap();
+    let struct_name = &ast.ident;
+    let (impl_generics, type_generics, where_clause) = &ast.generics.split_for_impl();
+
+    quote! {
+        impl #impl_generics ::bevy_impulse::DeliveryLabel for #struct_name #type_generics #where_clause {
+            fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
+                ::std::boxed::Box::new(::std::clone::Clone::clone(self))
+            }
+
+            fn as_dyn_eq(&self) -> &dyn ::bevy_impulse::utils::DynEq {
+                self
+            }
+
+            fn dyn_hash(&self, mut state: &mut dyn ::std::hash::Hasher) {
+                let ty_id = ::std::any::TypeId::of::<Self>();
+                ::std::hash::Hash::hash(&ty_id, &mut state);
+                ::std::hash::Hash::hash(self, &mut state);
+            }
         }
     }
     .into()
