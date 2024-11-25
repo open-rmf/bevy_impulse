@@ -15,21 +15,18 @@
  *
 */
 
-use std::{
-    sync::Arc,
-    collections::HashMap,
-};
 use bevy_ecs::{
     prelude::{Component, Entity, World},
     system::Command,
 };
 use smallvec::SmallVec;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    Splittable, Broken, OrBroken, UnhandledErrors, Operation, OperationCleanup, OperationError,
-    OperationSetup, OperationResult, OperationReachability, OperationRequest, ReachabilityResult,
-    ForkTargetStorage, MiscellaneousFailure, InputBundle, ManageInput, Input,
-    SplitDispatcher, Disposal, ManageDisposal, SingleInputStorage,
+    Broken, Disposal, ForkTargetStorage, Input, InputBundle, ManageDisposal, ManageInput,
+    MiscellaneousFailure, Operation, OperationCleanup, OperationError, OperationReachability,
+    OperationRequest, OperationResult, OperationSetup, OrBroken, ReachabilityResult,
+    SingleInputStorage, SplitDispatcher, Splittable, UnhandledErrors,
 };
 
 #[derive(Component)]
@@ -58,18 +55,20 @@ impl<T: Splittable> Default for OperateSplit<T> {
 
 impl<T: 'static + Splittable + Send + Sync> Operation for OperateSplit<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world
-            .entity_mut(source)
-            .insert((
-                self,
-                InputBundle::<T>::new(),
-                ForkTargetStorage::default(),
-            ));
+        world.entity_mut(source).insert((
+            self,
+            InputBundle::<T>::new(),
+            ForkTargetStorage::default(),
+        ));
         Ok(())
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
@@ -101,15 +100,24 @@ impl<T: 'static + Splittable + Send + Sync> Operation for OperateSplit<T> {
 
         if !missed_indices.is_empty() {
             let split = source_mut.get::<OperateSplit<T>>().or_broken()?;
-            let missing_keys: SmallVec<[Option<Arc<str>>; 16]> = missed_indices.into_iter()
+            let missing_keys: SmallVec<[Option<Arc<str>>; 16]> = missed_indices
+                .into_iter()
                 .map(|index| split.index_to_key.get(index).cloned())
                 .collect();
 
-            source_mut.emit_disposal(session, Disposal::incomplete_split(source, missing_keys), roster);
+            source_mut.emit_disposal(
+                session,
+                Disposal::incomplete_split(source, missing_keys),
+                roster,
+            );
         }
 
         // Return the cache into the component
-        source_mut.get_mut::<OperateSplit<T>>().or_broken()?.outputs_cache.replace(outputs);
+        source_mut
+            .get_mut::<OperateSplit<T>>()
+            .or_broken()?
+            .outputs_cache
+            .replace(outputs);
 
         Ok(())
     }
@@ -148,15 +156,24 @@ impl<T: 'static + Splittable> Command for ConnectToSplit<T> {
 
 impl<T: 'static + Splittable> ConnectToSplit<T> {
     fn connect(self, world: &mut World) -> Result<(), OperationError> {
-        let mut target_storage = world.get_mut::<ForkTargetStorage>(self.source).or_broken()?;
+        let mut target_storage = world
+            .get_mut::<ForkTargetStorage>(self.source)
+            .or_broken()?;
         let index = target_storage.0.len();
         target_storage.0.push(self.target);
 
-        world.get_entity_mut(self.target).or_broken()?.insert(SingleInputStorage::new(self.source));
+        world
+            .get_entity_mut(self.target)
+            .or_broken()?
+            .insert(SingleInputStorage::new(self.source));
 
         let mut split = world.get_mut::<OperateSplit<T>>(self.source).or_broken()?;
         let previous_index = split.connections.insert(self.key.clone(), index);
-        split.outputs_cache.as_mut().or_broken()?.resize_with(index + 1, || Vec::new());
+        split
+            .outputs_cache
+            .as_mut()
+            .or_broken()?
+            .resize_with(index + 1, || Vec::new());
         if split.index_to_key.len() != index {
             // If the next element of the reverse map does not match the new index
             // then something has fallen out of sync. This doesn't really break
@@ -175,7 +192,9 @@ impl<T: 'static + Splittable> ConnectToSplit<T> {
                     backtrace: Some(backtrace::Backtrace::new()),
                 });
         } else {
-            split.index_to_key.push(format!("{:?}", self.key).as_str().into());
+            split
+                .index_to_key
+                .push(format!("{:?}", self.key).as_str().into());
         }
 
         if let Some(previous_index) = previous_index {

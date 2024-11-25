@@ -127,7 +127,11 @@ impl Disposal {
         split_node: Entity,
         missing_keys: SmallVec<[Option<Arc<str>>; 16]>,
     ) -> Self {
-        IncompleteSplit { split_node, missing_keys }.into()
+        IncompleteSplit {
+            split_node,
+            missing_keys,
+        }
+        .into()
     }
 }
 

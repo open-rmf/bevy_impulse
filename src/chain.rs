@@ -27,9 +27,9 @@ use crate::{
     make_option_branching, make_result_branching, AddOperation, AsMap, Buffer, BufferKey,
     BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
     ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
-    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateStaticGate,
-    Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf,
-    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget, OperateSplit,
+    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateSplit,
+    OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service,
+    Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -608,10 +608,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// will insert a split operation and provide your `build` function with the
     /// [`SplitBuilder`] for it. This returns the return value of your build
     /// function.
-    pub fn split<U>(
-        self,
-        build: impl FnOnce(SplitBuilder<T>) -> U,
-    ) -> U
+    pub fn split<U>(self, build: impl FnOnce(SplitBuilder<T>) -> U) -> U
     where
         T: Splittable,
     {
@@ -637,17 +634,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// If the chain's response can be turned into an iterator with an appropriate
     /// item type, this will allow it to be split in a list-like way.
-    pub fn split_as_list<U>(
-        self,
-        build: impl FnOnce(SplitBuilder<SplitAsList<T>>) -> U,
-    ) -> U
+    pub fn split_as_list<U>(self, build: impl FnOnce(SplitBuilder<SplitAsList<T>>) -> U) -> U
     where
         T: IntoIterator,
         T::Item: 'static + Send + Sync,
     {
-        self
-        .map_block(|v| SplitAsList::new(v))
-        .split(build)
+        self.map_block(|v| SplitAsList::new(v)).split(build)
     }
 
     /// If the chain's response can be turned into an iterator with an appropriate
@@ -1014,13 +1006,8 @@ where
     /// If the chain's response type can be turned into an iterator that returns
     /// `(key, value)` pairs, then this will split it in a map-like way, whether
     /// or not it is a conventional map data structure.
-    pub fn split_as_map<U>(
-        self,
-        build: impl FnOnce(SplitBuilder<SplitAsMap<K, V, T>>) -> U,
-    ) -> U {
-        self
-        .map_block(|v| SplitAsMap::new(v))
-        .split(build)
+    pub fn split_as_map<U>(self, build: impl FnOnce(SplitBuilder<SplitAsMap<K, V, T>>) -> U) -> U {
+        self.map_block(|v| SplitAsMap::new(v)).split(build)
     }
 
     /// If the chain's response type can be turned into an iterator that returns

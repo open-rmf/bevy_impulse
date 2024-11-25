@@ -26,10 +26,10 @@ use crate::{
     AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferItem, BufferKeys, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
     GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
-    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output, Provider,
-    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
-    Sendish, Service, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
-    SplitOutputs, OperateSplit, Splittable,
+    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output,
+    Provider, RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings,
+    ScopeSettingsStorage, Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap,
+    StreamsOfMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
@@ -354,7 +354,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             OperateSplit::<T>::default(),
         ));
 
-        (InputSlot::new(self.scope, source), SplitOutputs::new(self.scope, source))
+        (
+            InputSlot::new(self.scope, source),
+            SplitOutputs::new(self.scope, source),
+        )
     }
 
     /// This method allows you to define a cleanup workflow that branches off of

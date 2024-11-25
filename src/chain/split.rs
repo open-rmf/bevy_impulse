@@ -15,13 +15,15 @@
  *
 */
 
-use thiserror::Error as ThisError;
-use std::{hash::Hash, fmt::Debug, collections::{HashSet, HashMap, BTreeMap}};
 use bevy_ecs::prelude::Entity;
-
-use crate::{
-    Builder, Chain, ConnectToSplit, Output, UnusedTarget, OperationResult,
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
 };
+use thiserror::Error as ThisError;
+
+use crate::{Builder, Chain, ConnectToSplit, OperationResult, Output, UnusedTarget};
 
 /// Implementing this trait on a struct will allow the [`Chain::split`] operation
 /// to be performed on [outputs][crate::Output] of that type.
@@ -57,8 +59,7 @@ pub struct SplitBuilder<'w, 's, 'a, 'b, T: Splittable> {
 
 impl<'w, 's, 'a, 'b, T: Splittable> std::fmt::Debug for SplitBuilder<'w, 's, 'a, 'b, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("SplitBuilder")
+        f.debug_struct("SplitBuilder")
             .field("outputs", &self.outputs)
             .finish()
     }
@@ -157,10 +158,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     }
 
     /// Get the output slot for an element in the split.
-    pub fn output_for(
-        &mut self,
-        key: T::Key,
-    ) -> Result<Output<T::Item>, SplitConnectionError> {
+    pub fn output_for(&mut self, key: T::Key) -> Result<Output<T::Item>, SplitConnectionError> {
         let key: T::Key = key.into();
         if !T::validate(&key) {
             return Err(SplitConnectionError::KeyOutOfBounds);
@@ -174,7 +172,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
         self.builder.commands.add(ConnectToSplit::<T> {
             source: self.outputs.source,
             target,
-            key
+            key,
         });
         Ok(Output::new(self.outputs.scope, target))
     }
@@ -226,10 +224,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     }
 
     /// Used internally to create a new split connector
-    pub(crate) fn new(
-        source: Entity,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Self {
+    pub(crate) fn new(source: Entity, builder: &'b mut Builder<'w, 's, 'a>) -> Self {
         Self {
             outputs: SplitOutputs::new(builder.scope, source),
             builder,
@@ -276,8 +271,7 @@ pub struct SplitOutputs<T: Splittable> {
 
 impl<T: Splittable> std::fmt::Debug for SplitOutputs<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct(&format!("SplitOutputs<{}>", std::any::type_name::<T>()))
+        f.debug_struct(&format!("SplitOutputs<{}>", std::any::type_name::<T>()))
             .field("scope", &self.scope)
             .field("source", &self.source)
             .field("last_key", &self.last_key)
@@ -293,7 +287,10 @@ impl<T: Splittable> SplitOutputs<T> {
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> SplitBuilder<'w, 's, 'a, 'b, T> {
         assert_eq!(self.scope, builder.scope);
-        SplitBuilder { outputs: self, builder }
+        SplitBuilder {
+            outputs: self,
+            builder,
+        }
     }
 
     pub(crate) fn new(scope: Entity, source: Entity) -> Self {
@@ -301,7 +298,7 @@ impl<T: Splittable> SplitOutputs<T> {
             scope,
             source,
             last_key: None,
-            used: Default::default()
+            used: Default::default(),
         }
     }
 }
@@ -317,7 +314,7 @@ impl<T: Splittable> SplitOutputs<T> {
 /// just keep chaining without checking whether the connection suceeded.
 pub type SplitChainResult<'w, 's, 'a, 'b, T> = Result<
     SplitBuilder<'w, 's, 'a, 'b, T>,
-    (SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError)
+    (SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError),
 >;
 
 /// A helper trait that allows users to ignore any failures while chaining
@@ -328,7 +325,9 @@ pub trait IgnoreSplitChainResult<'w, 's, 'a, 'b, T: Splittable> {
     fn ignore_result(self) -> SplitBuilder<'w, 's, 'a, 'b, T>;
 }
 
-impl<'w, 's, 'a, 'b, T: Splittable> IgnoreSplitChainResult<'w, 's, 'a, 'b, T> for SplitChainResult<'w, 's, 'a, 'b, T> {
+impl<'w, 's, 'a, 'b, T: Splittable> IgnoreSplitChainResult<'w, 's, 'a, 'b, T>
+    for SplitChainResult<'w, 's, 'a, 'b, T>
+{
     fn ignore_result(self) -> SplitBuilder<'w, 's, 'a, 'b, T> {
         match self {
             Ok(split) => split,
@@ -364,10 +363,7 @@ where
     ///
     /// If there is no connection associated with the specified key, the value
     /// will be returned as [`Err`].
-    pub fn outputs_for<'o, 'k>(
-        &'o mut self,
-        key: &'k Key,
-    ) -> Option<&'o mut Vec<Item>> {
+    pub fn outputs_for<'o, 'k>(&'o mut self, key: &'k Key) -> Option<&'o mut Vec<Item>> {
         let Some(index) = self.connections.get(key) else {
             return None;
         };
@@ -376,7 +372,7 @@ where
         if self.outputs.len() <= index {
             // We do this just in case something bad happened with the cache
             // that reset its size.
-            self.outputs.resize_with(index+1, || Vec::new());
+            self.outputs.resize_with(index + 1, || Vec::new());
         }
 
         self.outputs.get_mut(index)
@@ -438,7 +434,7 @@ impl ForRemaining for ListSplitKey {
 /// be a sorted order (e.g. alphabetical or numerical) but for [`HashMap`] this
 /// order can be completely arbitrary and may be unstable.
 pub struct SplitAsList<T: 'static + Send + Sync + IntoIterator> {
-    pub contents: T
+    pub contents: T,
 }
 
 impl<T: 'static + Send + Sync + IntoIterator> SplitAsList<T> {
@@ -618,7 +614,10 @@ where
     M: 'static + Send + Sync + IntoIterator<Item = (K, V)>,
 {
     pub fn new(contents: M) -> Self {
-        Self { contents, _ignore: Default::default() }
+        Self {
+            contents,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -648,7 +647,7 @@ where
                     MapSplitKey::Remaining => None,
                 }
             }
-            None => Some(MapSplitKey::Sequential(0))
+            None => Some(MapSplitKey::Sequential(0)),
         }
     }
 
@@ -730,7 +729,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{*, testing::*};
+    use crate::{testing::*, *};
     use std::collections::{BTreeMap, HashMap};
 
     #[test]
@@ -744,19 +743,20 @@ mod tests {
                 .split(|split| {
                     let mut outputs = Vec::new();
                     split
-                    .sequential_branch(0, |chain| {
-                        outputs.push(chain.value().map_block(|v| v + 0.0).output());
-                    })
-                    .unwrap()
-                    .sequential_branch(2, |chain| {
-                        outputs.push(chain.value().map_async(|v| async move { v + 2.0 }).output());
-                    })
-                    .unwrap()
-                    .sequential_branch(4, |chain| {
-                        outputs.push(chain.value().map_block(|v| v + 4.0).output());
-                    })
-                    .unwrap()
-                    .unused();
+                        .sequential_branch(0, |chain| {
+                            outputs.push(chain.value().map_block(|v| v + 0.0).output());
+                        })
+                        .unwrap()
+                        .sequential_branch(2, |chain| {
+                            outputs
+                                .push(chain.value().map_async(|v| async move { v + 2.0 }).output());
+                        })
+                        .unwrap()
+                        .sequential_branch(4, |chain| {
+                            outputs.push(chain.value().map_block(|v| v + 4.0).output());
+                        })
+                        .unwrap()
+                        .unused();
 
                     outputs
                 })
@@ -765,7 +765,9 @@ mod tests {
         });
 
         let mut promise = context.command(|commands| {
-            commands.request([5.0, 4.0, 3.0, 2.0, 1.0], workflow).take_response()
+            commands
+                .request([5.0, 4.0, 3.0, 2.0, 1.0], workflow)
+                .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(30));
@@ -774,55 +776,57 @@ mod tests {
         assert_eq!(value, [5.0, 5.0, 5.0].into());
 
         let workflow = context.spawn_io_workflow(|scope: Scope<[f64; 3], f64>, builder| {
-            scope
-                .input
-                .chain(builder)
-                .split(|split| {
-                    let split = split.sequential_branch(0, |chain| {
+            scope.input.chain(builder).split(|split| {
+                let split = split
+                    .sequential_branch(0, |chain| {
                         chain
-                        // Do some nonsense with the first element in the split
-                        .fork_clone((
-                            |chain: Chain<_>| chain.unused(),
-                            |chain: Chain<_>| chain.unused(),
-                            |chain: Chain<_>| chain.unused(),
-                        ));
+                            // Do some nonsense with the first element in the split
+                            .fork_clone((
+                                |chain: Chain<_>| chain.unused(),
+                                |chain: Chain<_>| chain.unused(),
+                                |chain: Chain<_>| chain.unused(),
+                            ));
                     })
                     .unwrap();
 
-                    // This is outside the valid range for the array, so it should
-                    // fail
-                    let err = split.sequential_branch(3, |chain| {
-                        chain.value().connect(scope.terminate);
-                    });
-                    assert!(matches!(&err, Err((_, SplitConnectionError::KeyOutOfBounds))));
-
-                    let split = err
-                        .ignore_result()
-                        .sequential_branch(1, |chain| {
-                            chain.unused();
-                        })
-                        .unwrap();
-
-                    // We already connected to this key, so it should fail
-                    let err = split.sequential_branch(0, |chain| {
-                        chain.value().connect(scope.terminate);
-                    });
-                    assert!(matches!(&err, Err((_, SplitConnectionError::KeyAlreadyUsed))));
-
-                    // Connect the last element in the split to the termination node
-                    err
-                        .ignore_result()
-                        .sequential_branch(2, |chain| {
-                            chain.value().connect(scope.terminate);
-                        })
-                        .unwrap()
-                        .unused();
+                // This is outside the valid range for the array, so it should
+                // fail
+                let err = split.sequential_branch(3, |chain| {
+                    chain.value().connect(scope.terminate);
                 });
+                assert!(matches!(
+                    &err,
+                    Err((_, SplitConnectionError::KeyOutOfBounds))
+                ));
+
+                let split = err
+                    .ignore_result()
+                    .sequential_branch(1, |chain| {
+                        chain.unused();
+                    })
+                    .unwrap();
+
+                // We already connected to this key, so it should fail
+                let err = split.sequential_branch(0, |chain| {
+                    chain.value().connect(scope.terminate);
+                });
+                assert!(matches!(
+                    &err,
+                    Err((_, SplitConnectionError::KeyAlreadyUsed))
+                ));
+
+                // Connect the last element in the split to the termination node
+                err.ignore_result()
+                    .sequential_branch(2, |chain| {
+                        chain.value().connect(scope.terminate);
+                    })
+                    .unwrap()
+                    .unused();
+            });
         });
 
-        let mut promise = context.command(|commands| {
-            commands.request([1.0, 2.0, 3.0], workflow).take_response()
-        });
+        let mut promise =
+            context.command(|commands| commands.request([1.0, 2.0, 3.0], workflow).take_response());
 
         context.run_with_conditions(&mut promise, 1);
         assert!(context.no_unhandled_errors());
@@ -841,51 +845,61 @@ mod tests {
         let convert_speed = move |v: f64| v * km_to_miles * per_second_to_per_hour;
         let convert_distance = move |d: f64| d * km_to_miles;
 
-        let workflow = context.spawn_io_workflow(|scope: Scope<BTreeMap<String, f64>, _>, builder| {
-            let collector = builder.create_collect_all::<_, 16>();
+        let workflow =
+            context.spawn_io_workflow(|scope: Scope<BTreeMap<String, f64>, _>, builder| {
+                let collector = builder.create_collect_all::<_, 16>();
 
-            scope
-                .input
-                .chain(builder)
-                .split(|split| {
+                scope.input.chain(builder).split(|split| {
                     split
-                    .specific_branch("speed".to_owned(), |chain| {
-                        chain.map_block(move |(k, v)| (k, convert_speed(v))).connect(collector.input);
-                    })
-                    .ignore_result()
-                    .specific_branch("velocity".to_owned(), |chain| {
-                        chain.map_async(move |(k, v)| async move { (k, convert_speed(v)) }).connect(collector.input);
-                    })
-                    .unwrap()
-                    .specific_branch("distance".to_owned(), |chain| {
-                        chain.map_block(move |(k, v)| (k, convert_distance(v))).connect(collector.input);
-                    })
-                    .unwrap()
-                    .sequential_branch(0, |chain| {
-                        chain.map_block(move |(k, v)| (k, 0.0 * v)).connect(collector.input);
-                    })
-                    .unwrap()
-                    .sequential_branch(1, |chain| {
-                        chain.map_async(move |(k, v)| async move { (k, 1.0 * v) }).connect(collector.input);
-                    })
-                    .unwrap()
-                    .sequential_branch(2, |chain| {
-                        chain.map_block(move |(k, v)| (k, 2.0 * v)).connect(collector.input);
-                    })
-                    .unwrap()
-                    .remaining_branch(|chain| {
-                        chain.connect(collector.input);
-                    })
-                    .unwrap()
-                    .unused();
+                        .specific_branch("speed".to_owned(), |chain| {
+                            chain
+                                .map_block(move |(k, v)| (k, convert_speed(v)))
+                                .connect(collector.input);
+                        })
+                        .ignore_result()
+                        .specific_branch("velocity".to_owned(), |chain| {
+                            chain
+                                .map_async(move |(k, v)| async move { (k, convert_speed(v)) })
+                                .connect(collector.input);
+                        })
+                        .unwrap()
+                        .specific_branch("distance".to_owned(), |chain| {
+                            chain
+                                .map_block(move |(k, v)| (k, convert_distance(v)))
+                                .connect(collector.input);
+                        })
+                        .unwrap()
+                        .sequential_branch(0, |chain| {
+                            chain
+                                .map_block(move |(k, v)| (k, 0.0 * v))
+                                .connect(collector.input);
+                        })
+                        .unwrap()
+                        .sequential_branch(1, |chain| {
+                            chain
+                                .map_async(move |(k, v)| async move { (k, 1.0 * v) })
+                                .connect(collector.input);
+                        })
+                        .unwrap()
+                        .sequential_branch(2, |chain| {
+                            chain
+                                .map_block(move |(k, v)| (k, 2.0 * v))
+                                .connect(collector.input);
+                        })
+                        .unwrap()
+                        .remaining_branch(|chain| {
+                            chain.connect(collector.input);
+                        })
+                        .unwrap()
+                        .unused();
                 });
 
-            collector
-                .output
-                .chain(builder)
-                .map_block(|v| HashMap::<String, f64>::from_iter(v))
-                .connect(scope.terminate);
-        });
+                collector
+                    .output
+                    .chain(builder)
+                    .map_block(|v| HashMap::<String, f64>::from_iter(v))
+                    .connect(scope.terminate);
+            });
 
         // We input a BTreeMap so we can ensure the first three sequence items
         // are always the same: a, b, and c. Make sure that no other keys in the
@@ -901,12 +915,14 @@ mod tests {
             ("fib", 78.3),
             ("dib", -22.1),
         ]
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), v))
-            .collect();
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v))
+        .collect();
 
         let mut promise = context.command(|commands| {
-            commands.request(input_map.clone(), workflow).take_response()
+            commands
+                .request(input_map.clone(), workflow)
+                .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(30));

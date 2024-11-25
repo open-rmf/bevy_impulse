@@ -255,9 +255,7 @@ where
         builder: &mut Builder,
     ) -> SmallVec<[Self::BufferElement; N]> {
         SmallVec::<[Self::BufferElement; N]>::from_iter(
-            self
-            .into_iter()
-            .map(|e| e.into_buffer(builder))
+            self.into_iter().map(|e| e.into_buffer(builder)),
         )
     }
 }
