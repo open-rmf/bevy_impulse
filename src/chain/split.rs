@@ -50,50 +50,50 @@ pub trait Splittable: Sized {
 /// This is returned by [`Chain::split`] and allows you to connect to the
 /// split pieces.
 #[must_use]
-pub struct SplitConnector<'w, 's, 'a, 'b, T: Splittable> {
-    connections: SplitConnections<T>,
+pub struct SplitBuilder<'w, 's, 'a, 'b, T: Splittable> {
+    outputs: SplitOutputs<T>,
     builder: &'b mut Builder<'w, 's, 'a>,
 }
 
-impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitConnector<'w, 's, 'a, 'b, T> {
+impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     /// Get the state of connections for this split. You can resume building
-    /// more connections later by calling [`SplitConnections::build`] on the
+    /// more connections later by calling [`SplitOutputs::build`] on the
     /// connections.
-    pub fn connections(self) -> SplitConnections<T> {
-        self.connections
+    pub fn outputs(self) -> SplitOutputs<T> {
+        self.outputs
     }
 
-    /// Build a branch for one of the elements in the split.
-    pub fn branch(
+    /// Build a branch for one of the keys in the split.
+    pub fn branch_for(
         mut self,
         key: impl Into<T::Key>,
         f: impl FnOnce(Chain<T::Item>),
-    ) -> Result<SplitConnector<'w, 's, 'a, 'b, T>, SplitConnectionError> {
-        let output = self.output(key)?;
+    ) -> Result<SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError> {
+        let output = self.output_for(key)?;
         f(output.chain(self.builder));
         Ok(self)
     }
 
-    /// Build a branch for the next element in the split, if such an element may
-    /// be available. The second argument tells you what the key would be, but
+    /// Build a branch for the next key in the split, if such an key may
+    /// be available. The first argument tells you what the key would be, but
     /// you can safely ignore this if it doesn't matter to you.
     ///
     /// This changes what the next element will be if you later use this
-    /// [`SplitConnector`] as an iterator.
+    /// [`SplitBuilder`] as an iterator.
     pub fn next_branch(
         mut self,
-        f: impl FnOnce(Chain<T::Item>, T::Key),
-    ) -> Result<SplitConnector<'w, 's, 'a, 'b, T>, SplitConnectionError> {
+        f: impl FnOnce(T::Key, Chain<T::Item>),
+    ) -> Result<SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError> {
         let Some((key, output)) = self.next() else {
             return Err(SplitConnectionError::KeyOutOfBounds);
         };
 
-        f(output.chain(self.builder), key);
+        f(key, output.chain(self.builder));
         Ok(self)
     }
 
     /// Get the output slot for an element in the split.
-    pub fn output(
+    pub fn output_for(
         &mut self,
         key: impl Into<T::Key>,
     ) -> Result<Output<T::Item>, SplitConnectionError> {
@@ -102,17 +102,17 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitConnector<'w, 's, 'a, 'b, T> 
             return Err(SplitConnectionError::KeyOutOfBounds);
         }
 
-        if !self.connections.used.insert(key.clone()) {
+        if !self.outputs.used.insert(key.clone()) {
             return Err(SplitConnectionError::KeyAlreadyUsed);
         }
 
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(ConnectToSplit::<T> {
-            source: self.connections.source,
+            source: self.outputs.source,
             target,
             key
         });
-        Ok(Output::new(self.builder.scope, target))
+        Ok(Output::new(self.outputs.scope, target))
     }
 
     /// Used internally to create a new split connector
@@ -121,17 +121,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitConnector<'w, 's, 'a, 'b, T> 
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Self {
         Self {
-            connections: SplitConnections {
-                source,
-                last_key: None,
-                used: Default::default(),
-            },
+            outputs: SplitOutputs::new(builder.scope, source),
             builder,
         }
     }
 }
 
-impl<'w, 's, 'a, 'b, T, K> SplitConnector<'w, 's, 'a, 'b, T>
+impl<'w, 's, 'a, 'b, T, K> SplitBuilder<'w, 's, 'a, 'b, T>
 where
     T: 'static + Splittable<Key = MapSplitKey<K>>,
 {
@@ -141,19 +137,19 @@ where
         self,
         sequence_number: usize,
         f: impl FnOnce(Chain<T::Item>),
-    ) -> Result<SplitConnector<'w, 's, 'a, 'b, T>, SplitConnectionError> {
-        self.branch(MapSplitKey::Sequential(sequence_number), f)
+    ) -> Result<SplitBuilder<'w, 's, 'a, 'b, T>, SplitConnectionError> {
+        self.branch_for(MapSplitKey::Sequential(sequence_number), f)
     }
 }
 
-impl<'w, 's, 'a, 'b, T: 'static + Splittable> Iterator for SplitConnector<'w, 's, 'a, 'b, T> {
+impl<'w, 's, 'a, 'b, T: 'static + Splittable> Iterator for SplitBuilder<'w, 's, 'a, 'b, T> {
     type Item = (T::Key, Output<T::Item>);
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let next_key = T::next(&self.connections.last_key)?;
-            self.connections.last_key = Some(next_key.clone());
+            let next_key = T::next(&self.outputs.last_key)?;
+            self.outputs.last_key = Some(next_key.clone());
 
-            match self.output(next_key.clone()) {
+            match self.output_for(next_key.clone()) {
                 Ok(output) => {
                     return Some((next_key, output));
                 }
@@ -173,22 +169,33 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> Iterator for SplitConnector<'w, 's
 }
 
 /// This tracks the connections that have been made to a split. This can be
-/// retrieved from [`SplitConnector`] by calling [`SplitConnector::connections`].
-/// You can then continue building connections by calling [`SplitConnector::build`].
+/// retrieved from [`SplitBuilder`] by calling [`SplitBuilder::connections`].
+/// You can then continue building connections by calling [`SplitBuilder::build`].
 #[must_use]
-pub struct SplitConnections<T: Splittable> {
+pub struct SplitOutputs<T: Splittable> {
+    scope: Entity,
     source: Entity,
     last_key: Option<T::Key>,
     used: HashSet<T::Key>,
 }
 
-impl<T: Splittable> SplitConnections<T> {
+impl<T: Splittable> SplitOutputs<T> {
     /// Resume building connections for this split.
     pub fn build<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> SplitConnector<'w, 's, 'a, 'b, T> {
-        SplitConnector { connections: self, builder }
+    ) -> SplitBuilder<'w, 's, 'a, 'b, T> {
+        assert_eq!(self.scope, builder.scope);
+        SplitBuilder { outputs: self, builder }
+    }
+
+    pub(crate) fn new(scope: Entity, source: Entity) -> Self {
+        Self {
+            scope,
+            source,
+            last_key: None,
+            used: Default::default()
+        }
     }
 }
 

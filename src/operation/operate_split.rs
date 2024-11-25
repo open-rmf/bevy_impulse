@@ -178,7 +178,7 @@ impl<T: 'static + Splittable> ConnectToSplit<T> {
 
         if let Some(previous_index) = previous_index {
             // If something was already using this key then there is a flaw in
-            // the implementation of SplitConnector and we should log it.
+            // the implementation of SplitBuilder and we should log it.
             let target_storage = world.get::<ForkTargetStorage>(self.source).or_broken()?;
             let previous_target = *target_storage.0.get(previous_index).or_broken()?;
 
