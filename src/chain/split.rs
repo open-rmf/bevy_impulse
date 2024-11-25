@@ -159,7 +159,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
 
     /// Get the output slot for an element in the split.
     pub fn output_for(&mut self, key: T::Key) -> Result<Output<T::Item>, SplitConnectionError> {
-        let key: T::Key = key.into();
         if !T::validate(&key) {
             return Err(SplitConnectionError::KeyOutOfBounds);
         }
@@ -363,16 +362,13 @@ where
     ///
     /// If there is no connection associated with the specified key, the value
     /// will be returned as [`Err`].
-    pub fn outputs_for<'o, 'k>(&'o mut self, key: &'k Key) -> Option<&'o mut Vec<Item>> {
-        let Some(index) = self.connections.get(key) else {
-            return None;
-        };
-        let index = *index;
+    pub fn outputs_for<'o>(&'o mut self, key: &Key) -> Option<&'o mut Vec<Item>> {
+        let index = *self.connections.get(key)?;
 
         if self.outputs.len() <= index {
             // We do this just in case something bad happened with the cache
             // that reset its size.
-            self.outputs.resize_with(index + 1, || Vec::new());
+            self.outputs.resize_with(index + 1, Vec::new);
         }
 
         self.outputs.get_mut(index)

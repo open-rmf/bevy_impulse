@@ -147,7 +147,7 @@ impl<T: 'static + Splittable> Command for ConnectToSplit<T> {
         let node = self.source;
         if let Err(OperationError::Broken(backtrace)) = self.connect(world) {
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .broken
                 .push(Broken { node, backtrace });
         }
@@ -173,7 +173,7 @@ impl<T: 'static + Splittable> ConnectToSplit<T> {
             .outputs_cache
             .as_mut()
             .or_broken()?
-            .resize_with(index + 1, || Vec::new());
+            .resize_with(index + 1, Vec::new);
         if split.index_to_key.len() != index {
             // If the next element of the reverse map does not match the new index
             // then something has fallen out of sync. This doesn't really break
@@ -181,7 +181,7 @@ impl<T: 'static + Splittable> ConnectToSplit<T> {
             // disposal messages, but it does indicate a bug is present.
             let reverse_map_size = split.index_to_key.len();
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow::anyhow!(
@@ -204,7 +204,7 @@ impl<T: 'static + Splittable> ConnectToSplit<T> {
             let previous_target = *target_storage.0.get(previous_index).or_broken()?;
 
             world
-                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .get_resource_or_insert_with(UnhandledErrors::default)
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: Arc::new(anyhow::anyhow!(
