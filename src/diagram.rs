@@ -50,6 +50,13 @@ pub struct UnzipOp {
     next: Vec<OperationId>,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkResultOp {
+    ok: OperationId,
+    err: OperationId,
+}
+
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum DiagramOperation {
@@ -58,6 +65,7 @@ pub enum DiagramOperation {
     Node(NodeOp),
     ForkClone(ForkCloneOp),
     Unzip(UnzipOp),
+    ForkResult(ForkResultOp),
     Dispose,
 }
 
@@ -175,6 +183,8 @@ pub enum DiagramError {
     NotSerializable,
     NotCloneable,
     NotUnzippable,
+    UnzipToTerminate,
+    CannotForkResult,
     BadInterconnectChain,
     JsonError(serde_json::Error),
 }
@@ -197,6 +207,10 @@ impl Display for DiagramError {
             Self::NotCloneable => f.write_str("response cannot be cloned"),
             Self::NotUnzippable => f.write_str(
                 "the number of unzip slots in response does not match the number of inputs",
+            ),
+            Self::UnzipToTerminate => f.write_str("cannot unzip to terminate"),
+            Self::CannotForkResult => f.write_str(
+                "node must be registered with \"with_fork_result()\" to be able to perform fork result",
             ),
             Self::BadInterconnectChain => {
                 f.write_str("an interconnect like forkClone cannot connect to another interconnect")
@@ -826,7 +840,7 @@ mod tests {
         let err = diagram
             .spawn_io_workflow(&mut context.app, &mut registry)
             .unwrap_err();
-        assert!(matches!(err, DiagramError::NotUnzippable));
+        assert!(matches!(err, DiagramError::UnzipToTerminate));
     }
 
     #[test]
@@ -930,6 +944,98 @@ mod tests {
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available().unwrap().unwrap(), 60);
+    }
+
+    #[test]
+    fn test_fork_result() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn check_even(v: i64) -> Result<String, String> {
+            if v % 2 == 0 {
+                Ok("even".to_string())
+            } else {
+                Err("odd".to_string())
+            }
+        }
+
+        registry.register_node(
+            "check_even",
+            "check_even",
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(&check_even))
+                .into_registration_builder()
+                .with_fork_result(),
+        );
+
+        fn echo(s: String) -> String {
+            s
+        }
+
+        registry.register_node(
+            "echo",
+            "echo",
+            (|builder: &mut Builder, _config: ()| builder.create_map_block(&echo))
+                .into_registration_builder(),
+        );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "check_even".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "fork_result".to_string(),
+                    }),
+                ),
+                (
+                    "fork_result".to_string(),
+                    DiagramOperation::ForkResult(ForkResultOp {
+                        ok: "op_2".to_string(),
+                        err: "op_3".to_string(),
+                    }),
+                ),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "echo".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "op_3".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "echo".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap().unwrap(), "even");
+
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(3), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap().unwrap(), "odd");
     }
 
     #[test]

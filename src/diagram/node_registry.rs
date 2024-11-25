@@ -143,6 +143,13 @@ pub struct NodeRegistration {
         // RefCell to a Box to a Fn that returns Result<(), DiagramError>
         RefCell<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
     >,
+
+    fork_result_impl: Option<
+        // RefCell to a Box to a Fn that returns Result<(), DiagramError>
+        RefCell<
+            Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
+        >,
+    >,
 }
 
 impl NodeRegistration {
@@ -209,6 +216,18 @@ impl NodeRegistration {
             .ok_or(DiagramError::NotUnzippable)?;
         (f.borrow_mut())(builder, output)
     }
+
+    pub(super) fn fork_result(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+        let f = self
+            .fork_result_impl
+            .as_ref()
+            .ok_or(DiagramError::CannotForkResult)?;
+        (f.borrow_mut())(builder, output)
+    }
 }
 
 pub trait DynUnzip {
@@ -244,6 +263,22 @@ macro_rules! dyn_unzip_impl {
 
 all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
 
+pub trait DynForkResult {
+    fn fork_result(self, builder: &mut Builder) -> Result<(DynOutput, DynOutput), DiagramError>;
+}
+
+impl<T, E> DynForkResult for Output<Result<T, E>>
+where
+    T: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+{
+    fn fork_result(self, builder: &mut Builder) -> Result<(DynOutput, DynOutput), DiagramError> {
+        let chain = self.chain(builder);
+        let (ok, err) = chain.fork_result(|c| c.output(), |c| c.output());
+        Ok((ok.into(), err.into()))
+    }
+}
+
 pub struct RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer> {
     build_node: NodeBuilderT,
     fork_clone: Option<
@@ -256,6 +291,12 @@ pub struct RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer> 
     >,
     /// The number of inputs that the output can be unzipped to
     unzip_slots: usize,
+
+    fork_result: Option<
+        RefCell<
+            Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
+        >,
+    >,
 
     _unused: PhantomData<(ConfigT, Deserializer, Serializer)>,
 }
@@ -276,6 +317,7 @@ where
             fork_clone: self.fork_clone,
             unzip: self.unzip,
             unzip_slots: self.unzip_slots,
+            fork_result: self.fork_result,
             _unused: Default::default(),
         }
     }
@@ -288,6 +330,7 @@ where
             fork_clone: self.fork_clone,
             unzip: self.unzip,
             unzip_slots: self.unzip_slots,
+            fork_result: self.fork_result,
             _unused: Default::default(),
         }
     }
@@ -317,6 +360,18 @@ where
             o.unzip(builder)
         })));
         self.unzip_slots = Output::<Response>::UNZIP_SLOTS;
+        self
+    }
+
+    pub fn with_fork_result(mut self) -> Self
+    where
+        Output<Response>: DynForkResult,
+    {
+        self.fork_result = Some(RefCell::new(Box::new(|builder, output| {
+            assert_eq!(std::any::type_name::<Response>(), output.type_name);
+            let o = output.into_output::<Response>();
+            o.fork_result(builder)
+        })));
         self
     }
 }
@@ -360,6 +415,7 @@ where
             serializable: Serializer::serializable(),
             cloneable: self.fork_clone.is_some(),
             unzip_slots: self.unzip_slots,
+            fork_result: self.fork_result.is_some(),
         };
         NodeRegistration {
             metadata: NodeMetadata {
@@ -401,6 +457,7 @@ where
             },
             fork_clone_impl: self.fork_clone,
             unzip_impl: self.unzip,
+            fork_result_impl: self.fork_result,
         }
     }
 }
@@ -424,6 +481,7 @@ where
             fork_clone: None,
             unzip: None,
             unzip_slots: 0,
+            fork_result: None,
             _unused: Default::default(),
         }
     }

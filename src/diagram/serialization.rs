@@ -77,6 +77,9 @@ pub struct ResponseMetadata {
     /// The number of unzip slots that a response have, a value of 0 means that the response
     /// cannot be unzipped. This should be > 0 only if the response is a tuple.
     pub(super) unzip_slots: usize,
+
+    /// Indicates if the response can fork result
+    pub(super) fork_result: bool,
 }
 
 pub trait SerializeMessage<T> {

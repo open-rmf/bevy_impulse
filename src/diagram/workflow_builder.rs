@@ -28,6 +28,14 @@ trait ConnectionChainOps {
         Err(DiagramError::NotUnzippable)
     }
 
+    fn fork_result(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+        Err(DiagramError::CannotForkResult)
+    }
+
     fn receiver(
         &self,
         builder: &mut Builder,
@@ -73,6 +81,14 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
         output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramError> {
         self.registration.unzip(builder, output)
+    }
+
+    fn fork_result(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+        self.registration.fork_result(builder, output)
     }
 
     fn receiver(
@@ -337,9 +353,26 @@ impl<'b> WorkflowBuilder<'b> {
                         |(next_op_id, output)| State {
                             op_id: next_op_id,
                             output,
-                            can_terminate: Some(DiagramError::NotUnzippable),
+                            can_terminate: Some(DiagramError::UnzipToTerminate),
                         },
                     ));
+                }
+                DiagramOperation::ForkResult(fork_result_op) => {
+                    debug!(
+                        "fork result ok to {:?}, err to {:?}",
+                        fork_result_op.ok, fork_result_op.err
+                    );
+                    let (ok_out, err_out) = ops.fork_result(builder, state.output)?;
+                    to_visit.push(State {
+                        op_id: &fork_result_op.ok,
+                        output: ok_out,
+                        can_terminate: Some(DiagramError::UnzipToTerminate),
+                    });
+                    to_visit.push(State {
+                        op_id: &fork_result_op.err,
+                        output: err_out,
+                        can_terminate: Some(DiagramError::UnzipToTerminate),
+                    });
                 }
                 DiagramOperation::Dispose => {}
             }
