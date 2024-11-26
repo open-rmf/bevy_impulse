@@ -36,7 +36,7 @@ pub trait Splittable: Sized {
 
     /// Return true if the key is feasible for this type of split, otherwise
     /// return false. Returning false will cause the user to receive a
-    /// [`SplitConnectionError::IndexOutOfBounds`]. This will also cause iterating
+    /// [`SplitConnectionError::KeyOutOfBounds`]. This will also cause iterating
     /// to cease.
     fn validate(key: &Self::Key) -> bool;
 
@@ -357,11 +357,11 @@ where
     Key: 'static + Send + Sync + Eq + Hash + Clone + Debug,
     Item: 'static + Send + Sync,
 {
-    /// Send a value for a key. The split operation will make sure that this
-    /// value will be sent to the target associated with the key.
+    /// Get the output buffer a certain key. If there are no connections for the
+    /// given key, then this will return [`None`].
     ///
-    /// If there is no connection associated with the specified key, the value
-    /// will be returned as [`Err`].
+    /// Push items into the output buffer to send them to the input connected to
+    /// this key.
     pub fn outputs_for<'o>(&'o mut self, key: &Key) -> Option<&'o mut Vec<Item>> {
         let index = *self.connections.get(key)?;
 
