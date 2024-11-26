@@ -625,6 +625,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the chain's response implements the [`Splittable`] trait, then this
     /// will insert a split and provide a container for its available outputs.
     /// To build connections to these outputs later, use [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split(|split| split.outputs())
+    /// ```
     pub fn split_outputs(self) -> SplitOutputs<T>
     where
         T: Splittable,
@@ -634,18 +639,28 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// If the chain's response can be turned into an iterator with an appropriate
     /// item type, this will allow it to be split in a list-like way.
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .map_block(SplitAsList::new).split(build)
+    /// ```
     pub fn split_as_list<U>(self, build: impl FnOnce(SplitBuilder<SplitAsList<T>>) -> U) -> U
     where
         T: IntoIterator,
         T::Item: 'static + Send + Sync,
     {
-        self.map_block(|v| SplitAsList::new(v)).split(build)
+        self.map_block(SplitAsList::new).split(build)
     }
 
     /// If the chain's response can be turned into an iterator with an appropriate
     /// item type, this will insert a split and provide a container for its
     /// available outputs. To build connections to these outputs later, use
     /// [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split_as_list(|split| split.outputs())
+    /// ```
     pub fn split_as_list_outputs(self) -> SplitOutputs<SplitAsList<T>>
     where
         T: IntoIterator,
@@ -1006,14 +1021,24 @@ where
     /// If the chain's response type can be turned into an iterator that returns
     /// `(key, value)` pairs, then this will split it in a map-like way, whether
     /// or not it is a conventional map data structure.
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .map_block(SplitAsMap::new).split(build)
+    /// ```
     pub fn split_as_map<U>(self, build: impl FnOnce(SplitBuilder<SplitAsMap<K, V, T>>) -> U) -> U {
-        self.map_block(|v| SplitAsMap::new(v)).split(build)
+        self.map_block(SplitAsMap::new).split(build)
     }
 
     /// If the chain's response type can be turned into an iterator that returns
     /// `(key, value)` pairs, then this will split it in a map-like way and
     /// provide a container for its available outputs. To build connections to
     /// these outputs later, use [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split_as_map(|split| split.outputs())
+    /// ```
     pub fn split_as_map_outputs(self) -> SplitOutputs<SplitAsMap<K, V, T>> {
         self.split_as_map(|b| b.outputs())
     }
