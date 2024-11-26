@@ -66,6 +66,8 @@
 //! run freely, or use [`Impulse::take`] to get a [`Recipient`] of the final
 //! result.
 
+extern crate self as bevy_impulse;
+
 mod async_execution;
 pub use async_execution::Sendish;
 

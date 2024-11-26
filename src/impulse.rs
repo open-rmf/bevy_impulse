@@ -336,7 +336,6 @@ impl<T> Default for Collection<T> {
 #[cfg(test)]
 mod tests {
     use crate::{prelude::*, testing::*, ContinuousQueueView};
-    use bevy_utils::label::DynEq;
     use smallvec::SmallVec;
     use std::{
         sync::{Arc, Mutex},
@@ -484,45 +483,11 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, DeliveryLabel)]
     struct UnitLabel;
 
-    // TODO(@mxgrey) Figure out how to make the DeliveryLabel macro usable
-    // within the core bevy_impulse library
-    impl DeliveryLabel for UnitLabel {
-        fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
-            Box::new(self.clone())
-        }
-
-        fn as_dyn_eq(&self) -> &dyn DynEq {
-            self
-        }
-
-        fn dyn_hash(&self, mut state: &mut dyn std::hash::Hasher) {
-            let ty_id = std::any::TypeId::of::<Self>();
-            std::hash::Hash::hash(&ty_id, &mut state);
-            std::hash::Hash::hash(self, &mut state);
-        }
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, DeliveryLabel)]
     struct StatefulLabel(u64);
-
-    impl DeliveryLabel for StatefulLabel {
-        fn dyn_clone(&self) -> Box<dyn DeliveryLabel> {
-            Box::new(self.clone())
-        }
-
-        fn as_dyn_eq(&self) -> &dyn DynEq {
-            self
-        }
-
-        fn dyn_hash(&self, mut state: &mut dyn std::hash::Hasher) {
-            let ty_id = std::any::TypeId::of::<Self>();
-            std::hash::Hash::hash(&ty_id, &mut state);
-            std::hash::Hash::hash(self, &mut state);
-        }
-    }
 
     #[test]
     fn test_delivery_instructions() {

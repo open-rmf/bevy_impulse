@@ -16,30 +16,18 @@
 */
 
 use proc_macro::TokenStream;
+use quote::quote;
+use syn::DeriveInput;
 
-mod stream_macro;
-use stream_macro::*;
+pub(super) fn impl_stream_macro(item: TokenStream) -> TokenStream {
+    let ast: DeriveInput = syn::parse(item).unwrap();
+    let struct_name = &ast.ident;
+    let (impl_generics, type_generics, where_clause) = &ast.generics.split_for_impl();
 
-/// Provide the Stream derive macro
-#[proc_macro_derive(Stream)]
-pub fn stream_macro(item: TokenStream) -> TokenStream {
-    impl_stream_macro(item)
-}
-
-mod delivery_label_macro;
-use delivery_label_macro::*;
-
-/// Provide the DeliveryLabel derive macro
-#[proc_macro_derive(DeliveryLabel)]
-pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
-    impl_delivery_label_macro(item)
-}
-
-mod unzip_macro;
-use unzip_macro::*;
-
-/// Provide the Unzip derive macro
-#[proc_macro_derive(Unzip)]
-pub fn unzip_macro(item: TokenStream) -> TokenStream {
-    impl_unzip_macro(item)
+    quote! {
+        impl #impl_generics ::bevy_impulse::Stream for #struct_name #type_generics #where_clause {
+            type Container = ::bevy_impulse::DefaultStreamContainer<Self>;
+        }
+    }
+    .into()
 }

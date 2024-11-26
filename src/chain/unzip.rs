@@ -32,7 +32,10 @@ pub trait Unzippable: Sized {
 
     fn distribute_values(request: OperationRequest) -> OperationResult;
 
+    #[deprecated(since = "0.0.2", note = "This associated type was not meant to exist")]
     type Prepended<T>;
+
+    #[deprecated(since = "0.0.2", note = "This associated function was not meant to exist")]
     fn prepend<T>(self, value: T) -> Self::Prepended<T>;
 }
 

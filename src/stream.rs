@@ -162,14 +162,10 @@ pub trait Stream: 'static + Send + Sync + Sized {
 
 /// A simple newtype wrapper that turns any suitable data structure
 /// (`'static + Send + Sync`) into a stream.
-#[derive(Clone, Copy, Debug, Deref, DerefMut)]
+#[derive(Clone, Copy, Debug, Deref, DerefMut, Stream)]
 pub struct StreamOf<T: 'static + Send + Sync>(pub T);
 
 pub type DefaultStreamContainer<T> = SmallVec<[T; 16]>;
-
-impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
-    type Container = DefaultStreamContainer<Self>;
-}
 
 pub struct StreamBuffer<T: Stream> {
     // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
