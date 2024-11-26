@@ -39,7 +39,10 @@ mod unzip_macro;
 use unzip_macro::*;
 
 /// Provide the Unzip derive macro
-#[proc_macro_derive(Unzip)]
+#[proc_macro_derive(Unzip, attributes(unzip))]
 pub fn unzip_macro(item: TokenStream) -> TokenStream {
-    impl_unzip_macro(item)
+    match impl_unzip_macro(item) {
+        Ok(ts) => ts.into(),
+        Err(ts) => ts.into(),
+    }
 }

@@ -20,6 +20,8 @@ use bevy_utils::all_tuples;
 use itertools::Itertools;
 use smallvec::SmallVec;
 
+pub use bevy_impulse_derive::Unzip;
+
 use crate::{
     AddOperation, Builder, Chain, ForkTargetStorage, ForkUnzip, Input, ManageInput,
     OperationRequest, OperationResult, OrBroken, Output, UnusedTarget,
@@ -32,7 +34,6 @@ pub trait Unzippable: Sized {
 
     fn distribute_values(request: OperationRequest) -> OperationResult;
 
-    #[deprecated(since = "0.0.2", note = "This associated type was not meant to exist")]
     type Prepended<T>;
 
     #[deprecated(since = "0.0.2", note = "This associated function was not meant to exist")]
@@ -133,3 +134,20 @@ macro_rules! impl_unzipbuilder_for_tuple {
 
 // Implements the `UnzipBuilder` trait for all tuples between size 1 and 12
 all_tuples!(impl_unzipbuilder_for_tuple, 2, 12, A, F, U);
+
+#[cfg(test)]
+mod tests {
+    use crate::{*, testing::*};
+
+    #[derive(Unzip)]
+    struct SomeUnzippable {
+        aaa: i32,
+        #[unzip(discard)]
+        bbb: f32,
+    }
+
+    #[test]
+    fn test_unzip_struct() {
+
+    }
+}
