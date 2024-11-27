@@ -31,3 +31,11 @@ jobs:
       run: cargo build --features single_threaded_async
     - name: Test single_threaded_async
       run: cargo test --features single_threaded_async
+
+    # Build and test with 1.75
+    - name: Install Rust 1.75
+      run: rustup default 1.75
+    - name: Build default features with Rust 1.75
+      run: cargo build
+    - name: Test default features with Rust 1.75
+      run: cargo test
