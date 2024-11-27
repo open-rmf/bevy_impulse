@@ -26,9 +26,10 @@ use crate::{
     AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferItem, BufferKeys, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
     GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
-    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output, Provider,
-    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
-    Sendish, Service, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output,
+    Provider, RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings,
+    ScopeSettingsStorage, Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap,
+    StreamsOfMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
@@ -337,6 +338,26 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync,
     {
         self.create_collect(n, Some(n))
+    }
+
+    /// Create a new split operation in the workflow. The [`InputSlot`] can take
+    /// in values that you want to split, and [`SplitOutputs::build`] will let
+    /// you build connections to the split value.
+    pub fn create_split<T>(&mut self) -> (InputSlot<T>, SplitOutputs<T>)
+    where
+        T: 'static + Send + Sync + Splittable,
+    {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateSplit::<T>::default(),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            SplitOutputs::new(self.scope, source),
+        )
     }
 
     /// This method allows you to define a cleanup workflow that branches off of

@@ -80,6 +80,9 @@ pub(crate) use operate_map::*;
 mod operate_service;
 pub(crate) use operate_service::*;
 
+mod operate_split;
+pub(crate) use operate_split::*;
+
 mod operate_task;
 pub(crate) use operate_task::*;
 
