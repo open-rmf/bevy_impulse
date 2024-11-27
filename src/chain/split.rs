@@ -532,7 +532,12 @@ impl<T: 'static + Send + Sync, const N: usize> Splittable for [T; N] {
 
     fn next(key: &Option<Self::Key>) -> Option<Self::Key> {
         // Static arrays have a firm limit of N
-        SplitAsList::<Self>::next(key).take_if(|key| Self::validate(key))
+        let mut key = SplitAsList::<Self>::next(key);
+        if key.map_or(false, |key| Self::validate(&key)) {
+            key.take()
+        } else {
+            None
+        }
     }
 
     fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {
