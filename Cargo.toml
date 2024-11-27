@@ -30,7 +30,6 @@ async-task = { version = "4.7.1", optional = true }
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
 bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
 
-arrayvec = "0.7"
 itertools = "0.13"
 smallvec = "1.13"
 tokio = { version = "1.39", features = ["sync"] }
