@@ -1,10 +1,12 @@
 mod node_registry;
 mod serialization;
+mod split_serialized;
 mod workflow_builder;
 
 use log::debug;
 pub use node_registry::*;
 pub use serialization::*;
+pub use split_serialized::*;
 pub use workflow_builder::*;
 
 // ----------

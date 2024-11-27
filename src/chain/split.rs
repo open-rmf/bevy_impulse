@@ -561,6 +561,22 @@ impl<K> MapSplitKey<K> {
             _ => None,
         }
     }
+
+    pub fn next(this: &Option<Self>) -> Option<Self> {
+        match this {
+            Some(key) => {
+                match key {
+                    // Give the next key in the sequence
+                    MapSplitKey::Sequential(index) => Some(MapSplitKey::Sequential(index + 1)),
+                    // For an arbitrary map we don't know what would follow a specific key, so
+                    // just stop iterating. This should never be reached in practice anyway.
+                    MapSplitKey::Specific(_) => None,
+                    MapSplitKey::Remaining => None,
+                }
+            }
+            None => Some(MapSplitKey::Sequential(0)),
+        }
+    }
 }
 
 impl<K> From<K> for MapSplitKey<K> {
@@ -632,19 +648,7 @@ where
     }
 
     fn next(key: &Option<Self::Key>) -> Option<Self::Key> {
-        match key {
-            Some(key) => {
-                match key {
-                    // Give the next key in the sequence
-                    MapSplitKey::Sequential(index) => Some(MapSplitKey::Sequential(index + 1)),
-                    // For an arbitrary map we don't know what would follow a specific key, so
-                    // just stop iterating. This should never be reached in practice anyway.
-                    MapSplitKey::Specific(_) => None,
-                    MapSplitKey::Remaining => None,
-                }
-            }
-            None => Some(MapSplitKey::Sequential(0)),
-        }
+        MapSplitKey::next(key)
     }
 
     fn split(self, mut dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {

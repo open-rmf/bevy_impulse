@@ -608,7 +608,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// will insert a split operation and provide your `build` function with the
     /// [`SplitBuilder`] for it. This returns the return value of your build
     /// function.
-    pub fn split<U>(self, build: impl FnOnce(SplitBuilder<T>) -> U) -> U
+    pub fn split<U>(self, build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, T>) -> U) -> U
     where
         T: Splittable,
     {
@@ -644,7 +644,10 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// ```text
     /// .map_block(SplitAsList::new).split(build)
     /// ```
-    pub fn split_as_list<U>(self, build: impl FnOnce(SplitBuilder<SplitAsList<T>>) -> U) -> U
+    pub fn split_as_list<U>(
+        self,
+        build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, SplitAsList<T>>) -> U,
+    ) -> U
     where
         T: IntoIterator,
         T::Item: 'static + Send + Sync,
@@ -1026,7 +1029,10 @@ where
     /// ```text
     /// .map_block(SplitAsMap::new).split(build)
     /// ```
-    pub fn split_as_map<U>(self, build: impl FnOnce(SplitBuilder<SplitAsMap<K, V, T>>) -> U) -> U {
+    pub fn split_as_map<U>(
+        self,
+        build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, SplitAsMap<K, V, T>>) -> U,
+    ) -> U {
         self.map_block(SplitAsMap::new).split(build)
     }
 
