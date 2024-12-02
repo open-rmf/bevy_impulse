@@ -127,28 +127,19 @@ pub struct NodeRegistration {
         RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>,
 
     /// Creates a node that deserializes a [`serde_json::Value`] into the registered node input.
-    create_receiver_impl: Option<RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>>,
+    create_receiver_impl: Option<Box<dyn Fn(&mut Builder) -> DynNode>>,
 
     /// Creates a node that serializes the registered node's output to a [`serde_json::Value`].
-    create_sender_impl: Option<RefCell<Box<dyn FnMut(&mut Builder) -> DynNode>>>,
+    create_sender_impl: Option<Box<dyn Fn(&mut Builder) -> DynNode>>,
 
-    fork_clone_impl: Option<
-        // RefCell to a Box to a Fn that returns Result<(), DiagramError>
-        RefCell<
-            Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>,
-        >,
-    >,
+    fork_clone_impl:
+        Option<Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>>,
 
-    unzip_impl: Option<
-        // RefCell to a Box to a Fn that returns Result<(), DiagramError>
-        RefCell<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
-    >,
+    unzip_impl:
+        Option<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
 
     fork_result_impl: Option<
-        // RefCell to a Box to a Fn that returns Result<(), DiagramError>
-        RefCell<
-            Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
-        >,
+        Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
     >,
 }
 
@@ -171,7 +162,7 @@ impl NodeRegistration {
             .create_receiver_impl
             .as_ref()
             .ok_or(DiagramError::NotSerializable)?;
-        let n = (f.borrow_mut())(builder);
+        let n = f(builder);
         debug!(
             "create receiver [{}], output: [{:?}], input: [{:?}]",
             self.metadata.id, n.output.target, n.input.source
@@ -184,7 +175,7 @@ impl NodeRegistration {
             .create_sender_impl
             .as_ref()
             .ok_or(DiagramError::NotSerializable)?;
-        let n = (f.borrow_mut())(builder);
+        let n = f(builder);
         debug!(
             "create sender [{}], output: [{:?}], input: [{:?}]",
             self.metadata.id, n.output.target, n.input.source
@@ -202,7 +193,7 @@ impl NodeRegistration {
             .fork_clone_impl
             .as_ref()
             .ok_or(DiagramError::NotCloneable)?;
-        (f.borrow_mut())(builder, output, amount)
+        f(builder, output, amount)
     }
 
     pub(super) fn unzip(
@@ -214,7 +205,7 @@ impl NodeRegistration {
             .unzip_impl
             .as_ref()
             .ok_or(DiagramError::NotUnzippable)?;
-        (f.borrow_mut())(builder, output)
+        f(builder, output)
     }
 
     pub(super) fn fork_result(
@@ -226,7 +217,7 @@ impl NodeRegistration {
             .fork_result_impl
             .as_ref()
             .ok_or(DiagramError::CannotForkResult)?;
-        (f.borrow_mut())(builder, output)
+        f(builder, output)
     }
 }
 
@@ -279,41 +270,34 @@ where
     }
 }
 
-pub struct RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer> {
-    build_node: NodeBuilderT,
-    fork_clone: Option<
-        RefCell<
-            Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>,
-        >,
-    >,
-    unzip: Option<
-        RefCell<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
-    >,
+pub struct RegistrationBuilder<NodeBuilder, Config, Deserializer, Serializer> {
+    create_node: NodeBuilder,
+    fork_clone:
+        Option<Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>>,
+    unzip: Option<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
     /// The number of inputs that the output can be unzipped to
     unzip_slots: usize,
 
     fork_result: Option<
-        RefCell<
-            Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
-        >,
+        Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
     >,
 
-    _unused: PhantomData<(ConfigT, Deserializer, Serializer)>,
+    _unused: PhantomData<(Config, Deserializer, Serializer)>,
 }
 
-impl<NodeBuilderT, ConfigT, Request, Response, Streams, Deserializer, Serializer>
-    RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, Serializer>
+impl<NodeBuilder, Config, Request, Response, Streams, Deserializer, Serializer>
+    RegistrationBuilder<NodeBuilder, Config, Deserializer, Serializer>
 where
-    NodeBuilderT: FnMut(&mut Builder, ConfigT) -> Node<Request, Response, Streams> + 'static,
+    NodeBuilder: FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
     Request: Send + Sync + 'static,
     Response: Send + Sync + 'static,
     Streams: StreamPack,
 {
     pub fn with_opaque_request(
         self,
-    ) -> RegistrationBuilder<NodeBuilderT, ConfigT, OpaqueMessageDeserializer, Serializer> {
+    ) -> RegistrationBuilder<NodeBuilder, Config, OpaqueMessageDeserializer, Serializer> {
         RegistrationBuilder {
-            build_node: self.build_node,
+            create_node: self.create_node,
             fork_clone: self.fork_clone,
             unzip: self.unzip,
             unzip_slots: self.unzip_slots,
@@ -324,9 +308,9 @@ where
 
     pub fn with_opaque_response(
         self,
-    ) -> RegistrationBuilder<NodeBuilderT, ConfigT, Deserializer, OpaqueMessageSerializer> {
+    ) -> RegistrationBuilder<NodeBuilder, Config, Deserializer, OpaqueMessageSerializer> {
         RegistrationBuilder {
-            build_node: self.build_node,
+            create_node: self.create_node,
             fork_clone: self.fork_clone,
             unzip: self.unzip,
             unzip_slots: self.unzip_slots,
@@ -339,14 +323,14 @@ where
     where
         Response: Clone,
     {
-        self.fork_clone = Some(RefCell::new(Box::new(|builder, output, amount| {
+        self.fork_clone = Some(Box::new(|builder, output, amount| {
             assert_eq!(output.type_name, std::any::type_name::<Response>());
 
             let fork_clone = output.into_output::<Response>().fork_clone(builder);
             Ok((0..amount)
                 .map(|_| fork_clone.clone_output(builder).into())
                 .collect())
-        })));
+        }));
         self
     }
 
@@ -354,11 +338,11 @@ where
     where
         Output<Response>: DynUnzip,
     {
-        self.unzip = Some(RefCell::new(Box::new(|builder, output| {
+        self.unzip = Some(Box::new(|builder, output| {
             assert_eq!(std::any::type_name::<Response>(), output.type_name);
             let o = output.into_output::<Response>();
             o.unzip(builder)
-        })));
+        }));
         self.unzip_slots = Output::<Response>::UNZIP_SLOTS;
         self
     }
@@ -367,11 +351,11 @@ where
     where
         Output<Response>: DynForkResult,
     {
-        self.fork_result = Some(RefCell::new(Box::new(|builder, output| {
+        self.fork_result = Some(Box::new(|builder, output| {
             assert_eq!(std::any::type_name::<Response>(), output.type_name);
             let o = output.into_output::<Response>();
             o.fork_result(builder)
-        })));
+        }));
         self
     }
 }
@@ -427,30 +411,30 @@ where
             },
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
-                let n = (self.build_node)(builder, config);
+                let n = (self.create_node)(builder, config);
                 Ok(DynNode::new(n.output, n.input))
             })),
             create_receiver_impl: {
                 if Deserializer::deserializable() {
-                    Some(RefCell::new(Box::new(move |builder| {
+                    Some(Box::new(move |builder| {
                         let n = builder.create_map_block(|json: serde_json::Value| {
                             Deserializer::from_json(json)
                         });
                         let o = n.output.chain(builder).cancel_on_err().output();
                         DynNode::new(o, n.input)
-                    })))
+                    }))
                 } else {
                     None
                 }
             },
             create_sender_impl: {
                 if Serializer::serializable() {
-                    Some(RefCell::new(Box::new(move |builder| {
+                    Some(Box::new(move |builder| {
                         let n = builder.create_map_block(|resp: Response| -> ScopeTerminate {
                             Ok(Serializer::to_json(&resp)?)
                         });
                         DynNode::from(n)
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -477,7 +461,7 @@ where
         self,
     ) -> RegistrationBuilder<F, ConfigT, DefaultDeserializer, DefaultSerializer> {
         RegistrationBuilder {
-            build_node: self,
+            create_node: self,
             fork_clone: None,
             unzip: None,
             unzip_slots: 0,
