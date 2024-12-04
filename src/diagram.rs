@@ -1,5 +1,9 @@
+mod fork_clone;
+mod fork_result;
+mod impls;
 mod node_registry;
 mod serialization;
+mod unzip;
 mod workflow_builder;
 
 use log::debug;
@@ -70,7 +74,7 @@ pub enum DiagramOperation {
 }
 
 type ScopeStart = serde_json::Value;
-type ScopeTerminate = Result<serde_json::Value, Box<dyn Error + Send + Sync>>;
+type ScopeTerminate = serde_json::Value;
 type DynScope<Streams> = Scope<ScopeStart, ScopeTerminate, Streams>;
 
 #[derive(JsonSchema, Serialize, Deserialize)]
@@ -177,7 +181,6 @@ pub enum DiagramError {
     NotSerializable,
     NotCloneable,
     NotUnzippable,
-    UnzipToTerminate,
     CannotForkResult,
     BadInterconnectChain,
     JsonError(serde_json::Error),
@@ -198,7 +201,6 @@ impl Display for DiagramError {
             Self::NotUnzippable => f.write_str(
                 "the number of unzip slots in response does not match the number of inputs",
             ),
-            Self::UnzipToTerminate => f.write_str("cannot unzip to terminate"),
             Self::CannotForkResult => f.write_str(
                 "node must be registered with \"with_fork_result()\" to be able to perform fork result",
             ),
@@ -267,55 +269,54 @@ mod tests {
         registry.register_node(
             "multiply3",
             "multiply3",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3))
-                .into_registration_builder(),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
         );
-        registry.register_node(
-            "multiply3_cloneable",
-            "multiply3_cloneable",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3))
-                .into_registration_builder()
-                .with_response_cloneable(),
-        );
-        registry.register_node(
-            "multiply3_5",
-            "multiply3_5",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5))
-                .into_registration_builder()
-                .with_unzippable(),
-        );
+        registry
+            .registration_builder()
+            .with_response_cloneable()
+            .register_node(
+                "multiply3_cloneable",
+                "multiply3_cloneable",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
+            );
+        registry
+            .registration_builder()
+            .with_unzippable()
+            .register_node(
+                "multiply3_5",
+                "multiply3_5",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
+            );
 
         registry.register_node(
             "multiplyBy",
             "multiplyBy",
-            (|builder: &mut Builder, config: i64| {
-                builder.create_map_block(move |a: i64| a * config)
-            })
-            .into_registration_builder(),
+            |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
         );
 
-        registry.register_node(
-            "opaque",
-            "opaque",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(opaque))
-                .into_registration_builder()
-                .with_opaque_request()
-                .with_opaque_response(),
-        );
-        registry.register_node(
-            "opaque_request",
-            "opaque_request",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request))
-                .into_registration_builder()
-                .with_opaque_request(),
-        );
-        registry.register_node(
-            "opaque_response",
-            "opaque_response",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response))
-                .into_registration_builder()
-                .with_opaque_response(),
-        );
+        registry
+            .registration_builder()
+            .with_opaque_request()
+            .with_opaque_response()
+            .register_node("opaque", "opaque", |builder: &mut Builder, _config: ()| {
+                builder.create_map_block(opaque)
+            });
+        registry
+            .registration_builder()
+            .with_opaque_request()
+            .register_node(
+                "opaque_request",
+                "opaque_request",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
+            );
+        registry
+            .registration_builder()
+            .with_opaque_response()
+            .register_node(
+                "opaque_response",
+                "opaque_response",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
+            );
         registry
     }
 
@@ -684,7 +685,7 @@ mod tests {
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
         let result = unwrap_promise(promise);
-        assert_eq!(result.unwrap(), 12);
+        assert_eq!(result, 12);
     }
 
     #[test]
@@ -792,9 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_unzip_to_terminate() {
-        // we cannot unzip to terminate because the serialization registered is for (T1, T2, ...) but when we
-        // unzip to terminate we need to serialize T1.
+    fn test_unzip_to_terminate() {
         let mut registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
@@ -817,9 +816,10 @@ mod tests {
                 (
                     "unzip".to_string(),
                     DiagramOperation::Unzip(UnzipOp {
-                        next: vec!["terminate".to_string()],
+                        next: vec!["dispose".to_string(), "terminate".to_string()],
                     }),
                 ),
+                ("dispose".to_string(), DiagramOperation::Dispose),
                 (
                     "terminate".to_string(),
                     DiagramOperation::Terminate(TerminateOp {}),
@@ -827,10 +827,13 @@ mod tests {
             ]),
         };
 
-        let err = diagram
+        let w = diagram
             .spawn_io_workflow(&mut context.app, &mut registry)
-            .unwrap_err();
-        assert!(matches!(err, DiagramError::UnzipToTerminate));
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap(), 20);
     }
 
     #[test]
@@ -881,7 +884,7 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 36);
+        assert_eq!(promise.take().available().unwrap(), 36);
     }
 
     #[test]
@@ -933,7 +936,7 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 60);
+        assert_eq!(promise.take().available().unwrap(), 60);
     }
 
     #[test]
@@ -949,24 +952,22 @@ mod tests {
             }
         }
 
-        registry.register_node(
-            "check_even",
-            "check_even",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(&check_even))
-                .into_registration_builder()
-                .with_fork_result(),
-        );
+        registry
+            .registration_builder()
+            .with_fork_result()
+            .register_node(
+                "check_even",
+                "check_even",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
+            );
 
         fn echo(s: String) -> String {
             s
         }
 
-        registry.register_node(
-            "echo",
-            "echo",
-            (|builder: &mut Builder, _config: ()| builder.create_map_block(&echo))
-                .into_registration_builder(),
-        );
+        registry.register_node("echo", "echo", |builder: &mut Builder, _config: ()| {
+            builder.create_map_block(&echo)
+        });
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -1020,12 +1021,12 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), "even");
+        assert_eq!(promise.take().available().unwrap(), "even");
 
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(3), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), "odd");
+        assert_eq!(promise.take().available().unwrap(), "odd");
     }
 
     #[test]
@@ -1076,7 +1077,7 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 36);
+        assert_eq!(promise.take().available().unwrap(), 36);
     }
 
     #[test]
@@ -1105,7 +1106,7 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 4);
+        assert_eq!(promise.take().available().unwrap(), 4);
     }
 
     #[test]
@@ -1138,6 +1139,6 @@ mod tests {
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap().unwrap(), 28);
+        assert_eq!(promise.take().available().unwrap(), 28);
     }
 }

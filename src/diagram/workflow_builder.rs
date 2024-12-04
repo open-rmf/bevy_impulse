@@ -42,29 +42,33 @@ trait ConnectionChainOps {
     fn receiver(
         &self,
         builder: &mut Builder,
-        output: &DynOutput,
-        input: DynInputSlot,
-    ) -> Result<DynInputSlot, DiagramError> {
-        Ok(input)
+        output: DynOutput,
+        input_type: TypeId,
+    ) -> Result<DynOutput, DiagramError> {
+        Ok(output)
     }
 
     fn sender(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        input: &DynInputSlot,
+        input_type: TypeId,
     ) -> Result<DynOutput, DiagramError> {
         Ok(output)
     }
 }
 
 struct NodeConnectionChainOps<'a> {
+    registry: &'a NodeRegistry,
     registration: &'a NodeRegistration,
 }
 
 impl<'a> NodeConnectionChainOps<'a> {
-    fn new(registration: &'a NodeRegistration) -> Self {
-        Self { registration }
+    fn new(registry: &'a NodeRegistry, registration: &'a NodeRegistration) -> Self {
+        Self {
+            registry,
+            registration,
+        }
     }
 }
 
@@ -97,31 +101,49 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
     fn receiver(
         &self,
         builder: &mut Builder,
-        output: &DynOutput,
-        input: DynInputSlot,
-    ) -> Result<DynInputSlot, DiagramError> {
-        if output.type_id == TypeId::of::<ScopeStart>() {
-            let receiver = self.registration.create_receiver(builder)?;
-            WorkflowBuilder::connect_output(builder, receiver.output, input)?;
-            Ok(receiver.input)
-        } else {
-            Ok(input)
+        output: DynOutput,
+        input_type: TypeId,
+    ) -> Result<DynOutput, DiagramError> {
+        if output.type_id != TypeId::of::<serde_json::Value>() {
+            return Ok(output);
         }
+        // don't need to deserialize if input is also json
+        if input_type == TypeId::of::<serde_json::Value>() {
+            return Ok(output);
+        }
+        if !self.registration.metadata.request.deserializable {
+            return Err(DiagramError::NotSerializable);
+        }
+        let deserialize = self
+            .registry
+            .deserialize_impls
+            .get(&input_type)
+            .ok_or(DiagramError::NotSerializable)?;
+        Ok(deserialize(builder, output.into_output()))
     }
 
     fn sender(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        input: &DynInputSlot,
+        input_type: TypeId,
     ) -> Result<DynOutput, DiagramError> {
-        if input.type_id == TypeId::of::<ScopeTerminate>() {
-            let sender = self.registration.create_sender(builder)?;
-            WorkflowBuilder::connect_output(builder, output, sender.input)?;
-            Ok(sender.output)
-        } else {
-            Ok(output)
+        if input_type != TypeId::of::<serde_json::Value>() {
+            return Ok(output);
         }
+        // don't need to serialize if output is already json
+        if output.type_id == TypeId::of::<serde_json::Value>() {
+            return Ok(output);
+        }
+        if !self.registration.metadata.response.serializable {
+            return Err(DiagramError::NotSerializable);
+        }
+        let serialize = self
+            .registry
+            .serialize_impls
+            .get(&output.type_id)
+            .ok_or(DiagramError::NotSerializable)?;
+        Ok(serialize(builder, output).into())
     }
 }
 
@@ -139,24 +161,6 @@ impl ConnectionChainOps for StartConnectionChainOps {
         Ok((0..amount)
             .map(|_| fork_clone.clone_output(builder).into())
             .collect())
-    }
-
-    fn sender(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        input: &DynInputSlot,
-    ) -> Result<DynOutput, DiagramError> {
-        if input.type_id == TypeId::of::<ScopeTerminate>() {
-            Ok(output
-                .into_output::<ScopeStart>()
-                .chain(builder)
-                .map_block_node(|v| -> ScopeTerminate { Ok(v) })
-                .output
-                .into())
-        } else {
-            Ok(output)
-        }
     }
 }
 
@@ -253,7 +257,7 @@ impl<'b> WorkflowBuilder<'b> {
             builder,
             ConnectionSource {
                 output: source_node.output,
-                chain_ops: NodeConnectionChainOps::new(source_registration),
+                chain_ops: NodeConnectionChainOps::new(&self.registry, source_registration),
             },
             target_op_id,
             scope.terminate,
@@ -297,13 +301,11 @@ impl<'b> WorkflowBuilder<'b> {
         struct State<'a> {
             op_id: &'a OperationId,
             output: DynOutput,
-            can_terminate: Option<DiagramError>,
         }
 
         let mut to_visit = vec![State {
             op_id: next_op_id,
             output,
-            can_terminate: None,
         }];
         let mut visited: HashSet<&OperationId> = HashSet::new();
 
@@ -317,19 +319,17 @@ impl<'b> WorkflowBuilder<'b> {
                 DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
                 DiagramOperation::Node(node_op) => {
                     let reg = self.registry.get_registration(&node_op.node_id)?;
-                    let node_conn = NodeConnectionChainOps::new(reg);
+                    let node_conn = NodeConnectionChainOps::new(&self.registry, reg);
                     let input = self.inputs[state.op_id];
-                    let receiver = node_conn.receiver(builder, &state.output, input)?;
-                    let sender = ops.sender(builder, state.output, &input)?;
-                    Self::connect_output(builder, sender, receiver)?;
+                    let mapped_output = ops.sender(builder, state.output, input.type_id)?;
+                    let mapped_output =
+                        node_conn.receiver(builder, mapped_output, input.type_id)?;
+                    Self::connect_output(builder, mapped_output, input)?;
                 }
                 DiagramOperation::Terminate(_) => {
-                    if let Some(err) = state.can_terminate {
-                        return Err(err);
-                    }
-                    let input = terminate.into();
-                    let sender = ops.sender(builder, state.output, &input)?;
-                    Self::connect_output(builder, sender, input)?;
+                    let mapped_output =
+                        ops.sender(builder, state.output, TypeId::of::<ScopeTerminate>())?;
+                    Self::connect_output(builder, mapped_output, terminate.into())?;
                 }
                 DiagramOperation::ForkClone(fork_clone_op) => {
                     debug!("fork_clone to {:?}", fork_clone_op.next);
@@ -339,7 +339,6 @@ impl<'b> WorkflowBuilder<'b> {
                         |(next_op_id, output)| State {
                             op_id: next_op_id,
                             output,
-                            can_terminate: None,
                         },
                     ));
                 }
@@ -353,7 +352,6 @@ impl<'b> WorkflowBuilder<'b> {
                         |(next_op_id, output)| State {
                             op_id: next_op_id,
                             output,
-                            can_terminate: Some(DiagramError::UnzipToTerminate),
                         },
                     ));
                 }
@@ -366,12 +364,10 @@ impl<'b> WorkflowBuilder<'b> {
                     to_visit.push(State {
                         op_id: &fork_result_op.ok,
                         output: ok_out,
-                        can_terminate: Some(DiagramError::UnzipToTerminate),
                     });
                     to_visit.push(State {
                         op_id: &fork_result_op.err,
                         output: err_out,
-                        can_terminate: Some(DiagramError::UnzipToTerminate),
                     });
                 }
                 DiagramOperation::Dispose => {}
