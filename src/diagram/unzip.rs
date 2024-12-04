@@ -37,6 +37,9 @@ where
     Serializer: SerializeMessage<Response>,
     Response: Send + Sync + 'static,
 {
+    if !Serializer::serializable() {
+        return;
+    }
     registry.serialize_impls.insert(
         TypeId::of::<Response>(),
         Box::new(|builder, output| {
