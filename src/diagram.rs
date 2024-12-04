@@ -167,17 +167,11 @@ impl Diagram {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct TypeMismatch {
-    output_type: String,
-    input_type: String,
-}
-
 #[derive(Debug)]
 pub enum DiagramError {
     NodeNotFound(NodeId),
     OperationNotFound(OperationId),
-    TypeMismatch(TypeMismatch),
+    TypeMismatch,
     MissingStartOrTerminate,
     CannotConnectStart,
     NotSerializable,
@@ -194,11 +188,7 @@ impl Display for DiagramError {
         match self {
             Self::NodeNotFound(node_id) => write!(f, "node [{}] is not registered", node_id),
             Self::OperationNotFound(op_id) => write!(f, "operation [{}] not found", op_id),
-            Self::TypeMismatch(data) => write!(
-                f,
-                "output type [{}] does not match input type [{}]",
-                data.output_type, data.input_type
-            ),
+            Self::TypeMismatch => f.write_str("output type does not match input type"),
             Self::MissingStartOrTerminate => f.write_str("missing start or terminate"),
             Self::CannotConnectStart => f.write_str("cannot connect to start"),
             Self::NotSerializable => {
@@ -546,7 +536,7 @@ mod tests {
         let err = diagram
             .spawn_io_workflow(&mut context.app, &mut registry)
             .unwrap_err();
-        assert!(matches!(err, DiagramError::TypeMismatch(_)), "{:?}", err);
+        assert!(matches!(err, DiagramError::TypeMismatch), "{:?}", err);
     }
 
     #[test]

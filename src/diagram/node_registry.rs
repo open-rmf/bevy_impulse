@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, cell::RefCell, collections::HashMap, marker::PhantomData};
+use std::{any::TypeId, borrow::Borrow, cell::RefCell, collections::HashMap, marker::PhantomData};
 
 use crate::{Builder, InputSlot, Node, Output, StreamPack};
 use bevy_ecs::entity::Entity;
@@ -19,9 +19,7 @@ use super::{
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,
-
-    /// The rust type name of the input (not the json schema type name).
-    pub(super) type_name: &'static str,
+    pub(super) type_id: TypeId,
 }
 
 impl DynInputSlot {
@@ -34,12 +32,15 @@ impl DynInputSlot {
     }
 }
 
-impl<T> From<InputSlot<T>> for DynInputSlot {
+impl<T> From<InputSlot<T>> for DynInputSlot
+where
+    T: 'static,
+{
     fn from(input: InputSlot<T>) -> Self {
         Self {
             scope: input.scope(),
             source: input.id(),
-            type_name: std::any::type_name::<T>(),
+            type_id: TypeId::of::<T>(),
         }
     }
 }
@@ -48,9 +49,7 @@ impl<T> From<InputSlot<T>> for DynInputSlot {
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
-
-    /// The rust type name of the output (not the json schema type name).
-    pub(super) type_name: &'static str,
+    pub(super) type_id: TypeId,
 }
 
 impl DynOutput {
@@ -74,7 +73,7 @@ where
         Self {
             scope: output.scope(),
             target: output.id(),
-            type_name: std::any::type_name::<T>(),
+            type_id: TypeId::of::<T>(),
         }
     }
 }
@@ -97,6 +96,7 @@ pub(super) struct DynNode {
 impl DynNode {
     fn new<Request, Response>(output: Output<Response>, input: InputSlot<Request>) -> Self
     where
+        Request: 'static,
         Response: Send + Sync + 'static,
     {
         Self {
@@ -108,6 +108,7 @@ impl DynNode {
 
 impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
 where
+    Request: 'static,
     Response: Send + Sync + 'static,
     Streams: StreamPack,
 {
@@ -324,7 +325,7 @@ where
         Response: Clone,
     {
         self.fork_clone = Some(Box::new(|builder, output, amount| {
-            assert_eq!(output.type_name, std::any::type_name::<Response>());
+            assert_eq!(output.type_id, TypeId::of::<Response>());
 
             let fork_clone = output.into_output::<Response>().fork_clone(builder);
             Ok((0..amount)
@@ -339,7 +340,7 @@ where
         Output<Response>: DynUnzip,
     {
         self.unzip = Some(Box::new(|builder, output| {
-            assert_eq!(std::any::type_name::<Response>(), output.type_name);
+            assert_eq!(TypeId::of::<Response>(), output.type_id);
             let o = output.into_output::<Response>();
             o.unzip(builder)
         }));
@@ -352,7 +353,7 @@ where
         Output<Response>: DynForkResult,
     {
         self.fork_result = Some(Box::new(|builder, output| {
-            assert_eq!(std::any::type_name::<Response>(), output.type_name);
+            assert_eq!(TypeId::of::<Response>(), output.type_id);
             let o = output.into_output::<Response>();
             o.fork_result(builder)
         }));

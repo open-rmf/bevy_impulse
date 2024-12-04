@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    any::TypeId,
+    collections::{HashMap, HashSet},
+};
 
 use log::debug;
 
@@ -6,7 +9,7 @@ use crate::{Builder, InputSlot, StreamPack};
 
 use super::{
     Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode, DynOutput, DynScope, NodeOp,
-    NodeRegistration, NodeRegistry, OperationId, ScopeStart, ScopeTerminate, StartOp, TypeMismatch,
+    NodeRegistration, NodeRegistry, OperationId, ScopeStart, ScopeTerminate, StartOp,
 };
 
 #[allow(unused_variables)]
@@ -97,7 +100,7 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
         output: &DynOutput,
         input: DynInputSlot,
     ) -> Result<DynInputSlot, DiagramError> {
-        if output.type_name == std::any::type_name::<ScopeStart>() {
+        if output.type_id == TypeId::of::<ScopeStart>() {
             let receiver = self.registration.create_receiver(builder)?;
             WorkflowBuilder::connect_output(builder, receiver.output, input)?;
             Ok(receiver.input)
@@ -112,7 +115,7 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
         output: DynOutput,
         input: &DynInputSlot,
     ) -> Result<DynOutput, DiagramError> {
-        if input.type_name == std::any::type_name::<ScopeTerminate>() {
+        if input.type_id == TypeId::of::<ScopeTerminate>() {
             let sender = self.registration.create_sender(builder)?;
             WorkflowBuilder::connect_output(builder, output, sender.input)?;
             Ok(sender.output)
@@ -144,7 +147,7 @@ impl ConnectionChainOps for StartConnectionChainOps {
         output: DynOutput,
         input: &DynInputSlot,
     ) -> Result<DynOutput, DiagramError> {
-        if input.type_name == std::any::type_name::<ScopeTerminate>() {
+        if input.type_id == TypeId::of::<ScopeTerminate>() {
             Ok(output
                 .into_output::<ScopeStart>()
                 .chain(builder)
@@ -224,11 +227,8 @@ impl<'b> WorkflowBuilder<'b> {
         input: DynInputSlot,
     ) -> Result<(), DiagramError> {
         debug!("connect [{:?}] to [{:?}]", output.id(), input.id());
-        if output.type_name != input.type_name {
-            Err(DiagramError::TypeMismatch(TypeMismatch {
-                output_type: output.type_name.to_string(),
-                input_type: input.type_name.to_string(),
-            }))
+        if output.type_id != input.type_id {
+            Err(DiagramError::TypeMismatch)
         } else {
             builder.connect(output.into_output::<()>(), input.into_input::<()>());
             Ok(())
