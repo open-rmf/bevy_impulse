@@ -532,7 +532,12 @@ impl<T: 'static + Send + Sync, const N: usize> Splittable for [T; N] {
 
     fn next(key: &Option<Self::Key>) -> Option<Self::Key> {
         // Static arrays have a firm limit of N
-        SplitAsList::<Self>::next(key).take_if(|key| Self::validate(key))
+        let mut key = SplitAsList::<Self>::next(key);
+        if key.map_or(false, |key| Self::validate(&key)) {
+            key.take()
+        } else {
+            None
+        }
     }
 
     fn split(self, dispatcher: SplitDispatcher<'_, Self::Key, Self::Item>) -> OperationResult {
@@ -939,5 +944,50 @@ mod tests {
         assert_eq!(result["foo"], input_map["foo"]);
         assert_eq!(result["fib"], input_map["fib"]);
         assert_eq!(result["dib"], input_map["dib"]);
+    }
+
+    #[test]
+    fn test_array_split_limit() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            scope.input.chain(builder).split(|split| {
+                let err = split
+                    .next_branch(|_, chain| {
+                        chain.value().connect(scope.terminate);
+                    })
+                    .unwrap()
+                    .next_branch(|_, chain| {
+                        chain.value().connect(scope.terminate);
+                    })
+                    .unwrap()
+                    .next_branch(|_, chain| {
+                        chain.value().connect(scope.terminate);
+                    })
+                    .unwrap()
+                    .next_branch(|_, chain| {
+                        chain.value().connect(scope.terminate);
+                    })
+                    .unwrap()
+                    // This last one should fail because it should exceed the
+                    // array limit
+                    .next_branch(|_, chain| {
+                        chain.value().connect(scope.terminate);
+                    });
+
+                assert!(matches!(err, Err(_)));
+            })
+        });
+
+        let mut promise =
+            context.command(|commands| commands.request([1, 2, 3, 4], workflow).take_response());
+
+        context.run_with_conditions(&mut promise, 1);
+        assert!(context.no_unhandled_errors());
+
+        let result = promise.take().available().unwrap();
+        // All the values in the array are racing to finish, but the first value
+        // should finish first since it will naturally get queued first.
+        assert_eq!(result, 1);
     }
 }
