@@ -49,14 +49,14 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {
-        gen.subschema_for::<()>()
+        gen.subschema_for::<T>()
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RequestMetadata {
-    /// The type name of the request.
-    pub(super) r#type: String,
+    /// The JSON Schema of the request.
+    pub(super) schema: Schema,
 
     /// Indicates if the request is deserializable.
     pub(super) deserializable: bool,
@@ -64,8 +64,8 @@ pub struct RequestMetadata {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ResponseMetadata {
-    /// The type name of the response.
-    pub(super) r#type: String,
+    /// The JSON Schema of the response.
+    pub(super) schema: Schema,
 
     /// Indicates if the response is serializable.
     pub(super) serializable: bool,
