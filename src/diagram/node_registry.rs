@@ -3,7 +3,11 @@ use std::{any::TypeId, borrow::Borrow, cell::RefCell, collections::HashMap, mark
 use crate::{Builder, InputSlot, Node, Output, StreamPack};
 use bevy_ecs::entity::Entity;
 use log::debug;
-use schemars::gen::{SchemaGenerator, SchemaSettings};
+use schemars::{
+    gen::{SchemaGenerator, SchemaSettings},
+    schema::Schema,
+    JsonSchema,
+};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{RequestMetadata, SerializeMessage};
@@ -87,7 +91,7 @@ pub(super) struct NodeMetadata {
     pub(super) name: &'static str,
     pub(super) request: RequestMetadata,
     pub(super) response: ResponseMetadata,
-    pub(super) config_type: String,
+    pub(super) config_schema: Schema,
 }
 
 /// A type erased [`bevy_impulse::Node`]
@@ -234,7 +238,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         name: &'static str,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
     ) where
-        Config: DynType + DeserializeOwned,
+        Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static,
         Response: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Request>,
@@ -243,16 +247,16 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         UnzipImpl: DynUnzip<Response, SerializeImpl>,
         ForkResultImpl: DynForkResult<Response>,
     {
-        DeserializeImpl::json_schema(&mut self.registry.gen);
-        SerializeImpl::json_schema(&mut self.registry.gen);
         Config::json_schema(&mut self.registry.gen);
 
         let request = RequestMetadata {
-            r#type: DeserializeImpl::type_name(),
+            schema: DeserializeImpl::json_schema(&mut self.registry.gen)
+                .unwrap_or_else(|| self.registry.gen.subschema_for::<()>()),
             deserializable: DeserializeImpl::deserializable(),
         };
         let response = ResponseMetadata {
-            r#type: SerializeImpl::type_name(),
+            schema: SerializeImpl::json_schema(&mut self.registry.gen)
+                .unwrap_or_else(|| self.registry.gen.subschema_for::<()>()),
             serializable: SerializeImpl::serializable(),
             cloneable: ForkCloneImpl::CLONEABLE,
             unzip_slots: UnzipImpl::UNZIP_SLOTS,
@@ -265,7 +269,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
                 name,
                 request,
                 response,
-                config_type: Config::type_name(),
+                config_schema: self.registry.gen.subschema_for::<Config>(),
             },
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
@@ -497,7 +501,7 @@ impl NodeRegistry {
         name: &'static str,
         f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
     ) where
-        Config: DynType + DeserializeOwned,
+        Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static + DynType + DeserializeOwned,
         Response: Send + Sync + 'static + DynType + Serialize,
     {

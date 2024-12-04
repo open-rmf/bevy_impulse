@@ -45,7 +45,9 @@
             "type"
           ],
           "properties": {
-            "config": true,
+            "config": {
+              "default": null
+            },
             "next": {
               "type": "string"
             },
@@ -98,6 +100,42 @@
               "type": "string",
               "enum": [
                 "unzip"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "err",
+            "ok",
+            "type"
+          ],
+          "properties": {
+            "err": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "forkResult"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "dispose"
               ]
             }
           }
