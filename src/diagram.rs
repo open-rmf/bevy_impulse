@@ -104,10 +104,44 @@ pub struct Diagram {
 }
 
 impl Diagram {
+    /// Spawns a workflow from this diagram.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bevy_impulse::{Diagram, DiagramError, NodeRegistry};
+    ///
+    /// let mut app = bevy_app::App::new();
+    /// let mut registry = NodeRegistry::default();
+    /// registry.register_node("echo", "echo", |builder, _config: ()| {
+    ///     builder.create_map_block(|msg: String| msg)
+    /// });
+    ///
+    /// let json_str = r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "echo"
+    ///     },
+    ///     "echo": {
+    ///         "type": "node",
+    ///         "nodeId": "echo",
+    ///         "next": "terminate"
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// "#;
+    ///
+    /// let diagram = Diagram::from_json_str(json_str)?;
+    /// let workflow = diagram.spawn_io_workflow(&mut app, &registry)?;
+    /// # Ok::<_, DiagramError>(())
+    /// ```
     pub fn spawn_workflow<Streams>(
         &self,
         app: &mut App,
-        registry: &mut NodeRegistry,
+        registry: &NodeRegistry,
     ) -> Result<Service<ScopeStart, ScopeTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
@@ -164,10 +198,11 @@ impl Diagram {
         Ok(w)
     }
 
+    /// Wrapper to [`spawn_workflow::<()>`].
     pub fn spawn_io_workflow(
         &self,
         app: &mut App,
-        registry: &mut NodeRegistry,
+        registry: &NodeRegistry,
     ) -> Result<Service<ScopeStart, ScopeTerminate, ()>, DiagramError> {
         self.spawn_workflow::<()>(app, registry)
     }
@@ -353,7 +388,7 @@ mod tests {
     #[test]
     fn test_no_terminate() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -375,7 +410,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -389,7 +424,7 @@ mod tests {
     #[test]
     fn test_no_start() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -409,7 +444,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -423,7 +458,7 @@ mod tests {
     #[test]
     fn test_connect_to_start() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -455,7 +490,7 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::CannotConnectStart), "{:?}", err);
     }
@@ -463,7 +498,7 @@ mod tests {
     #[test]
     fn test_unserializable_start() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -489,7 +524,7 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
@@ -497,7 +532,7 @@ mod tests {
     #[test]
     fn test_unserializable_terminate() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -523,7 +558,7 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
@@ -531,7 +566,7 @@ mod tests {
     #[test]
     fn test_mismatch_types() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -565,7 +600,7 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::TypeMismatch), "{:?}", err);
     }
@@ -573,7 +608,7 @@ mod tests {
     #[test]
     fn test_disconnected() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -607,7 +642,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -621,7 +656,7 @@ mod tests {
     #[test]
     fn test_fork_clone_uncloneable() {
         let mut context = TestingContext::minimal_plugins();
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -661,14 +696,14 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::NotCloneable), "{:?}", err);
     }
 
     #[test]
     fn test_fork_clone() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -709,7 +744,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -720,7 +755,7 @@ mod tests {
 
     #[test]
     fn test_unzip_not_unzippable() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -753,14 +788,14 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::NotUnzippable));
     }
 
     #[test]
     fn test_unzip_to_too_many_slots() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -817,14 +852,14 @@ mod tests {
         };
 
         let err = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap_err();
         assert!(matches!(err, DiagramError::NotUnzippable));
     }
 
     #[test]
     fn test_unzip_to_terminate() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -858,7 +893,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -868,7 +903,7 @@ mod tests {
 
     #[test]
     fn test_unzip() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -909,7 +944,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -919,7 +954,7 @@ mod tests {
 
     #[test]
     fn test_unzip_with_dispose() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -961,7 +996,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1046,7 +1081,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1108,7 +1143,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1168,7 +1203,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1232,7 +1267,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1290,7 +1325,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1300,7 +1335,7 @@ mod tests {
 
     #[test]
     fn test_looping_diagram() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -1341,7 +1376,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1351,7 +1386,7 @@ mod tests {
 
     #[test]
     fn test_noop_diagram() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let diagram = Diagram {
@@ -1370,7 +1405,7 @@ mod tests {
         };
 
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
@@ -1380,7 +1415,7 @@ mod tests {
 
     #[test]
     fn test_serialized_diagram() {
-        let mut registry = new_registry_with_basic_nodes();
+        let registry = new_registry_with_basic_nodes();
         let mut context = TestingContext::minimal_plugins();
 
         let json_str = r#"
@@ -1403,7 +1438,7 @@ mod tests {
 
         let diagram = Diagram::from_json_str(json_str).unwrap();
         let w = diagram
-            .spawn_io_workflow(&mut context.app, &mut registry)
+            .spawn_io_workflow(&mut context.app, &registry)
             .unwrap();
         let mut promise =
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());

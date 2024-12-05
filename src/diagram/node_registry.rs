@@ -345,6 +345,9 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         SplitImpl::register_serialize(&mut self.registry);
     }
 
+    /// Mark the node as having a non deserializable request. This allows nodes with
+    /// non deserializable requests to be registered but any nodes registered this way will not
+    /// be able to be connected to "Start" or any operation that requires deserialization.
     pub fn with_opaque_request(
         self,
     ) -> RegistrationBuilder<
@@ -359,6 +362,9 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         RegistrationBuilder::new(self.registry)
     }
 
+    /// Mark the node as having a non serializable response. This allows nodes with
+    /// non serializable responses to be registered but any nodes registered this way will not
+    /// be able to be connected to "Terminate" or any operation that requires serialization.
     pub fn with_opaque_response(
         self,
     ) -> RegistrationBuilder<
@@ -373,6 +379,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         RegistrationBuilder::new(self.registry)
     }
 
+    /// Mark the node as having a cloneable response. This is required in order for the node
+    /// to be able to be connected to a "Fork Clone" operation.
     pub fn with_response_cloneable(
         self,
     ) -> RegistrationBuilder<
@@ -387,6 +395,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         RegistrationBuilder::new(self.registry)
     }
 
+    /// Mark the node as having a unzippable response. This is required in order for the node
+    /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzippable(
         self,
     ) -> RegistrationBuilder<
@@ -401,6 +411,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         RegistrationBuilder::new(self.registry)
     }
 
+    /// Mark the node as having a [`Result<_, _>`] response. This is required in order for the node
+    /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(
         self,
     ) -> RegistrationBuilder<
@@ -415,6 +427,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         RegistrationBuilder::new(self.registry)
     }
 
+    /// Mark the node as having a splittable response. This is required in order for the node
+    /// to be able to be connected to a "Split" operation.
     pub fn with_splittable(
         self,
     ) -> RegistrationBuilder<
@@ -513,6 +527,53 @@ impl Default for NodeRegistry {
 }
 
 impl NodeRegistry {
+    /// Create a new [`RegistrationBuilder`]. By default, it is configured for nodes with
+    /// deserializable request and serializable responses and without support for any interconnect
+    /// operations like "fork_clone" and "unzip". See [`RegistrationBuilder`] for more information
+    /// about these operations.
+    ///
+    /// ```
+    /// use bevy_impulse::NodeRegistry;
+    ///
+    /// let mut registry = NodeRegistry::default();
+    /// registry.registration_builder().register_node("echo", "echo",
+    ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg));
+    /// ```
+    ///
+    /// In order for the request to be deserializable, it must implement [`schemars::JsonSchema`] and [`serde::DeserializeOwned`].
+    /// In order for the response to be serializable, it must implement [`schemars::JsonSchema`] and [`serde::Serialize`].
+    ///
+    /// ```
+    /// use schemars::JsonSchema;
+    /// use serde::{Deserialize, Serialize};
+    ///
+    /// #[derive(JsonSchema, Deserialize)]
+    /// struct DeserializableRequest {}
+    ///
+    /// #[derive(JsonSchema, Serialize)]
+    /// struct SerializableResponse {}
+    /// ```
+    ///
+    /// If your node have a request or response that is not serializable, there is still
+    /// a way to register it.
+    ///
+    /// ```
+    /// use bevy_impulse::NodeRegistry;
+    ///
+    /// struct NonSerializable {
+    ///     data: String
+    /// }
+    ///
+    /// let mut registry = NodeRegistry::default();
+    /// registry.registration_builder()
+    ///     .with_opaque_request()
+    ///     .with_opaque_response()
+    ///     .register_node("echo", "echo", |builder, _config: ()| {
+    ///         builder.create_map_block(|msg: NonSerializable| msg)
+    ///     });
+    /// ```
+    ///
+    /// Note that nodes registered this way cannot be connected to "Start" or "Terminate".
     pub fn registration_builder(
         &mut self,
     ) -> RegistrationBuilder<
@@ -526,6 +587,13 @@ impl NodeRegistry {
         RegistrationBuilder::new(self)
     }
 
+    /// Register a node using the default registration config.
+    ///
+    /// This is a equivalent to
+    ///
+    /// ```ignore
+    /// registry.registration_builder().register_node(f)
+    /// ```
     pub fn register_node<Config, Request, Response, Streams: StreamPack>(
         &mut self,
         id: &'static str,

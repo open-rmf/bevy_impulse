@@ -199,7 +199,7 @@ impl<'b> WorkflowBuilder<'b> {
     pub(super) fn new<Streams: StreamPack>(
         scope: &DynScope<Streams>,
         builder: &mut Builder,
-        registry: &'b mut NodeRegistry,
+        registry: &'b NodeRegistry,
         diagram: &'b Diagram,
     ) -> Result<Self, DiagramError> {
         // nodes and outputs cannot be cloned, but input can be cloned, so we
