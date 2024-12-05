@@ -8,8 +8,9 @@ use log::debug;
 use crate::{Builder, InputSlot, StreamPack};
 
 use super::{
-    Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode, DynOutput, DynScope, NodeOp,
-    NodeRegistration, NodeRegistry, OperationId, ScopeStart, ScopeTerminate, StartOp,
+    Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode, DynOutput, DynScope,
+    DynSplitOutputs, NodeOp, NodeRegistration, NodeRegistry, OperationId, ScopeStart,
+    ScopeTerminate, SplitOpParams, StartOp,
 };
 
 #[allow(unused_variables)]
@@ -37,6 +38,15 @@ trait ConnectionChainOps {
         output: DynOutput,
     ) -> Result<(DynOutput, DynOutput), DiagramError> {
         Err(DiagramError::CannotForkResult)
+    }
+
+    fn split<'a>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOpParams,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        Err(DiagramError::NotSplittable)
     }
 
     fn receiver(
@@ -96,6 +106,15 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
         output: DynOutput,
     ) -> Result<(DynOutput, DynOutput), DiagramError> {
         self.registration.fork_result(builder, output)
+    }
+
+    fn split<'b>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'b SplitOpParams,
+    ) -> Result<DynSplitOutputs<'b>, DiagramError> {
+        self.registration.split(builder, output, split_op)
     }
 
     fn receiver(
@@ -369,6 +388,23 @@ impl<'b> WorkflowBuilder<'b> {
                         op_id: &fork_result_op.err,
                         output: err_out,
                     });
+                }
+                DiagramOperation::Split(split_op) => {
+                    debug!("split {:?}", split_op);
+                    let outputs = ops.split(builder, state.output, &split_op.params)?;
+                    for (op_id, output) in outputs.outputs {
+                        to_visit.push(State {
+                            op_id: &op_id,
+                            output,
+                        })
+                    }
+
+                    if let Some(remaining_op_id) = split_op.remaining.as_ref() {
+                        to_visit.push(State {
+                            op_id: remaining_op_id,
+                            output: outputs.remaining,
+                        });
+                    }
                 }
                 DiagramOperation::Dispose => {}
             }

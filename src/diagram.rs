@@ -17,7 +17,7 @@ pub use workflow_builder::*;
 
 use std::{collections::HashMap, error::Error, fmt::Display, io::Read};
 
-use crate::{Builder, Scope, Service, SpawnWorkflowExt, StreamPack};
+use crate::{Builder, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack};
 use bevy_app::App;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,22 @@ pub struct ForkResultOp {
     err: OperationId,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SplitOpParams {
+    Index(Vec<OperationId>),
+    Key(HashMap<String, OperationId>),
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitOp {
+    #[serde(flatten)]
+    params: SplitOpParams,
+
+    remaining: Option<OperationId>,
+}
+
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum DiagramOperation {
@@ -72,6 +88,7 @@ pub enum DiagramOperation {
     ForkClone(ForkCloneOp),
     Unzip(UnzipOp),
     ForkResult(ForkResultOp),
+    Split(SplitOp),
     Dispose,
 }
 
@@ -184,8 +201,10 @@ pub enum DiagramError {
     NotCloneable,
     NotUnzippable,
     CannotForkResult,
+    NotSplittable,
     BadInterconnectChain,
     JsonError(serde_json::Error),
+    ConnectionError(Box<dyn Error>),
 }
 
 impl Display for DiagramError {
@@ -206,10 +225,12 @@ impl Display for DiagramError {
             Self::CannotForkResult => f.write_str(
                 "node must be registered with \"with_fork_result()\" to be able to perform fork result",
             ),
+            Self::NotSplittable => f.write_str("response cannot be splitted"),
             Self::BadInterconnectChain => {
                 f.write_str("an interconnect like forkClone cannot connect to another interconnect")
             }
             Self::JsonError(err) => err.fmt(f),
+            Self::ConnectionError(inner) => inner.fmt(f),
         }
     }
 }
@@ -218,6 +239,7 @@ impl Error for DiagramError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::JsonError(err) => Some(err),
+            Self::ConnectionError(inner) => Some(inner.as_ref()),
             _ => None,
         }
     }
@@ -226,6 +248,12 @@ impl Error for DiagramError {
 impl From<serde_json::Error> for DiagramError {
     fn from(err: serde_json::Error) -> Self {
         DiagramError::JsonError(err)
+    }
+}
+
+impl From<SplitConnectionError> for DiagramError {
+    fn from(value: SplitConnectionError) -> Self {
+        DiagramError::ConnectionError(value.into())
     }
 }
 
@@ -1029,6 +1057,245 @@ mod tests {
             context.command(|cmds| cmds.request(serde_json::Value::from(3), w).take_response());
         context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available().unwrap(), "odd");
+    }
+
+    #[test]
+    fn test_split_list() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_list(_: i64) -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_list",
+                "split_list",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_list".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Index(vec!["terminate".to_string()]),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 1);
+    }
+
+    #[test]
+    fn test_split_list_with_key() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_list(_: i64) -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_list",
+                "split_list",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_list".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Key(HashMap::from([(
+                            "1".to_string(),
+                            "terminate".to_string(),
+                        )])),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 2);
+    }
+
+    #[test]
+    fn test_split_map() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_map(_: i64) -> HashMap<String, i64> {
+            HashMap::from([
+                ("a".to_string(), 1),
+                ("b".to_string(), 2),
+                ("c".to_string(), 3),
+            ])
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_map",
+                "split_map",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_map".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Key(HashMap::from([(
+                            "b".to_string(),
+                            "terminate".to_string(),
+                        )])),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 2);
+    }
+
+    #[test]
+    fn test_split_remaining() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_list(_: i64) -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_list",
+                "split_list",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_list".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Index(vec!["dispose".to_string()]),
+                        remaining: Some("terminate".to_string()),
+                    }),
+                ),
+                ("dispose".to_string(), DiagramOperation::Dispose),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &mut registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 2);
     }
 
     #[test]

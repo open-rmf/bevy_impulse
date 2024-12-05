@@ -16,9 +16,11 @@ use super::{
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
     impls::{DefaultImpl, NotSupported},
+    register_deserialize, register_serialize,
     unzip::DynUnzip,
-    DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynType,
-    OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata,
+    DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
+    DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata,
+    SplitOpParams,
 };
 
 /// A type erased [`bevy_impulse::InputSlot`]
@@ -143,6 +145,16 @@ pub struct NodeRegistration {
     fork_result_impl: Option<
         Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
     >,
+
+    split_impl: Option<
+        Box<
+            dyn for<'a> Fn(
+                &mut Builder,
+                DynOutput,
+                &'a SplitOpParams,
+            ) -> Result<DynSplitOutputs<'a>, DiagramError>,
+        >,
+    >,
 }
 
 impl NodeRegistration {
@@ -195,6 +207,19 @@ impl NodeRegistration {
             .ok_or(DiagramError::CannotForkResult)?;
         f(builder, output)
     }
+
+    pub(super) fn split<'a>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOpParams,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        let f = self
+            .split_impl
+            .as_ref()
+            .ok_or(DiagramError::NotSplittable)?;
+        f(builder, output, split_op)
+    }
 }
 
 pub struct RegistrationBuilder<
@@ -204,6 +229,7 @@ pub struct RegistrationBuilder<
     ForkCloneImpl,
     UnzipImpl,
     ForkResultImpl,
+    SplitImpl,
 > {
     registry: &'a mut NodeRegistry,
     _unused: PhantomData<(
@@ -212,10 +238,11 @@ pub struct RegistrationBuilder<
         ForkCloneImpl,
         UnzipImpl,
         ForkResultImpl,
+        SplitImpl,
     )>,
 }
 
-impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImpl>
+impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImpl, SplitImpl>
     RegistrationBuilder<
         'a,
         DeserializeImpl,
@@ -223,6 +250,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         ForkCloneImpl,
         UnzipImpl,
         ForkResultImpl,
+        SplitImpl,
     >
 {
     pub fn new(registry: &'a mut NodeRegistry) -> Self {
@@ -246,6 +274,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         ForkCloneImpl: DynForkClone<Response>,
         UnzipImpl: DynUnzip<Response, SerializeImpl>,
         ForkResultImpl: DynForkResult<Response>,
+        SplitImpl: DynSplit<Response, SerializeImpl>,
     {
         Config::json_schema(&mut self.registry.gen);
 
@@ -261,6 +290,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
             cloneable: ForkCloneImpl::CLONEABLE,
             unzip_slots: UnzipImpl::UNZIP_SLOTS,
             fork_result: ForkResultImpl::SUPPORTED,
+            splittable: SplitImpl::SUPPORTED,
         };
 
         let reg = NodeRegistration {
@@ -297,41 +327,22 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
             } else {
                 None
             },
+            split_impl: if SplitImpl::SUPPORTED {
+                Some(Box::new(|builder, output, params| {
+                    SplitImpl::dyn_split(builder, output, params)
+                }))
+            } else {
+                None
+            },
         };
 
         self.registry.nodes.insert(id, reg);
 
-        if DeserializeImpl::deserializable() {
-            self.registry.deserialize_impls.insert(
-                TypeId::of::<Request>(),
-                Box::new(|builder, output| {
-                    let receiver = builder.create_map_block(|json: serde_json::Value| {
-                        DeserializeImpl::from_json(json)
-                    });
-                    builder.connect(output, receiver.input);
-                    receiver
-                        .output
-                        .chain(builder)
-                        .cancel_on_err()
-                        .output()
-                        .into()
-                }),
-            );
-        }
-
-        if SerializeImpl::serializable() {
-            self.registry.serialize_impls.insert(
-                TypeId::of::<Response>(),
-                Box::new(|builder: &mut Builder, output: DynOutput| {
-                    let sender =
-                        builder.create_map_block(|resp: Response| SerializeImpl::to_json(&resp));
-                    builder.connect(output.into_output::<Response>(), sender.input);
-                    sender.output.chain(builder).cancel_on_err().output().into()
-                }),
-            );
-        }
+        register_deserialize::<Request, DeserializeImpl>(self.registry);
+        register_serialize::<Response, SerializeImpl>(self.registry);
 
         UnzipImpl::register_serialize(&mut self.registry);
+        SplitImpl::register_serialize(&mut self.registry);
     }
 
     pub fn with_opaque_request(
@@ -343,6 +354,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         ForkCloneImpl,
         UnzipImpl,
         ForkResultImpl,
+        SplitImpl,
     > {
         RegistrationBuilder::new(self.registry)
     }
@@ -356,6 +368,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         ForkCloneImpl,
         UnzipImpl,
         ForkResultImpl,
+        SplitImpl,
     > {
         RegistrationBuilder::new(self.registry)
     }
@@ -369,6 +382,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         DefaultImpl,
         UnzipImpl,
         ForkResultImpl,
+        SplitImpl,
     > {
         RegistrationBuilder::new(self.registry)
     }
@@ -382,6 +396,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         ForkCloneImpl,
         DefaultImpl,
         ForkResultImpl,
+        SplitImpl,
     > {
         RegistrationBuilder::new(self.registry)
     }
@@ -394,6 +409,21 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         SerializeImpl,
         ForkCloneImpl,
         UnzipImpl,
+        DefaultImpl,
+        SplitImpl,
+    > {
+        RegistrationBuilder::new(self.registry)
+    }
+
+    pub fn with_splittable(
+        self,
+    ) -> RegistrationBuilder<
+        'a,
+        DeserializeImpl,
+        SerializeImpl,
+        ForkCloneImpl,
+        UnzipImpl,
+        ForkResultImpl,
         DefaultImpl,
     > {
         RegistrationBuilder::new(self.registry)
@@ -491,6 +521,7 @@ impl NodeRegistry {
         NotSupported,
         NotSupported,
         NotSupported,
+        NotSupported,
     > {
         RegistrationBuilder::new(self)
     }
@@ -576,6 +607,42 @@ mod tests {
         assert!(registration.metadata.response.serializable);
         assert!(!registration.metadata.response.cloneable);
         assert_eq!(registration.metadata.response.unzip_slots, 1);
+    }
+
+    #[test]
+    fn test_register_splittable_node() {
+        let mut registry = NodeRegistry::default();
+        let vec_resp = |_: ()| -> Vec<i64> { vec![1, 2] };
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "vec_resp",
+                "Test Name",
+                move |builder: &mut Builder, _config: ()| builder.create_map_block(vec_resp),
+            );
+        let registration = registry.get_registration("vec_resp").unwrap();
+        assert!(registration.metadata.response.splittable);
+
+        let map_resp = |_: ()| -> HashMap<String, i64> { HashMap::new() };
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "map_resp",
+                "Test Name",
+                move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
+            );
+        let registration = registry.get_registration("map_resp").unwrap();
+        assert!(registration.metadata.response.splittable);
+
+        registry.register_node(
+            "not_splittable",
+            "Test Name",
+            move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
+        );
+        let registration = registry.get_registration("not_splittable").unwrap();
+        assert!(!registration.metadata.response.splittable);
     }
 
     #[test]

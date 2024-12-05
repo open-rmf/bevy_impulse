@@ -1,7 +1,9 @@
-use std::{error::Error, fmt::Display};
+use std::{any::TypeId, error::Error, fmt::Display};
 
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
+
+use super::NodeRegistry;
 
 #[derive(Debug)]
 pub enum SerializationError {
@@ -80,6 +82,9 @@ pub struct ResponseMetadata {
 
     /// Indicates if the response can fork result
     pub(super) fork_result: bool,
+
+    /// Indiciates if the response can be split
+    pub(super) splittable: bool,
 }
 
 pub trait SerializeMessage<T> {
@@ -190,4 +195,46 @@ impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
     fn deserializable() -> bool {
         false
     }
+}
+
+pub(super) fn register_deserialize<T, Deserializer>(registry: &mut NodeRegistry)
+where
+    Deserializer: DeserializeMessage<T>,
+    T: Send + Sync + 'static,
+{
+    if !Deserializer::deserializable() {
+        return;
+    }
+    registry.deserialize_impls.insert(
+        TypeId::of::<T>(),
+        Box::new(|builder, output| {
+            let receiver =
+                builder.create_map_block(|json: serde_json::Value| Deserializer::from_json(json));
+            builder.connect(output, receiver.input);
+            receiver
+                .output
+                .chain(builder)
+                .cancel_on_err()
+                .output()
+                .into()
+        }),
+    );
+}
+
+pub(super) fn register_serialize<T, Serializer>(registry: &mut NodeRegistry)
+where
+    Serializer: SerializeMessage<T>,
+    T: Send + Sync + 'static,
+{
+    if !Serializer::serializable() {
+        return;
+    }
+    registry.serialize_impls.insert(
+        TypeId::of::<T>(),
+        Box::new(|builder, output| {
+            let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
+            builder.connect(output.into_output(), n.input);
+            n.output.chain(builder).cancel_on_err().output()
+        }),
+    );
 }

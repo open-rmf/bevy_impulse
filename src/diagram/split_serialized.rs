@@ -15,10 +15,21 @@
  *
 */
 
+use std::{collections::HashMap, usize};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{MapSplitKey, OperationResult, SplitDispatcher, Splittable};
+use crate::{
+    Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
+    OperationResult, SplitDispatcher, Splittable,
+};
+
+use super::{
+    impls::{DefaultImpl, NotSupported},
+    register_serialize, DiagramError, DynOutput, NodeRegistry, OperationId, SerializeMessage,
+    SplitOpParams,
+};
 
 impl Splittable for Value {
     type Key = MapSplitKey<String>;
@@ -111,6 +122,96 @@ pub enum JsonPosition {
     ArrayElement(usize),
     /// The item was a field of an object.
     ObjectField(String),
+}
+
+impl FromSpecific for ListSplitKey {
+    type SpecificKey = String;
+
+    fn from_specific(specific: Self::SpecificKey) -> Self {
+        match specific.parse::<usize>() {
+            Ok(seq) => Self::Sequential(seq),
+            Err(_) => Self::Remaining,
+        }
+    }
+}
+
+pub struct DynSplitOutputs<'a> {
+    pub(super) outputs: HashMap<&'a OperationId, DynOutput>,
+    pub(super) remaining: DynOutput,
+}
+
+pub trait DynSplit<T, Serializer> {
+    const SUPPORTED: bool;
+
+    fn dyn_split<'a>(
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOpParams,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError>;
+
+    fn register_serialize(registry: &mut NodeRegistry);
+}
+
+impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
+    const SUPPORTED: bool = false;
+
+    fn dyn_split<'a>(
+        _builder: &mut Builder,
+        _output: DynOutput,
+        _split_op: &'a SplitOpParams,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        Err(DiagramError::NotSplittable)
+    }
+
+    fn register_serialize(_registry: &mut NodeRegistry) {}
+}
+
+impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
+where
+    T: Send + Sync + 'static + Splittable,
+    T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
+    Serializer: SerializeMessage<T::Item>,
+{
+    const SUPPORTED: bool = true;
+
+    fn dyn_split<'a>(
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOpParams,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        let chain = output.into_output::<T>().chain(builder);
+        chain.split(|mut sp| -> Result<DynSplitOutputs, DiagramError> {
+            let outputs = match split_op {
+                SplitOpParams::Index(v) => {
+                    let outputs: HashMap<_, _> = v
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, op_id)| -> Result<(_, DynOutput), DiagramError> {
+                            Ok((op_id, sp.sequential_output(i)?.into()))
+                        })
+                        .collect::<Result<_, _>>()?;
+                    outputs
+                }
+                SplitOpParams::Key(v) => {
+                    let outputs: HashMap<_, _> = v
+                        .into_iter()
+                        .map(|(k, op_id)| -> Result<(_, DynOutput), DiagramError> {
+                            Ok((op_id, sp.specific_output(k.clone())?.into()))
+                        })
+                        .collect::<Result<_, _>>()?;
+                    outputs
+                }
+            };
+            Ok(DynSplitOutputs {
+                outputs,
+                remaining: sp.remaining_output()?.into(),
+            })
+        })
+    }
+
+    fn register_serialize(registry: &mut NodeRegistry) {
+        register_serialize::<T::Item, Serializer>(registry);
+    }
 }
 
 #[cfg(test)]

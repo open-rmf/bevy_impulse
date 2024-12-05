@@ -1,12 +1,11 @@
-use std::any::TypeId;
-
 use bevy_utils::all_tuples_with_size;
 
 use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, NodeRegistry, SerializeMessage,
+    register_serialize as register_serialize_impl, DiagramError, DynOutput, NodeRegistry,
+    SerializeMessage,
 };
 
 pub trait DynUnzip<T, Serializer> {
@@ -30,24 +29,6 @@ impl<T, Serializer> DynUnzip<T, Serializer> for NotSupported {
     }
 
     fn register_serialize(_registry: &mut NodeRegistry) {}
-}
-
-fn register_serialize_impl<Response, Serializer>(registry: &mut NodeRegistry)
-where
-    Serializer: SerializeMessage<Response>,
-    Response: Send + Sync + 'static,
-{
-    if !Serializer::serializable() {
-        return;
-    }
-    registry.serialize_impls.insert(
-        TypeId::of::<Response>(),
-        Box::new(|builder, output| {
-            let n = builder.create_map_block(|resp: Response| Serializer::to_json(&resp));
-            builder.connect(output.into_output(), n.input);
-            n.output.chain(builder).cancel_on_err().output()
-        }),
-    );
 }
 
 macro_rules! dyn_unzip_impl {
