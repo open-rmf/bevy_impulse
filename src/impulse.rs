@@ -79,6 +79,7 @@ where
     /// | [`Self::detach`] <br> [`Self::send_event`]                | This will never be dropped                            |
     /// | Using none of the above                                   | The impulse will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
+        println!(" --- commanding detach for {:?}", self.target);
         self.commands.add(Detach {
             target: self.target,
         });
@@ -132,7 +133,11 @@ where
         // this one is finished.
         self.commands
             .entity(source)
-            .insert(Cancellable::new(cancel_impulse))
+            .insert((
+                Cancellable::new(cancel_impulse),
+                ImpulseMarker,
+            ))
+            .remove::<UnusedTarget>()
             .set_parent(target);
         provider.connect(None, source, target, self.commands);
         Impulse {
@@ -483,6 +488,48 @@ mod tests {
         assert!(context.run_with_conditions(&mut promise, conditions.clone()));
         assert!(promise.take().available().is_some_and(|v| v == "hello"));
         assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_detach() {
+        // This is a regression test that covers a bug which existed due to
+        // an incorrect handling of detached impulses when giving input.
+        let mut context = TestingContext::minimal_plugins();
+        let service = context.spawn_delayed_map_with_viewer(
+            Duration::from_millis(1),
+            |n| {
+                dbg!(n);
+                n + 1
+            },
+            |_| dbg!(),
+        );
+
+        context.command(|commands| {
+            commands
+                .provide(0)
+                .then(service)
+                .detach();
+        });
+
+        let (sender, mut promise) = Promise::<()>::new();
+        context.run_with_conditions(&mut promise, Duration::from_millis(5));
+        assert!(
+            context.no_unhandled_errors(),
+            "Unhandled errors: {:#?}",
+            context.get_unhandled_errors(),
+        );
+
+        // The promise and sender only exist because run_with_conditions requires
+        // them. Moreover we need to make sure that sender does not get dropped
+        // prematurely by the compiler, otherwise the promise will have the run
+        // exit prematurely. Therefore we call .send(()) here to guarantee the
+        // compiler knows to keep it alive until the running is finished.
+        //
+        // We have observed that using `let (_, mut promise) = ` will cause the
+        // sender to drop prematurely, so we don't want to risk that there are
+        // other cases where that may happen. It is important for the run to
+        // last multiple cycles.
+        sender.send(()).ok();
     }
 
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]

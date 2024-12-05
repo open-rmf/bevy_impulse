@@ -28,7 +28,7 @@ use backtrace::Backtrace;
 use crate::{
     Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, OperationError,
     MiscellaneousFailure, OperationRoster, OrBroken, SessionStatus,
-    UnhandledErrors, UnusedTarget,
+    UnhandledErrors, UnusedTarget, Detached,
 };
 
 /// This contains data that has been provided as input into an operation, along
@@ -190,6 +190,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         only_if_active: bool,
     ) -> Result<bool, OperationError> {
+        dbg!(session);
         if only_if_active {
             let active_session =
                 if let Some(session_status) = self.world().get::<SessionStatus>(session) {
@@ -202,13 +203,22 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                 // The session being sent is not active, either it is being cleaned
                 // or already despawned. Therefore we should not propogate any inputs
                 // related to it.
+                dbg!(session);
                 return Ok(false);
             }
         }
 
         if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
+            dbg!(session);
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
+            if let Some(detached) = self.get::<Detached>() {
+                if detached.is_detached() {
+                    // The input is going to a detached node that will not
+                    // respond any further. We can
+                }
+            }
+            dbg!(session);
             let expected = self.get::<InputTypeIndicator>().map(|i| i.name);
             let id = self.id();
             // If the input is being fed to an unused target then we can

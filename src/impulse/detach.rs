@@ -43,9 +43,11 @@ pub(crate) struct Detach {
 
 impl Command for Detach {
     fn apply(self, world: &mut World) {
+        println!("detaching {:?}", self.target);
         let backtrace;
         if let Some(mut session_mut) = world.get_entity_mut(self.target) {
             if let Some(mut detached) = session_mut.get_mut::<Detached>() {
+                dbg!(self.target);
                 detached.0 = true;
                 session_mut.remove::<UnusedTarget>();
                 return;
