@@ -16,11 +16,17 @@ env:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        rust-version: [stable, 1.75]
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
+
+    - name: Setup rust
+      run: rustup default ${{ matrix.rust-version }}
 
     - name: Build default features
       run: cargo build
@@ -32,10 +38,3 @@ jobs:
     - name: Test single_threaded_async
       run: cargo test --features single_threaded_async
 
-    # Build and test with 1.75
-    - name: Install Rust 1.75
-      run: rustup default 1.75
-    - name: Build default features with Rust 1.75
-      run: cargo build
-    - name: Test default features with Rust 1.75
-      run: cargo test
