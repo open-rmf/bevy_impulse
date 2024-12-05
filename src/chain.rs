@@ -99,6 +99,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
+        dbg!(target);
         provider.connect(
             Some(self.builder.scope),
             source,

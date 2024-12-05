@@ -126,6 +126,7 @@ where
             .commands
             .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
             .id();
+        dbg!(target);
 
         // We should automatically delete the previous step in the chain once
         // this one is finished.
@@ -547,6 +548,24 @@ mod tests {
         );
 
         verify_delivery_instruction_matrix(service, &mut context);
+
+        let async_service = service;
+        let service = context.spawn_io_workflow(|scope, builder| {
+            scope
+                .input
+                .chain(builder)
+                // .map_block(|counter: Arc<Mutex<u64>>| {
+                //     *counter.lock().unwrap() += 1;
+                // })
+                .then(async_service)
+                .connect(scope.terminate);
+        });
+
+        verify_delivery_instruction_matrix(service, &mut context);
+        verify_delivery_instruction_matrix(service, &mut context);
+
+        // We don't test blocking services because blocking services are always
+        // serial no matter what, so delivery instructions have no effect for them.
     }
 
     fn verify_delivery_instruction_matrix(

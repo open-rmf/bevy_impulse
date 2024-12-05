@@ -319,6 +319,18 @@ pub(crate) struct Blocker {
     pub(crate) serve_next: fn(Blocker, &mut World, &mut OperationRoster),
 }
 
+impl std::fmt::Debug for Blocker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("Blocker")
+            .field("provider", &self.provider)
+            .field("source", &self.source)
+            .field("session", &self.session)
+            .field("label", &self.label)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum OperationError {
     Broken(Option<Backtrace>),

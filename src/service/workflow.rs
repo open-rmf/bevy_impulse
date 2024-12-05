@@ -190,6 +190,7 @@ where
 
     let (request, blocker) = match update {
         DeliveryUpdate::Immediate { blocking, request } => {
+            dbg!((parent_session, scoped_session, &instructions));
             let serve_next = serve_next_workflow_request::<Request, Response, Streams>;
             let blocker = blocking.map(|label| Blocker {
                 provider,
@@ -203,6 +204,7 @@ where
         DeliveryUpdate::Queued {
             cancelled, stop, ..
         } => {
+            dbg!((parent_session, scoped_session, &instructions));
             for cancelled in cancelled {
                 let disposal = Disposal::supplanted(cancelled.source, source, parent_session);
                 emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
@@ -258,13 +260,13 @@ where
     let mut exit_target = world.get_mut::<ExitTargetStorage>(scope).or_broken()?;
     let parent_session = input.session;
     exit_target.map.insert(
-        scoped_session,
-        ExitTarget {
+        dbg!(scoped_session),
+        dbg!(ExitTarget {
             target,
             source,
             parent_session,
             blocker,
-        },
+        }),
     );
     begin_scope::<Request, Response, Streams>(
         input,

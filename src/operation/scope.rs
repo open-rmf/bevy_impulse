@@ -772,7 +772,7 @@ where
             // use this session as input despite not being active because we are
             // passing it to an operation that will only use it to begin a
             // cleanup workflow.
-            finish_cleanup_workflow_mut.sneak_input(scoped_session, CheckAwaitingSession, false)?;
+            finish_cleanup_workflow_mut.sneak_input(scoped_session, FinishCleanupSignal::CheckAwaitingSession, false)?;
             roster.queue(finish_cleanup);
         }
 
@@ -793,7 +793,7 @@ where
                 world
                     .get_entity_mut(begin.source)
                     .or_broken()?
-                    .sneak_input(scoped_session, (), false)?;
+                    .sneak_input(scoped_session, FinishCleanupSignal::DeductFinishedCleanup, false)?;
             }
             execute_operation(OperationRequest {
                 source: begin.source,
@@ -1234,8 +1234,7 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
             CleanupForScope(self.from_scope),
-            InputBundle::<()>::new(),
-            InputBundle::<CheckAwaitingSession>::new(),
+            InputBundle::<FinishCleanupSignal>::new(),
             Cancellable::new(Self::receive_cancel),
             AwaitingCleanupStorage::default(),
         ));
@@ -1250,40 +1249,42 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
         }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        if let Some(Input {
-            session: new_scoped_session,
-            ..
-        }) = source_mut.try_take_input::<CheckAwaitingSession>()?
-        {
-            let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
-            if let Some((index, a)) = awaiting
-                .0
-                .iter_mut()
-                .enumerate()
-                .find(|(_, a)| a.scoped_session == new_scoped_session)
-            {
-                if a.cleanup_workflow_sessions
-                    .as_ref()
-                    .is_some_and(|s| s.is_empty())
+        let Some(Input { session, data: signal }) = source_mut.try_take_input::<FinishCleanupSignal>()? else {
+            return Ok(());
+        };
+
+        match signal {
+            FinishCleanupSignal::CheckAwaitingSession => {
+                let new_scoped_session = session;
+
+                let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
+                if let Some((index, a)) = awaiting
+                    .0
+                    .iter_mut()
+                    .enumerate()
+                    .find(|(_, a)| a.scoped_session == new_scoped_session)
                 {
-                    // No cancellation sessions were started for this scoped
-                    // session so we can immediately clean it up.
-                    Self::finalize_scoped_session(
-                        index,
-                        OperationRequest {
-                            source,
-                            world,
-                            roster,
-                        },
-                    )?;
+                    if a.cleanup_workflow_sessions
+                        .as_ref()
+                        .is_some_and(|s| s.is_empty())
+                    {
+                        // No cancellation sessions were started for this scoped
+                        // session so we can immediately clean it up.
+                        Self::finalize_scoped_session(
+                            index,
+                            OperationRequest {
+                                source,
+                                world,
+                                roster,
+                            },
+                        )?;
+                    }
                 }
             }
-        } else if let Some(Input {
-            session: cancellation_session,
-            ..
-        }) = source_mut.try_take_input::<()>()?
-        {
-            Self::deduct_finished_cleanup(source, cancellation_session, world, roster, None)?;
+            FinishCleanupSignal::DeductFinishedCleanup => {
+                let cancellation_session = session;
+                Self::deduct_finished_cleanup(source, cancellation_session, world, roster, None)?;
+            }
         }
 
         Ok(())
@@ -1532,7 +1533,9 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
                 .remove(&scoped_session);
         }
 
+        dbg!(&blocker);
         if let Some(blocker) = blocker {
+            dbg!(&blocker);
             let serve_next = blocker.serve_next;
             serve_next(blocker, world, roster);
         }
@@ -1605,7 +1608,10 @@ impl AwaitingCleanup {
     }
 }
 
-struct CheckAwaitingSession;
+enum FinishCleanupSignal {
+    CheckAwaitingSession,
+    DeductFinishedCleanup,
+}
 
 #[derive(Component, Default)]
 pub(crate) struct ExitTargetStorage {
@@ -1613,6 +1619,7 @@ pub(crate) struct ExitTargetStorage {
     pub(crate) map: HashMap<Entity, ExitTarget>,
 }
 
+#[derive(Debug)]
 pub(crate) struct ExitTarget {
     pub(crate) target: Entity,
     pub(crate) source: Entity,

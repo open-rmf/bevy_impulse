@@ -27,7 +27,8 @@ use backtrace::Backtrace;
 
 use crate::{
     Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, OperationError,
-    OperationRoster, OrBroken, SessionStatus, UnusedTarget,
+    MiscellaneousFailure, OperationRoster, OrBroken, SessionStatus,
+    UnhandledErrors, UnusedTarget,
 };
 
 /// This contains data that has been provided as input into an operation, along
@@ -69,15 +70,30 @@ impl<T> Default for InputStorage<T> {
     }
 }
 
+/// Used to keep track of the expected input type for an operation
+#[derive(Component)]
+pub(crate) struct InputTypeIndicator {
+    #[allow(unused)]
+    pub(crate) name: &'static str,
+}
+
+impl InputTypeIndicator {
+    fn new<T>() -> Self {
+        Self { name: std::any::type_name::<T>() }
+    }
+}
+
 #[derive(Bundle)]
 pub struct InputBundle<T: 'static + Send + Sync> {
     storage: InputStorage<T>,
+    indicator: InputTypeIndicator,
 }
 
 impl<T: 'static + Send + Sync> InputBundle<T> {
     pub fn new() -> Self {
         Self {
             storage: Default::default(),
+            indicator: InputTypeIndicator::new::<T>(),
         }
     }
 }
@@ -193,6 +209,8 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
+            let expected = self.get::<InputTypeIndicator>().map(|i| i.name);
+            let id = self.id();
             // If the input is being fed to an unused target then we can
             // generally ignore it, although it may indicate a bug in the user's
             // workflow because workflow branches that end in an unused target
@@ -200,6 +218,17 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
 
             // However in this case, the target is not unused but also does not
             // have the correct input storage type. This indicates
+            self.world_mut().get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: std::sync::Arc::new(anyhow::anyhow!(
+                        "Incorrect input type for operation [{:?}]: [{}], expected [{}]",
+                        id,
+                        std::any::type_name::<T>(),
+                        expected.unwrap_or("<null>"),
+                    )),
+                    backtrace: None,
+                });
             None.or_broken()?;
         }
         Ok(true)
