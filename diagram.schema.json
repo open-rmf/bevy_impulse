@@ -1,0 +1,198 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Diagram",
+  "type": "object",
+  "definitions": {
+    "DiagramOperation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "start"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "terminate"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "next",
+            "nodeId",
+            "type"
+          ],
+          "properties": {
+            "config": {
+              "default": null
+            },
+            "next": {
+              "type": "string"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "node"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "forkClone"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "unzip"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "err",
+            "ok",
+            "type"
+          ],
+          "properties": {
+            "err": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "forkResult"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "index"
+              ],
+              "properties": {
+                "index": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "key"
+              ],
+              "properties": {
+                "key": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "remaining": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "split"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "dispose"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
