@@ -765,24 +765,6 @@ where
 
         let is_terminated = awaiting.info.status.is_terminated();
 
-        unsafe {
-            // INVARIANT: We use sneak_input here to side-step the protection of
-            // only allowing inputs for Active sessions. This current session is
-            // not active because cleaning already started for it. It's okay to
-            // use this session as input despite not being active because we are
-            // passing it to an operation that will only use it to begin a
-            // cleanup workflow.
-            let add_to_queue = finish_cleanup_workflow_mut.sneak_input(
-                scoped_session,
-                FinishCleanupSignal::CheckAwaitingSession,
-                false,
-                roster,
-            )?;
-            if add_to_queue {
-                roster.queue(finish_cleanup);
-            }
-        }
-
         for begin in begin_cleanup_workflows {
             let run_this_workflow =
                 (is_terminated && begin.on_terminate) || (!is_terminated && begin.on_cancelled);
@@ -800,12 +782,7 @@ where
                 world
                     .get_entity_mut(begin.source)
                     .or_broken()?
-                    .sneak_input(
-                        scoped_session,
-                        FinishCleanupSignal::DeductFinishedCleanup,
-                        false,
-                        roster,
-                    )?
+                    .sneak_input(scoped_session, (), false, roster)?
             };
             if execute {
                 execute_operation(OperationRequest {
@@ -815,6 +792,12 @@ where
                 });
             }
         }
+
+        // Check if there are any cleanup workflows waiting to be run. If not,
+        // the workflow can fully terminate.
+        FinishCleanup::<Response>::check_awaiting_session(
+            finish_cleanup, scoped_session, world, roster,
+        )?;
 
         Ok(())
     }
@@ -1248,7 +1231,7 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world.entity_mut(source).insert((
             CleanupForScope(self.from_scope),
-            InputBundle::<FinishCleanupSignal>::new(),
+            InputBundle::<()>::new(),
             Cancellable::new(Self::receive_cancel),
             AwaitingCleanupStorage::default(),
         ));
@@ -1263,45 +1246,11 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
         }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Some(Input { session, data: signal }) = source_mut.try_take_input::<FinishCleanupSignal>()? else {
+        let Some(Input { session: cancellation_session, .. }) = source_mut.try_take_input::<()>()? else {
             return Ok(());
         };
 
-        match signal {
-            FinishCleanupSignal::CheckAwaitingSession => {
-                let new_scoped_session = session;
-
-                let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
-                if let Some((index, a)) = awaiting
-                    .0
-                    .iter_mut()
-                    .enumerate()
-                    .find(|(_, a)| a.scoped_session == new_scoped_session)
-                {
-                    if a.cleanup_workflow_sessions
-                        .as_ref()
-                        .is_some_and(|s| s.is_empty())
-                    {
-                        // No cancellation sessions were started for this scoped
-                        // session so we can immediately clean it up.
-                        Self::finalize_scoped_session(
-                            index,
-                            OperationRequest {
-                                source,
-                                world,
-                                roster,
-                            },
-                        )?;
-                    }
-                }
-            }
-            FinishCleanupSignal::DeductFinishedCleanup => {
-                let cancellation_session = session;
-                Self::deduct_finished_cleanup(source, cancellation_session, world, roster, None)?;
-            }
-        }
-
-        Ok(())
+        Self::deduct_finished_cleanup(source, cancellation_session, world, roster, None)
     }
 
     fn cleanup(_: OperationCleanup) -> OperationResult {
@@ -1370,6 +1319,40 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
                     .get_resource_or_insert_with(UnhandledErrors::default)
                     .operations
                     .push(error);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn check_awaiting_session(
+        source: Entity,
+        new_scoped_session: Entity,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        let mut source_mut = world.get_entity_mut(source).or_broken()?;
+        let mut awaiting = source_mut.get_mut::<AwaitingCleanupStorage>().or_broken()?;
+        if let Some((index, a)) = awaiting
+            .0
+            .iter_mut()
+            .enumerate()
+            .find(|(_, a)| a.scoped_session == new_scoped_session)
+        {
+            if a.cleanup_workflow_sessions
+                .as_ref()
+                .is_some_and(|s| s.is_empty())
+            {
+                // No cancellation sessions were started for this scoped
+                // session so we can immediately clean it up.
+                Self::finalize_scoped_session(
+                    index,
+                    OperationRequest {
+                        source,
+                        world,
+                        roster,
+                    },
+                )?;
             }
         }
 
@@ -1547,9 +1530,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
                 .remove(&scoped_session);
         }
 
-        dbg!(&blocker);
         if let Some(blocker) = blocker {
-            dbg!(&blocker);
             let serve_next = blocker.serve_next;
             serve_next(blocker, world, roster);
         }
@@ -1620,11 +1601,6 @@ impl AwaitingCleanup {
             cleanup_workflow_sessions: None,
         }
     }
-}
-
-enum FinishCleanupSignal {
-    CheckAwaitingSession,
-    DeductFinishedCleanup,
 }
 
 #[derive(Component, Default)]

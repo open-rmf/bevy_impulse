@@ -97,7 +97,6 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
         let target = self
             .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
             .id();
-        dbg!(target);
 
         let source = self
             .spawn((

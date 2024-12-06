@@ -67,7 +67,6 @@ impl<Request: 'static + Send + Sync> Operation for OperateService<Request> {
             ActiveTasksStorage::default(),
             DisposeForUnavailableService::new::<Request>(),
         ));
-        dbg!(&self.instructions);
         if let Some(instructions) = self.instructions {
             world.entity_mut(source).insert(instructions);
         }

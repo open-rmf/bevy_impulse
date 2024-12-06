@@ -587,7 +587,6 @@ where
         target: Entity,
         commands: &mut Commands,
     ) {
-        dbg!(&self);
         commands.add(AddOperation::new(
             scope,
             source,

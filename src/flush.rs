@@ -212,12 +212,9 @@ fn collect_from_channels(
     let mut add_finish: SmallVec<[_; 8]> = SmallVec::new();
     let mut drop_targets: SmallVec<[_; 8]> = SmallVec::new();
     for (e, detached) in unused_targets_state.get(world).iter() {
-        dbg!(e);
         if detached.is_detached() {
-            dbg!(e);
             add_finish.push(e);
         } else {
-            dbg!(e);
             drop_targets.push(e);
         }
     }

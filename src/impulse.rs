@@ -79,7 +79,6 @@ where
     /// | [`Self::detach`] <br> [`Self::send_event`]                | This will never be dropped                            |
     /// | Using none of the above                                   | The impulse will immediately be dropped during a flush, so it will never be run at all. <br> This will also push an error into [`UnhandledErrors`](crate::UnhandledErrors). |
     pub fn detach(self) -> Impulse<'w, 's, 'a, Response, Streams> {
-        println!(" --- commanding detach for {:?}", self.target);
         self.commands.add(Detach {
             target: self.target,
         });
@@ -127,7 +126,6 @@ where
             .commands
             .spawn((Detached::default(), UnusedTarget, ImpulseMarker))
             .id();
-        dbg!(target);
 
         // We should automatically delete the previous step in the chain once
         // this one is finished.
@@ -495,13 +493,9 @@ mod tests {
         // This is a regression test that covers a bug which existed due to
         // an incorrect handling of detached impulses when giving input.
         let mut context = TestingContext::minimal_plugins();
-        let service = context.spawn_delayed_map_with_viewer(
+        let service = context.spawn_delayed_map(
             Duration::from_millis(1),
-            |n| {
-                dbg!(n);
-                n + 1
-            },
-            |_| dbg!(),
+            |n| n + 1,
         );
 
         context.command(|commands| {
@@ -601,14 +595,10 @@ mod tests {
             scope
                 .input
                 .chain(builder)
-                // .map_block(|counter: Arc<Mutex<u64>>| {
-                //     *counter.lock().unwrap() += 1;
-                // })
                 .then(async_service)
                 .connect(scope.terminate);
         });
 
-        verify_delivery_instruction_matrix(service, &mut context);
         verify_delivery_instruction_matrix(service, &mut context);
 
         // We don't test blocking services because blocking services are always

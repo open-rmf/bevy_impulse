@@ -73,7 +73,6 @@ impl<T> Default for InputStorage<T> {
 /// Used to keep track of the expected input type for an operation
 #[derive(Component)]
 pub(crate) struct InputTypeIndicator {
-    #[allow(unused)]
     pub(crate) name: &'static str,
 }
 
@@ -192,7 +191,6 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         only_if_active: bool,
         roster: &mut OperationRoster,
     ) -> Result<bool, OperationError> {
-        dbg!(session);
         if only_if_active {
             let active_session =
                 if let Some(session_status) = self.world().get::<SessionStatus>(session) {
@@ -205,13 +203,11 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                 // The session being sent is not active, either it is being cleaned
                 // or already despawned. Therefore we should not propogate any inputs
                 // related to it.
-                dbg!(session);
                 return Ok(false);
             }
         }
 
         if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
-            dbg!(session);
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
             let id = self.id();
@@ -228,7 +224,6 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                 }
             }
 
-            dbg!(session);
             let expected = self.get::<InputTypeIndicator>().map(|i| i.name);
             // If the input is being fed to an unused target then we can
             // generally ignore it, although it may indicate a bug in the user's
@@ -241,7 +236,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: std::sync::Arc::new(anyhow::anyhow!(
-                        "Incorrect input type for operation [{:?}]: [{}], expected [{}]",
+                        "Incorrect input type for operation [{:?}]: received [{}], expected [{}]",
                         id,
                         std::any::type_name::<T>(),
                         expected.unwrap_or("<null>"),
