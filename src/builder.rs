@@ -959,11 +959,15 @@ mod tests {
         let mut promise = context.command(|commands| commands.request(5, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors(),
+        );
         assert!(promise.peek().is_cancelled());
         let channel_output = receiver.try_recv().unwrap();
         assert_eq!(channel_output, 5);
         assert!(receiver.try_recv().is_err());
-        assert!(context.no_unhandled_errors());
         assert!(context.confirm_buffers_empty().is_ok());
 
         let (cancel_sender, mut cancel_receiver) = unbounded_channel();

@@ -131,7 +131,8 @@ where
         // this one is finished.
         self.commands
             .entity(source)
-            .insert(Cancellable::new(cancel_impulse))
+            .insert((Cancellable::new(cancel_impulse), ImpulseMarker))
+            .remove::<UnusedTarget>()
             .set_parent(target);
         provider.connect(None, source, target, self.commands);
         Impulse {
@@ -484,6 +485,38 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
+    #[test]
+    fn test_detach() {
+        // This is a regression test that covers a bug which existed due to
+        // an incorrect handling of detached impulses when giving input.
+        let mut context = TestingContext::minimal_plugins();
+        let service = context.spawn_delayed_map(Duration::from_millis(1), |n| n + 1);
+
+        context.command(|commands| {
+            commands.provide(0).then(service).detach();
+        });
+
+        let (sender, mut promise) = Promise::<()>::new();
+        context.run_with_conditions(&mut promise, Duration::from_millis(5));
+        assert!(
+            context.no_unhandled_errors(),
+            "Unhandled errors: {:#?}",
+            context.get_unhandled_errors(),
+        );
+
+        // The promise and sender only exist because run_with_conditions requires
+        // them. Moreover we need to make sure that sender does not get dropped
+        // prematurely by the compiler, otherwise the promise will have the run
+        // exit prematurely. Therefore we call .send(()) here to guarantee the
+        // compiler knows to keep it alive until the running is finished.
+        //
+        // We have observed that using `let (_, mut promise) = ` will cause the
+        // sender to drop prematurely, so we don't want to risk that there are
+        // other cases where that may happen. It is important for the run to
+        // last multiple cycles.
+        sender.send(()).ok();
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
     struct UnitLabel;
 
@@ -547,6 +580,20 @@ mod tests {
         );
 
         verify_delivery_instruction_matrix(service, &mut context);
+
+        let async_service = service;
+        let service = context.spawn_io_workflow(|scope, builder| {
+            scope
+                .input
+                .chain(builder)
+                .then(async_service)
+                .connect(scope.terminate);
+        });
+
+        verify_delivery_instruction_matrix(service, &mut context);
+
+        // We don't test blocking services because blocking services are always
+        // serial no matter what, so delivery instructions have no effect for them.
     }
 
     fn verify_delivery_instruction_matrix(
