@@ -772,8 +772,15 @@ where
             // use this session as input despite not being active because we are
             // passing it to an operation that will only use it to begin a
             // cleanup workflow.
-            finish_cleanup_workflow_mut.sneak_input(scoped_session, FinishCleanupSignal::CheckAwaitingSession, false)?;
-            roster.queue(finish_cleanup);
+            let add_to_queue = finish_cleanup_workflow_mut.sneak_input(
+                scoped_session,
+                FinishCleanupSignal::CheckAwaitingSession,
+                false,
+                roster,
+            )?;
+            if add_to_queue {
+                roster.queue(finish_cleanup);
+            }
         }
 
         for begin in begin_cleanup_workflows {
@@ -787,19 +794,26 @@ where
             // We execute the begin nodes immediately so that they can load up the
             // finish_cancel node with all their cancellation behavior IDs before
             // the finish_cancel node gets executed.
-            unsafe {
+            let execute = unsafe {
                 // INVARIANT: We can use sneak_input here because we execute the
                 // recipient node immediately after giving the input.
                 world
                     .get_entity_mut(begin.source)
                     .or_broken()?
-                    .sneak_input(scoped_session, FinishCleanupSignal::DeductFinishedCleanup, false)?;
+                    .sneak_input(
+                        scoped_session,
+                        FinishCleanupSignal::DeductFinishedCleanup,
+                        false,
+                        roster,
+                    )?
+            };
+            if execute {
+                execute_operation(OperationRequest {
+                    source: begin.source,
+                    world,
+                    roster,
+                });
             }
-            execute_operation(OperationRequest {
-                source: begin.source,
-                world,
-                roster,
-            });
         }
 
         Ok(())

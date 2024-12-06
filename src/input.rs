@@ -141,6 +141,7 @@ pub trait ManageInput {
         session: Entity,
         data: T,
         only_if_active: bool,
+        roster: &mut OperationRoster,
     ) -> Result<bool, OperationError>;
 
     /// Get an input that is ready to be taken, or else produce an error.
@@ -166,7 +167,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        if unsafe { self.sneak_input(session, data, true)? } {
+        if unsafe { self.sneak_input(session, data, true, roster)? } {
             roster.queue(self.id());
         }
         Ok(())
@@ -178,7 +179,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        if unsafe { self.sneak_input(session, data, true)? } {
+        if unsafe { self.sneak_input(session, data, true, roster)? } {
             roster.defer(self.id());
         }
         Ok(())
@@ -189,6 +190,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         session: Entity,
         data: T,
         only_if_active: bool,
+        roster: &mut OperationRoster,
     ) -> Result<bool, OperationError> {
         dbg!(session);
         if only_if_active {
@@ -212,15 +214,22 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
             dbg!(session);
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
+            let id = self.id();
             if let Some(detached) = self.get::<Detached>() {
                 if detached.is_detached() {
-                    // The input is going to a detached node that will not
-                    // respond any further. We can
+                    // The input is going to a detached impulse that will not
+                    // react any further. We need to tell that detached impulse
+                    // to despawn since it is no longer needed.
+                    roster.defer_despawn(id);
+
+                    // No error occurred, but the caller should not queue the
+                    // operation into the roster because it is being despawned.
+                    return Ok(false);
                 }
             }
+
             dbg!(session);
             let expected = self.get::<InputTypeIndicator>().map(|i| i.name);
-            let id = self.id();
             // If the input is being fed to an unused target then we can
             // generally ignore it, although it may indicate a bug in the user's
             // workflow because workflow branches that end in an unused target

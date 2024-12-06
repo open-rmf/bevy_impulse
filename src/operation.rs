@@ -223,6 +223,9 @@ pub struct OperationRoster {
     pub(crate) disposed: Vec<DisposalNotice>,
     /// Tell a scope to attempt cleanup
     pub(crate) cleanup_finished: Vec<Cleanup>,
+    /// Despawn these entities while no other operation is running. This is used
+    /// to cleanup detached impulses that receive no input.
+    pub(crate) deferred_despawn: Vec<Entity>,
 }
 
 impl OperationRoster {
@@ -262,6 +265,10 @@ impl OperationRoster {
         self.cleanup_finished.push(cleanup);
     }
 
+    pub fn defer_despawn(&mut self, source: Entity) {
+        self.deferred_despawn.push(source);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
             && self.awake.is_empty()
@@ -270,6 +277,7 @@ impl OperationRoster {
             && self.unblock.is_empty()
             && self.disposed.is_empty()
             && self.cleanup_finished.is_empty()
+            && self.deferred_despawn.is_empty()
     }
 
     pub fn append(&mut self, other: &mut Self) {
