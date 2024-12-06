@@ -329,8 +329,7 @@ pub(crate) struct Blocker {
 
 impl std::fmt::Debug for Blocker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("Blocker")
+        f.debug_struct("Blocker")
             .field("provider", &self.provider)
             .field("source", &self.source)
             .field("session", &self.session)

@@ -95,8 +95,7 @@ impl<Req, Res, S> std::fmt::Debug for Service<Req, Res, S> {
             )
         });
 
-        f
-            .debug_struct(name.as_str())
+        f.debug_struct(name.as_str())
             .field("provider", &self.provider)
             .field("instructions", &self.instructions)
             .finish()

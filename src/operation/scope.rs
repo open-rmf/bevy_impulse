@@ -796,7 +796,10 @@ where
         // Check if there are any cleanup workflows waiting to be run. If not,
         // the workflow can fully terminate.
         FinishCleanup::<Response>::check_awaiting_session(
-            finish_cleanup, scoped_session, world, roster,
+            finish_cleanup,
+            scoped_session,
+            world,
+            roster,
         )?;
 
         Ok(())
@@ -1246,7 +1249,11 @@ impl<T: 'static + Send + Sync> Operation for FinishCleanup<T> {
         }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let Some(Input { session: cancellation_session, .. }) = source_mut.try_take_input::<()>()? else {
+        let Some(Input {
+            session: cancellation_session,
+            ..
+        }) = source_mut.try_take_input::<()>()?
+        else {
             return Ok(());
         };
 

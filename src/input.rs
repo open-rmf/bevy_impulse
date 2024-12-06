@@ -26,9 +26,9 @@ use smallvec::SmallVec;
 use backtrace::Backtrace;
 
 use crate::{
-    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, OperationError,
-    MiscellaneousFailure, OperationRoster, OrBroken, SessionStatus,
-    UnhandledErrors, UnusedTarget, Detached,
+    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, Detached,
+    MiscellaneousFailure, OperationError, OperationRoster, OrBroken, SessionStatus,
+    UnhandledErrors, UnusedTarget,
 };
 
 /// This contains data that has been provided as input into an operation, along
@@ -78,7 +78,9 @@ pub(crate) struct InputTypeIndicator {
 
 impl InputTypeIndicator {
     fn new<T>() -> Self {
-        Self { name: std::any::type_name::<T>() }
+        Self {
+            name: std::any::type_name::<T>(),
+        }
     }
 }
 
@@ -232,7 +234,8 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
 
             // However in this case, the target is not unused but also does not
             // have the correct input storage type. This indicates
-            self.world_mut().get_resource_or_insert_with(|| UnhandledErrors::default())
+            self.world_mut()
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .miscellaneous
                 .push(MiscellaneousFailure {
                     error: std::sync::Arc::new(anyhow::anyhow!(
