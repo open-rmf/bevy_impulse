@@ -8,13 +8,13 @@ use log::debug;
 use crate::{Builder, InputSlot, StreamPack};
 
 use super::{
-    Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode, DynOutput, DynScope,
-    DynSplitOutputs, NodeOp, NodeRegistration, NodeRegistry, OperationId, ScopeStart,
-    ScopeTerminate, SplitOpParams, StartOp,
+    transform::transform_output, Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode,
+    DynOutput, DynScope, DynSplitOutputs, NodeOp, NodeRegistration, NodeRegistry, OperationId,
+    ScopeStart, ScopeTerminate, SplitOpParams, StartOp,
 };
 
 #[allow(unused_variables)]
-trait ConnectionChainOps {
+trait OutputOperations {
     fn fork_clone(
         &self,
         builder: &mut Builder,
@@ -68,12 +68,12 @@ trait ConnectionChainOps {
     }
 }
 
-struct NodeConnectionChainOps<'a> {
+struct NodeOutputOperations<'a> {
     registry: &'a NodeRegistry,
     registration: &'a NodeRegistration,
 }
 
-impl<'a> NodeConnectionChainOps<'a> {
+impl<'a> NodeOutputOperations<'a> {
     fn new(registry: &'a NodeRegistry, registration: &'a NodeRegistration) -> Self {
         Self {
             registry,
@@ -82,7 +82,7 @@ impl<'a> NodeConnectionChainOps<'a> {
     }
 }
 
-impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
+impl<'a> OutputOperations for NodeOutputOperations<'a> {
     fn fork_clone(
         &self,
         builder: &mut Builder,
@@ -168,7 +168,7 @@ impl<'a> ConnectionChainOps for NodeConnectionChainOps<'a> {
 
 struct StartConnectionChainOps;
 
-impl ConnectionChainOps for StartConnectionChainOps {
+impl OutputOperations for StartConnectionChainOps {
     fn fork_clone(
         &self,
         builder: &mut Builder,
@@ -185,7 +185,7 @@ impl ConnectionChainOps for StartConnectionChainOps {
 
 struct ConnectionSource<T> {
     output: DynOutput,
-    chain_ops: T,
+    ops: T,
 }
 
 pub struct WorkflowBuilder<'b> {
@@ -276,7 +276,7 @@ impl<'b> WorkflowBuilder<'b> {
             builder,
             ConnectionSource {
                 output: source_node.output,
-                chain_ops: NodeConnectionChainOps::new(&self.registry, source_registration),
+                ops: NodeOutputOperations::new(&self.registry, source_registration),
             },
             target_op_id,
             scope.terminate,
@@ -295,7 +295,7 @@ impl<'b> WorkflowBuilder<'b> {
             builder,
             ConnectionSource {
                 output: scope.input.into(),
-                chain_ops: StartConnectionChainOps {},
+                ops: StartConnectionChainOps {},
             },
             target_op_id,
             scope.terminate,
@@ -310,12 +310,9 @@ impl<'b> WorkflowBuilder<'b> {
         terminate: InputSlot<ScopeTerminate>,
     ) -> Result<(), DiagramError>
     where
-        Ops: ConnectionChainOps,
+        Ops: OutputOperations,
     {
-        let ConnectionSource {
-            output,
-            chain_ops: ops,
-        } = source;
+        let ConnectionSource { output, ops } = source;
 
         struct State<'a> {
             op_id: &'a OperationId,
@@ -338,7 +335,7 @@ impl<'b> WorkflowBuilder<'b> {
                 DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
                 DiagramOperation::Node(node_op) => {
                     let reg = self.registry.get_registration(&node_op.node_id)?;
-                    let node_conn = NodeConnectionChainOps::new(&self.registry, reg);
+                    let node_conn = NodeOutputOperations::new(&self.registry, reg);
                     let input = self.inputs[state.op_id];
                     let mapped_output = ops.sender(builder, state.output, input.type_id)?;
                     let mapped_output =
@@ -405,6 +402,14 @@ impl<'b> WorkflowBuilder<'b> {
                             output: outputs.remaining,
                         });
                     }
+                }
+                DiagramOperation::Transform(transform_op) => {
+                    let transformed_output =
+                        transform_output(builder, self.registry, state.output, transform_op)?;
+                    to_visit.push(State {
+                        op_id: &transform_op.next,
+                        output: transformed_output.into(),
+                    });
                 }
                 DiagramOperation::Dispose => {}
             }

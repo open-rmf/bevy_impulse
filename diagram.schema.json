@@ -127,6 +127,7 @@
           }
         },
         {
+          "description": "If the request is a list-like or map-like object, splits it into multiple responses.\n\n# Examples ```json { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } ```",
           "type": "object",
           "oneOf": [
             {
@@ -179,6 +180,30 @@
           }
         },
         {
+          "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } }\"#); ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } }\"#); ```",
+          "type": "object",
+          "required": [
+            "cel",
+            "next",
+            "type"
+          ],
+          "properties": {
+            "cel": {
+              "type": "string"
+            },
+            "next": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "transform"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Drops the request, equivalent to a no-op.",
           "type": "object",
           "required": [
             "type"

@@ -591,7 +591,7 @@ impl NodeRegistry {
     ///
     /// This is a equivalent to
     ///
-    /// ```ignore
+    /// ```text
     /// registry.registration_builder().register_node(f)
     /// ```
     pub fn register_node<Config, Request, Response, Streams: StreamPack>(

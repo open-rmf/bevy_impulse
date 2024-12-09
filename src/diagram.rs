@@ -4,6 +4,7 @@ mod impls;
 mod node_registry;
 mod serialization;
 mod split_serialized;
+mod transform;
 mod unzip;
 mod workflow_builder;
 
@@ -11,6 +12,7 @@ use log::debug;
 pub use node_registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
+use transform::{TransformError, TransformOp};
 pub use workflow_builder::*;
 
 // ----------
@@ -82,13 +84,179 @@ pub struct SplitOp {
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum DiagramOperation {
+    /// Signifies the start of a workflow. There must be exactly 1 start operation in a diagram.
     Start(StartOp),
+
+    /// Signifies the end of a workflow. There must be exactly 1 terminate operation in a diagram.
     Terminate(TerminateOp),
+
+    /// Connects the request to a registered node.
+    ///
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "nodeOp"
+    ///     },
+    ///     "nodeOp": {
+    ///         "type": "node",
+    ///         "nodeId": "myNode",
+    ///         "next": "terminate"
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
     Node(NodeOp),
+
+    /// If the request is cloneable, clone it into multiple responses.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "forkClone"
+    ///     },
+    ///     "forkClone": {
+    ///         "type": "forkClone",
+    ///         "next": ["terminate"]
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
     ForkClone(ForkCloneOp),
+
+    /// If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses
+    /// of T1, T2, T3, ...
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "unzip"
+    ///     },
+    ///     "unzip": {
+    ///         "type": "unzip",
+    ///         "next": ["terminate"]
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
     Unzip(UnzipOp),
+
+    /// If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "forkResult"
+    ///     },
+    ///     "forkResult": {
+    ///         "type": "forkResult",
+    ///         "ok": "terminate",
+    ///         "err": "dispose"
+    ///     },
+    ///     "dispose": {
+    ///         "type": "dispose"
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
     ForkResult(ForkResultOp),
+
+    /// If the request is a list-like or map-like object, splits it into multiple responses.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "split"
+    ///     },
+    ///     "split": {
+    ///         "type": "split",
+    ///         "index": ["terminate"]
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Split(SplitOp),
+
+    /// If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program.
+    /// The context includes a "request" variable which contains the request.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "transform"
+    ///     },
+    ///     "transform": {
+    ///         "type": "transform",
+    ///         "cel": "request.name",
+    ///         "next": "terminate"
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    ///
+    /// Note that due to how `serde_json` performs serialization, positive integers are always
+    /// serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so
+    /// it is recommended to always perform explicit casts.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "start": {
+    ///         "type": "start",
+    ///         "next": "transform"
+    ///     },
+    ///     "transform": {
+    ///         "type": "transform",
+    ///         "cel": "int(request.score) * 3",
+    ///         "next": "terminate"
+    ///     },
+    ///     "terminate": {
+    ///         "type": "terminate"
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    Transform(TransformOp),
+
+    /// Drops the request, equivalent to a no-op.
     Dispose,
 }
 
@@ -237,6 +405,7 @@ pub enum DiagramError {
     NotUnzippable,
     CannotForkResult,
     NotSplittable,
+    CannotTransform(TransformError),
     BadInterconnectChain,
     JsonError(serde_json::Error),
     ConnectionError(Box<dyn Error>),
@@ -261,6 +430,7 @@ impl Display for DiagramError {
                 "node must be registered with \"with_fork_result()\" to be able to perform fork result",
             ),
             Self::NotSplittable => f.write_str("response cannot be splitted"),
+            Self::CannotTransform(err) => err.fmt(f),
             Self::BadInterconnectChain => {
                 f.write_str("an interconnect like forkClone cannot connect to another interconnect")
             }
@@ -275,6 +445,7 @@ impl Error for DiagramError {
         match self {
             Self::JsonError(err) => Some(err),
             Self::ConnectionError(inner) => Some(inner.as_ref()),
+            Self::CannotTransform(inner) => Some(inner),
             _ => None,
         }
     }
@@ -292,98 +463,22 @@ impl From<SplitConnectionError> for DiagramError {
     }
 }
 
+impl From<TransformError> for DiagramError {
+    fn from(value: TransformError) -> Self {
+        DiagramError::CannotTransform(value)
+    }
+}
+
+#[cfg(test)]
+mod testing;
+
 #[cfg(test)]
 mod tests {
-    use crate::{testing::TestingContext, CancellationCause, Promise, RequestExt};
+    use crate::{testing::TestingContext, CancellationCause, RequestExt};
     use test_log::test;
+    use testing::{new_registry_with_basic_nodes, unwrap_promise};
 
     use super::*;
-
-    fn unwrap_promise<T>(mut p: Promise<T>) -> T {
-        let taken = p.take();
-        if taken.is_available() {
-            taken.available().unwrap()
-        } else {
-            panic!("{:?}", taken.cancellation().unwrap())
-        }
-    }
-
-    fn multiply3(i: i64) -> i64 {
-        i * 3
-    }
-
-    fn multiply3_5(x: i64) -> (i64, i64) {
-        (x * 3, x * 5)
-    }
-
-    struct Unserializable;
-
-    fn opaque(_: Unserializable) -> Unserializable {
-        Unserializable {}
-    }
-
-    fn opaque_request(_: Unserializable) {}
-
-    fn opaque_response(_: i64) -> Unserializable {
-        Unserializable {}
-    }
-
-    /// create a new node registry with some basic nodes registered
-    fn new_registry_with_basic_nodes() -> NodeRegistry {
-        let mut registry = NodeRegistry::default();
-        registry.register_node(
-            "multiply3",
-            "multiply3",
-            |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
-        );
-        registry
-            .registration_builder()
-            .with_response_cloneable()
-            .register_node(
-                "multiply3_cloneable",
-                "multiply3_cloneable",
-                |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
-            );
-        registry
-            .registration_builder()
-            .with_unzippable()
-            .register_node(
-                "multiply3_5",
-                "multiply3_5",
-                |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
-            );
-
-        registry.register_node(
-            "multiplyBy",
-            "multiplyBy",
-            |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
-        );
-
-        registry
-            .registration_builder()
-            .with_opaque_request()
-            .with_opaque_response()
-            .register_node("opaque", "opaque", |builder: &mut Builder, _config: ()| {
-                builder.create_map_block(opaque)
-            });
-        registry
-            .registration_builder()
-            .with_opaque_request()
-            .register_node(
-                "opaque_request",
-                "opaque_request",
-                |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
-            );
-        registry
-            .registration_builder()
-            .with_opaque_response()
-            .register_node(
-                "opaque_response",
-                "opaque_response",
-                |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
-            );
-        registry
-    }
 
     #[test]
     fn test_no_terminate() {
@@ -1444,5 +1539,58 @@ mod tests {
             context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
         context.run_while_pending(&mut promise);
         assert_eq!(promise.take().available().unwrap(), 28);
+    }
+
+    /// Test that we can transform on a slot of a unzipped response. Operations which changes
+    /// the output type has extra serialization logic.
+    #[test]
+    fn test_transform_unzip() {
+        let mut context = TestingContext::minimal_plugins();
+        let registry = new_registry_with_basic_nodes();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "transform".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["transform".to_string()],
+                    }),
+                ),
+                (
+                    "transform".to_string(),
+                    DiagramOperation::Transform(TransformOp {
+                        cel: "777".to_string(),
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        let result = unwrap_promise(promise);
+        assert_eq!(result, 777);
     }
 }
