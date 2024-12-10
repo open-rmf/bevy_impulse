@@ -17,19 +17,35 @@
 
 use std::{collections::HashMap, usize};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
+    Builder, Chain, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
     OperationResult, SplitDispatcher, Splittable,
 };
 
 use super::{
     impls::{DefaultImpl, NotSupported},
     register_serialize, DiagramError, DynOutput, NodeRegistry, OperationId, SerializeMessage,
-    SplitOpParams,
 };
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitOp {
+    #[serde(flatten)]
+    pub(super) params: SplitOpParams,
+
+    pub(super) remaining: Option<OperationId>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SplitOpParams {
+    Index(Vec<OperationId>),
+    Key(HashMap<String, OperationId>),
+}
 
 impl Splittable for Value {
     type Key = MapSplitKey<String>;
@@ -113,7 +129,9 @@ impl Splittable for Value {
 }
 
 /// Where was this positioned within the JSON structure.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 pub enum JsonPosition {
     /// This was the only item, e.g. the [`Value`] was a [`Null`][Value::Null],
     /// [`Bool`][Value::Bool], [`Number`][Value::Number], or [`String`][Value::String].
@@ -140,13 +158,50 @@ pub struct DynSplitOutputs<'a> {
     pub(super) remaining: DynOutput,
 }
 
+pub(super) fn split_chain<'a, T>(
+    chain: Chain<T>,
+    split_op: &'a SplitOp,
+) -> Result<DynSplitOutputs<'a>, DiagramError>
+where
+    T: Send + Sync + 'static + Splittable,
+    T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
+{
+    chain.split(|mut sb| -> Result<DynSplitOutputs, DiagramError> {
+        let outputs = match &split_op.params {
+            SplitOpParams::Index(v) => {
+                let outputs: HashMap<_, _> = v
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, op_id)| -> Result<(_, DynOutput), DiagramError> {
+                        Ok((op_id, sb.sequential_output(i)?.into()))
+                    })
+                    .collect::<Result<_, _>>()?;
+                outputs
+            }
+            SplitOpParams::Key(v) => {
+                let outputs: HashMap<_, _> = v
+                    .into_iter()
+                    .map(|(k, op_id)| -> Result<(_, DynOutput), DiagramError> {
+                        Ok((op_id, sb.specific_output(k.clone())?.into()))
+                    })
+                    .collect::<Result<_, _>>()?;
+                outputs
+            }
+        };
+        Ok(DynSplitOutputs {
+            outputs,
+            remaining: sb.remaining_output()?.into(),
+        })
+    })
+}
+
 pub trait DynSplit<T, Serializer> {
     const SUPPORTED: bool;
 
     fn dyn_split<'a>(
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'a SplitOpParams,
+        split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError>;
 
     fn register_serialize(registry: &mut NodeRegistry);
@@ -158,7 +213,7 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
     fn dyn_split<'a>(
         _builder: &mut Builder,
         _output: DynOutput,
-        _split_op: &'a SplitOpParams,
+        _split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError> {
         Err(DiagramError::NotSplittable)
     }
@@ -177,36 +232,10 @@ where
     fn dyn_split<'a>(
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'a SplitOpParams,
+        split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError> {
         let chain = output.into_output::<T>().chain(builder);
-        chain.split(|mut sp| -> Result<DynSplitOutputs, DiagramError> {
-            let outputs = match split_op {
-                SplitOpParams::Index(v) => {
-                    let outputs: HashMap<_, _> = v
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, op_id)| -> Result<(_, DynOutput), DiagramError> {
-                            Ok((op_id, sp.sequential_output(i)?.into()))
-                        })
-                        .collect::<Result<_, _>>()?;
-                    outputs
-                }
-                SplitOpParams::Key(v) => {
-                    let outputs: HashMap<_, _> = v
-                        .into_iter()
-                        .map(|(k, op_id)| -> Result<(_, DynOutput), DiagramError> {
-                            Ok((op_id, sp.specific_output(k.clone())?.into()))
-                        })
-                        .collect::<Result<_, _>>()?;
-                    outputs
-                }
-            };
-            Ok(DynSplitOutputs {
-                outputs,
-                remaining: sp.remaining_output()?.into(),
-            })
-        })
+        split_chain(chain, split_op)
     }
 
     fn register_serialize(registry: &mut NodeRegistry) {
@@ -216,7 +245,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::{testing::*, *};
+    use diagram::testing::new_registry_with_basic_nodes;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
@@ -326,5 +358,303 @@ mod tests {
 
         let result: Person = promise.take().available().unwrap();
         assert_eq!(result, Person::new("Charlie", 42));
+    }
+
+    #[test]
+    fn test_split_list() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_list(_: i64) -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_list",
+                "split_list",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_list".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Index(vec!["terminate".to_string()]),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 1);
+    }
+
+    #[test]
+    fn test_split_list_with_key() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_list(_: i64) -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_list",
+                "split_list",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_list".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Key(HashMap::from([(
+                            "1".to_string(),
+                            "terminate".to_string(),
+                        )])),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 2);
+    }
+
+    #[test]
+    fn test_split_map() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_map(_: i64) -> HashMap<String, i64> {
+            HashMap::from([
+                ("a".to_string(), 1),
+                ("b".to_string(), 2),
+                ("c".to_string(), 3),
+            ])
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_map",
+                "split_map",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_map".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Key(HashMap::from([(
+                            "b".to_string(),
+                            "terminate".to_string(),
+                        )])),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 2);
+    }
+
+    #[test]
+    fn test_split_remaining() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn split_list(_: i64) -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        registry
+            .registration_builder()
+            .with_splittable()
+            .register_node(
+                "split_list",
+                "split_list",
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
+            );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "split_list".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Index(vec!["dispose".to_string()]),
+                        remaining: Some("terminate".to_string()),
+                    }),
+                ),
+                ("dispose".to_string(), DiagramOperation::Dispose),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &registry)
+            .unwrap();
+        let mut promise =
+            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap()[1], 2);
+    }
+
+    #[test]
+    fn test_split_start() {
+        let mut registry = new_registry_with_basic_nodes();
+        let mut context = TestingContext::minimal_plugins();
+
+        fn get_split_value(pair: (JsonPosition, serde_json::Value)) -> serde_json::Value {
+            pair.1
+        }
+
+        registry.register_node(
+            "get_split_value",
+            "get_split_value",
+            |builder, _config: ()| builder.create_map_block(get_split_value),
+        );
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "split".to_string(),
+                    }),
+                ),
+                (
+                    "split".to_string(),
+                    DiagramOperation::Split(SplitOp {
+                        params: SplitOpParams::Index(vec!["get_split_value".to_string()]),
+                        remaining: None,
+                    }),
+                ),
+                (
+                    "get_split_value".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "get_split_value".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let w = diagram
+            .spawn_io_workflow(&mut context.app, &registry)
+            .unwrap();
+        let mut promise = context.command(|cmds| {
+            cmds.request(
+                serde_json::to_value(HashMap::from([("test".to_string(), 1)])).unwrap(),
+                w,
+            )
+            .take_response()
+        });
+        context.run_while_pending(&mut promise);
+        assert_eq!(promise.take().available().unwrap(), 1);
     }
 }

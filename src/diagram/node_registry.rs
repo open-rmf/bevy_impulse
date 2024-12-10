@@ -8,7 +8,7 @@ use schemars::{
     schema::Schema,
     JsonSchema,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, ser::SerializeStruct, Serialize};
 
 use crate::{RequestMetadata, SerializeMessage};
 
@@ -20,7 +20,7 @@ use super::{
     unzip::DynUnzip,
     DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
     DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata,
-    SplitOpParams,
+    SplitOp,
 };
 
 /// A type erased [`bevy_impulse::InputSlot`]
@@ -34,10 +34,6 @@ pub struct DynInputSlot {
 impl DynInputSlot {
     pub(super) fn into_input<T>(self) -> InputSlot<T> {
         InputSlot::<T>::new(self.scope, self.source)
-    }
-
-    pub(super) fn id(&self) -> Entity {
-        self.source
     }
 }
 
@@ -67,10 +63,6 @@ impl DynOutput {
         T: Send + Sync + 'static,
     {
         Output::<T>::new(self.scope, self.target)
-    }
-
-    pub(super) fn id(&self) -> Entity {
-        self.target
     }
 }
 
@@ -133,25 +125,25 @@ pub struct NodeRegistration {
     pub(super) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    create_node_impl:
+    pub(super) create_node_impl:
         RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>,
 
-    fork_clone_impl:
+    pub(super) fork_clone_impl:
         Option<Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>>,
 
-    unzip_impl:
+    pub(super) unzip_impl:
         Option<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
 
-    fork_result_impl: Option<
+    pub(super) fork_result_impl: Option<
         Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
     >,
 
-    split_impl: Option<
+    pub(super) split_impl: Option<
         Box<
             dyn for<'a> Fn(
                 &mut Builder,
                 DynOutput,
-                &'a SplitOpParams,
+                &'a SplitOp,
             ) -> Result<DynSplitOutputs<'a>, DiagramError>,
         >,
     >,
@@ -169,56 +161,6 @@ impl NodeRegistration {
             self.metadata.id, n.output.target, n.input.source
         );
         Ok(n)
-    }
-
-    pub(super) fn fork_clone(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        let f = self
-            .fork_clone_impl
-            .as_ref()
-            .ok_or(DiagramError::NotCloneable)?;
-        f(builder, output, amount)
-    }
-
-    pub(super) fn unzip(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        let f = self
-            .unzip_impl
-            .as_ref()
-            .ok_or(DiagramError::NotUnzippable)?;
-        f(builder, output)
-    }
-
-    pub(super) fn fork_result(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
-        let f = self
-            .fork_result_impl
-            .as_ref()
-            .ok_or(DiagramError::CannotForkResult)?;
-        f(builder, output)
-    }
-
-    pub(super) fn split<'a>(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        split_op: &'a SplitOpParams,
-    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
-        let f = self
-            .split_impl
-            .as_ref()
-            .ok_or(DiagramError::NotSplittable)?;
-        f(builder, output, split_op)
     }
 }
 
@@ -328,8 +270,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
                 None
             },
             split_impl: if SplitImpl::SUPPORTED {
-                Some(Box::new(|builder, output, params| {
-                    SplitImpl::dyn_split(builder, output, params)
+                Some(Box::new(|builder, output, split_op| {
+                    SplitImpl::dyn_split(builder, output, split_op)
                 }))
             } else {
                 None
@@ -475,40 +417,17 @@ where
     }
 }
 
-/// Serializes the node registrations as a map of node metadata.
-fn serialize_node_registry_nodes<S>(
-    nodes: &HashMap<&'static str, NodeRegistration>,
-    s: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    s.collect_map(nodes.iter().map(|(k, v)| (*k, &v.metadata)))
-}
-
-fn serialize_node_registry_types<S>(gen: &SchemaGenerator, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    gen.definitions().serialize(s)
-}
-
-#[derive(Serialize)]
 pub struct NodeRegistry {
-    #[serde(serialize_with = "serialize_node_registry_nodes")]
     nodes: HashMap<&'static str, NodeRegistration>,
 
     /// List of all request and response types used in all registered nodes, this only
     /// contains serializable types, non serializable types are opaque and is only compatible
     /// with itself.
-    #[serde(rename = "types", serialize_with = "serialize_node_registry_types")]
     gen: SchemaGenerator,
 
-    #[serde(skip)]
     pub(super) deserialize_impls:
         HashMap<TypeId, Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> DynOutput>>,
 
-    #[serde(skip)]
     pub(super) serialize_impls:
         HashMap<TypeId, Box<dyn Fn(&mut Builder, DynOutput) -> Output<serde_json::Value>>>,
 }
@@ -615,6 +534,39 @@ impl NodeRegistry {
         self.nodes
             .get(k)
             .ok_or(DiagramError::NodeNotFound(k.to_string()))
+    }
+}
+
+impl Serialize for NodeRegistry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("NodeRegistry", 2)?;
+        // serialize only the nodes metadata
+        s.serialize_field(
+            "nodes",
+            // Since the serializer methods are consuming, we can't call `serialize_struct` and `collect_map`.
+            // This genius solution of creating an inline struct and impl `Serialize` on it is based on
+            // the code that `#[derive(Serialize)]` generates.
+            {
+                struct SerializeWith<'a> {
+                    value: &'a NodeRegistry,
+                }
+                impl<'a> Serialize for SerializeWith<'a> {
+                    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                    where
+                        S: serde::Serializer,
+                    {
+                        serializer
+                            .collect_map(self.value.nodes.iter().map(|(k, v)| (*k, &v.metadata)))
+                    }
+                }
+                &SerializeWith { value: self }
+            },
+        )?;
+        s.serialize_field("types", self.gen.definitions())?;
+        s.end()
     }
 }
 

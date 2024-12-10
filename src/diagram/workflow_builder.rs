@@ -3,93 +3,69 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-use log::debug;
-
-use crate::{Builder, InputSlot, StreamPack};
+use crate::{Builder, InputSlot, Output, StreamPack};
 
 use super::{
-    transform::transform_output, Diagram, DiagramError, DiagramOperation, DynInputSlot, DynNode,
-    DynOutput, DynScope, DynSplitOutputs, NodeOp, NodeRegistration, NodeRegistry, OperationId,
-    ScopeStart, ScopeTerminate, SplitOpParams, StartOp,
+    split_chain, transform::transform_output, Diagram, DiagramError, DiagramOperation,
+    DynInputSlot, DynNode, DynOutput, DynScope, DynSplitOutputs, NodeOp, NodeRegistration,
+    NodeRegistry, OperationId, ScopeStart, ScopeTerminate, SplitOp, StartOp,
 };
 
-#[allow(unused_variables)]
 trait OutputOperations {
     fn fork_clone(
         &self,
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        Err(DiagramError::NotCloneable)
-    }
+    ) -> Result<Vec<DynOutput>, DiagramError>;
 
     fn unzip(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        Err(DiagramError::NotUnzippable)
-    }
+    ) -> Result<Vec<DynOutput>, DiagramError>;
 
     fn fork_result(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
-        Err(DiagramError::CannotForkResult)
-    }
+    ) -> Result<(DynOutput, DynOutput), DiagramError>;
 
     fn split<'a>(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'a SplitOpParams,
-    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
-        Err(DiagramError::NotSplittable)
-    }
+        split_op: &'a SplitOp,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError>;
 
-    fn receiver(
+    fn deserialize(
+        &self,
+        builder: &mut Builder,
+        output: Output<serde_json::Value>,
+        input_type: TypeId,
+        registry: &NodeRegistry,
+    ) -> Result<DynOutput, DiagramError>;
+
+    fn serialize(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        input_type: TypeId,
-    ) -> Result<DynOutput, DiagramError> {
-        Ok(output)
-    }
-
-    fn sender(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        input_type: TypeId,
-    ) -> Result<DynOutput, DiagramError> {
-        Ok(output)
-    }
+        registry: &NodeRegistry,
+    ) -> Result<Output<serde_json::Value>, DiagramError>;
 }
 
-struct NodeOutputOperations<'a> {
-    registry: &'a NodeRegistry,
-    registration: &'a NodeRegistration,
-}
-
-impl<'a> NodeOutputOperations<'a> {
-    fn new(registry: &'a NodeRegistry, registration: &'a NodeRegistration) -> Self {
-        Self {
-            registry,
-            registration,
-        }
-    }
-}
-
-impl<'a> OutputOperations for NodeOutputOperations<'a> {
+impl OutputOperations for &NodeRegistration {
     fn fork_clone(
         &self,
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
     ) -> Result<Vec<DynOutput>, DiagramError> {
-        self.registration.fork_clone(builder, output, amount)
+        let f = self
+            .fork_clone_impl
+            .as_ref()
+            .ok_or(DiagramError::NotCloneable)?;
+        f(builder, output, amount)
     }
 
     fn unzip(
@@ -97,7 +73,11 @@ impl<'a> OutputOperations for NodeOutputOperations<'a> {
         builder: &mut Builder,
         output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramError> {
-        self.registration.unzip(builder, output)
+        let f = self
+            .unzip_impl
+            .as_ref()
+            .ok_or(DiagramError::NotUnzippable)?;
+        f(builder, output)
     }
 
     fn fork_result(
@@ -105,70 +85,61 @@ impl<'a> OutputOperations for NodeOutputOperations<'a> {
         builder: &mut Builder,
         output: DynOutput,
     ) -> Result<(DynOutput, DynOutput), DiagramError> {
-        self.registration.fork_result(builder, output)
+        let f = self
+            .fork_result_impl
+            .as_ref()
+            .ok_or(DiagramError::CannotForkResult)?;
+        f(builder, output)
     }
 
-    fn split<'b>(
+    fn split<'a>(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'b SplitOpParams,
-    ) -> Result<DynSplitOutputs<'b>, DiagramError> {
-        self.registration.split(builder, output, split_op)
+        split_op: &'a SplitOp,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        let f = self
+            .split_impl
+            .as_ref()
+            .ok_or(DiagramError::NotSplittable)?;
+        f(builder, output, split_op)
     }
 
-    fn receiver(
+    fn deserialize(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
+        output: Output<serde_json::Value>,
         input_type: TypeId,
+        registry: &NodeRegistry,
     ) -> Result<DynOutput, DiagramError> {
-        if output.type_id != TypeId::of::<serde_json::Value>() {
-            return Ok(output);
+        if !self.metadata.request.deserializable {
+            Err(DiagramError::NotSerializable)
+        } else {
+            let deserialize = &registry.deserialize_impls[&input_type];
+            Ok(deserialize(builder, output))
         }
-        // don't need to deserialize if input is also json
-        if input_type == TypeId::of::<serde_json::Value>() {
-            return Ok(output);
-        }
-        if !self.registration.metadata.request.deserializable {
-            return Err(DiagramError::NotSerializable);
-        }
-        let deserialize = self
-            .registry
-            .deserialize_impls
-            .get(&input_type)
-            .ok_or(DiagramError::NotSerializable)?;
-        Ok(deserialize(builder, output.into_output()))
     }
 
-    fn sender(
+    fn serialize(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        input_type: TypeId,
-    ) -> Result<DynOutput, DiagramError> {
-        if input_type != TypeId::of::<serde_json::Value>() {
-            return Ok(output);
-        }
-        // don't need to serialize if output is already json
+        registry: &NodeRegistry,
+    ) -> Result<Output<serde_json::Value>, DiagramError> {
         if output.type_id == TypeId::of::<serde_json::Value>() {
-            return Ok(output);
+            Ok(output.into_output())
+        } else if !self.metadata.response.serializable {
+            Err(DiagramError::NotSerializable)
+        } else {
+            let serialize = &registry.serialize_impls[&output.type_id];
+            Ok(serialize(builder, output))
         }
-        if !self.registration.metadata.response.serializable {
-            return Err(DiagramError::NotSerializable);
-        }
-        let serialize = self
-            .registry
-            .serialize_impls
-            .get(&output.type_id)
-            .ok_or(DiagramError::NotSerializable)?;
-        Ok(serialize(builder, output).into())
     }
 }
 
-struct StartConnectionChainOps;
+struct JsonOutputOperations;
 
-impl OutputOperations for StartConnectionChainOps {
+impl OutputOperations for JsonOutputOperations {
     fn fork_clone(
         &self,
         builder: &mut Builder,
@@ -181,11 +152,56 @@ impl OutputOperations for StartConnectionChainOps {
             .map(|_| fork_clone.clone_output(builder).into())
             .collect())
     }
+
+    fn unzip(
+        &self,
+        _builder: &mut Builder,
+        _output: DynOutput,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        Err(DiagramError::NotUnzippable)
+    }
+
+    fn fork_result(
+        &self,
+        _builder: &mut Builder,
+        _output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+        Err(DiagramError::CannotForkResult)
+    }
+
+    fn split<'a>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOp,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        let chain = output.into_output::<serde_json::Value>().chain(builder);
+        split_chain(chain, split_op)
+    }
+
+    fn deserialize(
+        &self,
+        _builder: &mut Builder,
+        output: Output<serde_json::Value>,
+        _input_type: TypeId,
+        _registry: &NodeRegistry,
+    ) -> Result<DynOutput, DiagramError> {
+        Ok(output.into())
+    }
+
+    fn serialize(
+        &self,
+        _builder: &mut Builder,
+        output: DynOutput,
+        _registry: &NodeRegistry,
+    ) -> Result<Output<serde_json::Value>, DiagramError> {
+        Ok(output.into_output())
+    }
 }
 
-struct ConnectionSource<T> {
+struct ConnectionSource<Ops> {
     output: DynOutput,
-    ops: T,
+    ops: Ops,
 }
 
 pub struct WorkflowBuilder<'b> {
@@ -244,12 +260,11 @@ impl<'b> WorkflowBuilder<'b> {
             .map_err(|_| DiagramError::OperationNotFound(op_id.clone()))
     }
 
-    fn connect_output(
+    fn dyn_connect(
         builder: &mut Builder,
         output: DynOutput,
         input: DynInputSlot,
     ) -> Result<(), DiagramError> {
-        debug!("connect [{:?}] to [{:?}]", output.id(), input.id());
         if output.type_id != input.type_id {
             Err(DiagramError::TypeMismatch)
         } else {
@@ -276,7 +291,7 @@ impl<'b> WorkflowBuilder<'b> {
             builder,
             ConnectionSource {
                 output: source_node.output,
-                ops: NodeOutputOperations::new(&self.registry, source_registration),
+                ops: source_registration,
             },
             target_op_id,
             scope.terminate,
@@ -295,7 +310,7 @@ impl<'b> WorkflowBuilder<'b> {
             builder,
             ConnectionSource {
                 output: scope.input.into(),
-                ops: StartConnectionChainOps {},
+                ops: JsonOutputOperations {},
             },
             target_op_id,
             scope.terminate,
@@ -334,21 +349,25 @@ impl<'b> WorkflowBuilder<'b> {
             match op {
                 DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
                 DiagramOperation::Node(node_op) => {
-                    let reg = self.registry.get_registration(&node_op.node_id)?;
-                    let node_conn = NodeOutputOperations::new(&self.registry, reg);
                     let input = self.inputs[state.op_id];
-                    let mapped_output = ops.sender(builder, state.output, input.type_id)?;
-                    let mapped_output =
-                        node_conn.receiver(builder, mapped_output, input.type_id)?;
-                    Self::connect_output(builder, mapped_output, input)?;
+                    let output = if state.output.type_id == TypeId::of::<serde_json::Value>() {
+                        let reg = self.registry.get_registration(&node_op.node_id)?;
+                        reg.deserialize(
+                            builder,
+                            state.output.into_output(),
+                            input.type_id,
+                            self.registry,
+                        )?
+                    } else {
+                        state.output
+                    };
+                    Self::dyn_connect(builder, output, input)?;
                 }
                 DiagramOperation::Terminate(_) => {
-                    let mapped_output =
-                        ops.sender(builder, state.output, TypeId::of::<ScopeTerminate>())?;
-                    Self::connect_output(builder, mapped_output, terminate.into())?;
+                    let output = ops.serialize(builder, state.output, self.registry)?;
+                    builder.connect(output, terminate);
                 }
                 DiagramOperation::ForkClone(fork_clone_op) => {
-                    debug!("fork_clone to {:?}", fork_clone_op.next);
                     let outputs =
                         ops.fork_clone(builder, state.output, fork_clone_op.next.len())?;
                     to_visit.extend(fork_clone_op.next.iter().zip(outputs).map(
@@ -359,7 +378,6 @@ impl<'b> WorkflowBuilder<'b> {
                     ));
                 }
                 DiagramOperation::Unzip(unzip_op) => {
-                    debug!("unzip to {:?}", unzip_op.next);
                     let outputs = ops.unzip(builder, state.output)?;
                     if outputs.len() < unzip_op.next.len() {
                         return Err(DiagramError::NotUnzippable);
@@ -372,10 +390,6 @@ impl<'b> WorkflowBuilder<'b> {
                     ));
                 }
                 DiagramOperation::ForkResult(fork_result_op) => {
-                    debug!(
-                        "fork result ok to {:?}, err to {:?}",
-                        fork_result_op.ok, fork_result_op.err
-                    );
                     let (ok_out, err_out) = ops.fork_result(builder, state.output)?;
                     to_visit.push(State {
                         op_id: &fork_result_op.ok,
@@ -387,8 +401,7 @@ impl<'b> WorkflowBuilder<'b> {
                     });
                 }
                 DiagramOperation::Split(split_op) => {
-                    debug!("split {:?}", split_op);
-                    let outputs = ops.split(builder, state.output, &split_op.params)?;
+                    let outputs = ops.split(builder, state.output, split_op)?;
                     for (op_id, output) in outputs.outputs {
                         to_visit.push(State {
                             op_id: &op_id,
