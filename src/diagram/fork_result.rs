@@ -54,12 +54,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use serde_json::json;
 
-    use crate::{
-        diagram::{fork_result::ForkResultOp, testing::DiagramTestFixture},
-        Builder, Diagram, DiagramOperation, NodeOp, StartOp, TerminateOp,
-    };
+    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram};
 
     #[test]
     fn test_fork_result() {
@@ -93,51 +90,36 @@ mod tests {
                 builder.create_map_block(&echo)
             });
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "check_even".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "fork_result".to_string(),
-                    }),
-                ),
-                (
-                    "fork_result".to_string(),
-                    DiagramOperation::ForkResult(ForkResultOp {
-                        ok: "op_2".to_string(),
-                        err: "op_3".to_string(),
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "echo".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "op_3".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "echo".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "check_even",
+                "next": "forkResult",
+            },
+            "forkResult": {
+                "type": "forkResult",
+                "ok": "op2",
+                "err": "op3",
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "echo",
+                "next": "terminate",
+            },
+            "op3": {
+                "type": "node",
+                "nodeId": "echo",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))

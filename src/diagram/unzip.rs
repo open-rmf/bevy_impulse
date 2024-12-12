@@ -79,6 +79,8 @@ all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
 mod tests {
     use std::collections::HashMap;
 
+    use serde_json::json;
+
     use crate::{
         diagram::{testing::DiagramTestFixture, unzip::UnzipOp},
         Diagram, DiagramError, DiagramOperation, NodeOp, StartOp, TerminateOp,
@@ -230,42 +232,30 @@ mod tests {
     fn test_unzip() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_5".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "unzip".to_string(),
-                    }),
-                ),
-                (
-                    "unzip".to_string(),
-                    DiagramOperation::Unzip(UnzipOp {
-                        next: vec!["op_2".to_string()],
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3_5",
+                "next": "unzip",
+            },
+            "unzip": {
+                "type": "unzip",
+                "next": ["op2"],
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -277,43 +267,33 @@ mod tests {
     fn test_unzip_with_dispose() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_5".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "unzip".to_string(),
-                    }),
-                ),
-                (
-                    "unzip".to_string(),
-                    DiagramOperation::Unzip(UnzipOp {
-                        next: vec!["dispose".to_string(), "op_2".to_string()],
-                    }),
-                ),
-                ("dispose".to_string(), DiagramOperation::Dispose),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3_5",
+                "next": "unzip",
+            },
+            "unzip": {
+                "type": "unzip",
+                "next": ["dispose", "op2"],
+            },
+            "dispose": {
+                "type": "dispose",
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))

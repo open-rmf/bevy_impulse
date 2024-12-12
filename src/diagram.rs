@@ -343,8 +343,12 @@ impl Diagram {
         self.spawn_workflow::<()>(app, registry)
     }
 
+    pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(value)
+    }
+
     pub fn from_json_str(s: &str) -> Result<Self, serde_json::Error> {
-        Ok(serde_json::from_str(s)?)
+        serde_json::from_str(s)
     }
 
     pub fn from_reader<R>(r: R) -> Result<Self, serde_json::Error>
@@ -443,6 +447,7 @@ mod testing;
 #[cfg(test)]
 mod tests {
     use crate::{Cancellation, CancellationCause};
+    use serde_json::json;
     use test_log::test;
     use testing::DiagramTestFixture;
 
@@ -452,24 +457,21 @@ mod tests {
     fn test_no_terminate() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_1".to_string(),
-                    }),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "dispose",
+            },
+            "dispose": {
+                "type": "dispose",
+            },
+        }))
+        .unwrap();
 
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -488,22 +490,17 @@ mod tests {
     fn test_no_start() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -522,34 +519,25 @@ mod tests {
     fn test_connect_to_start() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_cloneable".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_2".to_string(),
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::ForkClone(ForkCloneOp {
-                        next: vec!["start".to_string(), "terminate".to_string()],
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3_cloneable",
+                "next": "forkClone",
+            },
+            "forkClone": {
+                "type": "forkClone",
+                "next": ["start", "terminate"],
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let err = diagram
             .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
@@ -561,28 +549,21 @@ mod tests {
     fn test_unserializable_start() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "opaque_request".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "opaque_request",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let err = diagram
             .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
@@ -594,28 +575,21 @@ mod tests {
     fn test_unserializable_terminate() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "opaque_response".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "opaque_response",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let err = diagram
             .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
@@ -627,36 +601,26 @@ mod tests {
     fn test_mismatch_types() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_2".to_string(),
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "opaque_request".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "op2",
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "opaque_request",
+                "next": "terminate"
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let err = diagram
             .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
@@ -668,36 +632,26 @@ mod tests {
     fn test_disconnected() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_2".to_string(),
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "op2",
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "op1",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -712,42 +666,30 @@ mod tests {
     fn test_looping_diagram() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_cloneable".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "fork_clone".to_string(),
-                    }),
-                ),
-                (
-                    "fork_clone".to_string(),
-                    DiagramOperation::ForkClone(ForkCloneOp {
-                        next: vec!["op_1".to_string(), "op_2".to_string()],
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3_cloneable",
+                "next": "forkClone",
+            },
+            "forkClone": {
+                "type": "forkClone",
+                "next": ["op1", "op2"],
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -759,20 +701,16 @@ mod tests {
     fn test_noop_diagram() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -803,7 +741,10 @@ mod tests {
         "#;
 
         let result = fixture
-            .spawn_and_run_serialized(&json_str, serde_json::Value::from(4))
+            .spawn_and_run(
+                &Diagram::from_json_str(json_str).unwrap(),
+                serde_json::Value::from(4),
+            )
             .unwrap();
         assert_eq!(result, 28);
     }
@@ -814,41 +755,30 @@ mod tests {
     fn test_transform_unzip() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "transform".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_5".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "unzip".to_string(),
-                    }),
-                ),
-                (
-                    "unzip".to_string(),
-                    DiagramOperation::Unzip(UnzipOp {
-                        next: vec!["transform".to_string()],
-                    }),
-                ),
-                (
-                    "transform".to_string(),
-                    DiagramOperation::Transform(TransformOp {
-                        cel: "777".to_string(),
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3_5",
+                "next": "unzip",
+            },
+            "unzip": {
+                "type": "unzip",
+                "next": ["transform"],
+            },
+            "transform": {
+                "type": "transform",
+                "cel": "777",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))

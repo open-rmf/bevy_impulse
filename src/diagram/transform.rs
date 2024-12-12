@@ -69,47 +69,34 @@ pub(super) fn transform_output(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, str::FromStr};
+    use serde_json::json;
 
-    use super::*;
-    use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramOperation, NodeOp, StartOp,
-        TerminateOp,
-    };
+    use crate::{diagram::testing::DiagramTestFixture, Diagram};
 
     #[test]
     fn test_transform_node_response() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "transform".to_string(),
-                    }),
-                ),
-                (
-                    "transform".to_string(),
-                    DiagramOperation::Transform(TransformOp {
-                        cel: "777".to_string(),
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "transform",
+            },
+            "transform": {
+                "type": "transform",
+                "cel": "777",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -121,27 +108,21 @@ mod tests {
     fn test_transform_scope_start() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "transform".to_string(),
-                    }),
-                ),
-                (
-                    "transform".to_string(),
-                    DiagramOperation::Transform(TransformOp {
-                        cel: "777".to_string(),
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "transform",
+            },
+            "transform": {
+                "type": "transform",
+                "cel": "777",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -153,30 +134,21 @@ mod tests {
     fn test_cel_multiply() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "transform".to_string(),
-                    }),
-                ),
-                (
-                    "transform".to_string(),
-                    DiagramOperation::Transform(TransformOp {
-                        // serde_json always serializes a postive int as u64, "request * 3"
-                        // would result in a operation between unsigned and signed, which
-                        // is not supported in CEL.
-                        cel: "int(request) * 3".to_string(),
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "transform",
+            },
+            "transform": {
+                "type": "transform",
+                "cel": "int(request) * 3",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -188,27 +160,21 @@ mod tests {
     fn test_cel_compose() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "transform".to_string(),
-                    }),
-                ),
-                (
-                    "transform".to_string(),
-                    DiagramOperation::Transform(TransformOp {
-                        cel: r#"{ "request": request, "seven": 7 }"#.to_string(),
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "transform",
+            },
+            "transform": {
+                "type": "transform",
+                "cel": "{ \"request\": request, \"seven\": 7 }",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -221,37 +187,26 @@ mod tests {
     fn test_cel_destructure() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "transform".to_string(),
-                    }),
-                ),
-                (
-                    "transform".to_string(),
-                    DiagramOperation::Transform(TransformOp {
-                        cel: r#"request.age"#.to_string(),
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
-
-        let request = serde_json::Value::from_str(
-            r#"
-            {
-                "name": "John",
-                "age": 40
-            }
-            "#,
-        )
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "transform",
+            },
+            "transform": {
+                "type": "transform",
+                "cel": "request.age",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
         .unwrap();
+
+        let request = json!({
+            "name": "John",
+            "age": 40,
+        });
 
         let result = fixture.spawn_and_run(&diagram, request).unwrap();
         assert_eq!(result, 40);

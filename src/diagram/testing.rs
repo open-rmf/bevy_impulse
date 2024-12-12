@@ -17,7 +17,7 @@ impl DiagramTestFixture {
         }
     }
 
-    /// Spawns a workflow from a serialized diagram then run the workflow until completion.
+    /// Spawns a workflow from a diagram then run the workflow until completion.
     /// Returns the result of the workflow.
     pub(super) fn spawn_and_run(
         &mut self,
@@ -38,17 +38,6 @@ impl DiagramTestFixture {
         } else {
             Err(String::from("promise is in invalid state").into())
         }
-    }
-
-    /// Spawns a workflow from a diagram then run the workflow until completion.
-    /// Returns the result of the workflow.
-    pub(super) fn spawn_and_run_serialized(
-        &mut self,
-        json: &str,
-        request: serde_json::Value,
-    ) -> Result<serde_json::Value, Box<dyn Error>> {
-        let diagram = Diagram::from_json_str(json)?;
-        self.spawn_and_run(&diagram, request)
     }
 }
 

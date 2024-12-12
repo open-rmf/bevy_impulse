@@ -378,35 +378,25 @@ mod tests {
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             );
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "split_list".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "split".to_string(),
-                    }),
-                ),
-                (
-                    "split".to_string(),
-                    DiagramOperation::Split(SplitOp {
-                        params: SplitOpParams::Index(vec!["terminate".to_string()]),
-                        remaining: None,
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "split_list",
+                "next": "split",
+            },
+            "split": {
+                "type": "split",
+                "index": ["terminate"],
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -432,38 +422,25 @@ mod tests {
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             );
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "split_list".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "split".to_string(),
-                    }),
-                ),
-                (
-                    "split".to_string(),
-                    DiagramOperation::Split(SplitOp {
-                        params: SplitOpParams::Key(HashMap::from([(
-                            "1".to_string(),
-                            "terminate".to_string(),
-                        )])),
-                        remaining: None,
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "split_list",
+                "next": "split",
+            },
+            "split": {
+                "type": "split",
+                "key": {"1": "terminate"},
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -493,38 +470,25 @@ mod tests {
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
             );
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "split_map".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "split".to_string(),
-                    }),
-                ),
-                (
-                    "split".to_string(),
-                    DiagramOperation::Split(SplitOp {
-                        params: SplitOpParams::Key(HashMap::from([(
-                            "b".to_string(),
-                            "terminate".to_string(),
-                        )])),
-                        remaining: None,
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "split_map",
+                "next": "split",
+            },
+            "split": {
+                "type": "split",
+                "key": {"b": "terminate"},
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -550,36 +514,29 @@ mod tests {
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             );
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "split_list".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "split".to_string(),
-                    }),
-                ),
-                (
-                    "split".to_string(),
-                    DiagramOperation::Split(SplitOp {
-                        params: SplitOpParams::Index(vec!["dispose".to_string()]),
-                        remaining: Some("terminate".to_string()),
-                    }),
-                ),
-                ("dispose".to_string(), DiagramOperation::Dispose),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "op1",
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "split_list",
+                "next": "split",
+            },
+            "split": {
+                "type": "split",
+                "index": ["dispose"],
+                "remaining": "terminate",
+            },
+            "dispose": {
+                "type": "dispose",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
@@ -601,35 +558,25 @@ mod tests {
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "split".to_string(),
-                    }),
-                ),
-                (
-                    "split".to_string(),
-                    DiagramOperation::Split(SplitOp {
-                        params: SplitOpParams::Index(vec!["get_split_value".to_string()]),
-                        remaining: None,
-                    }),
-                ),
-                (
-                    "get_split_value".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "get_split_value".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!({
+            "start": {
+                "type": "start",
+                "next": "split",
+            },
+            "split": {
+                "type": "split",
+                "index": ["getSplitValue"],
+            },
+            "getSplitValue": {
+                "type": "node",
+                "nodeId": "get_split_value",
+                "next": "terminate",
+            },
+            "terminate": {
+                "type": "terminate",
+            },
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(

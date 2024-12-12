@@ -60,12 +60,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use serde_json::json;
 
-    use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramOperation, NodeOp, StartOp,
-        TerminateOp,
-    };
+    use crate::{diagram::testing::DiagramTestFixture, Diagram};
 
     use super::*;
 
@@ -73,43 +70,31 @@ mod tests {
     fn test_fork_clone_uncloneable() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_2".to_string(),
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::ForkClone(ForkCloneOp {
-                        next: vec!["op_3".to_string(), "terminate".to_string()],
-                    }),
-                ),
-                (
-                    "op_3".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
-
+        let diagram = Diagram::from_json(json!(
+        {
+            "start": {
+                "type": "start",
+                "next": "op1"
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "forkClone"
+            },
+            "forkClone": {
+                "type": "forkClone",
+                "next": ["op2"]
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "multiply3",
+                "next": "terminate"
+            },
+            "terminate": {
+                "type": "terminate"
+            }
+        }))
+        .unwrap();
         let err = diagram
             .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
             .unwrap_err();
@@ -120,46 +105,35 @@ mod tests {
     fn test_fork_clone() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram {
-            ops: HashMap::from([
-                (
-                    "start".to_string(),
-                    DiagramOperation::Start(StartOp {
-                        next: "op_1".to_string(),
-                    }),
-                ),
-                (
-                    "op_1".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_cloneable".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "op_2".to_string(),
-                    }),
-                ),
-                (
-                    "op_2".to_string(),
-                    DiagramOperation::ForkClone(ForkCloneOp {
-                        next: vec!["op_3".to_string(), "terminate".to_string()],
-                    }),
-                ),
-                (
-                    "op_3".to_string(),
-                    DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_cloneable".to_string(),
-                        config: serde_json::Value::Null,
-                        next: "terminate".to_string(),
-                    }),
-                ),
-                (
-                    "terminate".to_string(),
-                    DiagramOperation::Terminate(TerminateOp {}),
-                ),
-            ]),
-        };
+        let diagram = Diagram::from_json(json!(
+        {
+            "start": {
+                "type": "start",
+                "next": "op1"
+            },
+            "op1": {
+                "type": "node",
+                "nodeId": "multiply3_cloneable",
+                "next": "forkClone"
+            },
+            "forkClone": {
+                "type": "forkClone",
+                "next": ["op2"]
+            },
+            "op2": {
+                "type": "node",
+                "nodeId": "multiply3_cloneable",
+                "next": "terminate"
+            },
+            "terminate": {
+                "type": "terminate"
+            }
+        }))
+        .unwrap();
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        assert_eq!(result, 12);
+        assert_eq!(result, 36);
     }
 }
