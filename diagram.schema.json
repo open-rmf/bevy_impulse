@@ -1,0 +1,229 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Diagram",
+  "type": "object",
+  "definitions": {
+    "DiagramOperation": {
+      "oneOf": [
+        {
+          "description": "Signifies the start of a workflow. There must be exactly 1 start operation in a diagram.",
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "start"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Signifies the end of a workflow. There must be exactly 1 terminate operation in a diagram.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "terminate"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"nodeId\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "type": "object",
+          "required": [
+            "next",
+            "nodeId",
+            "type"
+          ],
+          "properties": {
+            "config": {
+              "default": null
+            },
+            "next": {
+              "type": "string"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "node"
+              ]
+            }
+          }
+        },
+        {
+          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"forkClone\" }, \"forkClone\": { \"type\": \"forkClone\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "forkClone"
+              ]
+            }
+          }
+        },
+        {
+          "description": "If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses of T1, T2, T3, ...\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"unzip\" }, \"unzip\": { \"type\": \"unzip\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "unzip"
+              ]
+            }
+          }
+        },
+        {
+          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"forkResult\" }, \"forkResult\": { \"type\": \"forkResult\", \"ok\": \"terminate\", \"err\": \"dispose\" }, \"dispose\": { \"type\": \"dispose\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "type": "object",
+          "required": [
+            "err",
+            "ok",
+            "type"
+          ],
+          "properties": {
+            "err": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "forkResult"
+              ]
+            }
+          }
+        },
+        {
+          "description": "If the request is a list-like or map-like object, splits it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "index"
+              ],
+              "properties": {
+                "index": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "key"
+              ],
+              "properties": {
+                "key": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "remaining": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "split"
+              ]
+            }
+          }
+        },
+        {
+          "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "type": "object",
+          "required": [
+            "cel",
+            "next",
+            "type"
+          ],
+          "properties": {
+            "cel": {
+              "type": "string"
+            },
+            "next": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "transform"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Drops the request, equivalent to a no-op.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "dispose"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
