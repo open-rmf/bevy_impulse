@@ -1,12 +1,20 @@
 use bevy_utils::all_tuples_with_size;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
     register_serialize as register_serialize_impl, DiagramError, DynOutput, NodeRegistry,
-    SerializeMessage,
+    OperationId, SerializeMessage,
 };
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnzipOp {
+    pub(super) next: Vec<OperationId>,
+}
 
 pub trait DynUnzip<T, Serializer> {
     const UNZIP_SLOTS: usize;
@@ -66,3 +74,250 @@ macro_rules! dyn_unzip_impl {
 }
 
 all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::{
+        diagram::{testing::DiagramTestFixture, unzip::UnzipOp},
+        Diagram, DiagramError, DiagramOperation, NodeOp, StartOp, TerminateOp,
+    };
+
+    #[test]
+    fn test_unzip_not_unzippable() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["op_2".to_string()],
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let err = diagram
+            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
+            .unwrap_err();
+        assert!(matches!(err, DiagramError::NotUnzippable));
+    }
+
+    #[test]
+    fn test_unzip_to_too_many_slots() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["op_2".to_string(), "op_3".to_string(), "op_4".to_string()],
+                    }),
+                ),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "op_3".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "op_4".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let err = diagram
+            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
+            .unwrap_err();
+        assert!(matches!(err, DiagramError::NotUnzippable));
+    }
+
+    #[test]
+    fn test_unzip_to_terminate() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["dispose".to_string(), "terminate".to_string()],
+                    }),
+                ),
+                ("dispose".to_string(), DiagramOperation::Dispose),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .unwrap();
+        assert_eq!(result, 20);
+    }
+
+    #[test]
+    fn test_unzip() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["op_2".to_string()],
+                    }),
+                ),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .unwrap();
+        assert_eq!(result, 36);
+    }
+
+    #[test]
+    fn test_unzip_with_dispose() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram {
+            ops: HashMap::from([
+                (
+                    "start".to_string(),
+                    DiagramOperation::Start(StartOp {
+                        next: "op_1".to_string(),
+                    }),
+                ),
+                (
+                    "op_1".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3_5".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "unzip".to_string(),
+                    }),
+                ),
+                (
+                    "unzip".to_string(),
+                    DiagramOperation::Unzip(UnzipOp {
+                        next: vec!["dispose".to_string(), "op_2".to_string()],
+                    }),
+                ),
+                ("dispose".to_string(), DiagramOperation::Dispose),
+                (
+                    "op_2".to_string(),
+                    DiagramOperation::Node(NodeOp {
+                        node_id: "multiply3".to_string(),
+                        config: serde_json::Value::Null,
+                        next: "terminate".to_string(),
+                    }),
+                ),
+                (
+                    "terminate".to_string(),
+                    DiagramOperation::Terminate(TerminateOp {}),
+                ),
+            ]),
+        };
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .unwrap();
+        assert_eq!(result, 60);
+    }
+}

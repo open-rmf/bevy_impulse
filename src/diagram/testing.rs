@@ -1,13 +1,54 @@
-use crate::{Builder, Promise};
+use std::error::Error;
 
-use super::NodeRegistry;
+use crate::{testing::TestingContext, Builder, RequestExt};
 
-pub(super) fn unwrap_promise<T>(mut p: Promise<T>) -> T {
-    let taken = p.take();
-    if taken.is_available() {
-        taken.available().unwrap()
-    } else {
-        panic!("{:?}", taken.cancellation().unwrap())
+use super::{Diagram, NodeRegistry};
+
+pub(super) struct DiagramTestFixture {
+    pub(super) context: TestingContext,
+    pub(super) registry: NodeRegistry,
+}
+
+impl DiagramTestFixture {
+    pub(super) fn new() -> Self {
+        Self {
+            context: TestingContext::minimal_plugins(),
+            registry: new_registry_with_basic_nodes(),
+        }
+    }
+
+    /// Spawns a workflow from a serialized diagram then run the workflow until completion.
+    /// Returns the result of the workflow.
+    pub(super) fn spawn_and_run(
+        &mut self,
+        diagram: &Diagram,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn Error>> {
+        let workflow = diagram.spawn_io_workflow(&mut self.context.app, &self.registry)?;
+        let mut promise = self
+            .context
+            .command(|cmds| cmds.request(request, workflow).take_response());
+        self.context.run_while_pending(&mut promise);
+        let taken = promise.take();
+        if taken.is_available() {
+            Ok(taken.available().unwrap())
+        } else if taken.is_cancelled() {
+            let cancellation = taken.cancellation().unwrap();
+            Err(cancellation.clone().into())
+        } else {
+            Err(String::from("promise is in invalid state").into())
+        }
+    }
+
+    /// Spawns a workflow from a diagram then run the workflow until completion.
+    /// Returns the result of the workflow.
+    pub(super) fn spawn_and_run_serialized(
+        &mut self,
+        json: &str,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn Error>> {
+        let diagram = Diagram::from_json_str(json)?;
+        self.spawn_and_run(&diagram, request)
     }
 }
 
@@ -32,7 +73,7 @@ fn opaque_response(_: i64) -> Unserializable {
 }
 
 /// create a new node registry with some basic nodes registered
-pub(super) fn new_registry_with_basic_nodes() -> NodeRegistry {
+fn new_registry_with_basic_nodes() -> NodeRegistry {
     let mut registry = NodeRegistry::default();
     registry.register_node(
         "multiply3",

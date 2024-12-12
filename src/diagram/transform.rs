@@ -73,15 +73,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::{new_registry_with_basic_nodes, unwrap_promise},
-        testing::TestingContext,
-        Diagram, DiagramOperation, NodeOp, RequestExt, StartOp, TerminateOp,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramOperation, NodeOp, StartOp,
+        TerminateOp,
     };
 
     #[test]
     fn test_transform_node_response() {
-        let mut context = TestingContext::minimal_plugins();
-        let registry = new_registry_with_basic_nodes();
+        let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -113,20 +111,15 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = unwrap_promise(promise);
         assert_eq!(result, 777);
     }
 
     #[test]
     fn test_transform_scope_start() {
-        let mut context = TestingContext::minimal_plugins();
-        let registry = new_registry_with_basic_nodes();
+        let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -150,20 +143,15 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = unwrap_promise(promise);
         assert_eq!(result, 777);
     }
 
     #[test]
     fn test_cel_multiply() {
-        let mut context = TestingContext::minimal_plugins();
-        let registry = new_registry_with_basic_nodes();
+        let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -190,20 +178,15 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = unwrap_promise(promise);
         assert_eq!(result, 12);
     }
 
     #[test]
     fn test_cel_compose() {
-        let mut context = TestingContext::minimal_plugins();
-        let registry = new_registry_with_basic_nodes();
+        let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -227,21 +210,16 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = unwrap_promise(promise);
         assert_eq!(result["request"], 4);
         assert_eq!(result["seven"], 7);
     }
 
     #[test]
     fn test_cel_destructure() {
-        let mut context = TestingContext::minimal_plugins();
-        let registry = new_registry_with_basic_nodes();
+        let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram {
             ops: HashMap::from([
@@ -265,9 +243,6 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
-            .unwrap();
         let request = serde_json::Value::from_str(
             r#"
             {
@@ -278,9 +253,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut promise = context.command(|cmds| cmds.request(request, w).take_response());
-        context.run_while_pending(&mut promise);
-        let result = unwrap_promise(promise);
+        let result = fixture.spawn_and_run(&diagram, request).unwrap();
         assert_eq!(result, 40);
     }
 }

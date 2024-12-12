@@ -248,7 +248,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::{testing::*, *};
-    use diagram::testing::new_registry_with_basic_nodes;
+    use diagram::testing::DiagramTestFixture;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
@@ -362,14 +362,14 @@ mod tests {
 
     #[test]
     fn test_split_list() {
-        let mut registry = new_registry_with_basic_nodes();
-        let mut context = TestingContext::minimal_plugins();
+        let mut fixture = DiagramTestFixture::new();
 
         fn split_list(_: i64) -> Vec<i64> {
             vec![1, 2, 3]
         }
 
-        registry
+        fixture
+            .registry
             .registration_builder()
             .with_splittable()
             .register_node(
@@ -408,25 +408,22 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap()[1], 1);
+        assert_eq!(result[1], 1);
     }
 
     #[test]
     fn test_split_list_with_key() {
-        let mut registry = new_registry_with_basic_nodes();
-        let mut context = TestingContext::minimal_plugins();
+        let mut fixture = DiagramTestFixture::new();
 
         fn split_list(_: i64) -> Vec<i64> {
             vec![1, 2, 3]
         }
 
-        registry
+        fixture
+            .registry
             .registration_builder()
             .with_splittable()
             .register_node(
@@ -468,19 +465,15 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap()[1], 2);
+        assert_eq!(result[1], 2);
     }
 
     #[test]
     fn test_split_map() {
-        let mut registry = new_registry_with_basic_nodes();
-        let mut context = TestingContext::minimal_plugins();
+        let mut fixture = DiagramTestFixture::new();
 
         fn split_map(_: i64) -> HashMap<String, i64> {
             HashMap::from([
@@ -490,7 +483,8 @@ mod tests {
             ])
         }
 
-        registry
+        fixture
+            .registry
             .registration_builder()
             .with_splittable()
             .register_node(
@@ -532,25 +526,22 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap()[1], 2);
+        assert_eq!(result[1], 2);
     }
 
     #[test]
     fn test_split_remaining() {
-        let mut registry = new_registry_with_basic_nodes();
-        let mut context = TestingContext::minimal_plugins();
+        let mut fixture = DiagramTestFixture::new();
 
         fn split_list(_: i64) -> Vec<i64> {
             vec![1, 2, 3]
         }
 
-        registry
+        fixture
+            .registry
             .registration_builder()
             .with_splittable()
             .register_node(
@@ -590,25 +581,21 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
-        let mut promise =
-            context.command(|cmds| cmds.request(serde_json::Value::from(4), w).take_response());
-        context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap()[1], 2);
+        assert_eq!(result[1], 2);
     }
 
     #[test]
     fn test_split_start() {
-        let mut registry = new_registry_with_basic_nodes();
-        let mut context = TestingContext::minimal_plugins();
+        let mut fixture = DiagramTestFixture::new();
 
         fn get_split_value(pair: (JsonPosition, serde_json::Value)) -> serde_json::Value {
             pair.1
         }
 
-        registry.register_node(
+        fixture.registry.register_node(
             "get_split_value",
             "get_split_value",
             |builder, _config: ()| builder.create_map_block(get_split_value),
@@ -644,17 +631,12 @@ mod tests {
             ]),
         };
 
-        let w = diagram
-            .spawn_io_workflow(&mut context.app, &registry)
-            .unwrap();
-        let mut promise = context.command(|cmds| {
-            cmds.request(
+        let result = fixture
+            .spawn_and_run(
+                &diagram,
                 serde_json::to_value(HashMap::from([("test".to_string(), 1)])).unwrap(),
-                w,
             )
-            .take_response()
-        });
-        context.run_while_pending(&mut promise);
-        assert_eq!(promise.take().available().unwrap(), 1);
+            .unwrap();
+        assert_eq!(result, 1);
     }
 }
