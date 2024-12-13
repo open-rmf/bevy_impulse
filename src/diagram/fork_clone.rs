@@ -70,29 +70,30 @@ mod tests {
     fn test_fork_clone_uncloneable() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram::from_json(json!(
-        {
-            "start": {
-                "type": "start",
-                "next": "op1"
+        let diagram = Diagram::from_json(json!({
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1"
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "forkClone"
+                },
+                "forkClone": {
+                    "type": "forkClone",
+                    "next": ["op2"]
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "terminate"
+                },
+                "terminate": {
+                    "type": "terminate"
+                },
             },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "forkClone"
-            },
-            "forkClone": {
-                "type": "forkClone",
-                "next": ["op2"]
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "terminate"
-            },
-            "terminate": {
-                "type": "terminate"
-            }
         }))
         .unwrap();
         let err = diagram
@@ -105,29 +106,30 @@ mod tests {
     fn test_fork_clone() {
         let mut fixture = DiagramTestFixture::new();
 
-        let diagram = Diagram::from_json(json!(
-        {
-            "start": {
-                "type": "start",
-                "next": "op1"
+        let diagram = Diagram::from_json(json!({
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1"
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3_cloneable",
+                    "next": "forkClone"
+                },
+                "forkClone": {
+                    "type": "forkClone",
+                    "next": ["op2"]
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "multiply3_cloneable",
+                    "next": "terminate"
+                },
+                "terminate": {
+                    "type": "terminate"
+                },
             },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3_cloneable",
-                "next": "forkClone"
-            },
-            "forkClone": {
-                "type": "forkClone",
-                "next": ["op2"]
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "multiply3_cloneable",
-                "next": "terminate"
-            },
-            "terminate": {
-                "type": "terminate"
-            }
         }))
         .unwrap();
 

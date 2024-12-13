@@ -2,6 +2,17 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Diagram",
   "type": "object",
+  "required": [
+    "ops"
+  ],
+  "properties": {
+    "ops": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/DiagramOperation"
+      }
+    }
+  },
   "definitions": {
     "DiagramOperation": {
       "oneOf": [
@@ -40,7 +51,7 @@
           }
         },
         {
-          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"nodeId\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"nodeId\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "next",
@@ -66,7 +77,7 @@
           }
         },
         {
-          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"forkClone\" }, \"forkClone\": { \"type\": \"forkClone\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"forkClone\" }, \"forkClone\": { \"type\": \"forkClone\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "next",
@@ -88,7 +99,7 @@
           }
         },
         {
-          "description": "If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses of T1, T2, T3, ...\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"unzip\" }, \"unzip\": { \"type\": \"unzip\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses of T1, T2, T3, ...\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"unzip\" }, \"unzip\": { \"type\": \"unzip\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "next",
@@ -110,7 +121,7 @@
           }
         },
         {
-          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"forkResult\" }, \"forkResult\": { \"type\": \"forkResult\", \"ok\": \"terminate\", \"err\": \"dispose\" }, \"dispose\": { \"type\": \"dispose\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"forkResult\" }, \"forkResult\": { \"type\": \"forkResult\", \"ok\": \"terminate\", \"err\": \"dispose\" }, \"dispose\": { \"type\": \"dispose\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "err",
@@ -133,7 +144,7 @@
           }
         },
         {
-          "description": "If the request is a list-like or map-like object, splits it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "If the request is a list-like or map-like object, splits it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "oneOf": [
             {
@@ -186,7 +197,7 @@
           }
         },
         {
-          "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
             "cel",

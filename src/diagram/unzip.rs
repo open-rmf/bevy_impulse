@@ -233,26 +233,28 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3_5",
-                "next": "unzip",
-            },
-            "unzip": {
-                "type": "unzip",
-                "next": ["op2"],
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3_5",
+                    "next": "unzip",
+                },
+                "unzip": {
+                    "type": "unzip",
+                    "next": ["op2"],
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -268,29 +270,31 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3_5",
-                "next": "unzip",
-            },
-            "unzip": {
-                "type": "unzip",
-                "next": ["dispose", "op2"],
-            },
-            "dispose": {
-                "type": "dispose",
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3_5",
+                    "next": "unzip",
+                },
+                "unzip": {
+                    "type": "unzip",
+                    "next": ["dispose", "op2"],
+                },
+                "dispose": {
+                    "type": "dispose",
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();

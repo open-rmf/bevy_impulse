@@ -1,0 +1,18 @@
+{
+  "$schema": "../../../diagram.schema.json",
+  "ops": {
+    "start": {
+      "type": "start",
+      "next": "mul3"
+    },
+    "mul3": {
+      "type": "node",
+      "nodeId": "mul",
+      "config": 3,
+      "next": "terminate"
+    },
+    "terminate": {
+      "type": "terminate"
+    }
+  }
+}

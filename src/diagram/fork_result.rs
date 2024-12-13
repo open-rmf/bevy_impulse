@@ -91,32 +91,34 @@ mod tests {
             });
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "check_even",
-                "next": "forkResult",
-            },
-            "forkResult": {
-                "type": "forkResult",
-                "ok": "op2",
-                "err": "op3",
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "echo",
-                "next": "terminate",
-            },
-            "op3": {
-                "type": "node",
-                "nodeId": "echo",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "check_even",
+                    "next": "forkResult",
+                },
+                "forkResult": {
+                    "type": "forkResult",
+                    "ok": "op2",
+                    "err": "op3",
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "echo",
+                    "next": "terminate",
+                },
+                "op3": {
+                    "type": "node",
+                    "nodeId": "echo",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();

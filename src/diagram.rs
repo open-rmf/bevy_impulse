@@ -63,17 +63,19 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "nodeOp"
-    ///     },
-    ///     "nodeOp": {
-    ///         "type": "node",
-    ///         "nodeId": "myNode",
-    ///         "next": "terminate"
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "nodeOp"
+    ///         },
+    ///         "nodeOp": {
+    ///             "type": "node",
+    ///             "nodeId": "myNode",
+    ///             "next": "terminate"
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -86,16 +88,18 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "forkClone"
-    ///     },
-    ///     "forkClone": {
-    ///         "type": "forkClone",
-    ///         "next": ["terminate"]
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "forkClone"
+    ///         },
+    ///         "forkClone": {
+    ///             "type": "forkClone",
+    ///             "next": ["terminate"]
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -109,16 +113,18 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "unzip"
-    ///     },
-    ///     "unzip": {
-    ///         "type": "unzip",
-    ///         "next": ["terminate"]
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "unzip"
+    ///         },
+    ///         "unzip": {
+    ///             "type": "unzip",
+    ///             "next": ["terminate"]
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -131,20 +137,22 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "forkResult"
-    ///     },
-    ///     "forkResult": {
-    ///         "type": "forkResult",
-    ///         "ok": "terminate",
-    ///         "err": "dispose"
-    ///     },
-    ///     "dispose": {
-    ///         "type": "dispose"
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "forkResult"
+    ///         },
+    ///         "forkResult": {
+    ///             "type": "forkResult",
+    ///             "ok": "terminate",
+    ///             "err": "dispose"
+    ///         },
+    ///         "dispose": {
+    ///             "type": "dispose"
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -157,16 +165,18 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "split"
-    ///     },
-    ///     "split": {
-    ///         "type": "split",
-    ///         "index": ["terminate"]
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "split"
+    ///         },
+    ///         "split": {
+    ///             "type": "split",
+    ///             "index": ["terminate"]
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -181,17 +191,19 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "transform"
-    ///     },
-    ///     "transform": {
-    ///         "type": "transform",
-    ///         "cel": "request.name",
-    ///         "next": "terminate"
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "transform"
+    ///         },
+    ///         "transform": {
+    ///             "type": "transform",
+    ///             "cel": "request.name",
+    ///             "next": "terminate"
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -206,17 +218,19 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "transform"
-    ///     },
-    ///     "transform": {
-    ///         "type": "transform",
-    ///         "cel": "int(request.score) * 3",
-    ///         "next": "terminate"
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "transform"
+    ///         },
+    ///         "transform": {
+    ///             "type": "transform",
+    ///             "cel": "int(request.score) * 3",
+    ///             "next": "terminate"
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// # "#)?;
@@ -235,7 +249,6 @@ type DynScope<Streams> = Scope<ScopeStart, ScopeTerminate, Streams>;
 #[derive(JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagram {
-    #[serde(flatten)]
     ops: HashMap<OperationId, DiagramOperation>,
 }
 
@@ -255,17 +268,19 @@ impl Diagram {
     ///
     /// let json_str = r#"
     /// {
-    ///     "start": {
-    ///         "type": "start",
-    ///         "next": "echo"
-    ///     },
-    ///     "echo": {
-    ///         "type": "node",
-    ///         "nodeId": "echo",
-    ///         "next": "terminate"
-    ///     },
-    ///     "terminate": {
-    ///         "type": "terminate"
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "echo"
+    ///         },
+    ///         "echo": {
+    ///             "type": "node",
+    ///             "nodeId": "echo",
+    ///             "next": "terminate"
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
     ///     }
     /// }
     /// "#;
@@ -355,7 +370,7 @@ impl Diagram {
     where
         R: Read,
     {
-        Ok(serde_json::from_reader(r)?)
+        serde_json::from_reader(r)
     }
 
     fn get_op(&self, op_id: &OperationId) -> Result<&DiagramOperation, DiagramError> {
@@ -458,17 +473,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "dispose",
-            },
-            "dispose": {
-                "type": "dispose",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "dispose",
+                },
+                "dispose": {
+                    "type": "dispose",
+                },
             },
         }))
         .unwrap();
@@ -491,13 +508,15 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -520,21 +539,23 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3_cloneable",
-                "next": "forkClone",
-            },
-            "forkClone": {
-                "type": "forkClone",
-                "next": ["start", "terminate"],
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3_cloneable",
+                    "next": "forkClone",
+                },
+                "forkClone": {
+                    "type": "forkClone",
+                    "next": ["start", "terminate"],
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -550,17 +571,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "opaque_request",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "opaque_request",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -576,17 +599,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "opaque_response",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "opaque_response",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -602,22 +627,24 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "op2",
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "opaque_request",
-                "next": "terminate"
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "op2",
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "opaque_request",
+                    "next": "terminate"
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -633,22 +660,24 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "op2",
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "op1",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "op2",
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "op1",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -667,26 +696,28 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3_cloneable",
-                "next": "forkClone",
-            },
-            "forkClone": {
-                "type": "forkClone",
-                "next": ["op1", "op2"],
-            },
-            "op2": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3_cloneable",
+                    "next": "forkClone",
+                },
+                "forkClone": {
+                    "type": "forkClone",
+                    "next": ["op1", "op2"],
+                },
+                "op2": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -702,12 +733,14 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -724,18 +757,20 @@ mod tests {
 
         let json_str = r#"
         {
-            "start": {
-                "type": "start",
-                "next": "multiply3"
-            },
-            "multiply3": {
-                "type": "node",
-                "nodeId": "multiplyBy",
-                "config": 7,
-                "next": "terminate"
-            },
-            "terminate": {
-                "type": "terminate"
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "multiply3"
+                },
+                "multiply3": {
+                    "type": "node",
+                    "nodeId": "multiplyBy",
+                    "config": 7,
+                    "next": "terminate"
+                },
+                "terminate": {
+                    "type": "terminate"
+                }
             }
         }
         "#;
@@ -756,26 +791,28 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3_5",
-                "next": "unzip",
-            },
-            "unzip": {
-                "type": "unzip",
-                "next": ["transform"],
-            },
-            "transform": {
-                "type": "transform",
-                "cel": "777",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3_5",
+                    "next": "unzip",
+                },
+                "unzip": {
+                    "type": "unzip",
+                    "next": ["transform"],
+                },
+                "transform": {
+                    "type": "transform",
+                    "cel": "777",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();

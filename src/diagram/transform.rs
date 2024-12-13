@@ -78,22 +78,24 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "op1",
-            },
-            "op1": {
-                "type": "node",
-                "nodeId": "multiply3",
-                "next": "transform",
-            },
-            "transform": {
-                "type": "transform",
-                "cel": "777",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "nodeId": "multiply3",
+                    "next": "transform",
+                },
+                "transform": {
+                    "type": "transform",
+                    "cel": "777",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -109,17 +111,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "transform",
-            },
-            "transform": {
-                "type": "transform",
-                "cel": "777",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "transform",
+                },
+                "transform": {
+                    "type": "transform",
+                    "cel": "777",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -135,17 +139,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "transform",
-            },
-            "transform": {
-                "type": "transform",
-                "cel": "int(request) * 3",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "transform",
+                },
+                "transform": {
+                    "type": "transform",
+                    "cel": "int(request) * 3",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -161,17 +167,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "transform",
-            },
-            "transform": {
-                "type": "transform",
-                "cel": "{ \"request\": request, \"seven\": 7 }",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "transform",
+                },
+                "transform": {
+                    "type": "transform",
+                    "cel": "{ \"request\": request, \"seven\": 7 }",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
@@ -188,17 +196,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "start": {
-                "type": "start",
-                "next": "transform",
-            },
-            "transform": {
-                "type": "transform",
-                "cel": "request.age",
-                "next": "terminate",
-            },
-            "terminate": {
-                "type": "terminate",
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "transform",
+                },
+                "transform": {
+                    "type": "transform",
+                    "cel": "request.age",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
             },
         }))
         .unwrap();
