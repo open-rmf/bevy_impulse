@@ -23,7 +23,7 @@ use super::{
     SplitOp,
 };
 
-/// A type erased [`bevy_impulse::InputSlot`]
+/// A type erased [`crate::InputSlot`]
 #[derive(Copy, Clone)]
 pub struct DynInputSlot {
     scope: Entity,
@@ -50,7 +50,7 @@ where
     }
 }
 
-/// A type erased [`bevy_impulse::Output`]
+/// A type erased [`crate::Output`]
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
@@ -395,28 +395,6 @@ pub trait IntoNodeRegistration {
     ) -> NodeRegistration;
 }
 
-pub trait BuildNode<Request, Response> {
-    fn build_node(
-        &mut self,
-        builder: &mut Builder,
-        config: serde_json::Value,
-    ) -> Node<Request, Response, impl StreamPack>;
-}
-
-impl<F, Request, Response, Streams> BuildNode<Request, Response> for F
-where
-    F: FnMut(&mut Builder, serde_json::Value) -> Node<Request, Response, Streams>,
-    Streams: StreamPack,
-{
-    fn build_node(
-        &mut self,
-        builder: &mut Builder,
-        config: serde_json::Value,
-    ) -> Node<Request, Response, impl StreamPack> {
-        self(builder, config)
-    }
-}
-
 pub struct NodeRegistry {
     nodes: HashMap<&'static str, NodeRegistration>,
 
@@ -459,7 +437,7 @@ impl NodeRegistry {
     ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg));
     /// ```
     ///
-    /// In order for the request to be deserializable, it must implement [`schemars::JsonSchema`] and [`serde::DeserializeOwned`].
+    /// In order for the request to be deserializable, it must implement [`schemars::JsonSchema`] and [`serde::de::DeserializeOwned`].
     /// In order for the response to be serializable, it must implement [`schemars::JsonSchema`] and [`serde::Serialize`].
     ///
     /// ```

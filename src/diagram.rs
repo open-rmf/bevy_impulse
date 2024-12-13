@@ -349,7 +349,7 @@ impl Diagram {
         Ok(w)
     }
 
-    /// Wrapper to [`spawn_workflow::<()>`].
+    /// Wrapper to [spawn_workflow::<()>](Self::spawn_workflow).
     pub fn spawn_io_workflow(
         &self,
         app: &mut App,
