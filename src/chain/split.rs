@@ -259,7 +259,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> Iterator for SplitBuilder<'w, 's, 
 
 /// This tracks the connections that have been made to a split. This can be
 /// retrieved from [`SplitBuilder`] by calling [`SplitBuilder::outputs`].
-/// You can then continue building connections by calling [`SplitBuilder::build`].
+/// You can then continue building connections by calling [`SplitOutputs::build`].
 #[must_use]
 pub struct SplitOutputs<T: Splittable> {
     scope: Entity,
