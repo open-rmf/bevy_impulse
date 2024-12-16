@@ -15,11 +15,12 @@
  *
 */
 
-use std::{collections::HashMap, usize};
+use std::{any::TypeId, collections::HashMap, usize};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::debug;
 
 use crate::{
     Builder, Chain, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
@@ -153,6 +154,7 @@ impl FromSpecific for ListSplitKey {
     }
 }
 
+#[derive(Debug)]
 pub struct DynSplitOutputs<'a> {
     pub(super) outputs: HashMap<&'a OperationId, DynOutput>,
     pub(super) remaining: DynOutput,
@@ -166,6 +168,11 @@ where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
 {
+    debug!(
+        "split chain of type: {:?}, op: {:?}",
+        TypeId::of::<T>(),
+        split_op
+    );
     chain.split(|mut sb| -> Result<DynSplitOutputs, DiagramError> {
         let outputs = match &split_op.params {
             SplitOpParams::Index(v) => {
@@ -188,10 +195,12 @@ where
                 outputs
             }
         };
-        Ok(DynSplitOutputs {
+        let split_outputs = DynSplitOutputs {
             outputs,
             remaining: sb.remaining_output()?.into(),
-        })
+        };
+        debug!("splitted outputs: {:?}", split_outputs);
+        Ok(split_outputs)
     })
 }
 
@@ -251,6 +260,7 @@ mod tests {
     use diagram::testing::DiagramTestFixture;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
+    use test_log::test;
 
     #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
     struct Person {

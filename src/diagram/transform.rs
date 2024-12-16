@@ -4,6 +4,7 @@ use cel_interpreter::{Context, ExecutionError, ParseError, Program};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::debug;
 
 use crate::{Builder, Output};
 
@@ -34,12 +35,14 @@ pub(super) fn transform_output(
     output: DynOutput,
     transform_op: &TransformOp,
 ) -> Result<Output<serde_json::Value>, DiagramError> {
-    let json_output = if output.type_id == TypeId::of::<serde_json::Value>() {
+    debug!("transform output: {:?}, op: {:?}", output, transform_op);
+
+    let json_output = if output.type_info == TypeId::of::<serde_json::Value>() {
         output.into_output()
     } else {
         let serialize = registry
             .serialize_impls
-            .get(&output.type_id)
+            .get(&output.type_info)
             .ok_or(DiagramError::NotSerializable)?;
         serialize(builder, output)
     };
@@ -60,16 +63,19 @@ pub(super) fn transform_output(
         },
     );
     builder.connect(json_output, transform_node.input);
-    Ok(transform_node
+    let transformed_output = transform_node
         .output
         .chain(builder)
         .cancel_on_err()
-        .output())
+        .output();
+    debug!("transformed output: {:?}", transformed_output);
+    Ok(transformed_output)
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use test_log::test;
 
     use crate::{diagram::testing::DiagramTestFixture, Diagram};
 

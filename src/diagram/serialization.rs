@@ -2,6 +2,7 @@ use std::{any::TypeId, error::Error, fmt::Display};
 
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
+use tracing::debug;
 
 use super::NodeRegistry;
 
@@ -202,21 +203,32 @@ where
     Deserializer: DeserializeMessage<T>,
     T: Send + Sync + 'static,
 {
-    if !Deserializer::deserializable() {
+    if registry.deserialize_impls.contains_key(&TypeId::of::<T>())
+        || !Deserializer::deserializable()
+    {
         return;
     }
+
+    debug!(
+        "register deserialize for type: {}, with deserializer: {}",
+        std::any::type_name::<T>(),
+        std::any::type_name::<Deserializer>()
+    );
     registry.deserialize_impls.insert(
         TypeId::of::<T>(),
         Box::new(|builder, output| {
+            debug!("deserialize output: {:?}", output);
             let receiver =
                 builder.create_map_block(|json: serde_json::Value| Deserializer::from_json(json));
             builder.connect(output, receiver.input);
-            receiver
+            let deserialized_output = receiver
                 .output
                 .chain(builder)
                 .cancel_on_err()
                 .output()
-                .into()
+                .into();
+            debug!("deserialized output: {:?}", deserialized_output);
+            deserialized_output
         }),
     );
 }
@@ -226,15 +238,24 @@ where
     Serializer: SerializeMessage<T>,
     T: Send + Sync + 'static,
 {
-    if !Serializer::serializable() {
+    if registry.serialize_impls.contains_key(&TypeId::of::<T>()) || !Serializer::serializable() {
         return;
     }
+
+    debug!(
+        "register serialize for type: {}, with serializer: {}",
+        std::any::type_name::<T>(),
+        std::any::type_name::<Serializer>()
+    );
     registry.serialize_impls.insert(
         TypeId::of::<T>(),
         Box::new(|builder, output| {
+            debug!("serialize output: {:?}", output);
             let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
             builder.connect(output.into_output(), n.input);
-            n.output.chain(builder).cancel_on_err().output()
+            let serialized_output = n.output.chain(builder).cancel_on_err().output();
+            debug!("serialized output: {:?}", serialized_output);
+            serialized_output
         }),
     );
 }

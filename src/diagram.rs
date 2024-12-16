@@ -10,10 +10,10 @@ mod workflow_builder;
 
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
-use log::debug;
 pub use node_registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
+use tracing::debug;
 use transform::{TransformError, TransformOp};
 use unzip::UnzipOp;
 pub use workflow_builder::*;
@@ -328,16 +328,14 @@ impl Diagram {
                     DiagramOperation::Node(op) => Some((op_id, op)),
                     _ => None,
                 }) {
-                    debug!("connecting op [{:?}]", op_id);
                     unwrap_or_return!(dyn_builder.connect_node(&scope, builder, op_id, op));
                 }
 
                 // connect start operation, note that this consumes scope, so we need to do this last
-                if let Some((op_id, start_op)) = self.ops.iter().find_map(|(op_id, v)| match v {
+                if let Some((_, start_op)) = self.ops.iter().find_map(|(op_id, v)| match v {
                     DiagramOperation::Start(op) => Some((op_id, op)),
                     _ => None,
                 }) {
-                    debug!("connecting op [{:?}]", op_id);
                     unwrap_or_return!(dyn_builder.connect_start(scope, builder, start_op));
                 }
             });

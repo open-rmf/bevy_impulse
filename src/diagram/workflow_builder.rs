@@ -3,6 +3,8 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+use tracing::debug;
+
 use crate::{Builder, InputSlot, Output, StreamPack};
 
 use super::{
@@ -126,12 +128,12 @@ impl OutputOperations for &NodeRegistration {
         output: DynOutput,
         registry: &NodeRegistry,
     ) -> Result<Output<serde_json::Value>, DiagramError> {
-        if output.type_id == TypeId::of::<serde_json::Value>() {
+        if output.type_info == TypeId::of::<serde_json::Value>() {
             Ok(output.into_output())
         } else if !self.metadata.response.serializable {
             Err(DiagramError::NotSerializable)
         } else {
-            let serialize = &registry.serialize_impls[&output.type_id];
+            let serialize = &registry.serialize_impls[&output.type_info];
             Ok(serialize(builder, output))
         }
     }
@@ -230,6 +232,7 @@ impl<'b> WorkflowBuilder<'b> {
                 _ => None,
             })
             .map(|(op_id, node_op)| {
+                debug!("creating node for {}", op_id);
                 let r = registry.get_registration(&node_op.node_id)?;
                 let n = r.create_node(builder, node_op.config.clone())?;
                 Ok((op_id, n))
@@ -265,10 +268,14 @@ impl<'b> WorkflowBuilder<'b> {
         output: DynOutput,
         input: DynInputSlot,
     ) -> Result<(), DiagramError> {
-        if output.type_id != input.type_id {
+        if output.type_info != input.type_info {
             Err(DiagramError::TypeMismatch)
         } else {
-            builder.connect(output.into_output::<()>(), input.into_input::<()>());
+            struct TypeErased {}
+            builder.connect(
+                output.into_output::<TypeErased>(),
+                input.into_input::<TypeErased>(),
+            );
             Ok(())
         }
     }
@@ -350,12 +357,12 @@ impl<'b> WorkflowBuilder<'b> {
                 DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
                 DiagramOperation::Node(node_op) => {
                     let input = self.inputs[state.op_id];
-                    let output = if state.output.type_id == TypeId::of::<serde_json::Value>() {
+                    let output = if state.output.type_info == TypeId::of::<serde_json::Value>() {
                         let reg = self.registry.get_registration(&node_op.node_id)?;
                         reg.deserialize(
                             builder,
                             state.output.into_output(),
-                            input.type_id,
+                            input.type_info,
                             self.registry,
                         )?
                     } else {

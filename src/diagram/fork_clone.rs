@@ -2,6 +2,7 @@ use std::any::TypeId;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::Builder;
 
@@ -49,18 +50,22 @@ where
         output: DynOutput,
         amount: usize,
     ) -> Result<Vec<DynOutput>, DiagramError> {
-        assert_eq!(output.type_id, TypeId::of::<T>());
+        debug!("fork clone: {:?}", output);
+        assert_eq!(output.type_info, TypeId::of::<T>());
 
         let fork_clone = output.into_output::<T>().fork_clone(builder);
-        Ok((0..amount)
+        let outputs = (0..amount)
             .map(|_| fork_clone.clone_output(builder).into())
-            .collect())
+            .collect();
+        debug!("forked outputs: {:?}", outputs);
+        Ok(outputs)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use test_log::test;
 
     use crate::{diagram::testing::DiagramTestFixture, Diagram};
 

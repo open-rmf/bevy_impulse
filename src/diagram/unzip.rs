@@ -1,6 +1,7 @@
 use bevy_utils::all_tuples_with_size;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::Builder;
 
@@ -52,6 +53,7 @@ macro_rules! dyn_unzip_impl {
                 builder: &mut Builder,
                 output: DynOutput
             ) -> Result<Vec<DynOutput>, DiagramError> {
+                debug!("unzip output: {:?}", output);
                 let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
                 let chain = output.into_output::<($($P,)*)>().chain(builder);
                 let ($($o,)*) = chain.unzip();
@@ -60,6 +62,7 @@ macro_rules! dyn_unzip_impl {
                     outputs.push($o.into());
                 })*
 
+                debug!("unzipped outputs: {:?}", outputs);
                 Ok(outputs)
             }
 
@@ -80,6 +83,7 @@ mod tests {
     use std::collections::HashMap;
 
     use serde_json::json;
+    use test_log::test;
 
     use crate::{
         diagram::{testing::DiagramTestFixture, unzip::UnzipOp},

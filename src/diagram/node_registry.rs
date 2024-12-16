@@ -1,14 +1,17 @@
-use std::{any::TypeId, borrow::Borrow, cell::RefCell, collections::HashMap, marker::PhantomData};
+use std::{
+    any::TypeId, borrow::Borrow, cell::RefCell, collections::HashMap, fmt::Debug,
+    marker::PhantomData,
+};
 
 use crate::{Builder, InputSlot, Node, Output, StreamPack};
 use bevy_ecs::entity::Entity;
-use log::debug;
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
     schema::Schema,
     JsonSchema,
 };
 use serde::{de::DeserializeOwned, ser::SerializeStruct, Serialize};
+use tracing::debug;
 
 use crate::{RequestMetadata, SerializeMessage};
 
@@ -28,12 +31,22 @@ use super::{
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,
-    pub(super) type_id: TypeId,
+    pub(super) type_info: TypeId,
 }
 
 impl DynInputSlot {
     pub(super) fn into_input<T>(self) -> InputSlot<T> {
         InputSlot::<T>::new(self.scope, self.source)
+    }
+}
+
+impl Debug for DynInputSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "DynInputSlot {{ scope: {:?}, source: {:?} }}",
+            self.scope, self.source
+        )
     }
 }
 
@@ -45,7 +58,7 @@ where
         Self {
             scope: input.scope(),
             source: input.id(),
-            type_id: TypeId::of::<T>(),
+            type_info: TypeId::of::<T>(),
         }
     }
 }
@@ -54,7 +67,7 @@ where
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
-    pub(super) type_id: TypeId,
+    pub(super) type_info: TypeId,
 }
 
 impl DynOutput {
@@ -66,6 +79,16 @@ impl DynOutput {
     }
 }
 
+impl Debug for DynOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "DynOutput {{ scope: {:?}, target: {:?} }}",
+            self.scope, self.target
+        )
+    }
+}
+
 impl<T> From<Output<T>> for DynOutput
 where
     T: Send + Sync + 'static,
@@ -74,7 +97,7 @@ where
         Self {
             scope: output.scope(),
             target: output.id(),
-            type_id: TypeId::of::<T>(),
+            type_info: TypeId::of::<T>(),
         }
     }
 }
@@ -157,8 +180,8 @@ impl NodeRegistration {
     ) -> Result<DynNode, DiagramError> {
         let n = (self.create_node_impl.borrow_mut())(builder, config)?;
         debug!(
-            "create node [{}], output: [{:?}], input: [{:?}]",
-            self.metadata.id, n.output.target, n.input.source
+            "created node of {}, output: {:?}, input: {:?}",
+            self.metadata.id, n.output, n.input
         );
         Ok(n)
     }
