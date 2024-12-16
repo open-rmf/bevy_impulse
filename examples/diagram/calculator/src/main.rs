@@ -4,6 +4,8 @@ use bevy_app::Update;
 use bevy_impulse::{flush_impulses, Diagram, NodeRegistry, RequestExt, RunCommandsOnWorldExt};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt::init();
+
     let mut registry = NodeRegistry::default();
     registry.register_node("add", "Add", |builder, config: f64| {
         builder.create_map_block(move |req: f64| req + config)
