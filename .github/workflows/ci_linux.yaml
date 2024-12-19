@@ -28,6 +28,14 @@ jobs:
     - name: Setup rust
       run: rustup default ${{ matrix.rust-version }}
 
+    # As new versions of our dependencies come out, they might depend on newer
+    # versions of the Rust compiler. When that happens, we'll use this step to
+    # lock down the dependency to a version that is known to be compatible with
+    # compiler version 1.75.
+    - name: Patch dependencies
+      if: ${{ matrix.rust-version == 1.75 }}
+      run: cargo add home@=0.5.9
+
     - name: Build default features
       run: cargo build --workspace
     - name: Test default features
