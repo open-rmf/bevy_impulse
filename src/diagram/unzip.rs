@@ -7,6 +7,7 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
+    join::register_join_impl,
     register_serialize as register_serialize_impl, DiagramError, DynOutput, NodeRegistry,
     OperationId, SerializeMessage,
 };
@@ -22,9 +23,8 @@ pub trait DynUnzip<T, Serializer> {
 
     fn dyn_unzip(builder: &mut Builder, output: DynOutput) -> Result<Vec<DynOutput>, DiagramError>;
 
-    /// Register serialize functions for all items in the tuple.
-    /// For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
-    fn register_serialize(registry: &mut NodeRegistry);
+    /// Called when a node is registered.
+    fn on_register(registry: &mut NodeRegistry);
 }
 
 impl<T, Serializer> DynUnzip<T, Serializer> for NotSupported {
@@ -37,7 +37,7 @@ impl<T, Serializer> DynUnzip<T, Serializer> for NotSupported {
         Err(DiagramError::NotUnzippable)
     }
 
-    fn register_serialize(_registry: &mut NodeRegistry) {}
+    fn on_register(_registry: &mut NodeRegistry) {}
 }
 
 macro_rules! dyn_unzip_impl {
@@ -45,7 +45,7 @@ macro_rules! dyn_unzip_impl {
         impl<$($P),*, Serializer> DynUnzip<($($P,)*), Serializer> for DefaultImpl
         where
             $($P: Send + Sync + 'static),*,
-            Serializer: $(SerializeMessage<$P> +)*
+            Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
         {
             const UNZIP_SLOTS: usize = $len;
 
@@ -66,10 +66,17 @@ macro_rules! dyn_unzip_impl {
                 Ok(outputs)
             }
 
-            fn register_serialize(registry: &mut NodeRegistry)
+            fn on_register(registry: &mut NodeRegistry)
             {
+                // Register serialize functions for all items in the tuple.
+                // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
                 $(
                     register_serialize_impl::<$P, Serializer>(registry);
+                )*
+
+                // Register join impls for T1, T2, T3...
+                $(
+                    register_join_impl::<$P, Serializer>(registry);
                 )*
             }
         }

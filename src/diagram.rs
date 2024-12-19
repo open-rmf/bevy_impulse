@@ -1,6 +1,7 @@
 mod fork_clone;
 mod fork_result;
 mod impls;
+mod join;
 mod node_registry;
 mod serialization;
 mod split_serialized;
@@ -10,6 +11,7 @@ mod workflow_builder;
 
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
+use join::JoinOp;
 pub use node_registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
@@ -184,6 +186,46 @@ pub enum DiagramOperation {
     /// ```
     Split(SplitOp),
 
+    /// Waits for an item to be emitted from each of the inputs, then combined the
+    /// oldest of each into an array.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "ops": {
+    ///         "start": {
+    ///             "type": "start",
+    ///             "next": "split"
+    ///         },
+    ///         "split": {
+    ///             "type": "split",
+    ///             "index": ["op1", "op2"]
+    ///         },
+    ///         "op1": {
+    ///             "type": "node",
+    ///             "nodeId": "foo",
+    ///             "next": "join"
+    ///         },
+    ///         "op2": {
+    ///             "type": "node",
+    ///             "nodeId": "bar",
+    ///             "next": "join"
+    ///         },
+    ///         "join": {
+    ///             "type": "join",
+    ///             "next": "terminate"
+    ///         },
+    ///         "terminate": {
+    ///             "type": "terminate"
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    Join(JoinOp),
+
     /// If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program.
     /// The context includes a "request" variable which contains the request.
     ///
@@ -320,7 +362,7 @@ impl Diagram {
                     scope.terminate.id()
                 );
 
-                let mut dyn_builder =
+                let mut wf_builder =
                     unwrap_or_return!(WorkflowBuilder::new(&scope, builder, registry, self));
 
                 // connect node operations
@@ -328,7 +370,7 @@ impl Diagram {
                     DiagramOperation::Node(op) => Some((op_id, op)),
                     _ => None,
                 }) {
-                    unwrap_or_return!(dyn_builder.connect_node(&scope, builder, op_id, op));
+                    unwrap_or_return!(wf_builder.connect_node(&scope, builder, op_id, op));
                 }
 
                 // connect start operation, note that this consumes scope, so we need to do this last
@@ -336,7 +378,7 @@ impl Diagram {
                     DiagramOperation::Start(op) => Some((op_id, op)),
                     _ => None,
                 }) {
-                    unwrap_or_return!(dyn_builder.connect_start(scope, builder, start_op));
+                    unwrap_or_return!(wf_builder.connect_start(scope, builder, start_op));
                 }
             });
 

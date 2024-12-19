@@ -128,12 +128,12 @@ impl OutputOperations for &NodeRegistration {
         output: DynOutput,
         registry: &NodeRegistry,
     ) -> Result<Output<serde_json::Value>, DiagramError> {
-        if output.type_info == TypeId::of::<serde_json::Value>() {
+        if output.type_id == TypeId::of::<serde_json::Value>() {
             Ok(output.into_output())
         } else if !self.metadata.response.serializable {
             Err(DiagramError::NotSerializable)
         } else {
-            let serialize = &registry.serialize_impls[&output.type_info];
+            let serialize = &registry.serialize_impls[&output.type_id];
             Ok(serialize(builder, output))
         }
     }
@@ -268,7 +268,7 @@ impl<'b> WorkflowBuilder<'b> {
         output: DynOutput,
         input: DynInputSlot,
     ) -> Result<(), DiagramError> {
-        if output.type_info != input.type_info {
+        if output.type_id != input.type_info {
             Err(DiagramError::TypeMismatch)
         } else {
             struct TypeErased {}
@@ -284,8 +284,8 @@ impl<'b> WorkflowBuilder<'b> {
         &mut self,
         scope: &DynScope<Streams>,
         builder: &mut Builder,
-        op_id: &OperationId,
-        op: &NodeOp,
+        op_id: &'b OperationId,
+        op: &'b NodeOp,
     ) -> Result<(), DiagramError> {
         let target_op_id = &op.next;
         let source_registration = self.registry.get_registration(&op.node_id)?;
@@ -306,10 +306,10 @@ impl<'b> WorkflowBuilder<'b> {
     }
 
     pub(super) fn connect_start<Streams: StreamPack>(
-        &self,
+        &mut self,
         scope: DynScope<Streams>,
         builder: &mut Builder,
-        start_op: &StartOp,
+        start_op: &'b StartOp,
     ) -> Result<(), DiagramError> {
         let target_op_id = &start_op.next;
 
@@ -325,10 +325,10 @@ impl<'b> WorkflowBuilder<'b> {
     }
 
     fn connect_next<Ops>(
-        &self,
+        &mut self,
         builder: &mut Builder,
         source: ConnectionSource<Ops>,
-        next_op_id: &OperationId,
+        next_op_id: &'b OperationId,
         terminate: InputSlot<ScopeTerminate>,
     ) -> Result<(), DiagramError>
     where
@@ -357,7 +357,7 @@ impl<'b> WorkflowBuilder<'b> {
                 DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
                 DiagramOperation::Node(node_op) => {
                     let input = self.inputs[state.op_id];
-                    let output = if state.output.type_info == TypeId::of::<serde_json::Value>() {
+                    let output = if state.output.type_id == TypeId::of::<serde_json::Value>() {
                         let reg = self.registry.get_registration(&node_op.node_id)?;
                         reg.deserialize(
                             builder,
@@ -422,6 +422,9 @@ impl<'b> WorkflowBuilder<'b> {
                             output: outputs.remaining,
                         });
                     }
+                }
+                DiagramOperation::Join(join_op) => {
+                    panic!("not implemented")
                 }
                 DiagramOperation::Transform(transform_op) => {
                     let transformed_output =

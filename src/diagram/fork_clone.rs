@@ -51,7 +51,7 @@ where
         amount: usize,
     ) -> Result<Vec<DynOutput>, DiagramError> {
         debug!("fork clone: {:?}", output);
-        assert_eq!(output.type_info, TypeId::of::<T>());
+        assert_eq!(output.type_id, TypeId::of::<T>());
 
         let fork_clone = output.into_output::<T>().fork_clone(builder);
         let outputs = (0..amount)

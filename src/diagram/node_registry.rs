@@ -67,7 +67,7 @@ where
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
-    pub(super) type_info: TypeId,
+    pub(super) type_id: TypeId,
 }
 
 impl DynOutput {
@@ -97,7 +97,7 @@ where
         Self {
             scope: output.scope(),
             target: output.id(),
-            type_info: TypeId::of::<T>(),
+            type_id: TypeId::of::<T>(),
         }
     }
 }
@@ -306,8 +306,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
         register_deserialize::<Request, DeserializeImpl>(self.registry);
         register_serialize::<Response, SerializeImpl>(self.registry);
 
-        UnzipImpl::register_serialize(&mut self.registry);
-        SplitImpl::register_serialize(&mut self.registry);
+        UnzipImpl::on_register(&mut self.registry);
+        SplitImpl::on_register(&mut self.registry);
     }
 
     /// Mark the node as having a non deserializable request. This allows nodes with
@@ -431,6 +431,11 @@ pub struct NodeRegistry {
 
     pub(super) serialize_impls:
         HashMap<TypeId, Box<dyn Fn(&mut Builder, DynOutput) -> Output<serde_json::Value>>>,
+
+    pub(super) join_impls: HashMap<
+        TypeId,
+        Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramError>>,
+    >,
 }
 
 impl Default for NodeRegistry {
@@ -442,11 +447,16 @@ impl Default for NodeRegistry {
             gen: SchemaGenerator::new(settings),
             deserialize_impls: HashMap::new(),
             serialize_impls: HashMap::new(),
+            join_impls: HashMap::new(),
         }
     }
 }
 
 impl NodeRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Create a new [`RegistrationBuilder`]. By default, it is configured for nodes with
     /// deserializable request and serializable responses and without support for any interconnect
     /// operations like "fork_clone" and "unzip". See [`RegistrationBuilder`] for more information

@@ -37,12 +37,12 @@ pub(super) fn transform_output(
 ) -> Result<Output<serde_json::Value>, DiagramError> {
     debug!("transform output: {:?}, op: {:?}", output, transform_op);
 
-    let json_output = if output.type_info == TypeId::of::<serde_json::Value>() {
+    let json_output = if output.type_id == TypeId::of::<serde_json::Value>() {
         output.into_output()
     } else {
         let serialize = registry
             .serialize_impls
-            .get(&output.type_info)
+            .get(&output.type_id)
             .ok_or(DiagramError::NotSerializable)?;
         serialize(builder, output)
     };

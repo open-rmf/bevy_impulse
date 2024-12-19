@@ -29,6 +29,7 @@ use crate::{
 
 use super::{
     impls::{DefaultImpl, NotSupported},
+    join::register_join_impl,
     register_serialize, DiagramError, DynOutput, NodeRegistry, OperationId, SerializeMessage,
 };
 
@@ -213,7 +214,7 @@ pub trait DynSplit<T, Serializer> {
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError>;
 
-    fn register_serialize(registry: &mut NodeRegistry);
+    fn on_register(registry: &mut NodeRegistry);
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
@@ -227,14 +228,14 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
         Err(DiagramError::NotSplittable)
     }
 
-    fn register_serialize(_registry: &mut NodeRegistry) {}
+    fn on_register(_registry: &mut NodeRegistry) {}
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
-    Serializer: SerializeMessage<T::Item>,
+    Serializer: SerializeMessage<T::Item> + SerializeMessage<Vec<T::Item>>,
 {
     const SUPPORTED: bool = true;
 
@@ -247,8 +248,9 @@ where
         split_chain(chain, split_op)
     }
 
-    fn register_serialize(registry: &mut NodeRegistry) {
+    fn on_register(registry: &mut NodeRegistry) {
         register_serialize::<T::Item, Serializer>(registry);
+        register_join_impl::<T::Item, Serializer>(registry);
     }
 }
 
