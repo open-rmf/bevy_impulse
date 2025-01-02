@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{Builder, IterBufferable};
 
-use super::{register_serialize, DiagramError, DynOutput, NodeRegistry, SerializeMessage};
+use super::{DiagramError, DynOutput, NodeRegistry, SerializeMessage};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +27,10 @@ where
         .join_impls
         .insert(TypeId::of::<T>(), Box::new(join_impl::<T>));
 
-    // also need to register serialize for Vec<T>
-    register_serialize::<Vec<T>, Serializer>(registry);
+    // FIXME(koonpeng): join_vec results in a SmallVec<[T; N]>, we can't serialize it because
+    // it doesn't implement JsonSchema, and we can't impl it because of orphan rule. We would need
+    // to create our own trait that covers `JsonSchema` and `Serialize`.
+    // register_serialize::<Vec<T>, Serializer>(registry);
 }
 
 fn join_impl<T>(builder: &mut Builder, outputs: Vec<DynOutput>) -> Result<DynOutput, DiagramError>
@@ -57,41 +59,81 @@ where
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use smallvec::SmallVec;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Diagram};
+    use crate::{diagram::testing::DiagramTestFixture, Diagram, JsonPosition};
 
     #[test]
     fn test_join() {
         let mut fixture = DiagramTestFixture::new();
 
+        fn get_split_value(pair: (JsonPosition, serde_json::Value)) -> serde_json::Value {
+            pair.1
+        }
+
+        fixture.registry.register_node(
+            "get_split_value",
+            "get_split_value",
+            |builder, _config: ()| builder.create_map_block(get_split_value),
+        );
+
+        fn serialize_join_output(small_vec: SmallVec<[i64; 4]>) -> serde_json::Value {
+            serde_json::to_value(small_vec).unwrap()
+        }
+
+        fixture
+            .registry
+            .registration_builder()
+            .with_opaque_request()
+            .register_node(
+                "serialize_join_output",
+                "serialize_join_output",
+                |builder, _config: ()| builder.create_map_block(serialize_join_output),
+            );
+
         let diagram = Diagram::from_json(json!({
             "ops": {
                 "start": {
                     "type": "start",
-                    "next": "split"
+                    "next": "split",
                 },
-                "unzip": {
-                    "type": "unzip",
-                    "next": ["op1", "op2"]
+                "split": {
+                    "type": "split",
+                    "index": ["getSplitValue1", "getSplitValue2"]
+                },
+                "getSplitValue1": {
+                    "type": "node",
+                    "nodeId": "get_split_value",
+                    "next": "op1",
                 },
                 "op1": {
                     "type": "node",
                     "nodeId": "multiply3",
-                    "next": "join"
+                    "next": "join",
+                },
+                "getSplitValue2": {
+                    "type": "node",
+                    "nodeId": "get_split_value",
+                    "next": "op2",
                 },
                 "op2": {
                     "type": "node",
                     "nodeId": "multiply3",
-                    "next": "join"
+                    "next": "join",
                 },
                 "join": {
                     "type": "join",
-                    "next": "terminate"
+                    "next": "serializeJoinOutput",
+                },
+                "serializeJoinOutput": {
+                    "type": "node",
+                    "nodeId": "serialize_join_output",
+                    "next": "terminate",
                 },
                 "terminate": {
-                    "type": "terminate"
-                }
+                    "type": "terminate",
+                },
             }
         }))
         .unwrap();
@@ -100,7 +142,9 @@ mod tests {
             .spawn_and_run(&diagram, serde_json::Value::from([1, 2]))
             .unwrap();
         assert_eq!(result.as_array().unwrap().len(), 2);
-        assert_eq!(result[0], 3);
-        assert_eq!(result[1], 6);
+        // order is not guaranteed so need to test for both possibility
+        assert!(result[0] == 3 || result[0] == 6);
+        assert!(result[1] == 3 || result[1] == 6);
+        assert!(result[0] != result[1]);
     }
 }

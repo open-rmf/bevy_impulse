@@ -197,6 +197,25 @@
           }
         },
         {
+          "description": "Waits for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"nodeId\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"nodeId\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "type": "object",
+          "required": [
+            "next",
+            "type"
+          ],
+          "properties": {
+            "next": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "join"
+              ]
+            }
+          }
+        },
+        {
           "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [

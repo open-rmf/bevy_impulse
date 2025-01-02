@@ -1,6 +1,6 @@
 use std::{any::TypeId, collections::HashMap};
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{Builder, Output, StreamPack};
 
@@ -111,16 +111,16 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 state,
             },
         );
-        let new_edge_idx = edges.len() - 1;
+        let new_edge_id = edges.len() - 1;
 
         let source_vertex = vertices
             .get_mut(source)
             .ok_or_else(|| DiagramError::OperationNotFound(source.clone()))?;
-        source_vertex.out_edges.push(new_edge_idx);
+        source_vertex.out_edges.push(new_edge_id);
         let target_vertex = vertices
             .get_mut(target)
             .ok_or_else(|| DiagramError::OperationNotFound(target.clone()))?;
-        target_vertex.in_edges.push(new_edge_idx);
+        target_vertex.in_edges.push(new_edge_id);
         Ok(())
     };
 
@@ -191,22 +191,75 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 .any(|e| matches!(e.state, EdgeState::Pending))
             {
                 // not all inputs are ready
+                debug!(
+                    "defer connecting [{}] until all incoming edges are ready",
+                    v.op_id
+                );
                 unconnected_vertices.push(v);
                 continue;
             }
 
-            for idx in &v.in_edges {
-                connect_edge(builder, registry, &vertices, &mut edges, &inputs, *idx, v)?;
-            }
+            connect_vertex(builder, registry, &vertices, &mut edges, &inputs, v)?;
         }
 
         // can't connect anything and there are still remaining vertices
         if unconnected_vertices.len() > 0 && ws_length == unconnected_vertices.len() {
+            warn!(
+                "the following operations are not connected {:?}",
+                unconnected_vertices
+                    .iter()
+                    .map(|v| v.op_id)
+                    .collect::<Vec<_>>()
+            );
             return Err(DiagramError::BadInterconnectChain);
         }
     }
 
     Ok(())
+}
+
+fn connect_vertex<'a>(
+    builder: &mut Builder,
+    registry: &NodeRegistry,
+    vertices: &'a HashMap<&OperationId, Vertex>,
+    edges: &mut HashMap<usize, Edge<'a>>,
+    inputs: &HashMap<&OperationId, DynInputSlot>,
+    target: &'a Vertex,
+) -> Result<(), DiagramError> {
+    debug!("connecting [{}]", target.op_id);
+    match target.op {
+        // join needs all incoming edges to be connected at once so it is done at the vertex level
+        // instead of per edge level.
+        DiagramOperation::Join(_) => {
+            let outputs: Vec<DynOutput> = target
+                .in_edges
+                .iter()
+                .map(|e| {
+                    let edge = edges.remove(e).unwrap();
+                    match edge.state {
+                        EdgeState::Ready { output, origin: _ } => output,
+                        _ => panic!("expected all incoming edges to be ready"),
+                    }
+                })
+                .collect();
+
+            let join_impl = &registry.join_impls[&outputs[0].type_id];
+            let joined_output = join_impl(builder, outputs)?;
+            let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
+            out_edge.state = EdgeState::Ready {
+                output: joined_output,
+                origin: &target.op_id,
+            };
+            Ok(())
+        }
+        // for other operations, each edge is independent, so we can connect at the edge level.
+        _ => {
+            for edge_id in target.in_edges.iter() {
+                connect_edge(builder, registry, vertices, edges, inputs, *edge_id, target)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn connect_edge<'a>(
@@ -220,13 +273,14 @@ fn connect_edge<'a>(
 ) -> Result<(), DiagramError> {
     let edge = edges.remove(&edge_id).unwrap();
     debug!(
-        "connect edge, source: {}, target: {}",
-        edge.source, edge.target
+        "connect edge {}, source: {}, target: {}",
+        edge_id, edge.source, edge.target
     );
     let (output, origin) = match edge.state {
         EdgeState::Ready { output, origin } => (output, &vertices[origin]),
-        EdgeState::Pending => return Ok(()),
+        EdgeState::Pending => panic!("can only connect ready edges"),
     };
+
     match target.op {
         DiagramOperation::Start(_) => return Err(DiagramError::CannotConnectStart),
         DiagramOperation::Terminate(_) => {
@@ -259,17 +313,11 @@ fn connect_edge<'a>(
                 .into_iter()
                 .zip(target.out_edges.iter())
                 .for_each(|(o, e)| {
-                    edges.insert(
-                        *e,
-                        Edge {
-                            source: &edge.source,
-                            target: &edge.target,
-                            state: EdgeState::Ready {
-                                output: o,
-                                origin: origin.op_id,
-                            },
-                        },
-                    );
+                    let out_edge = edges.get_mut(e).unwrap();
+                    out_edge.state = EdgeState::Ready {
+                        output: o,
+                        origin: origin.op_id,
+                    };
                 });
         }
         DiagramOperation::Unzip(unzip_op) => {
@@ -291,17 +339,11 @@ fn connect_edge<'a>(
                 .into_iter()
                 .zip(target.out_edges.iter())
                 .for_each(|(o, e)| {
-                    edges.insert(
-                        *e,
-                        Edge {
-                            source: &edge.source,
-                            target: &edge.target,
-                            state: EdgeState::Ready {
-                                output: o,
-                                origin: origin.op_id,
-                            },
-                        },
-                    );
+                    let out_edge = edges.get_mut(e).unwrap();
+                    out_edge.state = EdgeState::Ready {
+                        output: o,
+                        origin: origin.op_id,
+                    };
                 });
         }
         DiagramOperation::ForkResult(_) => {
@@ -316,28 +358,20 @@ fn connect_edge<'a>(
                     _ => Err(DiagramError::CannotForkResult),
                 }
             }?;
-            edges.insert(
-                target.out_edges[0],
-                Edge {
-                    source: &edge.source,
-                    target: &edge.target,
-                    state: EdgeState::Ready {
-                        output: ok,
-                        origin: origin.op_id,
-                    },
-                },
-            );
-            edges.insert(
-                target.out_edges[1],
-                Edge {
-                    source: &edge.source,
-                    target: &edge.target,
-                    state: EdgeState::Ready {
-                        output: err,
-                        origin: origin.op_id,
-                    },
-                },
-            );
+            {
+                let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
+                out_edge.state = EdgeState::Ready {
+                    output: ok,
+                    origin: origin.op_id,
+                };
+            }
+            {
+                let out_edge = edges.get_mut(&target.out_edges[1]).unwrap();
+                out_edge.state = EdgeState::Ready {
+                    output: err,
+                    origin: origin.op_id,
+                };
+            }
         }
         DiagramOperation::Split(split_op) => {
             let outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
@@ -357,48 +391,30 @@ fn connect_edge<'a>(
                 .into_iter()
                 .zip(target.out_edges.iter())
                 .for_each(|((_, o), e)| {
-                    edges.insert(
-                        *e,
-                        Edge {
-                            source: &edge.source,
-                            target: &edge.target,
-                            state: EdgeState::Ready {
-                                output: o,
-                                origin: origin.op_id,
-                            },
-                        },
-                    );
+                    let out_edge = edges.get_mut(e).unwrap();
+                    out_edge.state = EdgeState::Ready {
+                        output: o,
+                        origin: origin.op_id,
+                    };
                 });
             if let Some(_) = &split_op.remaining {
-                edges.insert(
-                    *target.out_edges.last().unwrap(),
-                    Edge {
-                        source: &edge.source,
-                        target: &edge.target,
-                        state: EdgeState::Ready {
-                            output: outputs.remaining,
-                            origin: origin.op_id,
-                        },
-                    },
-                );
+                let out_edge = edges.get_mut(target.out_edges.last().unwrap()).unwrap();
+                out_edge.state = EdgeState::Ready {
+                    output: outputs.remaining,
+                    origin: origin.op_id,
+                };
             }
         }
         DiagramOperation::Join(_) => {
-            panic!("not implemented")
+            // join is connected at the vertex level
         }
         DiagramOperation::Transform(transform_op) => {
             let transformed_output = transform_output(builder, registry, output, transform_op)?;
-            edges.insert(
-                target.out_edges[0],
-                Edge {
-                    source: &edge.source,
-                    target: &edge.target,
-                    state: EdgeState::Ready {
-                        output: transformed_output.into(),
-                        origin: origin.op_id,
-                    },
-                },
-            );
+            let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
+            out_edge.state = EdgeState::Ready {
+                output: transformed_output.into(),
+                origin: origin.op_id,
+            }
         }
         DiagramOperation::Dispose => {}
     }
