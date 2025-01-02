@@ -18,7 +18,7 @@ pub use split_serialized::*;
 use tracing::debug;
 use transform::{TransformError, TransformOp};
 use unzip::UnzipOp;
-pub use workflow_builder::*;
+use workflow_builder::create_workflow;
 
 // ----------
 
@@ -362,24 +362,7 @@ impl Diagram {
                     scope.terminate.id()
                 );
 
-                let mut wf_builder =
-                    unwrap_or_return!(WorkflowBuilder::new(&scope, builder, registry, self));
-
-                // connect node operations
-                for (op_id, op) in self.ops.iter().filter_map(|(op_id, v)| match v {
-                    DiagramOperation::Node(op) => Some((op_id, op)),
-                    _ => None,
-                }) {
-                    unwrap_or_return!(wf_builder.connect_node(&scope, builder, op_id, op));
-                }
-
-                // connect start operation, note that this consumes scope, so we need to do this last
-                if let Some((_, start_op)) = self.ops.iter().find_map(|(op_id, v)| match v {
-                    DiagramOperation::Start(op) => Some((op_id, op)),
-                    _ => None,
-                }) {
-                    unwrap_or_return!(wf_builder.connect_start(scope, builder, start_op));
-                }
+                unwrap_or_return!(create_workflow(scope, builder, registry, self));
             });
 
         if let Some(err) = err {
@@ -411,12 +394,6 @@ impl Diagram {
         R: Read,
     {
         serde_json::from_reader(r)
-    }
-
-    fn get_op(&self, op_id: &OperationId) -> Result<&DiagramOperation, DiagramError> {
-        self.ops
-            .get(op_id)
-            .ok_or_else(|| DiagramError::OperationNotFound(op_id.clone()))
     }
 }
 
@@ -533,10 +510,11 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
+        assert!(err.downcast_ref::<DiagramError>().is_some(), "{:?}", err);
         assert!(
             matches!(
-                *err.downcast_ref::<Cancellation>().unwrap().cause,
-                CancellationCause::Unreachable(_)
+                err.downcast_ref::<DiagramError>().unwrap(),
+                DiagramError::MissingStartOrTerminate,
             ),
             "{:?}",
             err
@@ -564,10 +542,11 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
+        assert!(err.downcast_ref::<DiagramError>().is_some(), "{:?}", err);
         assert!(
             matches!(
-                *err.downcast_ref::<Cancellation>().unwrap().cause,
-                CancellationCause::Unreachable(_)
+                err.downcast_ref::<DiagramError>().unwrap(),
+                DiagramError::MissingStartOrTerminate,
             ),
             "{:?}",
             err

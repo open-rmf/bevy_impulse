@@ -31,7 +31,7 @@ use super::{
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,
-    pub(super) type_info: TypeId,
+    pub(super) type_id: TypeId,
 }
 
 impl DynInputSlot {
@@ -58,7 +58,7 @@ where
         Self {
             scope: input.scope(),
             source: input.id(),
-            type_info: TypeId::of::<T>(),
+            type_id: TypeId::of::<T>(),
         }
     }
 }
@@ -148,20 +148,20 @@ pub struct NodeRegistration {
     pub(super) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    pub(super) create_node_impl:
+    create_node_impl:
         RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>,
 
-    pub(super) fork_clone_impl:
+    fork_clone_impl:
         Option<Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>>,
 
-    pub(super) unzip_impl:
+    unzip_impl:
         Option<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
 
-    pub(super) fork_result_impl: Option<
+    fork_result_impl: Option<
         Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
     >,
 
-    pub(super) split_impl: Option<
+    split_impl: Option<
         Box<
             dyn for<'a> Fn(
                 &mut Builder,
@@ -184,6 +184,56 @@ impl NodeRegistration {
             self.metadata.id, n.output, n.input
         );
         Ok(n)
+    }
+
+    pub(super) fn fork_clone(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        amount: usize,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        let f = self
+            .fork_clone_impl
+            .as_ref()
+            .ok_or(DiagramError::NotCloneable)?;
+        f(builder, output, amount)
+    }
+
+    pub(super) fn unzip(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        let f = self
+            .unzip_impl
+            .as_ref()
+            .ok_or(DiagramError::NotUnzippable)?;
+        f(builder, output)
+    }
+
+    pub(super) fn fork_result(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+        let f = self
+            .fork_result_impl
+            .as_ref()
+            .ok_or(DiagramError::CannotForkResult)?;
+        f(builder, output)
+    }
+
+    pub(super) fn split<'a>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOp,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        let f = self
+            .split_impl
+            .as_ref()
+            .ok_or(DiagramError::NotSplittable)?;
+        f(builder, output, split_op)
     }
 }
 

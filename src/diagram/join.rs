@@ -6,9 +6,7 @@ use tracing::debug;
 
 use crate::{Builder, IterBufferable};
 
-use super::{
-    impls::DefaultImpl, register_serialize, DiagramError, DynOutput, NodeRegistry, SerializeMessage,
-};
+use super::{register_serialize, DiagramError, DynOutput, NodeRegistry, SerializeMessage};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

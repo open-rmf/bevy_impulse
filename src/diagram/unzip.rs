@@ -120,7 +120,7 @@ mod tests {
                 (
                     "unzip".to_string(),
                     DiagramOperation::Unzip(UnzipOp {
-                        next: vec!["op_2".to_string()],
+                        next: vec!["terminate".to_string()],
                     }),
                 ),
                 (
@@ -133,7 +133,7 @@ mod tests {
         let err = diagram
             .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
             .unwrap_err();
-        assert!(matches!(err, DiagramError::NotUnzippable));
+        assert!(matches!(err, DiagramError::NotUnzippable), "{}", err);
     }
 
     #[test]
