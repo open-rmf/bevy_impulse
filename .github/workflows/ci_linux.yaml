@@ -34,13 +34,13 @@ jobs:
       run: cargo test --workspace --ignore-rust-version
 
     - name: Test diagram
-      run: cargo test --workspace -F=diagram
+      run: cargo test --workspace -F=diagram --ignore-rust-version
 
     - name: Build single_threaded_async
-      run: cargo build --features single_threaded_async
+      run: cargo build --features single_threaded_async --ignore-rust-version
     - name: Test single_threaded_async
-      run: cargo test --features single_threaded_async
+      run: cargo test --features single_threaded_async --ignore-rust-version
 
     - name: Build docs
-      run: cargo doc
+      run: cargo doc --ignore-rust-version
 
