@@ -29,9 +29,9 @@ jobs:
       run: rustup default ${{ matrix.rust-version }}
 
     - name: Build default features
-      run: cargo build --workspace
+      run: cargo build --workspace --ignore-rust-version
     - name: Test default features
-      run: cargo test --workspace
+      run: cargo test --workspace --ignore-rust-version
 
     - name: Test diagram
       run: cargo test --workspace -F=diagram
