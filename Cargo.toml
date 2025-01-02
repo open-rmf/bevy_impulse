@@ -14,6 +14,7 @@ categories = [
   "concurrency",
   "game-development",
 ]
+rust-version = "1.75"
 
 [dependencies]
 bevy_impulse_derive = { path = "macros", version = "0.0.2" }
@@ -58,7 +59,9 @@ diagram = ["dep:schemars", "dep:serde", "dep:serde_json", "dep:cel-interpreter"]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
-test-log = { version = "0.2.16", features = ["trace"], default-features = false }
+test-log = { version = "0.2.16", features = [
+  "trace",
+], default-features = false }
 
 [workspace]
 members = ["examples/diagram/calculator"]
