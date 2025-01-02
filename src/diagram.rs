@@ -29,30 +29,30 @@ use bevy_app::App;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub type NodeId = String;
+pub type BuilderId = String;
 pub type OperationId = String;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct StartOp {
     next: OperationId,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TerminateOp {}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct NodeOp {
-    node_id: NodeId,
+    builder: BuilderId,
     #[serde(default)]
     config: serde_json::Value,
     next: OperationId,
 }
 
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum DiagramOperation {
     /// Signifies the start of a workflow. There must be exactly 1 start operation in a diagram.
     Start(StartOp),
@@ -72,7 +72,7 @@ pub enum DiagramOperation {
     ///         },
     ///         "nodeOp": {
     ///             "type": "node",
-    ///             "nodeId": "myNode",
+    ///             "builder": "myNode",
     ///             "next": "terminate"
     ///         },
     ///         "terminate": {
@@ -93,10 +93,10 @@ pub enum DiagramOperation {
     ///     "ops": {
     ///         "start": {
     ///             "type": "start",
-    ///             "next": "forkClone"
+    ///             "next": "fork_clone"
     ///         },
-    ///         "forkClone": {
-    ///             "type": "forkClone",
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
     ///             "next": ["terminate"]
     ///         },
     ///         "terminate": {
@@ -142,10 +142,10 @@ pub enum DiagramOperation {
     ///     "ops": {
     ///         "start": {
     ///             "type": "start",
-    ///             "next": "forkResult"
+    ///             "next": "fork_result"
     ///         },
-    ///         "forkResult": {
-    ///             "type": "forkResult",
+    ///         "fork_result": {
+    ///             "type": "fork_result",
     ///             "ok": "terminate",
     ///             "err": "dispose"
     ///         },
@@ -204,12 +204,12 @@ pub enum DiagramOperation {
     ///         },
     ///         "op1": {
     ///             "type": "node",
-    ///             "nodeId": "foo",
+    ///             "builder": "foo",
     ///             "next": "join"
     ///         },
     ///         "op2": {
     ///             "type": "node",
-    ///             "nodeId": "bar",
+    ///             "builder": "bar",
     ///             "next": "join"
     ///         },
     ///         "join": {
@@ -289,7 +289,7 @@ type ScopeTerminate = serde_json::Value;
 type DynScope<Streams> = Scope<ScopeStart, ScopeTerminate, Streams>;
 
 #[derive(JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Diagram {
     ops: HashMap<OperationId, DiagramOperation>,
 }
@@ -317,7 +317,7 @@ impl Diagram {
     ///         },
     ///         "echo": {
     ///             "type": "node",
-    ///             "nodeId": "echo",
+    ///             "builder": "echo",
     ///             "next": "terminate"
     ///         },
     ///         "terminate": {
@@ -399,7 +399,7 @@ impl Diagram {
 
 #[derive(Debug)]
 pub enum DiagramError {
-    NodeNotFound(NodeId),
+    NodeNotFound(BuilderId),
     OperationNotFound(OperationId),
     TypeMismatch,
     MissingStartOrTerminate,
@@ -436,7 +436,7 @@ impl Display for DiagramError {
             Self::NotSplittable => f.write_str("response cannot be splitted"),
             Self::CannotTransform(err) => err.fmt(f),
             Self::BadInterconnectChain => {
-                f.write_str("an interconnect like forkClone cannot connect to another interconnect")
+                f.write_str("an interconnect like fork_clone cannot connect to another interconnect")
             }
             Self::JsonError(err) => err.fmt(f),
             Self::ConnectionError(inner) => inner.fmt(f),
@@ -497,7 +497,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "dispose",
                 },
                 "dispose": {
@@ -529,7 +529,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -565,11 +565,11 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "forkClone",
+                    "builder": "multiply3_cloneable",
+                    "next": "fork_clone",
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["start", "terminate"],
                 },
                 "terminate": {
@@ -597,7 +597,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "opaque_request",
+                    "builder": "opaque_request",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -625,7 +625,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "opaque_response",
+                    "builder": "opaque_response",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -653,12 +653,12 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "opaque_request",
+                    "builder": "opaque_request",
                     "next": "terminate"
                 },
                 "terminate": {
@@ -686,12 +686,12 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "op1",
                 },
                 "terminate": {
@@ -722,16 +722,16 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "forkClone",
+                    "builder": "multiply3_cloneable",
+                    "next": "fork_clone",
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["op1", "op2"],
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -783,7 +783,7 @@ mod tests {
                 },
                 "multiply3": {
                     "type": "node",
-                    "nodeId": "multiplyBy",
+                    "builder": "multiplyBy",
                     "config": 7,
                     "next": "terminate"
                 },
@@ -817,7 +817,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_5",
+                    "builder": "multiply3_5",
                     "next": "unzip",
                 },
                 "unzip": {

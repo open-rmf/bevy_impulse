@@ -130,7 +130,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
             DiagramOperation::Start(_) => {}
             DiagramOperation::Terminate(_) => {}
             DiagramOperation::Node(node_op) => {
-                let reg = registry.get_registration(&node_op.node_id)?;
+                let reg = registry.get_registration(&node_op.builder)?;
                 let n = reg.create_node(builder, node_op.config.clone())?;
                 inputs.insert(op_id, n.input);
                 add_edge(
@@ -303,7 +303,7 @@ fn connect_edge<'a>(
             } else {
                 match origin.op {
                     DiagramOperation::Node(node_op) => {
-                        let reg = registry.get_registration(&node_op.node_id)?;
+                        let reg = registry.get_registration(&node_op.builder)?;
                         reg.fork_clone(builder, output, amount)
                     }
                     _ => Err(DiagramError::NotCloneable),
@@ -326,7 +326,7 @@ fn connect_edge<'a>(
             } else {
                 match origin.op {
                     DiagramOperation::Node(node_op) => {
-                        let reg = registry.get_registration(&node_op.node_id)?;
+                        let reg = registry.get_registration(&node_op.builder)?;
                         reg.unzip(builder, output)
                     }
                     _ => Err(DiagramError::NotUnzippable),
@@ -352,7 +352,7 @@ fn connect_edge<'a>(
             } else {
                 match origin.op {
                     DiagramOperation::Node(node_op) => {
-                        let reg = registry.get_registration(&node_op.node_id)?;
+                        let reg = registry.get_registration(&node_op.builder)?;
                         reg.fork_result(builder, output)
                     }
                     _ => Err(DiagramError::CannotForkResult),
@@ -380,7 +380,7 @@ fn connect_edge<'a>(
             } else {
                 match origin.op {
                     DiagramOperation::Node(node_op) => {
-                        let reg = registry.get_registration(&node_op.node_id)?;
+                        let reg = registry.get_registration(&node_op.builder)?;
                         reg.split(builder, output, split_op)
                     }
                     _ => Err(DiagramError::NotSplittable),
@@ -452,7 +452,7 @@ fn deserialize(
         let serialized = output.into_output::<serde_json::Value>();
         match target.op {
             DiagramOperation::Node(node_op) => {
-                let reg = registry.get_registration(&node_op.node_id)?;
+                let reg = registry.get_registration(&node_op.builder)?;
                 if reg.metadata.request.deserializable {
                     let deserialize_impl = &registry.deserialize_impls[&input_type];
                     Ok(deserialize_impl(builder, serialized))
@@ -477,7 +477,7 @@ fn serialize(
         match origin.op {
             DiagramOperation::Start(_) => Ok(output.into_output()),
             DiagramOperation::Node(node_op) => {
-                let reg = registry.get_registration(&node_op.node_id)?;
+                let reg = registry.get_registration(&node_op.builder)?;
                 if reg.metadata.response.serializable {
                     let serialize_impl = &registry.serialize_impls[&output.type_id];
                     Ok(serialize_impl(builder, output))

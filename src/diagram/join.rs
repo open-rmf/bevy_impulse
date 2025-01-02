@@ -9,7 +9,7 @@ use crate::{Builder, IterBufferable};
 use super::{DiagramError, DynOutput, NodeRegistry, SerializeMessage};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct JoinOp {
     pub(super) next: String,
 }
@@ -104,22 +104,22 @@ mod tests {
                 },
                 "getSplitValue1": {
                     "type": "node",
-                    "nodeId": "get_split_value",
+                    "builder": "get_split_value",
                     "next": "op1",
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "join",
                 },
                 "getSplitValue2": {
                     "type": "node",
-                    "nodeId": "get_split_value",
+                    "builder": "get_split_value",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "join",
                 },
                 "join": {
@@ -128,7 +128,7 @@ mod tests {
                 },
                 "serializeJoinOutput": {
                     "type": "node",
-                    "nodeId": "serialize_join_output",
+                    "builder": "serialize_join_output",
                     "next": "terminate",
                 },
                 "terminate": {

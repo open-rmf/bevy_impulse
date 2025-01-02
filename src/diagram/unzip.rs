@@ -13,7 +13,7 @@ use super::{
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct UnzipOp {
     pub(super) next: Vec<OperationId>,
 }
@@ -112,7 +112,7 @@ mod tests {
                 (
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
+                        builder: "multiply3".to_string(),
                         config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
@@ -151,7 +151,7 @@ mod tests {
                 (
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_5".to_string(),
+                        builder: "multiply3_5".to_string(),
                         config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
@@ -165,7 +165,7 @@ mod tests {
                 (
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
+                        builder: "multiply3".to_string(),
                         config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
@@ -173,7 +173,7 @@ mod tests {
                 (
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
+                        builder: "multiply3".to_string(),
                         config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
@@ -181,7 +181,7 @@ mod tests {
                 (
                     "op_4".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3".to_string(),
+                        builder: "multiply3".to_string(),
                         config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
@@ -214,7 +214,7 @@ mod tests {
                 (
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        node_id: "multiply3_5".to_string(),
+                        builder: "multiply3_5".to_string(),
                         config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
@@ -251,7 +251,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_5",
+                    "builder": "multiply3_5",
                     "next": "unzip",
                 },
                 "unzip": {
@@ -260,7 +260,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -288,7 +288,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_5",
+                    "builder": "multiply3_5",
                     "next": "unzip",
                 },
                 "unzip": {
@@ -300,7 +300,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "terminate",
                 },
                 "terminate": {

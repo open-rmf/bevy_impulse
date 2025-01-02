@@ -51,21 +51,21 @@
           }
         },
         {
-          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"nodeId\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"builder\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
+            "builder",
             "next",
-            "nodeId",
             "type"
           ],
           "properties": {
+            "builder": {
+              "type": "string"
+            },
             "config": {
               "default": null
             },
             "next": {
-              "type": "string"
-            },
-            "nodeId": {
               "type": "string"
             },
             "type": {
@@ -77,7 +77,7 @@
           }
         },
         {
-          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"forkClone\" }, \"forkClone\": { \"type\": \"forkClone\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"fork_clone\" }, \"fork_clone\": { \"type\": \"fork_clone\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "next",
@@ -93,7 +93,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "forkClone"
+                "fork_clone"
               ]
             }
           }
@@ -121,7 +121,7 @@
           }
         },
         {
-          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"forkResult\" }, \"forkResult\": { \"type\": \"forkResult\", \"ok\": \"terminate\", \"err\": \"dispose\" }, \"dispose\": { \"type\": \"dispose\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"fork_result\" }, \"fork_result\": { \"type\": \"fork_result\", \"ok\": \"terminate\", \"err\": \"dispose\" }, \"dispose\": { \"type\": \"dispose\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "err",
@@ -138,7 +138,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "forkResult"
+                "fork_result"
               ]
             }
           }
@@ -197,7 +197,7 @@
           }
         },
         {
-          "description": "Waits for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"nodeId\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"nodeId\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "Waits for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"builder\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"builder\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
             "next",

@@ -23,7 +23,7 @@ pub enum TransformError {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TransformOp {
     pub(super) cel: String,
     pub(super) next: String,
@@ -91,7 +91,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "transform",
                 },
                 "transform": {

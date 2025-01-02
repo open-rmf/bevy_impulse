@@ -12,7 +12,7 @@ use super::{
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ForkCloneOp {
     pub(super) next: Vec<OperationId>,
 }
@@ -83,16 +83,16 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
-                    "next": "forkClone"
+                    "builder": "multiply3",
+                    "next": "fork_clone"
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["op2"]
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3",
                     "next": "terminate"
                 },
                 "terminate": {
@@ -119,16 +119,16 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "forkClone"
+                    "builder": "multiply3_cloneable",
+                    "next": "fork_clone"
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["op2"]
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
+                    "builder": "multiply3_cloneable",
                     "next": "terminate"
                 },
                 "terminate": {

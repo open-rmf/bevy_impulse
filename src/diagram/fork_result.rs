@@ -12,7 +12,7 @@ use super::{
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ForkResultOp {
     pub(super) ok: OperationId,
     pub(super) err: OperationId,
@@ -106,22 +106,22 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "check_even",
-                    "next": "forkResult",
+                    "builder": "check_even",
+                    "next": "fork_result",
                 },
-                "forkResult": {
-                    "type": "forkResult",
+                "fork_result": {
+                    "type": "fork_result",
                     "ok": "op2",
                     "err": "op3",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "echo",
+                    "builder": "echo",
                     "next": "terminate",
                 },
                 "op3": {
                     "type": "node",
-                    "nodeId": "echo",
+                    "builder": "echo",
                     "next": "terminate",
                 },
                 "terminate": {

@@ -34,7 +34,7 @@ use super::{
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct SplitOp {
     #[serde(flatten)]
     pub(super) params: SplitOpParams,
@@ -43,7 +43,7 @@ pub struct SplitOp {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum SplitOpParams {
     Index(Vec<OperationId>),
     Key(HashMap<String, OperationId>),
@@ -398,7 +398,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "split_list",
+                    "builder": "split_list",
                     "next": "split",
                 },
                 "split": {
@@ -444,7 +444,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "split_list",
+                    "builder": "split_list",
                     "next": "split",
                 },
                 "split": {
@@ -494,7 +494,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "split_map",
+                    "builder": "split_map",
                     "next": "split",
                 },
                 "split": {
@@ -540,7 +540,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "nodeId": "split_list",
+                    "builder": "split_list",
                     "next": "split",
                 },
                 "split": {
@@ -590,7 +590,7 @@ mod tests {
                 },
                 "getSplitValue": {
                     "type": "node",
-                    "nodeId": "get_split_value",
+                    "builder": "get_split_value",
                     "next": "terminate",
                 },
                 "terminate": {
