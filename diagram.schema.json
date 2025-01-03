@@ -51,7 +51,7 @@
           }
         },
         {
-          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"builder\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "Connect the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"builder\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "builder",
@@ -144,7 +144,7 @@
           }
         },
         {
-          "description": "If the request is a list-like or map-like object, splits it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "If the request is a list-like or map-like object, split it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "oneOf": [
             {
@@ -197,7 +197,7 @@
           }
         },
         {
-          "description": "Waits for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"builder\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"builder\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "Wait for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"builder\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"builder\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
             "next",
@@ -216,7 +216,7 @@
           }
         },
         {
-          "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
             "cel",
@@ -239,7 +239,7 @@
           }
         },
         {
-          "description": "Drops the request, equivalent to a no-op.",
+          "description": "Drop the request, equivalent to a no-op.",
           "type": "object",
           "required": [
             "type"

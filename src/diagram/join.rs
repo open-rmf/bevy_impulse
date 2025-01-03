@@ -37,7 +37,7 @@ fn join_impl<T>(builder: &mut Builder, outputs: Vec<DynOutput>) -> Result<DynOut
 where
     T: Send + Sync + 'static,
 {
-    debug!("join outputs");
+    debug!("join outputs {:?}", outputs);
 
     let first_type = outputs[0].type_id;
 

@@ -27,7 +27,7 @@ use super::{
 };
 
 /// A type erased [`crate::InputSlot`]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,
@@ -37,16 +37,6 @@ pub struct DynInputSlot {
 impl DynInputSlot {
     pub(super) fn into_input<T>(self) -> InputSlot<T> {
         InputSlot::<T>::new(self.scope, self.source)
-    }
-}
-
-impl Debug for DynInputSlot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "DynInputSlot {{ scope: {:?}, source: {:?} }}",
-            self.scope, self.source
-        )
     }
 }
 
@@ -63,6 +53,7 @@ where
     }
 }
 
+#[derive(Debug)]
 /// A type erased [`crate::Output`]
 pub struct DynOutput {
     scope: Entity,
@@ -76,16 +67,6 @@ impl DynOutput {
         T: Send + Sync + 'static,
     {
         Output::<T>::new(self.scope, self.target)
-    }
-}
-
-impl Debug for DynOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "DynOutput {{ scope: {:?}, target: {:?} }}",
-            self.scope, self.target
-        )
     }
 }
 
