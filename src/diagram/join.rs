@@ -81,8 +81,8 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "get_split_value",
-            "get_split_value",
+            "get_split_value".to_string(),
+            "get_split_value".to_string(),
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 
@@ -95,8 +95,8 @@ mod tests {
             .registration_builder()
             .with_opaque_request()
             .register_node_builder(
-                "serialize_join_output",
-                "serialize_join_output",
+                "serialize_join_output".to_string(),
+                "serialize_join_output".to_string(),
                 |builder, _config: ()| builder.create_map_block(serialize_join_output),
             );
 
