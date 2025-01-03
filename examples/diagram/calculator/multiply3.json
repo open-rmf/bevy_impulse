@@ -7,7 +7,7 @@
     },
     "mul3": {
       "type": "node",
-      "nodeId": "mul",
+      "builder": "mul",
       "config": 3,
       "next": "terminate"
     },
