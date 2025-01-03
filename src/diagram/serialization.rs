@@ -1,4 +1,4 @@
-use std::{any::TypeId, error::Error, fmt::Display};
+use std::any::TypeId;
 
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
@@ -6,34 +6,13 @@ use tracing::debug;
 
 use super::NodeRegistry;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum SerializationError {
+    #[error("not supported")]
     NotSupported,
-    JsonError(serde_json::Error),
-}
 
-impl Display for SerializationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotSupported => f.write_str("not supported"),
-            Self::JsonError(err) => err.fmt(f),
-        }
-    }
-}
-
-impl Error for SerializationError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::NotSupported => None,
-            Self::JsonError(err) => Some(err),
-        }
-    }
-}
-
-impl From<serde_json::Error> for SerializationError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::JsonError(value)
-    }
+    #[error(transparent)]
+    JsonError(#[from] serde_json::Error),
 }
 
 pub trait DynType {
