@@ -72,7 +72,7 @@ mod tests {
             pair.1
         }
 
-        fixture.registry.register_node(
+        fixture.registry.register_node_builder(
             "get_split_value",
             "get_split_value",
             |builder, _config: ()| builder.create_map_block(get_split_value),
@@ -86,7 +86,7 @@ mod tests {
             .registry
             .registration_builder()
             .with_opaque_request()
-            .register_node(
+            .register_node_builder(
                 "serialize_join_output",
                 "serialize_join_output",
                 |builder, _config: ()| builder.create_map_block(serialize_join_output),

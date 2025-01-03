@@ -384,7 +384,7 @@ mod tests {
             .registry
             .registration_builder()
             .with_splittable()
-            .register_node(
+            .register_node_builder(
                 "split_list",
                 "split_list",
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
@@ -430,7 +430,7 @@ mod tests {
             .registry
             .registration_builder()
             .with_splittable()
-            .register_node(
+            .register_node_builder(
                 "split_list",
                 "split_list",
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
@@ -480,7 +480,7 @@ mod tests {
             .registry
             .registration_builder()
             .with_splittable()
-            .register_node(
+            .register_node_builder(
                 "split_map",
                 "split_map",
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
@@ -526,7 +526,7 @@ mod tests {
             .registry
             .registration_builder()
             .with_splittable()
-            .register_node(
+            .register_node_builder(
                 "split_list",
                 "split_list",
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
@@ -572,7 +572,7 @@ mod tests {
             pair.1
         }
 
-        fixture.registry.register_node(
+        fixture.registry.register_node_builder(
             "get_split_value",
             "get_split_value",
             |builder, _config: ()| builder.create_map_block(get_split_value),

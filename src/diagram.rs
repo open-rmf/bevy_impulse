@@ -304,7 +304,7 @@ impl Diagram {
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = NodeRegistry::default();
-    /// registry.register_node("echo", "echo", |builder, _config: ()| {
+    /// registry.register_node_builder("echo", "echo", |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
     ///

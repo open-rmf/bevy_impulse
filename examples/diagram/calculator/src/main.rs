@@ -7,16 +7,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
 
     let mut registry = NodeRegistry::default();
-    registry.register_node("add", "Add", |builder, config: f64| {
+    registry.register_node_builder("add", "Add", |builder, config: f64| {
         builder.create_map_block(move |req: f64| req + config)
     });
-    registry.register_node("sub", "Subtract", |builder, config: f64| {
+    registry.register_node_builder("sub", "Subtract", |builder, config: f64| {
         builder.create_map_block(move |req: f64| req - config)
     });
-    registry.register_node("mul", "Multiply", |builder, config: f64| {
+    registry.register_node_builder("mul", "Multiply", |builder, config: f64| {
         builder.create_map_block(move |req: f64| req * config)
     });
-    registry.register_node("div", "Divide", |builder, config: f64| {
+    registry.register_node_builder("div", "Divide", |builder, config: f64| {
         builder.create_map_block(move |req: f64| req / config)
     });
 

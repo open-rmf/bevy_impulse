@@ -82,7 +82,7 @@ mod tests {
             .registry
             .registration_builder()
             .with_fork_result()
-            .register_node(
+            .register_node_builder(
                 "check_even",
                 "check_even",
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
@@ -92,11 +92,11 @@ mod tests {
             s
         }
 
-        fixture
-            .registry
-            .register_node("echo", "echo", |builder: &mut Builder, _config: ()| {
-                builder.create_map_block(&echo)
-            });
+        fixture.registry.register_node_builder(
+            "echo",
+            "echo",
+            |builder: &mut Builder, _config: ()| builder.create_map_block(&echo),
+        );
 
         let diagram = Diagram::from_json(json!({
             "ops": {
