@@ -60,7 +60,7 @@ pub enum DiagramOperation {
     /// Signifies the end of a workflow. There must be exactly 1 terminate operation in a diagram.
     Terminate(TerminateOp),
 
-    /// Connects the request to a registered node.
+    /// Connect the request to a registered node.
     ///
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
@@ -161,7 +161,7 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     ForkResult(ForkResultOp),
 
-    /// If the request is a list-like or map-like object, splits it into multiple responses.
+    /// If the request is a list-like or map-like object, split it into multiple responses.
     ///
     /// # Examples
     /// ```
@@ -186,7 +186,7 @@ pub enum DiagramOperation {
     /// ```
     Split(SplitOp),
 
-    /// Waits for an item to be emitted from each of the inputs, then combined the
+    /// Wait for an item to be emitted from each of the inputs, then combined the
     /// oldest of each into an array.
     ///
     /// # Examples
@@ -226,7 +226,7 @@ pub enum DiagramOperation {
     /// ```
     Join(JoinOp),
 
-    /// If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program.
+    /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
     /// The context includes a "request" variable which contains the request.
     ///
     /// # Examples
@@ -280,7 +280,7 @@ pub enum DiagramOperation {
     /// ```
     Transform(TransformOp),
 
-    /// Drops the request, equivalent to a no-op.
+    /// Drop the request, equivalent to a no-op.
     Dispose,
 }
 
