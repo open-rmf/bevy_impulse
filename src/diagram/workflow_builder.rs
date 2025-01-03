@@ -6,7 +6,7 @@ use crate::{Builder, Output, StreamPack};
 
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
-    Diagram, DiagramError, DiagramOperation, DynInputSlot, DynOutput, DynScope, NodeRegistry,
+    Diagram, DiagramError, DiagramOperation, DiagramScope, DynInputSlot, DynOutput, NodeRegistry,
     OperationId, SplitOpParams,
 };
 
@@ -32,7 +32,7 @@ enum EdgeState<'a> {
 }
 
 pub(super) fn create_workflow<'a, Streams: StreamPack>(
-    scope: DynScope<Streams>,
+    scope: DiagramScope<Streams>,
     builder: &mut Builder,
     registry: &NodeRegistry,
     diagram: &'a Diagram,

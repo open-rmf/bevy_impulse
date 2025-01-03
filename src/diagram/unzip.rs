@@ -130,9 +130,7 @@ mod tests {
             ]),
         };
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotUnzippable), "{}", err);
     }
 
@@ -193,9 +191,7 @@ mod tests {
             ]),
         };
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotUnzippable));
     }
 

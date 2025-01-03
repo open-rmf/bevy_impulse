@@ -1,6 +1,8 @@
 use std::{error::Error, fs::File, str::FromStr};
 
-use bevy_impulse::{Diagram, ImpulsePlugin, NodeRegistry, RequestExt, RunCommandsOnWorldExt};
+use bevy_impulse::{
+    Diagram, DiagramError, ImpulsePlugin, NodeRegistry, Promise, RequestExt, RunCommandsOnWorldExt,
+};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -38,10 +40,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let diagram = Diagram::from_reader(file)?;
 
     let request = serde_json::Value::from_str(&args.request)?;
-    let workflow = diagram.spawn_io_workflow(&mut app, &registry)?;
-    let mut promise = app
-        .world
-        .command(|cmds| cmds.request(request, workflow).take_response());
+    let mut promise =
+        app.world
+            .command(|cmds| -> Result<Promise<serde_json::Value>, DiagramError> {
+                let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
+                Ok(cmds.request(request, workflow).take_response())
+            })?;
 
     while promise.peek().is_pending() {
         app.update();

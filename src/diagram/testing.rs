@@ -1,8 +1,10 @@
 use std::error::Error;
 
-use crate::{testing::TestingContext, Builder, RequestExt};
+use crate::{
+    testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
+};
 
-use super::{Diagram, NodeRegistry};
+use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeRegistry};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
@@ -17,6 +19,24 @@ impl DiagramTestFixture {
         }
     }
 
+    pub(super) fn spawn_workflow<Streams: StreamPack>(
+        &mut self,
+        diagram: &Diagram,
+    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError> {
+        self.context
+            .app
+            .world
+            .command(|cmds| diagram.spawn_workflow(cmds, &self.registry))
+    }
+
+    /// Equivalent to `self.spawn_workflow::<()>(diagram)`
+    pub(super) fn spawn_io_workflow(
+        &mut self,
+        diagram: &Diagram,
+    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
+        self.spawn_workflow::<()>(diagram)
+    }
+
     /// Spawns a workflow from a diagram then run the workflow until completion.
     /// Returns the result of the workflow.
     pub(super) fn spawn_and_run(
@@ -24,7 +44,7 @@ impl DiagramTestFixture {
         diagram: &Diagram,
         request: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn Error>> {
-        let workflow = diagram.spawn_io_workflow(&mut self.context.app, &self.registry)?;
+        let workflow = self.spawn_workflow::<()>(diagram)?;
         let mut promise = self
             .context
             .command(|cmds| cmds.request(request, workflow).take_response());

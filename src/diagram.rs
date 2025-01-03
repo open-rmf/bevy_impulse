@@ -9,6 +9,7 @@ mod transform;
 mod unzip;
 mod workflow_builder;
 
+use bevy_ecs::system::Commands;
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
@@ -25,7 +26,6 @@ use workflow_builder::create_workflow;
 use std::{collections::HashMap, io::Read};
 
 use crate::{Builder, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack};
-use bevy_app::App;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -284,9 +284,9 @@ pub enum DiagramOperation {
     Dispose,
 }
 
-type ScopeStart = serde_json::Value;
-type ScopeTerminate = serde_json::Value;
-type DynScope<Streams> = Scope<ScopeStart, ScopeTerminate, Streams>;
+type DiagramStart = serde_json::Value;
+type DiagramTerminate = serde_json::Value;
+type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>;
 
 #[derive(JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -331,11 +331,13 @@ impl Diagram {
     /// let workflow = diagram.spawn_io_workflow(&mut app, &registry)?;
     /// # Ok::<_, DiagramError>(())
     /// ```
-    pub fn spawn_workflow<Streams>(
+    // TODO(koonpeng): Support streams other than `()` #43.
+    /* pub */
+    fn spawn_workflow<Streams>(
         &self,
-        app: &mut App,
+        cmds: &mut Commands,
         registry: &NodeRegistry,
-    ) -> Result<Service<ScopeStart, ScopeTerminate, Streams>, DiagramError>
+    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
     {
@@ -353,17 +355,15 @@ impl Diagram {
             };
         }
 
-        let w = app
-            .world
-            .spawn_workflow(|scope: DynScope<Streams>, builder: &mut Builder| {
-                debug!(
-                    "spawn workflow, scope input: {:?}, terminate: {:?}",
-                    scope.input.id(),
-                    scope.terminate.id()
-                );
+        let w = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
+            debug!(
+                "spawn workflow, scope input: {:?}, terminate: {:?}",
+                scope.input.id(),
+                scope.terminate.id()
+            );
 
-                unwrap_or_return!(create_workflow(scope, builder, registry, self));
-            });
+            unwrap_or_return!(create_workflow(scope, builder, registry, self));
+        });
 
         if let Some(err) = err {
             return Err(err);
@@ -375,10 +375,10 @@ impl Diagram {
     /// Wrapper to [spawn_workflow::<()>](Self::spawn_workflow).
     pub fn spawn_io_workflow(
         &self,
-        app: &mut App,
+        cmds: &mut Commands,
         registry: &NodeRegistry,
-    ) -> Result<Service<ScopeStart, ScopeTerminate, ()>, DiagramError> {
-        self.spawn_workflow::<()>(app, registry)
+    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
+        self.spawn_workflow::<()>(cmds, registry)
     }
 
     pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
@@ -550,9 +550,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::CannotConnectStart), "{:?}", err);
     }
 
@@ -578,9 +576,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
 
@@ -606,9 +602,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
 
@@ -639,9 +633,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::TypeMismatch), "{:?}", err);
     }
 
