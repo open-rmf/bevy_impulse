@@ -399,7 +399,7 @@ impl Diagram {
 
 #[derive(Debug)]
 pub enum DiagramError {
-    NodeNotFound(BuilderId),
+    BuilderNotFound(BuilderId),
     OperationNotFound(OperationId),
     TypeMismatch,
     MissingStartOrTerminate,
@@ -418,7 +418,7 @@ pub enum DiagramError {
 impl Display for DiagramError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NodeNotFound(node_id) => write!(f, "node [{}] is not registered", node_id),
+            Self::BuilderNotFound(builder_id) => write!(f, "node builder [{}] is not registered", builder_id),
             Self::OperationNotFound(op_id) => write!(f, "operation [{}] not found", op_id),
             Self::TypeMismatch => f.write_str("output type does not match input type"),
             Self::MissingStartOrTerminate => f.write_str("missing start or terminate"),

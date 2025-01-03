@@ -594,7 +594,7 @@ impl NodeRegistry {
         let k = id.borrow();
         self.nodes
             .get(k)
-            .ok_or(DiagramError::NodeNotFound(k.to_string()))
+            .ok_or(DiagramError::BuilderNotFound(k.to_string()))
     }
 }
 
