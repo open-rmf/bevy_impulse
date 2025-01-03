@@ -475,8 +475,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
 pub trait IntoNodeRegistration {
     fn into_node_registration(
         self,
-        id: &'static str,
-        name: &'static str,
+        id: BuilderId,
+        name: String,
         gen: &mut SchemaGenerator,
     ) -> NodeRegistration;
 }
