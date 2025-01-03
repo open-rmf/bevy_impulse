@@ -22,7 +22,7 @@ use workflow_builder::create_workflow;
 
 // ----------
 
-use std::{collections::HashMap, error::Error, fmt::Display, io::Read};
+use std::{collections::HashMap, io::Read};
 
 use crate::{Builder, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack};
 use bevy_app::App;
@@ -397,80 +397,51 @@ impl Diagram {
     }
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum DiagramError {
+    #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
+
+    #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
+
+    #[error("output type does not match input type")]
     TypeMismatch,
+
+    #[error("missing start or terminate")]
     MissingStartOrTerminate,
+
+    #[error("cannot connect to start")]
     CannotConnectStart,
+
+    #[error("request or response cannot be serialized or deserialized")]
     NotSerializable,
+
+    #[error("response cannot be cloned")]
     NotCloneable,
+
+    #[error("the number of unzip slots in response does not match the number of inputs")]
     NotUnzippable,
+
+    #[error(
+        "node must be registered with \"with_fork_result()\" to be able to perform fork result"
+    )]
     CannotForkResult,
+
+    #[error("response cannot be splitted")]
     NotSplittable,
-    CannotTransform(TransformError),
+
+    #[error(transparent)]
+    CannotTransform(#[from] TransformError),
+
+    #[error("an interconnect like fork_clone cannot connect to another interconnect")]
     BadInterconnectChain,
-    JsonError(serde_json::Error),
-    ConnectionError(Box<dyn Error>),
-}
 
-impl Display for DiagramError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BuilderNotFound(builder_id) => write!(f, "node builder [{}] is not registered", builder_id),
-            Self::OperationNotFound(op_id) => write!(f, "operation [{}] not found", op_id),
-            Self::TypeMismatch => f.write_str("output type does not match input type"),
-            Self::MissingStartOrTerminate => f.write_str("missing start or terminate"),
-            Self::CannotConnectStart => f.write_str("cannot connect to start"),
-            Self::NotSerializable => {
-                f.write_str("request or response cannot be serialized or deserialized")
-            }
-            Self::NotCloneable => f.write_str("response cannot be cloned"),
-            Self::NotUnzippable => f.write_str(
-                "the number of unzip slots in response does not match the number of inputs",
-            ),
-            Self::CannotForkResult => f.write_str(
-                "node must be registered with \"with_fork_result()\" to be able to perform fork result",
-            ),
-            Self::NotSplittable => f.write_str("response cannot be splitted"),
-            Self::CannotTransform(err) => err.fmt(f),
-            Self::BadInterconnectChain => {
-                f.write_str("an interconnect like fork_clone cannot connect to another interconnect")
-            }
-            Self::JsonError(err) => err.fmt(f),
-            Self::ConnectionError(inner) => inner.fmt(f),
-        }
-    }
-}
+    #[error(transparent)]
+    JsonError(#[from] serde_json::Error),
 
-impl Error for DiagramError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::JsonError(err) => Some(err),
-            Self::ConnectionError(inner) => Some(inner.as_ref()),
-            Self::CannotTransform(inner) => Some(inner),
-            _ => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for DiagramError {
-    fn from(err: serde_json::Error) -> Self {
-        DiagramError::JsonError(err)
-    }
-}
-
-impl From<SplitConnectionError> for DiagramError {
-    fn from(value: SplitConnectionError) -> Self {
-        DiagramError::ConnectionError(value.into())
-    }
-}
-
-impl From<TransformError> for DiagramError {
-    fn from(value: TransformError) -> Self {
-        DiagramError::CannotTransform(value)
-    }
+    #[error(transparent)]
+    ConnectionError(#[from] SplitConnectionError),
 }
 
 #[cfg(test)]
