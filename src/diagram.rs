@@ -300,7 +300,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeRegistry};
+    /// use bevy_impulse::{Diagram, DiagramError, NodeRegistry, RunCommandsOnWorldExt};
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = NodeRegistry::default();
@@ -328,7 +328,7 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = diagram.spawn_io_workflow(&mut app, &registry)?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
     /// # Ok::<_, DiagramError>(())
     /// ```
     // TODO(koonpeng): Support streams other than `()` #43.

@@ -1,5 +1,3 @@
-use std::any::TypeId;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -50,9 +48,8 @@ where
         output: DynOutput,
     ) -> Result<(DynOutput, DynOutput), DiagramError> {
         debug!("fork result: {:?}", output);
-        assert_eq!(output.type_id, TypeId::of::<Result<T, E>>());
 
-        let chain = output.into_output::<Result<T, E>>().chain(builder);
+        let chain = output.into_output::<Result<T, E>>()?.chain(builder);
         let outputs = chain.fork_result(|c| c.output().into(), |c| c.output().into());
         debug!("forked outputs: {:?}", outputs);
         Ok(outputs)

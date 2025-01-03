@@ -53,7 +53,7 @@ where
         debug!("fork clone: {:?}", output);
         assert_eq!(output.type_id, TypeId::of::<T>());
 
-        let fork_clone = output.into_output::<T>().fork_clone(builder);
+        let fork_clone = output.into_output::<T>()?.fork_clone(builder);
         let outputs = (0..amount)
             .map(|_| fork_clone.clone_output(builder).into())
             .collect();

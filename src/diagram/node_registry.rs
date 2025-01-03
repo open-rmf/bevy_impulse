@@ -1,5 +1,9 @@
 use std::{
-    any::TypeId, borrow::Borrow, cell::RefCell, collections::HashMap, fmt::Debug,
+    any::{Any, TypeId},
+    borrow::Borrow,
+    cell::RefCell,
+    collections::HashMap,
+    fmt::Debug,
     marker::PhantomData,
 };
 
@@ -35,15 +39,24 @@ pub struct DynInputSlot {
 }
 
 impl DynInputSlot {
-    pub(super) fn into_input<T>(self) -> InputSlot<T> {
-        InputSlot::<T>::new(self.scope, self.source)
+    pub(super) fn into_input<T: Any>(self) -> Result<InputSlot<T>, DiagramError> {
+        if self.type_id != TypeId::of::<T>() {
+            Err(DiagramError::TypeMismatch)
+        } else {
+            Ok(InputSlot::<T>::new(self.scope, self.source))
+        }
+    }
+
+    pub(super) fn scope(&self) -> Entity {
+        self.scope
+    }
+
+    pub(super) fn id(&self) -> Entity {
+        self.source
     }
 }
 
-impl<T> From<InputSlot<T>> for DynInputSlot
-where
-    T: 'static,
-{
+impl<T: Any> From<InputSlot<T>> for DynInputSlot {
     fn from(input: InputSlot<T>) -> Self {
         Self {
             scope: input.scope(),
@@ -62,11 +75,23 @@ pub struct DynOutput {
 }
 
 impl DynOutput {
-    pub(super) fn into_output<T>(self) -> Output<T>
+    pub(super) fn into_output<T>(self) -> Result<Output<T>, DiagramError>
     where
-        T: Send + Sync + 'static,
+        T: Send + Sync + 'static + Any,
     {
-        Output::<T>::new(self.scope, self.target)
+        if self.type_id != TypeId::of::<T>() {
+            Err(DiagramError::TypeMismatch)
+        } else {
+            Ok(Output::<T>::new(self.scope, self.target))
+        }
+    }
+
+    pub(super) fn scope(&self) -> Entity {
+        self.scope
+    }
+
+    pub(super) fn id(&self) -> Entity {
+        self.target
     }
 }
 
@@ -457,11 +482,15 @@ pub struct NodeRegistry {
     /// with itself.
     gen: SchemaGenerator,
 
-    pub(super) deserialize_impls:
-        HashMap<TypeId, Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> DynOutput>>,
+    pub(super) deserialize_impls: HashMap<
+        TypeId,
+        Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramError>>,
+    >,
 
-    pub(super) serialize_impls:
-        HashMap<TypeId, Box<dyn Fn(&mut Builder, DynOutput) -> Output<serde_json::Value>>>,
+    pub(super) serialize_impls: HashMap<
+        TypeId,
+        Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramError>>,
+    >,
 
     pub(super) join_impls: HashMap<
         TypeId,

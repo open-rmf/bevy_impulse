@@ -45,7 +45,7 @@ pub(super) fn transform_output(
             .get(&output.type_id)
             .ok_or(DiagramError::NotSerializable)?;
         serialize(builder, output)
-    };
+    }?;
 
     let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;
     let transform_node = builder.create_map_block(

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::{Builder, IterBufferable};
+use crate::{Builder, IterBufferable, Output};
 
 use super::{DiagramError, DynOutput, NodeRegistry, SerializeMessage};
 
@@ -39,6 +39,14 @@ where
 {
     debug!("join outputs {:?}", outputs);
 
+    if outputs.is_empty() {
+        // do a empty join
+        return Ok(([] as [Output<()>; 0])
+            .join_vec::<4>(builder)
+            .output()
+            .into());
+    }
+
     let first_type = outputs[0].type_id;
 
     let outputs = outputs
@@ -47,7 +55,7 @@ where
             if o.type_id != first_type {
                 Err(DiagramError::TypeMismatch)
             } else {
-                Ok(o.into_output::<T>())
+                Ok(o.into_output::<T>()?)
             }
         })
         .collect::<Result<Vec<_>, _>>()?;

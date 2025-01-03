@@ -244,7 +244,7 @@ where
         output: DynOutput,
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError> {
-        let chain = output.into_output::<T>().chain(builder);
+        let chain = output.into_output::<T>()?.chain(builder);
         split_chain(chain, split_op)
     }
 

@@ -2,7 +2,7 @@ use std::{any::TypeId, collections::HashMap};
 
 use tracing::{debug, warn};
 
-use crate::{Builder, Output, StreamPack};
+use crate::{Builder, InputSlot, Output, StreamPack};
 
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
@@ -286,7 +286,7 @@ fn connect_edge<'a>(
         DiagramOperation::Terminate(_) => {
             let serialized_output = serialize(builder, registry, output, origin)?;
             let input = inputs[target.op_id];
-            builder.connect(serialized_output, input.into_input());
+            builder.connect(serialized_output, input.into_input()?);
         }
         DiagramOperation::Node(_) => {
             let input = inputs[target.op_id];
@@ -375,7 +375,7 @@ fn connect_edge<'a>(
         }
         DiagramOperation::Split(split_op) => {
             let outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
-                let chain = output.into_output::<serde_json::Value>().chain(builder);
+                let chain = output.into_output::<serde_json::Value>()?.chain(builder);
                 split_chain(chain, split_op)
             } else {
                 match origin.op {
@@ -421,21 +421,26 @@ fn connect_edge<'a>(
     Ok(())
 }
 
+/// Connect a [`DynOutput`] to a [`DynInputSlot`]. Use this only when both the output and input
+/// are type erased. To connect an [`Output`] to a [`DynInputSlot`] or vice versa, prefer converting
+/// the type erased output/input slot to the typed equivalent.
+///
+/// ```text
+/// builder.connect(output.into_output::<i64>()?, dyn_input)?;
+/// ```
 fn dyn_connect(
     builder: &mut Builder,
     output: DynOutput,
     input: DynInputSlot,
 ) -> Result<(), DiagramError> {
     if output.type_id != input.type_id {
-        Err(DiagramError::TypeMismatch)
-    } else {
-        struct TypeErased {}
-        builder.connect(
-            output.into_output::<TypeErased>(),
-            input.into_input::<TypeErased>(),
-        );
-        Ok(())
+        return Err(DiagramError::TypeMismatch);
     }
+    struct TypeErased {}
+    let typed_output = Output::<TypeErased>::new(output.scope(), output.id());
+    let typed_input = InputSlot::<TypeErased>::new(input.scope(), input.id());
+    builder.connect(typed_output, typed_input);
+    Ok(())
 }
 
 /// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
@@ -449,13 +454,13 @@ fn deserialize(
     if output.type_id != TypeId::of::<serde_json::Value>() || output.type_id == input_type {
         Ok(output)
     } else {
-        let serialized = output.into_output::<serde_json::Value>();
+        let serialized = output.into_output::<serde_json::Value>()?;
         match target.op {
             DiagramOperation::Node(node_op) => {
                 let reg = registry.get_registration(&node_op.builder)?;
                 if reg.metadata.request.deserializable {
                     let deserialize_impl = &registry.deserialize_impls[&input_type];
-                    Ok(deserialize_impl(builder, serialized))
+                    deserialize_impl(builder, serialized)
                 } else {
                     Err(DiagramError::NotSerializable)
                 }
@@ -472,15 +477,15 @@ fn serialize(
     origin: &Vertex,
 ) -> Result<Output<serde_json::Value>, DiagramError> {
     if output.type_id == TypeId::of::<serde_json::Value>() {
-        Ok(output.into_output())
+        output.into_output()
     } else {
         match origin.op {
-            DiagramOperation::Start(_) => Ok(output.into_output()),
+            DiagramOperation::Start(_) => output.into_output(),
             DiagramOperation::Node(node_op) => {
                 let reg = registry.get_registration(&node_op.builder)?;
                 if reg.metadata.response.serializable {
                     let serialize_impl = &registry.serialize_impls[&output.type_id];
-                    Ok(serialize_impl(builder, output))
+                    serialize_impl(builder, output)
                 } else {
                     Err(DiagramError::NotSerializable)
                 }

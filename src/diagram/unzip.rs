@@ -55,7 +55,7 @@ macro_rules! dyn_unzip_impl {
             ) -> Result<Vec<DynOutput>, DiagramError> {
                 debug!("unzip output: {:?}", output);
                 let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
-                let chain = output.into_output::<($($P,)*)>().chain(builder);
+                let chain = output.into_output::<($($P,)*)>()?.chain(builder);
                 let ($($o,)*) = chain.unzip();
 
                 $({

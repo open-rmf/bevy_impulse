@@ -207,7 +207,7 @@ where
                 .output()
                 .into();
             debug!("deserialized output: {:?}", deserialized_output);
-            deserialized_output
+            Ok(deserialized_output)
         }),
     );
 }
@@ -231,10 +231,10 @@ where
         Box::new(|builder, output| {
             debug!("serialize output: {:?}", output);
             let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
-            builder.connect(output.into_output(), n.input);
+            builder.connect(output.into_output()?, n.input);
             let serialized_output = n.output.chain(builder).cancel_on_err().output();
             debug!("serialized output: {:?}", serialized_output);
-            serialized_output
+            Ok(serialized_output)
         }),
     );
 }
