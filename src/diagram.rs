@@ -428,7 +428,7 @@ pub enum DiagramError {
     )]
     CannotForkResult,
 
-    #[error("response cannot be splitted")]
+    #[error("response cannot be split")]
     NotSplittable,
 
     #[error(transparent)]
