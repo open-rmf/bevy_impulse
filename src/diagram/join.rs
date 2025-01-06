@@ -2,9 +2,10 @@ use std::any::TypeId;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use tracing::debug;
 
-use crate::{Builder, IterBufferable, Output};
+use crate::{Builder, IterBufferable};
 
 use super::{DiagramError, DynOutput, NodeRegistry, SerializeMessage};
 
@@ -40,11 +41,9 @@ where
     debug!("join outputs {:?}", outputs);
 
     if outputs.is_empty() {
-        // do a empty join
-        return Ok(([] as [Output<()>; 0])
-            .join_vec::<4>(builder)
-            .output()
-            .into());
+        // do a empty join, in practice, this branch is never ran because [`WorkflowBuilder`]
+        // should error out if there is an empty join.
+        return Err(DiagramError::EmptyJoin);
     }
 
     let first_type = outputs[0].type_id;
@@ -52,6 +51,12 @@ where
     let outputs = outputs
         .into_iter()
         .map(|o| {
+            // joins is only supported for outputs of the same type. This is because joins of
+            // different types produces a tuple and we cannot output a tuple as we don't
+            // know the number and order of join inputs at compile time.
+            // A workaround is to serialize them all the `serde_json::Value` or convert them to `Box<dyn Any>`.
+            // But the problem with `Box<dyn Any>` is that we can't convert it back to the original type,
+            // so nodes need to take a request of `JoinOutput<Box<dyn Any>>`.
             if o.type_id != first_type {
                 Err(DiagramError::TypeMismatch)
             } else {
@@ -61,15 +66,21 @@ where
         .collect::<Result<Vec<_>, _>>()?;
 
     // we don't know the number of items at compile time, so we just use a sensible number.
+    // NOTE: Be sure to update `JoinOutput` if this changes.
     Ok(outputs.join_vec::<4>(builder).output().into())
 }
+
+/// The resulting type of a `join` operation. Nodes receiving a join output must have request
+/// of this type. Note that the join output is NOT serializable. If you would like to serialize it,
+/// convert it to a `Vec` first.
+pub type JoinOutput<T> = SmallVec<[T; 4]>;
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use smallvec::SmallVec;
     use test_log::test;
 
+    use super::*;
     use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramError, JsonPosition};
 
     #[test]
@@ -86,8 +97,8 @@ mod tests {
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 
-        fn serialize_join_output(small_vec: SmallVec<[i64; 4]>) -> serde_json::Value {
-            serde_json::to_value(small_vec).unwrap()
+        fn serialize_join_output(join_output: JoinOutput<i64>) -> serde_json::Value {
+            serde_json::to_value(join_output).unwrap()
         }
 
         fixture

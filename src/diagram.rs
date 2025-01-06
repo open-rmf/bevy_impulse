@@ -13,6 +13,7 @@ use bevy_ecs::system::Commands;
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
+pub use join::JoinOutput;
 pub use node_registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
@@ -162,6 +163,8 @@ pub enum DiagramOperation {
     ForkResult(ForkResultOp),
 
     /// If the request is a list-like or map-like object, split it into multiple responses.
+    /// Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split
+    /// output should have request of that type instead of just the value type.
     ///
     /// # Examples
     /// ```
