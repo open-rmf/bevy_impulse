@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::{Builder, Output};
 
-use super::{DiagramError, DynOutput, NodeRegistry};
+use super::{DiagramError, DynOutput, NextOperation, NodeRegistry};
 
 #[derive(Error, Debug)]
 pub enum TransformError {
@@ -26,7 +26,7 @@ pub enum TransformError {
 #[serde(rename_all = "snake_case")]
 pub struct TransformOp {
     pub(super) cel: String,
-    pub(super) next: String,
+    pub(super) next: NextOperation,
 }
 
 pub(super) fn transform_output(
@@ -84,11 +84,8 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
                     "builder": "multiply3_uncloneable",
@@ -97,10 +94,7 @@ mod tests {
                 "transform": {
                     "type": "transform",
                     "cel": "777",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
@@ -117,18 +111,12 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "transform",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "transform",
-                },
                 "transform": {
                     "type": "transform",
                     "cel": "777",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
@@ -145,18 +133,12 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "transform",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "transform",
-                },
                 "transform": {
                     "type": "transform",
                     "cel": "int(request) * 3",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
@@ -173,18 +155,12 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "transform",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "transform",
-                },
                 "transform": {
                     "type": "transform",
                     "cel": "{ \"request\": request, \"seven\": 7 }",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
@@ -202,18 +178,12 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "transform",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "transform",
-                },
                 "transform": {
                     "type": "transform",
                     "cel": "request.age",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))

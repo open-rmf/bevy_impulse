@@ -39,14 +39,6 @@ pub struct DynInputSlot {
 }
 
 impl DynInputSlot {
-    pub(super) fn into_input<T: Any>(self) -> Result<InputSlot<T>, DiagramError> {
-        if self.type_id != TypeId::of::<T>() {
-            Err(DiagramError::TypeMismatch)
-        } else {
-            Ok(InputSlot::<T>::new(self.scope, self.source))
-        }
-    }
-
     pub(super) fn scope(&self) -> Entity {
         self.scope
     }

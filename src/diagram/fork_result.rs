@@ -6,14 +6,14 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, OperationId,
+    DiagramError, DynOutput, NextOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkResultOp {
-    pub(super) ok: OperationId,
-    pub(super) err: OperationId,
+    pub(super) ok: NextOperation,
+    pub(super) err: NextOperation,
 }
 
 pub trait DynForkResult<T> {
@@ -96,11 +96,8 @@ mod tests {
         );
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
                     "builder": "check_even",
@@ -114,15 +111,12 @@ mod tests {
                 "op2": {
                     "type": "node",
                     "builder": "echo",
-                    "next": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
                 "op3": {
                     "type": "node",
                     "builder": "echo",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))

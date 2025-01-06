@@ -7,12 +7,12 @@ use tracing::debug;
 
 use crate::{Builder, IterBufferable};
 
-use super::{DiagramError, DynOutput, NodeRegistry, SerializeMessage};
+use super::{DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessage};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct JoinOp {
-    pub(super) next: String,
+    pub(super) next: NextOperation,
 }
 
 pub(super) fn register_join_impl<T, Serializer>(registry: &mut NodeRegistry)
@@ -112,11 +112,8 @@ mod tests {
             );
 
         let diagram = Diagram::from_json(json!({
+            "start": "split",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "split",
-                },
                 "split": {
                     "type": "split",
                     "index": ["getSplitValue1", "getSplitValue2"]
@@ -148,10 +145,7 @@ mod tests {
                 "serializeJoinOutput": {
                     "type": "node",
                     "builder": "serialize_join_output",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             }
         }))
@@ -182,11 +176,8 @@ mod tests {
         );
 
         let diagram = Diagram::from_json(json!({
+            "start": "split",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "split",
-                },
                 "split": {
                     "type": "split",
                     "index": ["getSplitValue1", "getSplitValue2"]
@@ -199,7 +190,7 @@ mod tests {
                 "op1": {
                     "type": "node",
                     "builder": "multiply3_uncloneable",
-                    "next": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
                 "getSplitValue2": {
                     "type": "node",
@@ -209,14 +200,11 @@ mod tests {
                 "op2": {
                     "type": "node",
                     "builder": "multiply3_uncloneable",
-                    "next": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
                 "join": {
                     "type": "join",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             }
         }))

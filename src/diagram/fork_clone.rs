@@ -8,13 +8,13 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, OperationId,
+    DiagramError, DynOutput, NextOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkCloneOp {
-    pub(super) next: Vec<OperationId>,
+    pub(super) next: Vec<NextOperation>,
 }
 
 pub trait DynForkClone<T> {
@@ -76,11 +76,8 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1"
-                },
                 "op1": {
                     "type": "node",
                     "builder": "multiply3_uncloneable",
@@ -93,10 +90,7 @@ mod tests {
                 "op2": {
                     "type": "node",
                     "builder": "multiply3_uncloneable",
-                    "next": "terminate"
-                },
-                "terminate": {
-                    "type": "terminate"
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
@@ -110,11 +104,8 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1"
-                },
                 "op1": {
                     "type": "node",
                     "builder": "multiply3",
@@ -127,10 +118,7 @@ mod tests {
                 "op2": {
                     "type": "node",
                     "builder": "multiply3",
-                    "next": "terminate"
-                },
-                "terminate": {
-                    "type": "terminate"
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))

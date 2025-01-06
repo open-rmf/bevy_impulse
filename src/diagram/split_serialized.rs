@@ -30,7 +30,7 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize, DiagramError, DynOutput, NodeRegistry, OperationId, SerializeMessage,
+    register_serialize, DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessage,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -39,14 +39,14 @@ pub struct SplitOp {
     #[serde(flatten)]
     pub(super) params: SplitOpParams,
 
-    pub(super) remaining: Option<OperationId>,
+    pub(super) remaining: Option<NextOperation>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SplitOpParams {
-    Index(Vec<OperationId>),
-    Key(HashMap<String, OperationId>),
+    Index(Vec<NextOperation>),
+    Key(HashMap<String, NextOperation>),
 }
 
 impl Splittable for Value {
@@ -157,7 +157,7 @@ impl FromSpecific for ListSplitKey {
 
 #[derive(Debug)]
 pub struct DynSplitOutputs<'a> {
-    pub(super) outputs: HashMap<&'a OperationId, DynOutput>,
+    pub(super) outputs: HashMap<&'a NextOperation, DynOutput>,
     pub(super) remaining: DynOutput,
 }
 
@@ -391,11 +391,8 @@ mod tests {
             );
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
                     "builder": "split_list",
@@ -403,10 +400,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "index": ["terminate"],
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "index": [{ "builtin": "terminate" }],
                 },
             },
         }))
@@ -437,11 +431,8 @@ mod tests {
             );
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
                     "builder": "split_list",
@@ -449,10 +440,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "key": {"1": "terminate"},
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "key": { "1": { "builtin": "terminate" } },
                 },
             },
         }))
@@ -487,11 +475,8 @@ mod tests {
             );
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
                     "builder": "split_map",
@@ -499,10 +484,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "key": {"b": "terminate"},
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "key": { "b": { "builtin": "terminate" } },
                 },
             },
         }))
@@ -533,11 +515,8 @@ mod tests {
             );
 
         let diagram = Diagram::from_json(json!({
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
                     "builder": "split_list",
@@ -545,14 +524,8 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "index": ["dispose"],
-                    "remaining": "terminate",
-                },
-                "dispose": {
-                    "type": "dispose",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "index": [{ "builtin": "dispose" }],
+                    "remaining": { "builtin": "terminate" },
                 },
             },
         }))
@@ -579,11 +552,8 @@ mod tests {
         );
 
         let diagram = Diagram::from_json(json!({
+            "start": "split",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "split",
-                },
                 "split": {
                     "type": "split",
                     "index": ["getSplitValue"],
@@ -591,10 +561,7 @@ mod tests {
                 "getSplitValue": {
                     "type": "node",
                     "builder": "get_split_value",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
