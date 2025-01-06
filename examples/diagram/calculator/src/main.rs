@@ -21,18 +21,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
 
     let mut registry = NodeRegistry::default();
-    registry.register_node_builder("add", "Add", |builder, config: f64| {
-        builder.create_map_block(move |req: f64| req + config)
-    });
-    registry.register_node_builder("sub", "Subtract", |builder, config: f64| {
-        builder.create_map_block(move |req: f64| req - config)
-    });
-    registry.register_node_builder("mul", "Multiply", |builder, config: f64| {
-        builder.create_map_block(move |req: f64| req * config)
-    });
-    registry.register_node_builder("div", "Divide", |builder, config: f64| {
-        builder.create_map_block(move |req: f64| req / config)
-    });
+    registry.register_node_builder(
+        "add".to_string(),
+        "Add".to_string(),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
+    );
+    registry.register_node_builder(
+        "sub".to_string(),
+        "Subtract".to_string(),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
+    );
+    registry.register_node_builder(
+        "mul".to_string(),
+        "Multiply".to_string(),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
+    );
+    registry.register_node_builder(
+        "div".to_string(),
+        "Divide".to_string(),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
+    );
 
     let mut app = bevy_app::App::new();
     app.add_plugins(ImpulsePlugin::default());
