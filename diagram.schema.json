@@ -4,7 +4,8 @@
   "type": "object",
   "required": [
     "ops",
-    "start"
+    "start",
+    "version"
   ],
   "properties": {
     "ops": {
@@ -20,6 +21,13 @@
           "$ref": "#/definitions/NextOperation"
         }
       ]
+    },
+    "version": {
+      "description": "Version of the diagram, should always be `1`.",
+      "type": "integer",
+      "format": "uint32",
+      "maximum": 1.0,
+      "minimum": 1.0
     }
   },
   "definitions": {

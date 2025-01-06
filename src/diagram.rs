@@ -271,6 +271,10 @@ type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>
 #[derive(JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Diagram {
+    /// Version of the diagram, should always be `1`.
+    #[schemars(range(min = 1, max = 1))]
+    version: u32,
+
     /// Signifies the start of a workflow.
     start: NextOperation,
 
