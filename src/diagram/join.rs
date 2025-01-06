@@ -70,7 +70,7 @@ mod tests {
     use smallvec::SmallVec;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Diagram, JsonPosition};
+    use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramError, JsonPosition};
 
     #[test]
     fn test_join() {
@@ -154,5 +154,64 @@ mod tests {
         assert!(result[0] == 3 || result[0] == 6);
         assert!(result[1] == 3 || result[1] == 6);
         assert!(result[0] != result[1]);
+    }
+
+    #[test]
+    fn test_empty_join() {
+        let mut fixture = DiagramTestFixture::new();
+
+        fn get_split_value(pair: (JsonPosition, serde_json::Value)) -> serde_json::Value {
+            pair.1
+        }
+
+        fixture.registry.register_node_builder(
+            "get_split_value".to_string(),
+            "get_split_value".to_string(),
+            |builder, _config: ()| builder.create_map_block(get_split_value),
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "ops": {
+                "start": {
+                    "type": "start",
+                    "next": "split",
+                },
+                "split": {
+                    "type": "split",
+                    "index": ["getSplitValue1", "getSplitValue2"]
+                },
+                "getSplitValue1": {
+                    "type": "node",
+                    "builder": "get_split_value",
+                    "next": "op1",
+                },
+                "op1": {
+                    "type": "node",
+                    "builder": "multiply3_uncloneable",
+                    "next": "terminate",
+                },
+                "getSplitValue2": {
+                    "type": "node",
+                    "builder": "get_split_value",
+                    "next": "op2",
+                },
+                "op2": {
+                    "type": "node",
+                    "builder": "multiply3_uncloneable",
+                    "next": "terminate",
+                },
+                "join": {
+                    "type": "join",
+                    "next": "terminate",
+                },
+                "terminate": {
+                    "type": "terminate",
+                },
+            }
+        }))
+        .unwrap();
+
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        assert!(matches!(err, DiagramError::EmptyJoin));
     }
 }

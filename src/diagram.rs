@@ -431,6 +431,9 @@ pub enum DiagramError {
     #[error("response cannot be split")]
     NotSplittable,
 
+    #[error("empty join is not allowed")]
+    EmptyJoin,
+
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
 
