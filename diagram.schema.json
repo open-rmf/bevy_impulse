@@ -144,7 +144,7 @@
           }
         },
         {
-          "description": "If the request is a list-like or map-like object, split it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "If the request is a list-like or map-like object, split it into multiple responses. Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split output should have request of that type instead of just the value type.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "oneOf": [
             {
