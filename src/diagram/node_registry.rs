@@ -674,11 +674,11 @@ mod tests {
     fn test_register_node_builder() {
         let mut registry = NodeRegistry::default();
         registry.register_node_builder(
-            "multiply3".to_string(),
+            "multiply3_uncloneable".to_string(),
             "Test Name".to_string(),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
-        let registration = registry.get_registration("multiply3").unwrap();
+        let registration = registry.get_registration("multiply3_uncloneable").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
         assert!(!registration.metadata.response.cloneable);
@@ -692,11 +692,11 @@ mod tests {
             .registration_builder()
             .with_response_cloneable()
             .register_node_builder(
-                "multiply3".to_string(),
+                "multiply3_uncloneable".to_string(),
                 "Test Name".to_string(),
                 |builder, _config: ()| builder.create_map_block(multiply3),
             );
-        let registration = registry.get_registration("multiply3").unwrap();
+        let registration = registry.get_registration("multiply3_uncloneable").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
         assert!(registration.metadata.response.cloneable);
@@ -711,11 +711,11 @@ mod tests {
             .registration_builder()
             .with_unzippable()
             .register_node_builder(
-                "multiply3".to_string(),
+                "multiply3_uncloneable".to_string(),
                 "Test Name".to_string(),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
             );
-        let registration = registry.get_registration("multiply3").unwrap();
+        let registration = registry.get_registration("multiply3_uncloneable").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
         assert!(!registration.metadata.response.cloneable);

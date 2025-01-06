@@ -112,7 +112,7 @@ mod tests {
                 (
                     "op_1".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        builder: "multiply3".to_string(),
+                        builder: "multiply3_uncloneable".to_string(),
                         config: serde_json::Value::Null,
                         next: "unzip".to_string(),
                     }),
@@ -163,7 +163,7 @@ mod tests {
                 (
                     "op_2".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        builder: "multiply3".to_string(),
+                        builder: "multiply3_uncloneable".to_string(),
                         config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
@@ -171,7 +171,7 @@ mod tests {
                 (
                     "op_3".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        builder: "multiply3".to_string(),
+                        builder: "multiply3_uncloneable".to_string(),
                         config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
@@ -179,7 +179,7 @@ mod tests {
                 (
                     "op_4".to_string(),
                     DiagramOperation::Node(NodeOp {
-                        builder: "multiply3".to_string(),
+                        builder: "multiply3_uncloneable".to_string(),
                         config: serde_json::Value::Null,
                         next: "terminate".to_string(),
                     }),
@@ -256,7 +256,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -296,7 +296,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "terminate",
                 },
                 "terminate": {

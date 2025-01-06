@@ -91,7 +91,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "transform",
                 },
                 "transform": {

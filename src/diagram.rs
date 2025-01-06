@@ -468,7 +468,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "dispose",
                 },
                 "dispose": {
@@ -500,7 +500,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -536,7 +536,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_cloneable",
+                    "builder": "multiply3",
                     "next": "fork_clone",
                 },
                 "fork_clone": {
@@ -618,7 +618,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "op2",
                 },
                 "op2": {
@@ -649,12 +649,12 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "op1",
                 },
                 "terminate": {
@@ -685,7 +685,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_cloneable",
+                    "builder": "multiply3",
                     "next": "fork_clone",
                 },
                 "fork_clone": {
@@ -694,7 +694,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "terminate",
                 },
                 "terminate": {
@@ -742,9 +742,9 @@ mod tests {
             "ops": {
                 "start": {
                     "type": "start",
-                    "next": "multiply3"
+                    "next": "multiply3_uncloneable"
                 },
-                "multiply3": {
+                "multiply3_uncloneable": {
                     "type": "node",
                     "builder": "multiplyBy",
                     "config": 7,

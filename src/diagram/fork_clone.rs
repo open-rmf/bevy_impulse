@@ -83,7 +83,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "fork_clone"
                 },
                 "fork_clone": {
@@ -92,7 +92,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "terminate"
                 },
                 "terminate": {
@@ -117,7 +117,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_cloneable",
+                    "builder": "multiply3",
                     "next": "fork_clone"
                 },
                 "fork_clone": {
@@ -126,7 +126,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_cloneable",
+                    "builder": "multiply3",
                     "next": "terminate"
                 },
                 "terminate": {

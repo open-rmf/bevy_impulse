@@ -117,7 +117,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "join",
                 },
                 "getSplitValue2": {
@@ -127,7 +127,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "join",
                 },
                 "join": {
