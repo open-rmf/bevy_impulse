@@ -533,7 +533,7 @@ impl NodeRegistry {
     /// use bevy_impulse::NodeRegistry;
     ///
     /// let mut registry = NodeRegistry::default();
-    /// registry.registration_builder().register_node_builder("echo", "echo",
+    /// registry.registration_builder().register_node_builder("echo".to_string(), "echo".to_string(),
     ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg));
     /// ```
     ///
@@ -565,7 +565,7 @@ impl NodeRegistry {
     /// registry.registration_builder()
     ///     .with_opaque_request()
     ///     .with_opaque_response()
-    ///     .register_node_builder("echo", "echo", |builder, _config: ()| {
+    ///     .register_node_builder("echo".to_string(), "echo".to_string(), |builder, _config: ()| {
     ///         builder.create_map_block(|msg: NonSerializable| msg)
     ///     });
     /// ```
