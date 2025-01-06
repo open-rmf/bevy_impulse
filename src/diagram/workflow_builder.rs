@@ -232,9 +232,7 @@ fn connect_vertex<'a>(
         // instead of per edge level.
         DiagramOperation::Join(_) => {
             if target.in_edges.is_empty() {
-                if target.in_edges.is_empty() {
-                    return Err(DiagramError::EmptyJoin);
-                }
+                return Err(DiagramError::EmptyJoin);
             }
             let outputs: Vec<DynOutput> = target
                 .in_edges
