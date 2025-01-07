@@ -209,6 +209,13 @@
             "next": {
               "$ref": "#/definitions/NextOperation"
             },
+            "serialize": {
+              "description": "Whether to serialize incoming outputs before perform the join. This allows for joining outputs of different types at the cost of serialization overhead. If there is true, the resulting output will be of [`serde_json::Value`].",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "type": {
               "type": "string",
               "enum": [

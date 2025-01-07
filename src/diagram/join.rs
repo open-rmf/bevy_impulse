@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use tracing::debug;
 
-use crate::{Builder, IterBufferable};
+use crate::{Builder, IterBufferable, Output};
 
 use super::{DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessage};
 
@@ -13,6 +13,11 @@ use super::{DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessa
 #[serde(rename_all = "snake_case")]
 pub struct JoinOp {
     pub(super) next: NextOperation,
+
+    /// Whether to serialize incoming outputs before perform the join. This allows for joining
+    /// outputs of different types at the cost of serialization overhead. If there is true, the
+    /// resulting output will be of [`serde_json::Value`].
+    pub(super) serialize: Option<bool>,
 }
 
 pub(super) fn register_join_impl<T, Serializer>(registry: &mut NodeRegistry)
@@ -34,6 +39,42 @@ where
     // register_serialize::<Vec<T>, Serializer>(registry);
 }
 
+/// Serialize the outputs before joining them, and convert the resulting joined output into a
+/// [`serde_json::Value`].
+pub(super) fn serialize_and_join(
+    builder: &mut Builder,
+    registry: &NodeRegistry,
+    outputs: Vec<DynOutput>,
+) -> Result<Output<serde_json::Value>, DiagramError> {
+    debug!("serialize and join outputs {:?}", outputs);
+
+    if outputs.is_empty() {
+        // do not allow empty joins
+        return Err(DiagramError::EmptyJoin);
+    }
+
+    let outputs = outputs
+        .into_iter()
+        .map(|o| {
+            let serialize_impl = registry
+                .serialize_impls
+                .get(&o.type_id)
+                .ok_or(DiagramError::NotSerializable)?;
+            let serialized_output = serialize_impl(builder, o)?;
+            Ok(serialized_output)
+        })
+        .collect::<Result<Vec<_>, DiagramError>>()?;
+
+    // we need to convert the joined output to [`serde_json::Value`] in order for it to be
+    // serializable.
+    let joined_output = outputs.join_vec::<4>(builder).output();
+    let json_output = joined_output
+        .chain(builder)
+        .map_block(|o| serde_json::to_value(o).unwrap())
+        .output();
+    Ok(json_output)
+}
+
 fn join_impl<T>(builder: &mut Builder, outputs: Vec<DynOutput>) -> Result<DynOutput, DiagramError>
 where
     T: Send + Sync + 'static,
@@ -51,12 +92,6 @@ where
     let outputs = outputs
         .into_iter()
         .map(|o| {
-            // joins is only supported for outputs of the same type. This is because joins of
-            // different types produces a tuple and we cannot output a tuple as we don't
-            // know the number and order of join inputs at compile time.
-            // A workaround is to serialize them all the `serde_json::Value` or convert them to `Box<dyn Any>`.
-            // But the problem with `Box<dyn Any>` is that we can't convert it back to the original type,
-            // so nodes need to take a request of `JoinOutput<Box<dyn Any>>`.
             if o.type_id != first_type {
                 Err(DiagramError::TypeMismatch)
             } else {
@@ -214,5 +249,66 @@ mod tests {
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::EmptyJoin));
+    }
+
+    #[test]
+    fn test_serialize_and_join() {
+        let mut fixture = DiagramTestFixture::new();
+
+        fn num_output(_: serde_json::Value) -> i64 {
+            1
+        }
+
+        fixture.registry.register_node_builder(
+            "num_output".to_string(),
+            "num_output".to_string(),
+            |builder, _config: ()| builder.create_map_block(num_output),
+        );
+
+        fn string_output(_: serde_json::Value) -> String {
+            "hello".to_string()
+        }
+
+        fixture.registry.register_node_builder(
+            "string_output".to_string(),
+            "string_output".to_string(),
+            |builder, _config: ()| builder.create_map_block(string_output),
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork_clone",
+            "ops": {
+                "fork_clone": {
+                    "type": "fork_clone",
+                    "next": ["op1", "op2"]
+                },
+                "op1": {
+                    "type": "node",
+                    "builder": "num_output",
+                    "next": "join",
+                },
+                "op2": {
+                    "type": "node",
+                    "builder": "string_output",
+                    "next": "join",
+                },
+                "join": {
+                    "type": "join",
+                    "next": { "builtin": "terminate" },
+                    "serialize": true,
+                },
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::Null)
+            .unwrap();
+        assert_eq!(result.as_array().unwrap().len(), 2);
+        // order is not guaranteed so need to test for both possibility
+        assert!(result[0] == 1 || result[0] == "hello");
+        assert!(result[1] == 1 || result[1] == "hello");
+        assert!(result[0] != result[1]);
     }
 }

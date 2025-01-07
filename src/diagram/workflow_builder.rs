@@ -2,7 +2,7 @@ use std::{any::TypeId, collections::HashMap};
 
 use tracing::{debug, warn};
 
-use crate::{Builder, InputSlot, Output, StreamPack};
+use crate::{diagram::join::serialize_and_join, Builder, InputSlot, Output, StreamPack};
 
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
@@ -248,7 +248,7 @@ fn connect_vertex<'a>(
     match target.op {
         // join needs all incoming edges to be connected at once so it is done at the vertex level
         // instead of per edge level.
-        DiagramOperation::Join(_) => {
+        DiagramOperation::Join(join_op) => {
             if target.in_edges.is_empty() {
                 return Err(DiagramError::EmptyJoin);
             }
@@ -264,8 +264,13 @@ fn connect_vertex<'a>(
                 })
                 .collect();
 
-            let join_impl = &registry.join_impls[&outputs[0].type_id];
-            let joined_output = join_impl(builder, outputs)?;
+            let joined_output = if join_op.serialize.unwrap_or(false) {
+                serialize_and_join(builder, registry, outputs)?.into()
+            } else {
+                let join_impl = &registry.join_impls[&outputs[0].type_id];
+                join_impl(builder, outputs)?
+            };
+
             let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
             out_edge.state = EdgeState::Ready {
                 output: joined_output,
