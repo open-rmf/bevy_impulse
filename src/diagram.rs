@@ -52,9 +52,20 @@ impl Display for NextOperation {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    strum::Display,
 )]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum BuiltinTarget {
     /// Use the output to terminate the workflow. This will be the return value
     /// of the workflow.
@@ -62,15 +73,6 @@ pub enum BuiltinTarget {
 
     /// Dispose of the output.
     Dispose,
-}
-
-impl Display for BuiltinTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Terminate => f.write_str("terminate"),
-            Self::Dispose => f.write_str("dispose"),
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -94,6 +96,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "node_op",
     ///     "ops": {
     ///         "node_op": {
@@ -113,6 +116,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "fork_clone",
     ///     "ops": {
     ///         "fork_clone": {
@@ -132,6 +136,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "unzip",
     ///     "ops": {
     ///         "unzip": {
@@ -150,6 +155,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "fork_result",
     ///     "ops": {
     ///         "fork_result": {
@@ -171,6 +177,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "split",
     ///     "ops": {
     ///         "split": {
@@ -191,6 +198,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "split",
     ///     "ops": {
     ///         "split": {
@@ -225,6 +233,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "transform",
     ///     "ops": {
     ///         "transform": {
@@ -246,6 +255,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": 1,
     ///     "start": "transform",
     ///     "ops": {
     ///         "transform": {
@@ -297,6 +307,7 @@ impl Diagram {
     ///
     /// let json_str = r#"
     /// {
+    ///     "version": 1,
     ///     "start": "echo",
     ///     "ops": {
     ///         "echo": {
@@ -445,6 +456,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
@@ -470,6 +482,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
@@ -490,6 +503,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
@@ -510,6 +524,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
@@ -535,6 +550,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
@@ -565,6 +581,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
@@ -596,6 +613,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": { "builtin": "terminate" },
             "ops": {},
         }))
@@ -613,6 +631,7 @@ mod tests {
 
         let json_str = r#"
         {
+            "version": 1,
             "start": "multiply3_uncloneable",
             "ops": {
                 "multiply3_uncloneable": {
@@ -641,6 +660,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {

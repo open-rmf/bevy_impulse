@@ -96,6 +96,7 @@ mod tests {
         );
 
         let diagram = Diagram::from_json(json!({
+            "version": 1,
             "start": "op1",
             "ops": {
                 "op1": {
