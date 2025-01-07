@@ -30,6 +30,8 @@ use crate::{Builder, Scope, Service, SpawnWorkflowExt, SplitConnectionError, Str
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
+
 pub type BuilderId = String;
 pub type OperationId = String;
 
@@ -96,7 +98,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "node_op",
     ///     "ops": {
     ///         "node_op": {
@@ -116,7 +118,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "fork_clone",
     ///     "ops": {
     ///         "fork_clone": {
@@ -136,7 +138,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "unzip",
     ///     "ops": {
     ///         "unzip": {
@@ -155,7 +157,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "fork_result",
     ///     "ops": {
     ///         "fork_result": {
@@ -177,7 +179,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "split",
     ///     "ops": {
     ///         "split": {
@@ -198,7 +200,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "split",
     ///     "ops": {
     ///         "split": {
@@ -233,7 +235,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "transform",
     ///     "ops": {
     ///         "transform": {
@@ -255,7 +257,7 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "transform",
     ///     "ops": {
     ///         "transform": {
@@ -278,12 +280,48 @@ type DiagramStart = serde_json::Value;
 type DiagramTerminate = serde_json::Value;
 type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>;
 
+/// Returns the schema for [`String`]
+fn schema_with_string(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    gen.subschema_for::<String>()
+}
+
+/// deserialize semver and validate that it has a supported version
+fn deserialize_semver<'de, D>(de: D) -> Result<semver::Version, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(de)?;
+    let ver_req = semver::VersionReq::parse(SUPPORTED_DIAGRAM_VERSION).unwrap();
+    let ver = semver::Version::parse(&s).map_err(|_| {
+        serde::de::Error::invalid_value(serde::de::Unexpected::Str(&s), &SUPPORTED_DIAGRAM_VERSION)
+    })?;
+    if !ver_req.matches(&ver) {
+        return Err(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Str(&s),
+            &SUPPORTED_DIAGRAM_VERSION,
+        ));
+    }
+    Ok(ver)
+}
+
+/// serialize semver as a string
+fn serialize_semver<S>(o: &semver::Version, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    o.to_string().serialize(ser)
+}
+
 #[derive(JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Diagram {
-    /// Version of the diagram, should always be `1`.
-    #[schemars(range(min = 1, max = 1))]
-    version: u32,
+    /// Version of the diagram, should always be `0.1.0`.
+    #[serde(
+        deserialize_with = "deserialize_semver",
+        serialize_with = "serialize_semver"
+    )]
+    #[schemars(schema_with = "schema_with_string")]
+    version: semver::Version,
 
     /// Signifies the start of a workflow.
     start: NextOperation,
@@ -307,7 +345,7 @@ impl Diagram {
     ///
     /// let json_str = r#"
     /// {
-    ///     "version": 1,
+    ///     "version": "0.1.0",
     ///     "start": "echo",
     ///     "ops": {
     ///         "echo": {
@@ -456,7 +494,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -482,7 +520,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -503,7 +541,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -524,7 +562,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -550,7 +588,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -581,7 +619,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -613,7 +651,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": { "builtin": "terminate" },
             "ops": {},
         }))
@@ -631,7 +669,7 @@ mod tests {
 
         let json_str = r#"
         {
-            "version": 1,
+            "version": "0.1.0",
             "start": "multiply3_uncloneable",
             "ops": {
                 "multiply3_uncloneable": {
@@ -660,7 +698,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {

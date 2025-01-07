@@ -1,6 +1,6 @@
 {
   "$schema": "../../../diagram.schema.json",
-  "version": 1,
+  "version": "0.1.0",
   "start": "mul3",
   "ops": {
     "mul3": {

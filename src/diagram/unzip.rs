@@ -97,7 +97,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -122,7 +122,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -162,7 +162,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -189,7 +189,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {
@@ -221,7 +221,7 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "op1",
             "ops": {
                 "op1": {

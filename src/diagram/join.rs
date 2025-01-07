@@ -112,7 +112,7 @@ mod tests {
             );
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "split",
             "ops": {
                 "split": {
@@ -177,7 +177,7 @@ mod tests {
         );
 
         let diagram = Diagram::from_json(json!({
-            "version": 1,
+            "version": "0.1.0",
             "start": "split",
             "ops": {
                 "split": {
