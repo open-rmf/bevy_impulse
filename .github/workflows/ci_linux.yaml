@@ -34,7 +34,7 @@ jobs:
     # compiler version 1.75.
     - name: Patch dependencies
       if: ${{ matrix.rust-version == 1.75 }}
-      run: cargo add home@=0.5.9
+      run: ./scripts/patch-versions-msrv-1_75.sh
 
     - name: Build default features
       run: cargo build --workspace
