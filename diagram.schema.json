@@ -209,8 +209,8 @@
             "next": {
               "$ref": "#/definitions/NextOperation"
             },
-            "serialize": {
-              "description": "Whether to serialize incoming outputs before perform the join. This allows for joining outputs of different types at the cost of serialization overhead. If there is true, the resulting output will be of [`serde_json::Value`].",
+            "no_serialize": {
+              "description": "Do not serialize before performing the join. If true, joins can only be done on outputs of the same type.",
               "type": [
                 "boolean",
                 "null"

@@ -264,11 +264,11 @@ fn connect_vertex<'a>(
                 })
                 .collect();
 
-            let joined_output = if join_op.serialize.unwrap_or(false) {
-                serialize_and_join(builder, registry, outputs)?.into()
-            } else {
+            let joined_output = if join_op.no_serialize.unwrap_or(false) {
                 let join_impl = &registry.join_impls[&outputs[0].type_id];
                 join_impl(builder, outputs)?
+            } else {
+                serialize_and_join(builder, registry, outputs)?.into()
             };
 
             let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();

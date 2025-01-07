@@ -14,10 +14,9 @@ use super::{DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessa
 pub struct JoinOp {
     pub(super) next: NextOperation,
 
-    /// Whether to serialize incoming outputs before perform the join. This allows for joining
-    /// outputs of different types at the cost of serialization overhead. If there is true, the
-    /// resulting output will be of [`serde_json::Value`].
-    pub(super) serialize: Option<bool>,
+    /// Do not serialize before performing the join. If true, joins can only be done
+    /// on outputs of the same type.
+    pub(super) no_serialize: Option<bool>,
 }
 
 pub(super) fn register_join_impl<T, Serializer>(registry: &mut NodeRegistry)
@@ -177,6 +176,7 @@ mod tests {
                 "join": {
                     "type": "join",
                     "next": "serializeJoinOutput",
+                    "no_serialize": true,
                 },
                 "serializeJoinOutput": {
                     "type": "node",
@@ -242,6 +242,7 @@ mod tests {
                 "join": {
                     "type": "join",
                     "next": { "builtin": "terminate" },
+                    "no_serialize": true,
                 },
             }
         }))
@@ -296,7 +297,6 @@ mod tests {
                 "join": {
                     "type": "join",
                     "next": { "builtin": "terminate" },
-                    "serialize": true,
                 },
             }
         }))
