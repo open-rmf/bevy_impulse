@@ -7,12 +7,18 @@ use tracing::debug;
 
 use crate::{Builder, IterBufferable, Output};
 
-use super::{DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessage};
+use super::{
+    DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessage, SourceOperation,
+};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct JoinOp {
     pub(super) next: NextOperation,
+
+    /// Controls the order of the resulting join. Each item must be an operation id of one of the
+    /// incoming outputs.
+    pub(super) order: Vec<SourceOperation>,
 
     /// Do not serialize before performing the join. If true, joins can only be done
     /// on outputs of the same type.
@@ -31,11 +37,6 @@ where
     registry
         .join_impls
         .insert(TypeId::of::<T>(), Box::new(join_impl::<T>));
-
-    // FIXME(koonpeng): join_vec results in a SmallVec<[T; N]>, we can't serialize it because
-    // it doesn't implement JsonSchema, and we can't impl it because of orphan rule. We would need
-    // to create our own trait that covers `JsonSchema` and `Serialize`.
-    // register_serialize::<Vec<T>, Serializer>(registry);
 }
 
 /// Serialize the outputs before joining them, and convert the resulting joined output into a
@@ -151,9 +152,9 @@ mod tests {
             "ops": {
                 "split": {
                     "type": "split",
-                    "index": ["getSplitValue1", "getSplitValue2"]
+                    "index": ["get_split_value1", "get_split_value2"]
                 },
-                "getSplitValue1": {
+                "get_split_value1": {
                     "type": "node",
                     "builder": "get_split_value",
                     "next": "op1",
@@ -163,7 +164,7 @@ mod tests {
                     "builder": "multiply3_uncloneable",
                     "next": "join",
                 },
-                "getSplitValue2": {
+                "get_split_value2": {
                     "type": "node",
                     "builder": "get_split_value",
                     "next": "op2",
@@ -175,10 +176,11 @@ mod tests {
                 },
                 "join": {
                     "type": "join",
-                    "next": "serializeJoinOutput",
+                    "order": ["op1", "op2"],
+                    "next": "serialize_join_output",
                     "no_serialize": true,
                 },
-                "serializeJoinOutput": {
+                "serialize_join_output": {
                     "type": "node",
                     "builder": "serialize_join_output",
                     "next": { "builtin": "terminate" },
@@ -191,10 +193,8 @@ mod tests {
             .spawn_and_run(&diagram, serde_json::Value::from([1, 2]))
             .unwrap();
         assert_eq!(result.as_array().unwrap().len(), 2);
-        // order is not guaranteed so need to test for both possibility
-        assert!(result[0] == 3 || result[0] == 6);
-        assert!(result[1] == 3 || result[1] == 6);
-        assert!(result[0] != result[1]);
+        assert_eq!(result[0], 3);
+        assert_eq!(result[1], 6);
     }
 
     #[test]
@@ -241,6 +241,7 @@ mod tests {
                 },
                 "join": {
                     "type": "join",
+                    "order": [],
                     "next": { "builtin": "terminate" },
                     "no_serialize": true,
                 },
@@ -296,6 +297,7 @@ mod tests {
                 },
                 "join": {
                     "type": "join",
+                    "order": ["op1", "op2"],
                     "next": { "builtin": "terminate" },
                 },
             }
@@ -306,9 +308,7 @@ mod tests {
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
         assert_eq!(result.as_array().unwrap().len(), 2);
-        // order is not guaranteed so need to test for both possibility
-        assert!(result[0] == 1 || result[0] == "hello");
-        assert!(result[1] == 1 || result[1] == "hello");
-        assert!(result[0] != result[1]);
+        assert_eq!(result[0], 1);
+        assert_eq!(result[1], "hello");
     }
 }

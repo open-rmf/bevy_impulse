@@ -40,14 +40,14 @@ pub type OperationId = String;
 )]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum NextOperation {
-    Target(String),
+    Target(OperationId),
     Builtin { builtin: BuiltinTarget },
 }
 
 impl Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Target(builder_id) => f.write_str(builder_id),
+            Self::Target(operation_id) => f.write_str(operation_id),
             Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
         }
     }
@@ -75,6 +75,49 @@ pub enum BuiltinTarget {
 
     /// Dispose of the output.
     Dispose,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(untagged, rename_all = "snake_case")]
+pub enum SourceOperation {
+    Source(OperationId),
+    Builtin { builtin: BuiltinSource },
+}
+
+impl From<OperationId> for SourceOperation {
+    fn from(value: OperationId) -> Self {
+        SourceOperation::Source(value)
+    }
+}
+
+impl Display for SourceOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(operation_id) => f.write_str(operation_id),
+            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum BuiltinSource {
+    Start,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

@@ -7,7 +7,7 @@ use crate::{diagram::join::serialize_and_join, Builder, InputSlot, Output, Strea
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
     BuiltinTarget, Diagram, DiagramError, DiagramOperation, DiagramScope, DynInputSlot, DynOutput,
-    NextOperation, NodeOp, NodeRegistry, OperationId, SplitOpParams,
+    NextOperation, NodeOp, NodeRegistry, OperationId, SourceOperation, SplitOpParams,
 };
 
 struct Vertex<'a> {
@@ -18,8 +18,7 @@ struct Vertex<'a> {
 }
 
 struct Edge<'a> {
-    /// The source of the edge, may be `None` if it comes from outside the diagram, e.g. the entry point of the diagram.
-    source: Option<&'a OperationId>,
+    source: SourceOperation,
     target: &'a NextOperation,
     state: EdgeState<'a>,
 }
@@ -79,7 +78,9 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
             edges.insert(
                 edges.len(),
                 Edge {
-                    source: None,
+                    source: SourceOperation::Builtin {
+                        builtin: super::BuiltinSource::Start,
+                    },
                     target: &diagram.start,
                     state: EdgeState::Ready {
                         output: scope.input.into(),
@@ -95,10 +96,16 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
     let mut terminate_edges: Vec<usize> = Vec::new();
 
-    let mut add_edge = |source: Option<&'a OperationId>,
+    let mut add_edge = |source: SourceOperation,
                         target: &'a NextOperation,
                         state: EdgeState<'a>|
      -> Result<(), DiagramError> {
+        let source_id = if let SourceOperation::Source(source) = &source {
+            Some(source.clone())
+        } else {
+            None
+        };
+
         edges.insert(
             edges.len(),
             Edge {
@@ -109,10 +116,10 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         );
         let new_edge_id = edges.len() - 1;
 
-        if let Some(source) = source {
+        if let Some(source_id) = source_id {
             let source_vertex = vertices
-                .get_mut(source)
-                .ok_or_else(|| DiagramError::OperationNotFound(source.clone()))?;
+                .get_mut(&source_id)
+                .ok_or_else(|| DiagramError::OperationNotFound(source_id.clone()))?;
             source_vertex.out_edges.push(new_edge_id);
         }
 
@@ -141,7 +148,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 let n = reg.create_node(builder, node_op.config.clone())?;
                 inputs.insert(op_id, n.input);
                 add_edge(
-                    Some(op_id),
+                    op_id.clone().into(),
                     &node_op.next,
                     EdgeState::Ready {
                         output: n.output.into(),
@@ -151,17 +158,21 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
             }
             DiagramOperation::ForkClone(fork_clone_op) => {
                 for next_op_id in fork_clone_op.next.iter() {
-                    add_edge(Some(op_id), next_op_id, EdgeState::Pending)?;
+                    add_edge(op_id.clone().into(), next_op_id, EdgeState::Pending)?;
                 }
             }
             DiagramOperation::Unzip(unzip_op) => {
                 for next_op_id in unzip_op.next.iter() {
-                    add_edge(Some(op_id), next_op_id, EdgeState::Pending)?;
+                    add_edge(op_id.clone().into(), next_op_id, EdgeState::Pending)?;
                 }
             }
             DiagramOperation::ForkResult(fork_result_op) => {
-                add_edge(Some(op_id), &fork_result_op.ok, EdgeState::Pending)?;
-                add_edge(Some(op_id), &fork_result_op.err, EdgeState::Pending)?;
+                add_edge(op_id.clone().into(), &fork_result_op.ok, EdgeState::Pending)?;
+                add_edge(
+                    op_id.clone().into(),
+                    &fork_result_op.err,
+                    EdgeState::Pending,
+                )?;
             }
             DiagramOperation::Split(split_op) => {
                 let next_op_ids: Vec<&NextOperation> = match &split_op.params {
@@ -169,17 +180,17 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                     SplitOpParams::Key(v) => v.values().collect(),
                 };
                 for next_op_id in next_op_ids {
-                    add_edge(Some(op_id), next_op_id, EdgeState::Pending)?;
+                    add_edge(op_id.clone().into(), next_op_id, EdgeState::Pending)?;
                 }
                 if let Some(remaining) = &split_op.remaining {
-                    add_edge(Some(op_id), &remaining, EdgeState::Pending)?;
+                    add_edge(op_id.clone().into(), &remaining, EdgeState::Pending)?;
                 }
             }
             DiagramOperation::Join(join_op) => {
-                add_edge(Some(op_id), &join_op.next, EdgeState::Pending)?;
+                add_edge(op_id.clone().into(), &join_op.next, EdgeState::Pending)?;
             }
             DiagramOperation::Transform(transform_op) => {
-                add_edge(Some(op_id), &transform_op.next, EdgeState::Pending)?;
+                add_edge(op_id.clone().into(), &transform_op.next, EdgeState::Pending)?;
             }
             DiagramOperation::Dispose => {}
         }
@@ -252,23 +263,31 @@ fn connect_vertex<'a>(
             if target.in_edges.is_empty() {
                 return Err(DiagramError::EmptyJoin);
             }
-            let outputs: Vec<DynOutput> = target
+            let mut outputs: HashMap<SourceOperation, DynOutput> = target
                 .in_edges
                 .iter()
                 .map(|e| {
                     let edge = edges.remove(e).unwrap();
                     match edge.state {
-                        EdgeState::Ready { output, origin: _ } => output,
+                        EdgeState::Ready { output, origin: _ } => (edge.source, output),
                         _ => panic!("expected all incoming edges to be ready"),
                     }
                 })
                 .collect();
 
+            let mut ordered_outputs: Vec<DynOutput> = Vec::with_capacity(target.in_edges.len());
+            for source_id in join_op.order.iter() {
+                let o = outputs
+                    .remove(source_id)
+                    .ok_or(DiagramError::OperationNotFound(source_id.to_string()))?;
+                ordered_outputs.push(o);
+            }
+
             let joined_output = if join_op.no_serialize.unwrap_or(false) {
-                let join_impl = &registry.join_impls[&outputs[0].type_id];
-                join_impl(builder, outputs)?
+                let join_impl = &registry.join_impls[&ordered_outputs[0].type_id];
+                join_impl(builder, ordered_outputs)?
             } else {
-                serialize_and_join(builder, registry, outputs)?.into()
+                serialize_and_join(builder, registry, ordered_outputs)?.into()
             };
 
             let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
