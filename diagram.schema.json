@@ -205,14 +205,21 @@
           }
         },
         {
-          "description": "Wait for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"split\", \"ops\": { \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"builder\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"builder\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"order\": [\"op1\", \"op2\"], \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "Wait for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"split\", \"ops\": { \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"builder\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"builder\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"inputs\": [\"op1\", \"op2\"], \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
+            "inputs",
             "next",
-            "order",
             "type"
           ],
           "properties": {
+            "inputs": {
+              "description": "Controls the order of the resulting join. Each item must be an operation id of one of the incoming outputs.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SourceOperation"
+              }
+            },
             "next": {
               "$ref": "#/definitions/NextOperation"
             },
@@ -222,13 +229,6 @@
                 "boolean",
                 "null"
               ]
-            },
-            "order": {
-              "description": "Controls the order of the resulting join. Each item must be an operation id of one of the incoming outputs.",
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/SourceOperation"
-              }
             },
             "type": {
               "type": "string",

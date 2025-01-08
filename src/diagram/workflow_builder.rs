@@ -428,13 +428,27 @@ fn connect_edge<'a>(
                 let reg = registry.get_registration(&origin.builder)?;
                 reg.split(builder, output, split_op)
             }?;
-            for e in &target.out_edges {
+
+            // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
+            // then the last item will always be the remaining edge.
+            let remaining_edge_id = if split_op.remaining.is_some() {
+                Some(target.out_edges.last().unwrap())
+            } else {
+                None
+            };
+            let other_edge_ids = if split_op.remaining.is_some() {
+                &target.out_edges[..(target.out_edges.len() - 1)]
+            } else {
+                &target.out_edges[..]
+            };
+
+            for e in other_edge_ids {
                 let out_edge = edges.get_mut(e).unwrap();
                 let output = outputs.outputs.remove(out_edge.target).unwrap();
                 out_edge.state = EdgeState::Ready { output, origin };
             }
-            if let Some(_) = &split_op.remaining {
-                let out_edge = edges.get_mut(target.out_edges.last().unwrap()).unwrap();
+            if let Some(remaining_edge_id) = remaining_edge_id {
+                let out_edge = edges.get_mut(remaining_edge_id).unwrap();
                 out_edge.state = EdgeState::Ready {
                     output: outputs.remaining,
                     origin,
