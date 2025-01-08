@@ -1,18 +1,13 @@
 {
   "$schema": "../../../diagram.schema.json",
+  "version": "0.1.0",
+  "start": "mul3",
   "ops": {
-    "start": {
-      "type": "start",
-      "next": "mul3"
-    },
     "mul3": {
       "type": "node",
-      "nodeId": "mul",
+      "builder": "mul",
       "config": 3,
-      "next": "terminate"
-    },
-    "terminate": {
-      "type": "terminate"
+      "next": { "builtin": "terminate" }
     }
   }
 }

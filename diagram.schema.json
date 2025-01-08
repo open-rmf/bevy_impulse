@@ -3,7 +3,9 @@
   "title": "Diagram",
   "type": "object",
   "required": [
-    "ops"
+    "ops",
+    "start",
+    "version"
   ],
   "properties": {
     "ops": {
@@ -11,62 +13,64 @@
       "additionalProperties": {
         "$ref": "#/definitions/DiagramOperation"
       }
+    },
+    "start": {
+      "description": "Signifies the start of a workflow.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/NextOperation"
+        }
+      ]
+    },
+    "version": {
+      "description": "Version of the diagram, should always be `0.1.0`.",
+      "type": "string"
     }
   },
   "definitions": {
+    "BuiltinSource": {
+      "type": "string",
+      "enum": [
+        "start"
+      ]
+    },
+    "BuiltinTarget": {
+      "oneOf": [
+        {
+          "description": "Use the output to terminate the workflow. This will be the return value of the workflow.",
+          "type": "string",
+          "enum": [
+            "terminate"
+          ]
+        },
+        {
+          "description": "Dispose of the output.",
+          "type": "string",
+          "enum": [
+            "dispose"
+          ]
+        }
+      ]
+    },
     "DiagramOperation": {
       "oneOf": [
         {
-          "description": "Signifies the start of a workflow. There must be exactly 1 start operation in a diagram.",
+          "description": "Connect the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"node_op\", \"ops\": { \"node_op\": { \"type\": \"node\", \"builder\": \"my_node_builder\", \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
+            "builder",
             "next",
             "type"
           ],
           "properties": {
-            "next": {
+            "builder": {
               "type": "string"
             },
-            "type": {
-              "type": "string",
-              "enum": [
-                "start"
-              ]
-            }
-          }
-        },
-        {
-          "description": "Signifies the end of a workflow. There must be exactly 1 terminate operation in a diagram.",
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "terminate"
-              ]
-            }
-          }
-        },
-        {
-          "description": "Connects the request to a registered node.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"nodeOp\" }, \"nodeOp\": { \"type\": \"node\", \"nodeId\": \"myNode\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
-          "type": "object",
-          "required": [
-            "next",
-            "nodeId",
-            "type"
-          ],
-          "properties": {
             "config": {
               "default": null
             },
             "next": {
-              "type": "string"
-            },
-            "nodeId": {
-              "type": "string"
+              "$ref": "#/definitions/NextOperation"
             },
             "type": {
               "type": "string",
@@ -77,7 +81,7 @@
           }
         },
         {
-          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"forkClone\" }, \"forkClone\": { \"type\": \"forkClone\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"fork_clone\", \"ops\": { \"fork_clone\": { \"type\": \"fork_clone\", \"next\": [\"terminate\"] } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "next",
@@ -87,19 +91,19 @@
             "next": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/definitions/NextOperation"
               }
             },
             "type": {
               "type": "string",
               "enum": [
-                "forkClone"
+                "fork_clone"
               ]
             }
           }
         },
         {
-          "description": "If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses of T1, T2, T3, ...\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"unzip\" }, \"unzip\": { \"type\": \"unzip\", \"next\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses of T1, T2, T3, ...\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"unzip\", \"ops\": { \"unzip\": { \"type\": \"unzip\", \"next\": [{ \"builtin\": \"terminate\" }] } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "next",
@@ -109,7 +113,7 @@
             "next": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/definitions/NextOperation"
               }
             },
             "type": {
@@ -121,7 +125,7 @@
           }
         },
         {
-          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"forkResult\" }, \"forkResult\": { \"type\": \"forkResult\", \"ok\": \"terminate\", \"err\": \"dispose\" }, \"dispose\": { \"type\": \"dispose\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "description": "If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"fork_result\", \"ops\": { \"fork_result\": { \"type\": \"fork_result\", \"ok\": { \"builtin\": \"terminate\" }, \"err\": { \"builtin\": \"dispose\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
             "err",
@@ -130,21 +134,21 @@
           ],
           "properties": {
             "err": {
-              "type": "string"
+              "$ref": "#/definitions/NextOperation"
             },
             "ok": {
-              "type": "string"
+              "$ref": "#/definitions/NextOperation"
             },
             "type": {
               "type": "string",
               "enum": [
-                "forkResult"
+                "fork_result"
               ]
             }
           }
         },
         {
-          "description": "If the request is a list-like or map-like object, splits it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"split\" }, \"split\": { \"type\": \"split\", \"index\": [\"terminate\"] }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "If the request is a list-like or map-like object, split it into multiple responses. Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split output should have request of that type instead of just the value type.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"split\", \"ops\": { \"split\": { \"type\": \"split\", \"index\": [{ \"builtin\": \"terminate\" }] } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "oneOf": [
             {
@@ -156,7 +160,7 @@
                 "index": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/definitions/NextOperation"
                   }
                 }
               },
@@ -171,7 +175,7 @@
                 "key": {
                   "type": "object",
                   "additionalProperties": {
-                    "type": "string"
+                    "$ref": "#/definitions/NextOperation"
                   }
                 }
               },
@@ -183,9 +187,13 @@
           ],
           "properties": {
             "remaining": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/NextOperation"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -197,7 +205,41 @@
           }
         },
         {
-          "description": "If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"ops\": { \"start\": { \"type\": \"start\", \"next\": \"transform\" }, \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": \"terminate\" }, \"terminate\": { \"type\": \"terminate\" } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "Wait for an item to be emitted from each of the inputs, then combined the oldest of each into an array.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"split\", \"ops\": { \"split\": { \"type\": \"split\", \"index\": [\"op1\", \"op2\"] }, \"op1\": { \"type\": \"node\", \"builder\": \"foo\", \"next\": \"join\" }, \"op2\": { \"type\": \"node\", \"builder\": \"bar\", \"next\": \"join\" }, \"join\": { \"type\": \"join\", \"inputs\": [\"op1\", \"op2\"], \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "type": "object",
+          "required": [
+            "inputs",
+            "next",
+            "type"
+          ],
+          "properties": {
+            "inputs": {
+              "description": "Controls the order of the resulting join. Each item must be an operation id of one of the incoming outputs.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SourceOperation"
+              }
+            },
+            "next": {
+              "$ref": "#/definitions/NextOperation"
+            },
+            "no_serialize": {
+              "description": "Do not serialize before performing the join. If true, joins can only be done on outputs of the same type.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "join"
+              ]
+            }
+          }
+        },
+        {
+          "description": "If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program. The context includes a \"request\" variable which contains the request.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"transform\", \"ops\": { \"transform\": { \"type\": \"transform\", \"cel\": \"request.name\", \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nNote that due to how `serde_json` performs serialization, positive integers are always serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so it is recommended to always perform explicit casts.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"transform\", \"ops\": { \"transform\": { \"type\": \"transform\", \"cel\": \"int(request.score) * 3\", \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
             "cel",
@@ -209,7 +251,7 @@
               "type": "string"
             },
             "next": {
-              "type": "string"
+              "$ref": "#/definitions/NextOperation"
             },
             "type": {
               "type": "string",
@@ -220,7 +262,7 @@
           }
         },
         {
-          "description": "Drops the request, equivalent to a no-op.",
+          "description": "Drop the request, equivalent to a no-op.",
           "type": "object",
           "required": [
             "type"
@@ -231,6 +273,42 @@
               "enum": [
                 "dispose"
               ]
+            }
+          }
+        }
+      ]
+    },
+    "NextOperation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "builtin"
+          ],
+          "properties": {
+            "builtin": {
+              "$ref": "#/definitions/BuiltinTarget"
+            }
+          }
+        }
+      ]
+    },
+    "SourceOperation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "builtin"
+          ],
+          "properties": {
+            "builtin": {
+              "$ref": "#/definitions/BuiltinSource"
             }
           }
         }

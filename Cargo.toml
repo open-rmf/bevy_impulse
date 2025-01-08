@@ -51,14 +51,25 @@ serde = { version = "1.0.210", features = ["derive"], optional = true }
 serde_json = { version = "1.0.128", optional = true }
 cel-interpreter = { version = "0.9.0", features = ["json"], optional = true }
 tracing = "0.1.41"
+strum = { version = "0.26.3", optional = true, features = ["derive"] }
+semver = { version = "1.0.24", optional = true }
 
 [features]
 single_threaded_async = ["dep:async-task"]
-diagram = ["dep:schemars", "dep:serde", "dep:serde_json", "dep:cel-interpreter"]
+diagram = [
+  "dep:cel-interpreter",
+  "dep:schemars",
+  "dep:semver",
+  "dep:serde",
+  "dep:serde_json",
+  "dep:strum",
+]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
-test-log = { version = "0.2.16", features = ["trace"], default-features = false }
+test-log = { version = "0.2.16", features = [
+  "trace",
+], default-features = false }
 
 [workspace]
 members = ["examples/diagram/calculator"]

@@ -9,74 +9,145 @@ mod transform;
 mod unzip;
 mod workflow_builder;
 
+use bevy_ecs::system::Commands;
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
+pub use join::JoinOutput;
 pub use node_registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
 use transform::{TransformError, TransformOp};
 use unzip::UnzipOp;
-pub use workflow_builder::*;
+use workflow_builder::create_workflow;
 
 // ----------
 
-use std::{collections::HashMap, error::Error, fmt::Display, io::Read};
+use std::{collections::HashMap, fmt::Display, io::Read};
 
 use crate::{Builder, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack};
-use bevy_app::App;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub type NodeId = String;
+const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
+
+pub type BuilderId = String;
 pub type OperationId = String;
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct StartOp {
-    next: OperationId,
+#[derive(
+    Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(untagged, rename_all = "snake_case")]
+pub enum NextOperation {
+    Target(OperationId),
+    Builtin { builtin: BuiltinTarget },
+}
+
+impl Display for NextOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Target(operation_id) => f.write_str(operation_id),
+            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum BuiltinTarget {
+    /// Use the output to terminate the workflow. This will be the return value
+    /// of the workflow.
+    Terminate,
+
+    /// Dispose of the output.
+    Dispose,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(untagged, rename_all = "snake_case")]
+pub enum SourceOperation {
+    Source(OperationId),
+    Builtin { builtin: BuiltinSource },
+}
+
+impl From<OperationId> for SourceOperation {
+    fn from(value: OperationId) -> Self {
+        SourceOperation::Source(value)
+    }
+}
+
+impl Display for SourceOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(operation_id) => f.write_str(operation_id),
+            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum BuiltinSource {
+    Start,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct TerminateOp {}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct NodeOp {
-    node_id: NodeId,
+    builder: BuilderId,
     #[serde(default)]
     config: serde_json::Value,
-    next: OperationId,
+    next: NextOperation,
 }
 
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum DiagramOperation {
-    /// Signifies the start of a workflow. There must be exactly 1 start operation in a diagram.
-    Start(StartOp),
-
-    /// Signifies the end of a workflow. There must be exactly 1 terminate operation in a diagram.
-    Terminate(TerminateOp),
-
-    /// Connects the request to a registered node.
+    /// Connect the request to a registered node.
     ///
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "node_op",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "nodeOp"
-    ///         },
-    ///         "nodeOp": {
+    ///         "node_op": {
     ///             "type": "node",
-    ///             "nodeId": "myNode",
-    ///             "next": "terminate"
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "builder": "my_node_builder",
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
@@ -90,17 +161,12 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "fork_clone",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "forkClone"
-    ///         },
-    ///         "forkClone": {
-    ///             "type": "forkClone",
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
     ///             "next": ["terminate"]
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
     ///         }
     ///     }
     /// }
@@ -115,17 +181,12 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "unzip",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "unzip"
-    ///         },
     ///         "unzip": {
     ///             "type": "unzip",
-    ///             "next": ["terminate"]
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "next": [{ "builtin": "terminate" }]
     ///         }
     ///     }
     /// }
@@ -139,21 +200,13 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "fork_result",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "forkResult"
-    ///         },
-    ///         "forkResult": {
-    ///             "type": "forkResult",
-    ///             "ok": "terminate",
-    ///             "err": "dispose"
-    ///         },
-    ///         "dispose": {
-    ///             "type": "dispose"
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///         "fork_result": {
+    ///             "type": "fork_result",
+    ///             "ok": { "builtin": "terminate" },
+    ///             "err": { "builtin": "dispose" }
     ///         }
     ///     }
     /// }
@@ -161,23 +214,20 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     ForkResult(ForkResultOp),
 
-    /// If the request is a list-like or map-like object, splits it into multiple responses.
+    /// If the request is a list-like or map-like object, split it into multiple responses.
+    /// Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split
+    /// output should have request of that type instead of just the value type.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "split",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "split"
-    ///         },
     ///         "split": {
     ///             "type": "split",
-    ///             "index": ["terminate"]
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "index": [{ "builtin": "terminate" }]
     ///         }
     ///     }
     /// }
@@ -186,38 +236,34 @@ pub enum DiagramOperation {
     /// ```
     Split(SplitOp),
 
-    /// Waits for an item to be emitted from each of the inputs, then combined the
+    /// Wait for an item to be emitted from each of the inputs, then combined the
     /// oldest of each into an array.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "split",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "split"
-    ///         },
     ///         "split": {
     ///             "type": "split",
     ///             "index": ["op1", "op2"]
     ///         },
     ///         "op1": {
     ///             "type": "node",
-    ///             "nodeId": "foo",
+    ///             "builder": "foo",
     ///             "next": "join"
     ///         },
     ///         "op2": {
     ///             "type": "node",
-    ///             "nodeId": "bar",
+    ///             "builder": "bar",
     ///             "next": "join"
     ///         },
     ///         "join": {
     ///             "type": "join",
-    ///             "next": "terminate"
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "inputs": ["op1", "op2"],
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
@@ -226,25 +272,20 @@ pub enum DiagramOperation {
     /// ```
     Join(JoinOp),
 
-    /// If the request is serializable, transforms it by running it through a [CEL](https://cel.dev/) program.
+    /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
     /// The context includes a "request" variable which contains the request.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "transform",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "transform"
-    ///         },
     ///         "transform": {
     ///             "type": "transform",
     ///             "cel": "request.name",
-    ///             "next": "terminate"
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
@@ -260,18 +301,13 @@ pub enum DiagramOperation {
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "transform",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "transform"
-    ///         },
     ///         "transform": {
     ///             "type": "transform",
     ///             "cel": "int(request.score) * 3",
-    ///             "next": "terminate"
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
@@ -280,17 +316,60 @@ pub enum DiagramOperation {
     /// ```
     Transform(TransformOp),
 
-    /// Drops the request, equivalent to a no-op.
+    /// Drop the request, equivalent to a no-op.
     Dispose,
 }
 
-type ScopeStart = serde_json::Value;
-type ScopeTerminate = serde_json::Value;
-type DynScope<Streams> = Scope<ScopeStart, ScopeTerminate, Streams>;
+type DiagramStart = serde_json::Value;
+type DiagramTerminate = serde_json::Value;
+type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>;
+
+/// Returns the schema for [`String`]
+fn schema_with_string(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    gen.subschema_for::<String>()
+}
+
+/// deserialize semver and validate that it has a supported version
+fn deserialize_semver<'de, D>(de: D) -> Result<semver::Version, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(de)?;
+    let ver_req = semver::VersionReq::parse(SUPPORTED_DIAGRAM_VERSION).unwrap();
+    let ver = semver::Version::parse(&s).map_err(|_| {
+        serde::de::Error::invalid_value(serde::de::Unexpected::Str(&s), &SUPPORTED_DIAGRAM_VERSION)
+    })?;
+    if !ver_req.matches(&ver) {
+        return Err(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Str(&s),
+            &SUPPORTED_DIAGRAM_VERSION,
+        ));
+    }
+    Ok(ver)
+}
+
+/// serialize semver as a string
+fn serialize_semver<S>(o: &semver::Version, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    o.to_string().serialize(ser)
+}
 
 #[derive(JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Diagram {
+    /// Version of the diagram, should always be `0.1.0`.
+    #[serde(
+        deserialize_with = "deserialize_semver",
+        serialize_with = "serialize_semver"
+    )]
+    #[schemars(schema_with = "schema_with_string")]
+    version: semver::Version,
+
+    /// Signifies the start of a workflow.
+    start: NextOperation,
+
     ops: HashMap<OperationId, DiagramOperation>,
 }
 
@@ -300,42 +379,39 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeRegistry};
+    /// use bevy_impulse::{Diagram, DiagramError, NodeRegistry, RunCommandsOnWorldExt};
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = NodeRegistry::default();
-    /// registry.register_node("echo", "echo", |builder, _config: ()| {
+    /// registry.register_node_builder("echo".to_string(), "echo".to_string(), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
     ///
     /// let json_str = r#"
     /// {
+    ///     "version": "0.1.0",
+    ///     "start": "echo",
     ///     "ops": {
-    ///         "start": {
-    ///             "type": "start",
-    ///             "next": "echo"
-    ///         },
     ///         "echo": {
     ///             "type": "node",
-    ///             "nodeId": "echo",
-    ///             "next": "terminate"
-    ///         },
-    ///         "terminate": {
-    ///             "type": "terminate"
+    ///             "builder": "echo",
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = diagram.spawn_io_workflow(&mut app, &registry)?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
     /// # Ok::<_, DiagramError>(())
     /// ```
-    pub fn spawn_workflow<Streams>(
+    // TODO(koonpeng): Support streams other than `()` #43.
+    /* pub */
+    fn spawn_workflow<Streams>(
         &self,
-        app: &mut App,
+        cmds: &mut Commands,
         registry: &NodeRegistry,
-    ) -> Result<Service<ScopeStart, ScopeTerminate, Streams>, DiagramError>
+    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
     {
@@ -353,34 +429,15 @@ impl Diagram {
             };
         }
 
-        let w = app
-            .world
-            .spawn_workflow(|scope: DynScope<Streams>, builder: &mut Builder| {
-                debug!(
-                    "spawn workflow, scope input: {:?}, terminate: {:?}",
-                    scope.input.id(),
-                    scope.terminate.id()
-                );
+        let w = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
+            debug!(
+                "spawn workflow, scope input: {:?}, terminate: {:?}",
+                scope.input.id(),
+                scope.terminate.id()
+            );
 
-                let mut wf_builder =
-                    unwrap_or_return!(WorkflowBuilder::new(&scope, builder, registry, self));
-
-                // connect node operations
-                for (op_id, op) in self.ops.iter().filter_map(|(op_id, v)| match v {
-                    DiagramOperation::Node(op) => Some((op_id, op)),
-                    _ => None,
-                }) {
-                    unwrap_or_return!(wf_builder.connect_node(&scope, builder, op_id, op));
-                }
-
-                // connect start operation, note that this consumes scope, so we need to do this last
-                if let Some((_, start_op)) = self.ops.iter().find_map(|(op_id, v)| match v {
-                    DiagramOperation::Start(op) => Some((op_id, op)),
-                    _ => None,
-                }) {
-                    unwrap_or_return!(wf_builder.connect_start(scope, builder, start_op));
-                }
-            });
+            unwrap_or_return!(create_workflow(scope, builder, registry, self));
+        });
 
         if let Some(err) = err {
             return Err(err);
@@ -392,10 +449,10 @@ impl Diagram {
     /// Wrapper to [spawn_workflow::<()>](Self::spawn_workflow).
     pub fn spawn_io_workflow(
         &self,
-        app: &mut App,
+        cmds: &mut Commands,
         registry: &NodeRegistry,
-    ) -> Result<Service<ScopeStart, ScopeTerminate, ()>, DiagramError> {
-        self.spawn_workflow::<()>(app, registry)
+    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
+        self.spawn_workflow::<()>(cmds, registry)
     }
 
     pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
@@ -412,88 +469,56 @@ impl Diagram {
     {
         serde_json::from_reader(r)
     }
-
-    fn get_op(&self, op_id: &OperationId) -> Result<&DiagramOperation, DiagramError> {
-        self.ops
-            .get(op_id)
-            .ok_or_else(|| DiagramError::OperationNotFound(op_id.clone()))
-    }
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum DiagramError {
-    NodeNotFound(NodeId),
+    #[error("node builder [{0}] is not registered")]
+    BuilderNotFound(BuilderId),
+
+    #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
+
+    #[error("output type does not match input type")]
     TypeMismatch,
+
+    #[error("missing start or terminate")]
     MissingStartOrTerminate,
+
+    #[error("cannot connect to start")]
     CannotConnectStart,
+
+    #[error("request or response cannot be serialized or deserialized")]
     NotSerializable,
+
+    #[error("response cannot be cloned")]
     NotCloneable,
+
+    #[error("the number of unzip slots in response does not match the number of inputs")]
     NotUnzippable,
+
+    #[error(
+        "node must be registered with \"with_fork_result()\" to be able to perform fork result"
+    )]
     CannotForkResult,
+
+    #[error("response cannot be split")]
     NotSplittable,
-    CannotTransform(TransformError),
+
+    #[error("empty join is not allowed")]
+    EmptyJoin,
+
+    #[error(transparent)]
+    CannotTransform(#[from] TransformError),
+
+    #[error("an interconnect like fork_clone cannot connect to another interconnect")]
     BadInterconnectChain,
-    JsonError(serde_json::Error),
-    ConnectionError(Box<dyn Error>),
-}
 
-impl Display for DiagramError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NodeNotFound(node_id) => write!(f, "node [{}] is not registered", node_id),
-            Self::OperationNotFound(op_id) => write!(f, "operation [{}] not found", op_id),
-            Self::TypeMismatch => f.write_str("output type does not match input type"),
-            Self::MissingStartOrTerminate => f.write_str("missing start or terminate"),
-            Self::CannotConnectStart => f.write_str("cannot connect to start"),
-            Self::NotSerializable => {
-                f.write_str("request or response cannot be serialized or deserialized")
-            }
-            Self::NotCloneable => f.write_str("response cannot be cloned"),
-            Self::NotUnzippable => f.write_str(
-                "the number of unzip slots in response does not match the number of inputs",
-            ),
-            Self::CannotForkResult => f.write_str(
-                "node must be registered with \"with_fork_result()\" to be able to perform fork result",
-            ),
-            Self::NotSplittable => f.write_str("response cannot be splitted"),
-            Self::CannotTransform(err) => err.fmt(f),
-            Self::BadInterconnectChain => {
-                f.write_str("an interconnect like forkClone cannot connect to another interconnect")
-            }
-            Self::JsonError(err) => err.fmt(f),
-            Self::ConnectionError(inner) => inner.fmt(f),
-        }
-    }
-}
+    #[error(transparent)]
+    JsonError(#[from] serde_json::Error),
 
-impl Error for DiagramError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::JsonError(err) => Some(err),
-            Self::ConnectionError(inner) => Some(inner.as_ref()),
-            Self::CannotTransform(inner) => Some(inner),
-            _ => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for DiagramError {
-    fn from(err: serde_json::Error) -> Self {
-        DiagramError::JsonError(err)
-    }
-}
-
-impl From<SplitConnectionError> for DiagramError {
-    fn from(value: SplitConnectionError) -> Self {
-        DiagramError::ConnectionError(value.into())
-    }
-}
-
-impl From<TransformError> for DiagramError {
-    fn from(value: TransformError) -> Self {
-        DiagramError::CannotTransform(value)
-    }
+    #[error(transparent)]
+    ConnectionError(#[from] SplitConnectionError),
 }
 
 #[cfg(test)]
@@ -513,18 +538,13 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
-                    "next": "dispose",
-                },
-                "dispose": {
-                    "type": "dispose",
+                    "builder": "multiply3_uncloneable",
+                    "next": { "builtin": "dispose" },
                 },
             },
         }))
@@ -533,77 +553,10 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
-        assert!(
-            matches!(
-                *err.downcast_ref::<Cancellation>().unwrap().cause,
-                CancellationCause::Unreachable(_)
-            ),
-            "{:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_no_start() {
-        let mut fixture = DiagramTestFixture::new();
-
-        let diagram = Diagram::from_json(json!({
-            "ops": {
-                "op1": {
-                    "type": "node",
-                    "nodeId": "multiply3",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
-                },
-            },
-        }))
-        .unwrap();
-
-        let err = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
-            .unwrap_err();
-        assert!(
-            matches!(
-                *err.downcast_ref::<Cancellation>().unwrap().cause,
-                CancellationCause::Unreachable(_)
-            ),
-            "{:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_connect_to_start() {
-        let mut fixture = DiagramTestFixture::new();
-
-        let diagram = Diagram::from_json(json!({
-            "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
-                "op1": {
-                    "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "forkClone",
-                },
-                "forkClone": {
-                    "type": "forkClone",
-                    "next": ["start", "terminate"],
-                },
-                "terminate": {
-                    "type": "terminate",
-                },
-            },
-        }))
-        .unwrap();
-
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
-        assert!(matches!(err, DiagramError::CannotConnectStart), "{:?}", err);
+        assert!(matches!(
+            *err.downcast_ref::<Cancellation>().unwrap().cause,
+            CancellationCause::Unreachable(_)
+        ));
     }
 
     #[test]
@@ -611,26 +564,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "opaque_request",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "builder": "opaque_request",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
 
@@ -639,26 +585,19 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "opaque_response",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "builder": "opaque_response",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
     }
 
@@ -667,31 +606,24 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "opaque_request",
-                    "next": "terminate"
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "builder": "opaque_request",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
         .unwrap();
 
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::TypeMismatch), "{:?}", err);
     }
 
@@ -700,23 +632,18 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
+                    "builder": "multiply3_uncloneable",
                     "next": "op1",
-                },
-                "terminate": {
-                    "type": "terminate",
                 },
             },
         }))
@@ -736,27 +663,22 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "forkClone",
+                    "builder": "multiply3",
+                    "next": "fork_clone",
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["op1", "op2"],
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "builder": "multiply3_uncloneable",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
@@ -773,15 +695,9 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
-            "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
-                },
-            },
+            "version": "0.1.0",
+            "start": { "builtin": "terminate" },
+            "ops": {},
         }))
         .unwrap();
 
@@ -797,19 +713,14 @@ mod tests {
 
         let json_str = r#"
         {
+            "version": "0.1.0",
+            "start": "multiply3_uncloneable",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "multiply3"
-                },
-                "multiply3": {
+                "multiply3_uncloneable": {
                     "type": "node",
-                    "nodeId": "multiplyBy",
+                    "builder": "multiplyBy",
                     "config": 7,
-                    "next": "terminate"
-                },
-                "terminate": {
-                    "type": "terminate"
+                    "next": { "builtin": "terminate" }
                 }
             }
         }
@@ -831,14 +742,12 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_5",
+                    "builder": "multiply3_5",
                     "next": "unzip",
                 },
                 "unzip": {
@@ -848,10 +757,7 @@ mod tests {
                 "transform": {
                     "type": "transform",
                     "cel": "777",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))

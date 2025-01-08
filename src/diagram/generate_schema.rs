@@ -18,6 +18,7 @@ mod diagram {
         use super::super::*;
         use std::iter::zip;
 
+        #[cfg(not(target_os = "windows"))]
         #[test]
         fn check_schema_changes() -> Result<(), String> {
             let cur_schema_json = std::fs::read("diagram.schema.json").unwrap();

@@ -17,7 +17,6 @@
 
 use bevy_ecs::prelude::{Commands, Entity};
 use bevy_hierarchy::prelude::BuildChildren;
-use tracing::debug;
 
 use std::future::Future;
 
@@ -144,7 +143,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
     /// Connect the output of one into the input slot of another node.
     pub fn connect<T: 'static + Send + Sync>(&mut self, output: Output<T>, input: InputSlot<T>) {
-        debug!("connect output: {:?} to input: {:?}", output, input);
         assert_eq!(output.scope(), input.scope());
         self.commands.add(Connect {
             original_target: output.id(),

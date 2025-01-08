@@ -1,8 +1,10 @@
 use std::error::Error;
 
-use crate::{testing::TestingContext, Builder, RequestExt};
+use crate::{
+    testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
+};
 
-use super::{Diagram, NodeRegistry};
+use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeRegistry};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
@@ -17,6 +19,24 @@ impl DiagramTestFixture {
         }
     }
 
+    pub(super) fn spawn_workflow<Streams: StreamPack>(
+        &mut self,
+        diagram: &Diagram,
+    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError> {
+        self.context
+            .app
+            .world
+            .command(|cmds| diagram.spawn_workflow(cmds, &self.registry))
+    }
+
+    /// Equivalent to `self.spawn_workflow::<()>(diagram)`
+    pub(super) fn spawn_io_workflow(
+        &mut self,
+        diagram: &Diagram,
+    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
+        self.spawn_workflow::<()>(diagram)
+    }
+
     /// Spawns a workflow from a diagram then run the workflow until completion.
     /// Returns the result of the workflow.
     pub(super) fn spawn_and_run(
@@ -24,7 +44,7 @@ impl DiagramTestFixture {
         diagram: &Diagram,
         request: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn Error>> {
-        let workflow = diagram.spawn_io_workflow(&mut self.context.app, &self.registry)?;
+        let workflow = self.spawn_workflow::<()>(diagram)?;
         let mut promise = self
             .context
             .command(|cmds| cmds.request(request, workflow).take_response());
@@ -64,31 +84,31 @@ fn opaque_response(_: i64) -> Unserializable {
 /// create a new node registry with some basic nodes registered
 fn new_registry_with_basic_nodes() -> NodeRegistry {
     let mut registry = NodeRegistry::default();
-    registry.register_node(
-        "multiply3",
-        "multiply3",
+    registry.register_node_builder(
+        "multiply3_uncloneable".to_string(),
+        "multiply3_uncloneable".to_string(),
         |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
     );
     registry
         .registration_builder()
         .with_response_cloneable()
-        .register_node(
-            "multiply3_cloneable",
-            "multiply3_cloneable",
+        .register_node_builder(
+            "multiply3".to_string(),
+            "multiply3".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
         );
     registry
         .registration_builder()
         .with_unzippable()
-        .register_node(
-            "multiply3_5",
-            "multiply3_5",
+        .register_node_builder(
+            "multiply3_5".to_string(),
+            "multiply3_5".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
         );
 
-    registry.register_node(
-        "multiplyBy",
-        "multiplyBy",
+    registry.register_node_builder(
+        "multiplyBy".to_string(),
+        "multiplyBy".to_string(),
         |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
     );
 
@@ -96,23 +116,25 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .registration_builder()
         .with_opaque_request()
         .with_opaque_response()
-        .register_node("opaque", "opaque", |builder: &mut Builder, _config: ()| {
-            builder.create_map_block(opaque)
-        });
+        .register_node_builder(
+            "opaque".to_string(),
+            "opaque".to_string(),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(opaque),
+        );
     registry
         .registration_builder()
         .with_opaque_request()
-        .register_node(
-            "opaque_request",
-            "opaque_request",
+        .register_node_builder(
+            "opaque_request".to_string(),
+            "opaque_request".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
         );
     registry
         .registration_builder()
         .with_opaque_response()
-        .register_node(
-            "opaque_response",
-            "opaque_response",
+        .register_node_builder(
+            "opaque_response".to_string(),
+            "opaque_response".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
         );
     registry

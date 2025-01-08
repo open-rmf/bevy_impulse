@@ -8,13 +8,13 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, OperationId,
+    DiagramError, DynOutput, NextOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ForkCloneOp {
-    pub(super) next: Vec<OperationId>,
+    pub(super) next: Vec<NextOperation>,
 }
 
 pub trait DynForkClone<T> {
@@ -53,7 +53,7 @@ where
         debug!("fork clone: {:?}", output);
         assert_eq!(output.type_id, TypeId::of::<T>());
 
-        let fork_clone = output.into_output::<T>().fork_clone(builder);
+        let fork_clone = output.into_output::<T>()?.fork_clone(builder);
         let outputs = (0..amount)
             .map(|_| fork_clone.clone_output(builder).into())
             .collect();
@@ -76,34 +76,27 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1"
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3",
-                    "next": "forkClone"
+                    "builder": "multiply3_uncloneable",
+                    "next": "fork_clone"
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["op2"]
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3",
-                    "next": "terminate"
-                },
-                "terminate": {
-                    "type": "terminate"
+                    "builder": "multiply3_uncloneable",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
         .unwrap();
-        let err = diagram
-            .spawn_io_workflow(&mut fixture.context.app, &fixture.registry)
-            .unwrap_err();
+        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err, DiagramError::NotCloneable), "{:?}", err);
     }
 
@@ -112,27 +105,22 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1"
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "forkClone"
+                    "builder": "multiply3",
+                    "next": "fork_clone"
                 },
-                "forkClone": {
-                    "type": "forkClone",
+                "fork_clone": {
+                    "type": "fork_clone",
                     "next": ["op2"]
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "multiply3_cloneable",
-                    "next": "terminate"
-                },
-                "terminate": {
-                    "type": "terminate"
+                    "builder": "multiply3",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))

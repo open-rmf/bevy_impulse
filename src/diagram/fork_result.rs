@@ -1,5 +1,3 @@
-use std::any::TypeId;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -8,14 +6,14 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, OperationId,
+    DiagramError, DynOutput, NextOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ForkResultOp {
-    pub(super) ok: OperationId,
-    pub(super) err: OperationId,
+    pub(super) ok: NextOperation,
+    pub(super) err: NextOperation,
 }
 
 pub trait DynForkResult<T> {
@@ -50,9 +48,8 @@ where
         output: DynOutput,
     ) -> Result<(DynOutput, DynOutput), DiagramError> {
         debug!("fork result: {:?}", output);
-        assert_eq!(output.type_id, TypeId::of::<Result<T, E>>());
 
-        let chain = output.into_output::<Result<T, E>>().chain(builder);
+        let chain = output.into_output::<Result<T, E>>()?.chain(builder);
         let outputs = chain.fork_result(|c| c.output().into(), |c| c.output().into());
         debug!("forked outputs: {:?}", outputs);
         Ok(outputs)
@@ -82,9 +79,9 @@ mod tests {
             .registry
             .registration_builder()
             .with_fork_result()
-            .register_node(
-                "check_even",
-                "check_even",
+            .register_node_builder(
+                "check_even".to_string(),
+                "check_even".to_string(),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
             );
 
@@ -92,40 +89,35 @@ mod tests {
             s
         }
 
-        fixture
-            .registry
-            .register_node("echo", "echo", |builder: &mut Builder, _config: ()| {
-                builder.create_map_block(&echo)
-            });
+        fixture.registry.register_node_builder(
+            "echo".to_string(),
+            "echo".to_string(),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(&echo),
+        );
 
         let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
             "ops": {
-                "start": {
-                    "type": "start",
-                    "next": "op1",
-                },
                 "op1": {
                     "type": "node",
-                    "nodeId": "check_even",
-                    "next": "forkResult",
+                    "builder": "check_even",
+                    "next": "fork_result",
                 },
-                "forkResult": {
-                    "type": "forkResult",
+                "fork_result": {
+                    "type": "fork_result",
                     "ok": "op2",
                     "err": "op3",
                 },
                 "op2": {
                     "type": "node",
-                    "nodeId": "echo",
-                    "next": "terminate",
+                    "builder": "echo",
+                    "next": { "builtin": "terminate" },
                 },
                 "op3": {
                     "type": "node",
-                    "nodeId": "echo",
-                    "next": "terminate",
-                },
-                "terminate": {
-                    "type": "terminate",
+                    "builder": "echo",
+                    "next": { "builtin": "terminate" },
                 },
             },
         }))
