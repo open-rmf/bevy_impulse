@@ -248,15 +248,19 @@ impl NodeRegistration {
     }
 }
 
-type CreateNodeFn = RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>;
-type ForkCloneFn = Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>;
+type CreateNodeFn =
+    RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>;
+type ForkCloneFn =
+    Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>;
 
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
     registry: &'a mut NodeRegistry,
     _ignore: PhantomData<(Deserialize, Serialize, Cloneable)>,
 }
 
-impl<'a, DeserializeImpl, SerializeImpl, Cloneable> CommonOperations<'a, DeserializeImpl, SerializeImpl, Cloneable> {
+impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
+    CommonOperations<'a, DeserializeImpl, SerializeImpl, Cloneable>
+{
     /// Register a node builder with the specified common operations.
     ///
     /// # Arguments
@@ -288,16 +292,24 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable> CommonOperations<'a, Deseria
                 name,
                 request: RequestMetadata {
                     schema: DeserializeImpl::json_schema(&mut self.registry.data.schema_generator)
-                        .unwrap_or_else(|| self.registry.data.schema_generator.subschema_for::<()>()),
-                    deserializable: DeserializeImpl::deserializable()
+                        .unwrap_or_else(|| {
+                            self.registry.data.schema_generator.subschema_for::<()>()
+                        }),
+                    deserializable: DeserializeImpl::deserializable(),
                 },
                 response: ResponseMetadata::new(
                     SerializeImpl::json_schema(&mut self.registry.data.schema_generator)
-                        .unwrap_or_else(|| self.registry.data.schema_generator.subschema_for::<()>()),
+                        .unwrap_or_else(|| {
+                            self.registry.data.schema_generator.subschema_for::<()>()
+                        }),
                     SerializeImpl::serializable(),
                     Cloneable::CLONEABLE,
                 ),
-                config_schema: self.registry.data.schema_generator.subschema_for::<Config>(),
+                config_schema: self
+                    .registry
+                    .data
+                    .schema_generator
+                    .subschema_for::<Config>(),
             },
             RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
@@ -326,7 +338,9 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable> CommonOperations<'a, Deseria
 
     /// Opt out of deserializing the request of the node. Use this to build a
     /// node whose request type is not deserializable.
-    pub fn no_request_deserializing(self) -> CommonOperations<'a, OpaqueMessageDeserializer, SerializeImpl, Cloneable> {
+    pub fn no_request_deserializing(
+        self,
+    ) -> CommonOperations<'a, OpaqueMessageDeserializer, SerializeImpl, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -335,7 +349,9 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable> CommonOperations<'a, Deseria
 
     /// Opt out of serializing the response of the node. Use this to build a
     /// node whose response type is not serializable.
-    pub fn no_response_serializing(self) -> CommonOperations<'a, DeserializeImpl, OpaqueMessageSerializer, Cloneable> {
+    pub fn no_response_serializing(
+        self,
+    ) -> CommonOperations<'a, DeserializeImpl, OpaqueMessageSerializer, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -344,7 +360,9 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable> CommonOperations<'a, Deseria
 
     /// Opt out of cloning the response of the node. Use this to build a node
     /// whose response type is not cloneable.
-    pub fn no_response_cloning(self) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
+    pub fn no_response_cloning(
+        self,
+    ) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -402,7 +420,7 @@ impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, 
     {
         self.node.metadata.response.fork_result = true;
         self.node.fork_result_impl = Some(Box::new(|builder, output| {
-            <DefaultImpl as DynForkResult::<Response>>::dyn_fork_result(builder, output)
+            <DefaultImpl as DynForkResult<Response>>::dyn_fork_result(builder, output)
         }));
 
         self
@@ -483,12 +501,12 @@ impl Default for NodeRegistry {
         settings.definitions_path = "#/types/".to_string();
         NodeRegistry {
             nodes: Default::default(),
-            data: DataRegistry{
+            data: DataRegistry {
                 schema_generator: SchemaGenerator::new(settings),
                 deserialize_impls: HashMap::new(),
                 serialize_impls: HashMap::new(),
                 join_impls: HashMap::new(),
-            }
+            },
         }
     }
 }
@@ -578,7 +596,9 @@ impl NodeRegistry {
     /// Note that nodes registered without deserialization cannot be connected
     /// to the workflow start, and nodes registered without serialization cannot
     /// be connected to the workflow termination.
-    pub fn opt_out(&mut self) -> CommonOperations<DefaultDeserializer, DefaultSerializer, DefaultImpl> {
+    pub fn opt_out(
+        &mut self,
+    ) -> CommonOperations<DefaultDeserializer, DefaultSerializer, DefaultImpl> {
         CommonOperations {
             registry: self,
             _ignore: Default::default(),
@@ -665,12 +685,11 @@ mod tests {
     #[test]
     fn test_register_cloneable_node() {
         let mut registry = NodeRegistry::default();
-        registry
-            .register_node_builder(
-                "multiply3".to_string(),
-                "Test Name".to_string(),
-                |builder, _config: ()| builder.create_map_block(multiply3),
-            );
+        registry.register_node_builder(
+            "multiply3".to_string(),
+            "Test Name".to_string(),
+            |builder, _config: ()| builder.create_map_block(multiply3),
+        );
         let registration = registry.get_registration("multiply3").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);

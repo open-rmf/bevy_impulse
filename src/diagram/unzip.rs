@@ -8,8 +8,8 @@ use crate::Builder;
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize as register_serialize_impl, DiagramError, DynOutput, NextOperation,
-    DataRegistry, SerializeMessage,
+    register_serialize as register_serialize_impl, DataRegistry, DiagramError, DynOutput,
+    NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

@@ -68,18 +68,14 @@ pub struct ResponseMetadata {
 }
 
 impl ResponseMetadata {
-    pub(super) fn new(
-        schema: Schema,
-        serializable: bool,
-        cloneable: bool,
-    ) -> ResponseMetadata {
+    pub(super) fn new(schema: Schema, serializable: bool, cloneable: bool) -> ResponseMetadata {
         ResponseMetadata {
             schema,
             serializable,
             cloneable,
             unzip_slots: 0,
             fork_result: false,
-            splittable: false
+            splittable: false,
         }
     }
 }

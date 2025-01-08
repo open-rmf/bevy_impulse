@@ -30,7 +30,7 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize, DiagramError, DynOutput, NextOperation, DataRegistry, SerializeMessage,
+    register_serialize, DataRegistry, DiagramError, DynOutput, NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
