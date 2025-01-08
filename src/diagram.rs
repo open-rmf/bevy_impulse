@@ -262,7 +262,7 @@ pub enum DiagramOperation {
     ///         },
     ///         "join": {
     ///             "type": "join",
-    ///             "order": ["op1", "op2"],
+    ///             "inputs": ["op1", "op2"],
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }

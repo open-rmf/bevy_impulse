@@ -276,7 +276,7 @@ fn connect_vertex<'a>(
                 .collect();
 
             let mut ordered_outputs: Vec<DynOutput> = Vec::with_capacity(target.in_edges.len());
-            for source_id in join_op.order.iter() {
+            for source_id in join_op.inputs.iter() {
                 let o = outputs
                     .remove(source_id)
                     .ok_or(DiagramError::OperationNotFound(source_id.to_string()))?;
@@ -415,7 +415,7 @@ fn connect_edge<'a>(
             }
         }
         DiagramOperation::Split(split_op) => {
-            let outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
+            let mut outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
                 let chain = output.into_output::<serde_json::Value>()?.chain(builder);
                 split_chain(chain, split_op)
             } else {
@@ -428,14 +428,11 @@ fn connect_edge<'a>(
                 let reg = registry.get_registration(&origin.builder)?;
                 reg.split(builder, output, split_op)
             }?;
-            outputs
-                .outputs
-                .into_iter()
-                .zip(target.out_edges.iter())
-                .for_each(|((_, o), e)| {
-                    let out_edge = edges.get_mut(e).unwrap();
-                    out_edge.state = EdgeState::Ready { output: o, origin };
-                });
+            for e in &target.out_edges {
+                let out_edge = edges.get_mut(e).unwrap();
+                let output = outputs.outputs.remove(out_edge.target).unwrap();
+                out_edge.state = EdgeState::Ready { output, origin };
+            }
             if let Some(_) = &split_op.remaining {
                 let out_edge = edges.get_mut(target.out_edges.last().unwrap()).unwrap();
                 out_edge.state = EdgeState::Ready {

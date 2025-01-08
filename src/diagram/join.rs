@@ -18,7 +18,7 @@ pub struct JoinOp {
 
     /// Controls the order of the resulting join. Each item must be an operation id of one of the
     /// incoming outputs.
-    pub(super) order: Vec<SourceOperation>,
+    pub(super) inputs: Vec<SourceOperation>,
 
     /// Do not serialize before performing the join. If true, joins can only be done
     /// on outputs of the same type.
@@ -176,7 +176,7 @@ mod tests {
                 },
                 "join": {
                     "type": "join",
-                    "order": ["op1", "op2"],
+                    "inputs": ["op1", "op2"],
                     "next": "serialize_join_output",
                     "no_serialize": true,
                 },
@@ -195,6 +195,14 @@ mod tests {
         assert_eq!(result.as_array().unwrap().len(), 2);
         assert_eq!(result[0], 3);
         assert_eq!(result[1], 6);
+    }
+
+    /// This test is to ensure that the order of split and join operations are stable.
+    #[test]
+    fn test_join_stress() {
+        for _ in 1..20 {
+            test_join();
+        }
     }
 
     #[test]
@@ -241,7 +249,7 @@ mod tests {
                 },
                 "join": {
                     "type": "join",
-                    "order": [],
+                    "inputs": [],
                     "next": { "builtin": "terminate" },
                     "no_serialize": true,
                 },
@@ -297,7 +305,7 @@ mod tests {
                 },
                 "join": {
                     "type": "join",
-                    "order": ["op1", "op2"],
+                    "inputs": ["op1", "op2"],
                     "next": { "builtin": "terminate" },
                 },
             }
