@@ -37,18 +37,18 @@ jobs:
       run: ./scripts/patch-versions-msrv-1_75.sh
 
     - name: Build default features
-      run: cargo build --workspace --ignore-rust-version
+      run: cargo build --workspace
     - name: Test default features
-      run: cargo test --workspace --ignore-rust-version
+      run: cargo test --workspace
 
     - name: Test diagram
-      run: cargo test --workspace -F=diagram --ignore-rust-version
+      run: cargo test --workspace -F=diagram
 
     - name: Build single_threaded_async
-      run: cargo build --features single_threaded_async --ignore-rust-version
+      run: cargo build --features single_threaded_async
     - name: Test single_threaded_async
-      run: cargo test --features single_threaded_async --ignore-rust-version
+      run: cargo test --features single_threaded_async
 
     - name: Build docs
-      run: cargo doc --ignore-rust-version
+      run: cargo doc
 
