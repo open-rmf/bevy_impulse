@@ -84,27 +84,27 @@ fn opaque_response(_: i64) -> Unserializable {
 /// create a new node registry with some basic nodes registered
 fn new_registry_with_basic_nodes() -> NodeRegistry {
     let mut registry = NodeRegistry::default();
-    registry.register_node_builder(
-        "multiply3_uncloneable".to_string(),
-        "multiply3_uncloneable".to_string(),
-        |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
-    );
     registry
-        .registration_builder()
-        .with_response_cloneable()
+        .opt_out()
+        .no_response_cloning()
+        .register_node_builder(
+            "multiply3_uncloneable".to_string(),
+            "multiply3_uncloneable".to_string(),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
+        );
+    registry
         .register_node_builder(
             "multiply3".to_string(),
             "multiply3".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
         );
     registry
-        .registration_builder()
-        .with_unzippable()
         .register_node_builder(
             "multiply3_5".to_string(),
             "multiply3_5".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
-        );
+        )
+        .with_unzip();
 
     registry.register_node_builder(
         "multiplyBy".to_string(),
@@ -113,25 +113,27 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
     );
 
     registry
-        .registration_builder()
-        .with_opaque_request()
-        .with_opaque_response()
+        .opt_out()
+        .no_request_deserializing()
+        .no_response_serializing()
+        .no_response_cloning()
         .register_node_builder(
             "opaque".to_string(),
             "opaque".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque),
         );
     registry
-        .registration_builder()
-        .with_opaque_request()
+        .opt_out()
+        .no_request_deserializing()
         .register_node_builder(
             "opaque_request".to_string(),
             "opaque_request".to_string(),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
         );
     registry
-        .registration_builder()
-        .with_opaque_response()
+        .opt_out()
+        .no_response_serializing()
+        .no_response_cloning()
         .register_node_builder(
             "opaque_response".to_string(),
             "opaque_response".to_string(),

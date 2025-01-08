@@ -30,7 +30,7 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize, DiagramError, DynOutput, NextOperation, NodeRegistry, SerializeMessage,
+    register_serialize, DiagramError, DynOutput, NextOperation, DataRegistry, SerializeMessage,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -214,7 +214,7 @@ pub trait DynSplit<T, Serializer> {
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError>;
 
-    fn on_register(registry: &mut NodeRegistry);
+    fn on_register(registry: &mut DataRegistry);
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
@@ -228,7 +228,7 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
         Err(DiagramError::NotSplittable)
     }
 
-    fn on_register(_registry: &mut NodeRegistry) {}
+    fn on_register(_registry: &mut DataRegistry) {}
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
@@ -248,7 +248,7 @@ where
         split_chain(chain, split_op)
     }
 
-    fn on_register(registry: &mut NodeRegistry) {
+    fn on_register(registry: &mut DataRegistry) {
         register_serialize::<T::Item, Serializer>(registry);
         register_join_impl::<T::Item, Serializer>(registry);
     }
@@ -382,13 +382,12 @@ mod tests {
 
         fixture
             .registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
                 "split_list".to_string(),
                 "split_list".to_string(),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
-            );
+            )
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -423,13 +422,12 @@ mod tests {
 
         fixture
             .registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
                 "split_list".to_string(),
                 "split_list".to_string(),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
-            );
+            )
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -468,13 +466,12 @@ mod tests {
 
         fixture
             .registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
                 "split_map".to_string(),
                 "split_map".to_string(),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
-            );
+            )
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -509,13 +506,12 @@ mod tests {
 
         fixture
             .registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
                 "split_list".to_string(),
                 "split_list".to_string(),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
-            );
+            )
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
