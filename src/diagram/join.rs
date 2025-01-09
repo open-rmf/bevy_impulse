@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::{Builder, IterBufferable, Output};
 
 use super::{
-    MessageRegistry, DiagramError, DynOutput, NextOperation, SerializeMessage, SourceOperation,
+    DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage, SourceOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

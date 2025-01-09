@@ -8,7 +8,7 @@ use crate::Builder;
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize as register_serialize_impl, MessageRegistry, DiagramError, DynOutput,
+    register_serialize as register_serialize_impl, DiagramError, DynOutput, MessageRegistry,
     NextOperation, SerializeMessage,
 };
 
