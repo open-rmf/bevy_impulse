@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::new("mut").with_name("Multiply"),
+        NodeBuilderOptions::new("mul").with_name("Multiply"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
     );
     registry.register_node_builder(
