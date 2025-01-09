@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::{Builder, IterBufferable, Output};
 
 use super::{
-    DataRegistry, DiagramError, DynOutput, NextOperation, SerializeMessage, SourceOperation,
+    MessageRegistry, DiagramError, DynOutput, NextOperation, SerializeMessage, SourceOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -25,7 +25,7 @@ pub struct JoinOp {
     pub(super) no_serialize: Option<bool>,
 }
 
-pub(super) fn register_join_impl<T, Serializer>(registry: &mut DataRegistry)
+pub(super) fn register_join_impl<T, Serializer>(registry: &mut MessageRegistry)
 where
     T: Send + Sync + 'static,
     Serializer: SerializeMessage<Vec<T>>,
@@ -43,7 +43,7 @@ where
 /// [`serde_json::Value`].
 pub(super) fn serialize_and_join(
     builder: &mut Builder,
-    registry: &DataRegistry,
+    registry: &MessageRegistry,
     outputs: Vec<DynOutput>,
 ) -> Result<Output<serde_json::Value>, DiagramError> {
     debug!("serialize and join outputs {:?}", outputs);

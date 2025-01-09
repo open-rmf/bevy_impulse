@@ -371,7 +371,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
 
 pub struct RegistrationBuilder<'a, Request, Response, Streams> {
     node: &'a mut NodeRegistration,
-    data: &'a mut DataRegistry,
+    data: &'a mut MessageRegistry,
     _ignore: PhantomData<(Request, Response, Streams)>,
 }
 
@@ -469,10 +469,10 @@ pub trait IntoNodeRegistration {
 
 pub struct NodeRegistry {
     nodes: HashMap<BuilderId, NodeRegistration>,
-    pub(super) data: DataRegistry,
+    pub(super) data: MessageRegistry,
 }
 
-pub struct DataRegistry {
+pub struct MessageRegistry {
     /// List of all request and response types used in all registered nodes, this only
     /// contains serializable types, non serializable types are opaque and is only compatible
     /// with itself.
@@ -500,7 +500,7 @@ impl Default for NodeRegistry {
         settings.definitions_path = "#/types/".to_string();
         NodeRegistry {
             nodes: Default::default(),
-            data: DataRegistry {
+            data: MessageRegistry {
                 schema_generator: SchemaGenerator::new(settings),
                 deserialize_impls: HashMap::new(),
                 serialize_impls: HashMap::new(),

@@ -4,7 +4,7 @@ use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::debug;
 
-use super::DataRegistry;
+use super::MessageRegistry;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SerializationError {
@@ -190,7 +190,7 @@ impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
     }
 }
 
-pub(super) fn register_deserialize<T, Deserializer>(registry: &mut DataRegistry)
+pub(super) fn register_deserialize<T, Deserializer>(registry: &mut MessageRegistry)
 where
     Deserializer: DeserializeMessage<T>,
     T: Send + Sync + 'static,
@@ -225,7 +225,7 @@ where
     );
 }
 
-pub(super) fn register_serialize<T, Serializer>(registry: &mut DataRegistry)
+pub(super) fn register_serialize<T, Serializer>(registry: &mut MessageRegistry)
 where
     Serializer: SerializeMessage<T>,
     T: Send + Sync + 'static,

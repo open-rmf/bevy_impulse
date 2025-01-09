@@ -30,7 +30,7 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize, DataRegistry, DiagramError, DynOutput, NextOperation, SerializeMessage,
+    register_serialize, MessageRegistry, DiagramError, DynOutput, NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -221,7 +221,7 @@ pub trait DynSplit<T, Serializer> {
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramError>;
 
-    fn on_register(registry: &mut DataRegistry);
+    fn on_register(registry: &mut MessageRegistry);
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
@@ -235,7 +235,7 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
         Err(DiagramError::NotSplittable)
     }
 
-    fn on_register(_registry: &mut DataRegistry) {}
+    fn on_register(_registry: &mut MessageRegistry) {}
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
@@ -255,7 +255,7 @@ where
         split_chain(chain, split_op)
     }
 
-    fn on_register(registry: &mut DataRegistry) {
+    fn on_register(registry: &mut MessageRegistry) {
         register_serialize::<T::Item, Serializer>(registry);
         register_join_impl::<T::Item, Serializer>(registry);
     }
