@@ -41,6 +41,7 @@ pub(super) fn transform_output(
         output.into_output()
     } else {
         let serialize = registry
+            .data
             .serialize_impls
             .get(&output.type_id)
             .ok_or(DiagramError::NotSerializable)?;

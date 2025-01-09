@@ -298,10 +298,10 @@ fn connect_vertex<'a>(
             }
 
             let joined_output = if join_op.no_serialize.unwrap_or(false) {
-                let join_impl = &registry.join_impls[&ordered_outputs[0].type_id];
+                let join_impl = &registry.data.join_impls[&ordered_outputs[0].type_id];
                 join_impl(builder, ordered_outputs)?
             } else {
-                serialize_and_join(builder, registry, ordered_outputs)?.into()
+                serialize_and_join(builder, &registry.data, ordered_outputs)?.into()
             };
 
             let out_edge = edges
@@ -530,7 +530,7 @@ fn deserialize(
             DiagramOperation::Node(node_op) => {
                 let reg = registry.get_registration(&node_op.builder)?;
                 if reg.metadata.request.deserializable {
-                    let deserialize_impl = &registry.deserialize_impls[&input_type];
+                    let deserialize_impl = &registry.data.deserialize_impls[&input_type];
                     deserialize_impl(builder, serialized)
                 } else {
                     Err(DiagramError::NotSerializable)
@@ -559,7 +559,7 @@ fn serialize(
 
         let reg = registry.get_registration(&origin.builder)?;
         if reg.metadata.response.serializable {
-            let serialize_impl = &registry.serialize_impls[&output.type_id];
+            let serialize_impl = &registry.data.serialize_impls[&output.type_id];
             serialize_impl(builder, output)
         } else {
             Err(DiagramError::NotSerializable)

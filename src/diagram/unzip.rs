@@ -8,8 +8,8 @@ use crate::Builder;
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize as register_serialize_impl, DiagramError, DynOutput, NextOperation,
-    NodeRegistry, SerializeMessage,
+    register_serialize as register_serialize_impl, DataRegistry, DiagramError, DynOutput,
+    NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -24,7 +24,7 @@ pub trait DynUnzip<T, Serializer> {
     fn dyn_unzip(builder: &mut Builder, output: DynOutput) -> Result<Vec<DynOutput>, DiagramError>;
 
     /// Called when a node is registered.
-    fn on_register(registry: &mut NodeRegistry);
+    fn on_register(registry: &mut DataRegistry);
 }
 
 impl<T, Serializer> DynUnzip<T, Serializer> for NotSupported {
@@ -37,7 +37,7 @@ impl<T, Serializer> DynUnzip<T, Serializer> for NotSupported {
         Err(DiagramError::NotUnzippable)
     }
 
-    fn on_register(_registry: &mut NodeRegistry) {}
+    fn on_register(_registry: &mut DataRegistry) {}
 }
 
 macro_rules! dyn_unzip_impl {
@@ -66,7 +66,7 @@ macro_rules! dyn_unzip_impl {
                 Ok(outputs)
             }
 
-            fn on_register(registry: &mut NodeRegistry)
+            fn on_register(registry: &mut DataRegistry)
             {
                 // Register serialize functions for all items in the tuple.
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.

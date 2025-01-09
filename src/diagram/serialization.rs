@@ -4,7 +4,7 @@ use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::debug;
 
-use super::NodeRegistry;
+use super::DataRegistry;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SerializationError {
@@ -65,6 +65,19 @@ pub struct ResponseMetadata {
 
     /// Indiciates if the response can be split
     pub(super) splittable: bool,
+}
+
+impl ResponseMetadata {
+    pub(super) fn new(schema: Schema, serializable: bool, cloneable: bool) -> ResponseMetadata {
+        ResponseMetadata {
+            schema,
+            serializable,
+            cloneable,
+            unzip_slots: 0,
+            fork_result: false,
+            splittable: false,
+        }
+    }
 }
 
 pub trait SerializeMessage<T> {
@@ -177,7 +190,7 @@ impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
     }
 }
 
-pub(super) fn register_deserialize<T, Deserializer>(registry: &mut NodeRegistry)
+pub(super) fn register_deserialize<T, Deserializer>(registry: &mut DataRegistry)
 where
     Deserializer: DeserializeMessage<T>,
     T: Send + Sync + 'static,
@@ -212,7 +225,7 @@ where
     );
 }
 
-pub(super) fn register_serialize<T, Serializer>(registry: &mut NodeRegistry)
+pub(super) fn register_serialize<T, Serializer>(registry: &mut DataRegistry)
 where
     Serializer: SerializeMessage<T>,
     T: Send + Sync + 'static,

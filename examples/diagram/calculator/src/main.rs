@@ -23,19 +23,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut registry = NodeRegistry::default();
     registry.register_node_builder(
-        NodeBuilderOptions::with_name("add".to_string(), "Add".to_string()),
+        NodeBuilderOptions::new("add").with_name("Add"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::with_name("sub".to_string(), "Subtract".to_string()),
+        NodeBuilderOptions::new("sub").with_name("Subtract"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::with_name("mut".to_string(), "Multiply".to_string()),
+        NodeBuilderOptions::new("mul").with_name("Multiply"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::with_name("div".to_string(), "Divide".to_string()),
+        NodeBuilderOptions::new("div").with_name("Divide"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
     );
 

@@ -146,11 +146,9 @@ pub struct NodeRegistration {
     pub(super) metadata: NodeMetadata,
 
     /// Creates an instance of the registered node.
-    create_node_impl:
-        RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>,
+    create_node_impl: CreateNodeFn,
 
-    fork_clone_impl:
-        Option<Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>>,
+    fork_clone_impl: Option<ForkCloneFn>,
 
     unzip_impl:
         Option<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
@@ -171,6 +169,21 @@ pub struct NodeRegistration {
 }
 
 impl NodeRegistration {
+    fn new(
+        metadata: NodeMetadata,
+        create_node_impl: CreateNodeFn,
+        fork_clone_impl: Option<ForkCloneFn>,
+    ) -> NodeRegistration {
+        NodeRegistration {
+            metadata,
+            create_node_impl,
+            fork_clone_impl,
+            unzip_impl: None,
+            fork_result_impl: None,
+            split_impl: None,
+        }
+    }
+
     pub(super) fn create_node(
         &self,
         builder: &mut Builder,
@@ -235,231 +248,213 @@ impl NodeRegistration {
     }
 }
 
-pub struct RegistrationBuilder<
-    'a,
-    DeserializeImpl,
-    SerializeImpl,
-    ForkCloneImpl,
-    UnzipImpl,
-    ForkResultImpl,
-    SplitImpl,
-> {
+type CreateNodeFn =
+    RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>;
+type ForkCloneFn =
+    Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>;
+
+pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
     registry: &'a mut NodeRegistry,
-    _unused: PhantomData<(
-        DeserializeImpl,
-        SerializeImpl,
-        ForkCloneImpl,
-        UnzipImpl,
-        ForkResultImpl,
-        SplitImpl,
-    )>,
+    _ignore: PhantomData<(Deserialize, Serialize, Cloneable)>,
 }
 
-impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImpl, SplitImpl>
-    RegistrationBuilder<
-        'a,
-        DeserializeImpl,
-        SerializeImpl,
-        ForkCloneImpl,
-        UnzipImpl,
-        ForkResultImpl,
-        SplitImpl,
-    >
+impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
+    CommonOperations<'a, DeserializeImpl, SerializeImpl, Cloneable>
 {
-    pub fn new(registry: &'a mut NodeRegistry) -> Self {
-        Self {
-            registry,
-            _unused: Default::default(),
-        }
-    }
-
-    /// Register a node builder using the default registration config.
+    /// Register a node builder with the specified common operations.
     ///
     /// # Arguments
     ///
     /// * `id` - Id of the builder, this must be unique.
     /// * `name` - Friendly name for the builder, this is only used for display purposes.
     /// * `f` - The node builder to register.
-    pub fn register_node_builder<Config, Request, Response, Streams: StreamPack>(
-        &mut self,
-        opts: NodeBuilderOptions,
+    pub fn register_node_builder<Config, Request, Response, Streams>(
+        self,
+        options: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) where
+    ) -> RegistrationBuilder<'a, Request, Response, Streams>
+    where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static,
         Response: Send + Sync + 'static,
+        Streams: StreamPack,
         DeserializeImpl: DeserializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
-        ForkCloneImpl: DynForkClone<Response>,
-        UnzipImpl: DynUnzip<Response, SerializeImpl>,
-        ForkResultImpl: DynForkResult<Response>,
-        SplitImpl: DynSplit<Response, SerializeImpl>,
+        Cloneable: DynForkClone<Response>,
     {
-        Config::json_schema(&mut self.registry.gen);
+        register_deserialize::<Request, DeserializeImpl>(&mut self.registry.data);
+        register_serialize::<Response, SerializeImpl>(&mut self.registry.data);
 
-        let request = RequestMetadata {
-            schema: DeserializeImpl::json_schema(&mut self.registry.gen)
-                .unwrap_or_else(|| self.registry.gen.subschema_for::<()>()),
-            deserializable: DeserializeImpl::deserializable(),
-        };
-        let response = ResponseMetadata {
-            schema: SerializeImpl::json_schema(&mut self.registry.gen)
-                .unwrap_or_else(|| self.registry.gen.subschema_for::<()>()),
-            serializable: SerializeImpl::serializable(),
-            cloneable: ForkCloneImpl::CLONEABLE,
-            unzip_slots: UnzipImpl::UNZIP_SLOTS,
-            fork_result: ForkResultImpl::SUPPORTED,
-            splittable: SplitImpl::SUPPORTED,
-        };
-
-        let reg = NodeRegistration {
-            metadata: NodeMetadata {
-                id: opts.id.clone(),
-                name: opts.name.unwrap_or(opts.id.clone()),
-                request,
-                response,
-                config_schema: self.registry.gen.subschema_for::<Config>(),
+        let registration = NodeRegistration::new(
+            NodeMetadata {
+                id: options.id.clone(),
+                name: options.name.unwrap_or(options.id.clone()),
+                request: RequestMetadata {
+                    schema: DeserializeImpl::json_schema(&mut self.registry.data.schema_generator)
+                        .unwrap_or_else(|| {
+                            self.registry.data.schema_generator.subschema_for::<()>()
+                        }),
+                    deserializable: DeserializeImpl::deserializable(),
+                },
+                response: ResponseMetadata::new(
+                    SerializeImpl::json_schema(&mut self.registry.data.schema_generator)
+                        .unwrap_or_else(|| {
+                            self.registry.data.schema_generator.subschema_for::<()>()
+                        }),
+                    SerializeImpl::serializable(),
+                    Cloneable::CLONEABLE,
+                ),
+                config_schema: self
+                    .registry
+                    .data
+                    .schema_generator
+                    .subschema_for::<Config>(),
             },
-            create_node_impl: RefCell::new(Box::new(move |builder, config| {
+            RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
                 let n = f(builder, config);
                 Ok(DynNode::new(n.output, n.input))
             })),
-            fork_clone_impl: if ForkCloneImpl::CLONEABLE {
+            if Cloneable::CLONEABLE {
                 Some(Box::new(|builder, output, amount| {
-                    ForkCloneImpl::dyn_fork_clone(builder, output, amount)
+                    Cloneable::dyn_fork_clone(builder, output, amount)
                 }))
             } else {
                 None
             },
-            unzip_impl: if UnzipImpl::UNZIP_SLOTS > 0 {
-                Some(Box::new(|builder, output| {
-                    UnzipImpl::dyn_unzip(builder, output)
-                }))
-            } else {
-                None
-            },
-            fork_result_impl: if ForkResultImpl::SUPPORTED {
-                Some(Box::new(|builder, output| {
-                    ForkResultImpl::dyn_fork_result(builder, output)
-                }))
-            } else {
-                None
-            },
-            split_impl: if SplitImpl::SUPPORTED {
-                Some(Box::new(|builder, output, split_op| {
-                    SplitImpl::dyn_split(builder, output, split_op)
-                }))
-            } else {
-                None
-            },
-        };
+        );
+        self.registry.nodes.insert(options.id.clone(), registration);
 
-        self.registry.nodes.insert(opts.id, reg);
+        // SAFETY: We inserted an entry at this ID a moment ago
+        let node = self.registry.nodes.get_mut(&options.id).unwrap();
 
-        register_deserialize::<Request, DeserializeImpl>(self.registry);
-        register_serialize::<Response, SerializeImpl>(self.registry);
-
-        UnzipImpl::on_register(&mut self.registry);
-        SplitImpl::on_register(&mut self.registry);
+        RegistrationBuilder::<Request, Response, Streams> {
+            node,
+            data: &mut self.registry.data,
+            _ignore: Default::default(),
+        }
     }
 
-    /// Mark the node as having a non deserializable request. This allows nodes with
-    /// non deserializable requests to be registered but any nodes registered this way will not
-    /// be able to be connected to "Start" or any operation that requires deserialization.
-    pub fn with_opaque_request(
+    /// Opt out of deserializing the request of the node. Use this to build a
+    /// node whose request type is not deserializable.
+    pub fn no_request_deserializing(
         self,
-    ) -> RegistrationBuilder<
-        'a,
-        OpaqueMessageDeserializer,
-        SerializeImpl,
-        ForkCloneImpl,
-        UnzipImpl,
-        ForkResultImpl,
-        SplitImpl,
-    > {
-        RegistrationBuilder::new(self.registry)
+    ) -> CommonOperations<'a, OpaqueMessageDeserializer, SerializeImpl, Cloneable> {
+        CommonOperations {
+            registry: self.registry,
+            _ignore: Default::default(),
+        }
     }
 
-    /// Mark the node as having a non serializable response. This allows nodes with
-    /// non serializable responses to be registered but any nodes registered this way will not
-    /// be able to be connected to "Terminate" or any operation that requires serialization.
-    pub fn with_opaque_response(
+    /// Opt out of serializing the response of the node. Use this to build a
+    /// node whose response type is not serializable.
+    pub fn no_response_serializing(
         self,
-    ) -> RegistrationBuilder<
-        'a,
-        DeserializeImpl,
-        OpaqueMessageSerializer,
-        ForkCloneImpl,
-        UnzipImpl,
-        ForkResultImpl,
-        SplitImpl,
-    > {
-        RegistrationBuilder::new(self.registry)
+    ) -> CommonOperations<'a, DeserializeImpl, OpaqueMessageSerializer, Cloneable> {
+        CommonOperations {
+            registry: self.registry,
+            _ignore: Default::default(),
+        }
     }
 
-    /// Mark the node as having a cloneable response. This is required in order for the node
-    /// to be able to be connected to a "Fork Clone" operation.
-    pub fn with_response_cloneable(
+    /// Opt out of cloning the response of the node. Use this to build a node
+    /// whose response type is not cloneable.
+    pub fn no_response_cloning(
         self,
-    ) -> RegistrationBuilder<
-        'a,
-        DeserializeImpl,
-        SerializeImpl,
-        DefaultImpl,
-        UnzipImpl,
-        ForkResultImpl,
-        SplitImpl,
-    > {
-        RegistrationBuilder::new(self.registry)
+    ) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
+        CommonOperations {
+            registry: self.registry,
+            _ignore: Default::default(),
+        }
     }
+}
 
+pub struct RegistrationBuilder<'a, Request, Response, Streams> {
+    node: &'a mut NodeRegistration,
+    data: &'a mut DataRegistry,
+    _ignore: PhantomData<(Request, Response, Streams)>,
+}
+
+impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, Streams> {
     /// Mark the node as having a unzippable response. This is required in order for the node
     /// to be able to be connected to a "Unzip" operation.
-    pub fn with_unzippable(
-        self,
-    ) -> RegistrationBuilder<
-        'a,
-        DeserializeImpl,
-        SerializeImpl,
-        ForkCloneImpl,
-        DefaultImpl,
-        ForkResultImpl,
-        SplitImpl,
-    > {
-        RegistrationBuilder::new(self.registry)
+    pub fn with_unzip(self) -> Self
+    where
+        DefaultImpl: DynUnzip<Response, DefaultSerializer>,
+    {
+        self.with_unzip_impl::<DefaultImpl, DefaultSerializer>()
+    }
+
+    /// Mark the node as having an unzippable response whose elements are not serializable.
+    pub fn with_unzip_unserializable(self) -> Self
+    where
+        DefaultImpl: DynUnzip<Response, NotSupported>,
+    {
+        self.with_unzip_impl::<DefaultImpl, NotSupported>()
+    }
+
+    fn with_unzip_impl<UnzipImpl, SerializeImpl>(self) -> Self
+    where
+        UnzipImpl: DynUnzip<Response, SerializeImpl>,
+    {
+        self.node.metadata.response.unzip_slots = UnzipImpl::UNZIP_SLOTS;
+        self.node.unzip_impl = if UnzipImpl::UNZIP_SLOTS > 0 {
+            Some(Box::new(|builder, output| {
+                UnzipImpl::dyn_unzip(builder, output)
+            }))
+        } else {
+            None
+        };
+
+        UnzipImpl::on_register(self.data);
+
+        self
     }
 
     /// Mark the node as having a [`Result<_, _>`] response. This is required in order for the node
     /// to be able to be connected to a "Fork Result" operation.
-    pub fn with_fork_result(
-        self,
-    ) -> RegistrationBuilder<
-        'a,
-        DeserializeImpl,
-        SerializeImpl,
-        ForkCloneImpl,
-        UnzipImpl,
-        DefaultImpl,
-        SplitImpl,
-    > {
-        RegistrationBuilder::new(self.registry)
+    pub fn with_fork_result(self) -> Self
+    where
+        DefaultImpl: DynForkResult<Response>,
+    {
+        self.node.metadata.response.fork_result = true;
+        self.node.fork_result_impl = Some(Box::new(|builder, output| {
+            <DefaultImpl as DynForkResult<Response>>::dyn_fork_result(builder, output)
+        }));
+
+        self
     }
 
-    /// Mark the node as having a splittable response. This is required in order for the node
-    /// to be able to be connected to a "Split" operation.
-    pub fn with_splittable(
-        self,
-    ) -> RegistrationBuilder<
-        'a,
-        DeserializeImpl,
-        SerializeImpl,
-        ForkCloneImpl,
-        UnzipImpl,
-        ForkResultImpl,
-        DefaultImpl,
-    > {
-        RegistrationBuilder::new(self.registry)
+    /// Mark the node as having a splittable response. This is required in order
+    /// for the node to be able to be connected to a "Split" operation.
+    pub fn with_split(self) -> Self
+    where
+        DefaultImpl: DynSplit<Response, DefaultSerializer>,
+    {
+        self.with_split_impl::<DefaultImpl, DefaultSerializer>()
+    }
+
+    /// Mark the node as having a splittable response but the items from the split
+    /// are unserializable.
+    pub fn with_split_unserializable(self) -> Self
+    where
+        DefaultImpl: DynSplit<Response, NotSupported>,
+    {
+        self.with_split_impl::<DefaultImpl, NotSupported>()
+    }
+
+    pub fn with_split_impl<SplitImpl, SerializeImpl>(self) -> Self
+    where
+        SplitImpl: DynSplit<Response, SerializeImpl>,
+    {
+        self.node.metadata.response.splittable = true;
+        self.node.split_impl = Some(Box::new(|builder, output, split_op| {
+            SplitImpl::dyn_split(builder, output, split_op)
+        }));
+
+        SplitImpl::on_register(self.data);
+
+        self
     }
 }
 
@@ -468,17 +463,20 @@ pub trait IntoNodeRegistration {
         self,
         id: BuilderId,
         name: String,
-        gen: &mut SchemaGenerator,
+        schema_generator: &mut SchemaGenerator,
     ) -> NodeRegistration;
 }
 
 pub struct NodeRegistry {
     nodes: HashMap<BuilderId, NodeRegistration>,
+    pub(super) data: DataRegistry,
+}
 
+pub struct DataRegistry {
     /// List of all request and response types used in all registered nodes, this only
     /// contains serializable types, non serializable types are opaque and is only compatible
     /// with itself.
-    gen: SchemaGenerator,
+    schema_generator: SchemaGenerator,
 
     pub(super) deserialize_impls: HashMap<
         TypeId,
@@ -502,29 +500,12 @@ impl Default for NodeRegistry {
         settings.definitions_path = "#/types/".to_string();
         NodeRegistry {
             nodes: Default::default(),
-            gen: SchemaGenerator::new(settings),
-            deserialize_impls: HashMap::new(),
-            serialize_impls: HashMap::new(),
-            join_impls: HashMap::new(),
-        }
-    }
-}
-
-#[non_exhaustive]
-pub struct NodeBuilderOptions {
-    pub id: BuilderId,
-    pub name: Option<String>,
-}
-
-impl NodeBuilderOptions {
-    pub fn new(id: BuilderId) -> Self {
-        Self { id, name: None }
-    }
-
-    pub fn with_name(id: BuilderId, name: String) -> Self {
-        Self {
-            id,
-            name: Some(name),
+            data: DataRegistry {
+                schema_generator: SchemaGenerator::new(settings),
+                deserialize_impls: HashMap::new(),
+                serialize_impls: HashMap::new(),
+                join_impls: HashMap::new(),
+            },
         }
     }
 }
@@ -534,18 +515,48 @@ impl NodeRegistry {
         Self::default()
     }
 
-    /// Create a new [`RegistrationBuilder`]. By default, it is configured for nodes with
-    /// deserializable request and serializable responses and without support for any interconnect
-    /// operations like "fork_clone" and "unzip". See [`RegistrationBuilder`] for more information
-    /// about these operations.
+    /// Register a node builder with all the common operations (deserialize the
+    /// request, serialize the response, and clone the response) enabled.
+    ///
+    /// You will receive a [`RegistrationBuilder`] which you can then use to
+    /// enable more operations around your node, such as fork result, split,
+    /// or unzip. The data types of your node need to be suitable for those
+    /// operations or else the compiler will not allow you to enable them.
     ///
     /// ```
     /// use bevy_impulse::{NodeBuilderOptions, NodeRegistry};
     ///
     /// let mut registry = NodeRegistry::default();
-    /// registry.registration_builder().register_node_builder(NodeBuilderOptions::new("echo".to_string()),
-    ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg));
+    /// registry.register_node_builder(
+    ///     NodeBuilderOptions::new("echo".to_string()),
+    ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg)
+    /// );
     /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Id of the builder, this must be unique.
+    /// * `name` - Friendly name for the builder, this is only used for display purposes.
+    /// * `f` - The node builder to register.
+    pub fn register_node_builder<Config, Request, Response, Streams: StreamPack>(
+        &mut self,
+        options: NodeBuilderOptions,
+        builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
+    ) -> RegistrationBuilder<Request, Response, Streams>
+    where
+        Config: JsonSchema + DeserializeOwned,
+        Request: Send + Sync + 'static + DynType + DeserializeOwned,
+        Response: Send + Sync + 'static + DynType + Serialize + Clone,
+    {
+        self.opt_out().register_node_builder(options, builder)
+    }
+
+    /// In some cases the common operations of deserialization, serialization,
+    /// and cloning cannot be performed for the request or response of a node.
+    /// When that happens you can still register your node builder by calling
+    /// this function and explicitly disabling the common operations that your
+    /// node cannot support.
+    ///
     ///
     /// In order for the request to be deserializable, it must implement [`schemars::JsonSchema`] and [`serde::de::DeserializeOwned`].
     /// In order for the response to be serializable, it must implement [`schemars::JsonSchema`] and [`serde::Serialize`].
@@ -572,52 +583,29 @@ impl NodeRegistry {
     /// }
     ///
     /// let mut registry = NodeRegistry::default();
-    /// registry.registration_builder()
-    ///     .with_opaque_request()
-    ///     .with_opaque_response()
-    ///     .register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
-    ///         builder.create_map_block(|msg: NonSerializable| msg)
-    ///     });
+    /// registry
+    ///     .opt_out()
+    ///     .no_request_deserializing()
+    ///     .no_response_serializing()
+    ///     .no_response_cloning()
+    ///     .register_node_builder(
+    ///         NodeBuilderOptions::new("echo"),
+    ///         |builder, _config: ()| {
+    ///             builder.create_map_block(|msg: NonSerializable| msg)
+    ///         }
+    ///     );
     /// ```
     ///
-    /// Note that nodes registered this way cannot be connected to "Start" or "Terminate".
-    pub fn registration_builder(
+    /// Note that nodes registered without deserialization cannot be connected
+    /// to the workflow start, and nodes registered without serialization cannot
+    /// be connected to the workflow termination.
+    pub fn opt_out(
         &mut self,
-    ) -> RegistrationBuilder<
-        DefaultDeserializer,
-        DefaultSerializer,
-        NotSupported,
-        NotSupported,
-        NotSupported,
-        NotSupported,
-    > {
-        RegistrationBuilder::new(self)
-    }
-
-    /// Register a node builder using the default registration config.
-    ///
-    /// This is a equivalent to
-    ///
-    /// ```text
-    /// registry.registration_builder().register_node_builder(f)
-    /// ```
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - Id of the builder, this must be unique.
-    /// * `name` - Friendly name for the builder, this is only used for display purposes.
-    /// * `f` - The node builder to register.
-    pub fn register_node_builder<Config, Request, Response, Streams: StreamPack>(
-        &mut self,
-        opts: NodeBuilderOptions,
-        builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) where
-        Config: JsonSchema + DeserializeOwned,
-        Request: Send + Sync + 'static + DynType + DeserializeOwned,
-        Response: Send + Sync + 'static + DynType + Serialize,
-    {
-        self.registration_builder()
-            .register_node_builder(opts, builder)
+    ) -> CommonOperations<DefaultDeserializer, DefaultSerializer, DefaultImpl> {
+        CommonOperations {
+            registry: self,
+            _ignore: Default::default(),
+        }
     }
 
     pub(super) fn get_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramError>
@@ -663,8 +651,28 @@ impl Serialize for NodeRegistry {
                 &SerializeWith { value: self }
             },
         )?;
-        s.serialize_field("types", self.gen.definitions())?;
+        s.serialize_field("types", self.data.schema_generator.definitions())?;
         s.end()
+    }
+}
+
+#[non_exhaustive]
+pub struct NodeBuilderOptions {
+    pub id: BuilderId,
+    pub name: Option<String>,
+}
+
+impl NodeBuilderOptions {
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: id.to_string(),
+            name: None,
+        }
+    }
+
+    pub fn with_name(mut self, name: impl ToString) -> Self {
+        self.name = Some(name.to_string());
+        self
     }
 }
 
@@ -682,13 +690,13 @@ mod tests {
     #[test]
     fn test_register_node_builder() {
         let mut registry = NodeRegistry::default();
-        registry.register_node_builder(
-            NodeBuilderOptions::with_name(
-                "multiply3_uncloneable".to_string(),
-                "Test Name".to_string(),
-            ),
-            |builder, _config: ()| builder.create_map_block(multiply3),
-        );
+        registry
+            .opt_out()
+            .no_response_cloning()
+            .register_node_builder(
+                NodeBuilderOptions::new("multiply3_uncloneable").with_name("Test Name"),
+                |builder, _config: ()| builder.create_map_block(multiply3),
+            );
         let registration = registry.get_registration("multiply3_uncloneable").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
@@ -699,17 +707,11 @@ mod tests {
     #[test]
     fn test_register_cloneable_node() {
         let mut registry = NodeRegistry::default();
-        registry
-            .registration_builder()
-            .with_response_cloneable()
-            .register_node_builder(
-                NodeBuilderOptions::with_name(
-                    "multiply3_uncloneable".to_string(),
-                    "Test Name".to_string(),
-                ),
-                |builder, _config: ()| builder.create_map_block(multiply3),
-            );
-        let registration = registry.get_registration("multiply3_uncloneable").unwrap();
+        registry.register_node_builder(
+            NodeBuilderOptions::new("multiply3").with_name("Test Name"),
+            |builder, _config: ()| builder.create_map_block(multiply3),
+        );
+        let registration = registry.get_registration("multiply3").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
         assert!(registration.metadata.response.cloneable);
@@ -721,15 +723,13 @@ mod tests {
         let mut registry = NodeRegistry::default();
         let tuple_resp = |_: ()| -> (i64,) { (1,) };
         registry
-            .registration_builder()
-            .with_unzippable()
+            .opt_out()
+            .no_response_cloning()
             .register_node_builder(
-                NodeBuilderOptions::with_name(
-                    "multiply3_uncloneable".to_string(),
-                    "Test Name".to_string(),
-                ),
+                NodeBuilderOptions::new("multiply3_uncloneable").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
-            );
+            )
+            .with_unzip();
         let registration = registry.get_registration("multiply3_uncloneable").unwrap();
         assert!(registration.metadata.request.deserializable);
         assert!(registration.metadata.response.serializable);
@@ -742,28 +742,27 @@ mod tests {
         let mut registry = NodeRegistry::default();
         let vec_resp = |_: ()| -> Vec<i64> { vec![1, 2] };
         registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
-                NodeBuilderOptions::with_name("vec_resp".to_string(), "Test Name".to_string()),
+                NodeBuilderOptions::new("vec_resp").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(vec_resp),
-            );
+            )
+            .with_split();
         let registration = registry.get_registration("vec_resp").unwrap();
         assert!(registration.metadata.response.splittable);
 
         let map_resp = |_: ()| -> HashMap<String, i64> { HashMap::new() };
         registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
-                NodeBuilderOptions::with_name("map_resp".to_string(), "Test Name".to_string()),
+                NodeBuilderOptions::new("map_resp").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
-            );
+            )
+            .with_split();
+
         let registration = registry.get_registration("map_resp").unwrap();
         assert!(registration.metadata.response.splittable);
 
         registry.register_node_builder(
-            NodeBuilderOptions::with_name("not_splittable".to_string(), "Test Name".to_string()),
+            NodeBuilderOptions::new("not_splittable").with_name("Test Name"),
             move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
         );
         let registration = registry.get_registration("not_splittable").unwrap();
@@ -780,7 +779,7 @@ mod tests {
         }
 
         registry.register_node_builder(
-            NodeBuilderOptions::with_name("multiply".to_string(), "Test Name".to_string()),
+            NodeBuilderOptions::new("multiply").with_name("Test Name"),
             move |builder: &mut Builder, config: TestConfig| {
                 builder.create_map_block(move |operand: i64| operand * config.by)
             },
@@ -796,13 +795,11 @@ mod tests {
 
         let mut registry = NodeRegistry::default();
         registry
-            .registration_builder()
-            .with_opaque_request()
+            .opt_out()
+            .no_request_deserializing()
+            .no_response_cloning()
             .register_node_builder(
-                NodeBuilderOptions::with_name(
-                    "opaque_request_map".to_string(),
-                    "Test Name".to_string(),
-                ),
+                NodeBuilderOptions::new("opaque_request_map").with_name("Test Name"),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             );
         assert!(registry.get_registration("opaque_request_map").is_ok());
@@ -814,13 +811,11 @@ mod tests {
 
         let opaque_response_map = |_: ()| NonSerializableRequest {};
         registry
-            .registration_builder()
-            .with_opaque_response()
+            .opt_out()
+            .no_response_serializing()
+            .no_response_cloning()
             .register_node_builder(
-                NodeBuilderOptions::with_name(
-                    "opaque_response_map".to_string(),
-                    "Test Name".to_string(),
-                ),
+                NodeBuilderOptions::new("opaque_response_map").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_response_map)
                 },
@@ -834,14 +829,12 @@ mod tests {
 
         let opaque_req_resp_map = |_: NonSerializableRequest| NonSerializableRequest {};
         registry
-            .registration_builder()
-            .with_opaque_request()
-            .with_opaque_response()
+            .opt_out()
+            .no_request_deserializing()
+            .no_response_serializing()
+            .no_response_cloning()
             .register_node_builder(
-                NodeBuilderOptions::with_name(
-                    "opaque_req_resp_map".to_string(),
-                    "Test Name".to_string(),
-                ),
+                NodeBuilderOptions::new("opaque_req_resp_map").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_req_resp_map)
                 },
