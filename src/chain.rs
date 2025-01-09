@@ -27,9 +27,9 @@ use crate::{
     make_option_branching, make_result_branching, AddOperation, AsMap, Buffer, BufferKey,
     BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
     ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
-    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateStaticGate,
-    Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf,
-    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateSplit,
+    OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service,
+    Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -37,6 +37,9 @@ pub use fork_clone_builder::*;
 
 pub(crate) mod premade;
 use premade::*;
+
+pub mod split;
+pub use split::*;
 
 pub mod unzip;
 pub use unzip::*;
@@ -601,6 +604,74 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         self.map_async(|r| r)
     }
 
+    /// If the chain's response implements the [`Splittable`] trait, then this
+    /// will insert a split operation and provide your `build` function with the
+    /// [`SplitBuilder`] for it. This returns the return value of your build
+    /// function.
+    pub fn split<U>(self, build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, T>) -> U) -> U
+    where
+        T: Splittable,
+    {
+        let source = self.target;
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateSplit::<T>::default(),
+        ));
+
+        build(SplitBuilder::new(source, self.builder))
+    }
+
+    /// If the chain's response implements the [`Splittable`] trait, then this
+    /// will insert a split and provide a container for its available outputs.
+    /// To build connections to these outputs later, use [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split(|split| split.outputs())
+    /// ```
+    pub fn split_outputs(self) -> SplitOutputs<T>
+    where
+        T: Splittable,
+    {
+        self.split(|b| b.outputs())
+    }
+
+    /// If the chain's response can be turned into an iterator with an appropriate
+    /// item type, this will allow it to be split in a list-like way.
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .map_block(SplitAsList::new).split(build)
+    /// ```
+    pub fn split_as_list<U>(
+        self,
+        build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, SplitAsList<T>>) -> U,
+    ) -> U
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        self.map_block(SplitAsList::new).split(build)
+    }
+
+    /// If the chain's response can be turned into an iterator with an appropriate
+    /// item type, this will insert a split and provide a container for its
+    /// available outputs. To build connections to these outputs later, use
+    /// [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split_as_list(|split| split.outputs())
+    /// ```
+    pub fn split_as_list_outputs(self) -> SplitOutputs<SplitAsList<T>>
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        self.split_as_list(|b| b.outputs())
+    }
+
     /// Add a [no-op][1] to the current end of the chain.
     ///
     /// As the name suggests, a no-op will not actually do anything, but it adds
@@ -633,10 +704,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         }
     }
 
+    /// The scope that the chain is building inside of.
     pub fn scope(&self) -> Entity {
         self.builder.scope
     }
 
+    /// The target where the chain will be sending its latest output.
     pub fn target(&self) -> Entity {
         self.target
     }
@@ -942,6 +1015,41 @@ where
     }
 }
 
+impl<'w, 's, 'a, 'b, K, V, T> Chain<'w, 's, 'a, 'b, T>
+where
+    K: 'static + Send + Sync + Eq + std::hash::Hash + Clone + std::fmt::Debug,
+    V: 'static + Send + Sync,
+    T: 'static + Send + Sync + IntoIterator<Item = (K, V)>,
+{
+    /// If the chain's response type can be turned into an iterator that returns
+    /// `(key, value)` pairs, then this will split it in a map-like way, whether
+    /// or not it is a conventional map data structure.
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .map_block(SplitAsMap::new).split(build)
+    /// ```
+    pub fn split_as_map<U>(
+        self,
+        build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, SplitAsMap<K, V, T>>) -> U,
+    ) -> U {
+        self.map_block(SplitAsMap::new).split(build)
+    }
+
+    /// If the chain's response type can be turned into an iterator that returns
+    /// `(key, value)` pairs, then this will split it in a map-like way and
+    /// provide a container for its available outputs. To build connections to
+    /// these outputs later, use [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split_as_map(|split| split.outputs())
+    /// ```
+    pub fn split_as_map_outputs(self) -> SplitOutputs<SplitAsMap<K, V, T>> {
+        self.split_as_map(|b| b.outputs())
+    }
+}
+
 impl<'w, 's, 'a, 'b, Request, Response, Streams>
     Chain<'w, 's, 'a, 'b, (Request, Service<Request, Response, Streams>)>
 where
@@ -1027,6 +1135,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
             builder,
             _ignore: Default::default(),
         }
+    }
+}
+
+impl<'w, 's, 'a, 'b, K, V> Chain<'w, 's, 'a, 'b, (K, V)>
+where
+    K: 'static + Send + Sync,
+    V: 'static + Send + Sync,
+{
+    /// If the chain's response contains a `(key, value)` pair, get the `key`
+    /// component from it (the first element of the tuple).
+    pub fn key(self) -> Chain<'w, 's, 'a, 'b, K> {
+        self.map_block(|(key, _)| key)
+    }
+
+    /// If the chain's response contains a `(key, value)` pair, get the `value`
+    /// component from it (the second element of the tuple).
+    pub fn value(self) -> Chain<'w, 's, 'a, 'b, V> {
+        self.map_block(|(_, value)| value)
     }
 }
 

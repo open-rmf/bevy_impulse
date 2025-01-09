@@ -207,28 +207,28 @@ impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
 }
 
 pub trait IterBufferable {
-    type BufferType: Buffered;
+    type BufferElement: Buffered;
 
     /// Convert an iterable collection of bufferable workflow elements into
     /// buffers if they are not buffers already.
     fn into_buffer_vec<const N: usize>(
         self,
         builder: &mut Builder,
-    ) -> SmallVec<[Self::BufferType; N]>;
+    ) -> SmallVec<[Self::BufferElement; N]>;
 
     /// Join an iterable collection of bufferable workflow elements.
     ///
     /// Performance is best if you can choose an `N` which is equal to the
     /// number of buffers inside the iterable, but this will work even if `N`
     /// does not match the number.
-    fn join_vec<const N: usize>(
+    fn join_vec<'w, 's, 'a, 'b, const N: usize>(
         self,
-        builder: &mut Builder,
-    ) -> Output<SmallVec<[<Self::BufferType as Buffered>::Item; N]>>
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[<Self::BufferElement as Buffered>::Item; N]>>
     where
         Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        <Self::BufferType as Buffered>::Item: 'static + Send + Sync,
+        Self::BufferElement: 'static + Send + Sync,
+        <Self::BufferElement as Buffered>::Item: 'static + Send + Sync,
     {
         let buffers = self.into_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
@@ -239,6 +239,23 @@ pub trait IterBufferable {
             Join::new(buffers, target),
         ));
 
-        Output::new(builder.scope, target)
+        Output::new(builder.scope, target).chain(builder)
+    }
+}
+
+impl<T> IterBufferable for T
+where
+    T: IntoIterator,
+    T::Item: Bufferable,
+{
+    type BufferElement = <T::Item as Bufferable>::BufferType;
+
+    fn into_buffer_vec<const N: usize>(
+        self,
+        builder: &mut Builder,
+    ) -> SmallVec<[Self::BufferElement; N]> {
+        SmallVec::<[Self::BufferElement; N]>::from_iter(
+            self.into_iter().map(|e| e.into_buffer(builder)),
+        )
     }
 }
