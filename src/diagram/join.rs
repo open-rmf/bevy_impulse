@@ -70,7 +70,8 @@ pub(super) fn serialize_and_join(
     let joined_output = outputs.join_vec::<4>(builder).output();
     let json_output = joined_output
         .chain(builder)
-        .map_block(|o| serde_json::to_value(o).unwrap())
+        .map_block(|o| serde_json::to_value(o))
+        .cancel_on_err()
         .output();
     Ok(json_output)
 }

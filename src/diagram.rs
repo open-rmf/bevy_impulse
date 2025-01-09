@@ -335,6 +335,7 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(de)?;
+    // SAFETY: `SUPPORTED_DIAGRAM_VERSION` is a const, this will never fail.
     let ver_req = semver::VersionReq::parse(SUPPORTED_DIAGRAM_VERSION).unwrap();
     let ver = semver::Version::parse(&s).map_err(|_| {
         serde::de::Error::invalid_value(serde::de::Unexpected::Str(&s), &SUPPORTED_DIAGRAM_VERSION)
@@ -519,6 +520,19 @@ pub enum DiagramError {
 
     #[error(transparent)]
     ConnectionError(#[from] SplitConnectionError),
+
+    /// Use this only for errors that *should* never happen because of some preconditions.
+    /// If this error ever comes up, then it likely means that there is some logical flaws
+    /// in the algorithm.
+    #[error("an unknown error occurred while building the diagram, {0}")]
+    UnknownError(String),
+}
+
+#[macro_export]
+macro_rules! unknown_diagram_error {
+    () => {
+        DiagramError::UnknownError(format!("{}:{}", file!(), line!()))
+    };
 }
 
 #[cfg(test)]

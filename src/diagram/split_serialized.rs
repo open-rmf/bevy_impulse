@@ -84,6 +84,9 @@ impl Splittable for Value {
                     let key = MapSplitKey::Specific(name);
                     match dispatcher.outputs_for(&key) {
                         Some(outputs) => {
+                            // SAFETY: This key was initialized as MapSplitKey::Specific earlier
+                            // in the function and is immutable, so this method is guaranteed to
+                            // return `Some`
                             let position = JsonPosition::ObjectField(key.specific().unwrap());
                             outputs.push((position, value));
                         }
@@ -93,6 +96,9 @@ impl Splittable for Value {
                             let seq = MapSplitKey::Sequential(next_seq);
                             next_seq += 1;
 
+                            // SAFETY: This key was initialized as MapSplitKey::Specific earlier
+                            // in the function and is immutable, so this method is guaranteed to
+                            // return `Some`
                             let position = JsonPosition::ObjectField(key.specific().unwrap());
                             match dispatcher.outputs_for(&seq) {
                                 Some(outputs) => outputs.push((position, value)),
