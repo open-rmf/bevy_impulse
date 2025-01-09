@@ -87,6 +87,9 @@ impl<Request> InputSlot<Request> {
 /// `Response` parameter can be cloned then you can call [`Self::fork_clone`] to
 /// transform this into a [`ForkCloneOutput`] and then connect the output into
 /// any number of input slots.
+///
+/// `Output` intentionally does not implement copy or clone because it must only
+/// be consumed exactly once.
 #[must_use]
 pub struct Output<Response> {
     scope: Entity,
