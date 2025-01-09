@@ -510,12 +510,11 @@ mod tests {
 
         fixture
             .registry
-            .registration_builder()
-            .with_splittable()
             .register_node_builder(
                 NodeBuilderOptions::new("split_map".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
-            );
+            )
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
