@@ -1,7 +1,8 @@
 use std::{error::Error, fs::File, str::FromStr};
 
 use bevy_impulse::{
-    Diagram, DiagramError, ImpulsePlugin, NodeRegistry, Promise, RequestExt, RunCommandsOnWorldExt,
+    Diagram, DiagramError, ImpulsePlugin, NodeBuilderOptions, NodeRegistry, Promise, RequestExt,
+    RunCommandsOnWorldExt,
 };
 use clap::Parser;
 
@@ -22,23 +23,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut registry = NodeRegistry::default();
     registry.register_node_builder(
-        "add".to_string(),
-        "Add".to_string(),
+        NodeBuilderOptions::new("add").with_name("Add"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
     );
     registry.register_node_builder(
-        "sub".to_string(),
-        "Subtract".to_string(),
+        NodeBuilderOptions::new("sub").with_name("Subtract"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
     );
     registry.register_node_builder(
-        "mul".to_string(),
-        "Multiply".to_string(),
+        NodeBuilderOptions::new("mut").with_name("Multiply"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
     );
     registry.register_node_builder(
-        "div".to_string(),
-        "Divide".to_string(),
+        NodeBuilderOptions::new("div").with_name("Divide"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
     );
 

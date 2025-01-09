@@ -61,7 +61,7 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram};
+    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram, NodeBuilderOptions};
 
     #[test]
     fn test_fork_result() {
@@ -78,8 +78,7 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                "check_even".to_string(),
-                "check_even".to_string(),
+                NodeBuilderOptions::new("check_even".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
             )
             .with_fork_result();
@@ -89,8 +88,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "echo".to_string(),
-            "echo".to_string(),
+            NodeBuilderOptions::new("echo".to_string()),
             |builder: &mut Builder, _config: ()| builder.create_map_block(&echo),
         );
 

@@ -84,6 +84,9 @@ impl Splittable for Value {
                     let key = MapSplitKey::Specific(name);
                     match dispatcher.outputs_for(&key) {
                         Some(outputs) => {
+                            // SAFETY: This key was initialized as MapSplitKey::Specific earlier
+                            // in the function and is immutable, so this method is guaranteed to
+                            // return `Some`
                             let position = JsonPosition::ObjectField(key.specific().unwrap());
                             outputs.push((position, value));
                         }
@@ -93,6 +96,9 @@ impl Splittable for Value {
                             let seq = MapSplitKey::Sequential(next_seq);
                             next_seq += 1;
 
+                            // SAFETY: This key was initialized as MapSplitKey::Specific earlier
+                            // in the function and is immutable, so this method is guaranteed to
+                            // return `Some`
                             let position = JsonPosition::ObjectField(key.specific().unwrap());
                             match dispatcher.outputs_for(&seq) {
                                 Some(outputs) => outputs.push((position, value)),
@@ -383,8 +389,7 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                "split_list".to_string(),
-                "split_list".to_string(),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             )
             .with_split();
@@ -423,8 +428,7 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                "split_list".to_string(),
-                "split_list".to_string(),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             )
             .with_split();
@@ -467,8 +471,7 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                "split_map".to_string(),
-                "split_map".to_string(),
+                NodeBuilderOptions::new("split_map".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
             )
             .with_split();
@@ -507,8 +510,7 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                "split_list".to_string(),
-                "split_list".to_string(),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             )
             .with_split();
@@ -546,8 +548,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "get_split_value".to_string(),
-            "get_split_value".to_string(),
+            NodeBuilderOptions::new("get_split_value".to_string()),
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 

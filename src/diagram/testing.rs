@@ -4,7 +4,7 @@ use crate::{
     testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
 };
 
-use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeRegistry};
+use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeRegistry, NodeBuilderOptions};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
@@ -88,26 +88,22 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .opt_out()
         .no_response_cloning()
         .register_node_builder(
-            "multiply3_uncloneable".to_string(),
-            "multiply3_uncloneable".to_string(),
+            NodeBuilderOptions::new("multiply3_uncloneable"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
         );
     registry.register_node_builder(
-        "multiply3".to_string(),
-        "multiply3".to_string(),
+        NodeBuilderOptions::new("multiply3"),
         |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
     );
     registry
         .register_node_builder(
-            "multiply3_5".to_string(),
-            "multiply3_5".to_string(),
+            NodeBuilderOptions::new("multiply3_5"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
         )
         .with_unzip();
 
     registry.register_node_builder(
-        "multiplyBy".to_string(),
-        "multiplyBy".to_string(),
+        NodeBuilderOptions::new("multiplyBy"),
         |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
     );
 
@@ -117,16 +113,14 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .no_response_serializing()
         .no_response_cloning()
         .register_node_builder(
-            "opaque".to_string(),
-            "opaque".to_string(),
+            NodeBuilderOptions::new("opaque"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque),
         );
     registry
         .opt_out()
         .no_request_deserializing()
         .register_node_builder(
-            "opaque_request".to_string(),
-            "opaque_request".to_string(),
+            NodeBuilderOptions::new("opaque_request"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
         );
     registry
@@ -134,8 +128,7 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .no_response_serializing()
         .no_response_cloning()
         .register_node_builder(
-            "opaque_response".to_string(),
-            "opaque_response".to_string(),
+            NodeBuilderOptions::new("opaque_response"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
         );
     registry

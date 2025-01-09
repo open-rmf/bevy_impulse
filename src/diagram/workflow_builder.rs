@@ -2,7 +2,10 @@ use std::{any::TypeId, collections::HashMap};
 
 use tracing::{debug, warn};
 
-use crate::{diagram::join::serialize_and_join, Builder, InputSlot, Output, StreamPack};
+use crate::{
+    diagram::join::serialize_and_join, unknown_diagram_error, Builder, InputSlot, Output,
+    StreamPack,
+};
 
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
@@ -58,6 +61,11 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         .collect();
 
     // init with some capacity to reduce resizing. HashMap for faster removal.
+    // NOTE: There are many `unknown_diagram_errors!()` used when accessing this.
+    // In theory these accesses should never fail because the keys come from
+    // `vertices` which are built using the same data as `edges`. But we do modify
+    // `edges` while we are building the workflow so if an unknown error occurs, it is
+    // likely due to some logic issue in the algorithm.
     let mut edges: HashMap<usize, Edge> = HashMap::with_capacity(diagram.ops.len() * 2);
 
     // process start separately because we need to consume the scope input
@@ -88,7 +96,11 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                     },
                 },
             );
-            vertices.get_mut(&op_id).unwrap().in_edges.push(0);
+            vertices
+                .get_mut(&op_id)
+                .ok_or(DiagramError::OperationNotFound(op_id.clone()))?
+                .in_edges
+                .push(0);
         }
     };
 
@@ -235,7 +247,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
     // connect terminate
     for edge_id in terminate_edges {
-        let edge = edges.remove(&edge_id).unwrap();
+        let edge = edges.remove(&edge_id).ok_or(unknown_diagram_error!())?;
         match edge.state {
             EdgeState::Ready { output, origin } => {
                 let serialized_output = serialize(builder, registry, output, origin)?;
@@ -267,13 +279,14 @@ fn connect_vertex<'a>(
                 .in_edges
                 .iter()
                 .map(|e| {
-                    let edge = edges.remove(e).unwrap();
+                    let edge = edges.remove(e).ok_or(unknown_diagram_error!())?;
                     match edge.state {
-                        EdgeState::Ready { output, origin: _ } => (edge.source, output),
-                        _ => panic!("expected all incoming edges to be ready"),
+                        EdgeState::Ready { output, origin: _ } => Ok((edge.source, output)),
+                        // "expected all incoming edges to be ready"
+                        _ => Err(unknown_diagram_error!()),
                     }
                 })
-                .collect();
+                .collect::<Result<HashMap<_, _>, _>>()?;
 
             let mut ordered_outputs: Vec<DynOutput> = Vec::with_capacity(target.in_edges.len());
             for source_id in join_op.inputs.iter() {
@@ -290,7 +303,9 @@ fn connect_vertex<'a>(
                 serialize_and_join(builder, &registry.data, ordered_outputs)?.into()
             };
 
-            let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
+            let out_edge = edges
+                .get_mut(&target.out_edges[0])
+                .ok_or(unknown_diagram_error!())?;
             out_edge.state = EdgeState::Ready {
                 output: joined_output,
                 origin: None,
@@ -315,7 +330,7 @@ fn connect_edge<'a>(
     edge_id: usize,
     target: &Vertex,
 ) -> Result<(), DiagramError> {
-    let edge = edges.remove(&edge_id).unwrap();
+    let edge = edges.remove(&edge_id).ok_or(unknown_diagram_error!())?;
     debug!(
         "connect edge {:?}, source: {:?}, target: {:?}",
         edge_id, edge.source, edge.target
@@ -357,13 +372,10 @@ fn connect_edge<'a>(
                 let reg = registry.get_registration(&origin.builder)?;
                 reg.fork_clone(builder, output, amount)
             }?;
-            outputs
-                .into_iter()
-                .zip(target.out_edges.iter())
-                .for_each(|(o, e)| {
-                    let out_edge = edges.get_mut(e).unwrap();
-                    out_edge.state = EdgeState::Ready { output: o, origin };
-                });
+            for (o, e) in outputs.into_iter().zip(target.out_edges.iter()) {
+                let out_edge = edges.get_mut(e).ok_or(unknown_diagram_error!())?;
+                out_edge.state = EdgeState::Ready { output: o, origin };
+            }
         }
         DiagramOperation::Unzip(unzip_op) => {
             let outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
@@ -381,13 +393,10 @@ fn connect_edge<'a>(
             if outputs.len() < unzip_op.next.len() {
                 return Err(DiagramError::NotUnzippable);
             }
-            outputs
-                .into_iter()
-                .zip(target.out_edges.iter())
-                .for_each(|(o, e)| {
-                    let out_edge = edges.get_mut(e).unwrap();
-                    out_edge.state = EdgeState::Ready { output: o, origin };
-                });
+            for (o, e) in outputs.into_iter().zip(target.out_edges.iter()) {
+                let out_edge = edges.get_mut(e).ok_or(unknown_diagram_error!())?;
+                out_edge.state = EdgeState::Ready { output: o, origin };
+            }
         }
         DiagramOperation::ForkResult(_) => {
             let (ok, err) = if output.type_id == TypeId::of::<serde_json::Value>() {
@@ -403,11 +412,15 @@ fn connect_edge<'a>(
                 reg.fork_result(builder, output)
             }?;
             {
-                let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
+                let out_edge = edges
+                    .get_mut(&target.out_edges[0])
+                    .ok_or(unknown_diagram_error!())?;
                 out_edge.state = EdgeState::Ready { output: ok, origin };
             }
             {
-                let out_edge = edges.get_mut(&target.out_edges[1]).unwrap();
+                let out_edge = edges
+                    .get_mut(&target.out_edges[1])
+                    .ok_or(unknown_diagram_error!())?;
                 out_edge.state = EdgeState::Ready {
                     output: err,
                     origin,
@@ -432,7 +445,7 @@ fn connect_edge<'a>(
             // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
             // then the last item will always be the remaining edge.
             let remaining_edge_id = if split_op.remaining.is_some() {
-                Some(target.out_edges.last().unwrap())
+                Some(target.out_edges.last().ok_or(unknown_diagram_error!())?)
             } else {
                 None
             };
@@ -443,12 +456,17 @@ fn connect_edge<'a>(
             };
 
             for e in other_edge_ids {
-                let out_edge = edges.get_mut(e).unwrap();
-                let output = outputs.outputs.remove(out_edge.target).unwrap();
+                let out_edge = edges.get_mut(e).ok_or(unknown_diagram_error!())?;
+                let output = outputs
+                    .outputs
+                    .remove(out_edge.target)
+                    .ok_or(unknown_diagram_error!())?;
                 out_edge.state = EdgeState::Ready { output, origin };
             }
             if let Some(remaining_edge_id) = remaining_edge_id {
-                let out_edge = edges.get_mut(remaining_edge_id).unwrap();
+                let out_edge = edges
+                    .get_mut(remaining_edge_id)
+                    .ok_or(unknown_diagram_error!())?;
                 out_edge.state = EdgeState::Ready {
                     output: outputs.remaining,
                     origin,
@@ -460,7 +478,9 @@ fn connect_edge<'a>(
         }
         DiagramOperation::Transform(transform_op) => {
             let transformed_output = transform_output(builder, registry, output, transform_op)?;
-            let out_edge = edges.get_mut(&target.out_edges[0]).unwrap();
+            let out_edge = edges
+                .get_mut(&target.out_edges[0])
+                .ok_or(unknown_diagram_error!())?;
             out_edge.state = EdgeState::Ready {
                 output: transformed_output.into(),
                 origin,
