@@ -18,7 +18,7 @@
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Bundle, Commands, Component, Entity, With, World},
-    query::{QueryFilter, WorldQuery, ReadOnlyQueryData},
+    query::{QueryFilter, ReadOnlyQueryData, WorldQuery},
     system::Command,
 };
 use bevy_hierarchy::BuildChildren;
