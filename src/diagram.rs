@@ -379,11 +379,11 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, NodeRegistry, RunCommandsOnWorldExt};
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = NodeRegistry::default();
-    /// registry.register_node_builder("echo".to_string(), "echo".to_string(), |builder, _config: ()| {
+    /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
     ///

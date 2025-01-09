@@ -385,8 +385,7 @@ mod tests {
             .registration_builder()
             .with_splittable()
             .register_node_builder(
-                "split_list".to_string(),
-                "split_list".to_string(),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             );
 
@@ -426,8 +425,7 @@ mod tests {
             .registration_builder()
             .with_splittable()
             .register_node_builder(
-                "split_list".to_string(),
-                "split_list".to_string(),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             );
 
@@ -471,8 +469,7 @@ mod tests {
             .registration_builder()
             .with_splittable()
             .register_node_builder(
-                "split_map".to_string(),
-                "split_map".to_string(),
+                NodeBuilderOptions::new("split_map".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
             );
 
@@ -512,8 +509,7 @@ mod tests {
             .registration_builder()
             .with_splittable()
             .register_node_builder(
-                "split_list".to_string(),
-                "split_list".to_string(),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             );
 
@@ -550,8 +546,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "get_split_value".to_string(),
-            "get_split_value".to_string(),
+            NodeBuilderOptions::new("get_split_value".to_string()),
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 

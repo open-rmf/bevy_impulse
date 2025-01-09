@@ -4,7 +4,9 @@ use crate::{
     testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
 };
 
-use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeRegistry};
+use super::{
+    Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeBuilderOptions, NodeRegistry,
+};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
@@ -85,30 +87,26 @@ fn opaque_response(_: i64) -> Unserializable {
 fn new_registry_with_basic_nodes() -> NodeRegistry {
     let mut registry = NodeRegistry::default();
     registry.register_node_builder(
-        "multiply3_uncloneable".to_string(),
-        "multiply3_uncloneable".to_string(),
+        NodeBuilderOptions::new("multiply3_uncloneable".to_string()),
         |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
     );
     registry
         .registration_builder()
         .with_response_cloneable()
         .register_node_builder(
-            "multiply3".to_string(),
-            "multiply3".to_string(),
+            NodeBuilderOptions::new("multiply3".to_string()),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
         );
     registry
         .registration_builder()
         .with_unzippable()
         .register_node_builder(
-            "multiply3_5".to_string(),
-            "multiply3_5".to_string(),
+            NodeBuilderOptions::new("multiply3_5".to_string()),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
         );
 
     registry.register_node_builder(
-        "multiplyBy".to_string(),
-        "multiplyBy".to_string(),
+        NodeBuilderOptions::new("multiplyBy".to_string()),
         |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
     );
 
@@ -117,24 +115,21 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .with_opaque_request()
         .with_opaque_response()
         .register_node_builder(
-            "opaque".to_string(),
-            "opaque".to_string(),
+            NodeBuilderOptions::new("opaque".to_string()),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque),
         );
     registry
         .registration_builder()
         .with_opaque_request()
         .register_node_builder(
-            "opaque_request".to_string(),
-            "opaque_request".to_string(),
+            NodeBuilderOptions::new("opaque_request".to_string()),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
         );
     registry
         .registration_builder()
         .with_opaque_response()
         .register_node_builder(
-            "opaque_response".to_string(),
-            "opaque_response".to_string(),
+            NodeBuilderOptions::new("opaque_response".to_string()),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
         );
     registry

@@ -116,7 +116,10 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramError, JsonPosition};
+    use crate::{
+        diagram::testing::DiagramTestFixture, Diagram, DiagramError, JsonPosition,
+        NodeBuilderOptions,
+    };
 
     #[test]
     fn test_join() {
@@ -127,8 +130,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "get_split_value".to_string(),
-            "get_split_value".to_string(),
+            NodeBuilderOptions::new("get_split_value".to_string()),
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 
@@ -141,8 +143,7 @@ mod tests {
             .registration_builder()
             .with_opaque_request()
             .register_node_builder(
-                "serialize_join_output".to_string(),
-                "serialize_join_output".to_string(),
+                NodeBuilderOptions::new("serialize_join_output".to_string()),
                 |builder, _config: ()| builder.create_map_block(serialize_join_output),
             );
 
@@ -214,8 +215,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "get_split_value".to_string(),
-            "get_split_value".to_string(),
+            NodeBuilderOptions::new("get_split_value".to_string()),
             |builder, _config: ()| builder.create_map_block(get_split_value),
         );
 
@@ -270,8 +270,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "num_output".to_string(),
-            "num_output".to_string(),
+            NodeBuilderOptions::new("num_output".to_string()),
             |builder, _config: ()| builder.create_map_block(num_output),
         );
 
@@ -280,8 +279,7 @@ mod tests {
         }
 
         fixture.registry.register_node_builder(
-            "string_output".to_string(),
-            "string_output".to_string(),
+            NodeBuilderOptions::new("string_output".to_string()),
             |builder, _config: ()| builder.create_map_block(string_output),
         );
 

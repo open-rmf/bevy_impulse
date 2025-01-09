@@ -282,8 +282,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
     /// * `f` - The node builder to register.
     pub fn register_node_builder<Config, Request, Response, Streams: StreamPack>(
         &mut self,
-        id: BuilderId,
-        name: String,
+        opts: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
     ) where
         Config: JsonSchema + DeserializeOwned,
@@ -315,8 +314,8 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
 
         let reg = NodeRegistration {
             metadata: NodeMetadata {
-                id: id.clone(),
-                name,
+                id: opts.id.clone(),
+                name: opts.name.unwrap_or(opts.id.clone()),
                 request,
                 response,
                 config_schema: self.registry.gen.subschema_for::<Config>(),
@@ -356,7 +355,7 @@ impl<'a, DeserializeImpl, SerializeImpl, ForkCloneImpl, UnzipImpl, ForkResultImp
             },
         };
 
-        self.registry.nodes.insert(id, reg);
+        self.registry.nodes.insert(opts.id, reg);
 
         register_deserialize::<Request, DeserializeImpl>(self.registry);
         register_serialize::<Response, SerializeImpl>(self.registry);
@@ -511,6 +510,25 @@ impl Default for NodeRegistry {
     }
 }
 
+#[non_exhaustive]
+pub struct NodeBuilderOptions {
+    pub id: BuilderId,
+    pub name: Option<String>,
+}
+
+impl NodeBuilderOptions {
+    pub fn new(id: BuilderId) -> Self {
+        Self { id, name: None }
+    }
+
+    pub fn with_name(id: BuilderId, name: String) -> Self {
+        Self {
+            id,
+            name: Some(name),
+        }
+    }
+}
+
 impl NodeRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -522,10 +540,10 @@ impl NodeRegistry {
     /// about these operations.
     ///
     /// ```
-    /// use bevy_impulse::NodeRegistry;
+    /// use bevy_impulse::{NodeBuilderOptions, NodeRegistry};
     ///
     /// let mut registry = NodeRegistry::default();
-    /// registry.registration_builder().register_node_builder("echo".to_string(), "echo".to_string(),
+    /// registry.registration_builder().register_node_builder(NodeBuilderOptions::new("echo".to_string()),
     ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg));
     /// ```
     ///
@@ -547,7 +565,7 @@ impl NodeRegistry {
     /// a way to register it.
     ///
     /// ```
-    /// use bevy_impulse::NodeRegistry;
+    /// use bevy_impulse::{NodeBuilderOptions, NodeRegistry};
     ///
     /// struct NonSerializable {
     ///     data: String
@@ -557,7 +575,7 @@ impl NodeRegistry {
     /// registry.registration_builder()
     ///     .with_opaque_request()
     ///     .with_opaque_response()
-    ///     .register_node_builder("echo".to_string(), "echo".to_string(), |builder, _config: ()| {
+    ///     .register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///         builder.create_map_block(|msg: NonSerializable| msg)
     ///     });
     /// ```
@@ -591,8 +609,7 @@ impl NodeRegistry {
     /// * `f` - The node builder to register.
     pub fn register_node_builder<Config, Request, Response, Streams: StreamPack>(
         &mut self,
-        id: BuilderId,
-        name: String,
+        opts: NodeBuilderOptions,
         builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
     ) where
         Config: JsonSchema + DeserializeOwned,
@@ -600,7 +617,7 @@ impl NodeRegistry {
         Response: Send + Sync + 'static + DynType + Serialize,
     {
         self.registration_builder()
-            .register_node_builder(id, name, builder)
+            .register_node_builder(opts, builder)
     }
 
     pub(super) fn get_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramError>
@@ -666,8 +683,10 @@ mod tests {
     fn test_register_node_builder() {
         let mut registry = NodeRegistry::default();
         registry.register_node_builder(
-            "multiply3_uncloneable".to_string(),
-            "Test Name".to_string(),
+            NodeBuilderOptions::with_name(
+                "multiply3_uncloneable".to_string(),
+                "Test Name".to_string(),
+            ),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
         let registration = registry.get_registration("multiply3_uncloneable").unwrap();
@@ -684,8 +703,10 @@ mod tests {
             .registration_builder()
             .with_response_cloneable()
             .register_node_builder(
-                "multiply3_uncloneable".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name(
+                    "multiply3_uncloneable".to_string(),
+                    "Test Name".to_string(),
+                ),
                 |builder, _config: ()| builder.create_map_block(multiply3),
             );
         let registration = registry.get_registration("multiply3_uncloneable").unwrap();
@@ -703,8 +724,10 @@ mod tests {
             .registration_builder()
             .with_unzippable()
             .register_node_builder(
-                "multiply3_uncloneable".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name(
+                    "multiply3_uncloneable".to_string(),
+                    "Test Name".to_string(),
+                ),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
             );
         let registration = registry.get_registration("multiply3_uncloneable").unwrap();
@@ -722,8 +745,7 @@ mod tests {
             .registration_builder()
             .with_splittable()
             .register_node_builder(
-                "vec_resp".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name("vec_resp".to_string(), "Test Name".to_string()),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(vec_resp),
             );
         let registration = registry.get_registration("vec_resp").unwrap();
@@ -734,16 +756,14 @@ mod tests {
             .registration_builder()
             .with_splittable()
             .register_node_builder(
-                "map_resp".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name("map_resp".to_string(), "Test Name".to_string()),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
             );
         let registration = registry.get_registration("map_resp").unwrap();
         assert!(registration.metadata.response.splittable);
 
         registry.register_node_builder(
-            "not_splittable".to_string(),
-            "Test Name".to_string(),
+            NodeBuilderOptions::with_name("not_splittable".to_string(), "Test Name".to_string()),
             move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
         );
         let registration = registry.get_registration("not_splittable").unwrap();
@@ -760,8 +780,7 @@ mod tests {
         }
 
         registry.register_node_builder(
-            "multiply".to_string(),
-            "Test Name".to_string(),
+            NodeBuilderOptions::with_name("multiply".to_string(), "Test Name".to_string()),
             move |builder: &mut Builder, config: TestConfig| {
                 builder.create_map_block(move |operand: i64| operand * config.by)
             },
@@ -780,8 +799,10 @@ mod tests {
             .registration_builder()
             .with_opaque_request()
             .register_node_builder(
-                "opaque_request_map".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name(
+                    "opaque_request_map".to_string(),
+                    "Test Name".to_string(),
+                ),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             );
         assert!(registry.get_registration("opaque_request_map").is_ok());
@@ -796,8 +817,10 @@ mod tests {
             .registration_builder()
             .with_opaque_response()
             .register_node_builder(
-                "opaque_response_map".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name(
+                    "opaque_response_map".to_string(),
+                    "Test Name".to_string(),
+                ),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_response_map)
                 },
@@ -815,8 +838,10 @@ mod tests {
             .with_opaque_request()
             .with_opaque_response()
             .register_node_builder(
-                "opaque_req_resp_map".to_string(),
-                "Test Name".to_string(),
+                NodeBuilderOptions::with_name(
+                    "opaque_req_resp_map".to_string(),
+                    "Test Name".to_string(),
+                ),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_req_resp_map)
                 },
