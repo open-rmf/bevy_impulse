@@ -30,11 +30,15 @@ jobs:
       shell: powershell
 
     - name: Build default features
-      run: cargo build
+      run: cargo build --workspace
       shell: cmd
 
     - name: Test default features
-      run: cargo test
+      run: cargo test --workspace
+      shell: cmd
+
+    - name: Test diagram
+      run: cargo test --workspace -F=diagram
       shell: cmd
 
     - name: Build single_threaded_async

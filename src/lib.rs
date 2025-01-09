@@ -87,6 +87,11 @@ pub use chain::*;
 pub mod channel;
 pub use channel::*;
 
+#[cfg(feature = "diagram")]
+pub mod diagram;
+#[cfg(feature = "diagram")]
+pub use diagram::*;
+
 pub mod disposal;
 pub use disposal::*;
 
