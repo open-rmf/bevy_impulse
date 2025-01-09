@@ -16,17 +16,10 @@ env:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        rust-version: [stable, 1.75]
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
-
-    - name: Setup rust
-      run: rustup default ${{ matrix.rust-version }}
 
     - name: Build default features
       run: cargo build
