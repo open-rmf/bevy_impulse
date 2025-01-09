@@ -4,7 +4,9 @@ use crate::{
     testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
 };
 
-use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeRegistry, NodeBuilderOptions};
+use super::{
+    Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeBuilderOptions, NodeRegistry,
+};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
