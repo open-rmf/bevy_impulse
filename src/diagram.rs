@@ -472,11 +472,6 @@ impl Diagram {
     }
 }
 
-// thiserror has a special impl for backtrace which only works on nightly.
-// But we can disable this special impl by aliasing it.
-// See https://github.com/dtolnay/thiserror/issues/387#issuecomment-2473781561.
-type DefinitelyNotBacktrace = backtrace::Backtrace;
-
 #[derive(thiserror::Error, Debug)]
 pub enum DiagramError {
     #[error("node builder [{0}] is not registered")]
@@ -529,14 +524,14 @@ pub enum DiagramError {
     /// Use this only for errors that *should* never happen because of some preconditions.
     /// If this error ever comes up, then it likely means that there is some logical flaws
     /// in the algorithm.
-    #[error("an unknown error occurred while building the diagram, {0:#?}")]
-    UnknownError(DefinitelyNotBacktrace),
+    #[error("an unknown error occurred while building the diagram, {0}")]
+    UnknownError(String),
 }
 
 #[macro_export]
 macro_rules! unknown_diagram_error {
     () => {
-        DiagramError::UnknownError(backtrace::Backtrace::new())
+        DiagramError::UnknownError(format!("{}:{}", file!(), line!()))
     };
 }
 
