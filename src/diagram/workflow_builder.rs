@@ -10,7 +10,7 @@ use crate::{
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
     BuiltinTarget, Diagram, DiagramError, DiagramOperation, DiagramScope, DynInputSlot, DynOutput,
-    NextOperation, NodeOp, NodeRegistry, OperationId, SourceOperation, SplitOpParams,
+    NextOperation, NodeOp, NodeRegistry, OperationId, SourceOperation,
 };
 
 struct Vertex<'a> {
@@ -187,10 +187,11 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 )?;
             }
             DiagramOperation::Split(split_op) => {
-                let next_op_ids: Vec<&NextOperation> = match &split_op.params {
-                    SplitOpParams::Index(v) => v.iter().collect(),
-                    SplitOpParams::Key(v) => v.values().collect(),
-                };
+                let next_op_ids: Vec<&NextOperation> = split_op
+                    .sequential
+                    .iter()
+                    .chain(split_op.keyed.values())
+                    .collect();
                 for next_op_id in next_op_ids {
                     add_edge(op_id.clone().into(), next_op_id, EdgeState::Pending)?;
                 }

@@ -154,7 +154,7 @@ mod tests {
             "ops": {
                 "split": {
                     "type": "split",
-                    "index": ["get_split_value1", "get_split_value2"]
+                    "sequential": ["get_split_value1", "get_split_value2"]
                 },
                 "get_split_value1": {
                     "type": "node",
@@ -226,9 +226,9 @@ mod tests {
             "ops": {
                 "split": {
                     "type": "split",
-                    "index": ["getSplitValue1", "getSplitValue2"]
+                    "sequential": ["get_split_value1", "get_split_value2"]
                 },
-                "getSplitValue1": {
+                "get_split_value1": {
                     "type": "node",
                     "builder": "get_split_value",
                     "next": "op1",
@@ -238,7 +238,7 @@ mod tests {
                     "builder": "multiply3_uncloneable",
                     "next": { "builtin": "terminate" },
                 },
-                "getSplitValue2": {
+                "get_split_value2": {
                     "type": "node",
                     "builder": "get_split_value",
                     "next": "op2",

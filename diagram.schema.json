@@ -150,42 +150,17 @@
         {
           "description": "If the request is a list-like or map-like object, split it into multiple responses. Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split output should have request of that type instead of just the value type.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"split\", \"ops\": { \"split\": { \"type\": \"split\", \"index\": [{ \"builtin\": \"terminate\" }] } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "required": [
-                "index"
-              ],
-              "properties": {
-                "index": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/NextOperation"
-                  }
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": [
-                "key"
-              ],
-              "properties": {
-                "key": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "$ref": "#/definitions/NextOperation"
-                  }
-                }
-              },
-              "additionalProperties": false
-            }
-          ],
           "required": [
             "type"
           ],
           "properties": {
+            "keyed": {
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/NextOperation"
+              }
+            },
             "remaining": {
               "anyOf": [
                 {
@@ -195,6 +170,13 @@
                   "type": "null"
                 }
               ]
+            },
+            "sequential": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/NextOperation"
+              }
             },
             "type": {
               "type": "string",

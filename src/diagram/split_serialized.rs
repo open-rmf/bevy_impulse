@@ -36,17 +36,13 @@ use super::{
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SplitOp {
-    #[serde(flatten)]
-    pub(super) params: SplitOpParams,
+    #[serde(default)]
+    pub(super) sequential: Vec<NextOperation>,
+
+    #[serde(default)]
+    pub(super) keyed: HashMap<String, NextOperation>,
 
     pub(super) remaining: Option<NextOperation>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SplitOpParams {
-    Index(Vec<NextOperation>),
-    Key(HashMap<String, NextOperation>),
 }
 
 impl Splittable for Value {
@@ -180,28 +176,33 @@ where
         TypeId::of::<T>(),
         split_op
     );
+
+    enum SeqOrKey<'inner> {
+        Seq(usize),
+        Key(&'inner String),
+    }
+
     chain.split(|mut sb| -> Result<DynSplitOutputs, DiagramError> {
-        let outputs = match &split_op.params {
-            SplitOpParams::Index(v) => {
-                let outputs: HashMap<_, _> = v
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, op_id)| -> Result<(_, DynOutput), DiagramError> {
-                        Ok((op_id, sb.sequential_output(i)?.into()))
-                    })
-                    .collect::<Result<_, _>>()?;
-                outputs
-            }
-            SplitOpParams::Key(v) => {
-                let outputs: HashMap<_, _> = v
-                    .into_iter()
-                    .map(|(k, op_id)| -> Result<(_, DynOutput), DiagramError> {
-                        Ok((op_id, sb.specific_output(k.clone())?.into()))
-                    })
-                    .collect::<Result<_, _>>()?;
-                outputs
-            }
-        };
+        let outputs: HashMap<&NextOperation, DynOutput> = split_op
+            .sequential
+            .iter()
+            .enumerate()
+            .map(|(i, op_id)| (SeqOrKey::Seq(i), op_id))
+            .chain(
+                split_op
+                    .keyed
+                    .iter()
+                    .map(|(k, op_id)| (SeqOrKey::Key(k), op_id)),
+            )
+            .map(
+                |(ki, op_id)| -> Result<(&NextOperation, DynOutput), DiagramError> {
+                    match ki {
+                        SeqOrKey::Seq(i) => Ok((op_id, sb.sequential_output(i)?.into())),
+                        SeqOrKey::Key(k) => Ok((op_id, sb.specific_output(k.clone())?.into())),
+                    }
+                },
+            )
+            .collect::<Result<HashMap<_, _>, _>>()?;
         let split_outputs = DynSplitOutputs {
             outputs,
             remaining: sb.remaining_output()?.into(),
@@ -406,7 +407,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "index": [{ "builtin": "terminate" }],
+                    "sequential": [{ "builtin": "terminate" }],
                 },
             },
         }))
@@ -446,7 +447,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "key": { "1": { "builtin": "terminate" } },
+                    "keyed": { "1": { "builtin": "terminate" } },
                 },
             },
         }))
@@ -490,7 +491,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "key": { "b": { "builtin": "terminate" } },
+                    "keyed": { "b": { "builtin": "terminate" } },
                 },
             },
         }))
@@ -499,6 +500,48 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert_eq!(result[1], 2);
+    }
+
+    #[test]
+    fn test_split_dual_key_seq() {
+        let mut fixture = DiagramTestFixture::new();
+
+        fn split_map(_: i64) -> HashMap<String, i64> {
+            HashMap::from([("a".to_string(), 1), ("b".to_string(), 2)])
+        }
+
+        fixture
+            .registry
+            .registration_builder()
+            .with_splittable()
+            .register_node_builder(
+                NodeBuilderOptions::new("split_map".to_string()),
+                |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
+            );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
+            "ops": {
+                "op1": {
+                    "type": "node",
+                    "builder": "split_map",
+                    "next": "split",
+                },
+                "split": {
+                    "type": "split",
+                    "keyed": { "a": { "builtin": "dispose" } },
+                    "sequential": [{ "builtin": "terminate" }],
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .unwrap();
+        // "a" is "eaten" up by the keyed path, so we should be the result of "b".
         assert_eq!(result[1], 2);
     }
 
@@ -530,7 +573,7 @@ mod tests {
                 },
                 "split": {
                     "type": "split",
-                    "index": [{ "builtin": "dispose" }],
+                    "sequential": [{ "builtin": "dispose" }],
                     "remaining": { "builtin": "terminate" },
                 },
             },
@@ -562,7 +605,7 @@ mod tests {
             "ops": {
                 "split": {
                     "type": "split",
-                    "index": ["getSplitValue"],
+                    "sequential": ["getSplitValue"],
                 },
                 "getSplitValue": {
                     "type": "node",
