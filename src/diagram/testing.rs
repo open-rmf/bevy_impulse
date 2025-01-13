@@ -14,10 +14,19 @@ pub(super) struct DiagramTestFixture {
 }
 
 impl DiagramTestFixture {
+    /// Create a new text fixure with basic nodes registered.
     pub(super) fn new() -> Self {
         Self {
             context: TestingContext::minimal_plugins(),
             registry: new_registry_with_basic_nodes(),
+        }
+    }
+
+    /// Create a new text fixure with no nodes registered.
+    pub(super) fn new_empty() -> Self {
+        Self {
+            context: TestingContext::minimal_plugins(),
+            registry: NodeRegistry::new(),
         }
     }
 

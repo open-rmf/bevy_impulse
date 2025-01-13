@@ -15,9 +15,12 @@
  *
 */
 
+mod diagram_message;
+use diagram_message::impl_diagram_message;
+
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::DeriveInput;
+use syn::{parse_macro_input, DeriveInput};
 
 #[proc_macro_derive(Stream)]
 pub fn simple_stream_macro(item: TokenStream) -> TokenStream {
@@ -57,4 +60,10 @@ pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+#[proc_macro_derive(DiagramMessage)]
+pub fn derive_diagram_message(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    impl_diagram_message(input)
 }
