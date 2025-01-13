@@ -25,7 +25,7 @@ macro_rules! dyn_unzip_impl {
     };
 }
 
-all_tuples_with_size!(dyn_unzip_impl, 2, 12, R, o);
+all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
 
 #[cfg(test)]
 mod tests {
@@ -45,19 +45,67 @@ mod tests {
         let mut fixture = DiagramTestFixture::new_empty();
 
         fixture.registry.register_with_diagram_message(
-            NodeBuilderOptions::new("derive_foo_unzip"),
+            NodeBuilderOptions::new("foo_unzippable"),
+            |builder, _config: ()| builder.create_map_block(|_: ()| Foo {}),
+        );
+
+        assert_eq!(
+            fixture
+                .registry
+                .get_registration("foo_unzippable")
+                .unwrap()
+                .metadata
+                .response
+                .unzip_slots,
+            0
+        );
+
+        fixture.registry.register_with_diagram_message(
+            NodeBuilderOptions::new("foo_1_tuple"),
+            |builder, _config: ()| builder.create_map_block(|_: ()| (Foo {},)),
+        );
+
+        assert_eq!(
+            fixture
+                .registry
+                .get_registration("foo_1_tuple")
+                .unwrap()
+                .metadata
+                .response
+                .unzip_slots,
+            1
+        );
+
+        fixture.registry.register_with_diagram_message(
+            NodeBuilderOptions::new("foo_unzip_2_tuple"),
             |builder, _config: ()| builder.create_map_block(|_: ()| (Foo {}, Foo {})),
         );
 
         assert_eq!(
             fixture
                 .registry
-                .get_registration("derive_foo_unzip")
+                .get_registration("foo_unzip_2_tuple")
                 .unwrap()
                 .metadata
                 .response
                 .unzip_slots,
             2
+        );
+
+        fixture.registry.register_with_diagram_message(
+            NodeBuilderOptions::new("foo_unzip_3_tuple"),
+            |builder, _config: ()| builder.create_map_block(|_: ()| (Foo {}, Foo {}, Foo {})),
+        );
+
+        assert_eq!(
+            fixture
+                .registry
+                .get_registration("foo_unzip_3_tuple")
+                .unwrap()
+                .metadata
+                .response
+                .unzip_slots,
+            3
         );
     }
 }
