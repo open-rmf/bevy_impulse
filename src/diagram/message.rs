@@ -13,7 +13,7 @@ impl<Serializer> DiagramMessage<Serializer> for () {
     type DynUnzipImpl = NotSupported;
 }
 
-macro_rules! dyn_unzip_impl {
+macro_rules! diagram_message_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
         impl<$($P),*, Serializer> DiagramMessage<Serializer> for ($($P,)*)
         where
@@ -25,7 +25,7 @@ macro_rules! dyn_unzip_impl {
     };
 }
 
-all_tuples_with_size!(dyn_unzip_impl, 1, 12, R, o);
+all_tuples_with_size!(diagram_message_impl, 1, 12, R, o);
 
 #[cfg(test)]
 mod tests {
