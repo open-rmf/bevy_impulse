@@ -402,6 +402,14 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
 
         // SAFETY: We inserted an entry at this ID a moment ago
         let node = self.registry.nodes.get_mut(&options.id).unwrap();
+        node.unzip_impl = if Response::DynUnzipImpl::UNZIP_SLOTS > 0 {
+            Response::DynUnzipImpl::on_register(&mut self.registry.data);
+            Some(Box::new(|builder, output| {
+                Response::DynUnzipImpl::dyn_unzip(builder, output)
+            }))
+        } else {
+            None
+        };
 
         RegistrationBuilder::<Request, Response, Streams> {
             node,
