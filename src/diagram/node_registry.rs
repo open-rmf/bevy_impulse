@@ -25,9 +25,9 @@ use super::{
     impls::{DefaultImpl, NotSupported},
     register_deserialize, register_serialize,
     unzip::DynUnzip,
-    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
-    DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata,
-    SplitOp,
+    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError,
+    DiagramMessage, DynSplit, DynSplitOutputs, DynType, OpaqueMessageDeserializer,
+    OpaqueMessageSerializer, ResponseMetadata, SplitOp,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -335,6 +335,81 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         }
     }
 
+    /// Register a node builder with the specified common operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Id of the builder, this must be unique.
+    /// * `name` - Friendly name for the builder, this is only used for display purposes.
+    /// * `f` - The node builder to register.
+    pub fn register_with_diagram_message<Config, Request, Response, Streams>(
+        self,
+        options: NodeBuilderOptions,
+        mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
+    ) -> RegistrationBuilder<'a, Request, Response, Streams>
+    where
+        Config: JsonSchema + DeserializeOwned,
+        Request: Send + Sync + 'static + DiagramMessage<DeserializeImpl>,
+        Response: Send + Sync + 'static + DiagramMessage<SerializeImpl>,
+        Streams: StreamPack,
+        DeserializeImpl: DeserializeMessage<Request>,
+        SerializeImpl: SerializeMessage<Response>,
+        Cloneable: DynForkClone<Response>,
+    {
+        register_deserialize::<Request, DeserializeImpl>(&mut self.registry.data);
+        register_serialize::<Response, SerializeImpl>(&mut self.registry.data);
+
+        let mut response = ResponseMetadata::new(
+            SerializeImpl::json_schema(&mut self.registry.data.schema_generator)
+                .unwrap_or_else(|| self.registry.data.schema_generator.subschema_for::<()>()),
+            SerializeImpl::serializable(),
+            Cloneable::CLONEABLE,
+        );
+        response.unzip_slots = <Response::DynUnzipImpl>::UNZIP_SLOTS;
+
+        let registration = NodeRegistration::new(
+            NodeMetadata {
+                id: options.id.clone(),
+                name: options.name.unwrap_or(options.id.clone()),
+                request: RequestMetadata {
+                    schema: DeserializeImpl::json_schema(&mut self.registry.data.schema_generator)
+                        .unwrap_or_else(|| {
+                            self.registry.data.schema_generator.subschema_for::<()>()
+                        }),
+                    deserializable: DeserializeImpl::deserializable(),
+                },
+                response,
+                config_schema: self
+                    .registry
+                    .data
+                    .schema_generator
+                    .subschema_for::<Config>(),
+            },
+            RefCell::new(Box::new(move |builder, config| {
+                let config = serde_json::from_value(config)?;
+                let n = f(builder, config);
+                Ok(DynNode::new(n.output, n.input))
+            })),
+            if Cloneable::CLONEABLE {
+                Some(Box::new(|builder, output, amount| {
+                    Cloneable::dyn_fork_clone(builder, output, amount)
+                }))
+            } else {
+                None
+            },
+        );
+        self.registry.nodes.insert(options.id.clone(), registration);
+
+        // SAFETY: We inserted an entry at this ID a moment ago
+        let node = self.registry.nodes.get_mut(&options.id).unwrap();
+
+        RegistrationBuilder::<Request, Response, Streams> {
+            node,
+            data: &mut self.registry.data,
+            _ignore: Default::default(),
+        }
+    }
+
     /// Opt out of deserializing the request of the node. Use this to build a
     /// node whose request type is not deserializable.
     pub fn no_request_deserializing(
@@ -549,6 +624,26 @@ impl NodeRegistry {
         Response: Send + Sync + 'static + DynType + Serialize + Clone,
     {
         self.opt_out().register_node_builder(options, builder)
+    }
+
+    pub fn register_with_diagram_message<Config, Request, Response, Streams: StreamPack>(
+        &mut self,
+        options: NodeBuilderOptions,
+        builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
+    ) -> RegistrationBuilder<Request, Response, Streams>
+    where
+        Config: JsonSchema + DeserializeOwned,
+        Request: Send
+            + Sync
+            + 'static
+            + DynType
+            + DeserializeOwned
+            + DiagramMessage<DefaultDeserializer>,
+        Response:
+            Send + Sync + 'static + DynType + Serialize + Clone + DiagramMessage<DefaultSerializer>,
+    {
+        self.opt_out()
+            .register_with_diagram_message(options, builder)
     }
 
     /// In some cases the common operations of deserialization, serialization,
