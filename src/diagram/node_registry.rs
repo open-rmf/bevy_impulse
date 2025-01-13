@@ -335,13 +335,16 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         }
     }
 
-    /// Register a node builder with the specified common operations.
+    /// Register a node builder with the specified common operations, using [`DiagramMessage`]
+    /// to automatically opt in to the following operations:
+    ///
+    /// * unzip
     ///
     /// # Arguments
     ///
     /// * `id` - Id of the builder, this must be unique.
     /// * `name` - Friendly name for the builder, this is only used for display purposes.
-    /// * `f` - The node builder to register.
+    /// * `f` - The node builder to register. The request and response must impl [`DiagramMessage`].
     pub fn register_with_diagram_message<Config, Request, Response, Streams>(
         self,
         options: NodeBuilderOptions,
@@ -634,6 +637,16 @@ impl NodeRegistry {
         self.opt_out().register_node_builder(options, builder)
     }
 
+    /// Similar to `register_node_builder`, but uses [`DiagramMessage`] to automatically
+    /// opt in to the following operations:
+    ///
+    /// * unzip
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Id of the builder, this must be unique.
+    /// * `name` - Friendly name for the builder, this is only used for display purposes.
+    /// * `f` - The node builder to register. The request and response must impl [`DiagramMessage`].
     pub fn register_with_diagram_message<Config, Request, Response, Streams: StreamPack>(
         &mut self,
         options: NodeBuilderOptions,
