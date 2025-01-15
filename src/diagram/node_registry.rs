@@ -2,7 +2,7 @@ use std::{
     any::{Any, TypeId},
     borrow::Borrow,
     cell::RefCell,
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     marker::PhantomData,
 };
@@ -23,7 +23,6 @@ use super::{
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
     impls::{DefaultImpl, NotSupported},
-    register_deserialize, register_serialize,
     unzip::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
     DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, ResponseMetadata,
@@ -147,40 +146,13 @@ pub struct NodeRegistration {
 
     /// Creates an instance of the registered node.
     create_node_impl: CreateNodeFn,
-
-    fork_clone_impl: Option<ForkCloneFn>,
-
-    unzip_impl:
-        Option<Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>>,
-
-    fork_result_impl: Option<
-        Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>,
-    >,
-
-    split_impl: Option<
-        Box<
-            dyn for<'a> Fn(
-                &mut Builder,
-                DynOutput,
-                &'a SplitOp,
-            ) -> Result<DynSplitOutputs<'a>, DiagramError>,
-        >,
-    >,
 }
 
 impl NodeRegistration {
-    fn new(
-        metadata: NodeMetadata,
-        create_node_impl: CreateNodeFn,
-        fork_clone_impl: Option<ForkCloneFn>,
-    ) -> NodeRegistration {
+    fn new(metadata: NodeMetadata, create_node_impl: CreateNodeFn) -> NodeRegistration {
         NodeRegistration {
             metadata,
             create_node_impl,
-            fork_clone_impl,
-            unzip_impl: None,
-            fork_result_impl: None,
-            split_impl: None,
         }
     }
 
@@ -196,62 +168,27 @@ impl NodeRegistration {
         );
         Ok(n)
     }
-
-    pub(super) fn fork_clone(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        let f = self
-            .fork_clone_impl
-            .as_ref()
-            .ok_or(DiagramError::NotCloneable)?;
-        f(builder, output, amount)
-    }
-
-    pub(super) fn unzip(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        let f = self
-            .unzip_impl
-            .as_ref()
-            .ok_or(DiagramError::NotUnzippable)?;
-        f(builder, output)
-    }
-
-    pub(super) fn fork_result(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
-        let f = self
-            .fork_result_impl
-            .as_ref()
-            .ok_or(DiagramError::CannotForkResult)?;
-        f(builder, output)
-    }
-
-    pub(super) fn split<'a>(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
-        let f = self
-            .split_impl
-            .as_ref()
-            .ok_or(DiagramError::NotSplittable)?;
-        f(builder, output, split_op)
-    }
 }
 
 type CreateNodeFn =
     RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>;
+type DeserializeFn =
+    Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramError>>;
+type SerializeFn =
+    Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramError>>;
 type ForkCloneFn =
     Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>;
+type UnzipFn = Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>;
+type ForkResultFn =
+    Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>;
+type SplitFn = Box<
+    dyn for<'a> Fn(
+        &mut Builder,
+        DynOutput,
+        &'a SplitOp,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError>,
+>;
+type JoinFn = Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramError>>;
 
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
     registry: &'a mut NodeRegistry,
@@ -282,8 +219,15 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         SerializeImpl: SerializeMessage<Response>,
         Cloneable: DynForkClone<Response>,
     {
-        register_deserialize::<Request, DeserializeImpl>(&mut self.registry.data);
-        register_serialize::<Response, SerializeImpl>(&mut self.registry.data);
+        self.registry
+            .data
+            .register_deserialize::<Request, DeserializeImpl>();
+        self.registry
+            .data
+            .register_serialize::<Response, SerializeImpl>();
+        self.registry
+            .data
+            .register_fork_clone::<Response, Cloneable>();
 
         let registration = NodeRegistration::new(
             NodeMetadata {
@@ -294,15 +238,12 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                         .unwrap_or_else(|| {
                             self.registry.data.schema_generator.subschema_for::<()>()
                         }),
-                    deserializable: DeserializeImpl::deserializable(),
                 },
                 response: ResponseMetadata::new(
                     SerializeImpl::json_schema(&mut self.registry.data.schema_generator)
                         .unwrap_or_else(|| {
                             self.registry.data.schema_generator.subschema_for::<()>()
                         }),
-                    SerializeImpl::serializable(),
-                    Cloneable::CLONEABLE,
                 ),
                 config_schema: self
                     .registry
@@ -315,21 +256,10 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                 let n = f(builder, config);
                 Ok(DynNode::new(n.output, n.input))
             })),
-            if Cloneable::CLONEABLE {
-                Some(Box::new(|builder, output, amount| {
-                    Cloneable::dyn_fork_clone(builder, output, amount)
-                }))
-            } else {
-                None
-            },
         );
         self.registry.nodes.insert(options.id.clone(), registration);
 
-        // SAFETY: We inserted an entry at this ID a moment ago
-        let node = self.registry.nodes.get_mut(&options.id).unwrap();
-
         RegistrationBuilder::<Request, Response, Streams> {
-            node,
             data: &mut self.registry.data,
             _ignore: Default::default(),
         }
@@ -370,19 +300,24 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
 }
 
 pub struct RegistrationBuilder<'a, Request, Response, Streams> {
-    node: &'a mut NodeRegistration,
     data: &'a mut MessageRegistry,
     _ignore: PhantomData<(Request, Response, Streams)>,
 }
 
-impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, Streams> {
+impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, Streams>
+where
+    Request: Any,
+    Response: Any,
+{
     /// Mark the node as having a unzippable response. This is required in order for the node
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(self) -> Self
     where
         DefaultImpl: DynUnzip<Response, DefaultSerializer>,
     {
-        self.with_unzip_impl::<DefaultImpl, DefaultSerializer>()
+        self.data
+            .register_unzip::<Response, DefaultImpl, DefaultSerializer>();
+        self
     }
 
     /// Mark the node as having an unzippable response whose elements are not serializable.
@@ -390,24 +325,8 @@ impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, 
     where
         DefaultImpl: DynUnzip<Response, NotSupported>,
     {
-        self.with_unzip_impl::<DefaultImpl, NotSupported>()
-    }
-
-    fn with_unzip_impl<UnzipImpl, SerializeImpl>(self) -> Self
-    where
-        UnzipImpl: DynUnzip<Response, SerializeImpl>,
-    {
-        self.node.metadata.response.unzip_slots = UnzipImpl::UNZIP_SLOTS;
-        self.node.unzip_impl = if UnzipImpl::UNZIP_SLOTS > 0 {
-            Some(Box::new(|builder, output| {
-                UnzipImpl::dyn_unzip(builder, output)
-            }))
-        } else {
-            None
-        };
-
-        UnzipImpl::on_register(self.data);
-
+        self.data
+            .register_unzip::<Response, DefaultImpl, NotSupported>();
         self
     }
 
@@ -417,11 +336,7 @@ impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, 
     where
         DefaultImpl: DynForkResult<Response>,
     {
-        self.node.metadata.response.fork_result = true;
-        self.node.fork_result_impl = Some(Box::new(|builder, output| {
-            <DefaultImpl as DynForkResult<Response>>::dyn_fork_result(builder, output)
-        }));
-
+        self.data.register_fork_result::<Response, DefaultImpl>();
         self
     }
 
@@ -431,7 +346,9 @@ impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, 
     where
         DefaultImpl: DynSplit<Response, DefaultSerializer>,
     {
-        self.with_split_impl::<DefaultImpl, DefaultSerializer>()
+        self.data
+            .register_split::<Response, DefaultImpl, DefaultSerializer>();
+        self
     }
 
     /// Mark the node as having a splittable response but the items from the split
@@ -440,20 +357,8 @@ impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, 
     where
         DefaultImpl: DynSplit<Response, NotSupported>,
     {
-        self.with_split_impl::<DefaultImpl, NotSupported>()
-    }
-
-    pub fn with_split_impl<SplitImpl, SerializeImpl>(self) -> Self
-    where
-        SplitImpl: DynSplit<Response, SerializeImpl>,
-    {
-        self.node.metadata.response.splittable = true;
-        self.node.split_impl = Some(Box::new(|builder, output, split_op| {
-            SplitImpl::dyn_split(builder, output, split_op)
-        }));
-
-        SplitImpl::on_register(self.data);
-
+        self.data
+            .register_split::<Response, DefaultImpl, NotSupported>();
         self
     }
 }
@@ -478,20 +383,301 @@ pub struct MessageRegistry {
     /// with itself.
     schema_generator: SchemaGenerator,
 
-    pub(super) deserialize_impls: HashMap<
-        TypeId,
-        Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramError>>,
-    >,
+    deserialize_impls: HashMap<TypeId, DeserializeFn>,
+    serialize_impls: HashMap<TypeId, SerializeFn>,
+    fork_clone_impls: HashMap<TypeId, ForkCloneFn>,
+    unzip_impls: HashMap<TypeId, UnzipFn>,
+    fork_result_impls: HashMap<TypeId, ForkResultFn>,
+    split_impls: HashMap<TypeId, SplitFn>,
+    join_impls: HashMap<TypeId, JoinFn>,
+}
 
-    pub(super) serialize_impls: HashMap<
-        TypeId,
-        Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramError>>,
-    >,
+impl MessageRegistry {
+    #[cfg(test)]
+    pub(super) fn deserializable(&self, type_id: &TypeId) -> bool {
+        self.deserialize_impls.contains_key(type_id)
+    }
 
-    pub(super) join_impls: HashMap<
-        TypeId,
-        Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramError>>,
-    >,
+    /// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
+    pub(super) fn deserialize(
+        &self,
+        target_type: &TypeId,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<DynOutput, DiagramError> {
+        if output.type_id != TypeId::of::<serde_json::Value>() || &output.type_id == target_type {
+            Ok(output)
+        } else {
+            let f = self
+                .deserialize_impls
+                .get(target_type)
+                .ok_or(DiagramError::NotSerializable)?;
+            f(builder, output.into_output()?)
+        }
+    }
+
+    /// Register a deserialize function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_deserialize<T, Deserializer>(&mut self) -> bool
+    where
+        T: Send + Sync + 'static + Any,
+        Deserializer: DeserializeMessage<T>,
+    {
+        if !Deserializer::deserializable() {
+            return false;
+        }
+
+        if let Entry::Vacant(entry) = self.deserialize_impls.entry(TypeId::of::<T>()) {
+            debug!(
+                "register deserialize for type: {}, with deserializer: {}",
+                std::any::type_name::<T>(),
+                std::any::type_name::<Deserializer>()
+            );
+            entry.insert(Box::new(|builder, output| {
+                debug!("deserialize output: {:?}", output);
+                let receiver = builder
+                    .create_map_block(|json: serde_json::Value| Deserializer::from_json(json));
+                builder.connect(output, receiver.input);
+                let deserialized_output = receiver
+                    .output
+                    .chain(builder)
+                    .cancel_on_err()
+                    .output()
+                    .into();
+                debug!("deserialized output: {:?}", deserialized_output);
+                Ok(deserialized_output)
+            }));
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn serializable(&self, type_id: &TypeId) -> bool {
+        self.serialize_impls.contains_key(type_id)
+    }
+
+    pub(super) fn serialize(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Output<serde_json::Value>, DiagramError> {
+        if output.type_id == TypeId::of::<serde_json::Value>() {
+            output.into_output()
+        } else {
+            let f = self
+                .serialize_impls
+                .get(&output.type_id)
+                .ok_or(DiagramError::NotSerializable)?;
+            f(builder, output)
+        }
+    }
+
+    /// Register a serialize function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_serialize<T, Serializer>(&mut self) -> bool
+    where
+        T: Send + Sync + 'static + Any,
+        Serializer: SerializeMessage<T>,
+    {
+        if !Serializer::serializable() {
+            return false;
+        }
+
+        if let Entry::Vacant(entry) = self.serialize_impls.entry(TypeId::of::<T>()) {
+            debug!(
+                "register serialize for type: {}, with serializer: {}",
+                std::any::type_name::<T>(),
+                std::any::type_name::<Serializer>()
+            );
+            entry.insert(Box::new(|builder, output| {
+                debug!("serialize output: {:?}", output);
+                let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
+                builder.connect(output.into_output()?, n.input);
+                let serialized_output = n.output.chain(builder).cancel_on_err().output();
+                debug!("serialized output: {:?}", serialized_output);
+                Ok(serialized_output)
+            }));
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn cloneable(&self, type_id: &TypeId) -> bool {
+        self.fork_clone_impls.contains_key(type_id)
+    }
+
+    pub(super) fn fork_clone(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        amount: usize,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        let f = self
+            .fork_clone_impls
+            .get(&output.type_id)
+            .ok_or(DiagramError::NotCloneable)?;
+        f(builder, output, amount)
+    }
+
+    /// Register a fork_clone function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_fork_clone<T, F>(&mut self) -> bool
+    where
+        T: Any,
+        F: DynForkClone<T>,
+    {
+        if !F::CLONEABLE {
+            return false;
+        }
+
+        if let Entry::Vacant(entry) = self.fork_clone_impls.entry(TypeId::of::<T>()) {
+            entry.insert(Box::new(|builder, output, amount| {
+                F::dyn_fork_clone(builder, output, amount)
+            }));
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn unzippable(&self, type_id: &TypeId) -> bool {
+        self.unzip_impls.contains_key(type_id)
+    }
+
+    pub(super) fn unzip(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Vec<DynOutput>, DiagramError> {
+        let f = self
+            .unzip_impls
+            .get(&output.type_id)
+            .ok_or(DiagramError::NotUnzippable)?;
+        f(builder, output)
+    }
+
+    /// Register a unzip function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_unzip<T, F, S>(&mut self) -> bool
+    where
+        T: Any,
+        F: DynUnzip<T, S>,
+    {
+        if let Entry::Vacant(entry) = self.unzip_impls.entry(TypeId::of::<T>()) {
+            entry.insert(Box::new(|builder, output| F::dyn_unzip(builder, output)));
+            F::on_register(self);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn can_fork_result(&self, type_id: &TypeId) -> bool {
+        self.fork_result_impls.contains_key(type_id)
+    }
+
+    pub(super) fn fork_result(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+        let f = self
+            .fork_result_impls
+            .get(&output.type_id)
+            .ok_or(DiagramError::CannotForkResult)?;
+        f(builder, output)
+    }
+
+    /// Register a fork_result function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_fork_result<T, F>(&mut self) -> bool
+    where
+        T: Any,
+        F: DynForkResult<T>,
+    {
+        if let Entry::Vacant(entry) = self.fork_result_impls.entry(TypeId::of::<T>()) {
+            entry.insert(Box::new(|builder, output| {
+                F::dyn_fork_result(builder, output)
+            }));
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn splittable(&self, type_id: &TypeId) -> bool {
+        self.split_impls.contains_key(type_id)
+    }
+
+    pub(super) fn split<'a>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        split_op: &'a SplitOp,
+    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+        let f = self
+            .split_impls
+            .get(&output.type_id)
+            .ok_or(DiagramError::NotSplittable)?;
+        f(builder, output, split_op)
+    }
+
+    /// Register a split function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_split<T, F, S>(&mut self) -> bool
+    where
+        T: Any,
+        F: DynSplit<T, S>,
+    {
+        if let Entry::Vacant(entry) = self.split_impls.entry(TypeId::of::<T>()) {
+            entry.insert(Box::new(|builder, output, split_op| {
+                F::dyn_split(builder, output, split_op)
+            }));
+            F::on_register(self);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn joinable(&self, type_id: &TypeId) -> bool {
+        self.join_impls.contains_key(type_id)
+    }
+
+    pub(super) fn join<OutputIter>(
+        &self,
+        type_id: &TypeId,
+        builder: &mut Builder,
+        outputs: OutputIter,
+    ) -> Result<DynOutput, DiagramError>
+    where
+        OutputIter: IntoIterator<Item = DynOutput>,
+    {
+        let f = self
+            .join_impls
+            .get(type_id)
+            .ok_or(DiagramError::NotJoinable)?;
+        f(builder, outputs.into_iter().collect())
+    }
+
+    /// Register a join function if not already registered, returns true if the new
+    /// function is registered.
+    pub(super) fn register_join(&mut self, type_id: TypeId, f: JoinFn) -> bool {
+        if let Entry::Vacant(entry) = self.join_impls.entry(type_id) {
+            entry.insert(f);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for NodeRegistry {
@@ -504,6 +690,10 @@ impl Default for NodeRegistry {
                 schema_generator: SchemaGenerator::new(settings),
                 deserialize_impls: HashMap::new(),
                 serialize_impls: HashMap::new(),
+                fork_clone_impls: HashMap::new(),
+                unzip_impls: HashMap::new(),
+                fork_result_impls: HashMap::new(),
+                split_impls: HashMap::new(),
                 join_impls: HashMap::new(),
             },
         }
@@ -690,18 +880,19 @@ mod tests {
     #[test]
     fn test_register_node_builder() {
         let mut registry = NodeRegistry::default();
-        registry
-            .opt_out()
-            .no_response_cloning()
-            .register_node_builder(
-                NodeBuilderOptions::new("multiply3_uncloneable").with_name("Test Name"),
-                |builder, _config: ()| builder.create_map_block(multiply3),
-            );
-        let registration = registry.get_registration("multiply3_uncloneable").unwrap();
-        assert!(registration.metadata.request.deserializable);
-        assert!(registration.metadata.response.serializable);
-        assert!(!registration.metadata.response.cloneable);
-        assert_eq!(registration.metadata.response.unzip_slots, 0);
+        registry.opt_out().register_node_builder(
+            NodeBuilderOptions::new("multiply3").with_name("Test Name"),
+            |builder, _config: ()| builder.create_map_block(multiply3),
+        );
+        let req_type_id = TypeId::of::<i64>();
+        let resp_type_id = TypeId::of::<i64>();
+        assert!(registry.data.deserializable(&req_type_id));
+        assert!(registry.data.serializable(&resp_type_id));
+        assert!(registry.data.cloneable(&resp_type_id));
+        assert!(!registry.data.unzippable(&resp_type_id));
+        assert!(!registry.data.can_fork_result(&resp_type_id));
+        assert!(!registry.data.splittable(&resp_type_id));
+        assert!(!registry.data.joinable(&resp_type_id));
     }
 
     #[test]
@@ -711,11 +902,12 @@ mod tests {
             NodeBuilderOptions::new("multiply3").with_name("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
-        let registration = registry.get_registration("multiply3").unwrap();
-        assert!(registration.metadata.request.deserializable);
-        assert!(registration.metadata.response.serializable);
-        assert!(registration.metadata.response.cloneable);
-        assert_eq!(registration.metadata.response.unzip_slots, 0);
+        let req_type_id = TypeId::of::<i64>();
+        let resp_type_id = TypeId::of::<i64>();
+        assert!(registry.data.deserializable(&req_type_id));
+        assert!(registry.data.serializable(&resp_type_id));
+        assert!(registry.data.cloneable(&resp_type_id));
+        assert!(!registry.data.unzippable(&resp_type_id));
     }
 
     #[test]
@@ -730,43 +922,45 @@ mod tests {
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
             )
             .with_unzip();
-        let registration = registry.get_registration("multiply3_uncloneable").unwrap();
-        assert!(registration.metadata.request.deserializable);
-        assert!(registration.metadata.response.serializable);
-        assert!(!registration.metadata.response.cloneable);
-        assert_eq!(registration.metadata.response.unzip_slots, 1);
+        let req_type_id = TypeId::of::<()>();
+        let resp_type_id = TypeId::of::<(i64,)>();
+        assert!(registry.data.deserializable(&req_type_id));
+        assert!(registry.data.serializable(&resp_type_id));
+        assert!(!registry.data.cloneable(&resp_type_id));
+        assert!(registry.data.unzippable(&resp_type_id));
     }
 
     #[test]
     fn test_register_splittable_node() {
         let mut registry = NodeRegistry::default();
         let vec_resp = |_: ()| -> Vec<i64> { vec![1, 2] };
+        let vec_resp_type_id = TypeId::of::<Vec<i64>>();
+
         registry
             .register_node_builder(
                 NodeBuilderOptions::new("vec_resp").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(vec_resp),
             )
             .with_split();
-        let registration = registry.get_registration("vec_resp").unwrap();
-        assert!(registration.metadata.response.splittable);
+        assert!(registry.data.splittable(&vec_resp_type_id));
 
         let map_resp = |_: ()| -> HashMap<String, i64> { HashMap::new() };
+        let map_resp_type_id = TypeId::of::<HashMap<String, i64>>();
         registry
             .register_node_builder(
                 NodeBuilderOptions::new("map_resp").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
             )
             .with_split();
-
-        let registration = registry.get_registration("map_resp").unwrap();
-        assert!(registration.metadata.response.splittable);
+        assert!(registry.data.splittable(&map_resp_type_id));
 
         registry.register_node_builder(
             NodeBuilderOptions::new("not_splittable").with_name("Test Name"),
             move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
         );
-        let registration = registry.get_registration("not_splittable").unwrap();
-        assert!(!registration.metadata.response.splittable);
+        // even though we didn't register with `with_split`, it is still splittable because we
+        // previously registered another splittable node with the same response type.
+        assert!(registry.data.splittable(&map_resp_type_id));
     }
 
     #[test]
@@ -803,11 +997,12 @@ mod tests {
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             );
         assert!(registry.get_registration("opaque_request_map").is_ok());
-        let registration = registry.get_registration("opaque_request_map").unwrap();
-        assert!(!registration.metadata.request.deserializable);
-        assert!(registration.metadata.response.serializable);
-        assert!(!registration.metadata.response.cloneable);
-        assert_eq!(registration.metadata.response.unzip_slots, 0);
+        let req_type_id = TypeId::of::<NonSerializableRequest>();
+        let resp_type_id = TypeId::of::<()>();
+        assert!(!registry.data.deserializable(&req_type_id));
+        assert!(registry.data.serializable(&resp_type_id));
+        assert!(!registry.data.cloneable(&resp_type_id));
+        assert!(!registry.data.unzippable(&resp_type_id));
 
         let opaque_response_map = |_: ()| NonSerializableRequest {};
         registry
@@ -821,11 +1016,12 @@ mod tests {
                 },
             );
         assert!(registry.get_registration("opaque_response_map").is_ok());
-        let registration = registry.get_registration("opaque_response_map").unwrap();
-        assert!(registration.metadata.request.deserializable);
-        assert!(!registration.metadata.response.serializable);
-        assert!(!registration.metadata.response.cloneable);
-        assert_eq!(registration.metadata.response.unzip_slots, 0);
+        let req_type_id = TypeId::of::<()>();
+        let resp_type_id = TypeId::of::<NonSerializableRequest>();
+        assert!(registry.data.deserializable(&req_type_id));
+        assert!(!registry.data.serializable(&resp_type_id));
+        assert!(!registry.data.cloneable(&resp_type_id));
+        assert!(!registry.data.unzippable(&resp_type_id));
 
         let opaque_req_resp_map = |_: NonSerializableRequest| NonSerializableRequest {};
         registry
@@ -840,10 +1036,11 @@ mod tests {
                 },
             );
         assert!(registry.get_registration("opaque_req_resp_map").is_ok());
-        let registration = registry.get_registration("opaque_req_resp_map").unwrap();
-        assert!(!registration.metadata.request.deserializable);
-        assert!(!registration.metadata.response.serializable);
-        assert!(!registration.metadata.response.cloneable);
-        assert_eq!(registration.metadata.response.unzip_slots, 0);
+        let req_type_id = TypeId::of::<NonSerializableRequest>();
+        let resp_type_id = TypeId::of::<NonSerializableRequest>();
+        assert!(!registry.data.deserializable(&req_type_id));
+        assert!(!registry.data.serializable(&resp_type_id));
+        assert!(!registry.data.cloneable(&resp_type_id));
+        assert!(!registry.data.unzippable(&resp_type_id));
     }
 }

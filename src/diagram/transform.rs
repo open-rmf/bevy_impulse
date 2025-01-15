@@ -40,12 +40,7 @@ pub(super) fn transform_output(
     let json_output = if output.type_id == TypeId::of::<serde_json::Value>() {
         output.into_output()
     } else {
-        let serialize = registry
-            .data
-            .serialize_impls
-            .get(&output.type_id)
-            .ok_or(DiagramError::NotSerializable)?;
-        serialize(builder, output)
+        registry.data.serialize(builder, output)
     }?;
 
     let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;
@@ -90,7 +85,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "transform",
                 },
                 "transform": {

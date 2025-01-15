@@ -8,8 +8,7 @@ use crate::Builder;
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize as register_serialize_impl, DiagramError, DynOutput, MessageRegistry,
-    NextOperation, SerializeMessage,
+    DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -71,7 +70,7 @@ macro_rules! dyn_unzip_impl {
                 // Register serialize functions for all items in the tuple.
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
                 $(
-                    register_serialize_impl::<$P, Serializer>(registry);
+                    registry.register_serialize::<$P, Serializer>();
                 )*
 
                 // Register join impls for T1, T2, T3...
@@ -102,7 +101,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "unzip"
                 },
                 "unzip": {
@@ -136,17 +135,17 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
                 "op3": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
                 "op4": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -203,7 +202,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -238,7 +237,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
             },

@@ -30,7 +30,7 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     join::register_join_impl,
-    register_serialize, DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
+    DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -256,7 +256,7 @@ where
     }
 
     fn on_register(registry: &mut MessageRegistry) {
-        register_serialize::<T::Item, Serializer>(registry);
+        registry.register_serialize::<T::Item, Serializer>();
         register_join_impl::<T::Item, Serializer>(registry);
     }
 }

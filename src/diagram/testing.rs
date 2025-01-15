@@ -1,5 +1,8 @@
 use std::error::Error;
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
 use crate::{
     testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
 };
@@ -63,8 +66,15 @@ impl DiagramTestFixture {
     }
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct Uncloneable<T>(T);
+
 fn multiply3(i: i64) -> i64 {
     i * 3
+}
+
+fn multiply3_uncloneable(i: i64) -> Uncloneable<i64> {
+    Uncloneable(i * 3)
 }
 
 fn multiply3_5(x: i64) -> (i64, i64) {
@@ -91,7 +101,7 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .no_response_cloning()
         .register_node_builder(
             NodeBuilderOptions::new("multiply3_uncloneable"),
-            |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_uncloneable),
         );
     registry.register_node_builder(
         NodeBuilderOptions::new("multiply3"),
@@ -105,7 +115,7 @@ fn new_registry_with_basic_nodes() -> NodeRegistry {
         .with_unzip();
 
     registry.register_node_builder(
-        NodeBuilderOptions::new("multiplyBy"),
+        NodeBuilderOptions::new("multiply_by"),
         |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
     );
 

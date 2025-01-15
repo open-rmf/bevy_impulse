@@ -506,6 +506,9 @@ pub enum DiagramError {
     #[error("response cannot be split")]
     NotSplittable,
 
+    #[error("responses cannot be joined")]
+    NotJoinable,
+
     #[error("empty join is not allowed")]
     EmptyJoin,
 
@@ -557,7 +560,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "dispose" },
                 },
             },
@@ -625,7 +628,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "op2",
                 },
                 "op2": {
@@ -651,12 +654,12 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "op1",
                 },
             },
@@ -691,7 +694,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -728,11 +731,11 @@ mod tests {
         let json_str = r#"
         {
             "version": "0.1.0",
-            "start": "multiply3_uncloneable",
+            "start": "multiply3",
             "ops": {
-                "multiply3_uncloneable": {
+                "multiply3": {
                     "type": "node",
-                    "builder": "multiplyBy",
+                    "builder": "multiply_by",
                     "config": 7,
                     "next": { "builtin": "terminate" }
                 }
