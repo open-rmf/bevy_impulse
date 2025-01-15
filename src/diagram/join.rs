@@ -1,5 +1,3 @@
-use std::any::TypeId;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -30,7 +28,7 @@ where
     T: Send + Sync + 'static,
     Serializer: SerializeMessage<Vec<T>>,
 {
-    registry.register_join(TypeId::of::<T>(), Box::new(join_impl::<T>));
+    registry.register_join::<T>(Box::new(join_impl::<T>));
 }
 
 /// Serialize the outputs before joining them, and convert the resulting joined output into a

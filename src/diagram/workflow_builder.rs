@@ -298,11 +298,7 @@ fn connect_vertex<'a>(
             }
 
             let joined_output = if join_op.no_serialize.unwrap_or(false) {
-                registry.data.join(
-                    &ordered_outputs[0].type_id.clone(),
-                    builder,
-                    ordered_outputs,
-                )?
+                registry.data.join(builder, ordered_outputs)?
             } else {
                 serialize_and_join(builder, &registry.data, ordered_outputs)?.into()
             };
