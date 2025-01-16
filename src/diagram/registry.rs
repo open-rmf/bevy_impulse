@@ -376,12 +376,17 @@ pub struct Registry {
     pub(super) messages: MessageRegistry,
 }
 
+struct UnzipImpl {
+    slots: usize,
+    f: UnzipFn,
+}
+
 #[derive(Default)]
 pub(super) struct MessageOperation {
     deserialize_impl: Option<DeserializeFn>,
     serialize_impl: Option<SerializeFn>,
     fork_clone_impl: Option<ForkCloneFn>,
-    unzip_impl: Option<UnzipFn>,
+    unzip_impl: Option<UnzipImpl>,
     fork_result_impl: Option<ForkResultFn>,
     split_impl: Option<SplitFn>,
     join_impl: Option<JoinFn>,
@@ -455,10 +460,11 @@ impl MessageOperation {
         builder: &mut Builder,
         output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramError> {
-        let f = self
+        let f = &self
             .unzip_impl
             .as_ref()
-            .ok_or(DiagramError::NotUnzippable)?;
+            .ok_or(DiagramError::NotUnzippable)?
+            .f;
         f(builder, output)
     }
 
@@ -524,7 +530,12 @@ impl Serialize for MessageOperation {
         s.serialize_field("deserialize", &self.deserialize_impl.is_some())?;
         s.serialize_field("serialize", &self.serialize_impl.is_some())?;
         s.serialize_field("fork_clone", &self.fork_clone_impl.is_some())?;
-        s.serialize_field("unzip", &self.unzip_impl.is_some())?;
+        let unzip_slots = if let Some(unzip_impl) = &self.unzip_impl {
+            unzip_impl.slots
+        } else {
+            0
+        };
+        s.serialize_field("unzip_slots", &unzip_slots)?;
         s.serialize_field("fork_result", &self.fork_result_impl.is_some())?;
         s.serialize_field("split", &self.split_impl.is_some())?;
         s.serialize_field("join", &self.join_impl.is_some())?;
@@ -740,7 +751,10 @@ impl MessageRegistry {
         if ops.unzip_impl.is_some() {
             return false;
         }
-        ops.unzip_impl = Some(Box::new(|builder, output| F::dyn_unzip(builder, output)));
+        ops.unzip_impl = Some(UnzipImpl {
+            slots: F::UNZIP_SLOTS,
+            f: Box::new(|builder, output| F::dyn_unzip(builder, output)),
+        });
         F::on_register(self);
 
         true
