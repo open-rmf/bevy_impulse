@@ -2,7 +2,7 @@ mod fork_clone;
 mod fork_result;
 mod impls;
 mod join;
-mod node_registry;
+mod registry;
 mod serialization;
 mod split_serialized;
 mod transform;
@@ -14,7 +14,7 @@ use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
 pub use join::JoinOutput;
-pub use node_registry::*;
+pub use registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
@@ -380,10 +380,10 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, NodeRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, Registry, RunCommandsOnWorldExt};
     ///
     /// let mut app = bevy_app::App::new();
-    /// let mut registry = NodeRegistry::default();
+    /// let mut registry = Registry::new();
     /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
@@ -411,7 +411,7 @@ impl Diagram {
     fn spawn_workflow<Streams>(
         &self,
         cmds: &mut Commands,
-        registry: &NodeRegistry,
+        registry: &Registry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
@@ -451,7 +451,7 @@ impl Diagram {
     pub fn spawn_io_workflow(
         &self,
         cmds: &mut Commands,
-        registry: &NodeRegistry,
+        registry: &Registry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
         self.spawn_workflow::<()>(cmds, registry)
     }

@@ -7,13 +7,11 @@ use crate::{
     testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
 };
 
-use super::{
-    Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeBuilderOptions, NodeRegistry,
-};
+use super::{Diagram, DiagramError, DiagramStart, DiagramTerminate, NodeBuilderOptions, Registry};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
-    pub(super) registry: NodeRegistry,
+    pub(super) registry: Registry,
 }
 
 impl DiagramTestFixture {
@@ -94,8 +92,8 @@ fn opaque_response(_: i64) -> Unserializable {
 }
 
 /// create a new node registry with some basic nodes registered
-fn new_registry_with_basic_nodes() -> NodeRegistry {
-    let mut registry = NodeRegistry::default();
+fn new_registry_with_basic_nodes() -> Registry {
+    let mut registry = Registry::new();
     registry
         .opt_out()
         .no_response_cloning()

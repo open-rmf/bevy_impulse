@@ -30,24 +30,6 @@ where
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct RequestMetadata {
-    /// The JSON Schema of the request.
-    pub(super) schema: Schema,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ResponseMetadata {
-    /// The JSON Schema of the response.
-    pub(super) schema: Schema,
-}
-
-impl ResponseMetadata {
-    pub(super) fn new(schema: Schema) -> ResponseMetadata {
-        ResponseMetadata { schema }
-    }
-}
-
 pub trait SerializeMessage<T> {
     fn type_name() -> String;
 

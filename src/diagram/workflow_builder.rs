@@ -10,7 +10,7 @@ use crate::{
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
     BuiltinTarget, Diagram, DiagramError, DiagramOperation, DiagramScope, DynInputSlot, DynOutput,
-    NextOperation, NodeOp, NodeRegistry, OperationId, SourceOperation,
+    NextOperation, NodeOp, OperationId, Registry, SourceOperation,
 };
 
 struct Vertex<'a> {
@@ -40,7 +40,7 @@ enum EdgeState<'a> {
 pub(super) fn create_workflow<'a, Streams: StreamPack>(
     scope: DiagramScope<Streams>,
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &Registry,
     diagram: &'a Diagram,
 ) -> Result<(), DiagramError> {
     // first create all the vertices
@@ -251,7 +251,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         let edge = edges.remove(&edge_id).ok_or(unknown_diagram_error!())?;
         match edge.state {
             EdgeState::Ready { output, origin: _ } => {
-                let serialized_output = registry.data.serialize(builder, output)?;
+                let serialized_output = registry.messages.serialize(builder, output)?;
                 builder.connect(serialized_output, scope.terminate);
             }
             EdgeState::Pending => return Err(DiagramError::BadInterconnectChain),
@@ -263,7 +263,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
 fn connect_vertex<'a>(
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &Registry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
     target: &'a Vertex,
@@ -298,9 +298,9 @@ fn connect_vertex<'a>(
             }
 
             let joined_output = if join_op.no_serialize.unwrap_or(false) {
-                registry.data.join(builder, ordered_outputs)?
+                registry.messages.join(builder, ordered_outputs)?
             } else {
-                serialize_and_join(builder, &registry.data, ordered_outputs)?.into()
+                serialize_and_join(builder, &registry.messages, ordered_outputs)?.into()
             };
 
             let out_edge = edges
@@ -324,7 +324,7 @@ fn connect_vertex<'a>(
 
 fn connect_edge<'a>(
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &Registry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
     edge_id: usize,
@@ -352,7 +352,10 @@ fn connect_edge<'a>(
     match target.op {
         DiagramOperation::Node(_) => {
             let input = inputs[target.op_id];
-            let deserialized_output = registry.data.deserialize(&input.type_id, builder, output)?;
+            let deserialized_output =
+                registry
+                    .messages
+                    .deserialize(&input.type_id, builder, output)?;
             dyn_connect(builder, deserialized_output, input)?;
         }
         DiagramOperation::ForkClone(fork_clone_op) => {
@@ -362,7 +365,7 @@ fn connect_edge<'a>(
                     builder, output, amount,
                 )
             } else {
-                registry.data.fork_clone(builder, output, amount)
+                registry.messages.fork_clone(builder, output, amount)
             }?;
             for (o, e) in outputs.into_iter().zip(target.out_edges.iter()) {
                 let out_edge = edges.get_mut(e).ok_or(unknown_diagram_error!())?;
@@ -373,7 +376,7 @@ fn connect_edge<'a>(
             let outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
                 Err(DiagramError::NotUnzippable)
             } else {
-                registry.data.unzip(builder, output)
+                registry.messages.unzip(builder, output)
             }?;
             if outputs.len() < unzip_op.next.len() {
                 return Err(DiagramError::NotUnzippable);
@@ -387,7 +390,7 @@ fn connect_edge<'a>(
             let (ok, err) = if output.type_id == TypeId::of::<serde_json::Value>() {
                 Err(DiagramError::CannotForkResult)
             } else {
-                registry.data.fork_result(builder, output)
+                registry.messages.fork_result(builder, output)
             }?;
             {
                 let out_edge = edges
@@ -410,7 +413,7 @@ fn connect_edge<'a>(
                 let chain = output.into_output::<serde_json::Value>()?.chain(builder);
                 split_chain(chain, split_op)
             } else {
-                registry.data.split(builder, output, split_op)
+                registry.messages.split(builder, output, split_op)
             }?;
 
             // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
