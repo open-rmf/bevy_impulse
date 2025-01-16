@@ -16,7 +16,7 @@ use schemars::{
 };
 use serde::{
     de::DeserializeOwned,
-    ser::{SerializeMap, SerializeStruct},
+    ser::{SerializeMap, SerializeSeq, SerializeStruct},
     Serialize,
 };
 use tracing::debug;
@@ -468,6 +468,14 @@ impl MessageOperation {
         f(builder, output)
     }
 
+    pub(super) fn unzip_slots(&self) -> usize {
+        if let Some(unzip_impl) = &self.unzip_impl {
+            unzip_impl.slots
+        } else {
+            0
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn can_fork_result(&self) -> bool {
         self.fork_result_impl.is_some()
@@ -526,28 +534,34 @@ impl Serialize for MessageOperation {
     where
         S: serde::Serializer,
     {
-        let mut s = serializer.serialize_struct("MessageOperation", 7)?;
-        s.serialize_field("deserialize", &self.deserialize_impl.is_some())?;
-        s.serialize_field("serialize", &self.serialize_impl.is_some())?;
-        s.serialize_field("fork_clone", &self.fork_clone_impl.is_some())?;
-        let unzip_slots = if let Some(unzip_impl) = &self.unzip_impl {
-            unzip_impl.slots
-        } else {
-            0
-        };
-        s.serialize_field("unzip_slots", &unzip_slots)?;
-        s.serialize_field("fork_result", &self.fork_result_impl.is_some())?;
-        s.serialize_field("split", &self.split_impl.is_some())?;
-        s.serialize_field("join", &self.join_impl.is_some())?;
+        let mut s = serializer.serialize_seq(None)?;
+        if self.deserialize_impl.is_some() {
+            s.serialize_element("deserialize")?;
+        }
+        if self.serialize_impl.is_some() {
+            s.serialize_element("serialize")?;
+        }
+        if self.fork_clone_impl.is_some() {
+            s.serialize_element("fork_clone")?;
+        }
+        if self.unzip_impl.is_some() {
+            s.serialize_element("unzip")?;
+        }
+        if self.fork_result_impl.is_some() {
+            s.serialize_element("fork_result")?;
+        }
+        if self.split_impl.is_some() {
+            s.serialize_element("split")?;
+        }
+        if self.join_impl.is_some() {
+            s.serialize_element("join")?;
+        }
         s.end()
     }
 }
 
-#[derive(Serialize)]
 struct MessageRegistration {
-    #[serde(skip)]
     type_name: &'static str,
-
     schema: Option<schemars::schema::Schema>,
     operations: MessageOperation,
 }
@@ -559,6 +573,19 @@ impl MessageRegistration {
             schema: None,
             operations: MessageOperation::new(),
         }
+    }
+}
+
+impl Serialize for MessageRegistration {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("MessageRegistration", 3)?;
+        s.serialize_field("schema", &self.schema)?;
+        s.serialize_field("operations", &self.operations)?;
+        s.serialize_field("unzip_slots", &self.operations.unzip_slots())?;
+        s.end()
     }
 }
 
