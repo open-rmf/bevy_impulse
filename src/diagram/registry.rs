@@ -1292,13 +1292,17 @@ mod tests {
             foo: Foo,
         }
 
-        reg.register_node_builder(NodeBuilderOptions::new("test"), |builder, _config: ()| {
-            builder.create_map_block(|_: ()| Bar {
-                foo: Foo {
-                    hello: "hello".to_string(),
-                },
-            })
-        });
+        struct Opaque;
+
+        reg.opt_out()
+            .no_request_deserializing()
+            .register_node_builder(NodeBuilderOptions::new("test"), |builder, _config: ()| {
+                builder.create_map_block(|_: Opaque| Bar {
+                    foo: Foo {
+                        hello: "hello".to_string(),
+                    },
+                })
+            });
 
         // print out a pretty json for manual inspection
         println!("{}", serde_json::to_string_pretty(&reg).unwrap());
