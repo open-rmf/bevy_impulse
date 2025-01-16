@@ -106,7 +106,9 @@ where
 pub(super) struct NodeMetadata {
     pub(super) id: BuilderId,
     pub(super) name: String,
+    /// type name of the request
     pub(super) request: &'static str,
+    /// type name of the response
     pub(super) response: &'static str,
     pub(super) config_schema: Schema,
 }
