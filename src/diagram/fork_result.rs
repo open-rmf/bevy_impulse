@@ -1,12 +1,18 @@
-use schemars::JsonSchema;
+use std::collections::HashMap;
+
+use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::Builder;
+use crate::{unknown_diagram_error, Builder};
 
 use super::{
-    impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, NextOperation,
+    impls::{DefaultImplMarker, NotSupportedMarker},
+    register_serialize,
+    type_info::TypeInfo,
+    workflow_builder::{Edge, EdgeBuilder},
+    DiagramErrorCode, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
+    SerializeMessage,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -16,43 +22,115 @@ pub struct ForkResultOp {
     pub(super) err: NextOperation,
 }
 
-pub trait DynForkResult<T> {
-    const SUPPORTED: bool;
+impl ForkResultOp {
+    pub(super) fn build_edges<'a>(
+        &'a self,
+        mut builder: EdgeBuilder<'a, '_>,
+    ) -> Result<(), DiagramErrorCode> {
+        builder.add_output_edge(&self.ok, None)?;
+        builder.add_output_edge(&self.err, None)?;
+        Ok(())
+    }
 
-    fn dyn_fork_result(
+    pub(super) fn try_connect<'b>(
+        &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError>;
-}
+        mut out_edges: Vec<&mut Edge>,
+        registry: &MessageRegistry,
+    ) -> Result<(), DiagramErrorCode> {
+        let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
+            Err(DiagramErrorCode::CannotForkResult)
+        } else {
+            registry.fork_result(builder, output)
+        }?;
+        {
+            let ok_edge = out_edges
+                .get_mut(0)
+                .ok_or_else(|| unknown_diagram_error!())?;
+            ok_edge.output = Some(ok);
+        }
+        {
+            let err_edge = out_edges
+                .get_mut(1)
+                .ok_or_else(|| unknown_diagram_error!())?;
+            err_edge.output = Some(err);
+        }
 
-impl<T> DynForkResult<T> for NotSupported {
-    const SUPPORTED: bool = false;
-
-    fn dyn_fork_result(
-        _builder: &mut Builder,
-        _output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
-        Err(DiagramError::CannotForkResult)
+        Ok(())
     }
 }
 
-impl<T, E> DynForkResult<Result<T, E>> for DefaultImpl
+pub trait DynForkResult {
+    fn dyn_fork_result(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode>;
+
+    fn on_register(
+        self,
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    ) -> bool;
+}
+
+impl<T> DynForkResult for NotSupportedMarker<T> {
+    fn dyn_fork_result(
+        &self,
+        _builder: &mut Builder,
+        _output: DynOutput,
+    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
+        Err(DiagramErrorCode::CannotForkResult)
+    }
+
+    fn on_register(
+        self,
+        _messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        _schema_generator: &mut SchemaGenerator,
+    ) -> bool {
+        false
+    }
+}
+
+impl<T, E, S> DynForkResult for DefaultImplMarker<(Result<T, E>, S)>
 where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
+    S: SerializeMessage<T> + 'static,
 {
-    const SUPPORTED: bool = true;
-
     fn dyn_fork_result(
+        &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
         debug!("fork result: {:?}", output);
 
         let chain = output.into_output::<Result<T, E>>()?.chain(builder);
         let outputs = chain.fork_result(|c| c.output().into(), |c| c.output().into());
         debug!("forked outputs: {:?}", outputs);
         Ok(outputs)
+    }
+
+    fn on_register(
+        self,
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    ) -> bool {
+        let ops = &mut messages
+            .entry(TypeInfo::of::<Result<T, E>>())
+            .or_insert(MessageRegistration::new::<T>())
+            .operations;
+        if ops.fork_result_impl.is_some() {
+            return false;
+        }
+
+        ops.fork_result_impl = Some(Box::new(move |builder, output| {
+            self.dyn_fork_result(builder, output)
+        }));
+
+        register_serialize::<T, S>(messages, schema_generator);
+        true
     }
 }
 

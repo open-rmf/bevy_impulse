@@ -1,5 +1,5 @@
 use std::{
-    any::{type_name, Any, TypeId},
+    any::{type_name, Any},
     borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
@@ -7,7 +7,9 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::{Builder, InputSlot, Node, Output, StreamPack};
+use crate::{
+    unknown_diagram_error, Buffer, Builder, InputSlot, IterBufferable, Node, Output, StreamPack,
+};
 use bevy_ecs::entity::Entity;
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
@@ -29,9 +31,12 @@ use super::{
     fork_result::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
     join::register_join_impl,
+    register_serialize,
+    type_info::TypeInfo,
     unzip::DynUnzip,
-    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
-    DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, SplitOp,
+    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
+    DynSplit, DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer,
+    SplitOp,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -39,7 +44,7 @@ use super::{
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,
-    pub(super) type_id: TypeId,
+    pub(super) type_info: TypeInfo,
 }
 
 impl DynInputSlot {
@@ -57,7 +62,7 @@ impl<T: Any> From<InputSlot<T>> for DynInputSlot {
         Self {
             scope: input.scope(),
             source: input.id(),
-            type_id: TypeId::of::<T>(),
+            type_info: TypeInfo::of::<T>(),
         }
     }
 }
@@ -67,16 +72,19 @@ impl<T: Any> From<InputSlot<T>> for DynInputSlot {
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
-    pub(super) type_id: TypeId,
+    pub(super) type_info: TypeInfo,
 }
 
 impl DynOutput {
-    pub(super) fn into_output<T>(self) -> Result<Output<T>, DiagramError>
+    pub(super) fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
     where
         T: Send + Sync + 'static + Any,
     {
-        if self.type_id != TypeId::of::<T>() {
-            Err(DiagramError::TypeMismatch)
+        if self.type_info != TypeInfo::of::<T>() {
+            Err(DiagramErrorCode::TypeMismatch {
+                source_type: self.type_info,
+                target_type: TypeInfo::of::<T>(),
+            })
         } else {
             Ok(Output::<T>::new(self.scope, self.target))
         }
@@ -93,13 +101,13 @@ impl DynOutput {
 
 impl<T> From<Output<T>> for DynOutput
 where
-    T: Send + Sync + 'static,
+    T: Send + Sync + 'static + Any,
 {
     fn from(output: Output<T>) -> Self {
         Self {
             scope: output.scope(),
             target: output.id(),
-            type_id: TypeId::of::<T>(),
+            type_info: TypeInfo::of::<T>(),
         }
     }
 }
@@ -157,7 +165,7 @@ impl NodeRegistration {
         &self,
         builder: &mut Builder,
         config: serde_json::Value,
-    ) -> Result<DynNode, DiagramError> {
+    ) -> Result<DynNode, DiagramErrorCode> {
         let n = (self.create_node_impl.borrow_mut())(builder, config)?;
         debug!(
             "created node of {}, output: {:?}, input: {:?}",
@@ -167,24 +175,50 @@ impl NodeRegistration {
     }
 }
 
+/// A container that can store any message.
+///
+/// TODO(koonpeng): This is currently only used in buffers, theorically, this can be used
+/// to avoid serialization in `join`, but there are some blockers which stops it from being used.
+///
+/// The problem is that `join` produces a `SmallVec`. "serialize and join" works because the
+/// resulting `SmallVec<[serde_json::Value, 4]>` is converted to a `serde_json::Value`. This
+/// allows other operations like fork_clone, split, serialize etc to work. With "box and join",
+/// we get `SmallVec<[BoxedMessage; 4]>`, unlike `serde_json::Value`, whether a `BoxedMessage`
+/// can be cloned, split etc needs to depend on the inner type, which is lost when we box it.
+///
+/// A way to support "box and join" is to embed the impls into each `DynOutput`,
+/// but we can't because `DynOutput` has to be convertible from `Output`. Though it is probably
+/// possible with a trait bound.
+pub(super) struct BoxedMessage(pub(super) Box<dyn Send + Sync + 'static + Any>);
+
 type CreateNodeFn =
-    RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramError>>>;
+    RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramErrorCode>>>;
+type BoxedFn =
+    Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<BoxedMessage>, DiagramErrorCode>>;
+type UnboxFn = Box<dyn Fn(&mut Builder, DynOutput) -> Result<DynOutput, DiagramErrorCode>>;
 type DeserializeFn =
-    Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramError>>;
+    Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>>;
 type SerializeFn =
-    Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramError>>;
+    Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramErrorCode>>;
 type ForkCloneFn =
-    Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>;
+    Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramErrorCode>>;
 type ForkResultFn =
-    Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>;
+    Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramErrorCode>>;
 type SplitFn = Box<
     dyn for<'a> Fn(
         &mut Builder,
         DynOutput,
         &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramError>,
+    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>,
 >;
-type JoinFn = Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramError>>;
+type JoinFn = Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramErrorCode>>;
+type BufferAccessFn = Box<
+    dyn Fn(
+        &mut Builder,
+        DynOutput,
+        Vec<Buffer<BoxedMessage>>,
+    ) -> Result<DynOutput, DiagramErrorCode>,
+>;
 
 #[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
@@ -310,7 +344,7 @@ pub struct MessageRegistrationBuilder<'a, Message> {
 
 impl<'a, Message> MessageRegistrationBuilder<'a, Message>
 where
-    Message: Any,
+    Message: Send + Sync + 'static + Any,
 {
     fn new(registry: &'a mut MessageRegistry) -> Self {
         Self {
@@ -342,9 +376,10 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImpl: DynForkResult<Message>,
+        DefaultImplMarker<(Message, OpaqueMessageSerializer)>: DynForkResult,
     {
-        self.data.register_fork_result::<Message, DefaultImpl>();
+        self.data
+            .register_fork_result(DefaultImplMarker::<(Message, OpaqueMessageSerializer)>::new());
         self
     }
 
@@ -379,7 +414,7 @@ pub struct NodeRegistrationBuilder<'a, Request, Response, Streams> {
 impl<'a, Request, Response, Streams> NodeRegistrationBuilder<'a, Request, Response, Streams>
 where
     Request: Any,
-    Response: Any,
+    Response: Send + Sync + 'static + Any,
 {
     fn new(registry: &'a mut MessageRegistry) -> Self {
         Self {
@@ -411,7 +446,7 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImpl: DynForkResult<Response>,
+        DefaultImplMarker<(Response, OpaqueMessageSerializer)>: DynForkResult,
     {
         MessageRegistrationBuilder::new(self.registry).with_fork_result();
         self
@@ -454,20 +489,80 @@ pub struct DiagramElementRegistry {
     pub(super) messages: MessageRegistry,
 }
 
-#[derive(Default)]
 pub(super) struct MessageOperation {
-    deserialize_impl: Option<DeserializeFn>,
-    serialize_impl: Option<SerializeFn>,
-    fork_clone_impl: Option<ForkCloneFn>,
-    unzip_impl: Option<Box<dyn DynUnzip>>,
-    fork_result_impl: Option<ForkResultFn>,
-    split_impl: Option<SplitFn>,
-    join_impl: Option<JoinFn>,
+    pub(super) boxed_impl: BoxedFn,
+    pub(super) unbox_impl: UnboxFn,
+    pub(super) deserialize_impl: Option<DeserializeFn>,
+    pub(super) serialize_impl: Option<SerializeFn>,
+    pub(super) fork_clone_impl: Option<ForkCloneFn>,
+    pub(super) unzip_impl: Option<Box<dyn DynUnzip>>,
+    pub(super) fork_result_impl: Option<ForkResultFn>,
+    pub(super) split_impl: Option<SplitFn>,
+    pub(super) join_impl: Option<JoinFn>,
+    pub(super) buffer_access_impl: BufferAccessFn,
 }
 
 impl MessageOperation {
-    fn new() -> Self {
-        Self::default()
+    fn new<T>() -> Self
+    where
+        T: Send + Sync + 'static + Any,
+    {
+        Self {
+            boxed_impl: Box::new(|builder, output| {
+                Ok(output
+                    .into_output::<T>()?
+                    .chain(builder)
+                    .map_block(|o| BoxedMessage(Box::new(o)))
+                    .output())
+            }),
+            unbox_impl: Box::new(|builder, output| {
+                Ok(output
+                    .into_output::<BoxedMessage>()?
+                    .chain(builder)
+                    .map_block(|boxed| -> Result<T, DiagramErrorCode> {
+                        let downcasted = boxed
+                            .0
+                            .downcast::<T>()
+                            .map_err(|_| DiagramErrorCode::CannotBoxOrUnbox)?;
+                        Ok(*downcasted)
+                    })
+                    .cancel_on_err()
+                    .output()
+                    .into())
+            }),
+            deserialize_impl: None,
+            serialize_impl: None,
+            fork_clone_impl: None,
+            unzip_impl: None,
+            fork_result_impl: None,
+            split_impl: None,
+            join_impl: None,
+            buffer_access_impl: Box::new(|builder, output, buffers| {
+                let buffer_output = buffers.join_vec::<4>(builder).output();
+                Ok(output
+                    .into_output::<T>()?
+                    .chain(builder)
+                    .with_access(buffer_output)
+                    .output()
+                    .into())
+            }),
+        }
+    }
+
+    pub(super) fn boxed(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Output<BoxedMessage>, DiagramErrorCode> {
+        (self.boxed_impl)(builder, output)
+    }
+
+    pub(super) fn unbox(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        (self.unbox_impl)(builder, output)
     }
 
     /// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
@@ -475,11 +570,11 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<DynOutput, DiagramError> {
+    ) -> Result<DynOutput, DiagramErrorCode> {
         let f = self
             .deserialize_impl
             .as_ref()
-            .ok_or(DiagramError::NotSerializable)?;
+            .ok_or(DiagramErrorCode::NotSerializable)?;
         f(builder, output.into_output()?)
     }
 
@@ -487,11 +582,11 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<serde_json::Value>, DiagramError> {
+    ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
         let f = self
             .serialize_impl
             .as_ref()
-            .ok_or(DiagramError::NotSerializable)?;
+            .ok_or(DiagramErrorCode::NotSerializable)?;
         f(builder, output)
     }
 
@@ -500,11 +595,11 @@ impl MessageOperation {
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
         let f = self
             .fork_clone_impl
             .as_ref()
-            .ok_or(DiagramError::NotCloneable)?;
+            .ok_or(DiagramErrorCode::NotCloneable)?;
         f(builder, output, amount)
     }
 
@@ -512,11 +607,11 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
         let unzip_impl = &self
             .unzip_impl
             .as_ref()
-            .ok_or(DiagramError::NotUnzippable)?;
+            .ok_or(DiagramErrorCode::NotUnzippable)?;
         unzip_impl.dyn_unzip(builder, output)
     }
 
@@ -524,11 +619,11 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
+    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
         let f = self
             .fork_result_impl
             .as_ref()
-            .ok_or(DiagramError::CannotForkResult)?;
+            .ok_or(DiagramErrorCode::CannotForkResult)?;
         f(builder, output)
     }
 
@@ -537,11 +632,11 @@ impl MessageOperation {
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramError> {
+    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
         let f = self
             .split_impl
             .as_ref()
-            .ok_or(DiagramError::NotSplittable)?;
+            .ok_or(DiagramErrorCode::NotSplittable)?;
         f(builder, output, split_op)
     }
 
@@ -549,12 +644,28 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         outputs: OutputIter,
-    ) -> Result<DynOutput, DiagramError>
+    ) -> Result<DynOutput, DiagramErrorCode>
     where
         OutputIter: IntoIterator<Item = DynOutput>,
     {
-        let f = self.join_impl.as_ref().ok_or(DiagramError::NotJoinable)?;
+        let f = self
+            .join_impl
+            .as_ref()
+            .ok_or(DiagramErrorCode::NotJoinable)?;
         f(builder, outputs.into_iter().collect())
+    }
+
+    pub(super) fn with_buffer_access<BufferIter>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        buffers: BufferIter,
+    ) -> Result<DynOutput, DiagramErrorCode>
+    where
+        BufferIter: IntoIterator<Item = Buffer<BoxedMessage>>,
+    {
+        let f = &self.buffer_access_impl;
+        f(builder, output, buffers.into_iter().collect())
     }
 }
 
@@ -590,17 +701,20 @@ impl Serialize for MessageOperation {
 }
 
 pub struct MessageRegistration {
-    type_name: &'static str,
-    schema: Option<schemars::schema::Schema>,
-    operations: MessageOperation,
+    pub(super) type_name: &'static str,
+    pub(super) schema: Option<schemars::schema::Schema>,
+    pub(super) operations: MessageOperation,
 }
 
 impl MessageRegistration {
-    fn new<T>() -> Self {
+    pub(super) fn new<T>() -> Self
+    where
+        T: Send + Sync + 'static + Any,
+    {
         Self {
             type_name: type_name::<T>(),
             schema: None,
-            operations: MessageOperation::new(),
+            operations: MessageOperation::new::<T>(),
         }
     }
 }
@@ -620,7 +734,7 @@ impl Serialize for MessageRegistration {
 #[derive(Serialize)]
 pub struct MessageRegistry {
     #[serde(serialize_with = "MessageRegistry::serialize_messages")]
-    messages: HashMap<TypeId, MessageRegistration>,
+    messages: HashMap<TypeInfo, MessageRegistration>,
 
     #[serde(
         rename = "schemas",
@@ -630,25 +744,78 @@ pub struct MessageRegistry {
 }
 
 impl MessageRegistry {
+    fn new() -> Self {
+        let mut settings = SchemaSettings::default();
+        settings.definitions_path = "#/schemas/".to_string();
+
+        Self {
+            schema_generator: SchemaGenerator::new(settings),
+            messages: HashMap::from([(
+                TypeInfo::of::<serde_json::Value>(),
+                MessageRegistration::new::<serde_json::Value>(),
+            )]),
+        }
+    }
+
     fn get<T>(&self) -> Option<&MessageRegistration>
     where
         T: Any,
     {
-        self.messages.get(&TypeId::of::<T>())
+        self.messages.get(&TypeInfo::of::<T>())
+    }
+
+    /// Box the output if it is not boxed, else do nothing.
+    pub(super) fn boxed(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Output<BoxedMessage>, DiagramErrorCode> {
+        if output.type_info == TypeInfo::of::<BoxedMessage>() {
+            // already boxed
+            return Ok(output.into_output()?);
+        }
+        let reg = self
+            .messages
+            .get(&output.type_info)
+            .ok_or(DiagramErrorCode::CannotBoxOrUnbox)?;
+        reg.operations.boxed(builder, output)
+    }
+
+    /// Unbox the output if it is boxed, else do nothing.
+    pub(super) fn unbox(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        target_type_id: &TypeInfo,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if output.type_info != TypeInfo::of::<BoxedMessage>() {
+            // already unboxed
+            return Ok(output);
+        }
+        let reg = self
+            .messages
+            // inner_type_id should always be filled for boxed outputs
+            // TODO(koonpeng): we will be able to have a stronger guaranteed when we move to
+            // a custom `TypeInfo` container.
+            .get(target_type_id)
+            .ok_or(DiagramErrorCode::CannotBoxOrUnbox)?;
+        reg.operations.unbox(builder, output)
     }
 
     pub(super) fn deserialize(
         &self,
-        target_type: &TypeId,
+        target_type: &TypeInfo,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<DynOutput, DiagramError> {
-        if output.type_id != TypeId::of::<serde_json::Value>() || &output.type_id == target_type {
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if output.type_info != TypeInfo::of::<serde_json::Value>()
+            || &output.type_info == target_type
+        {
             Ok(output)
         } else if let Some(reg) = self.messages.get(target_type) {
             reg.operations.deserialize(builder, output)
         } else {
-            Err(DiagramError::NotSerializable)
+            Err(DiagramErrorCode::NotSerializable)
         }
     }
 
@@ -661,7 +828,7 @@ impl MessageRegistry {
     {
         let reg = self
             .messages
-            .entry(TypeId::of::<T>())
+            .entry(TypeInfo::of::<T>())
             .or_insert(MessageRegistration::new::<T>());
         let ops = &mut reg.operations;
         if !Deserializer::deserializable() || ops.deserialize_impl.is_some() {
@@ -697,13 +864,14 @@ impl MessageRegistry {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<serde_json::Value>, DiagramError> {
-        if output.type_id == TypeId::of::<serde_json::Value>() {
+    ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
+        debug!("serialize {:?}", output);
+        if output.type_info == TypeInfo::of::<serde_json::Value>() {
             output.into_output()
-        } else if let Some(reg) = self.messages.get(&output.type_id) {
+        } else if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.serialize(builder, output)
         } else {
-            Err(DiagramError::NotSerializable)
+            Err(DiagramErrorCode::NotSerializable)
         }
     }
 
@@ -714,32 +882,7 @@ impl MessageRegistry {
         T: Send + Sync + 'static + Any,
         Serializer: SerializeMessage<T>,
     {
-        let reg = &mut self
-            .messages
-            .entry(TypeId::of::<T>())
-            .or_insert(MessageRegistration::new::<T>());
-        let ops = &mut reg.operations;
-        if !Serializer::serializable() || ops.serialize_impl.is_some() {
-            return false;
-        }
-
-        debug!(
-            "register serialize for type: {}, with serializer: {}",
-            std::any::type_name::<T>(),
-            std::any::type_name::<Serializer>()
-        );
-        ops.serialize_impl = Some(Box::new(|builder, output| {
-            debug!("serialize output: {:?}", output);
-            let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
-            builder.connect(output.into_output()?, n.input);
-            let serialized_output = n.output.chain(builder).cancel_on_err().output();
-            debug!("serialized output: {:?}", serialized_output);
-            Ok(serialized_output)
-        }));
-
-        reg.schema = Serializer::json_schema(&mut self.schema_generator);
-
-        true
+        register_serialize::<T, Serializer>(&mut self.messages, &mut self.schema_generator)
     }
 
     pub(super) fn fork_clone(
@@ -747,11 +890,11 @@ impl MessageRegistry {
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        if let Some(reg) = self.messages.get(&output.type_id) {
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.fork_clone(builder, output, amount)
         } else {
-            Err(DiagramError::NotCloneable)
+            Err(DiagramErrorCode::NotCloneable)
         }
     }
 
@@ -759,12 +902,12 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_fork_clone<T, F>(&mut self) -> bool
     where
-        T: Any,
+        T: Send + Sync + 'static + Any,
         F: DynForkClone<T>,
     {
         let ops = &mut self
             .messages
-            .entry(TypeId::of::<T>())
+            .entry(TypeInfo::of::<T>())
             .or_insert(MessageRegistration::new::<T>())
             .operations;
         if !F::CLONEABLE || ops.fork_clone_impl.is_some() {
@@ -782,11 +925,11 @@ impl MessageRegistry {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        if let Some(reg) = self.messages.get(&output.type_id) {
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.unzip(builder, output)
         } else {
-            Err(DiagramError::NotUnzippable)
+            Err(DiagramErrorCode::NotUnzippable)
         }
     }
 
@@ -794,7 +937,7 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_unzip<T, Serializer>(&mut self) -> bool
     where
-        T: Any,
+        T: Send + Sync + 'static + Any,
         Serializer: 'static,
         DefaultImplMarker<(T, Serializer)>: DynUnzip,
     {
@@ -803,7 +946,7 @@ impl MessageRegistry {
 
         let ops = &mut self
             .messages
-            .entry(TypeId::of::<T>())
+            .entry(TypeInfo::of::<T>())
             .or_insert(MessageRegistration::new::<T>())
             .operations;
         if ops.unzip_impl.is_some() {
@@ -818,35 +961,21 @@ impl MessageRegistry {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramError> {
-        if let Some(reg) = self.messages.get(&output.type_id) {
+    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.fork_result(builder, output)
         } else {
-            Err(DiagramError::CannotForkResult)
+            Err(DiagramErrorCode::CannotForkResult)
         }
     }
 
     /// Register a fork_result function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_fork_result<T, F>(&mut self) -> bool
+    pub(super) fn register_fork_result<T>(&mut self, implementation: T) -> bool
     where
-        T: Any,
-        F: DynForkResult<T>,
+        T: DynForkResult,
     {
-        let ops = &mut self
-            .messages
-            .entry(TypeId::of::<T>())
-            .or_insert(MessageRegistration::new::<T>())
-            .operations;
-        if ops.fork_result_impl.is_some() {
-            return false;
-        }
-
-        ops.fork_result_impl = Some(Box::new(|builder, output| {
-            F::dyn_fork_result(builder, output)
-        }));
-
-        true
+        implementation.on_register(&mut self.messages, &mut self.schema_generator)
     }
 
     pub(super) fn split<'b>(
@@ -854,11 +983,11 @@ impl MessageRegistry {
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'b SplitOp,
-    ) -> Result<DynSplitOutputs<'b>, DiagramError> {
-        if let Some(reg) = self.messages.get(&output.type_id) {
+    ) -> Result<DynSplitOutputs<'b>, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.split(builder, output, split_op)
         } else {
-            Err(DiagramError::NotSplittable)
+            Err(DiagramErrorCode::NotSplittable)
         }
     }
 
@@ -866,12 +995,12 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_split<T, F, S>(&mut self) -> bool
     where
-        T: Any,
+        T: Send + Sync + 'static + Any,
         F: DynSplit<T, S>,
     {
         let ops = &mut self
             .messages
-            .entry(TypeId::of::<T>())
+            .entry(TypeInfo::of::<T>())
             .or_insert(MessageRegistration::new::<T>())
             .operations;
         if ops.split_impl.is_some() {
@@ -890,13 +1019,13 @@ impl MessageRegistry {
         &self,
         builder: &mut Builder,
         outputs: OutputIter,
-    ) -> Result<DynOutput, DiagramError>
+    ) -> Result<DynOutput, DiagramErrorCode>
     where
         OutputIter: IntoIterator<Item = DynOutput>,
     {
         let mut i = outputs.into_iter().peekable();
         let output_type_id = if let Some(o) = i.peek() {
-            Some(o.type_id.clone())
+            Some(o.type_info.clone())
         } else {
             None
         };
@@ -905,10 +1034,10 @@ impl MessageRegistry {
             if let Some(reg) = self.messages.get(&output_type_id) {
                 reg.operations.join(builder, i)
             } else {
-                Err(DiagramError::NotJoinable)
+                Err(DiagramErrorCode::NotJoinable)
             }
         } else {
-            Err(DiagramError::NotJoinable)
+            Err(DiagramErrorCode::NotJoinable)
         }
     }
 
@@ -916,11 +1045,11 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_join<T>(&mut self, f: JoinFn) -> bool
     where
-        T: Any,
+        T: Send + Sync + 'static + Any,
     {
         let ops = &mut self
             .messages
-            .entry(TypeId::of::<T>())
+            .entry(TypeInfo::of::<T>())
             .or_insert(MessageRegistration::new::<T>())
             .operations;
         if ops.join_impl.is_some() {
@@ -932,25 +1061,47 @@ impl MessageRegistry {
         true
     }
 
+    pub(super) fn with_buffer_access<BufferIter>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        buffers: BufferIter,
+    ) -> Result<DynOutput, DiagramErrorCode>
+    where
+        BufferIter: IntoIterator<Item = Buffer<BoxedMessage>>,
+    {
+        if let Some(reg) = self.messages.get(&output.type_info) {
+            reg.operations.with_buffer_access(builder, output, buffers)
+        } else {
+            // `buffer_access_impl` is auto registered in the constructor.
+            Err(unknown_diagram_error!())
+        }
+    }
+
     fn serialize_messages<S>(
-        v: &HashMap<TypeId, MessageRegistration>,
+        v: &HashMap<TypeInfo, MessageRegistration>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         let mut s = serializer.serialize_map(Some(v.len()))?;
-        for msg in v.values() {
+        for (type_id, reg) in v {
+            // hide builtin registrations
+            if type_id == &TypeInfo::of::<serde_json::Value>() {
+                continue;
+            }
+
             // should we use short name? It makes the serialized json more readable at the cost
             // of greatly increased chance of key conflicts.
             // let short_name = {
-            //     if let Some(start) = msg.type_name.rfind(":") {
-            //         &msg.type_name[start + 1..]
+            //     if let Some(start) = reg.type_name.rfind(":") {
+            //         &reg.type_name[start + 1..]
             //     } else {
-            //         msg.type_name
+            //         reg.type_name
             //     }
             // };
-            s.serialize_entry(msg.type_name, msg)?;
+            s.serialize_entry(reg.type_name, reg)?;
         }
         s.end()
     }
@@ -965,14 +1116,9 @@ impl MessageRegistry {
 
 impl Default for DiagramElementRegistry {
     fn default() -> Self {
-        let mut settings = SchemaSettings::default();
-        settings.definitions_path = "#/schemas/".to_string();
         DiagramElementRegistry {
             nodes: Default::default(),
-            messages: MessageRegistry {
-                schema_generator: SchemaGenerator::new(settings),
-                messages: HashMap::new(),
-            },
+            messages: MessageRegistry::new(),
         }
     }
 }
@@ -1075,14 +1221,14 @@ impl DiagramElementRegistry {
         }
     }
 
-    pub fn get_node_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramError>
+    pub fn get_node_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramErrorCode>
     where
         Q: Borrow<str> + ?Sized,
     {
         let k = id.borrow();
         self.nodes
             .get(k)
-            .ok_or(DiagramError::BuilderNotFound(k.to_string()))
+            .ok_or(DiagramErrorCode::BuilderNotFound(k.to_string()))
     }
 
     pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration>

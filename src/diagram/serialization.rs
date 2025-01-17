@@ -1,5 +1,10 @@
+use std::collections::HashMap;
+
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
+use tracing::debug;
+
+use super::{type_info::TypeInfo, MessageRegistration};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SerializationError {
@@ -138,4 +143,39 @@ impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
     fn deserializable() -> bool {
         false
     }
+}
+
+pub(super) fn register_serialize<T, Serializer>(
+    messages: &mut HashMap<TypeInfo, MessageRegistration>,
+    schema_generator: &mut SchemaGenerator,
+) -> bool
+where
+    T: Send + Sync + 'static,
+    Serializer: SerializeMessage<T>,
+{
+    let reg = &mut messages
+        .entry(TypeInfo::of::<T>())
+        .or_insert(MessageRegistration::new::<T>());
+    let ops = &mut reg.operations;
+    if !Serializer::serializable() || ops.serialize_impl.is_some() {
+        return false;
+    }
+
+    debug!(
+        "register serialize for type: {}, with serializer: {}",
+        std::any::type_name::<T>(),
+        std::any::type_name::<Serializer>()
+    );
+    ops.serialize_impl = Some(Box::new(|builder, output| {
+        debug!("serialize output: {:?}", output);
+        let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
+        builder.connect(output.into_output()?, n.input);
+        let serialized_output = n.output.chain(builder).cancel_on_err().output();
+        debug!("serialized output: {:?}", serialized_output);
+        Ok(serialized_output)
+    }));
+
+    reg.schema = Serializer::json_schema(schema_generator);
+
+    true
 }

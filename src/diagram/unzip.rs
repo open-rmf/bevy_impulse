@@ -1,3 +1,5 @@
+use std::iter::zip;
+
 use bevy_utils::all_tuples_with_size;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -8,13 +10,46 @@ use crate::Builder;
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     join::register_join_impl,
-    DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
+    workflow_builder::{Edge, EdgeBuilder},
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UnzipOp {
     pub(super) next: Vec<NextOperation>,
+}
+
+impl UnzipOp {
+    pub(super) fn build_edges<'a>(
+        &'a self,
+        mut builder: EdgeBuilder<'a, '_>,
+    ) -> Result<(), DiagramErrorCode> {
+        for target in &self.next {
+            builder.add_output_edge(target, None)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn try_connect<'b>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        out_edges: Vec<&mut Edge>,
+        registry: &MessageRegistry,
+    ) -> Result<(), DiagramErrorCode> {
+        let outputs = registry.unzip(builder, output)?;
+
+        if outputs.len() < out_edges.len() {
+            return Err(DiagramErrorCode::NotUnzippable);
+        }
+
+        for (output, out_edge) in zip(outputs, out_edges) {
+            out_edge.output = Some(output);
+        }
+
+        Ok(())
+    }
 }
 
 pub trait DynUnzip {
@@ -25,7 +60,7 @@ pub trait DynUnzip {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError>;
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
 
     /// Called when a node is registered.
     fn on_register(&self, registry: &mut MessageRegistry);
@@ -40,8 +75,8 @@ impl<T> DynUnzip for NotSupportedMarker<T> {
         &self,
         _builder: &mut Builder,
         _output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        Err(DiagramError::NotUnzippable)
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+        Err(DiagramErrorCode::NotUnzippable)
     }
 
     fn on_register(&self, _registry: &mut MessageRegistry) {}
@@ -64,7 +99,7 @@ macro_rules! dyn_unzip_impl {
                 &self,
                 builder: &mut Builder,
                 output: DynOutput
-            ) -> Result<Vec<DynOutput>, DiagramError> {
+            ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
                 debug!("unzip output: {:?}", output);
                 let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
                 let chain = output.into_output::<($($P,)*)>()?.chain(builder);
@@ -102,7 +137,7 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramError};
+    use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramErrorCode};
 
     #[test]
     fn test_unzip_not_unzippable() {
@@ -126,7 +161,11 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::NotUnzippable), "{}", err);
+        assert!(
+            matches!(err.code, DiagramErrorCode::NotUnzippable),
+            "{}",
+            err
+        );
     }
 
     #[test]
@@ -166,7 +205,7 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::NotUnzippable));
+        assert!(matches!(err.code, DiagramErrorCode::NotUnzippable));
     }
 
     #[test]
@@ -243,10 +282,7 @@ mod tests {
                 },
                 "unzip": {
                     "type": "unzip",
-                    "next": ["dispose", "op2"],
-                },
-                "dispose": {
-                    "type": "dispose",
+                    "next": [{ "builtin": "dispose" }, "op2"],
                 },
                 "op2": {
                     "type": "node",

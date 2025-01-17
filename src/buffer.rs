@@ -171,7 +171,12 @@ impl<T: Clone> From<CloneFromBuffer<T>> for Buffer<T> {
 }
 
 /// Settings to describe the behavior of a buffer.
-#[derive(Default, Clone, Copy)]
+#[cfg_attr(
+    feature = "diagram",
+    derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema),
+    serde(rename_all = "snake_case")
+)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct BufferSettings {
     retention: RetentionPolicy,
 }
@@ -214,7 +219,12 @@ impl BufferSettings {
 /// are being pulled.
 ///
 /// The default value is KeepLast(1).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(
+    feature = "diagram",
+    derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema),
+    serde(rename_all = "snake_case")
+)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum RetentionPolicy {
     /// Keep the last N items that were stored into the buffer. Once the limit
     /// is reached, the oldest item will be removed any time a new item arrives.

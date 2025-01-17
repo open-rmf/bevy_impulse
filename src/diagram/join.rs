@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use tracing::debug;
 
-use crate::{Builder, IterBufferable, Output};
+use crate::{diagram::type_info::TypeInfo, unknown_diagram_error, Builder, IterBufferable, Output};
 
 use super::{
-    DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage, SourceOperation,
+    workflow_builder::{Edge, EdgeBuilder, Vertex},
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage, SourceOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -23,6 +26,65 @@ pub struct JoinOp {
     pub(super) no_serialize: Option<bool>,
 }
 
+impl JoinOp {
+    pub(super) fn build_edges<'a>(
+        &'a self,
+        mut builder: EdgeBuilder<'a, '_>,
+    ) -> Result<(), DiagramErrorCode> {
+        builder.add_output_edge(&self.next, None)?;
+        Ok(())
+    }
+
+    pub(super) fn try_connect<'b>(
+        &self,
+        builder: &mut Builder,
+        vertex: &Vertex,
+        mut edges: HashMap<&usize, &mut Edge>,
+        registry: &MessageRegistry,
+    ) -> Result<(), DiagramErrorCode> {
+        if vertex.in_edges.is_empty() {
+            return Err(DiagramErrorCode::EmptyJoin);
+        }
+        let mut outputs: HashMap<SourceOperation, DynOutput> = vertex
+            .in_edges
+            .iter()
+            .map(|e| {
+                let edge = edges.remove(e).ok_or(unknown_diagram_error!())?;
+                match edge.output.take() {
+                    Some(output) => Ok((edge.source.clone(), output)),
+                    // "expected all incoming edges to be ready"
+                    _ => Err(unknown_diagram_error!()),
+                }
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
+
+        let mut ordered_outputs: Vec<DynOutput> = Vec::with_capacity(vertex.in_edges.len());
+        for source_id in self.inputs.iter() {
+            let o = outputs
+                .remove(source_id)
+                .ok_or(DiagramErrorCode::OperationNotFound(source_id.to_string()))?;
+            ordered_outputs.push(o);
+        }
+
+        let joined_output = if self.no_serialize.unwrap_or(false) {
+            registry.join(builder, ordered_outputs)?
+        } else {
+            serialize_and_join(builder, &registry, ordered_outputs)?.into()
+        };
+
+        let out_edge = edges
+            .get_mut(
+                vertex
+                    .out_edges
+                    .get(0)
+                    .ok_or_else(|| unknown_diagram_error!())?,
+            )
+            .ok_or(unknown_diagram_error!())?;
+        out_edge.output = Some(joined_output);
+        Ok(())
+    }
+}
+
 pub(super) fn register_join_impl<T, Serializer>(registry: &mut MessageRegistry)
 where
     T: Send + Sync + 'static,
@@ -37,18 +99,18 @@ pub(super) fn serialize_and_join(
     builder: &mut Builder,
     registry: &MessageRegistry,
     outputs: Vec<DynOutput>,
-) -> Result<Output<serde_json::Value>, DiagramError> {
+) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
     debug!("serialize and join outputs {:?}", outputs);
 
     if outputs.is_empty() {
         // do not allow empty joins
-        return Err(DiagramError::EmptyJoin);
+        return Err(DiagramErrorCode::EmptyJoin);
     }
 
     let outputs = outputs
         .into_iter()
         .map(|o| registry.serialize(builder, o))
-        .collect::<Result<Vec<_>, DiagramError>>()?;
+        .collect::<Result<Vec<_>, DiagramErrorCode>>()?;
 
     // we need to convert the joined output to [`serde_json::Value`] in order for it to be
     // serializable.
@@ -61,7 +123,10 @@ pub(super) fn serialize_and_join(
     Ok(json_output)
 }
 
-fn join_impl<T>(builder: &mut Builder, outputs: Vec<DynOutput>) -> Result<DynOutput, DiagramError>
+fn join_impl<T>(
+    builder: &mut Builder,
+    outputs: Vec<DynOutput>,
+) -> Result<DynOutput, DiagramErrorCode>
 where
     T: Send + Sync + 'static,
 {
@@ -70,16 +135,19 @@ where
     if outputs.is_empty() {
         // do a empty join, in practice, this branch is never ran because [`WorkflowBuilder`]
         // should error out if there is an empty join.
-        return Err(DiagramError::EmptyJoin);
+        return Err(DiagramErrorCode::EmptyJoin);
     }
 
-    let first_type = outputs[0].type_id;
+    let first_type = outputs[0].type_info;
 
     let outputs = outputs
         .into_iter()
         .map(|o| {
-            if o.type_id != first_type {
-                Err(DiagramError::TypeMismatch)
+            if o.type_info != first_type {
+                Err(DiagramErrorCode::TypeMismatch {
+                    source_type: o.type_info,
+                    target_type: TypeInfo::of::<T>(),
+                })
             } else {
                 Ok(o.into_output::<T>()?)
             }
@@ -103,7 +171,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramError, JsonPosition,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramErrorCode, JsonPosition,
         NodeBuilderOptions,
     };
 
@@ -244,7 +312,7 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::EmptyJoin));
+        assert!(matches!(err.code, DiagramErrorCode::EmptyJoin));
     }
 
     #[test]

@@ -1,24 +1,30 @@
+mod buffer;
 mod fork_clone;
 mod fork_result;
 mod impls;
 mod join;
+mod node;
 mod registration;
 mod serialization;
 mod split_serialized;
 mod transform;
+mod type_info;
 mod unzip;
 mod workflow_builder;
 
 use bevy_ecs::system::Commands;
+use buffer::{BufferAccessOp, BufferOp, ListenOp};
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
 pub use join::JoinOutput;
+pub use node::NodeOp;
 pub use registration::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
 use transform::{TransformError, TransformOp};
+use type_info::TypeInfo;
 use unzip::UnzipOp;
 use workflow_builder::create_workflow;
 
@@ -124,17 +130,9 @@ pub enum BuiltinSource {
 #[serde(rename_all = "snake_case")]
 pub struct TerminateOp {}
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct NodeOp {
-    builder: BuilderId,
-    #[serde(default)]
-    config: serde_json::Value,
-    next: NextOperation,
-}
-
-#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(strum::Display, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
+#[strum(serialize_all = "snake_case")]
 pub enum DiagramOperation {
     /// Connect the request to a registered node.
     ///
@@ -316,8 +314,109 @@ pub enum DiagramOperation {
     /// ```
     Transform(TransformOp),
 
-    /// Drop the request, equivalent to a no-op.
-    Dispose,
+    /// Create a [`Buffer`] which can be used to store and pull data within
+    /// a scope.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "my_op",
+    ///     "ops": {
+    ///         "my_op": {
+    ///             "type": "node",
+    ///             "builder": "my_op",
+    ///             "next": "buffer"
+    ///         },
+    ///         "buffer": {
+    ///             "type": "buffer",
+    ///             "settings": {
+    ///                 "retention": { "keep_last": 10 }
+    ///             }
+    ///         },
+    ///         "join": {
+    ///             "type": "join",
+    ///             "inputs": ["buffer"],
+    ///             "next": "collect"
+    ///         },
+    ///         "collect": {
+    ///             "type": "node",
+    ///             "builder": "collect",
+    ///             "next": { "builtin": "terminate" }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    Buffer(BufferOp),
+
+    /// Zip a response with a buffer access.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "my_op",
+    ///     "ops": {
+    ///         "my_buffer": {
+    ///             "type": "buffer"
+    ///         },
+    ///         "my_op": {
+    ///             "type": "node",
+    ///             "builder": "my_op",
+    ///             "next": "buffer_access"
+    ///         },
+    ///         "buffer_access": {
+    ///             "type": "buffer_access",
+    ///             "buffers": ["my_buffer"],
+    ///             "next": "my_op2"
+    ///         },
+    ///         "my_op2": {
+    ///             "type": "node",
+    ///             "builder": "my_op2",
+    ///             "next": { "builtin": "terminate" }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    BufferAccess(BufferAccessOp),
+
+    /// Listen on a buffer.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "my_op",
+    ///     "ops": {
+    ///         "my_buffer": {
+    ///             "type": "buffer"
+    ///         },
+    ///         "my_op": {
+    ///             "type": "node",
+    ///             "builder": "my_op2",
+    ///             "next": "my_buffer"
+    ///         },
+    ///         "listen": {
+    ///             "type": "listen",
+    ///             "buffers": ["my_buffer"],
+    ///             "next": "my_op"
+    ///         },
+    ///         "my_op2": {
+    ///             "type": "node",
+    ///             "builder": "my_op2",
+    ///             "next": { "builtin": "terminate" }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    Listen(ListenOp),
 }
 
 type DiagramStart = serde_json::Value;
@@ -375,7 +474,37 @@ pub struct Diagram {
 }
 
 impl Diagram {
-    /// Implementation for [Self::spawn_io_workflow].
+    /// Spawns a workflow from this diagram.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
+    ///
+    /// let mut app = bevy_app::App::new();
+    /// let mut registry = DiagramElementRegistry::new();
+    /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
+    ///     builder.create_map_block(|msg: String| msg)
+    /// });
+    ///
+    /// let json_str = r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "echo",
+    ///     "ops": {
+    ///         "echo": {
+    ///             "type": "node",
+    ///             "builder": "echo",
+    ///             "next": { "builtin": "terminate" }
+    ///         }
+    ///     }
+    /// }
+    /// "#;
+    ///
+    /// let diagram = Diagram::from_json_str(json_str)?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
     // TODO(koonpeng): Support streams other than `()` #43.
     /* pub */
     fn spawn_workflow<Streams>(
@@ -446,7 +575,7 @@ impl Diagram {
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
     /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
-    /// # Ok::<_, DiagramError>(())
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn spawn_io_workflow(
         &self,
@@ -472,16 +601,40 @@ impl Diagram {
     }
 }
 
+#[derive(Debug)]
+pub struct DiagramErrorContext {
+    op_id: Option<OperationId>,
+}
+
+impl Display for DiagramErrorContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(op_id) = &self.op_id {
+            write!(f, "in operation [{}],", op_id)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
-pub enum DiagramError {
+#[error("{context} {code}")]
+pub struct DiagramError {
+    context: DiagramErrorContext,
+    code: DiagramErrorCode,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
 
     #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
 
-    #[error("output type does not match input type")]
-    TypeMismatch,
+    #[error("type mismatch, source {source_type}, target {target_type}")]
+    TypeMismatch {
+        source_type: TypeInfo,
+        target_type: TypeInfo,
+    },
 
     #[error("missing start or terminate")]
     MissingStartOrTerminate,
@@ -515,8 +668,14 @@ pub enum DiagramError {
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
 
-    #[error("an interconnect like fork_clone cannot connect to another interconnect")]
-    BadInterconnectChain,
+    #[error("box/unbox operation for the message is not registered")]
+    CannotBoxOrUnbox,
+
+    #[error("one or more operation is missing inputs")]
+    IncompleteDiagram,
+
+    #[error("operation type only accept single input")]
+    OnlySingleInput,
 
     #[error(transparent)]
     JsonError(#[from] serde_json::Error),
@@ -534,7 +693,7 @@ pub enum DiagramError {
 #[macro_export]
 macro_rules! unknown_diagram_error {
     () => {
-        DiagramError::UnknownError(format!("{}:{}", file!(), line!()))
+        DiagramErrorCode::UnknownError(format!("{}:{}", file!(), line!()))
     };
 }
 
@@ -594,7 +753,11 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
+        assert!(
+            matches!(err.code, DiagramErrorCode::NotSerializable),
+            "{:?}",
+            err
+        );
     }
 
     #[test]
@@ -615,7 +778,11 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::NotSerializable), "{:?}", err);
+        assert!(
+            matches!(err.code, DiagramErrorCode::NotSerializable),
+            "{:?}",
+            err
+        );
     }
 
     #[test]
@@ -641,7 +808,17 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::TypeMismatch), "{:?}", err);
+        assert!(
+            matches!(
+                err.code,
+                DiagramErrorCode::TypeMismatch {
+                    target_type: _,
+                    source_type: _
+                }
+            ),
+            "{:?}",
+            err
+        );
     }
 
     #[test]
