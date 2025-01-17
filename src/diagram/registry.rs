@@ -102,17 +102,6 @@ where
     }
 }
 
-#[derive(Clone, Serialize)]
-pub(super) struct NodeMetadata {
-    pub(super) id: BuilderId,
-    pub(super) name: String,
-    /// type name of the request
-    pub(super) request: &'static str,
-    /// type name of the response
-    pub(super) response: &'static str,
-    pub(super) config_schema: Schema,
-}
-
 /// A type erased [`bevy_impulse::Node`]
 pub(super) struct DynNode {
     pub(super) input: DynInputSlot,
@@ -148,7 +137,13 @@ where
 
 #[derive(Serialize)]
 pub struct NodeRegistration {
-    pub(super) metadata: NodeMetadata,
+    pub(super) id: BuilderId,
+    pub(super) name: String,
+    /// type name of the request
+    pub(super) request: &'static str,
+    /// type name of the response
+    pub(super) response: &'static str,
+    pub(super) config_schema: Schema,
 
     /// Creates an instance of the registered node.
     #[serde(skip)]
@@ -156,13 +151,6 @@ pub struct NodeRegistration {
 }
 
 impl NodeRegistration {
-    fn new(metadata: NodeMetadata, create_node_impl: CreateNodeFn) -> NodeRegistration {
-        NodeRegistration {
-            metadata,
-            create_node_impl,
-        }
-    }
-
     pub(super) fn create_node(
         &self,
         builder: &mut Builder,
@@ -171,7 +159,7 @@ impl NodeRegistration {
         let n = (self.create_node_impl.borrow_mut())(builder, config)?;
         debug!(
             "created node of {}, output: {:?}, input: {:?}",
-            self.metadata.id, n.output, n.input
+            self.id, n.output, n.input
         );
         Ok(n)
     }
@@ -236,24 +224,22 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
             .messages
             .register_fork_clone::<Response, Cloneable>();
 
-        let registration = NodeRegistration::new(
-            NodeMetadata {
-                id: options.id.clone(),
-                name: options.name.unwrap_or(options.id.clone()),
-                request: type_name::<Request>(),
-                response: type_name::<Response>(),
-                config_schema: self
-                    .registry
-                    .messages
-                    .schema_generator
-                    .subschema_for::<Config>(),
-            },
-            RefCell::new(Box::new(move |builder, config| {
+        let registration = NodeRegistration {
+            id: options.id.clone(),
+            name: options.name.unwrap_or(options.id.clone()),
+            request: type_name::<Request>(),
+            response: type_name::<Response>(),
+            config_schema: self
+                .registry
+                .messages
+                .schema_generator
+                .subschema_for::<Config>(),
+            create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
                 let n = f(builder, config);
                 Ok(DynNode::new(n.output, n.input))
             })),
-        );
+        };
         self.registry.nodes.insert(options.id.clone(), registration);
 
         RegistrationBuilder::<Request, Response, Streams> {
