@@ -9,8 +9,8 @@ use crate::{
 
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
-    BuiltinTarget, Diagram, DiagramError, DiagramOperation, DiagramScope, DynInputSlot, DynOutput,
-    NextOperation, NodeOp, OperationId, Registry, SourceOperation,
+    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramOperation, DiagramScope,
+    DynInputSlot, DynOutput, NextOperation, NodeOp, OperationId, SourceOperation,
 };
 
 struct Vertex<'a> {
@@ -40,7 +40,7 @@ enum EdgeState<'a> {
 pub(super) fn create_workflow<'a, Streams: StreamPack>(
     scope: DiagramScope<Streams>,
     builder: &mut Builder,
-    registry: &Registry,
+    registry: &DiagramElementRegistry,
     diagram: &'a Diagram,
 ) -> Result<(), DiagramError> {
     // first create all the vertices
@@ -263,7 +263,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
 fn connect_vertex<'a>(
     builder: &mut Builder,
-    registry: &Registry,
+    registry: &DiagramElementRegistry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
     target: &'a Vertex,
@@ -324,7 +324,7 @@ fn connect_vertex<'a>(
 
 fn connect_edge<'a>(
     builder: &mut Builder,
-    registry: &Registry,
+    registry: &DiagramElementRegistry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
     edge_id: usize,

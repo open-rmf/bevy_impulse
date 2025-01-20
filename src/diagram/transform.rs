@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::{Builder, Output};
 
-use super::{DiagramError, DynOutput, NextOperation, Registry};
+use super::{DiagramElementRegistry, DiagramError, DynOutput, NextOperation};
 
 #[derive(Error, Debug)]
 pub enum TransformError {
@@ -31,7 +31,7 @@ pub struct TransformOp {
 
 pub(super) fn transform_output(
     builder: &mut Builder,
-    registry: &Registry,
+    registry: &DiagramElementRegistry,
     output: DynOutput,
     transform_op: &TransformOp,
 ) -> Result<Output<serde_json::Value>, DiagramError> {

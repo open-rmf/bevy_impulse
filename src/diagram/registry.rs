@@ -186,7 +186,7 @@ type SplitFn = Box<
 type JoinFn = Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramError>>;
 
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
-    registry: &'a mut Registry,
+    registry: &'a mut DiagramElementRegistry,
     _ignore: PhantomData<(Deserialize, Serialize, Cloneable)>,
 }
 
@@ -354,7 +354,7 @@ pub trait IntoNodeRegistration {
 }
 
 #[derive(Serialize)]
-pub struct Registry {
+pub struct DiagramElementRegistry {
     pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
     #[serde(flatten)]
     pub(super) messages: MessageRegistry,
@@ -905,11 +905,11 @@ impl MessageRegistry {
     }
 }
 
-impl Default for Registry {
+impl Default for DiagramElementRegistry {
     fn default() -> Self {
         let mut settings = SchemaSettings::default();
         settings.definitions_path = "#/schemas/".to_string();
-        Registry {
+        DiagramElementRegistry {
             nodes: Default::default(),
             messages: MessageRegistry {
                 schema_generator: SchemaGenerator::new(settings),
@@ -919,7 +919,7 @@ impl Default for Registry {
     }
 }
 
-impl Registry {
+impl DiagramElementRegistry {
     pub fn new() -> Self {
         Self::default()
     }
@@ -1061,7 +1061,7 @@ mod tests {
 
     #[test]
     fn test_register_node_builder() {
-        let mut registry = Registry::new();
+        let mut registry = DiagramElementRegistry::new();
         registry.opt_out().register_node_builder(
             NodeBuilderOptions::new("multiply3").with_name("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
@@ -1079,7 +1079,7 @@ mod tests {
 
     #[test]
     fn test_register_cloneable_node() {
-        let mut registry = Registry::new();
+        let mut registry = DiagramElementRegistry::new();
         registry.register_node_builder(
             NodeBuilderOptions::new("multiply3").with_name("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
@@ -1093,7 +1093,7 @@ mod tests {
 
     #[test]
     fn test_register_unzippable_node() {
-        let mut registry = Registry::new();
+        let mut registry = DiagramElementRegistry::new();
         let tuple_resp = |_: ()| -> (i64,) { (1,) };
         registry
             .opt_out()
@@ -1112,7 +1112,7 @@ mod tests {
 
     #[test]
     fn test_register_splittable_node() {
-        let mut registry = Registry::new();
+        let mut registry = DiagramElementRegistry::new();
         let vec_resp = |_: ()| -> Vec<i64> { vec![1, 2] };
 
         registry
@@ -1158,7 +1158,7 @@ mod tests {
 
     #[test]
     fn test_register_with_config() {
-        let mut registry = Registry::new();
+        let mut registry = DiagramElementRegistry::new();
 
         #[derive(Deserialize, JsonSchema)]
         struct TestConfig {
@@ -1180,7 +1180,7 @@ mod tests {
     fn test_register_opaque_node() {
         let opaque_request_map = |_: NonSerializableRequest| {};
 
-        let mut registry = Registry::new();
+        let mut registry = DiagramElementRegistry::new();
         registry
             .opt_out()
             .no_request_deserializing()
@@ -1249,7 +1249,7 @@ mod tests {
 
     #[test]
     fn test_serialize_registry() {
-        let mut reg = Registry::new();
+        let mut reg = DiagramElementRegistry::new();
 
         #[derive(Deserialize, Serialize, JsonSchema, Clone)]
         struct Foo {

@@ -411,7 +411,7 @@ impl Diagram {
     fn spawn_workflow<Streams>(
         &self,
         cmds: &mut Commands,
-        registry: &Registry,
+        registry: &DiagramElementRegistry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
@@ -451,7 +451,7 @@ impl Diagram {
     pub fn spawn_io_workflow(
         &self,
         cmds: &mut Commands,
-        registry: &Registry,
+        registry: &DiagramElementRegistry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
         self.spawn_workflow::<()>(cmds, registry)
     }
