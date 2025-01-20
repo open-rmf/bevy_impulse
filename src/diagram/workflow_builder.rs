@@ -156,7 +156,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
     for (op_id, op) in &diagram.ops {
         match op {
             DiagramOperation::Node(node_op) => {
-                let reg = registry.get_registration(&node_op.builder)?;
+                let reg = registry.get_node_registration(&node_op.builder)?;
                 let n = reg.create_node(builder, node_op.config.clone())?;
                 inputs.insert(op_id, n.input);
                 add_edge(

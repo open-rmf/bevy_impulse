@@ -28,6 +28,7 @@ use super::{
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
+    join::register_join_impl,
     unzip::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
     DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, SplitOp,
@@ -204,7 +205,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self,
         options: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) -> RegistrationBuilder<'a, Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static,
@@ -242,10 +243,29 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
-        RegistrationBuilder::<Request, Response, Streams> {
-            data: &mut self.registry.messages,
-            _ignore: Default::default(),
-        }
+        NodeRegistrationBuilder::<Request, Response, Streams>::new(&mut self.registry.messages)
+    }
+
+    /// Register a message with the specified common operations.
+    pub fn register_message<Message>(self) -> MessageRegistrationBuilder<'a, Message>
+    where
+        Message: Send + Sync + 'static,
+        DeserializeImpl: DeserializeMessage<Message>,
+        SerializeImpl: SerializeMessage<Message> + SerializeMessage<Vec<Message>>,
+        Cloneable: DynForkClone<Message>,
+    {
+        self.registry
+            .messages
+            .register_deserialize::<Message, DeserializeImpl>();
+        self.registry
+            .messages
+            .register_serialize::<Message, SerializeImpl>();
+        self.registry
+            .messages
+            .register_fork_clone::<Message, Cloneable>();
+        register_join_impl::<Message, SerializeImpl>(&mut self.registry.messages);
+
+        MessageRegistrationBuilder::<Message>::new(&mut self.registry.messages)
     }
 
     /// Opt out of deserializing the request of the node. Use this to build a
@@ -282,32 +302,38 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     }
 }
 
-pub struct RegistrationBuilder<'a, Request, Response, Streams> {
+pub struct MessageRegistrationBuilder<'a, Message> {
     data: &'a mut MessageRegistry,
-    _ignore: PhantomData<(Request, Response, Streams)>,
+    _ignore: PhantomData<Message>,
 }
 
-impl<'a, Request, Response, Streams> RegistrationBuilder<'a, Request, Response, Streams>
+impl<'a, Message> MessageRegistrationBuilder<'a, Message>
 where
-    Request: Any,
-    Response: Any,
+    Message: Any,
 {
+    fn new(registry: &'a mut MessageRegistry) -> Self {
+        Self {
+            data: registry,
+            _ignore: Default::default(),
+        }
+    }
+
     /// Mark the node as having a unzippable response. This is required in order for the node
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(self) -> Self
     where
-        DefaultImplMarker<(Response, DefaultSerializer)>: DynUnzip,
+        DefaultImplMarker<(Message, DefaultSerializer)>: DynUnzip,
     {
-        self.data.register_unzip::<Response, DefaultSerializer>();
+        self.data.register_unzip::<Message, DefaultSerializer>();
         self
     }
 
     /// Mark the node as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_unserializable(self) -> Self
     where
-        DefaultImplMarker<(Response, NotSupported)>: DynUnzip,
+        DefaultImplMarker<(Message, NotSupported)>: DynUnzip,
     {
-        self.data.register_unzip::<Response, NotSupported>();
+        self.data.register_unzip::<Message, NotSupported>();
         self
     }
 
@@ -315,9 +341,9 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(self) -> Self
     where
-        DefaultImpl: DynForkResult<Response>,
+        DefaultImpl: DynForkResult<Message>,
     {
-        self.data.register_fork_result::<Response, DefaultImpl>();
+        self.data.register_fork_result::<Message, DefaultImpl>();
         self
     }
 
@@ -325,10 +351,10 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(self) -> Self
     where
-        DefaultImpl: DynSplit<Response, DefaultSerializer>,
+        DefaultImpl: DynSplit<Message, DefaultSerializer>,
     {
         self.data
-            .register_split::<Response, DefaultImpl, DefaultSerializer>();
+            .register_split::<Message, DefaultImpl, DefaultSerializer>();
         self
     }
 
@@ -336,10 +362,77 @@ where
     /// are unserializable.
     pub fn with_split_unserializable(self) -> Self
     where
-        DefaultImpl: DynSplit<Response, NotSupported>,
+        DefaultImpl: DynSplit<Message, NotSupported>,
     {
         self.data
-            .register_split::<Response, DefaultImpl, NotSupported>();
+            .register_split::<Message, DefaultImpl, NotSupported>();
+        self
+    }
+}
+
+pub struct NodeRegistrationBuilder<'a, Request, Response, Streams> {
+    registry: &'a mut MessageRegistry,
+    _ignore: PhantomData<(Request, Response, Streams)>,
+}
+
+impl<'a, Request, Response, Streams> NodeRegistrationBuilder<'a, Request, Response, Streams>
+where
+    Request: Any,
+    Response: Any,
+{
+    fn new(registry: &'a mut MessageRegistry) -> Self {
+        Self {
+            registry,
+            _ignore: Default::default(),
+        }
+    }
+
+    /// Mark the node as having a unzippable response. This is required in order for the node
+    /// to be able to be connected to a "Unzip" operation.
+    pub fn with_unzip(&mut self) -> &mut Self
+    where
+        DefaultImplMarker<(Response, DefaultSerializer)>: DynUnzip,
+    {
+        MessageRegistrationBuilder::new(self.registry).with_unzip();
+        self
+    }
+
+    /// Mark the node as having an unzippable response whose elements are not serializable.
+    pub fn with_unzip_unserializable(&mut self) -> &mut Self
+    where
+        DefaultImplMarker<(Response, NotSupported)>: DynUnzip,
+    {
+        MessageRegistrationBuilder::new(self.registry).with_unzip_unserializable();
+        self
+    }
+
+    /// Mark the node as having a [`Result<_, _>`] response. This is required in order for the node
+    /// to be able to be connected to a "Fork Result" operation.
+    pub fn with_fork_result(&mut self) -> &mut Self
+    where
+        DefaultImpl: DynForkResult<Response>,
+    {
+        MessageRegistrationBuilder::new(self.registry).with_fork_result();
+        self
+    }
+
+    /// Mark the node as having a splittable response. This is required in order
+    /// for the node to be able to be connected to a "Split" operation.
+    pub fn with_split(&mut self) -> &mut Self
+    where
+        DefaultImpl: DynSplit<Response, DefaultSerializer>,
+    {
+        MessageRegistrationBuilder::new(self.registry).with_split();
+        self
+    }
+
+    /// Mark the node as having a splittable response but the items from the split
+    /// are unserializable.
+    pub fn with_split_unserializable(&mut self) -> &mut Self
+    where
+        DefaultImpl: DynSplit<Response, NotSupported>,
+    {
+        MessageRegistrationBuilder::new(self.registry).with_split_unserializable();
         self
     }
 }
@@ -530,7 +623,7 @@ impl Serialize for MessageOperation {
     }
 }
 
-struct MessageRegistration {
+pub struct MessageRegistration {
     type_name: &'static str,
     schema: Option<schemars::schema::Schema>,
     operations: MessageOperation,
@@ -571,7 +664,6 @@ pub struct MessageRegistry {
 }
 
 impl MessageRegistry {
-    #[cfg(test)]
     fn get<T>(&self) -> Option<&MessageRegistration>
     where
         T: Any,
@@ -951,7 +1043,7 @@ impl DiagramElementRegistry {
         &mut self,
         options: NodeBuilderOptions,
         builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) -> RegistrationBuilder<Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static + DynType + DeserializeOwned,
@@ -1017,7 +1109,7 @@ impl DiagramElementRegistry {
         }
     }
 
-    pub(super) fn get_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramError>
+    pub fn get_node_registration<Q>(&self, id: &Q) -> Result<&NodeRegistration, DiagramError>
     where
         Q: Borrow<str> + ?Sized,
     {
@@ -1025,6 +1117,13 @@ impl DiagramElementRegistry {
         self.nodes
             .get(k)
             .ok_or(DiagramError::BuilderNotFound(k.to_string()))
+    }
+
+    pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration>
+    where
+        T: Any,
+    {
+        self.messages.get::<T>()
     }
 }
 
@@ -1171,7 +1270,7 @@ mod tests {
                 builder.create_map_block(move |operand: i64| operand * config.by)
             },
         );
-        assert!(registry.get_registration("multiply").is_ok());
+        assert!(registry.get_node_registration("multiply").is_ok());
     }
 
     struct NonSerializableRequest {}
@@ -1189,7 +1288,7 @@ mod tests {
                 NodeBuilderOptions::new("opaque_request_map").with_name("Test Name"),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             );
-        assert!(registry.get_registration("opaque_request_map").is_ok());
+        assert!(registry.get_node_registration("opaque_request_map").is_ok());
         let req_ops = &registry
             .messages
             .get::<NonSerializableRequest>()
@@ -1210,7 +1309,9 @@ mod tests {
                     builder.create_map_block(opaque_response_map)
                 },
             );
-        assert!(registry.get_registration("opaque_response_map").is_ok());
+        assert!(registry
+            .get_node_registration("opaque_response_map")
+            .is_ok());
         let req_ops = &registry.messages.get::<()>().unwrap().operations;
         let resp_ops = &registry
             .messages
@@ -1232,7 +1333,9 @@ mod tests {
                     builder.create_map_block(opaque_req_resp_map)
                 },
             );
-        assert!(registry.get_registration("opaque_req_resp_map").is_ok());
+        assert!(registry
+            .get_node_registration("opaque_req_resp_map")
+            .is_ok());
         let req_ops = &registry
             .messages
             .get::<NonSerializableRequest>()
@@ -1245,6 +1348,28 @@ mod tests {
             .operations;
         assert!(!req_ops.deserializable());
         assert!(!resp_ops.serializable());
+    }
+
+    #[test]
+    fn test_register_message() {
+        let mut registry = DiagramElementRegistry::new();
+
+        #[derive(Deserialize, Serialize, JsonSchema, Clone)]
+        struct TestMessage;
+
+        registry.opt_out().register_message::<TestMessage>();
+
+        let ops = &registry
+            .get_message_registration::<TestMessage>()
+            .unwrap()
+            .operations;
+        assert!(ops.deserializable());
+        assert!(ops.serializable());
+        assert!(ops.cloneable());
+        assert!(!ops.unzippable());
+        assert!(!ops.can_fork_result());
+        assert!(!ops.splittable());
+        assert!(ops.joinable());
     }
 
     #[test]
