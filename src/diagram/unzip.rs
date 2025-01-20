@@ -6,7 +6,7 @@ use tracing::debug;
 use crate::Builder;
 
 use super::{
-    impls::{DefaultImpl, NotSupported},
+    impls::{DefaultImplMarker, NotSupportedMarker},
     join::register_join_impl,
     DiagramError, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
@@ -17,38 +17,51 @@ pub struct UnzipOp {
     pub(super) next: Vec<NextOperation>,
 }
 
-pub trait DynUnzip<T, Serializer> {
-    const UNZIP_SLOTS: usize;
-
-    fn dyn_unzip(builder: &mut Builder, output: DynOutput) -> Result<Vec<DynOutput>, DiagramError>;
-
-    /// Called when a node is registered.
-    fn on_register(registry: &mut MessageRegistry);
-}
-
-impl<T, Serializer> DynUnzip<T, Serializer> for NotSupported {
-    const UNZIP_SLOTS: usize = 0;
+pub trait DynUnzip {
+    /// Returns a list of type names that this message unzips to.
+    fn slots(&self) -> Vec<&'static str>;
 
     fn dyn_unzip(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Vec<DynOutput>, DiagramError>;
+
+    /// Called when a node is registered.
+    fn on_register(&self, registry: &mut MessageRegistry);
+}
+
+impl<T> DynUnzip for NotSupportedMarker<T> {
+    fn slots(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+
+    fn dyn_unzip(
+        &self,
         _builder: &mut Builder,
         _output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramError> {
         Err(DiagramError::NotUnzippable)
     }
 
-    fn on_register(_registry: &mut MessageRegistry) {}
+    fn on_register(&self, _registry: &mut MessageRegistry) {}
 }
 
 macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*, Serializer> DynUnzip<($($P,)*), Serializer> for DefaultImpl
+        impl<$($P),*, Serializer> DynUnzip for DefaultImplMarker<(($($P,)*), Serializer)>
         where
             $($P: Send + Sync + 'static),*,
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
         {
-            const UNZIP_SLOTS: usize = $len;
+            fn slots(&self) -> Vec<&'static str> {
+                vec![$(
+                    std::any::type_name::<$P>(),
+                )*]
+            }
 
             fn dyn_unzip(
+                &self,
                 builder: &mut Builder,
                 output: DynOutput
             ) -> Result<Vec<DynOutput>, DiagramError> {
@@ -65,7 +78,7 @@ macro_rules! dyn_unzip_impl {
                 Ok(outputs)
             }
 
-            fn on_register(registry: &mut MessageRegistry)
+            fn on_register(&self, registry: &mut MessageRegistry)
             {
                 // Register serialize functions for all items in the tuple.
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.

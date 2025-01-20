@@ -16,9 +16,10 @@ use schemars::{
 };
 use serde::{
     de::DeserializeOwned,
-    ser::{SerializeMap, SerializeSeq, SerializeStruct},
+    ser::{SerializeMap, SerializeStruct},
     Serialize,
 };
+use serde_json::json;
 use tracing::debug;
 
 use crate::SerializeMessage;
@@ -26,7 +27,7 @@ use crate::SerializeMessage;
 use super::{
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
-    impls::{DefaultImpl, NotSupported},
+    impls::{DefaultImpl, DefaultImplMarker, NotSupported},
     unzip::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramError, DynSplit,
     DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer, SplitOp,
@@ -173,7 +174,6 @@ type SerializeFn =
     Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramError>>;
 type ForkCloneFn =
     Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramError>>;
-type UnzipFn = Box<dyn Fn(&mut Builder, DynOutput) -> Result<Vec<DynOutput>, DiagramError>>;
 type ForkResultFn =
     Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramError>>;
 type SplitFn = Box<
@@ -296,20 +296,18 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(self) -> Self
     where
-        DefaultImpl: DynUnzip<Response, DefaultSerializer>,
+        DefaultImplMarker<(Response, DefaultSerializer)>: DynUnzip,
     {
-        self.data
-            .register_unzip::<Response, DefaultImpl, DefaultSerializer>();
+        self.data.register_unzip::<Response, DefaultSerializer>();
         self
     }
 
     /// Mark the node as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_unserializable(self) -> Self
     where
-        DefaultImpl: DynUnzip<Response, NotSupported>,
+        DefaultImplMarker<(Response, NotSupported)>: DynUnzip,
     {
-        self.data
-            .register_unzip::<Response, DefaultImpl, NotSupported>();
+        self.data.register_unzip::<Response, NotSupported>();
         self
     }
 
@@ -362,17 +360,12 @@ pub struct Registry {
     pub(super) messages: MessageRegistry,
 }
 
-struct UnzipImpl {
-    slots: usize,
-    f: UnzipFn,
-}
-
 #[derive(Default)]
 pub(super) struct MessageOperation {
     deserialize_impl: Option<DeserializeFn>,
     serialize_impl: Option<SerializeFn>,
     fork_clone_impl: Option<ForkCloneFn>,
-    unzip_impl: Option<UnzipImpl>,
+    unzip_impl: Option<Box<dyn DynUnzip>>,
     fork_result_impl: Option<ForkResultFn>,
     split_impl: Option<SplitFn>,
     join_impl: Option<JoinFn>,
@@ -446,20 +439,11 @@ impl MessageOperation {
         builder: &mut Builder,
         output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramError> {
-        let f = &self
+        let unzip_impl = &self
             .unzip_impl
             .as_ref()
-            .ok_or(DiagramError::NotUnzippable)?
-            .f;
-        f(builder, output)
-    }
-
-    pub(super) fn unzip_slots(&self) -> usize {
-        if let Some(unzip_impl) = &self.unzip_impl {
-            unzip_impl.slots
-        } else {
-            0
-        }
+            .ok_or(DiagramError::NotUnzippable)?;
+        unzip_impl.dyn_unzip(builder, output)
     }
 
     #[cfg(test)]
@@ -520,27 +504,27 @@ impl Serialize for MessageOperation {
     where
         S: serde::Serializer,
     {
-        let mut s = serializer.serialize_seq(None)?;
+        let mut s = serializer.serialize_map(None)?;
         if self.deserialize_impl.is_some() {
-            s.serialize_element("deserialize")?;
+            s.serialize_entry("deserialize", &serde_json::Value::Null)?;
         }
         if self.serialize_impl.is_some() {
-            s.serialize_element("serialize")?;
+            s.serialize_entry("serialize", &serde_json::Value::Null)?;
         }
         if self.fork_clone_impl.is_some() {
-            s.serialize_element("fork_clone")?;
+            s.serialize_entry("fork_clone", &serde_json::Value::Null)?;
         }
-        if self.unzip_impl.is_some() {
-            s.serialize_element("unzip")?;
+        if let Some(unzip_impl) = &self.unzip_impl {
+            s.serialize_entry("unzip", &json!({"slots": unzip_impl.slots()}))?;
         }
         if self.fork_result_impl.is_some() {
-            s.serialize_element("fork_result")?;
+            s.serialize_entry("fork_result", &serde_json::Value::Null)?;
         }
         if self.split_impl.is_some() {
-            s.serialize_element("split")?;
+            s.serialize_entry("split", &serde_json::Value::Null)?;
         }
         if self.join_impl.is_some() {
-            s.serialize_element("join")?;
+            s.serialize_entry("join", &serde_json::Value::Null)?;
         }
         s.end()
     }
@@ -570,7 +554,6 @@ impl Serialize for MessageRegistration {
         let mut s = serializer.serialize_struct("MessageRegistration", 3)?;
         s.serialize_field("schema", &self.schema)?;
         s.serialize_field("operations", &self.operations)?;
-        s.serialize_field("unzip_slots", &self.operations.unzip_slots())?;
         s.end()
     }
 }
@@ -751,11 +734,15 @@ impl MessageRegistry {
 
     /// Register a unzip function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_unzip<T, F, S>(&mut self) -> bool
+    pub(super) fn register_unzip<T, Serializer>(&mut self) -> bool
     where
         T: Any,
-        F: DynUnzip<T, S>,
+        Serializer: 'static,
+        DefaultImplMarker<(T, Serializer)>: DynUnzip,
     {
+        let unzip_impl = DefaultImplMarker::<(T, Serializer)>::new();
+        unzip_impl.on_register(self);
+
         let ops = &mut self
             .messages
             .entry(TypeId::of::<T>())
@@ -764,11 +751,7 @@ impl MessageRegistry {
         if ops.unzip_impl.is_some() {
             return false;
         }
-        ops.unzip_impl = Some(UnzipImpl {
-            slots: F::UNZIP_SLOTS,
-            f: Box::new(|builder, output| F::dyn_unzip(builder, output)),
-        });
-        F::on_register(self);
+        ops.unzip_impl = Some(Box::new(unzip_impl));
 
         true
     }
@@ -1283,12 +1266,20 @@ mod tests {
         reg.opt_out()
             .no_request_deserializing()
             .register_node_builder(NodeBuilderOptions::new("test"), |builder, _config: ()| {
-                builder.create_map_block(|_: Opaque| Bar {
-                    foo: Foo {
-                        hello: "hello".to_string(),
-                    },
+                builder.create_map_block(|_: Opaque| {
+                    (
+                        Foo {
+                            hello: "hello".to_string(),
+                        },
+                        Bar {
+                            foo: Foo {
+                                hello: "world".to_string(),
+                            },
+                        },
+                    )
                 })
-            });
+            })
+            .with_unzip();
 
         // print out a pretty json for manual inspection
         println!("{}", serde_json::to_string_pretty(&reg).unwrap());
