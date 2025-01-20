@@ -483,16 +483,6 @@ impl MessageOperation {
         f(builder, output.into_output()?)
     }
 
-    #[cfg(test)]
-    pub(super) fn deserializable(&self) -> bool {
-        self.deserialize_impl.is_some()
-    }
-
-    #[cfg(test)]
-    pub(super) fn serializable(&self) -> bool {
-        self.serialize_impl.is_some()
-    }
-
     pub(super) fn serialize(
         &self,
         builder: &mut Builder,
@@ -503,11 +493,6 @@ impl MessageOperation {
             .as_ref()
             .ok_or(DiagramError::NotSerializable)?;
         f(builder, output)
-    }
-
-    #[cfg(test)]
-    pub(super) fn cloneable(&self) -> bool {
-        self.fork_clone_impl.is_some()
     }
 
     pub(super) fn fork_clone(
@@ -523,11 +508,6 @@ impl MessageOperation {
         f(builder, output, amount)
     }
 
-    #[cfg(test)]
-    pub(super) fn unzippable(&self) -> bool {
-        self.unzip_impl.is_some()
-    }
-
     pub(super) fn unzip(
         &self,
         builder: &mut Builder,
@@ -538,11 +518,6 @@ impl MessageOperation {
             .as_ref()
             .ok_or(DiagramError::NotUnzippable)?;
         unzip_impl.dyn_unzip(builder, output)
-    }
-
-    #[cfg(test)]
-    pub(super) fn can_fork_result(&self) -> bool {
-        self.fork_result_impl.is_some()
     }
 
     pub(super) fn fork_result(
@@ -557,11 +532,6 @@ impl MessageOperation {
         f(builder, output)
     }
 
-    #[cfg(test)]
-    pub(super) fn splittable(&self) -> bool {
-        self.split_impl.is_some()
-    }
-
     pub(super) fn split<'a>(
         &self,
         builder: &mut Builder,
@@ -573,11 +543,6 @@ impl MessageOperation {
             .as_ref()
             .ok_or(DiagramError::NotSplittable)?;
         f(builder, output, split_op)
-    }
-
-    #[cfg(test)]
-    pub(super) fn joinable(&self) -> bool {
-        self.join_impl.is_some()
     }
 
     pub(super) fn join<OutputIter>(
@@ -1157,6 +1122,38 @@ mod tests {
 
     fn multiply3(i: i64) -> i64 {
         i * 3
+    }
+
+    /// Some extra impl only used in tests (for now).
+    /// If these impls are needed outside tests, then move them to the main impl.
+    impl MessageOperation {
+        fn deserializable(&self) -> bool {
+            self.deserialize_impl.is_some()
+        }
+
+        fn serializable(&self) -> bool {
+            self.serialize_impl.is_some()
+        }
+
+        fn cloneable(&self) -> bool {
+            self.fork_clone_impl.is_some()
+        }
+
+        fn unzippable(&self) -> bool {
+            self.unzip_impl.is_some()
+        }
+
+        fn can_fork_result(&self) -> bool {
+            self.fork_result_impl.is_some()
+        }
+
+        fn splittable(&self) -> bool {
+            self.split_impl.is_some()
+        }
+
+        fn joinable(&self) -> bool {
+            self.join_impl.is_some()
+        }
     }
 
     #[test]
