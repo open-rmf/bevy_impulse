@@ -186,6 +186,7 @@ type SplitFn = Box<
 >;
 type JoinFn = Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramError>>;
 
+#[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
     registry: &'a mut DiagramElementRegistry,
     _ignore: PhantomData<(Deserialize, Serialize, Cloneable)>,
@@ -320,7 +321,7 @@ where
 
     /// Mark the node as having a unzippable response. This is required in order for the node
     /// to be able to be connected to a "Unzip" operation.
-    pub fn with_unzip(self) -> Self
+    pub fn with_unzip(&mut self) -> &mut Self
     where
         DefaultImplMarker<(Message, DefaultSerializer)>: DynUnzip,
     {
@@ -329,7 +330,7 @@ where
     }
 
     /// Mark the node as having an unzippable response whose elements are not serializable.
-    pub fn with_unzip_unserializable(self) -> Self
+    pub fn with_unzip_minimal(&mut self) -> &mut Self
     where
         DefaultImplMarker<(Message, NotSupported)>: DynUnzip,
     {
@@ -339,7 +340,7 @@ where
 
     /// Mark the node as having a [`Result<_, _>`] response. This is required in order for the node
     /// to be able to be connected to a "Fork Result" operation.
-    pub fn with_fork_result(self) -> Self
+    pub fn with_fork_result(&mut self) -> &mut Self
     where
         DefaultImpl: DynForkResult<Message>,
     {
@@ -349,7 +350,7 @@ where
 
     /// Mark the node as having a splittable response. This is required in order
     /// for the node to be able to be connected to a "Split" operation.
-    pub fn with_split(self) -> Self
+    pub fn with_split(&mut self) -> &mut Self
     where
         DefaultImpl: DynSplit<Message, DefaultSerializer>,
     {
@@ -360,7 +361,7 @@ where
 
     /// Mark the node as having a splittable response but the items from the split
     /// are unserializable.
-    pub fn with_split_unserializable(self) -> Self
+    pub fn with_split_minimal(&mut self) -> &mut Self
     where
         DefaultImpl: DynSplit<Message, NotSupported>,
     {
@@ -402,7 +403,7 @@ where
     where
         DefaultImplMarker<(Response, NotSupported)>: DynUnzip,
     {
-        MessageRegistrationBuilder::new(self.registry).with_unzip_unserializable();
+        MessageRegistrationBuilder::new(self.registry).with_unzip_minimal();
         self
     }
 
@@ -432,7 +433,7 @@ where
     where
         DefaultImpl: DynSplit<Response, NotSupported>,
     {
-        MessageRegistrationBuilder::new(self.registry).with_split_unserializable();
+        MessageRegistrationBuilder::new(self.registry).with_split_minimal();
         self
     }
 }
@@ -608,7 +609,7 @@ impl Serialize for MessageOperation {
             s.serialize_entry("fork_clone", &serde_json::Value::Null)?;
         }
         if let Some(unzip_impl) = &self.unzip_impl {
-            s.serialize_entry("unzip", &json!({"slots": unzip_impl.slots()}))?;
+            s.serialize_entry("unzip", &json!({"output_types": unzip_impl.output_types()}))?;
         }
         if self.fork_result_impl.is_some() {
             s.serialize_entry("fork_result", &serde_json::Value::Null)?;

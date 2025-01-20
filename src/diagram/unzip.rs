@@ -19,7 +19,7 @@ pub struct UnzipOp {
 
 pub trait DynUnzip {
     /// Returns a list of type names that this message unzips to.
-    fn slots(&self) -> Vec<&'static str>;
+    fn output_types(&self) -> Vec<&'static str>;
 
     fn dyn_unzip(
         &self,
@@ -32,7 +32,7 @@ pub trait DynUnzip {
 }
 
 impl<T> DynUnzip for NotSupportedMarker<T> {
-    fn slots(&self) -> Vec<&'static str> {
+    fn output_types(&self) -> Vec<&'static str> {
         Vec::new()
     }
 
@@ -54,7 +54,7 @@ macro_rules! dyn_unzip_impl {
             $($P: Send + Sync + 'static),*,
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
         {
-            fn slots(&self) -> Vec<&'static str> {
+            fn output_types(&self) -> Vec<&'static str> {
                 vec![$(
                     std::any::type_name::<$P>(),
                 )*]

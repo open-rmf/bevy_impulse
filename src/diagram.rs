@@ -1,8 +1,8 @@
+mod diagram_element_registry;
 mod fork_clone;
 mod fork_result;
 mod impls;
 mod join;
-mod registry;
 mod serialization;
 mod split_serialized;
 mod transform;
@@ -10,11 +10,11 @@ mod unzip;
 mod workflow_builder;
 
 use bevy_ecs::system::Commands;
+pub use diagram_element_registry::*;
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
 pub use join::JoinOutput;
-pub use registry::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
