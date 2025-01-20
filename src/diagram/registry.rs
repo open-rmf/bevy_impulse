@@ -933,9 +933,9 @@ impl DiagramElementRegistry {
     /// operations or else the compiler will not allow you to enable them.
     ///
     /// ```
-    /// use bevy_impulse::{NodeBuilderOptions, Registry};
+    /// use bevy_impulse::{NodeBuilderOptions, DiagramElementRegistry};
     ///
-    /// let mut registry = Registry::new();
+    /// let mut registry = DiagramElementRegistry::new();
     /// registry.register_node_builder(
     ///     NodeBuilderOptions::new("echo".to_string()),
     ///     |builder, _config: ()| builder.create_map_block(|msg: String| msg)
@@ -985,13 +985,13 @@ impl DiagramElementRegistry {
     /// a way to register it.
     ///
     /// ```
-    /// use bevy_impulse::{NodeBuilderOptions, Registry};
+    /// use bevy_impulse::{NodeBuilderOptions, DiagramElementRegistry};
     ///
     /// struct NonSerializable {
     ///     data: String
     /// }
     ///
-    /// let mut registry = Registry::new();
+    /// let mut registry = DiagramElementRegistry::new();
     /// registry
     ///     .opt_out()
     ///     .no_request_deserializing()

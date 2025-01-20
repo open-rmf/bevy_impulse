@@ -380,10 +380,10 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, Registry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
     ///
     /// let mut app = bevy_app::App::new();
-    /// let mut registry = Registry::new();
+    /// let mut registry = DiagramElementRegistry::new();
     /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
