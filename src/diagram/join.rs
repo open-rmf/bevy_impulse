@@ -1,5 +1,3 @@
-use std::any::TypeId;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -30,13 +28,7 @@ where
     T: Send + Sync + 'static,
     Serializer: SerializeMessage<Vec<T>>,
 {
-    if registry.join_impls.contains_key(&TypeId::of::<T>()) {
-        return;
-    }
-
-    registry
-        .join_impls
-        .insert(TypeId::of::<T>(), Box::new(join_impl::<T>));
+    registry.register_join::<T>(Box::new(join_impl::<T>));
 }
 
 /// Serialize the outputs before joining them, and convert the resulting joined output into a
@@ -55,14 +47,7 @@ pub(super) fn serialize_and_join(
 
     let outputs = outputs
         .into_iter()
-        .map(|o| {
-            let serialize_impl = registry
-                .serialize_impls
-                .get(&o.type_id)
-                .ok_or(DiagramError::NotSerializable)?;
-            let serialized_output = serialize_impl(builder, o)?;
-            Ok(serialized_output)
-        })
+        .map(|o| registry.serialize(builder, o))
         .collect::<Result<Vec<_>, DiagramError>>()?;
 
     // we need to convert the joined output to [`serde_json::Value`] in order for it to be
@@ -163,7 +148,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "join",
                 },
                 "get_split_value2": {
@@ -173,7 +158,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "join",
                 },
                 "join": {
@@ -235,7 +220,7 @@ mod tests {
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
                 "get_split_value2": {
@@ -245,7 +230,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
                 "join": {

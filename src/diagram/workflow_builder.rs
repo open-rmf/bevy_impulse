@@ -9,8 +9,8 @@ use crate::{
 
 use super::{
     fork_clone::DynForkClone, impls::DefaultImpl, split_chain, transform::transform_output,
-    BuiltinTarget, Diagram, DiagramError, DiagramOperation, DiagramScope, DynInputSlot, DynOutput,
-    NextOperation, NodeOp, NodeRegistry, OperationId, SourceOperation,
+    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramOperation, DiagramScope,
+    DynInputSlot, DynOutput, NextOperation, NodeOp, OperationId, SourceOperation,
 };
 
 struct Vertex<'a> {
@@ -40,7 +40,7 @@ enum EdgeState<'a> {
 pub(super) fn create_workflow<'a, Streams: StreamPack>(
     scope: DiagramScope<Streams>,
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &DiagramElementRegistry,
     diagram: &'a Diagram,
 ) -> Result<(), DiagramError> {
     // first create all the vertices
@@ -156,7 +156,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
     for (op_id, op) in &diagram.ops {
         match op {
             DiagramOperation::Node(node_op) => {
-                let reg = registry.get_registration(&node_op.builder)?;
+                let reg = registry.get_node_registration(&node_op.builder)?;
                 let n = reg.create_node(builder, node_op.config.clone())?;
                 inputs.insert(op_id, n.input);
                 add_edge(
@@ -250,8 +250,8 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
     for edge_id in terminate_edges {
         let edge = edges.remove(&edge_id).ok_or(unknown_diagram_error!())?;
         match edge.state {
-            EdgeState::Ready { output, origin } => {
-                let serialized_output = serialize(builder, registry, output, origin)?;
+            EdgeState::Ready { output, origin: _ } => {
+                let serialized_output = registry.messages.serialize(builder, output)?;
                 builder.connect(serialized_output, scope.terminate);
             }
             EdgeState::Pending => return Err(DiagramError::BadInterconnectChain),
@@ -263,7 +263,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
 fn connect_vertex<'a>(
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &DiagramElementRegistry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
     target: &'a Vertex,
@@ -298,10 +298,9 @@ fn connect_vertex<'a>(
             }
 
             let joined_output = if join_op.no_serialize.unwrap_or(false) {
-                let join_impl = &registry.data.join_impls[&ordered_outputs[0].type_id];
-                join_impl(builder, ordered_outputs)?
+                registry.messages.join(builder, ordered_outputs)?
             } else {
-                serialize_and_join(builder, &registry.data, ordered_outputs)?.into()
+                serialize_and_join(builder, &registry.messages, ordered_outputs)?.into()
             };
 
             let out_edge = edges
@@ -325,7 +324,7 @@ fn connect_vertex<'a>(
 
 fn connect_edge<'a>(
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &DiagramElementRegistry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
     edge_id: usize,
@@ -354,7 +353,9 @@ fn connect_edge<'a>(
         DiagramOperation::Node(_) => {
             let input = inputs[target.op_id];
             let deserialized_output =
-                deserialize(builder, registry, output, target, input.type_id)?;
+                registry
+                    .messages
+                    .deserialize(&input.type_id, builder, output)?;
             dyn_connect(builder, deserialized_output, input)?;
         }
         DiagramOperation::ForkClone(fork_clone_op) => {
@@ -364,14 +365,7 @@ fn connect_edge<'a>(
                     builder, output, amount,
                 )
             } else {
-                let origin = if let Some(origin_node) = origin {
-                    origin_node
-                } else {
-                    return Err(DiagramError::NotCloneable);
-                };
-
-                let reg = registry.get_registration(&origin.builder)?;
-                reg.fork_clone(builder, output, amount)
+                registry.messages.fork_clone(builder, output, amount)
             }?;
             for (o, e) in outputs.into_iter().zip(target.out_edges.iter()) {
                 let out_edge = edges.get_mut(e).ok_or(unknown_diagram_error!())?;
@@ -382,14 +376,7 @@ fn connect_edge<'a>(
             let outputs = if output.type_id == TypeId::of::<serde_json::Value>() {
                 Err(DiagramError::NotUnzippable)
             } else {
-                let origin = if let Some(origin_node) = origin {
-                    origin_node
-                } else {
-                    return Err(DiagramError::NotUnzippable);
-                };
-
-                let reg = registry.get_registration(&origin.builder)?;
-                reg.unzip(builder, output)
+                registry.messages.unzip(builder, output)
             }?;
             if outputs.len() < unzip_op.next.len() {
                 return Err(DiagramError::NotUnzippable);
@@ -403,14 +390,7 @@ fn connect_edge<'a>(
             let (ok, err) = if output.type_id == TypeId::of::<serde_json::Value>() {
                 Err(DiagramError::CannotForkResult)
             } else {
-                let origin = if let Some(origin_node) = origin {
-                    origin_node
-                } else {
-                    return Err(DiagramError::CannotForkResult);
-                };
-
-                let reg = registry.get_registration(&origin.builder)?;
-                reg.fork_result(builder, output)
+                registry.messages.fork_result(builder, output)
             }?;
             {
                 let out_edge = edges
@@ -433,14 +413,7 @@ fn connect_edge<'a>(
                 let chain = output.into_output::<serde_json::Value>()?.chain(builder);
                 split_chain(chain, split_op)
             } else {
-                let origin = if let Some(origin_node) = origin {
-                    origin_node
-                } else {
-                    return Err(DiagramError::NotSplittable);
-                };
-
-                let reg = registry.get_registration(&origin.builder)?;
-                reg.split(builder, output, split_op)
+                registry.messages.split(builder, output, split_op)
             }?;
 
             // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
@@ -512,57 +485,4 @@ fn dyn_connect(
     let typed_input = InputSlot::<TypeErased>::new(input.scope(), input.id());
     builder.connect(typed_output, typed_input);
     Ok(())
-}
-
-/// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
-fn deserialize(
-    builder: &mut Builder,
-    registry: &NodeRegistry,
-    output: DynOutput,
-    target: &Vertex,
-    input_type: TypeId,
-) -> Result<DynOutput, DiagramError> {
-    if output.type_id != TypeId::of::<serde_json::Value>() || output.type_id == input_type {
-        Ok(output)
-    } else {
-        let serialized = output.into_output::<serde_json::Value>()?;
-        match target.op {
-            DiagramOperation::Node(node_op) => {
-                let reg = registry.get_registration(&node_op.builder)?;
-                if reg.metadata.request.deserializable {
-                    let deserialize_impl = &registry.data.deserialize_impls[&input_type];
-                    deserialize_impl(builder, serialized)
-                } else {
-                    Err(DiagramError::NotSerializable)
-                }
-            }
-            _ => Err(DiagramError::NotSerializable),
-        }
-    }
-}
-
-fn serialize(
-    builder: &mut Builder,
-    registry: &NodeRegistry,
-    output: DynOutput,
-    origin: Option<&NodeOp>,
-) -> Result<Output<serde_json::Value>, DiagramError> {
-    if output.type_id == TypeId::of::<serde_json::Value>() {
-        output.into_output()
-    } else {
-        // Cannot serialize if we don't know the origin, as we need it to know which serialize impl to use.
-        let origin = if let Some(origin) = origin {
-            origin
-        } else {
-            return Err(DiagramError::NotSerializable);
-        };
-
-        let reg = registry.get_registration(&origin.builder)?;
-        if reg.metadata.response.serializable {
-            let serialize_impl = &registry.data.serialize_impls[&output.type_id];
-            serialize_impl(builder, output)
-        } else {
-            Err(DiagramError::NotSerializable)
-        }
-    }
 }

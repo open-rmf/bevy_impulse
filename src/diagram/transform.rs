@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::{Builder, Output};
 
-use super::{DiagramError, DynOutput, NextOperation, NodeRegistry};
+use super::{DiagramElementRegistry, DiagramError, DynOutput, NextOperation};
 
 #[derive(Error, Debug)]
 pub enum TransformError {
@@ -31,7 +31,7 @@ pub struct TransformOp {
 
 pub(super) fn transform_output(
     builder: &mut Builder,
-    registry: &NodeRegistry,
+    registry: &DiagramElementRegistry,
     output: DynOutput,
     transform_op: &TransformOp,
 ) -> Result<Output<serde_json::Value>, DiagramError> {
@@ -40,12 +40,7 @@ pub(super) fn transform_output(
     let json_output = if output.type_id == TypeId::of::<serde_json::Value>() {
         output.into_output()
     } else {
-        let serialize = registry
-            .data
-            .serialize_impls
-            .get(&output.type_id)
-            .ok_or(DiagramError::NotSerializable)?;
-        serialize(builder, output)
+        registry.messages.serialize(builder, output)
     }?;
 
     let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;
@@ -90,7 +85,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "transform",
                 },
                 "transform": {

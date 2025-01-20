@@ -1,8 +1,8 @@
 use std::{error::Error, fs::File, str::FromStr};
 
 use bevy_impulse::{
-    Diagram, DiagramError, ImpulsePlugin, NodeBuilderOptions, NodeRegistry, Promise, RequestExt,
-    RunCommandsOnWorldExt,
+    Diagram, DiagramElementRegistry, DiagramError, ImpulsePlugin, NodeBuilderOptions, Promise,
+    RequestExt, RunCommandsOnWorldExt,
 };
 use clap::Parser;
 
@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     tracing_subscriber::fmt::init();
 
-    let mut registry = NodeRegistry::default();
+    let mut registry = DiagramElementRegistry::new();
     registry.register_node_builder(
         NodeBuilderOptions::new("add").with_name("Add"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req + config),

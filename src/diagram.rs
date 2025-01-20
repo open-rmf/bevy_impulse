@@ -2,7 +2,7 @@ mod fork_clone;
 mod fork_result;
 mod impls;
 mod join;
-mod node_registry;
+mod registration;
 mod serialization;
 mod split_serialized;
 mod transform;
@@ -14,7 +14,7 @@ use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 use join::JoinOp;
 pub use join::JoinOutput;
-pub use node_registry::*;
+pub use registration::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
@@ -380,10 +380,10 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, NodeRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
     ///
     /// let mut app = bevy_app::App::new();
-    /// let mut registry = NodeRegistry::default();
+    /// let mut registry = DiagramElementRegistry::new();
     /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
@@ -411,7 +411,7 @@ impl Diagram {
     fn spawn_workflow<Streams>(
         &self,
         cmds: &mut Commands,
-        registry: &NodeRegistry,
+        registry: &DiagramElementRegistry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
@@ -451,7 +451,7 @@ impl Diagram {
     pub fn spawn_io_workflow(
         &self,
         cmds: &mut Commands,
-        registry: &NodeRegistry,
+        registry: &DiagramElementRegistry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
         self.spawn_workflow::<()>(cmds, registry)
     }
@@ -506,6 +506,9 @@ pub enum DiagramError {
     #[error("response cannot be split")]
     NotSplittable,
 
+    #[error("responses cannot be joined")]
+    NotJoinable,
+
     #[error("empty join is not allowed")]
     EmptyJoin,
 
@@ -557,7 +560,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "dispose" },
                 },
             },
@@ -625,7 +628,7 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "op2",
                 },
                 "op2": {
@@ -651,12 +654,12 @@ mod tests {
             "ops": {
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "op2",
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": "op1",
                 },
             },
@@ -691,7 +694,7 @@ mod tests {
                 },
                 "op2": {
                     "type": "node",
-                    "builder": "multiply3_uncloneable",
+                    "builder": "multiply3",
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -728,11 +731,11 @@ mod tests {
         let json_str = r#"
         {
             "version": "0.1.0",
-            "start": "multiply3_uncloneable",
+            "start": "multiply3",
             "ops": {
-                "multiply3_uncloneable": {
+                "multiply3": {
                     "type": "node",
-                    "builder": "multiplyBy",
+                    "builder": "multiply_by",
                     "config": 7,
                     "next": { "builtin": "terminate" }
                 }
