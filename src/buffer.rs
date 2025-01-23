@@ -22,7 +22,7 @@ use bevy_ecs::{
     system::SystemParam,
 };
 
-use std::{ops::RangeBounds, sync::Arc};
+use std::{ops::RangeBounds, sync::Arc, any::TypeId};
 
 use crate::{
     Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
@@ -33,6 +33,9 @@ pub(crate) use buffer_access_lifecycle::*;
 
 mod buffer_key_builder;
 pub(crate) use buffer_key_builder::*;
+
+mod buffer_map;
+pub use buffer_map::*;
 
 mod buffer_storage;
 pub(crate) use buffer_storage::*;
@@ -93,6 +96,39 @@ pub struct CloneFromBuffer<T: Clone> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
+}
+
+/// A [`Buffer`] whose type has been anonymized.
+#[derive(Clone, Copy, Debug)]
+pub struct DynBuffer {
+    pub(crate) scope: Entity,
+    pub(crate) source: Entity,
+    pub(crate) type_id: TypeId,
+}
+
+impl DynBuffer {
+    pub fn into_buffer<T: 'static>(&self) -> Option<Buffer<T>> {
+        if TypeId::of::<T>() == self.type_id {
+            Some(Buffer {
+                scope: self.scope,
+                source: self.source,
+                _ignore: Default::default(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: 'static> From<Buffer<T>> for DynBuffer {
+    fn from(value: Buffer<T>) -> Self {
+        let type_id = TypeId::of::<T>();
+        DynBuffer {
+            scope: value.scope,
+            source: value.source,
+            type_id,
+        }
+    }
 }
 
 /// Settings to describe the behavior of a buffer.
