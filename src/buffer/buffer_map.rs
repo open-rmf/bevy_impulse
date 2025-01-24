@@ -20,28 +20,26 @@ use std::{
     borrow::Cow,
 };
 
+use smallvec::SmallVec;
+
 use bevy_ecs::prelude::{Entity, World};
 
-use crate::{DynBuffer, OperationError, OperationResult, OperationRoster, Buffered, Gate};
+use crate::{
+    DynBuffer, OperationError, OperationResult, OperationRoster, Buffered, Gate,
+    Joined, Accessed,
+};
 
 #[derive(Clone)]
 pub struct BufferMap {
     inner: HashMap<Cow<'static, str>, DynBuffer>,
 }
 
-pub trait BufferKeyMap: Sized {
-
+pub trait BufferMapLayout: Sized {
     fn buffered_count(
         buffers: &BufferMap,
         session: Entity,
-        world: &World
+        world: &World,
     ) -> Result<usize, OperationError>;
-
-    fn pull(
-        buffers: &BufferMap,
-        session: Entity,
-        world: &mut World,
-    ) -> Result<Self, OperationError>;
 
     fn add_listener(
         buffers: &BufferMap,
@@ -56,6 +54,25 @@ pub trait BufferKeyMap: Sized {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult;
+
+    fn as_input(buffers: &BufferMap) -> SmallVec<[Entity; 8]>;
+
+    fn ensure_active_session(
+        buffers: &BufferMap,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult;
+}
+
+pub trait JoinedValue: BufferMapLayout {
+    fn buffered_count(
+        buffers: &BufferMap,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError>;
+}
+
+pub trait BufferKeyMap: BufferMapLayout {
 }
 
 struct BufferedMap<K> {
@@ -63,10 +80,13 @@ struct BufferedMap<K> {
     _ignore: std::marker::PhantomData<fn(K)>,
 }
 
-impl<K: BufferKeyMap> Buffered for BufferedMap<K> {
+impl<K> Clone for BufferedMap<K> {
+    fn clone(&self) -> Self {
+        Self { map: self.map.clone(), _ignore: Default::default() }
+    }
+}
 
-    type Item = K;
-
+impl<L: BufferMapLayout> Buffered for BufferedMap<L> {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.map.inner.values() {
             assert_eq!(scope, buffer.scope);
@@ -74,14 +94,36 @@ impl<K: BufferKeyMap> Buffered for BufferedMap<K> {
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        K::buffered_count(&self.map, session, world)
-    }
-
-    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-        K::pull(&self.map, session, world)
+        L::buffered_count(&self.map, session, world)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
+        L::add_listener(&self.map, listener, world)
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: Gate,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        L::gate_action(&self.map, session, action, world, roster)
+    }
+
+    fn as_input(&self) -> SmallVec<[Entity; 8]> {
+        L::as_input(&self.map)
+    }
+
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        L::ensure_active_session(&self.map, session, world)
+    }
+}
+
+impl<V: JoinedValue> Joined for BufferedMap<V> {
+    type Item = V;
+
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
 
     }
 }

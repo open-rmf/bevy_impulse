@@ -23,7 +23,7 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferItem, BufferKeys, BufferSettings,
+    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, JoinedItem, BufferKeys, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
     GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
     OperateBufferAccess, OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output,
@@ -231,10 +231,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Alternative way of calling [`Bufferable::join`]
-    pub fn join<'b, B: Bufferable>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferItem<B>>
+    pub fn join<'b, B: Bufferable>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, JoinedItem<B>>
     where
         B::BufferType: 'static + Send + Sync,
-        BufferItem<B>: 'static + Send + Sync,
+        JoinedItem<B>: 'static + Send + Sync,
     {
         buffers.join(self)
     }

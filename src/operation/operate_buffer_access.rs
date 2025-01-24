@@ -25,7 +25,7 @@ use std::{
 use smallvec::SmallVec;
 
 use crate::{
-    BufferKeyBuilder, Buffered, ChannelQueue, Input, InputBundle, ManageInput, Operation,
+    Accessed, BufferKeyBuilder, ChannelQueue, Input, InputBundle, ManageInput, Operation,
     OperationCleanup, OperationError, OperationReachability, OperationRequest, OperationResult,
     OperationSetup, OrBroken, ReachabilityResult, ScopeStorage, SingleInputStorage,
     SingleTargetStorage,
@@ -34,7 +34,7 @@ use crate::{
 pub(crate) struct OperateBufferAccess<T, B>
 where
     T: 'static + Send + Sync,
-    B: Buffered,
+    B: Accessed,
 {
     buffers: B,
     target: Entity,
@@ -44,7 +44,7 @@ where
 impl<T, B> OperateBufferAccess<T, B>
 where
     T: 'static + Send + Sync,
-    B: Buffered,
+    B: Accessed,
 {
     pub(crate) fn new(buffers: B, target: Entity) -> Self {
         Self {
@@ -59,12 +59,12 @@ where
 pub struct BufferKeyUsage(pub(crate) fn(Entity, Entity, &World) -> ReachabilityResult);
 
 #[derive(Component)]
-pub(crate) struct BufferAccessStorage<B: Buffered> {
+pub(crate) struct BufferAccessStorage<B: Accessed> {
     pub(crate) buffers: B,
     pub(crate) keys: HashMap<Entity, B::Key>,
 }
 
-impl<B: Buffered> BufferAccessStorage<B> {
+impl<B: Accessed> BufferAccessStorage<B> {
     pub(crate) fn new(buffers: B) -> Self {
         Self {
             buffers,
@@ -76,7 +76,7 @@ impl<B: Buffered> BufferAccessStorage<B> {
 impl<T, B> Operation for OperateBufferAccess<T, B>
 where
     T: 'static + Send + Sync,
-    B: Buffered + 'static + Send + Sync,
+    B: Accessed + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
@@ -138,7 +138,7 @@ pub(crate) fn get_access_keys<B>(
     world: &mut World,
 ) -> Result<B::Key, OperationError>
 where
-    B: Buffered + 'static + Send + Sync,
+    B: Accessed + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
     let scope = world.get::<ScopeStorage>(source).or_broken()?.get();
@@ -180,7 +180,7 @@ pub(crate) fn buffer_key_usage<B>(
     world: &World,
 ) -> ReachabilityResult
 where
-    B: Buffered + 'static + Send + Sync,
+    B: Accessed + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
     let key = world

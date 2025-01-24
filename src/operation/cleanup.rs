@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    BufferAccessStorage, Buffered, ManageDisposal, ManageInput, MiscellaneousFailure,
+    Accessed, BufferAccessStorage, ManageDisposal, ManageInput, MiscellaneousFailure,
     OperationError, OperationResult, OperationRoster, OrBroken, ScopeStorage, UnhandledErrors,
 };
 
@@ -98,7 +98,7 @@ impl<'a> OperationCleanup<'a> {
 
     pub fn cleanup_buffer_access<B>(&mut self) -> OperationResult
     where
-        B: Buffered + 'static + Send + Sync,
+        B: Accessed + 'static + Send + Sync,
         B::Key: 'static + Send + Sync,
     {
         let scope = self

@@ -19,15 +19,16 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain, CleanupWorkflowConditions,
-    CloneFromBuffer, Join, Listen, Output, Scope, ScopeSettings, UnusedTarget,
+    Accessed, AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain,
+    CleanupWorkflowConditions, CloneFromBuffer, Join, Joined, Listen, Output, Scope,
+    ScopeSettings, UnusedTarget,
 };
 
-pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Buffered>::Key;
-pub type BufferItem<B> = <<B as Bufferable>::BufferType as Buffered>::Item;
+pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Accessed>::Key;
+pub type JoinedItem<B> = <<B as Bufferable>::BufferType as Joined>::Item;
 
 pub trait Bufferable {
-    type BufferType: Buffered;
+    type BufferType: Joined + Accessed;
 
     /// Convert these bufferable workflow elements into buffers if they are not
     /// buffers already.
@@ -42,11 +43,11 @@ pub trait Bufferable {
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, BufferItem<Self>>
+    ) -> Chain<'w, 's, 'a, 'b, JoinedItem<Self>>
     where
         Self: Sized,
         Self::BufferType: 'static + Send + Sync,
-        BufferItem<Self>: 'static + Send + Sync,
+        JoinedItem<Self>: 'static + Send + Sync,
     {
         let scope = builder.scope();
         let buffers = self.into_buffer(builder);
@@ -207,7 +208,7 @@ impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
 }
 
 pub trait IterBufferable {
-    type BufferElement: Buffered;
+    type BufferElement: Buffered + Joined;
 
     /// Convert an iterable collection of bufferable workflow elements into
     /// buffers if they are not buffers already.
@@ -224,11 +225,11 @@ pub trait IterBufferable {
     fn join_vec<'w, 's, 'a, 'b, const N: usize>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[<Self::BufferElement as Buffered>::Item; N]>>
+    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[<Self::BufferElement as Joined>::Item; N]>>
     where
         Self: Sized,
         Self::BufferElement: 'static + Send + Sync,
-        <Self::BufferElement as Buffered>::Item: 'static + Send + Sync,
+        <Self::BufferElement as Joined>::Item: 'static + Send + Sync,
     {
         let buffers = self.into_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
