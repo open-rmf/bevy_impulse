@@ -22,13 +22,18 @@ use bevy_ecs::{
 
 use smallvec::SmallVec;
 
-use crate::{BufferStorage, OperationError, OperationResult, OrBroken};
+use crate::{
+    BufferStorage, DynBufferStorage, OperationError, OperationResult, OrBroken,
+    BufferInspection,
+};
 
 pub trait InspectBuffer {
     fn buffered_count<T: 'static + Send + Sync>(
         &self,
         session: Entity,
     ) -> Result<usize, OperationError>;
+
+    fn dyn_buffered_count(&self, session: Entity) -> Result<usize, OperationError>;
 
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
         &self,
@@ -47,6 +52,11 @@ impl<'w> InspectBuffer for EntityRef<'w> {
     ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
         Ok(buffer.count(session))
+    }
+
+    fn dyn_buffered_count(&self, session: Entity) -> Result<usize, OperationError> {
+        let count = self.get::<DynBufferStorage>().or_broken()?.count;
+        count(self, session)
     }
 
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
@@ -89,6 +99,10 @@ pub trait ManageBuffer {
     ) -> Result<SmallVec<[T; 16]>, OperationError>;
 
     fn clear_buffer<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
+
+    fn ensure_session<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
+
+    fn dyn_ensure_session(&mut self, session: Entity) -> OperationResult;
 }
 
 impl<'w> ManageBuffer for EntityWorldMut<'w> {
@@ -113,5 +127,22 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
             .or_broken()?
             .clear_session(session);
         Ok(())
+    }
+
+    fn ensure_session<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult {
+        self
+            .get_mut::<BufferStorage<T>>()
+            .or_broken()?
+            .ensure_session(session);
+        Ok(())
+    }
+
+    fn dyn_ensure_session(&mut self, session: Entity) -> OperationResult {
+        let ensure_session = self
+            .get_mut::<DynBufferStorage>()
+            .or_broken()?
+            .ensure_session;
+
+        ensure_session(self, session)
     }
 }

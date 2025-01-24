@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferStorage, CloneFromBuffer,
     ForkTargetStorage, Gate, GateState, InspectBuffer, ManageBuffer, OperationError,
-    OperationResult, OperationRoster, OrBroken, SingleInputStorage,
+    OperationResult, OperationRoster, OrBroken, SingleInputStorage, DynBuffer,
 };
 
 pub trait Buffered: Clone {
@@ -72,23 +72,7 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        let mut targets = world
-            .get_mut::<ForkTargetStorage>(self.source)
-            .or_broken()?;
-        if !targets.0.contains(&listener) {
-            targets.0.push(listener);
-        }
-
-        if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
-            input_storage.add(self.source);
-        } else {
-            world
-                .get_entity_mut(listener)
-                .or_broken()?
-                .insert(SingleInputStorage::new(self.source));
-        }
-
-        Ok(())
+        add_listener_to_source(self.source, listener, world)
     }
 
     fn gate_action(
@@ -161,22 +145,7 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        let mut targets = world
-            .get_mut::<ForkTargetStorage>(self.source)
-            .or_broken()?;
-        if !targets.0.contains(&listener) {
-            targets.0.push(listener);
-        }
-
-        if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
-            input_storage.add(self.source);
-        } else {
-            world
-                .get_entity_mut(listener)
-                .or_broken()?
-                .insert(SingleInputStorage::new(self.source));
-        }
-        Ok(())
+        add_listener_to_source(self.source, listener, world)
     }
 
     fn gate_action(
@@ -195,10 +164,9 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
 
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         world
-            .get_mut::<BufferStorage<T>>(self.source)
+            .get_entity_mut(self.source)
             .or_broken()?
-            .ensure_session(session);
-        Ok(())
+            .ensure_session::<T>(session)
     }
 }
 
@@ -234,6 +202,44 @@ impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
 
     fn is_key_in_use(key: &Self::Key) -> bool {
         key.is_in_use()
+    }
+}
+
+impl Buffered for DynBuffer {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
+        world
+            .get_entity(self.source)
+            .or_broken()?
+            .dyn_buffered_count(session)
+    }
+
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
+        add_listener_to_source(self.source, listener, world)
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: Gate,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        GateState::apply(self.source, session, action, world, roster)
+    }
+
+    fn as_input(&self) -> SmallVec<[Entity; 8]> {
+        SmallVec::from_iter([self.source])
+    }
+
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        world
+            .get_entity_mut(self.source)
+            .or_broken()?
+            .dyn_ensure_session(session)
     }
 }
 
@@ -567,4 +573,28 @@ impl<T: Accessed, const N: usize> Accessed for SmallVec<[T; N]> {
 
         false
     }
+}
+
+fn add_listener_to_source(
+    source: Entity,
+    listener: Entity,
+    world: &mut World,
+) -> OperationResult {
+    let mut targets = world
+        .get_mut::<ForkTargetStorage>(source)
+        .or_broken()?;
+    if !targets.0.contains(&listener) {
+        targets.0.push(listener);
+    }
+
+    if let Some(mut input_storage) = world.get_mut::<SingleInputStorage>(listener) {
+        input_storage.add(source);
+    } else {
+        world
+            .get_entity_mut(listener)
+            .or_broken()?
+            .insert(SingleInputStorage::new(source));
+    }
+
+    Ok(())
 }

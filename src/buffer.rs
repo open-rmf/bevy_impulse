@@ -28,6 +28,9 @@ use crate::{
     Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
 };
 
+mod any_buffer;
+pub use any_buffer::*;
+
 mod buffer_access_lifecycle;
 pub(crate) use buffer_access_lifecycle::*;
 
@@ -92,6 +95,15 @@ impl<T> Buffer<T> {
     }
 }
 
+impl<T> Clone for Buffer<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Buffer<T> {}
+
+#[derive(Clone, Copy)]
 pub struct CloneFromBuffer<T: Clone> {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
@@ -107,6 +119,7 @@ pub struct DynBuffer {
 }
 
 impl DynBuffer {
+    /// Downcast this into a concrete [`Buffer`] type.
     pub fn into_buffer<T: 'static>(&self) -> Option<Buffer<T>> {
         if TypeId::of::<T>() == self.type_id {
             Some(Buffer {
@@ -193,22 +206,6 @@ impl Default for RetentionPolicy {
     }
 }
 
-impl<T> Clone for Buffer<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for Buffer<T> {}
-
-impl<T: Clone> Clone for CloneFromBuffer<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Clone> Copy for CloneFromBuffer<T> {}
-
 /// This key can unlock access to the contents of a buffer by passing it into
 /// [`BufferAccess`] or [`BufferAccessMut`].
 ///
@@ -266,6 +263,58 @@ impl<T> BufferKey<T> {
             .as_ref()
             .map(|l| Arc::new(l.as_ref().clone()));
         deep
+    }
+}
+
+#[derive(Clone)]
+pub struct DynBufferKey {
+    buffer: Entity,
+    session: Entity,
+    accessor: Entity,
+    lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    type_id: TypeId,
+}
+
+impl std::fmt::Debug for DynBufferKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("DynBufferKey")
+            .field("buffer", &self.buffer)
+            .field("session", &self.session)
+            .field("accessor", &self.accessor)
+            .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
+            .field("type_id", &self.type_id)
+            .finish()
+    }
+}
+
+impl DynBufferKey {
+    /// Downcast this into a concrete [`BufferKey`] type.
+    pub fn into_buffer_key<T: 'static>(&self) -> Option<BufferKey<T>> {
+        if TypeId::of::<T>() == self.type_id {
+            Some(BufferKey {
+                buffer: self.buffer,
+                session: self.session,
+                accessor: self.accessor,
+                lifecycle: self.lifecycle.clone(),
+                _ignore: Default::default(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: 'static> From<BufferKey<T>> for DynBufferKey {
+    fn from(value: BufferKey<T>) -> Self {
+        let type_id = TypeId::of::<T>();
+        DynBufferKey {
+            buffer: value.buffer,
+            session: value.session,
+            accessor: value.accessor,
+            lifecycle: value.lifecycle.clone(),
+            type_id,
+        }
     }
 }
 

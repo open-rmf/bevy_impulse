@@ -17,7 +17,7 @@
 
 use crate::{
     check_reachability, execute_operation, is_downstream_of, Accessed, AddOperation, Blocker,
-    BufferKeyBuilder, Buffered, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents,
+    BufferKeyBuilder, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents,
     ClearBufferFn, CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup,
     FinalizeCleanupRequest, Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput,
     Operation, OperationCancel, OperationCleanup, OperationError, OperationReachability,
