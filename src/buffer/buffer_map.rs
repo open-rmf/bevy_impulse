@@ -29,7 +29,7 @@ use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
     DynBuffer, OperationError, OperationResult, OperationRoster, Buffered, Gate,
-    Joined, Accessed, BufferKeyBuilder, DynBufferKey,
+    Joined, Accessed, BufferKeyBuilder, AnyBufferKey,
 };
 
 #[derive(Clone)]
@@ -197,7 +197,7 @@ impl<K: BufferKeyMap> Accessed for BufferedMap<K> {
 /// Container to represent any layout of buffer keys.
 #[derive(Clone, Debug)]
 pub struct AnyBufferKeyMap {
-    pub keys: HashMap<Cow<'static, str>, DynBufferKey>,
+    pub keys: HashMap<Cow<'static, str>, AnyBufferKey>,
 }
 
 impl BufferMapLayout for AnyBufferKeyMap {

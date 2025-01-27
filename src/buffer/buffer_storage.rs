@@ -15,7 +15,10 @@
  *
 */
 
-use bevy_ecs::prelude::{Component, Entity, EntityRef, EntityWorldMut, World, Mut};
+use bevy_ecs::{
+    prelude::{Component, Entity, EntityRef, EntityWorldMut, World, Mut},
+    system::SystemState,
+};
 
 use smallvec::{Drain, SmallVec};
 
@@ -31,16 +34,13 @@ use std::{
 use thiserror::Error as ThisError;
 
 use crate::{
-    AnyBufferMut, BufferSettings, DynBufferKey, InspectBuffer, ManageBuffer,
-    RetentionPolicy, OperationError, OperationResult,
+    AnyBufferAccessMutState, BufferAccessMut, BufferSettings, AnyBufferKey,
+    InspectBuffer, ManageBuffer, RetentionPolicy, OperationError, OperationResult,
 };
 
-pub(crate) trait BufferInspection {
-    fn count(&self, session: Entity) -> usize;
-    fn active_sessions(&self) -> SmallVec<[Entity; 16]>;
-}
-
 pub(crate) trait DynBufferViewer<'a, R> {
+    fn dyn_count(&self, session: Entity) -> usize;
+    fn dyn_active_sessions(&self) -> SmallVec<[Entity; 16]>;
     fn dyn_oldest(&'a self, session: Entity) -> Option<R>;
     fn dyn_newest(&'a self, session: Entity) -> Option<R>;
     fn dyn_get(&'a self, session: Entity, index: usize) -> Option<R>;
@@ -81,6 +81,17 @@ pub(crate) struct BufferStorage<T> {
 }
 
 impl<T> BufferStorage<T> {
+    pub(crate) fn count(&self, session: Entity) -> usize  {
+        self.reverse_queues
+            .get(&session)
+            .map(|q| q.len())
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn active_sessions(&self) -> SmallVec<[Entity; 16]> {
+        self.reverse_queues.keys().copied().collect()
+    }
+
     fn impl_push(
         reverse_queue: &mut SmallVec<[T; 16]>,
         retention: RetentionPolicy,
@@ -270,22 +281,17 @@ impl<T> BufferStorage<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> BufferInspection for BufferStorage<T> {
-    fn count(&self, session: Entity) -> usize  {
-        self.reverse_queues
-            .get(&session)
-            .map(|q| q.len())
-            .unwrap_or(0)
-    }
-
-    fn active_sessions(&self) -> SmallVec<[Entity; 16]> {
-        self.reverse_queues.keys().copied().collect()
-    }
-}
-
 pub type AnyMessageRef<'a> = &'a (dyn Any + 'static + Send + Sync);
 
 impl<'a, T: 'static + Send + Sync + Any> DynBufferViewer<'a, AnyMessageRef<'a>> for Mut<'a, BufferStorage<T>> {
+    fn dyn_count(&self, session: Entity) -> usize {
+        self.count(session)
+    }
+
+    fn dyn_active_sessions(&self) -> SmallVec<[Entity; 16]> {
+        self.active_sessions()
+    }
+
     fn dyn_oldest(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
         self.oldest(session).map(to_any_ref)
     }
@@ -450,14 +456,19 @@ where
 /// A component that lets us inspect buffer properties without knowing the
 /// message type of the buffer.
 #[derive(Component, Clone, Copy)]
-pub(crate) struct DynBufferStorage {
-    access_any_buffer_mut: fn(DynBufferKey, Box<dyn FnOnce(AnyBufferMut) + '_>, &mut World),
+pub(crate) struct AnyBufferStorageAccess {
+    pub(crate) buffered_count: fn(&EntityRef, Entity) -> Result<usize, OperationError>,
+    pub(crate) ensure_session: fn(&mut EntityWorldMut, Entity) -> OperationResult,
+    pub(crate) create_any_buffer_access_mut_state: fn(&mut World) -> Box<dyn AnyBufferAccessMutState>,
 }
 
-impl DynBufferStorage {
+impl AnyBufferStorageAccess {
     pub(crate) fn new<T: 'static + Send + Sync>() -> Self {
         Self {
-            access_any_buffer_mut: crate::access_any_buffer_mut::<T>,
+            buffered_count: buffered_count::<T>,
+            ensure_session: ensure_session::<T>,
+            create_any_buffer_access_mut_state: create_any_buffer_access_mut_state::<T>,
+
         }
     }
 }
@@ -475,3 +486,18 @@ fn ensure_session<T: 'static + Send + Sync>(
 ) -> OperationResult {
     entity_mut.ensure_session::<T>(session)
 }
+
+
+
+fn create_any_buffer_access_mut_state<T: 'static + Send + Sync + Any>(
+    world: &mut World,
+) -> Box<dyn AnyBufferAccessMutState> {
+    // Box::new(SystemState::<BufferAccessMut<'static, 'static, T>>::new(world))
+    Box::new(SystemState::<BufferAccessMut<T>>::new(world))
+}
+
+// fn create_buffer_access_mut_state<T: 'static + Send + Sync + Any>(
+//     world: &mut World,
+// ) -> SystemState<BufferAccessMut<'static, 'static, T>> {
+//     SystemState::new(world)
+// }

@@ -23,8 +23,9 @@ use bevy_ecs::{
 };
 
 use crate::{
-    AnyMessageRef, AnyMessageMut, BoxedMessage, BoxedMessageError, BufferAccessMut,
-    DynBufferViewer, DynBufferKey, DynBufferManagement, GateState, BufferStorage,
+    AnyBufferStorageAccess, AnyMessageRef, AnyMessageMut, BoxedMessage,
+    BoxedMessageError, BufferAccessMut, DynBufferViewer, AnyBufferKey,
+    DynBufferManagement, GateState, BufferStorage,
 };
 
 use thiserror::Error as ThisError;
@@ -38,8 +39,23 @@ pub struct AnyBufferMut<'w, 's, 'a> {
     buffer: Entity,
     session: Entity,
     accessor: Option<Entity>,
-    commands: Commands<'w, 's>,
+    commands: &'a mut Commands<'w, 's>,
     modified: bool,
+}
+
+impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
+    /// Same as [BufferMut::allow_closed_loops][1].
+    ///
+    /// [1]: crate::BufferMut::allow_closed_loops
+    pub fn allow_closed_loops(mut self) -> Self {
+        self.accessor = None;
+        self
+    }
+
+    /// Get how many messages are in this buffer.
+    pub fn len(&self) -> usize {
+        self.storage.dyn_count(self.session)
+    }
 }
 
 #[derive(ThisError, Debug, Clone)]
@@ -48,24 +64,59 @@ pub enum AnyBufferError {
     BufferMissing,
 }
 
-pub(crate) fn access_any_buffer_mut<T: 'static + Send + Sync + Any>(
-    key: DynBufferKey,
-    f: Box<dyn FnOnce(AnyBufferMut) + '_>,
-    world: &mut World,
-) -> Result<(), AnyBufferError> {
-    let mut state: SystemState<BufferAccessMut<T>> = SystemState::new(world);
-    let BufferAccessMut { mut query, commands } = state.get_mut(world);
-    let (storage, gate) = query.get_mut(key.buffer).map_err(|_| AnyBufferError::BufferMissing)?;
-    let buffer_mut = AnyBufferMut {
-        storage: Box::new(storage),
-        gate,
-        buffer: key.buffer,
-        session: key.session,
-        accessor: Some(key.accessor),
-        commands,
-        modified: false,
-    };
+/// This trait allows [`World`] to give you access to any buffer using an
+/// [`AnyBufferKey`].
+pub trait AnyBufferWorldAccess {
+    fn any_buffer_mut<U>(
+        &mut self,
+        key: AnyBufferKey,
+        f: impl FnOnce(AnyBufferMut) -> U,
+    ) -> Result<U, AnyBufferError>;
+}
 
-    f(buffer_mut);
-    Ok(())
+impl AnyBufferWorldAccess for World {
+    fn any_buffer_mut<U>(
+        &mut self,
+        key: AnyBufferKey,
+        f: impl FnOnce(AnyBufferMut) -> U,
+    ) -> Result<U, AnyBufferError> {
+        let create_state = self.get::<AnyBufferStorageAccess>(key.buffer)
+            .ok_or(AnyBufferError::BufferMissing)?
+            .create_any_buffer_access_mut_state;
+
+        let mut state = create_state(self);
+        let mut access = state.get_buffer_access_mut(self);
+        let buffer_mut = access.as_any_buffer_mut(key)?;
+        Ok(f(buffer_mut))
+    }
+}
+
+pub(crate) trait AnyBufferAccessMutState {
+    fn get_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's>;
+}
+
+impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState for SystemState<BufferAccessMut<'static, 'static, T>> {
+    fn get_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's> {
+        Box::new(self.get_mut(world))
+    }
+}
+
+trait AnyBufferAccessMut<'w, 's> {
+    fn as_any_buffer_mut<'a>(&'a mut self, key: AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError>;
+}
+
+impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for BufferAccessMut<'w, 's, T> {
+    fn as_any_buffer_mut<'a>(&'a mut self, key: AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError> {
+        let BufferAccessMut { query, commands } = self;
+        let (storage, gate) = query.get_mut(key.buffer).map_err(|_| AnyBufferError::BufferMissing)?;
+        Ok(AnyBufferMut {
+            storage: Box::new(storage),
+            gate,
+            buffer: key.buffer,
+            session: key.session,
+            accessor: Some(key.accessor),
+            commands,
+            modified: false,
+        })
+    }
 }

@@ -267,7 +267,7 @@ impl<T> BufferKey<T> {
 }
 
 #[derive(Clone)]
-pub struct DynBufferKey {
+pub struct AnyBufferKey {
     buffer: Entity,
     session: Entity,
     accessor: Entity,
@@ -275,7 +275,7 @@ pub struct DynBufferKey {
     type_id: TypeId,
 }
 
-impl std::fmt::Debug for DynBufferKey {
+impl std::fmt::Debug for AnyBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
             .debug_struct("DynBufferKey")
@@ -288,7 +288,7 @@ impl std::fmt::Debug for DynBufferKey {
     }
 }
 
-impl DynBufferKey {
+impl AnyBufferKey {
     /// Downcast this into a concrete [`BufferKey`] type.
     pub fn into_buffer_key<T: 'static>(&self) -> Option<BufferKey<T>> {
         if TypeId::of::<T>() == self.type_id {
@@ -305,10 +305,10 @@ impl DynBufferKey {
     }
 }
 
-impl<T: 'static> From<BufferKey<T>> for DynBufferKey {
+impl<T: 'static> From<BufferKey<T>> for AnyBufferKey {
     fn from(value: BufferKey<T>) -> Self {
         let type_id = TypeId::of::<T>();
-        DynBufferKey {
+        AnyBufferKey {
             buffer: value.buffer,
             session: value.session,
             accessor: value.accessor,

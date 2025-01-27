@@ -23,8 +23,7 @@ use bevy_ecs::{
 use smallvec::SmallVec;
 
 use crate::{
-    BufferStorage, DynBufferStorage, OperationError, OperationResult, OrBroken,
-    BufferInspection,
+    BufferStorage, AnyBufferStorageAccess, OperationError, OperationResult, OrBroken,
 };
 
 pub trait InspectBuffer {
@@ -55,7 +54,7 @@ impl<'w> InspectBuffer for EntityRef<'w> {
     }
 
     fn dyn_buffered_count(&self, session: Entity) -> Result<usize, OperationError> {
-        let count = self.get::<DynBufferStorage>().or_broken()?.count;
+        let count = self.get::<AnyBufferStorageAccess>().or_broken()?.buffered_count;
         count(self, session)
     }
 
@@ -139,7 +138,7 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
 
     fn dyn_ensure_session(&mut self, session: Entity) -> OperationResult {
         let ensure_session = self
-            .get_mut::<DynBufferStorage>()
+            .get_mut::<AnyBufferStorageAccess>()
             .or_broken()?
             .ensure_session;
 
