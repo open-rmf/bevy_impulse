@@ -15,17 +15,16 @@
  *
 */
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 
 use bevy_ecs::{
-    prelude::{Entity, Commands, Mut, World, Query},
+    prelude::{Entity, Commands, Mut, World},
     system::SystemState,
 };
 
 use crate::{
-    AnyBufferStorageAccess, AnyMessageRef, AnyMessageMut, BoxedMessage,
-    BoxedMessageError, BufferAccessMut, DynBufferViewer, AnyBufferKey,
-    DynBufferManagement, GateState, BufferStorage,
+    AnyBufferStorageAccess, AnyMessageError, AnyMessageRef, AnyMessageMut, AnyMessage,
+    BufferAccessMut, AnyBufferKey, NotifyBufferUpdate, AnyBufferManagement, GateState, Gate,
 };
 
 use thiserror::Error as ThisError;
@@ -34,7 +33,7 @@ use thiserror::Error as ThisError;
 /// [`DynBufferKey`], so it can work for any buffer regardless of the data type
 /// inside.
 pub struct AnyBufferMut<'w, 's, 'a> {
-    storage: Box<dyn DynBufferManagement<'a, AnyMessageRef<'a>, AnyMessageMut<'a>, BoxedMessage, BoxedMessageError> + 'a>,
+    storage: Box<dyn AnyBufferManagement + 'a>,
     gate: Mut<'a, GateState>,
     buffer: Entity,
     session: Entity,
@@ -52,9 +51,186 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
         self
     }
 
+    /// Look at the oldest item in the buffer.
+    pub fn oldest(&'a self) -> Option<AnyMessageRef<'a>> {
+        self.storage.any_oldest(self.session)
+    }
+
+    /// Look at the newest item in the buffer.
+    pub fn newest(&'a self) -> Option<AnyMessageRef<'a>> {
+        self.storage.any_newest(self.session)
+    }
+
+    /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
+    /// with the highest index being the newest item in the buffer.
+    pub fn get(&'a self, index: usize) -> Option<AnyMessageRef<'a>> {
+        self.storage.any_get(self.session, index)
+    }
+
     /// Get how many messages are in this buffer.
     pub fn len(&self) -> usize {
-        self.storage.dyn_count(self.session)
+        self.storage.any_count(self.session)
+    }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Check whether the gate of this buffer is open or closed.
+    pub fn gate(&self) -> Gate {
+        self.gate
+            .map
+            .get(&self.session)
+            .copied()
+            .unwrap_or(Gate::Open)
+    }
+
+    /// Modify the oldest item in the buffer.
+    pub fn oldest_mut(&'a mut self) -> Option<AnyMessageMut<'a>> {
+        self.modified = true;
+        self.storage.any_oldest_mut(self.session)
+    }
+
+    /// Modify the newest item in the buffer.
+    pub fn newest_mut(&'a mut self) -> Option<AnyMessageMut<'a>> {
+        self.modified = true;
+        self.storage.any_newest_mut(self.session)
+    }
+
+    /// Modify an item in the buffer. Index 0 is the oldest item in the buffer
+    /// with the highest index being the newest item in the buffer.
+    pub fn get_mut(&mut self, index: usize) -> Option<AnyMessageMut<'_>> {
+        self.modified = true;
+        self.storage.any_get_mut(self.session, index)
+    }
+
+    /// Pull the oldest item from the buffer.
+    pub fn pull(&mut self) -> Option<AnyMessage> {
+        self.modified = true;
+        self.storage.any_pull(self.session)
+    }
+
+    /// Pull the item that was most recently put into the buffer (instead of the
+    /// oldest, which is what [`Self::pull`] gives).
+    pub fn pull_newest(&mut self) -> Option<AnyMessage> {
+        self.modified = true;
+        self.storage.any_pull_newest(self.session)
+    }
+
+    /// Attempt to push a new value into the buffer.
+    ///
+    /// If the input value matches the message type of the buffer, this will
+    /// return [`Ok`]. If the buffer is at its limit before a successful push, this
+    /// will return the value that needed to be removed.
+    ///
+    /// If the input value does not match the message type of the buffer, this
+    /// will return [`Err`] and give back the message that you tried to push.
+    pub fn push<T: 'static + Send + Sync + Any>(&mut self, value: T) -> Result<Option<T>, T> {
+        if TypeId::of::<T>() != self.storage.any_message_type() {
+            return Err(value);
+        }
+
+        self.modified = true;
+
+        // SAFETY: We checked that T matches the message type for this buffer,
+        // so pushing and downcasting should not exhibit any errors.
+        let removed = self
+            .storage
+            .any_push(self.session, Box::new(value))
+            .unwrap()
+            .map(|value| *value.downcast::<T>().unwrap());
+
+        Ok(removed)
+    }
+
+    /// Attempt to push a new value of any message type into the buffer.
+    ///
+    /// If the input value matches the message type of the buffer, this will
+    /// return [`Ok`]. If the buffer is at its limit before a successful push, this
+    /// will return the value that needed to be removed.
+    ///
+    /// If the input value does not match the message type of the buffer, this
+    /// will return [`Err`] and give back an error with the message that you
+    /// tried to push and the type information for the expected message type.
+    pub fn push_any(&mut self, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+        self.storage.any_push(self.session, value)
+    }
+
+    /// Attempt to push a value into the buffer as if it is the oldest value of
+    /// the buffer.
+    ///
+    /// The result follows the same rules as [`Self::push`].
+    pub fn push_as_oldest<T: 'static + Send + Sync + Any>(&mut self, value: T) -> Result<Option<T>, T> {
+        if TypeId::of::<T>() != self.storage.any_message_type() {
+            return Err(value);
+        }
+
+        self.modified = true;
+
+        // SAFETY: We checked that T matches the message type for this buffer,
+        // so pushing and downcasting should not exhibit any errors.
+        let removed = self
+            .storage
+            .any_push_as_oldest(self.session, Box::new(value))
+            .unwrap()
+            .map(|value| *value.downcast::<T>().unwrap());
+
+        Ok(removed)
+    }
+
+    /// Attempt to push a value into the buffer as if it is the oldest value of
+    /// the buffer.
+    ///
+    /// The result follows the same rules as [`Self::push_any`].
+    pub fn push_any_as_oldest(&mut self, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+        self.storage.any_push_as_oldest(self.session, value)
+    }
+
+    /// Tell the buffer [`Gate`] to open.
+    pub fn open_gate(&mut self) {
+        if let Some(gate) = self.gate.map.get_mut(&self.session) {
+            if *gate != Gate::Open {
+                *gate = Gate::Open;
+                self.modified = true;
+            }
+        }
+    }
+
+    /// Tell the buffer [`Gate`] to close.
+    pub fn close_gate(&mut self) {
+        if let Some(gate) = self.gate.map.get_mut(&self.session) {
+            *gate = Gate::Closed;
+            // There is no need to to indicate that a modification happened
+            // because listeners do not get notified about gates closing.
+        }
+    }
+
+    /// Perform an action on the gate of the buffer.
+    pub fn gate_action(&mut self, action: Gate) {
+        match action {
+            Gate::Open => self.open_gate(),
+            Gate::Closed => self.close_gate(),
+        }
+    }
+
+    /// Trigger the listeners for this buffer to wake up even if nothing in the
+    /// buffer has changed. This could be used for timers or timeout elements
+    /// in a workflow.
+    pub fn pulse(&mut self) {
+        self.modified = true;
+    }
+}
+
+impl<'w, 's, 'a> Drop for AnyBufferMut<'w, 's, 'a> {
+    fn drop(&mut self) {
+        if self.modified {
+            self.commands.add(NotifyBufferUpdate::new(
+                self.buffer,
+                self.session,
+                self.accessor,
+            ));
+        }
     }
 }
 
@@ -69,7 +245,7 @@ pub enum AnyBufferError {
 pub trait AnyBufferWorldAccess {
     fn any_buffer_mut<U>(
         &mut self,
-        key: AnyBufferKey,
+        key: &AnyBufferKey,
         f: impl FnOnce(AnyBufferMut) -> U,
     ) -> Result<U, AnyBufferError>;
 }
@@ -77,7 +253,7 @@ pub trait AnyBufferWorldAccess {
 impl AnyBufferWorldAccess for World {
     fn any_buffer_mut<U>(
         &mut self,
-        key: AnyBufferKey,
+        key: &AnyBufferKey,
         f: impl FnOnce(AnyBufferMut) -> U,
     ) -> Result<U, AnyBufferError> {
         let create_state = self.get::<AnyBufferStorageAccess>(key.buffer)
@@ -101,12 +277,12 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState for SystemState<Buf
     }
 }
 
-trait AnyBufferAccessMut<'w, 's> {
-    fn as_any_buffer_mut<'a>(&'a mut self, key: AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError>;
+pub(crate) trait AnyBufferAccessMut<'w, 's> {
+    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError>;
 }
 
 impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for BufferAccessMut<'w, 's, T> {
-    fn as_any_buffer_mut<'a>(&'a mut self, key: AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError> {
+    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError> {
         let BufferAccessMut { query, commands } = self;
         let (storage, gate) = query.get_mut(key.buffer).map_err(|_| AnyBufferError::BufferMissing)?;
         Ok(AnyBufferMut {
@@ -118,5 +294,128 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for Buff
             commands,
             modified: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_ecs::prelude::World;
+    use crate::{prelude::*, testing::*};
+
+    #[test]
+    fn test_any_count() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            let push_multiple_times = builder.commands().spawn_service(
+                push_multiple_times_into_buffer.into_blocking_service()
+            );
+            let count = builder.commands().spawn_service(
+                get_buffer_count.into_blocking_service()
+            );
+
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .then(push_multiple_times)
+                .then(count)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(
+            |commands| commands.request(1, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let count = promise.take().available().unwrap();
+        assert_eq!(count, 5);
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn push_multiple_times_into_buffer(
+        In((value, key)): In<(usize, BufferKey<usize>)>,
+        mut access: BufferAccessMut<usize>,
+    ) -> AnyBufferKey {
+        let mut buffer = access.get_mut(&key).unwrap();
+        for _ in 0..5 {
+            buffer.push(value);
+        }
+
+        key.into()
+    }
+
+    fn get_buffer_count(
+        In(key): In<AnyBufferKey>,
+        world: &mut World,
+    ) -> usize {
+        world.any_buffer_mut(&key, |access| {
+            access.len()
+        }).unwrap()
+    }
+
+    #[test]
+    fn test_modify_any_message() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            let push_multiple_times = builder.commands().spawn_service(
+                push_multiple_times_into_buffer.into_blocking_service()
+            );
+            let modify_content = builder.commands().spawn_service(
+                modify_buffer_content.into_blocking_service()
+            );
+            let drain_content = builder.commands().spawn_service(
+                drain_buffer_content.into_blocking_service()
+            );
+
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .then(push_multiple_times)
+                .then(modify_content)
+                .then(drain_content)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(
+            |commands| commands.request(3, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let values = promise.take().available().unwrap();
+        assert_eq!(values, vec![30, 30, 30, 30, 30]);
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn modify_buffer_content(
+        In(key): In<AnyBufferKey>,
+        world: &mut World,
+    ) -> AnyBufferKey {
+        world.any_buffer_mut(&key, |mut access| {
+            for i in 0..access.len() {
+                access.get_mut(i).map(|value| {
+                    *value.downcast_mut::<usize>().unwrap() *= 10;
+                });
+            }
+        }).unwrap();
+
+        key
+    }
+
+    fn drain_buffer_content(
+        In(key): In<AnyBufferKey>,
+        world: &mut World,
+    ) -> Vec<usize> {
+        world.any_buffer_mut(&key, |mut access| {
+            let mut values = Vec::new();
+            while let Some(value) = access.pull() {
+                values.push(*value.downcast::<usize>().unwrap());
+            }
+            values
+        }).unwrap()
     }
 }

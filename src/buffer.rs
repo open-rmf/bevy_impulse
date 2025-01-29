@@ -509,7 +509,7 @@ where
         self.len() == 0
     }
 
-    /// Check whether the gate of this buffer is open or closed
+    /// Check whether the gate of this buffer is open or closed.
     pub fn gate(&self) -> Gate {
         self.gate
             .map
@@ -552,7 +552,7 @@ where
         self.storage.drain(self.session, range)
     }
 
-    /// Pull the oldest item from the buffer
+    /// Pull the oldest item from the buffer.
     pub fn pull(&mut self) -> Option<T> {
         self.modified = true;
         self.storage.pull(self.session)
@@ -585,7 +585,7 @@ where
     // continuous systems with BufferAccessMut from running at the same time no
     // matter what the buffer type is.
 
-    /// Tell the buffer [`Gate`] to open
+    /// Tell the buffer [`Gate`] to open.
     pub fn open_gate(&mut self) {
         if let Some(gate) = self.gate.map.get_mut(&self.session) {
             if *gate != Gate::Open {
@@ -595,7 +595,7 @@ where
         }
     }
 
-    /// Tell the buffer [`Gate`] to close
+    /// Tell the buffer [`Gate`] to close.
     pub fn close_gate(&mut self) {
         if let Some(gate) = self.gate.map.get_mut(&self.session) {
             *gate = Gate::Closed;
@@ -604,7 +604,7 @@ where
         }
     }
 
-    /// Perform an action on the gate of the buffer
+    /// Perform an action on the gate of the buffer.
     pub fn gate_action(&mut self, action: Gate) {
         match action {
             Gate::Open => self.open_gate(),

@@ -38,27 +38,25 @@ use crate::{
     InspectBuffer, ManageBuffer, RetentionPolicy, OperationError, OperationResult,
 };
 
-pub(crate) trait DynBufferViewer<'a, R> {
-    fn dyn_count(&self, session: Entity) -> usize;
-    fn dyn_active_sessions(&self) -> SmallVec<[Entity; 16]>;
-    fn dyn_oldest(&'a self, session: Entity) -> Option<R>;
-    fn dyn_newest(&'a self, session: Entity) -> Option<R>;
-    fn dyn_get(&'a self, session: Entity, index: usize) -> Option<R>;
+pub(crate) trait AnyBufferViewing {
+    fn any_count(&self, session: Entity) -> usize;
+    fn any_active_sessions(&self) -> SmallVec<[Entity; 16]>;
+    fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>>;
+    fn any_newest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>>;
+    fn any_get<'a>(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>>;
+    fn any_message_type(&self) -> TypeId;
 }
 
-pub(crate) trait DynBufferMutator<'a, R, M>: DynBufferViewer<'a, R> {
-    fn dyn_oldest_mut(&'a mut self, session: Entity) -> Option<M>;
-    fn dyn_newest_mut(&'a mut self, session: Entity) -> Option<M>;
-    fn dyn_get_mut(&'a mut self, session: Entity, index: usize) -> Option<M>;
-}
-
-pub(crate) trait DynBufferManagement<'a, R, M, T, E>: DynBufferMutator<'a, R, M> {
-    fn dyn_force_push(&mut self, session: Entity, value: T) -> Result<Option<T>, E>;
-    fn dyn_push(&mut self, session: Entity, value: T) -> Result<Option<T>, E>;
-    fn dyn_push_as_oldest(&mut self, session: Entity, value: T) -> Result<Option<T>, E>;
-    fn dyn_pull(&mut self, session: Entity) -> Option<T>;
-    fn dyn_pull_newest(&mut self, session: Entity) -> Option<T>;
-    fn dyn_consume(&mut self, session: Entity) -> SmallVec<[T; 16]>;
+pub(crate) trait AnyBufferManagement: AnyBufferViewing {
+    fn any_force_push<'a>(&'a mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
+    fn any_push(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
+    fn any_pull(&mut self, session: Entity) -> Option<AnyMessage>;
+    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage>;
+    fn any_consume(&mut self, session: Entity) -> SmallVec<[AnyMessage; 16]>;
+    fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
+    fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
+    fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>>;
 }
 
 pub(crate) trait BufferSessionManagement {
@@ -226,7 +224,7 @@ impl<T> BufferStorage<T> {
     pub(crate) fn get_mut(&mut self, session: Entity, index: usize) -> Option<&mut T> {
         let reverse_queue = self.reverse_queues.get_mut(&session)?;
         let len = reverse_queue.len();
-        if len >= index {
+        if len <= index {
             return None;
         }
 
@@ -266,7 +264,7 @@ impl<T> BufferStorage<T> {
     pub(crate) fn get(&self, session: Entity, index: usize) -> Option<&T> {
         let reverse_queue = self.reverse_queues.get(&session)?;
         let len = reverse_queue.len();
-        if len >= index {
+        if len <= index {
             return None;
         }
 
@@ -283,81 +281,85 @@ impl<T> BufferStorage<T> {
 
 pub type AnyMessageRef<'a> = &'a (dyn Any + 'static + Send + Sync);
 
-impl<'a, T: 'static + Send + Sync + Any> DynBufferViewer<'a, AnyMessageRef<'a>> for Mut<'a, BufferStorage<T>> {
-    fn dyn_count(&self, session: Entity) -> usize {
+impl<T: 'static + Send + Sync + Any> AnyBufferViewing for Mut<'_, BufferStorage<T>> {
+    fn any_count(&self, session: Entity) -> usize {
         self.count(session)
     }
 
-    fn dyn_active_sessions(&self) -> SmallVec<[Entity; 16]> {
+    fn any_active_sessions(&self) -> SmallVec<[Entity; 16]> {
         self.active_sessions()
     }
 
-    fn dyn_oldest(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
+    fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
         self.oldest(session).map(to_any_ref)
     }
 
-    fn dyn_newest(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
+    fn any_newest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
         self.newest(session).map(to_any_ref)
     }
 
-    fn dyn_get(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>> {
+    fn any_get<'a>(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>> {
         self.get(session, index).map(to_any_ref)
+    }
+
+    fn any_message_type(&self) -> TypeId {
+        TypeId::of::<T>()
     }
 }
 
 pub type AnyMessageMut<'a> = &'a mut (dyn Any + 'static + Send + Sync);
 
-impl<'a, T: 'static + Send + Sync + Any> DynBufferMutator<'a, AnyMessageRef<'a>, AnyMessageMut<'a>> for Mut<'a, BufferStorage<T>> {
-    fn dyn_oldest_mut(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
-        self.oldest_mut(session).map(to_any_mut)
-    }
-
-    fn dyn_newest_mut(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
-        self.newest_mut(session).map(to_any_mut)
-    }
-
-    fn dyn_get_mut(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>> {
-        self.get_mut(session, index).map(to_any_mut)
-    }
-}
-
-pub type BoxedMessage = Box<dyn Any + 'static + Send + Sync>;
+pub type AnyMessage = Box<dyn Any + 'static + Send + Sync>;
 
 #[derive(ThisError, Debug)]
 #[error("failed to convert a message")]
-pub struct BoxedMessageError {
+pub struct AnyMessageError {
     /// The original value provided
-    pub value: BoxedMessage,
+    pub value: AnyMessage,
     /// The type expected by the buffer
     pub type_id: TypeId,
 }
 
-impl<'a, T: 'static + Send + Sync + Any> DynBufferManagement<'a, AnyMessageRef<'a>, AnyMessageMut<'a>, BoxedMessage, BoxedMessageError> for Mut<'a, BufferStorage<T>> {
-    fn dyn_force_push(&mut self, session: Entity, value: BoxedMessage) -> Result<Option<BoxedMessage>, BoxedMessageError> {
+pub type AnyMessagePushResult = Result<Option<AnyMessage>, AnyMessageError>;
+
+impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStorage<T>> {
+    fn any_force_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
         let value = from_boxed_message::<T>(value)?;
         Ok(self.force_push(session, value).map(to_boxed_message))
     }
 
-    fn dyn_push(&mut self, session: Entity, value: BoxedMessage) -> Result<Option<BoxedMessage>, BoxedMessageError> {
+    fn any_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
         let value = from_boxed_message::<T>(value)?;
         Ok(self.push(session, value).map(to_boxed_message))
     }
 
-    fn dyn_push_as_oldest(&mut self, session: Entity, value: BoxedMessage) -> Result<Option<BoxedMessage>, BoxedMessageError> {
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
         let value = from_boxed_message::<T>(value)?;
         Ok(self.push_as_oldest(session, value).map(to_boxed_message))
     }
 
-    fn dyn_pull(&mut self, session: Entity) -> Option<BoxedMessage> {
+    fn any_pull(&mut self, session: Entity) -> Option<AnyMessage> {
         self.pull(session).map(to_boxed_message)
     }
 
-    fn dyn_pull_newest(&mut self, session: Entity) -> Option<BoxedMessage> {
+    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage> {
         self.pull_newest(session).map(to_boxed_message)
     }
 
-    fn dyn_consume(&mut self, session: Entity) -> SmallVec<[BoxedMessage; 16]> {
+    fn any_consume(&mut self, session: Entity) -> SmallVec<[AnyMessage; 16]> {
         self.consume(session).into_iter().map(to_boxed_message).collect()
+    }
+
+    fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
+        self.oldest_mut(session).map(to_any_mut)
+    }
+
+    fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
+        self.newest_mut(session).map(to_any_mut)
+    }
+
+    fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>> {
+        self.get_mut(session, index).map(to_any_mut)
     }
 }
 
@@ -369,16 +371,16 @@ fn to_any_mut<'a, T: 'static + Send + Sync + Any>(x: &'a mut T) -> AnyMessageMut
     x
 }
 
-fn to_boxed_message<T: 'static + Send + Sync + Any>(x: T) -> BoxedMessage {
+fn to_boxed_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessage {
     Box::new(x)
 }
 
-fn from_boxed_message<T: 'static + Send + Sync + Any>(value: BoxedMessage) -> Result<T, BoxedMessageError>
+fn from_boxed_message<T: 'static + Send + Sync + Any>(value: AnyMessage) -> Result<T, AnyMessageError>
 where
     T: 'static,
 {
     let value = value.downcast::<T>().map_err(|value| {
-        BoxedMessageError {
+        AnyMessageError {
             value,
             type_id: TypeId::of::<T>(),
         }
@@ -452,6 +454,14 @@ where
         }
     }
 }
+
+// pub trait DrainAnyBuffer {
+//     fn any_next(&mut self) -> Option<AnyMessage>;
+// }
+
+// impl<T: 'static + Send + Sync + Any> DrainAnyBuffer for DrainBuffer<'a> {
+
+// }
 
 /// A component that lets us inspect buffer properties without knowing the
 /// message type of the buffer.
