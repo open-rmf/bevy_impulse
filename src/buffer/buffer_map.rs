@@ -28,13 +28,13 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    DynBuffer, OperationError, OperationResult, OperationRoster, Buffered, Gate,
+    AnyBuffer, OperationError, OperationResult, OperationRoster, Buffered, Gate,
     Joined, Accessed, BufferKeyBuilder, AnyBufferKey,
 };
 
 #[derive(Clone)]
 pub struct BufferMap {
-    inner: HashMap<Cow<'static, str>, DynBuffer>,
+    inner: HashMap<Cow<'static, str>, AnyBuffer>,
 }
 
 /// This error is used when the buffers provided for an input are not compatible

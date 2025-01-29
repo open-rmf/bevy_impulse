@@ -110,40 +110,6 @@ pub struct CloneFromBuffer<T: Clone> {
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-/// A [`Buffer`] whose type has been anonymized.
-#[derive(Clone, Copy, Debug)]
-pub struct DynBuffer {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
-    pub(crate) type_id: TypeId,
-}
-
-impl DynBuffer {
-    /// Downcast this into a concrete [`Buffer`] type.
-    pub fn into_buffer<T: 'static>(&self) -> Option<Buffer<T>> {
-        if TypeId::of::<T>() == self.type_id {
-            Some(Buffer {
-                scope: self.scope,
-                source: self.source,
-                _ignore: Default::default(),
-            })
-        } else {
-            None
-        }
-    }
-}
-
-impl<T: 'static> From<Buffer<T>> for DynBuffer {
-    fn from(value: Buffer<T>) -> Self {
-        let type_id = TypeId::of::<T>();
-        DynBuffer {
-            scope: value.scope,
-            source: value.source,
-            type_id,
-        }
-    }
-}
-
 /// Settings to describe the behavior of a buffer.
 #[derive(Default, Clone, Copy)]
 pub struct BufferSettings {
@@ -263,58 +229,6 @@ impl<T> BufferKey<T> {
             .as_ref()
             .map(|l| Arc::new(l.as_ref().clone()));
         deep
-    }
-}
-
-#[derive(Clone)]
-pub struct AnyBufferKey {
-    buffer: Entity,
-    session: Entity,
-    accessor: Entity,
-    lifecycle: Option<Arc<BufferAccessLifecycle>>,
-    type_id: TypeId,
-}
-
-impl std::fmt::Debug for AnyBufferKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("DynBufferKey")
-            .field("buffer", &self.buffer)
-            .field("session", &self.session)
-            .field("accessor", &self.accessor)
-            .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
-            .field("type_id", &self.type_id)
-            .finish()
-    }
-}
-
-impl AnyBufferKey {
-    /// Downcast this into a concrete [`BufferKey`] type.
-    pub fn into_buffer_key<T: 'static>(&self) -> Option<BufferKey<T>> {
-        if TypeId::of::<T>() == self.type_id {
-            Some(BufferKey {
-                buffer: self.buffer,
-                session: self.session,
-                accessor: self.accessor,
-                lifecycle: self.lifecycle.clone(),
-                _ignore: Default::default(),
-            })
-        } else {
-            None
-        }
-    }
-}
-
-impl<T: 'static> From<BufferKey<T>> for AnyBufferKey {
-    fn from(value: BufferKey<T>) -> Self {
-        let type_id = TypeId::of::<T>();
-        AnyBufferKey {
-            buffer: value.buffer,
-            session: value.session,
-            accessor: value.accessor,
-            lifecycle: value.lifecycle.clone(),
-            type_id,
-        }
     }
 }
 

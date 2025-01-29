@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferStorage, CloneFromBuffer,
     ForkTargetStorage, Gate, GateState, InspectBuffer, ManageBuffer, OperationError,
-    OperationResult, OperationRoster, OrBroken, SingleInputStorage, DynBuffer,
+    OperationResult, OperationRoster, OrBroken, SingleInputStorage, AnyBuffer,
 };
 
 pub trait Buffered: Clone {
@@ -205,7 +205,7 @@ impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
     }
 }
 
-impl Buffered for DynBuffer {
+impl Buffered for AnyBuffer {
     fn verify_scope(&self, scope: Entity) {
         assert_eq!(scope, self.scope);
     }

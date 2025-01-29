@@ -15,19 +15,118 @@
  *
 */
 
-use std::any::{Any, TypeId};
+use std::{
+    any::{Any, TypeId},
+    ops::RangeBounds,
+    sync::Arc,
+};
 
 use bevy_ecs::{
-    prelude::{Entity, Commands, Mut, World},
+    prelude::{Component, Entity, EntityRef, EntityWorldMut, Commands, Mut, World},
     system::SystemState,
 };
 
-use crate::{
-    AnyBufferStorageAccess, AnyMessageError, AnyMessageRef, AnyMessageMut, AnyMessage,
-    BufferAccessMut, AnyBufferKey, NotifyBufferUpdate, AnyBufferManagement, GateState, Gate,
-};
+use smallvec::SmallVec;
 
 use thiserror::Error as ThisError;
+
+use crate::{
+    Buffer, BufferAccessLifecycle, BufferAccessMut, BufferKey, BufferStorage,
+    DrainBuffer, NotifyBufferUpdate, GateState, Gate, OperationResult, OperationError,
+    InspectBuffer, ManageBuffer,
+};
+
+/// A [`Buffer`] whose type has been anonymized. Joining with this buffer type
+/// will yield an [`AnyMessage`].
+#[derive(Clone, Copy, Debug)]
+pub struct AnyBuffer {
+    pub(crate) scope: Entity,
+    pub(crate) source: Entity,
+    pub(crate) type_id: TypeId,
+}
+
+impl AnyBuffer {
+    /// Downcast this into a concrete [`Buffer`] type.
+    pub fn into_buffer<T: 'static>(&self) -> Option<Buffer<T>> {
+        if TypeId::of::<T>() == self.type_id {
+            Some(Buffer {
+                scope: self.scope,
+                source: self.source,
+                _ignore: Default::default(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: 'static> From<Buffer<T>> for AnyBuffer {
+    fn from(value: Buffer<T>) -> Self {
+        let type_id = TypeId::of::<T>();
+        AnyBuffer {
+            scope: value.scope,
+            source: value.source,
+            type_id,
+        }
+    }
+}
+
+/// Similar to a [`BufferKey`][crate::BufferKey] except it can be used for any
+/// buffer without knowing the buffer's type ahead of time.
+///
+/// Use this with [`AnyBufferAccess`] to directly view or manipulate the contents
+/// of a buffer.
+#[derive(Clone)]
+pub struct AnyBufferKey {
+    buffer: Entity,
+    session: Entity,
+    accessor: Entity,
+    lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    type_id: TypeId,
+}
+
+impl std::fmt::Debug for AnyBufferKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("DynBufferKey")
+            .field("buffer", &self.buffer)
+            .field("session", &self.session)
+            .field("accessor", &self.accessor)
+            .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
+            .field("type_id", &self.type_id)
+            .finish()
+    }
+}
+
+impl AnyBufferKey {
+    /// Downcast this into a concrete [`BufferKey`] type.
+    pub fn into_buffer_key<T: 'static>(&self) -> Option<BufferKey<T>> {
+        if TypeId::of::<T>() == self.type_id {
+            Some(BufferKey {
+                buffer: self.buffer,
+                session: self.session,
+                accessor: self.accessor,
+                lifecycle: self.lifecycle.clone(),
+                _ignore: Default::default(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: 'static> From<BufferKey<T>> for AnyBufferKey {
+    fn from(value: BufferKey<T>) -> Self {
+        let type_id = TypeId::of::<T>();
+        AnyBufferKey {
+            buffer: value.buffer,
+            session: value.session,
+            accessor: value.accessor,
+            lifecycle: value.lifecycle.clone(),
+            type_id,
+        }
+    }
+}
 
 /// Similar to [`BufferMut`][crate::BufferMut], but this can be unlocked with a
 /// [`DynBufferKey`], so it can work for any buffer regardless of the data type
@@ -52,18 +151,18 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     }
 
     /// Look at the oldest item in the buffer.
-    pub fn oldest(&'a self) -> Option<AnyMessageRef<'a>> {
+    pub fn oldest(&self) -> Option<AnyMessageRef<'_>> {
         self.storage.any_oldest(self.session)
     }
 
     /// Look at the newest item in the buffer.
-    pub fn newest(&'a self) -> Option<AnyMessageRef<'a>> {
+    pub fn newest(&self) -> Option<AnyMessageRef<'_>> {
         self.storage.any_newest(self.session)
     }
 
     /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
     /// with the highest index being the newest item in the buffer.
-    pub fn get(&'a self, index: usize) -> Option<AnyMessageRef<'a>> {
+    pub fn get(&self, index: usize) -> Option<AnyMessageRef<'_>> {
         self.storage.any_get(self.session, index)
     }
 
@@ -87,13 +186,13 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     }
 
     /// Modify the oldest item in the buffer.
-    pub fn oldest_mut(&'a mut self) -> Option<AnyMessageMut<'a>> {
+    pub fn oldest_mut(&mut self) -> Option<AnyMessageMut<'_>> {
         self.modified = true;
         self.storage.any_oldest_mut(self.session)
     }
 
     /// Modify the newest item in the buffer.
-    pub fn newest_mut(&'a mut self) -> Option<AnyMessageMut<'a>> {
+    pub fn newest_mut(&mut self) -> Option<AnyMessageMut<'_>> {
         self.modified = true;
         self.storage.any_newest_mut(self.session)
     }
@@ -103,6 +202,13 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     pub fn get_mut(&mut self, index: usize) -> Option<AnyMessageMut<'_>> {
         self.modified = true;
         self.storage.any_get_mut(self.session, index)
+    }
+
+    pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> DrainAnyBuffer<'_> {
+        self.modified = true;
+        DrainAnyBuffer {
+            inner: self.storage.any_drain(self.session, AnyRange::new(range))
+        }
     }
 
     /// Pull the oldest item from the buffer.
@@ -267,6 +373,203 @@ impl AnyBufferWorldAccess for World {
     }
 }
 
+trait AnyBufferViewing {
+    fn any_count(&self, session: Entity) -> usize;
+    fn any_active_sessions(&self) -> SmallVec<[Entity; 16]>;
+    fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>>;
+    fn any_newest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>>;
+    fn any_get<'a>(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>>;
+    fn any_message_type(&self) -> TypeId;
+}
+
+trait AnyBufferManagement: AnyBufferViewing {
+    fn any_force_push<'a>(&'a mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
+    fn any_push(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
+    fn any_pull(&mut self, session: Entity) -> Option<AnyMessage>;
+    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage>;
+    fn any_consume(&mut self, session: Entity) -> SmallVec<[AnyMessage; 16]>;
+    fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
+    fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
+    fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>>;
+    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferImpl + 'a>;
+}
+
+struct AnyRange {
+    start_bound: std::ops::Bound<usize>,
+    end_bound: std::ops::Bound<usize>,
+}
+
+impl AnyRange {
+    fn new<T: std::ops::RangeBounds<usize>>(range: T) -> Self {
+        AnyRange {
+            start_bound: range.start_bound().map(|x| *x),
+            end_bound: range.end_bound().map(|x| *x),
+        }
+    }
+}
+
+impl std::ops::RangeBounds<usize> for AnyRange {
+    fn start_bound(&self) -> std::ops::Bound<&usize> {
+        self.start_bound.as_ref()
+    }
+
+    fn end_bound(&self) -> std::ops::Bound<&usize> {
+        self.end_bound.as_ref()
+    }
+
+    fn contains<U>(&self, item: &U) -> bool
+    where
+        usize: PartialOrd<U>,
+        U: ?Sized + PartialOrd<usize>,
+    {
+        match self.start_bound {
+            std::ops::Bound::Excluded(lower) => {
+                if *item <= lower {
+                    return false;
+                }
+            }
+            std::ops::Bound::Included(lower) => {
+                if *item < lower {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+
+        match self.end_bound {
+            std::ops::Bound::Excluded(upper) => {
+                if upper <= *item {
+                    return false;
+                }
+            }
+            std::ops::Bound::Included(upper) => {
+                if upper < *item {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+
+        return true;
+    }
+}
+
+pub type AnyMessageRef<'a> = &'a (dyn Any + 'static + Send + Sync);
+
+impl<T: 'static + Send + Sync + Any> AnyBufferViewing for Mut<'_, BufferStorage<T>> {
+    fn any_count(&self, session: Entity) -> usize {
+        self.count(session)
+    }
+
+    fn any_active_sessions(&self) -> SmallVec<[Entity; 16]> {
+        self.active_sessions()
+    }
+
+    fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
+        self.oldest(session).map(to_any_ref)
+    }
+
+    fn any_newest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
+        self.newest(session).map(to_any_ref)
+    }
+
+    fn any_get<'a>(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>> {
+        self.get(session, index).map(to_any_ref)
+    }
+
+    fn any_message_type(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
+
+
+pub type AnyMessageMut<'a> = &'a mut (dyn Any + 'static + Send + Sync);
+
+pub type AnyMessage = Box<dyn Any + 'static + Send + Sync>;
+
+#[derive(ThisError, Debug)]
+#[error("failed to convert a message")]
+pub struct AnyMessageError {
+    /// The original value provided
+    pub value: AnyMessage,
+    /// The type expected by the buffer
+    pub type_id: TypeId,
+}
+
+pub type AnyMessagePushResult = Result<Option<AnyMessage>, AnyMessageError>;
+
+impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStorage<T>> {
+    fn any_force_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+        let value = from_boxed_message::<T>(value)?;
+        Ok(self.force_push(session, value).map(to_any_message))
+    }
+
+    fn any_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+        let value = from_boxed_message::<T>(value)?;
+        Ok(self.push(session, value).map(to_any_message))
+    }
+
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+        let value = from_boxed_message::<T>(value)?;
+        Ok(self.push_as_oldest(session, value).map(to_any_message))
+    }
+
+    fn any_pull(&mut self, session: Entity) -> Option<AnyMessage> {
+        self.pull(session).map(to_any_message)
+    }
+
+    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage> {
+        self.pull_newest(session).map(to_any_message)
+    }
+
+    fn any_consume(&mut self, session: Entity) -> SmallVec<[AnyMessage; 16]> {
+        self.consume(session).into_iter().map(to_any_message).collect()
+    }
+
+    fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
+        self.oldest_mut(session).map(to_any_mut)
+    }
+
+    fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
+        self.newest_mut(session).map(to_any_mut)
+    }
+
+    fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>> {
+        self.get_mut(session, index).map(to_any_mut)
+    }
+
+    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferImpl + 'a> {
+        Box::new(self.drain(session, range))
+    }
+}
+
+fn to_any_ref<'a, T: 'static + Send + Sync + Any>(x: &'a T) -> AnyMessageRef<'a> {
+    x
+}
+
+fn to_any_mut<'a, T: 'static + Send + Sync + Any>(x: &'a mut T) -> AnyMessageMut<'a> {
+    x
+}
+
+fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessage {
+    Box::new(x)
+}
+
+fn from_boxed_message<T: 'static + Send + Sync + Any>(value: AnyMessage) -> Result<T, AnyMessageError>
+where
+    T: 'static,
+{
+    let value = value.downcast::<T>().map_err(|value| {
+        AnyMessageError {
+            value,
+            type_id: TypeId::of::<T>(),
+        }
+    })?;
+
+    Ok(*value)
+}
+
 pub(crate) trait AnyBufferAccessMutState {
     fn get_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's>;
 }
@@ -294,6 +597,68 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for Buff
             commands,
             modified: false,
         })
+    }
+}
+
+/// A component that lets us inspect buffer properties without knowing the
+/// message type of the buffer.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct AnyBufferStorageAccess {
+    pub(crate) buffered_count: fn(&EntityRef, Entity) -> Result<usize, OperationError>,
+    pub(crate) ensure_session: fn(&mut EntityWorldMut, Entity) -> OperationResult,
+    pub(crate) create_any_buffer_access_mut_state: fn(&mut World) -> Box<dyn AnyBufferAccessMutState>,
+}
+
+impl AnyBufferStorageAccess {
+    pub(crate) fn new<T: 'static + Send + Sync>() -> Self {
+        Self {
+            buffered_count: buffered_count::<T>,
+            ensure_session: ensure_session::<T>,
+            create_any_buffer_access_mut_state: create_any_buffer_access_mut_state::<T>,
+
+        }
+    }
+}
+
+fn buffered_count<T: 'static + Send + Sync>(
+    entity: &EntityRef,
+    session: Entity,
+) -> Result<usize, OperationError> {
+    entity.buffered_count::<T>(session)
+}
+
+fn ensure_session<T: 'static + Send + Sync>(
+    entity_mut: &mut EntityWorldMut,
+    session: Entity,
+) -> OperationResult {
+    entity_mut.ensure_session::<T>(session)
+}
+
+fn create_any_buffer_access_mut_state<T: 'static + Send + Sync + Any>(
+    world: &mut World,
+) -> Box<dyn AnyBufferAccessMutState> {
+    Box::new(SystemState::<BufferAccessMut<T>>::new(world))
+}
+
+pub struct DrainAnyBuffer<'a> {
+    inner: Box<dyn DrainAnyBufferImpl + 'a>,
+}
+
+impl<'a> Iterator for DrainAnyBuffer<'a> {
+    type Item = AnyMessage;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.any_next()
+    }
+}
+
+trait DrainAnyBufferImpl {
+    fn any_next(&mut self) -> Option<AnyMessage>;
+}
+
+impl<T: 'static + Send + Sync + Any> DrainAnyBufferImpl for DrainBuffer<'_, T> {
+    fn any_next(&mut self) -> Option<AnyMessage> {
+        self.next().map(to_any_message)
     }
 }
 
@@ -368,7 +733,7 @@ mod tests {
                 modify_buffer_content.into_blocking_service()
             );
             let drain_content = builder.commands().spawn_service(
-                drain_buffer_content.into_blocking_service()
+                pull_each_buffer_item.into_blocking_service()
             );
 
             scope
@@ -387,7 +752,7 @@ mod tests {
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let values = promise.take().available().unwrap();
-        assert_eq!(values, vec![30, 30, 30, 30, 30]);
+        assert_eq!(values, vec![0, 3, 6, 9, 12]);
         assert!(context.no_unhandled_errors());
     }
 
@@ -398,7 +763,7 @@ mod tests {
         world.any_buffer_mut(&key, |mut access| {
             for i in 0..access.len() {
                 access.get_mut(i).map(|value| {
-                    *value.downcast_mut::<usize>().unwrap() *= 10;
+                    *value.downcast_mut::<usize>().unwrap() *= i;
                 });
             }
         }).unwrap();
@@ -406,7 +771,7 @@ mod tests {
         key
     }
 
-    fn drain_buffer_content(
+    fn pull_each_buffer_item(
         In(key): In<AnyBufferKey>,
         world: &mut World,
     ) -> Vec<usize> {
@@ -416,6 +781,54 @@ mod tests {
                 values.push(*value.downcast::<usize>().unwrap());
             }
             values
+        }).unwrap()
+    }
+
+    #[test]
+    fn test_drain_any_message() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            let push_multiple_times = builder.commands().spawn_service(
+                push_multiple_times_into_buffer.into_blocking_service()
+            );
+            let modify_content = builder.commands().spawn_service(
+                modify_buffer_content.into_blocking_service()
+            );
+            let drain_content = builder.commands().spawn_service(
+                drain_buffer_contents.into_blocking_service()
+            );
+
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .then(push_multiple_times)
+                .then(modify_content)
+                .then(drain_content)
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(
+            |commands| commands.request(3, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let values = promise.take().available().unwrap();
+        assert_eq!(values, vec![0, 3, 6, 9, 12]);
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn drain_buffer_contents(
+        In(key): In<AnyBufferKey>,
+        world: &mut World,
+    ) -> Vec<usize> {
+        world.any_buffer_mut(&key, |mut access| {
+            access
+            .drain(..)
+            .map(|value| *value.downcast::<usize>().unwrap())
+            .collect()
         }).unwrap()
     }
 }
