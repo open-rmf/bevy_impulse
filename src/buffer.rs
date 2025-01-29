@@ -52,6 +52,9 @@ pub use bufferable::*;
 mod manage_buffer;
 pub use manage_buffer::*;
 
+#[cfg(feature = "diagram")]
+mod json_buffer;
+
 /// A buffer is a special type of node within a workflow that is able to store
 /// and release data. When a session is finished, the buffered data from the
 /// session will be automatically cleared.
