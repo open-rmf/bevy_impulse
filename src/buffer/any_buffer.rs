@@ -18,15 +18,13 @@
 use std::{
     any::{Any, TypeId},
     ops::RangeBounds,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use bevy_ecs::{
     prelude::{Component, Entity, EntityRef, EntityWorldMut, Commands, Mut, World},
     system::SystemState,
 };
-
-use smallvec::SmallVec;
 
 use thiserror::Error as ThisError;
 
@@ -362,11 +360,11 @@ impl AnyBufferWorldAccess for World {
         key: &AnyBufferKey,
         f: impl FnOnce(AnyBufferMut) -> U,
     ) -> Result<U, AnyBufferError> {
-        let create_state = self.get::<AnyBufferStorageAccess>(key.buffer)
+        let interface = self.get::<AnyBufferStorageAccess>(key.buffer)
             .ok_or(AnyBufferError::BufferMissing)?
-            .create_any_buffer_access_mut_state;
+            .interface;
 
-        let mut state = create_state(self);
+        let mut state = interface.create_any_buffer_access_mut_state(self);
         let mut access = state.get_buffer_access_mut(self);
         let buffer_mut = access.as_any_buffer_mut(key)?;
         Ok(f(buffer_mut))
@@ -375,7 +373,6 @@ impl AnyBufferWorldAccess for World {
 
 trait AnyBufferViewing {
     fn any_count(&self, session: Entity) -> usize;
-    fn any_active_sessions(&self) -> SmallVec<[Entity; 16]>;
     fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>>;
     fn any_newest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>>;
     fn any_get<'a>(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>>;
@@ -383,12 +380,10 @@ trait AnyBufferViewing {
 }
 
 trait AnyBufferManagement: AnyBufferViewing {
-    fn any_force_push<'a>(&'a mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
     fn any_push(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
     fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
     fn any_pull(&mut self, session: Entity) -> Option<AnyMessage>;
     fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage>;
-    fn any_consume(&mut self, session: Entity) -> SmallVec<[AnyMessage; 16]>;
     fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>>;
@@ -462,10 +457,6 @@ impl<T: 'static + Send + Sync + Any> AnyBufferViewing for Mut<'_, BufferStorage<
         self.count(session)
     }
 
-    fn any_active_sessions(&self) -> SmallVec<[Entity; 16]> {
-        self.active_sessions()
-    }
-
     fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
         self.oldest(session).map(to_any_ref)
     }
@@ -500,18 +491,13 @@ pub struct AnyMessageError {
 pub type AnyMessagePushResult = Result<Option<AnyMessage>, AnyMessageError>;
 
 impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStorage<T>> {
-    fn any_force_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
-        let value = from_boxed_message::<T>(value)?;
-        Ok(self.force_push(session, value).map(to_any_message))
-    }
-
     fn any_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
-        let value = from_boxed_message::<T>(value)?;
+        let value = from_any_message::<T>(value)?;
         Ok(self.push(session, value).map(to_any_message))
     }
 
     fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
-        let value = from_boxed_message::<T>(value)?;
+        let value = from_any_message::<T>(value)?;
         Ok(self.push_as_oldest(session, value).map(to_any_message))
     }
 
@@ -521,10 +507,6 @@ impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStora
 
     fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage> {
         self.pull_newest(session).map(to_any_message)
-    }
-
-    fn any_consume(&mut self, session: Entity) -> SmallVec<[AnyMessage; 16]> {
-        self.consume(session).into_iter().map(to_any_message).collect()
     }
 
     fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>> {
@@ -556,7 +538,7 @@ fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessage {
     Box::new(x)
 }
 
-fn from_boxed_message<T: 'static + Send + Sync + Any>(value: AnyMessage) -> Result<T, AnyMessageError>
+fn from_any_message<T: 'static + Send + Sync + Any>(value: AnyMessage) -> Result<T, AnyMessageError>
 where
     T: 'static,
 {
@@ -604,40 +586,64 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for Buff
 /// message type of the buffer.
 #[derive(Component, Clone, Copy)]
 pub(crate) struct AnyBufferStorageAccess {
-    pub(crate) buffered_count: fn(&EntityRef, Entity) -> Result<usize, OperationError>,
-    pub(crate) ensure_session: fn(&mut EntityWorldMut, Entity) -> OperationResult,
-    pub(crate) create_any_buffer_access_mut_state: fn(&mut World) -> Box<dyn AnyBufferAccessMutState>,
+    pub(crate) interface: &'static (dyn AnyBufferStorageAccessInterface + Send + Sync),
 }
 
 impl AnyBufferStorageAccess {
-    pub(crate) fn new<T: 'static + Send + Sync>() -> Self {
-        Self {
-            buffered_count: buffered_count::<T>,
-            ensure_session: ensure_session::<T>,
-            create_any_buffer_access_mut_state: create_any_buffer_access_mut_state::<T>,
+    pub(crate) fn new<T: 'static + Send + Sync + Any>() -> Self {
+        let once: OnceLock<&'static AnyBufferStorageAccessImpl<T>> = OnceLock::new();
+        let interface = *once.get_or_init(|| {
+            Box::leak(Box::new(AnyBufferStorageAccessImpl(Default::default())))
+        });
 
-        }
+        Self { interface }
     }
 }
 
-fn buffered_count<T: 'static + Send + Sync>(
-    entity: &EntityRef,
-    session: Entity,
-) -> Result<usize, OperationError> {
-    entity.buffered_count::<T>(session)
+pub(crate) trait AnyBufferStorageAccessInterface {
+    fn buffered_count(
+        &self,
+        entity: &EntityRef,
+        session: Entity,
+    ) -> Result<usize, OperationError>;
+
+    fn ensure_session(
+        &self,
+        entity_mut: &mut EntityWorldMut,
+        session: Entity,
+    ) -> OperationResult;
+
+    fn create_any_buffer_access_mut_state(
+        &self,
+        world: &mut World,
+    ) -> Box<dyn AnyBufferAccessMutState>;
 }
 
-fn ensure_session<T: 'static + Send + Sync>(
-    entity_mut: &mut EntityWorldMut,
-    session: Entity,
-) -> OperationResult {
-    entity_mut.ensure_session::<T>(session)
-}
+struct AnyBufferStorageAccessImpl<T>(std::marker::PhantomData<T>);
 
-fn create_any_buffer_access_mut_state<T: 'static + Send + Sync + Any>(
-    world: &mut World,
-) -> Box<dyn AnyBufferAccessMutState> {
-    Box::new(SystemState::<BufferAccessMut<T>>::new(world))
+impl<T: 'static + Send + Sync + Any> AnyBufferStorageAccessInterface for AnyBufferStorageAccessImpl<T> {
+    fn buffered_count(
+        &self,
+        entity: &EntityRef,
+        session: Entity,
+    ) -> Result<usize, OperationError> {
+        entity.buffered_count::<T>(session)
+    }
+
+    fn ensure_session(
+        &self,
+        entity_mut: &mut EntityWorldMut,
+        session: Entity,
+    ) -> OperationResult {
+        entity_mut.ensure_session::<T>(session)
+    }
+
+    fn create_any_buffer_access_mut_state(
+        &self,
+        world: &mut World,
+    ) -> Box<dyn AnyBufferAccessMutState> {
+        Box::new(SystemState::<BufferAccessMut<T>>::new(world))
+    }
 }
 
 pub struct DrainAnyBuffer<'a> {

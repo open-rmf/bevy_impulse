@@ -15,32 +15,19 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Component, Entity, EntityRef, EntityWorldMut, World, Mut},
-    system::SystemState,
-};
+use bevy_ecs::prelude::{Component, Entity};
 
 use smallvec::{Drain, SmallVec};
 
 use std::collections::HashMap;
 
 use std::{
-    any::{Any, TypeId},
     iter::Rev,
     ops::RangeBounds,
     slice::{Iter, IterMut},
 };
 
-use crate::{
-    AnyBufferAccessMutState, BufferAccessMut, BufferSettings,
-    InspectBuffer, ManageBuffer, RetentionPolicy, OperationError, OperationResult,
-};
-
-
-pub(crate) trait BufferSessionManagement {
-    fn clear_session(&mut self, session: Entity);
-    fn ensure_session(&mut self, session: Entity);
-}
+use crate::{BufferSettings, RetentionPolicy};
 
 #[derive(Component)]
 pub(crate) struct BufferStorage<T> {

@@ -54,8 +54,8 @@ impl<'w> InspectBuffer for EntityRef<'w> {
     }
 
     fn dyn_buffered_count(&self, session: Entity) -> Result<usize, OperationError> {
-        let count = self.get::<AnyBufferStorageAccess>().or_broken()?.buffered_count;
-        count(self, session)
+        let interface = self.get::<AnyBufferStorageAccess>().or_broken()?.interface;
+        interface.buffered_count(self, session)
     }
 
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
@@ -137,11 +137,11 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
     }
 
     fn dyn_ensure_session(&mut self, session: Entity) -> OperationResult {
-        let ensure_session = self
+        let interface = self
             .get_mut::<AnyBufferStorageAccess>()
             .or_broken()?
-            .ensure_session;
+            .interface;
 
-        ensure_session(self, session)
+        interface.ensure_session(self, session)
     }
 }

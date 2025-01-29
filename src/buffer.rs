@@ -22,7 +22,7 @@ use bevy_ecs::{
     system::SystemParam,
 };
 
-use std::{ops::RangeBounds, sync::Arc, any::TypeId};
+use std::{ops::RangeBounds, sync::Arc};
 
 use crate::{
     Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
