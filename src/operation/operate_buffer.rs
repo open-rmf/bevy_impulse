@@ -29,7 +29,7 @@ use backtrace::Backtrace;
 use smallvec::SmallVec;
 
 use crate::{
-    Broken, BufferAccessors, BufferSettings, BufferStorage, AnyBufferStorageAccess, DeferredRoster, ForkTargetStorage,
+    Broken, BufferAccessors, BufferSettings, BufferStorage, DeferredRoster, ForkTargetStorage,
     Gate, GateActionStorage, Input, InputBundle, InspectBuffer, ManageBuffer, ManageInput,
     MiscellaneousFailure, Operation, OperationCleanup, OperationError, OperationReachability,
     OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
@@ -39,14 +39,12 @@ use crate::{
 #[derive(Bundle)]
 pub(crate) struct OperateBuffer<T: 'static + Send + Sync> {
     storage: BufferStorage<T>,
-    inspector: AnyBufferStorageAccess,
 }
 
 impl<T: 'static + Send + Sync> OperateBuffer<T> {
     pub(crate) fn new(settings: BufferSettings) -> Self {
         Self {
             storage: BufferStorage::new(settings),
-            inspector: AnyBufferStorageAccess::new::<T>(),
         }
     }
 }

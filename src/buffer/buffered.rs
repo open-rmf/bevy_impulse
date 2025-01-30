@@ -211,10 +211,8 @@ impl Buffered for AnyBuffer {
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        world
-            .get_entity(self.source)
-            .or_broken()?
-            .dyn_buffered_count(session)
+        let entity_ref = world.get_entity(self.source).or_broken()?;
+        self.interface.buffered_count(&entity_ref, session)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
@@ -236,10 +234,8 @@ impl Buffered for AnyBuffer {
     }
 
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
-        world
-            .get_entity_mut(self.source)
-            .or_broken()?
-            .dyn_ensure_session(session)
+        let mut entity_mut = world.get_entity_mut(self.source).or_broken()?;
+        self.interface.ensure_session(&mut entity_mut, session)
     }
 }
 

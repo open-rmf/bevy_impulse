@@ -22,7 +22,7 @@ use std::{
 };
 
 use bevy_ecs::{
-    prelude::{Component, Entity, EntityRef, EntityWorldMut, Commands, Mut, World},
+    prelude::{Entity, EntityRef, EntityWorldMut, Commands, Mut, World},
     system::SystemState,
 };
 
@@ -36,17 +36,27 @@ use crate::{
 
 /// A [`Buffer`] whose type has been anonymized. Joining with this buffer type
 /// will yield an [`AnyMessage`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct AnyBuffer {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) type_id: TypeId,
+    pub(crate) interface: &'static (dyn AnyBufferStorageAccessInterface + Send + Sync)
+}
+
+impl std::fmt::Debug for AnyBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnyBuffer")
+            .field("scope", &self.scope)
+            .field("source", &self.source)
+            .field("message_type_name", &self.interface.message_type_name())
+            .finish()
+    }
 }
 
 impl AnyBuffer {
     /// Downcast this into a concrete [`Buffer`] type.
     pub fn into_buffer<T: 'static>(&self) -> Option<Buffer<T>> {
-        if TypeId::of::<T>() == self.type_id {
+        if TypeId::of::<T>() == self.interface.message_type_id() {
             Some(Buffer {
                 scope: self.scope,
                 source: self.source,
@@ -58,13 +68,13 @@ impl AnyBuffer {
     }
 }
 
-impl<T: 'static> From<Buffer<T>> for AnyBuffer {
+impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
     fn from(value: Buffer<T>) -> Self {
-        let type_id = TypeId::of::<T>();
+        let interface = AnyBufferStorageAccessImpl::<T>::get_interface();
         AnyBuffer {
             scope: value.scope,
             source: value.source,
-            type_id,
+            interface,
         }
     }
 }
@@ -80,7 +90,7 @@ pub struct AnyBufferKey {
     session: Entity,
     accessor: Entity,
     lifecycle: Option<Arc<BufferAccessLifecycle>>,
-    type_id: TypeId,
+    interface: &'static (dyn AnyBufferStorageAccessInterface + Send + Sync),
 }
 
 impl std::fmt::Debug for AnyBufferKey {
@@ -91,7 +101,7 @@ impl std::fmt::Debug for AnyBufferKey {
             .field("session", &self.session)
             .field("accessor", &self.accessor)
             .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
-            .field("type_id", &self.type_id)
+            .field("message_type_name", &self.interface.message_type_name())
             .finish()
     }
 }
@@ -99,7 +109,7 @@ impl std::fmt::Debug for AnyBufferKey {
 impl AnyBufferKey {
     /// Downcast this into a concrete [`BufferKey`] type.
     pub fn into_buffer_key<T: 'static>(&self) -> Option<BufferKey<T>> {
-        if TypeId::of::<T>() == self.type_id {
+        if TypeId::of::<T>() == self.interface.message_type_id() {
             Some(BufferKey {
                 buffer: self.buffer,
                 session: self.session,
@@ -113,15 +123,15 @@ impl AnyBufferKey {
     }
 }
 
-impl<T: 'static> From<BufferKey<T>> for AnyBufferKey {
+impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
     fn from(value: BufferKey<T>) -> Self {
-        let type_id = TypeId::of::<T>();
+        let interface = AnyBufferStorageAccessImpl::<T>::get_interface();
         AnyBufferKey {
             buffer: value.buffer,
             session: value.session,
             accessor: value.accessor,
             lifecycle: value.lifecycle.clone(),
-            type_id,
+            interface,
         }
     }
 }
@@ -360,10 +370,7 @@ impl AnyBufferWorldAccess for World {
         key: &AnyBufferKey,
         f: impl FnOnce(AnyBufferMut) -> U,
     ) -> Result<U, AnyBufferError> {
-        let interface = self.get::<AnyBufferStorageAccess>(key.buffer)
-            .ok_or(AnyBufferError::BufferMissing)?
-            .interface;
-
+        let interface = key.interface;
         let mut state = interface.create_any_buffer_access_mut_state(self);
         let mut access = state.get_buffer_access_mut(self);
         let buffer_mut = access.as_any_buffer_mut(key)?;
@@ -582,25 +589,11 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for Buff
     }
 }
 
-/// A component that lets us inspect buffer properties without knowing the
-/// message type of the buffer.
-#[derive(Component, Clone, Copy)]
-pub(crate) struct AnyBufferStorageAccess {
-    pub(crate) interface: &'static (dyn AnyBufferStorageAccessInterface + Send + Sync),
-}
-
-impl AnyBufferStorageAccess {
-    pub(crate) fn new<T: 'static + Send + Sync + Any>() -> Self {
-        let once: OnceLock<&'static AnyBufferStorageAccessImpl<T>> = OnceLock::new();
-        let interface = *once.get_or_init(|| {
-            Box::leak(Box::new(AnyBufferStorageAccessImpl(Default::default())))
-        });
-
-        Self { interface }
-    }
-}
-
 pub(crate) trait AnyBufferStorageAccessInterface {
+    fn message_type_id(&self) -> TypeId;
+
+    fn message_type_name(&self) -> &'static str;
+
     fn buffered_count(
         &self,
         entity: &EntityRef,
@@ -621,7 +614,24 @@ pub(crate) trait AnyBufferStorageAccessInterface {
 
 struct AnyBufferStorageAccessImpl<T>(std::marker::PhantomData<T>);
 
+impl<T: 'static + Send + Sync + Any> AnyBufferStorageAccessImpl<T> {
+    fn get_interface() -> &'static (dyn AnyBufferStorageAccessInterface + Send + Sync) {
+        let once: OnceLock<&'static AnyBufferStorageAccessImpl<T>> = OnceLock::new();
+        *once.get_or_init(|| {
+            Box::leak(Box::new(AnyBufferStorageAccessImpl(Default::default())))
+        })
+    }
+}
+
 impl<T: 'static + Send + Sync + Any> AnyBufferStorageAccessInterface for AnyBufferStorageAccessImpl<T> {
+    fn message_type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+
+    fn message_type_name(&self) -> &'static str {
+        std::any::type_name::<T>()
+    }
+
     fn buffered_count(
         &self,
         entity: &EntityRef,

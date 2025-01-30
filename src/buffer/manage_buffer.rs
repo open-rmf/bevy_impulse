@@ -23,7 +23,7 @@ use bevy_ecs::{
 use smallvec::SmallVec;
 
 use crate::{
-    BufferStorage, AnyBufferStorageAccess, OperationError, OperationResult, OrBroken,
+    BufferStorage, OperationError, OperationResult, OrBroken,
 };
 
 pub trait InspectBuffer {
@@ -31,8 +31,6 @@ pub trait InspectBuffer {
         &self,
         session: Entity,
     ) -> Result<usize, OperationError>;
-
-    fn dyn_buffered_count(&self, session: Entity) -> Result<usize, OperationError>;
 
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
         &self,
@@ -51,11 +49,6 @@ impl<'w> InspectBuffer for EntityRef<'w> {
     ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
         Ok(buffer.count(session))
-    }
-
-    fn dyn_buffered_count(&self, session: Entity) -> Result<usize, OperationError> {
-        let interface = self.get::<AnyBufferStorageAccess>().or_broken()?.interface;
-        interface.buffered_count(self, session)
     }
 
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(
@@ -100,8 +93,6 @@ pub trait ManageBuffer {
     fn clear_buffer<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
 
     fn ensure_session<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
-
-    fn dyn_ensure_session(&mut self, session: Entity) -> OperationResult;
 }
 
 impl<'w> ManageBuffer for EntityWorldMut<'w> {
@@ -134,14 +125,5 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
             .or_broken()?
             .ensure_session(session);
         Ok(())
-    }
-
-    fn dyn_ensure_session(&mut self, session: Entity) -> OperationResult {
-        let interface = self
-            .get_mut::<AnyBufferStorageAccess>()
-            .or_broken()?
-            .interface;
-
-        interface.ensure_session(self, session)
     }
 }
