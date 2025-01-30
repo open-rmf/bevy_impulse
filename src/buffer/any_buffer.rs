@@ -17,8 +17,9 @@
 
 use std::{
     any::{Any, TypeId},
+    collections::HashMap,
     ops::RangeBounds,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, Mutex},
 };
 
 use bevy_ecs::{
@@ -40,7 +41,7 @@ use crate::{
 pub struct AnyBuffer {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) interface: &'static (dyn AnyBufferStorageAccessInterface + Send + Sync)
+    pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync)
 }
 
 impl std::fmt::Debug for AnyBuffer {
@@ -70,7 +71,7 @@ impl AnyBuffer {
 
 impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
     fn from(value: Buffer<T>) -> Self {
-        let interface = AnyBufferStorageAccessImpl::<T>::get_interface();
+        let interface = AnyBufferAccessImpl::<T>::get_interface();
         AnyBuffer {
             scope: value.scope,
             source: value.source,
@@ -90,7 +91,7 @@ pub struct AnyBufferKey {
     session: Entity,
     accessor: Entity,
     lifecycle: Option<Arc<BufferAccessLifecycle>>,
-    interface: &'static (dyn AnyBufferStorageAccessInterface + Send + Sync),
+    interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
 }
 
 impl std::fmt::Debug for AnyBufferKey {
@@ -125,7 +126,7 @@ impl AnyBufferKey {
 
 impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
     fn from(value: BufferKey<T>) -> Self {
-        let interface = AnyBufferStorageAccessImpl::<T>::get_interface();
+        let interface = AnyBufferAccessImpl::<T>::get_interface();
         AnyBufferKey {
             buffer: value.buffer,
             session: value.session,
@@ -589,7 +590,7 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for Buff
     }
 }
 
-pub(crate) trait AnyBufferStorageAccessInterface {
+pub(crate) trait AnyBufferAccessInterface {
     fn message_type_id(&self) -> TypeId;
 
     fn message_type_name(&self) -> &'static str;
@@ -612,18 +613,26 @@ pub(crate) trait AnyBufferStorageAccessInterface {
     ) -> Box<dyn AnyBufferAccessMutState>;
 }
 
-struct AnyBufferStorageAccessImpl<T>(std::marker::PhantomData<T>);
+struct AnyBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
-impl<T: 'static + Send + Sync + Any> AnyBufferStorageAccessImpl<T> {
-    fn get_interface() -> &'static (dyn AnyBufferStorageAccessInterface + Send + Sync) {
-        let once: OnceLock<&'static AnyBufferStorageAccessImpl<T>> = OnceLock::new();
-        *once.get_or_init(|| {
-            Box::leak(Box::new(AnyBufferStorageAccessImpl(Default::default())))
+impl<T: 'static + Send + Sync + Any> AnyBufferAccessImpl<T> {
+    fn get_interface() -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
+        const INTERFACE_MAP: OnceLock<Mutex<HashMap<
+            TypeId,
+            &'static (dyn AnyBufferAccessInterface + Send + Sync)
+        >>> = OnceLock::new();
+        let binding = INTERFACE_MAP;
+
+        let interfaces = binding.get_or_init(|| Mutex::default());
+
+        let mut interfaces_mut = interfaces.lock().unwrap();
+        *interfaces_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
+            Box::leak(Box::new(AnyBufferAccessImpl::<T>(Default::default())))
         })
     }
 }
 
-impl<T: 'static + Send + Sync + Any> AnyBufferStorageAccessInterface for AnyBufferStorageAccessImpl<T> {
+impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAccessImpl<T> {
     fn message_type_id(&self) -> TypeId {
         TypeId::of::<T>()
     }

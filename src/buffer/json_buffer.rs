@@ -15,28 +15,70 @@
  *
 */
 
+use std::{
+    any::TypeId,
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
 use bevy_ecs::prelude::Entity;
 
-use schemars::schema::Schema;
+use schemars::{
+    gen::SchemaGenerator,
+    schema::Schema,
+    JsonSchema,
+};
+
+use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(Clone, Copy, Debug)]
 pub struct JsonBuffer {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) interface: &'static dyn JsonInterface,
+    pub(crate) interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
 }
 
-pub(crate) trait JsonInterface {
-    fn message_type(&self) -> &str;
-    fn schema(&self) -> &Schema;
+pub(crate) trait JsonBufferAccessInterface {
+    fn message_type_name(&self) -> &str;
+    fn message_type_id(&self) -> TypeId;
+    fn schema(&self, generator: &mut SchemaGenerator) -> &'static Schema;
 }
 
-impl<'a> std::fmt::Debug for &'a dyn JsonInterface {
+impl<'a> std::fmt::Debug for &'a (dyn JsonBufferAccessInterface + Send + Sync) {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
             .debug_struct("Message Properties")
-            .field("type", &self.message_type())
-            .field("schema", self.schema())
+            .field("type", &self.message_type_name())
             .finish()
+    }
+}
+
+struct JsonBufferAccessImpl<T>(std::marker::PhantomData<T>);
+
+impl<T: 'static + Send + Sync + Serialize + DeserializeOwned + JsonSchema> JsonBufferAccessImpl<T> {
+
+}
+
+impl<T: 'static + Send + Sync + Serialize + DeserializeOwned + JsonSchema> JsonBufferAccessInterface for JsonBufferAccessImpl<T> {
+    fn message_type_name(&self) -> &str {
+        std::any::type_name::<T>()
+    }
+
+    fn message_type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+
+    fn schema(&self, generator: &mut SchemaGenerator) -> &'static Schema {
+        // We use a const map so that we only need to generate the schema once
+        // per message type.
+        const SCHEMA_MAP: OnceLock<Mutex<HashMap<TypeId, &'static Schema>>> = OnceLock::new();
+        let binding = SCHEMA_MAP;
+
+        let schemas = binding.get_or_init(|| Mutex::default());
+
+        let mut schemas_mut = schemas.lock().unwrap();
+        *schemas_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
+            Box::leak(Box::new(generator.subschema_for::<T>()))
+        })
     }
 }
