@@ -24,6 +24,8 @@ use bevy_ecs::{
 
 use std::{ops::RangeBounds, sync::Arc};
 
+use thiserror::Error as ThisError;
+
 use crate::{
     Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
 };
@@ -569,6 +571,12 @@ where
             ));
         }
     }
+}
+
+#[derive(ThisError, Debug, Clone)]
+pub enum BufferError {
+    #[error("The key was unable to identify a buffer")]
+    BufferMissing,
 }
 
 #[cfg(test)]

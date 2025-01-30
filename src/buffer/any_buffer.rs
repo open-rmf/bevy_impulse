@@ -30,7 +30,7 @@ use bevy_ecs::{
 use thiserror::Error as ThisError;
 
 use crate::{
-    Buffer, BufferAccessLifecycle, BufferAccessMut, BufferKey, BufferStorage,
+    Buffer, BufferAccessLifecycle, BufferAccessMut, BufferError, BufferKey, BufferStorage,
     DrainBuffer, NotifyBufferUpdate, GateState, Gate, OperationResult, OperationError,
     InspectBuffer, ManageBuffer,
 };
@@ -80,8 +80,8 @@ impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
     }
 }
 
-/// Similar to a [`BufferKey`][crate::BufferKey] except it can be used for any
-/// buffer without knowing the buffer's type ahead of time.
+/// Similar to a [`BufferKey`] except it can be used for any buffer without
+/// knowing the buffer's message type at compile time.
 ///
 /// Use this with [`AnyBufferAccess`] to directly view or manipulate the contents
 /// of a buffer.
@@ -97,7 +97,7 @@ pub struct AnyBufferKey {
 impl std::fmt::Debug for AnyBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
-            .debug_struct("DynBufferKey")
+            .debug_struct("AnyBufferKey")
             .field("buffer", &self.buffer)
             .field("session", &self.session)
             .field("accessor", &self.accessor)
@@ -216,7 +216,7 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> DrainAnyBuffer<'_> {
         self.modified = true;
         DrainAnyBuffer {
-            inner: self.storage.any_drain(self.session, AnyRange::new(range))
+            interface: self.storage.any_drain(self.session, AnyRange::new(range))
         }
     }
 
@@ -349,12 +349,6 @@ impl<'w, 's, 'a> Drop for AnyBufferMut<'w, 's, 'a> {
     }
 }
 
-#[derive(ThisError, Debug, Clone)]
-pub enum AnyBufferError {
-    #[error("The key was unable to identify a buffer")]
-    BufferMissing,
-}
-
 /// This trait allows [`World`] to give you access to any buffer using an
 /// [`AnyBufferKey`].
 pub trait AnyBufferWorldAccess {
@@ -362,7 +356,7 @@ pub trait AnyBufferWorldAccess {
         &mut self,
         key: &AnyBufferKey,
         f: impl FnOnce(AnyBufferMut) -> U,
-    ) -> Result<U, AnyBufferError>;
+    ) -> Result<U, BufferError>;
 }
 
 impl AnyBufferWorldAccess for World {
@@ -370,10 +364,10 @@ impl AnyBufferWorldAccess for World {
         &mut self,
         key: &AnyBufferKey,
         f: impl FnOnce(AnyBufferMut) -> U,
-    ) -> Result<U, AnyBufferError> {
+    ) -> Result<U, BufferError> {
         let interface = key.interface;
         let mut state = interface.create_any_buffer_access_mut_state(self);
-        let mut access = state.get_buffer_access_mut(self);
+        let mut access = state.get_any_buffer_access_mut(self);
         let buffer_mut = access.as_any_buffer_mut(key)?;
         Ok(f(buffer_mut))
     }
@@ -395,10 +389,10 @@ trait AnyBufferManagement: AnyBufferViewing {
     fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>>;
-    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferImpl + 'a>;
+    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferInterface + 'a>;
 }
 
-struct AnyRange {
+pub(crate) struct AnyRange {
     start_bound: std::ops::Bound<usize>,
     end_bound: std::ops::Bound<usize>,
 }
@@ -492,19 +486,21 @@ pub type AnyMessage = Box<dyn Any + 'static + Send + Sync>;
 pub struct AnyMessageError {
     /// The original value provided
     pub value: AnyMessage,
-    /// The type expected by the buffer
+    /// The ID of the type expected by the buffer
     pub type_id: TypeId,
+    /// The name of the type expected by the buffer
+    pub type_name: &'static str,
 }
 
 pub type AnyMessagePushResult = Result<Option<AnyMessage>, AnyMessageError>;
 
 impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStorage<T>> {
-    fn any_push(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+    fn any_push(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult {
         let value = from_any_message::<T>(value)?;
         Ok(self.push(session, value).map(to_any_message))
     }
 
-    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult {
         let value = from_any_message::<T>(value)?;
         Ok(self.push_as_oldest(session, value).map(to_any_message))
     }
@@ -529,7 +525,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStora
         self.get_mut(session, index).map(to_any_mut)
     }
 
-    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferImpl + 'a> {
+    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferInterface + 'a> {
         Box::new(self.drain(session, range))
     }
 }
@@ -554,6 +550,7 @@ where
         AnyMessageError {
             value,
             type_id: TypeId::of::<T>(),
+            type_name: std::any::type_name::<T>(),
         }
     })?;
 
@@ -561,23 +558,23 @@ where
 }
 
 pub(crate) trait AnyBufferAccessMutState {
-    fn get_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's>;
+    fn get_any_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's>;
 }
 
 impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState for SystemState<BufferAccessMut<'static, 'static, T>> {
-    fn get_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's> {
+    fn get_any_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's> {
         Box::new(self.get_mut(world))
     }
 }
 
-pub(crate) trait AnyBufferAccessMut<'w, 's> {
-    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError>;
+trait AnyBufferAccessMut<'w, 's> {
+    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError>;
 }
 
 impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for BufferAccessMut<'w, 's, T> {
-    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, AnyBufferError> {
+    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError> {
         let BufferAccessMut { query, commands } = self;
-        let (storage, gate) = query.get_mut(key.buffer).map_err(|_| AnyBufferError::BufferMissing)?;
+        let (storage, gate) = query.get_mut(key.buffer).map_err(|_| BufferError::BufferMissing)?;
         Ok(AnyBufferMut {
             storage: Box::new(storage),
             gate,
@@ -666,22 +663,22 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
 }
 
 pub struct DrainAnyBuffer<'a> {
-    inner: Box<dyn DrainAnyBufferImpl + 'a>,
+    interface: Box<dyn DrainAnyBufferInterface + 'a>,
 }
 
 impl<'a> Iterator for DrainAnyBuffer<'a> {
     type Item = AnyMessage;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.any_next()
+        self.interface.any_next()
     }
 }
 
-trait DrainAnyBufferImpl {
+trait DrainAnyBufferInterface {
     fn any_next(&mut self) -> Option<AnyMessage>;
 }
 
-impl<T: 'static + Send + Sync + Any> DrainAnyBufferImpl for DrainBuffer<'_, T> {
+impl<T: 'static + Send + Sync + Any> DrainAnyBufferInterface for DrainBuffer<'_, T> {
     fn any_next(&mut self) -> Option<AnyMessage> {
         self.next().map(to_any_message)
     }
