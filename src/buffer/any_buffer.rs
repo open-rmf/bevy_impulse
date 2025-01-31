@@ -137,8 +137,8 @@ impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
     }
 }
 
-/// Similar to [`BufferMut`][crate::BufferMut], but this can be unlocked with a
-/// [`DynBufferKey`], so it can work for any buffer regardless of the data type
+/// Similar to [`BufferMut`][crate::BufferMut], but this can be unlocked with an
+/// [`AnyBufferKey`], so it can work for any buffer regardless of the data type
 /// inside.
 pub struct AnyBufferMut<'w, 's, 'a> {
     storage: Box<dyn AnyBufferManagement + 'a>,
@@ -159,18 +159,18 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
         self
     }
 
-    /// Look at the oldest item in the buffer.
+    /// Look at the oldest message in the buffer.
     pub fn oldest(&self) -> Option<AnyMessageRef<'_>> {
         self.storage.any_oldest(self.session)
     }
 
-    /// Look at the newest item in the buffer.
+    /// Look at the newest message in the buffer.
     pub fn newest(&self) -> Option<AnyMessageRef<'_>> {
         self.storage.any_newest(self.session)
     }
 
-    /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
-    /// with the highest index being the newest item in the buffer.
+    /// Borrow a message from the buffer. Index 0 is the oldest message in the buffer
+    /// with the highest index being the newest message in the buffer.
     pub fn get(&self, index: usize) -> Option<AnyMessageRef<'_>> {
         self.storage.any_get(self.session, index)
     }
@@ -194,25 +194,26 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
             .unwrap_or(Gate::Open)
     }
 
-    /// Modify the oldest item in the buffer.
+    /// Modify the oldest message in the buffer.
     pub fn oldest_mut(&mut self) -> Option<AnyMessageMut<'_>> {
         self.modified = true;
         self.storage.any_oldest_mut(self.session)
     }
 
-    /// Modify the newest item in the buffer.
+    /// Modify the newest message in the buffer.
     pub fn newest_mut(&mut self) -> Option<AnyMessageMut<'_>> {
         self.modified = true;
         self.storage.any_newest_mut(self.session)
     }
 
-    /// Modify an item in the buffer. Index 0 is the oldest item in the buffer
-    /// with the highest index being the newest item in the buffer.
+    /// Modify a message in the buffer. Index 0 is the oldest message in the buffer
+    /// with the highest index being the newest message in the buffer.
     pub fn get_mut(&mut self, index: usize) -> Option<AnyMessageMut<'_>> {
         self.modified = true;
         self.storage.any_get_mut(self.session, index)
     }
 
+    /// Drain a range of messages out of the buffer.
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> DrainAnyBuffer<'_> {
         self.modified = true;
         DrainAnyBuffer {
@@ -220,13 +221,13 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
         }
     }
 
-    /// Pull the oldest item from the buffer.
+    /// Pull the oldest message from the buffer.
     pub fn pull(&mut self) -> Option<AnyMessage> {
         self.modified = true;
         self.storage.any_pull(self.session)
     }
 
-    /// Pull the item that was most recently put into the buffer (instead of the
+    /// Pull the message that was most recently put into the buffer (instead of the
     /// oldest, which is what [`Self::pull`] gives).
     pub fn pull_newest(&mut self) -> Option<AnyMessage> {
         self.modified = true;
@@ -398,7 +399,7 @@ pub(crate) struct AnyRange {
 }
 
 impl AnyRange {
-    fn new<T: std::ops::RangeBounds<usize>>(range: T) -> Self {
+    pub(crate) fn new<T: std::ops::RangeBounds<usize>>(range: T) -> Self {
         AnyRange {
             start_bound: range.start_bound().map(|x| *x),
             end_bound: range.end_bound().map(|x| *x),
