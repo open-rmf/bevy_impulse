@@ -49,6 +49,18 @@ pub struct AnyBuffer {
     pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync)
 }
 
+impl AnyBuffer {
+    /// The buffer ID for this key.
+    pub fn id(&self) -> Entity {
+        self.source
+    }
+
+    /// Get the type ID of the messages that this buffer supports.
+    pub fn message_type_id(&self) -> TypeId {
+        self.interface.message_type_id()
+    }
+}
+
 impl std::fmt::Debug for AnyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AnyBuffer")

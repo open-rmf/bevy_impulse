@@ -28,24 +28,73 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    AnyBuffer, OperationError, OperationResult, OperationRoster, Buffered, Gate,
-    Joined, Accessed, BufferKeyBuilder, AnyBufferKey,
+    AnyBuffer, AddOperation, Chain, OperationError, OperationResult, OperationRoster, Buffered, Gate,
+    Join, Joined, Accessed, BufferKeyBuilder, AnyBufferKey, Builder, Output, UnusedTarget, GateState,
+    add_listener_to_source,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct BufferMap {
     inner: HashMap<Cow<'static, str>, AnyBuffer>,
 }
 
+impl BufferMap {
+    /// Insert a named buffer into the map.
+    pub fn insert(
+        &mut self,
+        name: Cow<'static, str>,
+        buffer: impl Into<AnyBuffer>,
+    ) {
+        self.inner.insert(name, buffer.into());
+    }
+
+    /// Get one of the buffers from the map by its name.
+    pub fn get(&self, name: &str) -> Option<&AnyBuffer> {
+        self.inner.get(name)
+    }
+}
+
 /// This error is used when the buffers provided for an input are not compatible
 /// with the layout.
-#[derive(ThisError, Debug, Clone)]
+#[derive(ThisError, Debug, Clone, Default)]
 #[error("the incoming buffer map is incompatible with the layout")]
 pub struct IncompatibleLayout {
     /// Names of buffers that were missing from the incoming buffer map.
     pub missing_buffers: Vec<Cow<'static, str>>,
     /// Buffers whose expected type did not match the received type.
     pub incompatible_buffers: Vec<BufferIncompatibility>,
+}
+
+impl IncompatibleLayout {
+    /// Check whether a named buffer is compatible with a specific type.
+    pub fn require_buffer<T: 'static>(
+        &mut self,
+        expected_name: &str,
+        buffers: &BufferMap,
+    ) {
+        if let Some((name, buffer)) = buffers.inner.get_key_value(expected_name) {
+            if buffer.message_type_id() != TypeId::of::<T>() {
+                self.incompatible_buffers.push(BufferIncompatibility {
+                    name: name.clone(),
+                    expected: TypeId::of::<T>(),
+                    received: buffer.message_type_id(),
+                });
+            }
+        } else {
+            self.missing_buffers.push(Cow::Owned(expected_name.to_owned()));
+        }
+    }
+
+    /// Convert the instance into a result. If any field has content in it, then
+    /// this will produce an [`Err`]. Otherwise if no incompatibilities are
+    /// present, this will produce an [`Ok`].
+    pub fn into_result(self) -> Result<(), IncompatibleLayout> {
+        if self.missing_buffers.is_empty() && self.incompatible_buffers.is_empty() {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
 }
 
 /// Difference between the expected and received types of a named buffer.
@@ -69,11 +118,22 @@ pub trait BufferMapLayout: Sized {
         world: &World,
     ) -> Result<usize, OperationError>;
 
+    fn ensure_active_session(
+        buffers: &BufferMap,
+        session: Entity,
+        world: &mut World,
+    ) -> OperationResult;
+
     fn add_listener(
         buffers: &BufferMap,
         listener: Entity,
         world: &mut World,
-    ) -> OperationResult;
+    ) -> OperationResult {
+        for buffer in buffers.inner.values() {
+            add_listener_to_source(buffer.id(), listener, world)?;
+        }
+        Ok(())
+    }
 
     fn gate_action(
         buffers: &BufferMap,
@@ -81,29 +141,59 @@ pub trait BufferMapLayout: Sized {
         action: Gate,
         world: &mut World,
         roster: &mut OperationRoster,
-    ) -> OperationResult;
+    ) -> OperationResult {
+        for buffer in buffers.inner.values() {
+            GateState::apply(buffer.id(), session, action, world, roster)?;
+        }
+        Ok(())
+    }
 
-    fn as_input(buffers: &BufferMap) -> SmallVec<[Entity; 8]>;
-
-    fn ensure_active_session(
-        buffers: &BufferMap,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult;
+    fn as_input(buffers: &BufferMap) -> SmallVec<[Entity; 8]> {
+        let mut inputs = SmallVec::new();
+        for buffer in buffers.inner.values() {
+            inputs.push(buffer.id());
+        }
+        inputs
+    }
 }
 
-pub trait JoinedValue: BufferMapLayout {
-    fn buffered_count(
-        buffers: &BufferMap,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError>;
+pub trait JoinedValue: 'static + BufferMapLayout + Send + Sync{
+    /// This associated type must represent a buffer map layout that is
+    /// guaranteed to be compatible for this JoinedValue. Failure to implement
+    /// this trait accordingly will result in panics.
+    type Buffers: Into<BufferMap>;
 
     fn pull(
         buffers: &BufferMap,
         session: Entity,
-        world: &World,
+        world: &mut World,
     ) -> Result<Self, OperationError>;
+
+    fn join_into<'w, 's, 'a, 'b>(
+        buffers: Self::Buffers,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self> {
+        Self::try_join_into(buffers.into(), builder).unwrap()
+    }
+
+    fn try_join_into<'w, 's, 'a, 'b>(
+        buffers: BufferMap,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Result<Chain<'w, 's, 'a, 'b, Self>, IncompatibleLayout> {
+        let scope = builder.scope();
+        let buffers = BufferedMap::<Self>::new(buffers)?;
+        buffers.verify_scope(scope);
+
+        let join = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
+            Some(scope),
+            join,
+            Join::new(buffers, target),
+        ));
+
+        Ok(Output::new(scope, target).chain(builder))
+    }
 }
 
 /// Trait to describe a layout of buffer keys
@@ -124,6 +214,13 @@ pub trait BufferKeyMap: BufferMapLayout + Clone {
 struct BufferedMap<K> {
     map: BufferMap,
     _ignore: std::marker::PhantomData<fn(K)>,
+}
+
+impl<K: BufferMapLayout> BufferedMap<K> {
+    fn new(map: BufferMap) -> Result<Self, IncompatibleLayout> {
+        K::is_compatible(&map)?;
+        Ok(Self { map, _ignore: Default::default() })
+    }
 }
 
 impl<K> Clone for BufferedMap<K> {
@@ -272,5 +369,176 @@ impl BufferMapLayout for AnyBufferKeyMap {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use crate::{
+        prelude::*,
+        testing::*,
+        OperationResult, OperationError, OrBroken, InspectBuffer, ManageBuffer, BufferMap,
+    };
+
+    use bevy_ecs::prelude::World;
+
+    #[derive(Clone)]
+    struct TestJoinedValue {
+        integer: i64,
+        float: f64,
+        string: String,
+    }
+
+    impl BufferMapLayout for TestJoinedValue {
+        fn is_compatible(buffers: &BufferMap) -> Result<(), IncompatibleLayout> {
+            let mut compatibility = IncompatibleLayout::default();
+            compatibility.require_buffer::<i64>("integer", buffers);
+            compatibility.require_buffer::<f64>("float", buffers);
+            compatibility.require_buffer::<String>("string", buffers);
+            compatibility.into_result()
+        }
+
+        fn buffered_count(
+            buffers: &BufferMap,
+            session: Entity,
+            world: &World,
+        ) -> Result<usize, OperationError> {
+            let integer_count = world
+                .get_entity(buffers.get("integer").unwrap().id())
+                .or_broken()?
+                .buffered_count::<i64>(session)?;
+
+            let float_count = world
+                .get_entity(buffers.get("float").unwrap().id())
+                .or_broken()?
+                .buffered_count::<f64>(session)?;
+
+            let string_count = world
+                .get_entity(buffers.get("string").unwrap().id())
+                .or_broken()?
+                .buffered_count::<String>(session)?;
+
+            Ok(
+                [
+                    integer_count,
+                    float_count,
+                    string_count,
+                ]
+                .iter()
+                .min()
+                .copied()
+                .unwrap_or(0)
+            )
+        }
+
+        fn ensure_active_session(
+            buffers: &BufferMap,
+            session: Entity,
+            world: &mut World,
+        ) -> OperationResult {
+            world
+                .get_entity_mut(buffers.get("integer").unwrap().id())
+                .or_broken()?
+                .ensure_session::<i64>(session)?;
+
+            world
+                .get_entity_mut(buffers.get("float").unwrap().id())
+                .or_broken()?
+                .ensure_session::<f64>(session)?;
+
+            world
+                .get_entity_mut(buffers.get("string").unwrap().id())
+                .or_broken()?
+                .ensure_session::<String>(session)?;
+
+            Ok(())
+        }
+    }
+
+    impl JoinedValue for TestJoinedValue {
+        type Buffers = TestJoinedValueBuffers;
+
+        fn pull(
+            buffers: &BufferMap,
+            session: Entity,
+            world: &mut World,
+        ) -> Result<Self, OperationError> {
+            let integer = world
+                .get_entity_mut(buffers.get("integer").unwrap().id())
+                .or_broken()?
+                .pull_from_buffer::<i64>(session)?;
+
+            let float = world
+                .get_entity_mut(buffers.get("float").unwrap().id())
+                .or_broken()?
+                .pull_from_buffer::<f64>(session)?;
+
+            let string = world
+                .get_entity_mut(buffers.get("string").unwrap().id())
+                .or_broken()?
+                .pull_from_buffer::<String>(session)?;
+
+            Ok(Self { integer, float, string })
+        }
+    }
+
+    struct TestJoinedValueBuffers {
+        integer: Buffer<i64>,
+        float: Buffer<f64>,
+        string: Buffer<String>,
+    }
+
+    impl From<TestJoinedValueBuffers> for BufferMap {
+        fn from(value: TestJoinedValueBuffers) -> Self {
+            let mut buffers = BufferMap::default();
+            buffers.insert(Cow::Borrowed("integer"), value.integer);
+            buffers.insert(Cow::Borrowed("float"), value.float);
+            buffers.insert(Cow::Borrowed("string"), value.string);
+            buffers
+        }
+    }
+
+    #[test]
+    fn test_joined_value() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_i64 = builder.create_buffer(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer(BufferSettings::default());
+            let buffer_string = builder.create_buffer(BufferSettings::default());
+
+            let mut buffers = BufferMap::default();
+            buffers.insert(Cow::Borrowed("integer"), buffer_i64);
+            buffers.insert(Cow::Borrowed("float"), buffer_f64);
+            buffers.insert(Cow::Borrowed("string"), buffer_string);
+
+            scope
+                .input
+                .chain(builder)
+                .fork_unzip((
+                    |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                    |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                    |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                ));
+
+            builder.try_join_into(buffers).unwrap().connect(scope.terminate);
+        });
+
+        let mut promise = context.command(
+            |commands| commands.request(
+                (5_i64, 3.14_f64, "hello".to_string()),
+                workflow,
+            )
+            .take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValue = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        assert_eq!(value.string, "hello");
+        assert!(context.no_unhandled_errors());
     }
 }

@@ -29,7 +29,7 @@ use crate::{
     OperateBufferAccess, OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output,
     Provider, RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings,
     ScopeSettingsStorage, Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap,
-    StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    StreamsOfMap, Trim, TrimBranch, UnusedTarget, JoinedValue, BufferMap, IncompatibleLayout,
 };
 
 pub(crate) mod connect;
@@ -237,6 +237,22 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         JoinedItem<B>: 'static + Send + Sync,
     {
         buffers.join(self)
+    }
+
+    /// Try joining a map of buffers into a single value.
+    pub fn try_join_into<'b, Joined: JoinedValue>(
+        &'b mut self,
+        buffers: impl Into<BufferMap>,
+    ) -> Result<Chain<'w, 's, 'a, 'b, Joined>, IncompatibleLayout> {
+        Joined::try_join_into(buffers.into(), self)
+    }
+
+    /// Join an appropriate layout of buffers into a single value.
+    pub fn join_into<'b, Joined: JoinedValue>(
+        &'b mut self,
+        buffers: Joined::Buffers,
+    ) -> Chain<'w, 's, 'a, 'b, Joined> {
+        Joined::join_into(buffers, self)
     }
 
     /// Alternative way of calling [`Bufferable::listen`].

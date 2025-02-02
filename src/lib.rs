@@ -338,7 +338,8 @@ pub mod prelude {
         buffer::{
             AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessage,
             Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferSettings, Bufferable,
-            Buffered, IterBufferable, RetentionPolicy,
+            Buffered, IterBufferable, RetentionPolicy, BufferMapLayout, JoinedValue, BufferKeyMap,
+            IncompatibleLayout,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
