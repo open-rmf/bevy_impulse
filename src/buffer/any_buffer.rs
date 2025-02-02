@@ -381,6 +381,11 @@ impl<'w, 's, 'a> Drop for AnyBufferMut<'w, 's, 'a> {
 /// This trait allows [`World`] to give you access to any buffer using an
 /// [`AnyBufferKey`].
 pub trait AnyBufferWorldAccess {
+
+    /// Call this to get mutable access to any buffer.
+    ///
+    /// Pass in a callback that will receive a [`AnyBufferMut`], allowing it to
+    /// view and modify the contents of the buffer.
     fn any_buffer_mut<U>(
         &mut self,
         key: &AnyBufferKey,

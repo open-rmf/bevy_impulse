@@ -37,11 +37,11 @@ use smallvec::SmallVec;
 
 use crate::{
     AnyBufferAccessImpl, AnyBufferAccessInterface, AnyBuffer, AnyBufferKey,
-    AnyRange, Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferAccessLifecycle,
-    BufferAccessMut, BufferError, BufferStorage, Builder, DrainBuffer, OperationError,
-    OperationResult, InspectBuffer, ManageBuffer, Gate, GateState,
-    NotifyBufferUpdate, Bufferable, Buffered, OrBroken, Joined, Accessed,
-    add_listener_to_source,
+    AnyRange, Buffer, BufferAccessors, BufferAccess, BufferKey, BufferKeyBuilder,
+    BufferAccessLifecycle, BufferAccessMut, BufferError, BufferStorage, Builder,
+    DrainBuffer, OperationError, OperationResult, InspectBuffer, ManageBuffer,
+    Gate, GateState, NotifyBufferUpdate, Bufferable, Buffered, OrBroken, Joined,
+    Accessed, add_listener_to_source,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -171,6 +171,52 @@ impl From<JsonBufferKey> for AnyBufferKey {
     }
 }
 
+/// Similar to [`BufferView`][crate::BufferView], but this can be unlocked with
+/// a [`JsonBufferKey`], so it can work for any buffer whose message types
+/// support serialization and deserialization.
+pub struct JsonBufferView<'a> {
+    storage: Box<dyn JsonBufferViewing + 'a>,
+    gate: &'a GateState,
+    buffer: Entity,
+    session: Entity,
+}
+
+impl<'a> JsonBufferView<'a> {
+    /// Get a serialized copy of the oldest message in the buffer.
+    pub fn oldest(&self) -> JsonMessageViewResult {
+        self.storage.json_oldest(self.session)
+    }
+
+    /// Get a serialized copy of the newest message in the buffer.
+    pub fn newest(&self) -> JsonMessageViewResult {
+        self.storage.json_newest(self.session)
+    }
+
+    /// Get a serialized copy of a message in the buffer.
+    pub fn get(&self, index: usize) -> JsonMessageViewResult {
+        self.storage.json_get(self.session, index)
+    }
+
+    /// Get how many messages are in this buffer.
+    pub fn len(&self) -> usize {
+        self.storage.json_count(self.session)
+    }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Check whether the gate of this buffer is open or closed.
+    pub fn gate(&self) -> Gate {
+        self.gate
+            .map
+            .get(&self.session)
+            .copied()
+            .unwrap_or(Gate::Open)
+    }
+}
+
 /// Similar to [`BufferMut`][crate::BufferMut], but this can be unlocked with a
 /// [`JsonBufferKey`], so it can work for any buffer whose message types support
 /// serialization and deserialization.
@@ -184,7 +230,7 @@ pub struct JsonBufferMut<'w, 's, 'a> {
     modified: bool,
 }
 
-impl<'w, 's, 'a> JsonBufferMut<'w, 's,  'a> {
+impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
     /// Same as [BufferMut::allow_closed_loops][1].
     ///
     /// [1]: crate::BufferMut::allow_closed_loops
@@ -363,6 +409,24 @@ impl<'w, 's, 'a> Drop for JsonBufferMut<'w, 's, 'a> {
 }
 
 pub trait JsonBufferWorldAccess {
+    /// Call this to get read-only access to any buffer whose message type is
+    /// serializable and deserializable.
+    ///
+    /// Pass in a callback that will receive a [`JsonBufferView`] alongside a
+    /// shared borrow of the [`World`]. Due to technical reasons this function
+    /// needs to be called on a `&mut World`, but you can still view the world
+    /// from inside the callback using the second argument.
+    fn json_buffer_view<U>(
+        &mut self,
+        key: &JsonBufferKey,
+        f: impl FnOnce(JsonBufferView, &World) -> U,
+    ) -> Result<U, BufferError>;
+
+    /// Call this to get mutable access to any buffer whose message type is
+    /// serializable and deserializable.
+    ///
+    /// Pass in a callback that will receive a [`JsonBufferMut`], allowing it to
+    /// view and modify the contents of the buffer.
     fn json_buffer_mut<U>(
         &mut self,
         key: &JsonBufferKey,
@@ -371,6 +435,18 @@ pub trait JsonBufferWorldAccess {
 }
 
 impl JsonBufferWorldAccess for World {
+    fn json_buffer_view<U>(
+        &mut self,
+        key: &JsonBufferKey,
+        f: impl FnOnce(JsonBufferView, &World) -> U,
+    ) -> Result<U, BufferError> {
+        let interface = key.interface;
+        let mut state = interface.create_json_buffer_access_state(self);
+        let access = state.get_json_buffer_access(self);
+        let buffer_view = access.as_json_buffer_view(key)?;
+        Ok(f(buffer_view, &self))
+    }
+
     fn json_buffer_mut<U>(
         &mut self,
         key: &JsonBufferKey,
@@ -486,6 +562,27 @@ trait JsonBufferManagement: JsonBufferViewing {
     fn json_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainJsonBufferInterface + 'a>;
 }
 
+impl<T> JsonBufferViewing for &'_ BufferStorage<T>
+where
+    T: 'static + Send + Sync + Serialize + DeserializeOwned,
+{
+    fn json_count(&self, session: Entity) -> usize {
+        self.count(session)
+    }
+
+    fn json_oldest<'a>(&'a self, session: Entity) -> JsonMessageViewResult {
+        self.oldest(session).map(serde_json::to_value).transpose()
+    }
+
+    fn json_newest<'a>(&'a self, session: Entity) -> JsonMessageViewResult {
+        self.newest(session).map(serde_json::to_value).transpose()
+    }
+
+    fn json_get<'a>(&'a self, session: Entity, index: usize) ->JsonMessageViewResult {
+        self.get(session, index).map(serde_json::to_value).transpose()
+    }
+}
+
 impl<T> JsonBufferViewing for Mut<'_, BufferStorage<T>>
 where
     T: 'static + Send + Sync + Serialize + DeserializeOwned,
@@ -598,6 +695,11 @@ trait JsonBufferAccessInterface {
         session: Entity,
     ) -> Result<JsonMessage, OperationError>;
 
+    fn create_json_buffer_access_state(
+        &self,
+        world: &mut World,
+    ) -> Box<dyn JsonBufferAccessState>;
+
     fn create_json_buffer_access_mut_state(
         &self,
         world: &mut World,
@@ -662,11 +764,31 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         serde_json::to_value(value).or_broken()
     }
 
+    fn create_json_buffer_access_state(
+        &self,
+        world: &mut World,
+    ) -> Box<dyn JsonBufferAccessState> {
+        Box::new(SystemState::<BufferAccess<T>>::new(world))
+    }
+
     fn create_json_buffer_access_mut_state(
         &self,
         world: &mut World,
     ) -> Box<dyn JsonBufferAccessMutState> {
         Box::new(SystemState::<BufferAccessMut<T>>::new(world))
+    }
+}
+
+trait JsonBufferAccessState {
+    fn get_json_buffer_access<'s, 'w: 's>(&'s mut self, world: &'w World) -> Box<dyn JsonBufferAccess<'w, 's> + 's>;
+}
+
+impl<T> JsonBufferAccessState for SystemState<BufferAccess<'static, 'static, T>>
+where
+    T: 'static + Send + Sync + Serialize + DeserializeOwned,
+{
+    fn get_json_buffer_access<'s, 'w: 's>(&'s mut self, world: &'w World) -> Box<dyn JsonBufferAccess<'w, 's> + 's> {
+        Box::new(self.get(world))
     }
 }
 
@@ -680,6 +802,26 @@ where
 {
     fn get_json_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn JsonBufferAccessMut<'w, 's> + 's> {
         Box::new(self.get_mut(world))
+    }
+}
+
+trait JsonBufferAccess<'w, 's> {
+    fn as_json_buffer_view<'a>(&'a self, key: &JsonBufferKey) -> Result<JsonBufferView<'a>, BufferError>;
+}
+
+impl<'w, 's, T> JsonBufferAccess<'w, 's> for BufferAccess<'w, 's, T>
+where
+    T: 'static + Send + Sync + Serialize + DeserializeOwned,
+{
+    fn as_json_buffer_view<'a>(&'a self, key: &JsonBufferKey) -> Result<JsonBufferView<'a>, BufferError> {
+        let BufferAccess { query } = self;
+        let (storage, gate) = query.get(key.buffer).map_err(|_| BufferError::BufferMissing)?;
+        Ok(JsonBufferView {
+            storage: Box::new(storage),
+            gate,
+            buffer: key.buffer,
+            session: key.session,
+        })
     }
 }
 
@@ -880,7 +1022,7 @@ mod tests {
         In(key): In<JsonBufferKey>,
         world: &mut World,
     ) -> usize {
-        world.json_buffer_mut(&key, |access| {
+        world.json_buffer_view(&key, |access, _| {
             access.len()
         }).unwrap()
     }
