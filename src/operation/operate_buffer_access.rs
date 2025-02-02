@@ -206,6 +206,12 @@ where
 pub(crate) struct BufferAccessors(pub(crate) SmallVec<[Entity; 8]>);
 
 impl BufferAccessors {
+    pub(crate) fn add_accessor(&mut self, accessor: Entity) {
+        self.0.push(accessor);
+        self.0.sort();
+        self.0.dedup();
+    }
+
     pub(crate) fn is_reachable(r: &mut OperationReachability) -> ReachabilityResult {
         let Some(accessors) = r.world.get::<Self>(r.source) else {
             return Ok(false);

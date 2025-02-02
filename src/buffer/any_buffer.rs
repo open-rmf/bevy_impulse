@@ -15,6 +15,8 @@
  *
 */
 
+// TODO(@mxgrey): Add module-level documentation describing how to use AnyBuffer
+
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -29,14 +31,17 @@ use bevy_ecs::{
 
 use thiserror::Error as ThisError;
 
+use smallvec::SmallVec;
+
 use crate::{
-    Buffer, BufferAccessLifecycle, BufferAccessMut, BufferError, BufferKey, BufferStorage,
-    DrainBuffer, NotifyBufferUpdate, GateState, Gate, OperationResult, OperationError,
-    InspectBuffer, ManageBuffer,
+    Buffer, Buffered, Bufferable, BufferAccessLifecycle, BufferAccessMut, BufferAccessors,
+    BufferError, BufferKey, BufferStorage, Builder, DrainBuffer, NotifyBufferUpdate,
+    GateState, Gate, OperationResult, OperationError, OperationRoster, OrBroken, InspectBuffer,
+    ManageBuffer, Joined, Accessed, add_listener_to_source,
 };
 
-/// A [`Buffer`] whose type has been anonymized. Joining with this buffer type
-/// will yield an [`AnyMessage`].
+/// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
+/// type will yield an [`AnyMessage`].
 #[derive(Clone, Copy)]
 pub struct AnyBuffer {
     pub(crate) scope: Entity,
@@ -56,7 +61,7 @@ impl std::fmt::Debug for AnyBuffer {
 
 impl AnyBuffer {
     /// Downcast this into a concrete [`Buffer`] type.
-    pub fn into_buffer<T: 'static>(&self) -> Option<Buffer<T>> {
+    pub fn downcast<T: 'static>(&self) -> Option<Buffer<T>> {
         if TypeId::of::<T>() == self.interface.message_type_id() {
             Some(Buffer {
                 scope: self.scope,
@@ -87,11 +92,51 @@ impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
 /// of a buffer.
 #[derive(Clone)]
 pub struct AnyBufferKey {
-    buffer: Entity,
-    session: Entity,
-    accessor: Entity,
-    lifecycle: Option<Arc<BufferAccessLifecycle>>,
-    interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
+    pub(crate) buffer: Entity,
+    pub(crate) session: Entity,
+    pub(crate) accessor: Entity,
+    pub(crate) lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
+}
+
+impl AnyBufferKey {
+    /// Downcast this into a concrete [`BufferKey`] type.
+    pub fn downcast<T: 'static>(&self) -> Option<BufferKey<T>> {
+        if TypeId::of::<T>() == self.interface.message_type_id() {
+            Some(BufferKey {
+                buffer: self.buffer,
+                session: self.session,
+                accessor: self.accessor,
+                lifecycle: self.lifecycle.clone(),
+                _ignore: Default::default(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// The buffer ID of this key.
+    pub fn id(&self) -> Entity {
+        self.buffer
+    }
+
+    /// The session that this key belongs to.
+    pub fn session(&self) -> Entity {
+        self.session
+    }
+
+    fn deep_clone(&self) -> Self {
+        let mut deep = self.clone();
+        deep.lifecycle = self
+            .lifecycle
+            .as_ref()
+            .map(|l| Arc::new(l.as_ref().clone()));
+        deep
+    }
+
+    fn is_in_use(&self) -> bool {
+        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
+    }
 }
 
 impl std::fmt::Debug for AnyBufferKey {
@@ -104,23 +149,6 @@ impl std::fmt::Debug for AnyBufferKey {
             .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
             .field("message_type_name", &self.interface.message_type_name())
             .finish()
-    }
-}
-
-impl AnyBufferKey {
-    /// Downcast this into a concrete [`BufferKey`] type.
-    pub fn into_buffer_key<T: 'static>(&self) -> Option<BufferKey<T>> {
-        if TypeId::of::<T>() == self.interface.message_type_id() {
-            Some(BufferKey {
-                buffer: self.buffer,
-                session: self.session,
-                accessor: self.accessor,
-                lifecycle: self.lifecycle.clone(),
-                _ignore: Default::default(),
-            })
-        } else {
-            None
-        }
     }
 }
 
@@ -568,7 +596,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState for SystemState<Buf
     }
 }
 
-trait AnyBufferAccessMut<'w, 's> {
+pub(crate) trait AnyBufferAccessMut<'w, 's> {
     fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError>;
 }
 
@@ -605,16 +633,22 @@ pub(crate) trait AnyBufferAccessInterface {
         session: Entity,
     ) -> OperationResult;
 
+    fn pull(
+        &self,
+        entity_mut: &mut EntityWorldMut,
+        session: Entity,
+    ) -> Result<AnyMessage, OperationError>;
+
     fn create_any_buffer_access_mut_state(
         &self,
         world: &mut World,
     ) -> Box<dyn AnyBufferAccessMutState>;
 }
 
-struct AnyBufferAccessImpl<T>(std::marker::PhantomData<T>);
+pub(crate) struct AnyBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync + Any> AnyBufferAccessImpl<T> {
-    fn get_interface() -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
+    pub(crate) fn get_interface() -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
         const INTERFACE_MAP: OnceLock<Mutex<HashMap<
             TypeId,
             &'static (dyn AnyBufferAccessInterface + Send + Sync)
@@ -655,6 +689,14 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         entity_mut.ensure_session::<T>(session)
     }
 
+    fn pull(
+        &self,
+        entity_mut: &mut EntityWorldMut,
+        session: Entity,
+    ) -> Result<AnyMessage, OperationError> {
+        entity_mut.pull_from_buffer::<T>(session).map(to_any_message)
+    }
+
     fn create_any_buffer_access_mut_state(
         &self,
         world: &mut World,
@@ -682,6 +724,86 @@ trait DrainAnyBufferInterface {
 impl<T: 'static + Send + Sync + Any> DrainAnyBufferInterface for DrainBuffer<'_, T> {
     fn any_next(&mut self) -> Option<AnyMessage> {
         self.next().map(to_any_message)
+    }
+}
+
+impl Bufferable for AnyBuffer {
+    type BufferType = Self;
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
+        assert_eq!(self.scope, builder.scope());
+        self
+    }
+}
+
+impl Buffered for AnyBuffer {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
+        let entity_ref = world.get_entity(self.source).or_broken()?;
+        self.interface.buffered_count(&entity_ref, session)
+    }
+
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
+        add_listener_to_source(self.source, listener, world)
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: Gate,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        GateState::apply(self.source, session, action, world, roster)
+    }
+
+    fn as_input(&self) -> SmallVec<[Entity; 8]> {
+        SmallVec::from_iter([self.source])
+    }
+
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        let mut entity_mut = world.get_entity_mut(self.source).or_broken()?;
+        self.interface.ensure_session(&mut entity_mut, session)
+    }
+}
+
+impl Joined for AnyBuffer {
+    type Item = AnyMessage;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        let mut buffer_mut = world.get_entity_mut(self.source).or_broken()?;
+        self.interface.pull(&mut buffer_mut, session)
+    }
+}
+
+impl Accessed for AnyBuffer {
+    type Key = AnyBufferKey;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
+        world
+            .get_mut::<BufferAccessors>(self.source)
+            .or_broken()?
+            .add_accessor(accessor);
+        Ok(())
+    }
+
+    fn create_key(&self, builder: &super::BufferKeyBuilder) -> Self::Key {
+        let components = builder.as_components(self.source);
+        AnyBufferKey {
+            buffer: components.buffer,
+            session: components.session,
+            accessor: components.accessor,
+            lifecycle: components.lifecycle,
+            interface: self.interface,
+        }
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        key.is_in_use()
     }
 }
 
@@ -853,5 +975,54 @@ mod tests {
             .map(|value| *value.downcast::<usize>().unwrap())
             .collect()
         }).unwrap()
+    }
+
+    #[test]
+    fn double_any_messages() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope: Scope<(u32, i32, f32), (u32, i32, f32)>, builder| {
+            let buffer_u32: AnyBuffer = builder.create_buffer::<u32>(BufferSettings::default()).into();
+            let buffer_i32: AnyBuffer = builder.create_buffer::<i32>(BufferSettings::default()).into();
+            let buffer_f32: AnyBuffer = builder.create_buffer::<f32>(BufferSettings::default()).into();
+
+            let (input_u32, input_i32, input_f32) = scope.input.chain(builder).unzip();
+            input_u32
+                .chain(builder)
+                .map_block(|v| 2*v)
+                .connect(buffer_u32.downcast::<u32>().unwrap().input_slot());
+
+            input_i32
+                .chain(builder)
+                .map_block(|v| 2*v)
+                .connect(buffer_i32.downcast::<i32>().unwrap().input_slot());
+
+            input_f32
+                .chain(builder)
+                .map_block(|v| 2.0*v)
+                .connect(buffer_f32.downcast::<f32>().unwrap().input_slot());
+
+            (buffer_u32, buffer_i32, buffer_f32)
+                .join(builder)
+                .map_block(|(value_u32, value_i32, value_f32)| {
+                    (
+                        *value_u32.downcast::<u32>().unwrap(),
+                        *value_i32.downcast::<i32>().unwrap(),
+                        *value_f32.downcast::<f32>().unwrap(),
+                    )
+                })
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(
+            |commands| commands.request((1u32, 2i32, 3f32), workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let (v_u32, v_i32, v_f32) = promise.take().available().unwrap();
+        assert_eq!(v_u32, 2);
+        assert_eq!(v_i32, 4);
+        assert_eq!(v_f32, 6.0);
+        assert!(context.no_unhandled_errors());
     }
 }

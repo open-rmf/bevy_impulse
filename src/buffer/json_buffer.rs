@@ -15,6 +15,8 @@
  *
 */
 
+// TODO(@mxgrey): Add module-level documentation describing how to use JsonBuffer
+
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -31,19 +33,60 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use serde_json::Value as JsonMessage;
 
-use thiserror::Error as ThisError;
+use smallvec::SmallVec;
 
 use crate::{
-    AnyRange, BufferKey, BufferAccessLifecycle, BufferAccessMut, BufferError, BufferStorage,
-    DrainBuffer, OperationError, OperationResult, InspectBuffer, ManageBuffer, Gate, GateState,
-    NotifyBufferUpdate,
+    AnyBufferAccessImpl, AnyBufferAccessInterface, AnyBuffer, AnyBufferKey,
+    AnyRange, Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferAccessLifecycle,
+    BufferAccessMut, BufferError, BufferStorage, Builder, DrainBuffer, OperationError,
+    OperationResult, InspectBuffer, ManageBuffer, Gate, GateState,
+    NotifyBufferUpdate, Bufferable, Buffered, OrBroken, Joined, Accessed,
+    add_listener_to_source,
 };
 
+/// A [`Buffer`] whose message type has been anonymized, but which is known to
+/// support serialization and deserialization. Joining this buffer type will
+/// yield a [`JsonMessage`].
 #[derive(Clone, Copy, Debug)]
 pub struct JsonBuffer {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
-    pub(crate) interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
+    scope: Entity,
+    source: Entity,
+    interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
+}
+
+impl JsonBuffer {
+    /// Downcast this into a concerete [`Buffer`] type.
+    pub fn downcast<T: 'static>(&self) -> Option<Buffer<T>> {
+        if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
+            Some(Buffer {
+                scope: self.scope,
+                source: self.source,
+                _ignore: Default::default(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<Buffer<T>> for JsonBuffer {
+    fn from(value: Buffer<T>) -> Self {
+        Self {
+            scope: value.scope,
+            source: value.source,
+            interface: JsonBufferAccessImpl::<T>::get_interface(),
+        }
+    }
+}
+
+impl From<JsonBuffer> for AnyBuffer {
+    fn from(value: JsonBuffer) -> Self {
+        Self {
+            scope: value.scope,
+            source: value.source,
+            interface: value.interface.any_access_interface(),
+        }
+    }
 }
 
 /// Similar to a [`BufferKey`] except it can be used for any buffer that supports
@@ -61,6 +104,35 @@ pub struct JsonBufferKey {
     interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
 }
 
+impl JsonBufferKey {
+    pub fn downcast<T: 'static>(&self) -> Option<BufferKey<T>> {
+        if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
+            Some(BufferKey {
+                buffer: self.buffer,
+                session: self.session,
+                accessor: self.accessor,
+                lifecycle: self.lifecycle.clone(),
+                _ignore: Default::default()
+            })
+        } else {
+            None
+        }
+    }
+
+    fn deep_clone(&self) -> Self {
+        let mut deep = self.clone();
+        deep.lifecycle = self
+            .lifecycle
+            .as_ref()
+            .map(|l| Arc::new(l.as_ref().clone()));
+        deep
+    }
+
+    fn is_in_use(&self) -> bool {
+        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
+    }
+}
+
 impl std::fmt::Debug for JsonBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
@@ -69,8 +141,33 @@ impl std::fmt::Debug for JsonBufferKey {
             .field("session", &self.session)
             .field("accessor", &self.accessor)
             .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
-            .field("message_type_name", &self.interface.message_type_name())
+            .field("message_type_name", &self.interface.any_access_interface().message_type_name())
             .finish()
+    }
+}
+
+impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<BufferKey<T>> for JsonBufferKey {
+    fn from(value: BufferKey<T>) -> Self {
+        let interface = JsonBufferAccessImpl::<T>::get_interface();
+        JsonBufferKey {
+            buffer: value.buffer,
+            session: value.session,
+            accessor: value.accessor,
+            lifecycle: value.lifecycle,
+            interface
+        }
+    }
+}
+
+impl From<JsonBufferKey> for AnyBufferKey {
+    fn from(value: JsonBufferKey) -> Self {
+        AnyBufferKey {
+            buffer: value.buffer,
+            session: value.session,
+            accessor: value.accessor,
+            lifecycle: value.lifecycle,
+            interface: value.interface.any_access_interface(),
+        }
     }
 }
 
@@ -467,10 +564,8 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonMutInterface f
     }
 }
 
-pub(crate) trait JsonBufferAccessInterface {
-    fn message_type_id(&self) -> TypeId;
-
-    fn message_type_name(&self) -> &'static str;
+trait JsonBufferAccessInterface {
+    fn any_access_interface(&self) -> &'static (dyn AnyBufferAccessInterface + Send + Sync);
 
     fn buffered_count(
         &self,
@@ -484,6 +579,12 @@ pub(crate) trait JsonBufferAccessInterface {
         session: Entity,
     ) -> OperationResult;
 
+    fn pull(
+        &self,
+        buffer_mut: &mut EntityWorldMut,
+        session: Entity,
+    ) -> Result<JsonMessage, OperationError>;
+
     fn create_json_buffer_access_mut_state(
         &self,
         world: &mut World,
@@ -494,7 +595,7 @@ impl<'a> std::fmt::Debug for &'a (dyn JsonBufferAccessInterface + Send + Sync) {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f
             .debug_struct("Message Properties")
-            .field("type", &self.message_type_name())
+            .field("type", &self.any_access_interface().message_type_name())
             .finish()
     }
 }
@@ -502,16 +603,25 @@ impl<'a> std::fmt::Debug for &'a (dyn JsonBufferAccessInterface + Send + Sync) {
 struct JsonBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessImpl<T> {
+    pub(crate) fn get_interface() -> &'static (dyn JsonBufferAccessInterface + Send + Sync) {
+        const INTERFACE_MAP: OnceLock<Mutex<HashMap<
+            TypeId,
+            &'static (dyn JsonBufferAccessInterface + Send + Sync)
+        >>> = OnceLock::new();
+        let binding = INTERFACE_MAP;
 
+        let interfaces = binding.get_or_init(|| Mutex::default());
+
+        let mut interfaces_mut = interfaces.lock().unwrap();
+        *interfaces_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
+            Box::leak(Box::new(JsonBufferAccessImpl::<T>(Default::default())))
+        })
+    }
 }
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessInterface for JsonBufferAccessImpl<T> {
-    fn message_type_name(&self) -> &'static str {
-        std::any::type_name::<T>()
-    }
-
-    fn message_type_id(&self) -> TypeId {
-        TypeId::of::<T>()
+    fn any_access_interface(&self) -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
+        AnyBufferAccessImpl::<T>::get_interface()
     }
 
     fn buffered_count(
@@ -528,6 +638,15 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         session: Entity,
     ) -> OperationResult {
         buffer_mut.ensure_session::<T>(session)
+    }
+
+    fn pull(
+        &self,
+        buffer_mut: &mut EntityWorldMut,
+        session: Entity,
+    ) -> Result<JsonMessage, OperationError> {
+        let value = buffer_mut.pull_from_buffer::<T>(session)?;
+        serde_json::to_value(value).or_broken()
     }
 
     fn create_json_buffer_access_mut_state(
@@ -578,6 +697,14 @@ pub struct DrainJsonBuffer<'a> {
     interface: Box<dyn DrainJsonBufferInterface + 'a>,
 }
 
+impl<'a> Iterator for DrainJsonBuffer<'a> {
+    type Item = Result<JsonMessage, serde_json::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.interface.json_next()
+    }
+}
+
 trait DrainJsonBufferInterface {
     fn json_next(&mut self) -> Option<Result<JsonMessage, serde_json::Error>>;
 }
@@ -585,5 +712,85 @@ trait DrainJsonBufferInterface {
 impl<T: 'static + Send + Sync + Serialize> DrainJsonBufferInterface for DrainBuffer<'_, T> {
     fn json_next(&mut self) -> Option<Result<JsonMessage, serde_json::Error>> {
         self.next().map(serde_json::to_value)
+    }
+}
+
+impl Bufferable for JsonBuffer {
+    type BufferType = Self;
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
+        assert_eq!(self.scope, builder.scope());
+        self
+    }
+}
+
+impl Buffered for JsonBuffer {
+    fn verify_scope(&self, scope: Entity) {
+        assert_eq!(scope, self.scope);
+    }
+
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
+        let buffer_ref = world.get_entity(self.source).or_broken()?;
+        self.interface.buffered_count(&buffer_ref, session)
+    }
+
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
+        add_listener_to_source(self.source, listener, world)
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: Gate,
+        world: &mut World,
+        roster: &mut crate::OperationRoster,
+    ) -> OperationResult {
+        GateState::apply(self.source, session, action, world, roster)
+    }
+
+    fn as_input(&self) -> smallvec::SmallVec<[Entity; 8]> {
+        SmallVec::from_iter([self.source])
+    }
+
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        let mut buffer_mut = world.get_entity_mut(self.source).or_broken()?;
+        self.interface.ensure_session(&mut buffer_mut, session)
+    }
+}
+
+impl Joined for JsonBuffer {
+    type Item = JsonMessage;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        let mut buffer_mut = world.get_entity_mut(self.source).or_broken()?;
+        self.interface.pull(&mut buffer_mut, session)
+    }
+}
+
+impl Accessed for JsonBuffer {
+    type Key = JsonBufferKey;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
+        world
+            .get_mut::<BufferAccessors>(self.source)
+            .or_broken()?
+            .add_accessor(accessor);
+        Ok(())
+    }
+
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
+        let components = builder.as_components(self.source);
+        JsonBufferKey {
+            buffer: components.buffer,
+            session: components.session,
+            accessor: components.accessor,
+            lifecycle: components.lifecycle,
+            interface: self.interface,
+        }
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        key.is_in_use()
     }
 }

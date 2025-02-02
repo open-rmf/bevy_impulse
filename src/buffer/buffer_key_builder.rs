@@ -28,6 +28,13 @@ pub struct BufferKeyBuilder {
     lifecycle: Option<(ChannelSender, Arc<()>)>,
 }
 
+pub struct BufferKeyComponents {
+    pub buffer: Entity,
+    pub session: Entity,
+    pub accessor: Entity,
+    pub lifecycle: Option<Arc<BufferAccessLifecycle>>,
+}
+
 impl BufferKeyBuilder {
     pub(crate) fn build<T>(&self, buffer: Entity) -> BufferKey<T> {
         BufferKey {
@@ -45,6 +52,26 @@ impl BufferKeyBuilder {
                 ))
             }),
             _ignore: Default::default(),
+        }
+    }
+
+    // TODO(@mxgrey): Consider refactoring all the buffer key structs to use a
+    // single inner struct like BufferKeyComponents
+    pub(crate) fn as_components(&self, buffer: Entity) -> BufferKeyComponents {
+        BufferKeyComponents {
+            buffer,
+            session: self.session,
+            accessor: self.accessor,
+            lifecycle: self.lifecycle.as_ref().map(|(sender, tracker)| {
+                Arc::new(BufferAccessLifecycle::new(
+                    self.scope,
+                    buffer,
+                    self.session,
+                    self.accessor,
+                    sender.clone(),
+                    tracker.clone(),
+                ))
+            }),
         }
     }
 

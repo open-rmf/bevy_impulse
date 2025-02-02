@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferStorage, CloneFromBuffer,
     ForkTargetStorage, Gate, GateState, InspectBuffer, ManageBuffer, OperationError,
-    OperationResult, OperationRoster, OrBroken, SingleInputStorage, AnyBuffer,
+    OperationResult, OperationRoster, OrBroken, SingleInputStorage,
 };
 
 pub trait Buffered: Clone {
@@ -111,11 +111,10 @@ impl<T: 'static + Send + Sync> Joined for Buffer<T> {
 impl<T: 'static + Send + Sync> Accessed for Buffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
-        let mut accessors = world.get_mut::<BufferAccessors>(self.source).or_broken()?;
-
-        accessors.0.push(accessor);
-        accessors.0.sort();
-        accessors.0.dedup();
+        world
+            .get_mut::<BufferAccessors>(self.source)
+            .or_broken()?
+            .add_accessor(accessor);
         Ok(())
     }
 
@@ -184,11 +183,10 @@ impl<T: 'static + Send + Sync + Clone> Joined for CloneFromBuffer<T> {
 impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
-        let mut accessors = world.get_mut::<BufferAccessors>(self.source).or_broken()?;
-
-        accessors.0.push(accessor);
-        accessors.0.sort();
-        accessors.0.dedup();
+        world
+            .get_mut::<BufferAccessors>(self.source)
+            .or_broken()?
+            .add_accessor(accessor);
         Ok(())
     }
 
@@ -202,40 +200,6 @@ impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
 
     fn is_key_in_use(key: &Self::Key) -> bool {
         key.is_in_use()
-    }
-}
-
-impl Buffered for AnyBuffer {
-    fn verify_scope(&self, scope: Entity) {
-        assert_eq!(scope, self.scope);
-    }
-
-    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        let entity_ref = world.get_entity(self.source).or_broken()?;
-        self.interface.buffered_count(&entity_ref, session)
-    }
-
-    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        add_listener_to_source(self.source, listener, world)
-    }
-
-    fn gate_action(
-        &self,
-        session: Entity,
-        action: Gate,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        GateState::apply(self.source, session, action, world, roster)
-    }
-
-    fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([self.source])
-    }
-
-    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
-        let mut entity_mut = world.get_entity_mut(self.source).or_broken()?;
-        self.interface.ensure_session(&mut entity_mut, session)
     }
 }
 
@@ -571,7 +535,7 @@ impl<T: Accessed, const N: usize> Accessed for SmallVec<[T; N]> {
     }
 }
 
-fn add_listener_to_source(
+pub(crate) fn add_listener_to_source(
     source: Entity,
     listener: Entity,
     world: &mut World,
