@@ -31,7 +31,7 @@ use bevy_ecs::{
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use serde_json::Value as JsonMessage;
+pub use serde_json::Value as JsonMessage;
 
 use smallvec::SmallVec;
 
@@ -427,6 +427,19 @@ impl<'a> JsonMut<'a> {
         *self.modified = true;
         self.interface.insert(message)
     }
+
+    /// Modify the data of the underlying message. This is equivalent to calling
+    /// [`Self::serialize`], modifying the value, and then calling [`Self::insert`].
+    /// The benefit of this function is that you do not need to remember to
+    /// insert after you have finished your modifications.
+    pub fn modify(
+        &mut self,
+        f: impl FnOnce(&mut JsonMessage),
+    ) -> Result<(), serde_json::Error> {
+        let mut message = self.serialize()?;
+        f(&mut message);
+        self.insert(message)
+    }
 }
 
 /// The return type for functions that give a JSON view of a message in a buffer.
@@ -792,5 +805,259 @@ impl Accessed for JsonBuffer {
 
     fn is_key_in_use(key: &Self::Key) -> bool {
         key.is_in_use()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_ecs::prelude::World;
+    use crate::{prelude::*, testing::*};
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize, Clone)]
+    struct TestMessage {
+        v_i32: i32,
+        v_u32: u32,
+        v_string: String,
+    }
+
+    impl TestMessage {
+        fn new() -> Self {
+            Self {
+                v_i32: 1,
+                v_u32: 2,
+                v_string: "hello".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_json_count() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            let push_multiple_times = builder.commands().spawn_service(
+                push_multiple_times_into_buffer.into_blocking_service()
+            );
+            let count = builder.commands().spawn_service(
+                get_buffer_count.into_blocking_service()
+            );
+
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .then(push_multiple_times)
+                .then(count)
+                .connect(scope.terminate);
+        });
+
+        let msg = TestMessage::new();
+        let mut promise = context.command(
+            |commands| commands.request(msg, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let count = promise.take().available().unwrap();
+        assert_eq!(count, 5);
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn push_multiple_times_into_buffer(
+        In((value, key)): In<(TestMessage, BufferKey<TestMessage>)>,
+        mut access: BufferAccessMut<TestMessage>,
+    ) -> JsonBufferKey {
+        let mut buffer = access.get_mut(&key).unwrap();
+        for _ in 0..5 {
+            buffer.push(value.clone());
+        }
+
+        key.into()
+    }
+
+    fn get_buffer_count(
+        In(key): In<JsonBufferKey>,
+        world: &mut World,
+    ) -> usize {
+        world.json_buffer_mut(&key, |access| {
+            access.len()
+        }).unwrap()
+    }
+
+    #[test]
+    fn test_modify_json_message() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            let push_multiple_times = builder.commands().spawn_service(
+                push_multiple_times_into_buffer.into_blocking_service()
+            );
+            let modify_content = builder.commands().spawn_service(
+                modify_buffer_content.into_blocking_service()
+            );
+            let drain_content = builder.commands().spawn_service(
+                pull_each_buffer_item.into_blocking_service()
+            );
+
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .then(push_multiple_times)
+                .then(modify_content)
+                .then(drain_content)
+                .connect(scope.terminate);
+        });
+
+        let msg = TestMessage::new();
+        let mut promise = context.command(
+            |commands| commands.request(msg, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let values = promise.take().available().unwrap();
+        assert_eq!(values.len(), 5);
+        for i in 0..values.len() {
+            let v_i32 = values[i].get("v_i32").unwrap().as_i64().unwrap();
+            assert_eq!(v_i32, i as i64);
+        }
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn modify_buffer_content(
+        In(key): In<JsonBufferKey>,
+        world: &mut World,
+    ) -> JsonBufferKey {
+        world.json_buffer_mut(&key, |mut access| {
+            for i in 0..access.len() {
+                access.get_mut(i).unwrap().modify(|value| {
+                    let v_i32 = value.get_mut("v_i32").unwrap();
+                    let modified_v_i32 = i as i64 * v_i32.as_i64().unwrap();
+                    *v_i32 = modified_v_i32.into();
+                }).unwrap();
+            }
+        }).unwrap();
+
+        key
+    }
+
+    fn pull_each_buffer_item(
+        In(key): In<JsonBufferKey>,
+        world: &mut World,
+    ) -> Vec<JsonMessage> {
+        world.json_buffer_mut(&key, |mut access| {
+            let mut values = Vec::new();
+            while let Ok(Some(value)) = access.pull() {
+                values.push(value);
+            }
+            values
+        }).unwrap()
+    }
+
+    #[test]
+    fn test_drain_json_message() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer = builder.create_buffer(BufferSettings::keep_all());
+            let push_multiple_times = builder.commands().spawn_service(
+                push_multiple_times_into_buffer.into_blocking_service()
+            );
+            let modify_content = builder.commands().spawn_service(
+                modify_buffer_content.into_blocking_service()
+            );
+            let drain_content = builder.commands().spawn_service(
+                drain_buffer_contents.into_blocking_service()
+            );
+
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .then(push_multiple_times)
+                .then(modify_content)
+                .then(drain_content)
+                .connect(scope.terminate);
+        });
+
+        let msg = TestMessage::new();
+        let mut promise = context.command(
+            |commands| commands.request(msg, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let values = promise.take().available().unwrap();
+        assert_eq!(values.len(), 5);
+        for i in 0..values.len() {
+            let v_i32 = values[i].get("v_i32").unwrap().as_i64().unwrap();
+            assert_eq!(v_i32, i as i64);
+        }
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn drain_buffer_contents(
+        In(key): In<JsonBufferKey>,
+        world: &mut World,
+    ) -> Vec<JsonMessage> {
+        world.json_buffer_mut(&key, |mut access| {
+            access
+            .drain(..)
+            .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap()
+        .unwrap()
+    }
+
+    #[test]
+    fn double_json_messages() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_double_u32: JsonBuffer = builder.create_buffer::<TestMessage>(BufferSettings::default()).into();
+            let buffer_double_i32: JsonBuffer = builder.create_buffer::<TestMessage>(BufferSettings::default()).into();
+            let buffer_double_string: JsonBuffer = builder.create_buffer::<TestMessage>(BufferSettings::default()).into();
+
+            scope
+                .input
+                .chain(builder)
+                .fork_clone((
+                    |chain: Chain<_>| chain
+                        .map_block(|mut msg: TestMessage| {
+                            msg.v_u32 *= 2;
+                            msg
+                        })
+                        .connect(buffer_double_u32.downcast::<TestMessage>().unwrap().input_slot()),
+                    |chain: Chain<_>| chain
+                        .map_block(|mut msg: TestMessage| {
+                            msg.v_i32 *= 2;
+                            msg
+                        })
+                        .connect(buffer_double_i32.downcast::<TestMessage>().unwrap().input_slot()),
+                    |chain: Chain<_>| chain
+                        .map_block(|mut msg: TestMessage| {
+                            msg.v_string = msg.v_string.clone() + &msg.v_string;
+                            msg
+                        })
+                        .connect(buffer_double_string.downcast::<TestMessage>().unwrap().input_slot()),
+                ));
+
+            (buffer_double_u32, buffer_double_i32, buffer_double_string)
+                .join(builder)
+                .connect(scope.terminate);
+        });
+
+        let msg = TestMessage::new();
+        let mut promise = context.command(
+            |commands| commands.request(msg, workflow).take_response()
+        );
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let (double_u32, double_i32, double_string) = promise.take().available().unwrap();
+        assert_eq!(4, double_u32.get("v_u32").unwrap().as_i64().unwrap());
+        assert_eq!(2, double_i32.get("v_i32").unwrap().as_i64().unwrap());
+        assert_eq!("hellohello", double_string.get("v_string").unwrap().as_str().unwrap());
+        assert!(context.no_unhandled_errors());
     }
 }

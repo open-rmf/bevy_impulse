@@ -336,8 +336,9 @@ impl Plugin for ImpulsePlugin {
 pub mod prelude {
     pub use crate::{
         buffer::{
-            AnyBuffer, AnyBufferKey, AnyBufferWorldAccess, Buffer, BufferAccess, BufferAccessMut,
-            BufferKey, BufferSettings, Bufferable, Buffered, IterBufferable, RetentionPolicy,
+            AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessage,
+            Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferSettings, Bufferable,
+            Buffered, IterBufferable, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
@@ -361,5 +362,10 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
+    };
+
+    #[cfg(feature = "diagram")]
+    pub use crate::buffer::{
+        JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage,
     };
 }
