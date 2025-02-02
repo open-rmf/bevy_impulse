@@ -514,9 +514,17 @@ pub(crate) struct AnyRange {
 impl AnyRange {
     pub(crate) fn new<T: std::ops::RangeBounds<usize>>(range: T) -> Self {
         AnyRange {
-            start_bound: range.start_bound().map(|x| *x),
-            end_bound: range.end_bound().map(|x| *x),
+            start_bound: deref_bound(range.start_bound()),
+            end_bound: deref_bound(range.end_bound()),
         }
+    }
+}
+
+fn deref_bound(bound: std::ops::Bound<&usize>) -> std::ops::Bound<usize> {
+    match bound {
+        std::ops::Bound::Included(v) => std::ops::Bound::Included(*v),
+        std::ops::Bound::Excluded(v) => std::ops::Bound::Excluded(*v),
+        std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
     }
 }
 
