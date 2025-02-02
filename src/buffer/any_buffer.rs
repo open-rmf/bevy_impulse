@@ -165,6 +165,52 @@ impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
     }
 }
 
+/// Similar to [`BufferView`][crate::BufferView], but this can be unlocked with
+/// an [`AnyBufferKey`], so it can work for any buffer whose message types
+/// support serialization and deserialization.
+pub struct AnyBufferView<'a> {
+    storage: Box<dyn AnyBufferViewing + 'a>,
+    gate: &'a GateState,
+    session: Entity,
+}
+
+impl<'a> AnyBufferView<'a> {
+    /// Look at the oldest message in the buffer.
+    pub fn oldest(&self) -> Option<AnyMessageRef<'_>> {
+        self.storage.any_oldest(self.session)
+    }
+
+    /// Look at the newest message in the buffer.
+    pub fn newest(&self) -> Option<AnyMessageRef<'_>> {
+        self.storage.any_newest(self.session)
+    }
+
+    /// Borrow a message from the buffer. Index 0 is the oldest message in the buffer
+    /// while the highest index is the newest message in the buffer.
+    pub fn get(&self, index: usize) -> Option<AnyMessageRef<'_>> {
+        self.storage.any_get(self.session, index)
+    }
+
+    /// Get how many messages are in this buffer.
+    pub fn len(&self) -> usize {
+        self.storage.any_count(self.session)
+    }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Check whether the gate of this buffer is open or closed.
+    pub fn gate(&self) -> Gate {
+        self.gate
+            .map
+            .get(&self.session)
+            .copied()
+            .unwrap_or(Gate::Open)
+    }
+}
+
 /// Similar to [`BufferMut`][crate::BufferMut], but this can be unlocked with an
 /// [`AnyBufferKey`], so it can work for any buffer regardless of the data type
 /// inside.
@@ -198,7 +244,7 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     }
 
     /// Borrow a message from the buffer. Index 0 is the oldest message in the buffer
-    /// with the highest index being the newest message in the buffer.
+    /// while the highest index is the newest message in the buffer.
     pub fn get(&self, index: usize) -> Option<AnyMessageRef<'_>> {
         self.storage.any_get(self.session, index)
     }
@@ -381,6 +427,15 @@ impl<'w, 's, 'a> Drop for AnyBufferMut<'w, 's, 'a> {
 /// This trait allows [`World`] to give you access to any buffer using an
 /// [`AnyBufferKey`].
 pub trait AnyBufferWorldAccess {
+    /// Call this to get read-only access to any buffer.
+    ///
+    /// For technical reasons this requires direct [`World`] access, but you can
+    /// do other read-only queries on the world while holding onto the
+    /// [`AnyBufferView`].
+    fn any_buffer_view<'a>(
+        &self,
+        key: &AnyBufferKey,
+    ) -> Result<AnyBufferView<'_>, BufferError>;
 
     /// Call this to get mutable access to any buffer.
     ///
@@ -394,6 +449,13 @@ pub trait AnyBufferWorldAccess {
 }
 
 impl AnyBufferWorldAccess for World {
+    fn any_buffer_view<'a>(
+        &self,
+        key: &AnyBufferKey,
+    ) -> Result<AnyBufferView<'_>, BufferError> {
+        key.interface.create_any_buffer_view(key, self)
+    }
+
     fn any_buffer_mut<U>(
         &mut self,
         key: &AnyBufferKey,
@@ -487,6 +549,28 @@ impl std::ops::RangeBounds<usize> for AnyRange {
 }
 
 pub type AnyMessageRef<'a> = &'a (dyn Any + 'static + Send + Sync);
+
+impl<T: 'static + Send + Sync + Any> AnyBufferViewing for &'_ BufferStorage<T> {
+    fn any_count(&self, session: Entity) -> usize {
+        self.count(session)
+    }
+
+    fn any_oldest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
+        self.oldest(session).map(to_any_ref)
+    }
+
+    fn any_newest<'a>(&'a self, session: Entity) -> Option<AnyMessageRef<'a>> {
+        self.newest(session).map(to_any_ref)
+    }
+
+    fn any_get<'a>(&'a self, session: Entity, index: usize) -> Option<AnyMessageRef<'a>> {
+        self.get(session, index).map(to_any_ref)
+    }
+
+    fn any_message_type(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
 
 impl<T: 'static + Send + Sync + Any> AnyBufferViewing for Mut<'_, BufferStorage<T>> {
     fn any_count(&self, session: Entity) -> usize {
@@ -644,6 +728,12 @@ pub(crate) trait AnyBufferAccessInterface {
         session: Entity,
     ) -> Result<AnyMessage, OperationError>;
 
+    fn create_any_buffer_view<'a>(
+        &self,
+        key: &AnyBufferKey,
+        world: &'a World,
+    ) -> Result<AnyBufferView<'a>, BufferError>;
+
     fn create_any_buffer_access_mut_state(
         &self,
         world: &mut World,
@@ -700,6 +790,21 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         session: Entity,
     ) -> Result<AnyMessage, OperationError> {
         entity_mut.pull_from_buffer::<T>(session).map(to_any_message)
+    }
+
+    fn create_any_buffer_view<'a>(
+        &self,
+        key: &AnyBufferKey,
+        world: &'a World,
+    ) -> Result<AnyBufferView<'a>, BufferError> {
+        let buffer_ref = world.get_entity(key.buffer).ok_or(BufferError::BufferMissing)?;
+        let storage = buffer_ref.get::<BufferStorage<T>>().ok_or(BufferError::BufferMissing)?;
+        let gate = buffer_ref.get::<GateState>().ok_or(BufferError::BufferMissing)?;
+        Ok(AnyBufferView {
+            storage: Box::new(storage),
+            gate,
+            session: key.session
+        })
     }
 
     fn create_any_buffer_access_mut_state(
@@ -865,9 +970,7 @@ mod tests {
         In(key): In<AnyBufferKey>,
         world: &mut World,
     ) -> usize {
-        world.any_buffer_mut(&key, |access| {
-            access.len()
-        }).unwrap()
+        world.any_buffer_view(&key).unwrap().len()
     }
 
     #[test]
