@@ -44,7 +44,7 @@ pub(crate) struct BufferStorage<T> {
 }
 
 impl<T> BufferStorage<T> {
-    pub(crate) fn count(&self, session: Entity) -> usize  {
+    pub(crate) fn count(&self, session: Entity) -> usize {
         self.reverse_queues
             .get(&session)
             .map(|q| q.len())

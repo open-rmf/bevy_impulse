@@ -20,8 +20,8 @@ use smallvec::SmallVec;
 
 use crate::{
     Accessed, AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain,
-    CleanupWorkflowConditions, CloneFromBuffer, Join, Joined, Listen, Output, Scope,
-    ScopeSettings, UnusedTarget,
+    CleanupWorkflowConditions, CloneFromBuffer, Join, Joined, Listen, Output, Scope, ScopeSettings,
+    UnusedTarget,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Accessed>::Key;

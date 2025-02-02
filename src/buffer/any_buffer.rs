@@ -21,11 +21,11 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     ops::RangeBounds,
-    sync::{Arc, OnceLock, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use bevy_ecs::{
-    prelude::{Entity, EntityRef, EntityWorldMut, Commands, Mut, World},
+    prelude::{Commands, Entity, EntityRef, EntityWorldMut, Mut, World},
     system::SystemState,
 };
 
@@ -34,10 +34,10 @@ use thiserror::Error as ThisError;
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, Buffered, Bufferable, BufferAccessLifecycle, BufferAccessMut, BufferAccessors,
-    BufferError, BufferKey, BufferStorage, Builder, DrainBuffer, NotifyBufferUpdate,
-    GateState, Gate, OperationResult, OperationError, OperationRoster, OrBroken, InspectBuffer,
-    ManageBuffer, Joined, Accessed, add_listener_to_source,
+    add_listener_to_source, Accessed, Buffer, BufferAccessLifecycle, BufferAccessMut,
+    BufferAccessors, BufferError, BufferKey, BufferStorage, Bufferable, Buffered, Builder,
+    DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
+    OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -46,7 +46,7 @@ use crate::{
 pub struct AnyBuffer {
     pub(crate) scope: Entity,
     pub(crate) source: Entity,
-    pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync)
+    pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
 }
 
 impl AnyBuffer {
@@ -153,12 +153,14 @@ impl AnyBufferKey {
 
 impl std::fmt::Debug for AnyBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("AnyBufferKey")
+        f.debug_struct("AnyBufferKey")
             .field("buffer", &self.buffer)
             .field("session", &self.session)
             .field("accessor", &self.accessor)
-            .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
+            .field(
+                "in_use",
+                &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()),
+            )
             .field("message_type_name", &self.interface.message_type_name())
             .finish()
     }
@@ -303,7 +305,7 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> DrainAnyBuffer<'_> {
         self.modified = true;
         DrainAnyBuffer {
-            interface: self.storage.any_drain(self.session, AnyRange::new(range))
+            interface: self.storage.any_drain(self.session, AnyRange::new(range)),
         }
     }
 
@@ -363,7 +365,10 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     /// the buffer.
     ///
     /// The result follows the same rules as [`Self::push`].
-    pub fn push_as_oldest<T: 'static + Send + Sync + Any>(&mut self, value: T) -> Result<Option<T>, T> {
+    pub fn push_as_oldest<T: 'static + Send + Sync + Any>(
+        &mut self,
+        value: T,
+    ) -> Result<Option<T>, T> {
         if TypeId::of::<T>() != self.storage.any_message_type() {
             return Err(value);
         }
@@ -385,7 +390,10 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     /// the buffer.
     ///
     /// The result follows the same rules as [`Self::push_any`].
-    pub fn push_any_as_oldest(&mut self, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+    pub fn push_any_as_oldest(
+        &mut self,
+        value: AnyMessage,
+    ) -> Result<Option<AnyMessage>, AnyMessageError> {
         self.storage.any_push_as_oldest(self.session, value)
     }
 
@@ -444,10 +452,7 @@ pub trait AnyBufferWorldAccess {
     /// For technical reasons this requires direct [`World`] access, but you can
     /// do other read-only queries on the world while holding onto the
     /// [`AnyBufferView`].
-    fn any_buffer_view<'a>(
-        &self,
-        key: &AnyBufferKey,
-    ) -> Result<AnyBufferView<'_>, BufferError>;
+    fn any_buffer_view<'a>(&self, key: &AnyBufferKey) -> Result<AnyBufferView<'_>, BufferError>;
 
     /// Call this to get mutable access to any buffer.
     ///
@@ -461,10 +466,7 @@ pub trait AnyBufferWorldAccess {
 }
 
 impl AnyBufferWorldAccess for World {
-    fn any_buffer_view<'a>(
-        &self,
-        key: &AnyBufferKey,
-    ) -> Result<AnyBufferView<'_>, BufferError> {
+    fn any_buffer_view<'a>(&self, key: &AnyBufferKey) -> Result<AnyBufferView<'_>, BufferError> {
         key.interface.create_any_buffer_view(key, self)
     }
 
@@ -497,7 +499,11 @@ trait AnyBufferManagement: AnyBufferViewing {
     fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>>;
-    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferInterface + 'a>;
+    fn any_drain<'a>(
+        &'a mut self,
+        session: Entity,
+        range: AnyRange,
+    ) -> Box<dyn DrainAnyBufferInterface + 'a>;
 }
 
 pub(crate) struct AnyRange {
@@ -606,7 +612,6 @@ impl<T: 'static + Send + Sync + Any> AnyBufferViewing for Mut<'_, BufferStorage<
     }
 }
 
-
 pub type AnyMessageMut<'a> = &'a mut (dyn Any + 'static + Send + Sync);
 
 pub type AnyMessage = Box<dyn Any + 'static + Send + Sync>;
@@ -655,7 +660,11 @@ impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStora
         self.get_mut(session, index).map(to_any_mut)
     }
 
-    fn any_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainAnyBufferInterface + 'a> {
+    fn any_drain<'a>(
+        &'a mut self,
+        session: Entity,
+        range: AnyRange,
+    ) -> Box<dyn DrainAnyBufferInterface + 'a> {
         Box::new(self.drain(session, range))
     }
 }
@@ -676,35 +685,51 @@ fn from_any_message<T: 'static + Send + Sync + Any>(value: AnyMessage) -> Result
 where
     T: 'static,
 {
-    let value = value.downcast::<T>().map_err(|value| {
-        AnyMessageError {
-            value,
-            type_id: TypeId::of::<T>(),
-            type_name: std::any::type_name::<T>(),
-        }
+    let value = value.downcast::<T>().map_err(|value| AnyMessageError {
+        value,
+        type_id: TypeId::of::<T>(),
+        type_name: std::any::type_name::<T>(),
     })?;
 
     Ok(*value)
 }
 
 pub(crate) trait AnyBufferAccessMutState {
-    fn get_any_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's>;
+    fn get_any_buffer_access_mut<'s, 'w: 's>(
+        &'s mut self,
+        world: &'w mut World,
+    ) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's>;
 }
 
-impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState for SystemState<BufferAccessMut<'static, 'static, T>> {
-    fn get_any_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's> {
+impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState
+    for SystemState<BufferAccessMut<'static, 'static, T>>
+{
+    fn get_any_buffer_access_mut<'s, 'w: 's>(
+        &'s mut self,
+        world: &'w mut World,
+    ) -> Box<dyn AnyBufferAccessMut<'w, 's> + 's> {
         Box::new(self.get_mut(world))
     }
 }
 
 pub(crate) trait AnyBufferAccessMut<'w, 's> {
-    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError>;
+    fn as_any_buffer_mut<'a>(
+        &'a mut self,
+        key: &AnyBufferKey,
+    ) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError>;
 }
 
-impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's> for BufferAccessMut<'w, 's, T> {
-    fn as_any_buffer_mut<'a>(&'a mut self, key: &AnyBufferKey) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError> {
+impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's>
+    for BufferAccessMut<'w, 's, T>
+{
+    fn as_any_buffer_mut<'a>(
+        &'a mut self,
+        key: &AnyBufferKey,
+    ) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError> {
         let BufferAccessMut { query, commands } = self;
-        let (storage, gate) = query.get_mut(key.buffer).map_err(|_| BufferError::BufferMissing)?;
+        let (storage, gate) = query
+            .get_mut(key.buffer)
+            .map_err(|_| BufferError::BufferMissing)?;
         Ok(AnyBufferMut {
             storage: Box::new(storage),
             gate,
@@ -722,17 +747,9 @@ pub(crate) trait AnyBufferAccessInterface {
 
     fn message_type_name(&self) -> &'static str;
 
-    fn buffered_count(
-        &self,
-        entity: &EntityRef,
-        session: Entity,
-    ) -> Result<usize, OperationError>;
+    fn buffered_count(&self, entity: &EntityRef, session: Entity) -> Result<usize, OperationError>;
 
-    fn ensure_session(
-        &self,
-        entity_mut: &mut EntityWorldMut,
-        session: Entity,
-    ) -> OperationResult;
+    fn ensure_session(&self, entity_mut: &mut EntityWorldMut, session: Entity) -> OperationResult;
 
     fn pull(
         &self,
@@ -756,18 +773,17 @@ pub(crate) struct AnyBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync + Any> AnyBufferAccessImpl<T> {
     pub(crate) fn get_interface() -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
-        const INTERFACE_MAP: OnceLock<Mutex<HashMap<
-            TypeId,
-            &'static (dyn AnyBufferAccessInterface + Send + Sync)
-        >>> = OnceLock::new();
+        const INTERFACE_MAP: OnceLock<
+            Mutex<HashMap<TypeId, &'static (dyn AnyBufferAccessInterface + Send + Sync)>>,
+        > = OnceLock::new();
         let binding = INTERFACE_MAP;
 
         let interfaces = binding.get_or_init(|| Mutex::default());
 
         let mut interfaces_mut = interfaces.lock().unwrap();
-        *interfaces_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
-            Box::leak(Box::new(AnyBufferAccessImpl::<T>(Default::default())))
-        })
+        *interfaces_mut
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::leak(Box::new(AnyBufferAccessImpl::<T>(Default::default()))))
     }
 }
 
@@ -780,19 +796,11 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         std::any::type_name::<T>()
     }
 
-    fn buffered_count(
-        &self,
-        entity: &EntityRef,
-        session: Entity,
-    ) -> Result<usize, OperationError> {
+    fn buffered_count(&self, entity: &EntityRef, session: Entity) -> Result<usize, OperationError> {
         entity.buffered_count::<T>(session)
     }
 
-    fn ensure_session(
-        &self,
-        entity_mut: &mut EntityWorldMut,
-        session: Entity,
-    ) -> OperationResult {
+    fn ensure_session(&self, entity_mut: &mut EntityWorldMut, session: Entity) -> OperationResult {
         entity_mut.ensure_session::<T>(session)
     }
 
@@ -801,7 +809,9 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         entity_mut: &mut EntityWorldMut,
         session: Entity,
     ) -> Result<AnyMessage, OperationError> {
-        entity_mut.pull_from_buffer::<T>(session).map(to_any_message)
+        entity_mut
+            .pull_from_buffer::<T>(session)
+            .map(to_any_message)
     }
 
     fn create_any_buffer_view<'a>(
@@ -809,13 +819,19 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         key: &AnyBufferKey,
         world: &'a World,
     ) -> Result<AnyBufferView<'a>, BufferError> {
-        let buffer_ref = world.get_entity(key.buffer).ok_or(BufferError::BufferMissing)?;
-        let storage = buffer_ref.get::<BufferStorage<T>>().ok_or(BufferError::BufferMissing)?;
-        let gate = buffer_ref.get::<GateState>().ok_or(BufferError::BufferMissing)?;
+        let buffer_ref = world
+            .get_entity(key.buffer)
+            .ok_or(BufferError::BufferMissing)?;
+        let storage = buffer_ref
+            .get::<BufferStorage<T>>()
+            .ok_or(BufferError::BufferMissing)?;
+        let gate = buffer_ref
+            .get::<GateState>()
+            .ok_or(BufferError::BufferMissing)?;
         Ok(AnyBufferView {
             storage: Box::new(storage),
             gate,
-            session: key.session
+            session: key.session,
         })
     }
 
@@ -931,8 +947,8 @@ impl Accessed for AnyBuffer {
 
 #[cfg(test)]
 mod tests {
-    use bevy_ecs::prelude::World;
     use crate::{prelude::*, testing::*};
+    use bevy_ecs::prelude::World;
 
     #[test]
     fn test_any_count() {
@@ -940,12 +956,12 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
-            let push_multiple_times = builder.commands().spawn_service(
-                push_multiple_times_into_buffer.into_blocking_service()
-            );
-            let count = builder.commands().spawn_service(
-                get_buffer_count.into_blocking_service()
-            );
+            let push_multiple_times = builder
+                .commands()
+                .spawn_service(push_multiple_times_into_buffer.into_blocking_service());
+            let count = builder
+                .commands()
+                .spawn_service(get_buffer_count.into_blocking_service());
 
             scope
                 .input
@@ -956,9 +972,7 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(
-            |commands| commands.request(1, workflow).take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(1, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let count = promise.take().available().unwrap();
@@ -978,10 +992,7 @@ mod tests {
         key.into()
     }
 
-    fn get_buffer_count(
-        In(key): In<AnyBufferKey>,
-        world: &mut World,
-    ) -> usize {
+    fn get_buffer_count(In(key): In<AnyBufferKey>, world: &mut World) -> usize {
         world.any_buffer_view(&key).unwrap().len()
     }
 
@@ -991,15 +1002,15 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
-            let push_multiple_times = builder.commands().spawn_service(
-                push_multiple_times_into_buffer.into_blocking_service()
-            );
-            let modify_content = builder.commands().spawn_service(
-                modify_buffer_content.into_blocking_service()
-            );
-            let drain_content = builder.commands().spawn_service(
-                pull_each_buffer_item.into_blocking_service()
-            );
+            let push_multiple_times = builder
+                .commands()
+                .spawn_service(push_multiple_times_into_buffer.into_blocking_service());
+            let modify_content = builder
+                .commands()
+                .spawn_service(modify_buffer_content.into_blocking_service());
+            let drain_content = builder
+                .commands()
+                .spawn_service(pull_each_buffer_item.into_blocking_service());
 
             scope
                 .input
@@ -1011,9 +1022,7 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(
-            |commands| commands.request(3, workflow).take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(3, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let values = promise.take().available().unwrap();
@@ -1021,32 +1030,30 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    fn modify_buffer_content(
-        In(key): In<AnyBufferKey>,
-        world: &mut World,
-    ) -> AnyBufferKey {
-        world.any_buffer_mut(&key, |mut access| {
-            for i in 0..access.len() {
-                access.get_mut(i).map(|value| {
-                    *value.downcast_mut::<usize>().unwrap() *= i;
-                });
-            }
-        }).unwrap();
+    fn modify_buffer_content(In(key): In<AnyBufferKey>, world: &mut World) -> AnyBufferKey {
+        world
+            .any_buffer_mut(&key, |mut access| {
+                for i in 0..access.len() {
+                    access.get_mut(i).map(|value| {
+                        *value.downcast_mut::<usize>().unwrap() *= i;
+                    });
+                }
+            })
+            .unwrap();
 
         key
     }
 
-    fn pull_each_buffer_item(
-        In(key): In<AnyBufferKey>,
-        world: &mut World,
-    ) -> Vec<usize> {
-        world.any_buffer_mut(&key, |mut access| {
-            let mut values = Vec::new();
-            while let Some(value) = access.pull() {
-                values.push(*value.downcast::<usize>().unwrap());
-            }
-            values
-        }).unwrap()
+    fn pull_each_buffer_item(In(key): In<AnyBufferKey>, world: &mut World) -> Vec<usize> {
+        world
+            .any_buffer_mut(&key, |mut access| {
+                let mut values = Vec::new();
+                while let Some(value) = access.pull() {
+                    values.push(*value.downcast::<usize>().unwrap());
+                }
+                values
+            })
+            .unwrap()
     }
 
     #[test]
@@ -1055,15 +1062,15 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
-            let push_multiple_times = builder.commands().spawn_service(
-                push_multiple_times_into_buffer.into_blocking_service()
-            );
-            let modify_content = builder.commands().spawn_service(
-                modify_buffer_content.into_blocking_service()
-            );
-            let drain_content = builder.commands().spawn_service(
-                drain_buffer_contents.into_blocking_service()
-            );
+            let push_multiple_times = builder
+                .commands()
+                .spawn_service(push_multiple_times_into_buffer.into_blocking_service());
+            let modify_content = builder
+                .commands()
+                .spawn_service(modify_buffer_content.into_blocking_service());
+            let drain_content = builder
+                .commands()
+                .spawn_service(drain_buffer_contents.into_blocking_service());
 
             scope
                 .input
@@ -1075,9 +1082,7 @@ mod tests {
                 .connect(scope.terminate);
         });
 
-        let mut promise = context.command(
-            |commands| commands.request(3, workflow).take_response()
-        );
+        let mut promise = context.command(|commands| commands.request(3, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let values = promise.take().available().unwrap();
@@ -1085,58 +1090,66 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    fn drain_buffer_contents(
-        In(key): In<AnyBufferKey>,
-        world: &mut World,
-    ) -> Vec<usize> {
-        world.any_buffer_mut(&key, |mut access| {
-            access
-            .drain(..)
-            .map(|value| *value.downcast::<usize>().unwrap())
-            .collect()
-        }).unwrap()
+    fn drain_buffer_contents(In(key): In<AnyBufferKey>, world: &mut World) -> Vec<usize> {
+        world
+            .any_buffer_mut(&key, |mut access| {
+                access
+                    .drain(..)
+                    .map(|value| *value.downcast::<usize>().unwrap())
+                    .collect()
+            })
+            .unwrap()
     }
 
     #[test]
     fn double_any_messages() {
         let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.spawn_io_workflow(|scope: Scope<(u32, i32, f32), (u32, i32, f32)>, builder| {
-            let buffer_u32: AnyBuffer = builder.create_buffer::<u32>(BufferSettings::default()).into();
-            let buffer_i32: AnyBuffer = builder.create_buffer::<i32>(BufferSettings::default()).into();
-            let buffer_f32: AnyBuffer = builder.create_buffer::<f32>(BufferSettings::default()).into();
+        let workflow =
+            context.spawn_io_workflow(|scope: Scope<(u32, i32, f32), (u32, i32, f32)>, builder| {
+                let buffer_u32: AnyBuffer = builder
+                    .create_buffer::<u32>(BufferSettings::default())
+                    .into();
+                let buffer_i32: AnyBuffer = builder
+                    .create_buffer::<i32>(BufferSettings::default())
+                    .into();
+                let buffer_f32: AnyBuffer = builder
+                    .create_buffer::<f32>(BufferSettings::default())
+                    .into();
 
-            let (input_u32, input_i32, input_f32) = scope.input.chain(builder).unzip();
-            input_u32
-                .chain(builder)
-                .map_block(|v| 2*v)
-                .connect(buffer_u32.downcast::<u32>().unwrap().input_slot());
+                let (input_u32, input_i32, input_f32) = scope.input.chain(builder).unzip();
+                input_u32
+                    .chain(builder)
+                    .map_block(|v| 2 * v)
+                    .connect(buffer_u32.downcast::<u32>().unwrap().input_slot());
 
-            input_i32
-                .chain(builder)
-                .map_block(|v| 2*v)
-                .connect(buffer_i32.downcast::<i32>().unwrap().input_slot());
+                input_i32
+                    .chain(builder)
+                    .map_block(|v| 2 * v)
+                    .connect(buffer_i32.downcast::<i32>().unwrap().input_slot());
 
-            input_f32
-                .chain(builder)
-                .map_block(|v| 2.0*v)
-                .connect(buffer_f32.downcast::<f32>().unwrap().input_slot());
+                input_f32
+                    .chain(builder)
+                    .map_block(|v| 2.0 * v)
+                    .connect(buffer_f32.downcast::<f32>().unwrap().input_slot());
 
-            (buffer_u32, buffer_i32, buffer_f32)
-                .join(builder)
-                .map_block(|(value_u32, value_i32, value_f32)| {
-                    (
-                        *value_u32.downcast::<u32>().unwrap(),
-                        *value_i32.downcast::<i32>().unwrap(),
-                        *value_f32.downcast::<f32>().unwrap(),
-                    )
-                })
-                .connect(scope.terminate);
+                (buffer_u32, buffer_i32, buffer_f32)
+                    .join(builder)
+                    .map_block(|(value_u32, value_i32, value_f32)| {
+                        (
+                            *value_u32.downcast::<u32>().unwrap(),
+                            *value_i32.downcast::<i32>().unwrap(),
+                            *value_f32.downcast::<f32>().unwrap(),
+                        )
+                    })
+                    .connect(scope.terminate);
+            });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((1u32, 2i32, 3f32), workflow)
+                .take_response()
         });
-
-        let mut promise = context.command(
-            |commands| commands.request((1u32, 2i32, 3f32), workflow).take_response()
-        );
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let (v_u32, v_i32, v_f32) = promise.take().available().unwrap();

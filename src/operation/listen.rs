@@ -18,7 +18,7 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::{
-    Accessed, buffer_key_usage, get_access_keys, BufferAccessStorage, BufferKeyUsage,
+    buffer_key_usage, get_access_keys, Accessed, BufferAccessStorage, BufferKeyUsage,
     FunnelInputStorage, Input, InputBundle, ManageInput, Operation, OperationCleanup,
     OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
     ReachabilityResult, SingleInputStorage, SingleTargetStorage,

@@ -540,9 +540,7 @@ pub(crate) fn add_listener_to_source(
     listener: Entity,
     world: &mut World,
 ) -> OperationResult {
-    let mut targets = world
-        .get_mut::<ForkTargetStorage>(source)
-        .or_broken()?;
+    let mut targets = world.get_mut::<ForkTargetStorage>(source).or_broken()?;
     if !targets.0.contains(&listener) {
         targets.0.push(listener);
     }

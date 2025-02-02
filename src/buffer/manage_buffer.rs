@@ -22,9 +22,7 @@ use bevy_ecs::{
 
 use smallvec::SmallVec;
 
-use crate::{
-    BufferStorage, OperationError, OperationResult, OrBroken,
-};
+use crate::{BufferStorage, OperationError, OperationResult, OrBroken};
 
 pub trait InspectBuffer {
     fn buffered_count<T: 'static + Send + Sync>(
@@ -120,8 +118,7 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
     }
 
     fn ensure_session<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult {
-        self
-            .get_mut::<BufferStorage<T>>()
+        self.get_mut::<BufferStorage<T>>()
             .or_broken()?
             .ensure_session(session);
         Ok(())

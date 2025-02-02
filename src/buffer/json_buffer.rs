@@ -36,12 +36,11 @@ pub use serde_json::Value as JsonMessage;
 use smallvec::SmallVec;
 
 use crate::{
-    AnyBufferAccessImpl, AnyBufferAccessInterface, AnyBuffer, AnyBufferKey,
-    AnyRange, Buffer, BufferAccessors, BufferKey, BufferKeyBuilder,
-    BufferAccessLifecycle, BufferAccessMut, BufferError, BufferStorage, Builder,
-    DrainBuffer, OperationError, OperationResult, InspectBuffer, ManageBuffer,
-    Gate, GateState, NotifyBufferUpdate, Bufferable, Buffered, OrBroken, Joined,
-    Accessed, add_listener_to_source,
+    add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessImpl, AnyBufferAccessInterface,
+    AnyBufferKey, AnyRange, Buffer, BufferAccessLifecycle, BufferAccessMut, BufferAccessors,
+    BufferError, BufferKey, BufferKeyBuilder, BufferStorage, Bufferable, Buffered, Builder,
+    DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
+    OperationError, OperationResult, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -112,7 +111,7 @@ impl JsonBufferKey {
                 session: self.session,
                 accessor: self.accessor,
                 lifecycle: self.lifecycle.clone(),
-                _ignore: Default::default()
+                _ignore: Default::default(),
             })
         } else {
             None
@@ -135,13 +134,18 @@ impl JsonBufferKey {
 
 impl std::fmt::Debug for JsonBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("JsonBufferKey")
+        f.debug_struct("JsonBufferKey")
             .field("buffer", &self.buffer)
             .field("session", &self.session)
             .field("accessor", &self.accessor)
-            .field("in_use", &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()))
-            .field("message_type_name", &self.interface.any_access_interface().message_type_name())
+            .field(
+                "in_use",
+                &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()),
+            )
+            .field(
+                "message_type_name",
+                &self.interface.any_access_interface().message_type_name(),
+            )
             .finish()
     }
 }
@@ -154,7 +158,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<BufferKey<T>>
             session: value.session,
             accessor: value.accessor,
             lifecycle: value.lifecycle,
-            interface
+            interface,
         }
     }
 }
@@ -274,24 +278,27 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
 
     /// Modify the oldest message in the buffer.
     pub fn oldest_mut(&mut self) -> Option<JsonMut<'_>> {
-        self.storage.json_oldest_mut(self.session, &mut self.modified)
+        self.storage
+            .json_oldest_mut(self.session, &mut self.modified)
     }
 
     /// Modify the newest message in the buffer.
     pub fn newest_mut(&mut self) -> Option<JsonMut<'_>> {
-        self.storage.json_newest_mut(self.session, &mut self.modified)
+        self.storage
+            .json_newest_mut(self.session, &mut self.modified)
     }
 
     /// Modify a message in the buffer.
     pub fn get_mut(&mut self, index: usize) -> Option<JsonMut<'_>> {
-        self.storage.json_get_mut(self.session, index, &mut self.modified)
+        self.storage
+            .json_get_mut(self.session, index, &mut self.modified)
     }
 
     /// Drain a range of messages out of the buffer.
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> DrainJsonBuffer<'_> {
         self.modified = true;
         DrainJsonBuffer {
-            interface: self.storage.json_drain(self.session, AnyRange::new(range))
+            interface: self.storage.json_drain(self.session, AnyRange::new(range)),
         }
     }
 
@@ -318,7 +325,9 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
     /// Pull the newest message from the buffer and attempt to deserialize it
     /// into the target type.
     pub fn pull_newest_as<T: DeserializeOwned>(&mut self) -> Result<Option<T>, serde_json::Error> {
-        self.pull_newest()?.map(|m| serde_json::from_value(m)).transpose()
+        self.pull_newest()?
+            .map(|m| serde_json::from_value(m))
+            .transpose()
     }
 
     /// Attempt to push a new value into the buffer.
@@ -332,7 +341,10 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
     /// out of the buffer failed to serialize.
     // TODO(@mxgrey): Consider having an error type that differentiates the
     // various possible error modes.
-    pub fn push<T: 'static + Serialize>(&mut self, value: T) -> Result<Option<JsonMessage>, serde_json::Error> {
+    pub fn push<T: 'static + Serialize>(
+        &mut self,
+        value: T,
+    ) -> Result<Option<JsonMessage>, serde_json::Error> {
         let message = serde_json::to_value(&value)?;
         self.modified = true;
         self.storage.json_push(self.session, message)
@@ -340,14 +352,20 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
 
     /// Same as [`Self::push`] but no serialization step is needed for the incoming
     /// message.
-    pub fn push_json(&mut self, message: JsonMessage) -> Result<Option<JsonMessage>, serde_json::Error> {
+    pub fn push_json(
+        &mut self,
+        message: JsonMessage,
+    ) -> Result<Option<JsonMessage>, serde_json::Error> {
         self.modified = true;
         self.storage.json_push(self.session, message)
     }
 
     /// Same as [`Self::push`] but the message will be interpreted as the oldest
     /// message in the buffer.
-    pub fn push_as_oldest<T: 'static + Serialize>(&mut self, value: T) -> Result<Option<JsonMessage>, serde_json::Error> {
+    pub fn push_as_oldest<T: 'static + Serialize>(
+        &mut self,
+        value: T,
+    ) -> Result<Option<JsonMessage>, serde_json::Error> {
         let message = serde_json::to_value(&value)?;
         self.modified = true;
         self.storage.json_push_as_oldest(self.session, message)
@@ -355,7 +373,10 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
 
     /// Same as [`Self:push_as_oldest`] but no serialization step is needed for
     /// the incoming message.
-    pub fn push_json_as_oldest(&mut self, message: JsonMessage) -> Result<Option<JsonMessage>, serde_json::Error> {
+    pub fn push_json_as_oldest(
+        &mut self,
+        message: JsonMessage,
+    ) -> Result<Option<JsonMessage>, serde_json::Error> {
         self.modified = true;
         self.storage.json_push_as_oldest(self.session, message)
     }
@@ -414,10 +435,7 @@ pub trait JsonBufferWorldAccess {
     /// For technical reasons this requires direct [`World`] access, but you can
     /// do other read-only queries on the world while holding onto the
     /// [`JsonBufferView`].
-    fn json_buffer_view(
-        &self,
-        key: &JsonBufferKey,
-    ) -> Result<JsonBufferView<'_>, BufferError>;
+    fn json_buffer_view(&self, key: &JsonBufferKey) -> Result<JsonBufferView<'_>, BufferError>;
 
     /// Call this to get mutable access to any buffer whose message type is
     /// serializable and deserializable.
@@ -432,10 +450,7 @@ pub trait JsonBufferWorldAccess {
 }
 
 impl JsonBufferWorldAccess for World {
-    fn json_buffer_view(
-        &self,
-        key: &JsonBufferKey,
-    ) -> Result<JsonBufferView<'_>, BufferError> {
+    fn json_buffer_view(&self, key: &JsonBufferKey) -> Result<JsonBufferView<'_>, BufferError> {
         key.interface.create_json_buffer_view(key, self)
     }
 
@@ -500,10 +515,7 @@ impl<'a> JsonMut<'a> {
     /// [`Self::serialize`], modifying the value, and then calling [`Self::insert`].
     /// The benefit of this function is that you do not need to remember to
     /// insert after you have finished your modifications.
-    pub fn modify(
-        &mut self,
-        f: impl FnOnce(&mut JsonMessage),
-    ) -> Result<(), serde_json::Error> {
+    pub fn modify(&mut self, f: impl FnOnce(&mut JsonMessage)) -> Result<(), serde_json::Error> {
         let mut message = self.serialize()?;
         f(&mut message);
         self.insert(message)
@@ -540,18 +552,36 @@ trait JsonBufferViewing {
     fn json_count(&self, session: Entity) -> usize;
     fn json_oldest<'a>(&'a self, session: Entity) -> JsonMessageViewResult;
     fn json_newest<'a>(&'a self, session: Entity) -> JsonMessageViewResult;
-    fn json_get<'a>(&'a self, session: Entity, index: usize) ->JsonMessageViewResult;
+    fn json_get<'a>(&'a self, session: Entity, index: usize) -> JsonMessageViewResult;
 }
 
 trait JsonBufferManagement: JsonBufferViewing {
     fn json_push(&mut self, session: Entity, value: JsonMessage) -> JsonMessagePushResult;
-    fn json_push_as_oldest(&mut self, session: Entity, value: JsonMessage) -> JsonMessagePushResult;
+    fn json_push_as_oldest(&mut self, session: Entity, value: JsonMessage)
+        -> JsonMessagePushResult;
     fn json_pull(&mut self, session: Entity) -> JsonMessageViewResult;
     fn json_pull_newest(&mut self, session: Entity) -> JsonMessageViewResult;
-    fn json_oldest_mut<'a>(&'a mut self, session: Entity, modified: &'a mut bool) -> Option<JsonMut<'a>>;
-    fn json_newest_mut<'a>(&'a mut self, session: Entity, modified: &'a mut bool) -> Option<JsonMut<'a>>;
-    fn json_get_mut<'a>(&'a mut self, session: Entity, index: usize, modified: &'a mut bool) -> Option<JsonMut<'a>>;
-    fn json_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainJsonBufferInterface + 'a>;
+    fn json_oldest_mut<'a>(
+        &'a mut self,
+        session: Entity,
+        modified: &'a mut bool,
+    ) -> Option<JsonMut<'a>>;
+    fn json_newest_mut<'a>(
+        &'a mut self,
+        session: Entity,
+        modified: &'a mut bool,
+    ) -> Option<JsonMut<'a>>;
+    fn json_get_mut<'a>(
+        &'a mut self,
+        session: Entity,
+        index: usize,
+        modified: &'a mut bool,
+    ) -> Option<JsonMut<'a>>;
+    fn json_drain<'a>(
+        &'a mut self,
+        session: Entity,
+        range: AnyRange,
+    ) -> Box<dyn DrainJsonBufferInterface + 'a>;
 }
 
 impl<T> JsonBufferViewing for &'_ BufferStorage<T>
@@ -570,8 +600,10 @@ where
         self.newest(session).map(serde_json::to_value).transpose()
     }
 
-    fn json_get<'a>(&'a self, session: Entity, index: usize) ->JsonMessageViewResult {
-        self.get(session, index).map(serde_json::to_value).transpose()
+    fn json_get<'a>(&'a self, session: Entity, index: usize) -> JsonMessageViewResult {
+        self.get(session, index)
+            .map(serde_json::to_value)
+            .transpose()
     }
 }
 
@@ -591,8 +623,10 @@ where
         self.newest(session).map(serde_json::to_value).transpose()
     }
 
-    fn json_get<'a>(&'a self, session: Entity, index: usize) ->JsonMessageViewResult {
-        self.get(session, index).map(serde_json::to_value).transpose()
+    fn json_get<'a>(&'a self, session: Entity, index: usize) -> JsonMessageViewResult {
+        self.get(session, index)
+            .map(serde_json::to_value)
+            .transpose()
     }
 }
 
@@ -602,12 +636,20 @@ where
 {
     fn json_push(&mut self, session: Entity, value: JsonMessage) -> JsonMessagePushResult {
         let value: T = serde_json::from_value(value)?;
-        self.push(session, value).map(serde_json::to_value).transpose()
+        self.push(session, value)
+            .map(serde_json::to_value)
+            .transpose()
     }
 
-    fn json_push_as_oldest(&mut self, session: Entity, value: JsonMessage) -> JsonMessagePushResult {
+    fn json_push_as_oldest(
+        &mut self,
+        session: Entity,
+        value: JsonMessage,
+    ) -> JsonMessagePushResult {
         let value: T = serde_json::from_value(value)?;
-        self.push(session, value).map(serde_json::to_value).transpose()
+        self.push(session, value)
+            .map(serde_json::to_value)
+            .transpose()
     }
 
     fn json_pull(&mut self, session: Entity) -> JsonMessageViewResult {
@@ -615,22 +657,50 @@ where
     }
 
     fn json_pull_newest(&mut self, session: Entity) -> JsonMessageViewResult {
-        self.pull_newest(session).map(serde_json::to_value).transpose()
+        self.pull_newest(session)
+            .map(serde_json::to_value)
+            .transpose()
     }
 
-    fn json_oldest_mut<'a>(&'a mut self, session: Entity, modified: &'a mut bool) -> Option<JsonMut<'a>> {
-        self.oldest_mut(session).map(|interface| JsonMut { interface, modified })
+    fn json_oldest_mut<'a>(
+        &'a mut self,
+        session: Entity,
+        modified: &'a mut bool,
+    ) -> Option<JsonMut<'a>> {
+        self.oldest_mut(session).map(|interface| JsonMut {
+            interface,
+            modified,
+        })
     }
 
-    fn json_newest_mut<'a>(&'a mut self, session: Entity, modified: &'a mut bool) -> Option<JsonMut<'a>> {
-        self.newest_mut(session).map(|interface| JsonMut { interface, modified })
+    fn json_newest_mut<'a>(
+        &'a mut self,
+        session: Entity,
+        modified: &'a mut bool,
+    ) -> Option<JsonMut<'a>> {
+        self.newest_mut(session).map(|interface| JsonMut {
+            interface,
+            modified,
+        })
     }
 
-    fn json_get_mut<'a>(&'a mut self, session: Entity, index: usize, modified: &'a mut bool) -> Option<JsonMut<'a>> {
-        self.get_mut(session, index).map(|interface| JsonMut { interface, modified })
+    fn json_get_mut<'a>(
+        &'a mut self,
+        session: Entity,
+        index: usize,
+        modified: &'a mut bool,
+    ) -> Option<JsonMut<'a>> {
+        self.get_mut(session, index).map(|interface| JsonMut {
+            interface,
+            modified,
+        })
     }
 
-    fn json_drain<'a>(&'a mut self, session: Entity, range: AnyRange) -> Box<dyn DrainJsonBufferInterface + 'a> {
+    fn json_drain<'a>(
+        &'a mut self,
+        session: Entity,
+        range: AnyRange,
+    ) -> Box<dyn DrainJsonBufferInterface + 'a> {
         Box::new(self.drain(session, range))
     }
 }
@@ -675,11 +745,7 @@ trait JsonBufferAccessInterface {
         session: Entity,
     ) -> Result<usize, OperationError>;
 
-    fn ensure_session(
-        &self,
-        buffer_mut: &mut EntityWorldMut,
-        session: Entity,
-    ) -> OperationResult;
+    fn ensure_session(&self, buffer_mut: &mut EntityWorldMut, session: Entity) -> OperationResult;
 
     fn pull(
         &self,
@@ -701,8 +767,7 @@ trait JsonBufferAccessInterface {
 
 impl<'a> std::fmt::Debug for &'a (dyn JsonBufferAccessInterface + Send + Sync) {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("Message Properties")
+        f.debug_struct("Message Properties")
             .field("type", &self.any_access_interface().message_type_name())
             .finish()
     }
@@ -712,22 +777,23 @@ struct JsonBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessImpl<T> {
     pub(crate) fn get_interface() -> &'static (dyn JsonBufferAccessInterface + Send + Sync) {
-        const INTERFACE_MAP: OnceLock<Mutex<HashMap<
-            TypeId,
-            &'static (dyn JsonBufferAccessInterface + Send + Sync)
-        >>> = OnceLock::new();
+        const INTERFACE_MAP: OnceLock<
+            Mutex<HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>>,
+        > = OnceLock::new();
         let binding = INTERFACE_MAP;
 
         let interfaces = binding.get_or_init(|| Mutex::default());
 
         let mut interfaces_mut = interfaces.lock().unwrap();
-        *interfaces_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
-            Box::leak(Box::new(JsonBufferAccessImpl::<T>(Default::default())))
-        })
+        *interfaces_mut
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::leak(Box::new(JsonBufferAccessImpl::<T>(Default::default()))))
     }
 }
 
-impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessInterface for JsonBufferAccessImpl<T> {
+impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessInterface
+    for JsonBufferAccessImpl<T>
+{
     fn any_access_interface(&self) -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
         AnyBufferAccessImpl::<T>::get_interface()
     }
@@ -740,11 +806,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         buffer_ref.buffered_count::<T>(session)
     }
 
-    fn ensure_session(
-        &self,
-        buffer_mut: &mut EntityWorldMut,
-        session: Entity,
-    ) -> OperationResult {
+    fn ensure_session(&self, buffer_mut: &mut EntityWorldMut, session: Entity) -> OperationResult {
         buffer_mut.ensure_session::<T>(session)
     }
 
@@ -762,9 +824,15 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         key: &JsonBufferKey,
         world: &'a World,
     ) -> Result<JsonBufferView<'a>, BufferError> {
-        let buffer_ref = world.get_entity(key.buffer).ok_or(BufferError::BufferMissing)?;
-        let storage = buffer_ref.get::<BufferStorage<T>>().ok_or(BufferError::BufferMissing)?;
-        let gate = buffer_ref.get::<GateState>().ok_or(BufferError::BufferMissing)?;
+        let buffer_ref = world
+            .get_entity(key.buffer)
+            .ok_or(BufferError::BufferMissing)?;
+        let storage = buffer_ref
+            .get::<BufferStorage<T>>()
+            .ok_or(BufferError::BufferMissing)?;
+        let gate = buffer_ref
+            .get::<GateState>()
+            .ok_or(BufferError::BufferMissing)?;
         Ok(JsonBufferView {
             storage: Box::new(storage),
             gate,
@@ -781,29 +849,43 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
 }
 
 trait JsonBufferAccessMutState {
-    fn get_json_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn JsonBufferAccessMut<'w, 's> + 's>;
+    fn get_json_buffer_access_mut<'s, 'w: 's>(
+        &'s mut self,
+        world: &'w mut World,
+    ) -> Box<dyn JsonBufferAccessMut<'w, 's> + 's>;
 }
 
 impl<T> JsonBufferAccessMutState for SystemState<BufferAccessMut<'static, 'static, T>>
 where
     T: 'static + Send + Sync + Serialize + DeserializeOwned,
 {
-    fn get_json_buffer_access_mut<'s, 'w: 's>(&'s mut self, world: &'w mut World) -> Box<dyn JsonBufferAccessMut<'w, 's> + 's> {
+    fn get_json_buffer_access_mut<'s, 'w: 's>(
+        &'s mut self,
+        world: &'w mut World,
+    ) -> Box<dyn JsonBufferAccessMut<'w, 's> + 's> {
         Box::new(self.get_mut(world))
     }
 }
 
 trait JsonBufferAccessMut<'w, 's> {
-    fn as_json_buffer_mut<'a>(&'a mut self, key: &JsonBufferKey) -> Result<JsonBufferMut<'w, 's ,'a>, BufferError>;
+    fn as_json_buffer_mut<'a>(
+        &'a mut self,
+        key: &JsonBufferKey,
+    ) -> Result<JsonBufferMut<'w, 's, 'a>, BufferError>;
 }
 
 impl<'w, 's, T> JsonBufferAccessMut<'w, 's> for BufferAccessMut<'w, 's, T>
 where
     T: 'static + Send + Sync + Serialize + DeserializeOwned,
 {
-    fn as_json_buffer_mut<'a>(&'a mut self, key: &JsonBufferKey) -> Result<JsonBufferMut<'w, 's ,'a>, BufferError> {
+    fn as_json_buffer_mut<'a>(
+        &'a mut self,
+        key: &JsonBufferKey,
+    ) -> Result<JsonBufferMut<'w, 's, 'a>, BufferError> {
         let BufferAccessMut { query, commands } = self;
-        let (storage, gate) = query.get_mut(key.buffer).map_err(|_| BufferError::BufferMissing)?;
+        let (storage, gate) = query
+            .get_mut(key.buffer)
+            .map_err(|_| BufferError::BufferMissing)?;
         Ok(JsonBufferMut {
             storage: Box::new(storage),
             gate,
@@ -920,9 +1002,9 @@ impl Accessed for JsonBuffer {
 
 #[cfg(test)]
 mod tests {
-    use bevy_ecs::prelude::World;
     use crate::{prelude::*, testing::*};
-    use serde::{Serialize, Deserialize};
+    use bevy_ecs::prelude::World;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Clone)]
     struct TestMessage {
@@ -947,12 +1029,12 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
-            let push_multiple_times = builder.commands().spawn_service(
-                push_multiple_times_into_buffer.into_blocking_service()
-            );
-            let count = builder.commands().spawn_service(
-                get_buffer_count.into_blocking_service()
-            );
+            let push_multiple_times = builder
+                .commands()
+                .spawn_service(push_multiple_times_into_buffer.into_blocking_service());
+            let count = builder
+                .commands()
+                .spawn_service(get_buffer_count.into_blocking_service());
 
             scope
                 .input
@@ -964,9 +1046,8 @@ mod tests {
         });
 
         let msg = TestMessage::new();
-        let mut promise = context.command(
-            |commands| commands.request(msg, workflow).take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request(msg, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let count = promise.take().available().unwrap();
@@ -986,10 +1067,7 @@ mod tests {
         key.into()
     }
 
-    fn get_buffer_count(
-        In(key): In<JsonBufferKey>,
-        world: &mut World,
-    ) -> usize {
+    fn get_buffer_count(In(key): In<JsonBufferKey>, world: &mut World) -> usize {
         world.json_buffer_view(&key).unwrap().len()
     }
 
@@ -999,15 +1077,15 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
-            let push_multiple_times = builder.commands().spawn_service(
-                push_multiple_times_into_buffer.into_blocking_service()
-            );
-            let modify_content = builder.commands().spawn_service(
-                modify_buffer_content.into_blocking_service()
-            );
-            let drain_content = builder.commands().spawn_service(
-                pull_each_buffer_item.into_blocking_service()
-            );
+            let push_multiple_times = builder
+                .commands()
+                .spawn_service(push_multiple_times_into_buffer.into_blocking_service());
+            let modify_content = builder
+                .commands()
+                .spawn_service(modify_buffer_content.into_blocking_service());
+            let drain_content = builder
+                .commands()
+                .spawn_service(pull_each_buffer_item.into_blocking_service());
 
             scope
                 .input
@@ -1020,9 +1098,8 @@ mod tests {
         });
 
         let msg = TestMessage::new();
-        let mut promise = context.command(
-            |commands| commands.request(msg, workflow).take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request(msg, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let values = promise.take().available().unwrap();
@@ -1034,34 +1111,36 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    fn modify_buffer_content(
-        In(key): In<JsonBufferKey>,
-        world: &mut World,
-    ) -> JsonBufferKey {
-        world.json_buffer_mut(&key, |mut access| {
-            for i in 0..access.len() {
-                access.get_mut(i).unwrap().modify(|value| {
-                    let v_i32 = value.get_mut("v_i32").unwrap();
-                    let modified_v_i32 = i as i64 * v_i32.as_i64().unwrap();
-                    *v_i32 = modified_v_i32.into();
-                }).unwrap();
-            }
-        }).unwrap();
+    fn modify_buffer_content(In(key): In<JsonBufferKey>, world: &mut World) -> JsonBufferKey {
+        world
+            .json_buffer_mut(&key, |mut access| {
+                for i in 0..access.len() {
+                    access
+                        .get_mut(i)
+                        .unwrap()
+                        .modify(|value| {
+                            let v_i32 = value.get_mut("v_i32").unwrap();
+                            let modified_v_i32 = i as i64 * v_i32.as_i64().unwrap();
+                            *v_i32 = modified_v_i32.into();
+                        })
+                        .unwrap();
+                }
+            })
+            .unwrap();
 
         key
     }
 
-    fn pull_each_buffer_item(
-        In(key): In<JsonBufferKey>,
-        world: &mut World,
-    ) -> Vec<JsonMessage> {
-        world.json_buffer_mut(&key, |mut access| {
-            let mut values = Vec::new();
-            while let Ok(Some(value)) = access.pull() {
-                values.push(value);
-            }
-            values
-        }).unwrap()
+    fn pull_each_buffer_item(In(key): In<JsonBufferKey>, world: &mut World) -> Vec<JsonMessage> {
+        world
+            .json_buffer_mut(&key, |mut access| {
+                let mut values = Vec::new();
+                while let Ok(Some(value)) = access.pull() {
+                    values.push(value);
+                }
+                values
+            })
+            .unwrap()
     }
 
     #[test]
@@ -1070,15 +1149,15 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let buffer = builder.create_buffer(BufferSettings::keep_all());
-            let push_multiple_times = builder.commands().spawn_service(
-                push_multiple_times_into_buffer.into_blocking_service()
-            );
-            let modify_content = builder.commands().spawn_service(
-                modify_buffer_content.into_blocking_service()
-            );
-            let drain_content = builder.commands().spawn_service(
-                drain_buffer_contents.into_blocking_service()
-            );
+            let push_multiple_times = builder
+                .commands()
+                .spawn_service(push_multiple_times_into_buffer.into_blocking_service());
+            let modify_content = builder
+                .commands()
+                .spawn_service(modify_buffer_content.into_blocking_service());
+            let drain_content = builder
+                .commands()
+                .spawn_service(drain_buffer_contents.into_blocking_service());
 
             scope
                 .input
@@ -1091,9 +1170,8 @@ mod tests {
         });
 
         let msg = TestMessage::new();
-        let mut promise = context.command(
-            |commands| commands.request(msg, workflow).take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request(msg, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let values = promise.take().available().unwrap();
@@ -1105,17 +1183,13 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    fn drain_buffer_contents(
-        In(key): In<JsonBufferKey>,
-        world: &mut World,
-    ) -> Vec<JsonMessage> {
-        world.json_buffer_mut(&key, |mut access| {
-            access
-            .drain(..)
-            .collect::<Result<Vec<_>, _>>()
-        })
-        .unwrap()
-        .unwrap()
+    fn drain_buffer_contents(In(key): In<JsonBufferKey>, world: &mut World) -> Vec<JsonMessage> {
+        world
+            .json_buffer_mut(&key, |mut access| {
+                access.drain(..).collect::<Result<Vec<_>, _>>()
+            })
+            .unwrap()
+            .unwrap()
     }
 
     #[test]
@@ -1123,33 +1197,57 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let buffer_double_u32: JsonBuffer = builder.create_buffer::<TestMessage>(BufferSettings::default()).into();
-            let buffer_double_i32: JsonBuffer = builder.create_buffer::<TestMessage>(BufferSettings::default()).into();
-            let buffer_double_string: JsonBuffer = builder.create_buffer::<TestMessage>(BufferSettings::default()).into();
+            let buffer_double_u32: JsonBuffer = builder
+                .create_buffer::<TestMessage>(BufferSettings::default())
+                .into();
+            let buffer_double_i32: JsonBuffer = builder
+                .create_buffer::<TestMessage>(BufferSettings::default())
+                .into();
+            let buffer_double_string: JsonBuffer = builder
+                .create_buffer::<TestMessage>(BufferSettings::default())
+                .into();
 
-            scope
-                .input
-                .chain(builder)
-                .fork_clone((
-                    |chain: Chain<_>| chain
+            scope.input.chain(builder).fork_clone((
+                |chain: Chain<_>| {
+                    chain
                         .map_block(|mut msg: TestMessage| {
                             msg.v_u32 *= 2;
                             msg
                         })
-                        .connect(buffer_double_u32.downcast::<TestMessage>().unwrap().input_slot()),
-                    |chain: Chain<_>| chain
+                        .connect(
+                            buffer_double_u32
+                                .downcast::<TestMessage>()
+                                .unwrap()
+                                .input_slot(),
+                        )
+                },
+                |chain: Chain<_>| {
+                    chain
                         .map_block(|mut msg: TestMessage| {
                             msg.v_i32 *= 2;
                             msg
                         })
-                        .connect(buffer_double_i32.downcast::<TestMessage>().unwrap().input_slot()),
-                    |chain: Chain<_>| chain
+                        .connect(
+                            buffer_double_i32
+                                .downcast::<TestMessage>()
+                                .unwrap()
+                                .input_slot(),
+                        )
+                },
+                |chain: Chain<_>| {
+                    chain
                         .map_block(|mut msg: TestMessage| {
                             msg.v_string = msg.v_string.clone() + &msg.v_string;
                             msg
                         })
-                        .connect(buffer_double_string.downcast::<TestMessage>().unwrap().input_slot()),
-                ));
+                        .connect(
+                            buffer_double_string
+                                .downcast::<TestMessage>()
+                                .unwrap()
+                                .input_slot(),
+                        )
+                },
+            ));
 
             (buffer_double_u32, buffer_double_i32, buffer_double_string)
                 .join(builder)
@@ -1157,15 +1255,17 @@ mod tests {
         });
 
         let msg = TestMessage::new();
-        let mut promise = context.command(
-            |commands| commands.request(msg, workflow).take_response()
-        );
+        let mut promise =
+            context.command(|commands| commands.request(msg, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let (double_u32, double_i32, double_string) = promise.take().available().unwrap();
         assert_eq!(4, double_u32.get("v_u32").unwrap().as_i64().unwrap());
         assert_eq!(2, double_i32.get("v_i32").unwrap().as_i64().unwrap());
-        assert_eq!("hellohello", double_string.get("v_string").unwrap().as_str().unwrap());
+        assert_eq!(
+            "hellohello",
+            double_string.get("v_string").unwrap().as_str().unwrap()
+        );
         assert!(context.no_unhandled_errors());
     }
 }

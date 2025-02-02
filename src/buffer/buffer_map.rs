@@ -15,11 +15,7 @@
  *
 */
 
-use std::{
-    any::TypeId,
-    borrow::Cow,
-    collections::HashMap,
-};
+use std::{any::TypeId, borrow::Cow, collections::HashMap};
 
 use thiserror::Error as ThisError;
 
@@ -28,9 +24,9 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    AnyBuffer, AddOperation, Chain, OperationError, OperationResult, OperationRoster, Buffered, Gate,
-    Join, Joined, Accessed, BufferKeyBuilder, AnyBufferKey, Builder, Output, UnusedTarget, GateState,
-    add_listener_to_source,
+    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, BufferKeyBuilder,
+    Buffered, Builder, Chain, Gate, GateState, Join, Joined, OperationError, OperationResult,
+    OperationRoster, Output, UnusedTarget,
 };
 
 #[derive(Clone, Default)]
@@ -40,11 +36,7 @@ pub struct BufferMap {
 
 impl BufferMap {
     /// Insert a named buffer into the map.
-    pub fn insert(
-        &mut self,
-        name: Cow<'static, str>,
-        buffer: impl Into<AnyBuffer>,
-    ) {
+    pub fn insert(&mut self, name: Cow<'static, str>, buffer: impl Into<AnyBuffer>) {
         self.inner.insert(name, buffer.into());
     }
 
@@ -67,11 +59,7 @@ pub struct IncompatibleLayout {
 
 impl IncompatibleLayout {
     /// Check whether a named buffer is compatible with a specific type.
-    pub fn require_buffer<T: 'static>(
-        &mut self,
-        expected_name: &str,
-        buffers: &BufferMap,
-    ) {
+    pub fn require_buffer<T: 'static>(&mut self, expected_name: &str, buffers: &BufferMap) {
         if let Some((name, buffer)) = buffers.inner.get_key_value(expected_name) {
             if buffer.message_type_id() != TypeId::of::<T>() {
                 self.incompatible_buffers.push(BufferIncompatibility {
@@ -81,7 +69,8 @@ impl IncompatibleLayout {
                 });
             }
         } else {
-            self.missing_buffers.push(Cow::Owned(expected_name.to_owned()));
+            self.missing_buffers
+                .push(Cow::Owned(expected_name.to_owned()));
         }
     }
 
@@ -124,11 +113,7 @@ pub trait BufferMapLayout: Sized {
         world: &mut World,
     ) -> OperationResult;
 
-    fn add_listener(
-        buffers: &BufferMap,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_listener(buffers: &BufferMap, listener: Entity, world: &mut World) -> OperationResult {
         for buffer in buffers.inner.values() {
             add_listener_to_source(buffer.id(), listener, world)?;
         }
@@ -157,7 +142,7 @@ pub trait BufferMapLayout: Sized {
     }
 }
 
-pub trait JoinedValue: 'static + BufferMapLayout + Send + Sync{
+pub trait JoinedValue: 'static + BufferMapLayout + Send + Sync {
     /// This associated type must represent a buffer map layout that is
     /// guaranteed to be compatible for this JoinedValue. Failure to implement
     /// this trait accordingly will result in panics.
@@ -198,11 +183,7 @@ pub trait JoinedValue: 'static + BufferMapLayout + Send + Sync{
 
 /// Trait to describe a layout of buffer keys
 pub trait BufferKeyMap: BufferMapLayout + Clone {
-    fn add_accessor(
-        buffers: &BufferMap,
-        accessor: Entity,
-        world: &mut World,
-    ) -> OperationResult;
+    fn add_accessor(buffers: &BufferMap, accessor: Entity, world: &mut World) -> OperationResult;
 
     fn create_key(buffers: &BufferMap, builder: &BufferKeyBuilder) -> Self;
 
@@ -219,13 +200,19 @@ struct BufferedMap<K> {
 impl<K: BufferMapLayout> BufferedMap<K> {
     fn new(map: BufferMap) -> Result<Self, IncompatibleLayout> {
         K::is_compatible(&map)?;
-        Ok(Self { map, _ignore: Default::default() })
+        Ok(Self {
+            map,
+            _ignore: Default::default(),
+        })
     }
 }
 
 impl<K> Clone for BufferedMap<K> {
     fn clone(&self) -> Self {
-        Self { map: self.map.clone(), _ignore: Default::default() }
+        Self {
+            map: self.map.clone(),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -322,11 +309,7 @@ impl BufferMapLayout for AnyBufferKeyMap {
         Ok(min_count.unwrap_or(0))
     }
 
-    fn add_listener(
-        buffers: &BufferMap,
-        listener: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn add_listener(buffers: &BufferMap, listener: Entity, world: &mut World) -> OperationResult {
         for buffer in buffers.inner.values() {
             buffer.add_listener(listener, world)?;
         }
@@ -377,9 +360,8 @@ mod tests {
     use std::borrow::Cow;
 
     use crate::{
-        prelude::*,
-        testing::*,
-        OperationResult, OperationError, OrBroken, InspectBuffer, ManageBuffer, BufferMap,
+        prelude::*, testing::*, BufferMap, InspectBuffer, ManageBuffer, OperationError,
+        OperationResult, OrBroken,
     };
 
     use bevy_ecs::prelude::World;
@@ -420,17 +402,11 @@ mod tests {
                 .or_broken()?
                 .buffered_count::<String>(session)?;
 
-            Ok(
-                [
-                    integer_count,
-                    float_count,
-                    string_count,
-                ]
+            Ok([integer_count, float_count, string_count]
                 .iter()
                 .min()
                 .copied()
-                .unwrap_or(0)
-            )
+                .unwrap_or(0))
         }
 
         fn ensure_active_session(
@@ -480,7 +456,11 @@ mod tests {
                 .or_broken()?
                 .pull_from_buffer::<String>(session)?;
 
-            Ok(Self { integer, float, string })
+            Ok(Self {
+                integer,
+                float,
+                string,
+            })
         }
     }
 
@@ -514,25 +494,23 @@ mod tests {
             buffers.insert(Cow::Borrowed("float"), buffer_f64);
             buffers.insert(Cow::Borrowed("string"), buffer_string);
 
-            scope
-                .input
-                .chain(builder)
-                .fork_unzip((
-                    |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
-                    |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
-                    |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
-                ));
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+            ));
 
-            builder.try_join_into(buffers).unwrap().connect(scope.terminate);
+            builder
+                .try_join_into(buffers)
+                .unwrap()
+                .connect(scope.terminate);
         });
 
-        let mut promise = context.command(
-            |commands| commands.request(
-                (5_i64, 3.14_f64, "hello".to_string()),
-                workflow,
-            )
-            .take_response()
-        );
+        let mut promise = context.command(|commands| {
+            commands
+                .request((5_i64, 3.14_f64, "hello".to_string()), workflow)
+                .take_response()
+        });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
         let value: TestJoinedValue = promise.take().available().unwrap();

@@ -23,13 +23,13 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, JoinedItem, BufferKeys, BufferSettings,
+    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferKeys, BufferMap, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
-    GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
-    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output,
-    Provider, RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings,
-    ScopeSettingsStorage, Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap,
-    StreamsOfMap, Trim, TrimBranch, UnusedTarget, JoinedValue, BufferMap, IncompatibleLayout,
+    GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap,
+    JoinedItem, JoinedValue, Node, OperateBuffer, OperateBufferAccess, OperateDynamicGate,
+    OperateScope, OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap,
+    Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
+    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
