@@ -251,7 +251,7 @@ impl<T> BufferKey<T> {
         self.tag.session
     }
 
-    pub(crate) fn tag(&self) -> &BufferKeyTag {
+    pub fn tag(&self) -> &BufferKeyTag {
         &self.tag
     }
 
@@ -286,11 +286,8 @@ impl<T> std::fmt::Debug for BufferKey<T> {
 
 /// The identifying information for a buffer key. This does not indicate
 /// anything about the type of messages that the buffer can contain.
-///
-/// This struct will be internal to the crate until we decide to make
-/// [`BufferAccessLifecycle`] a public struct.
 #[derive(Clone)]
-pub(crate) struct BufferKeyTag {
+pub struct BufferKeyTag {
     pub buffer: Entity,
     pub session: Entity,
     pub accessor: Entity,

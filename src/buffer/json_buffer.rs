@@ -21,7 +21,7 @@ use std::{
     any::TypeId,
     collections::HashMap,
     ops::RangeBounds,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
 };
 
 use bevy_ecs::{
@@ -143,20 +143,19 @@ pub struct JsonBufferKey {
 
 impl JsonBufferKey {
     /// Downcast this into a concrete [`BufferKey`] for the specified message type.
-    pub fn downcast_for_message<T: 'static>(&self) -> Option<BufferKey<T>> {
-        if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
-            Some(BufferKey {
-                tag: self.tag.clone(),
-                _ignore: Default::default(),
-            })
-        } else {
-            None
-        }
+    ///
+    /// To downcast to a specialized kind of key, use [`Self::downcast_buffer_key`] instead.
+    pub fn downcast_for_message<T: 'static>(self) -> Option<BufferKey<T>> {
+        self.as_any_buffer_key().downcast_for_message()
+    }
+
+    pub fn downcast_buffer_key<KeyType: 'static>(self) -> Option<KeyType> {
+        self.as_any_buffer_key().downcast_buffer_key()
     }
 
     /// Cast this into an [`AnyBufferKey`]
-    pub fn as_any_buffer_key(&self) -> AnyBufferKey {
-        self.clone().into()
+    pub fn as_any_buffer_key(self) -> AnyBufferKey {
+        self.into()
     }
 
     fn deep_clone(&self) -> Self {
@@ -816,6 +815,16 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIm
             }),
         );
 
+        any_interface.register_key_downcast(
+            TypeId::of::<JsonBufferKey>(),
+            Box::new(|tag| {
+                Box::new(JsonBufferKey {
+                    tag,
+                    interface: Self::get_interface(),
+                })
+            }),
+        );
+
         // Create and cache the json buffer access interface
         static INTERFACE_MAP: OnceLock<
             Mutex<HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>>,
@@ -1319,7 +1328,21 @@ mod tests {
             let _original_from_json: Buffer<TestMessage> =
                 json_buffer.downcast_for_message().unwrap();
 
-            builder.connect(scope.input, scope.terminate);
+            scope
+                .input
+                .chain(builder)
+                .with_access(buffer)
+                .map_block(|(data, key)| {
+                    let any_key: AnyBufferKey = key.clone().into();
+                    let json_key: JsonBufferKey = any_key.clone().downcast_buffer_key().unwrap();
+                    let _original_from_any: BufferKey<TestMessage> =
+                        any_key.downcast_for_message().unwrap();
+                    let _original_from_json: BufferKey<TestMessage> =
+                        json_key.downcast_for_message().unwrap();
+
+                    data
+                })
+                .connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| commands.request(1, workflow).take_response());

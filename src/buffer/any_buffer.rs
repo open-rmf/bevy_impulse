@@ -21,7 +21,7 @@ use std::{
     any::{Any, TypeId},
     collections::{hash_map::Entry, HashMap},
     ops::RangeBounds,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
 };
 
 use bevy_ecs::{
@@ -34,10 +34,10 @@ use thiserror::Error as ThisError;
 use smallvec::SmallVec;
 
 use crate::{
-    add_listener_to_source, Accessed, Buffer, BufferAccessLifecycle, BufferAccessMut,
-    BufferAccessors, BufferError, BufferKey, BufferKeyTag, BufferLocation, BufferStorage,
-    Bufferable, Buffered, Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joined,
-    ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
+    add_listener_to_source, Accessed, Buffer, BufferAccessMut, BufferAccessors, BufferError,
+    BufferKey, BufferKeyTag, BufferLocation, BufferStorage, Bufferable, Buffered, Builder,
+    DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
+    OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -143,16 +143,27 @@ pub struct AnyBufferKey {
 }
 
 impl AnyBufferKey {
-    /// Downcast this into a concrete [`BufferKey`] type.
-    pub fn downcast<T: 'static>(&self) -> Option<BufferKey<T>> {
-        if TypeId::of::<T>() == self.interface.message_type_id() {
+    /// Downcast this into a concrete [`BufferKey`] for the specified message type.
+    ///
+    /// To downcast to a specialized kind of key, use [`Self::downcast_buffer_key`] instead.
+    pub fn downcast_for_message<Message: 'static>(self) -> Option<BufferKey<Message>> {
+        if TypeId::of::<Message>() == self.interface.message_type_id() {
             Some(BufferKey {
-                tag: self.tag.clone(),
+                tag: self.tag,
                 _ignore: Default::default(),
             })
         } else {
             None
         }
+    }
+
+    /// Downcast this into a different special buffer key representation, such
+    /// as a `JsonBufferKey`.
+    pub fn downcast_buffer_key<KeyType: 'static>(self) -> Option<KeyType> {
+        self.interface.key_downcast(TypeId::of::<KeyType>())?(self.tag)
+            .downcast::<KeyType>()
+            .ok()
+            .map(|x| *x)
     }
 
     /// The buffer ID of this key.
@@ -780,6 +791,10 @@ pub trait AnyBufferAccessInterface {
 
     fn buffer_downcast(&self, buffer_type: TypeId) -> Option<BufferDowncastRef>;
 
+    fn register_key_downcast(&self, key_type: TypeId, f: KeyDowncastBox);
+
+    fn key_downcast(&self, key_type: TypeId) -> Option<KeyDowncastRef>;
+
     fn pull(
         &self,
         entity_mut: &mut EntityWorldMut,
@@ -800,15 +815,22 @@ pub trait AnyBufferAccessInterface {
 
 pub type BufferDowncastBox = Box<dyn Fn(BufferLocation) -> Box<dyn Any> + Send + Sync>;
 pub type BufferDowncastRef = &'static (dyn Fn(BufferLocation) -> Box<dyn Any> + Send + Sync);
+pub type KeyDowncastBox = Box<dyn Fn(BufferKeyTag) -> Box<dyn Any> + Send + Sync>;
+pub type KeyDowncastRef = &'static (dyn Fn(BufferKeyTag) -> Box<dyn Any> + Send + Sync);
 
 struct AnyBufferAccessImpl<T> {
     buffer_downcasts: Mutex<HashMap<TypeId, BufferDowncastRef>>,
+    key_downcasts: Mutex<HashMap<TypeId, KeyDowncastRef>>,
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
     fn new() -> Self {
         let mut buffer_downcasts: HashMap<_, BufferDowncastRef> = HashMap::new();
+
+        // SAFETY: These leaks are okay because we will only ever instantiate
+        // AnyBufferAccessImpl once per generic argument T, which puts a firm
+        // ceiling on how many of these callbacks will get leaked.
 
         // Automatically register a downcast into AnyBuffer
         buffer_downcasts.insert(
@@ -821,8 +843,22 @@ impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
             })),
         );
 
+        let mut key_downcasts: HashMap<_, KeyDowncastRef> = HashMap::new();
+
+        // Automatically register a downcast to AnyBufferKey
+        key_downcasts.insert(
+            TypeId::of::<AnyBufferKey>(),
+            Box::leak(Box::new(|tag| -> Box<dyn Any> {
+                Box::new(AnyBufferKey {
+                    tag,
+                    interface: AnyBuffer::interface_for::<T>(),
+                })
+            })),
+        );
+
         Self {
             buffer_downcasts: Mutex::new(buffer_downcasts),
+            key_downcasts: Mutex::new(key_downcasts),
             _ignore: Default::default(),
         }
     }
@@ -860,6 +896,19 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
             .unwrap()
             .get(&buffer_type)
             .copied()
+    }
+
+    fn register_key_downcast(&self, key_type: TypeId, f: KeyDowncastBox) {
+        let mut downcasts = self.key_downcasts.lock().unwrap();
+
+        if let Entry::Vacant(entry) = downcasts.entry(key_type) {
+            // We should only leak this in to the register once per type
+            entry.insert(Box::leak(f));
+        }
+    }
+
+    fn key_downcast(&self, key_type: TypeId) -> Option<KeyDowncastRef> {
+        self.key_downcasts.lock().unwrap().get(&key_type).copied()
     }
 
     fn pull(

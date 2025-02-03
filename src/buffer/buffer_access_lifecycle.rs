@@ -29,7 +29,7 @@ use crate::{emit_disposal, ChannelItem, Disposal, OperationRoster};
 /// we would be needlessly doing a reachability check every time the key gets
 /// cloned.
 #[derive(Clone)]
-pub(crate) struct BufferAccessLifecycle {
+pub struct BufferAccessLifecycle {
     scope: Entity,
     accessor: Entity,
     session: Entity,
