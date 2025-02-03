@@ -146,8 +146,6 @@ pub struct JsonBufferKey {
 
 impl JsonBufferKey {
     /// Downcast this into a concrete [`BufferKey`] for the specified message type.
-    ///
-    /// To downcast into a specialized kind of buffer key, use [`Self::downcast_buffer_key`] instead.
     pub fn downcast_for_message<T: 'static>(&self) -> Option<BufferKey<T>> {
         if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
             Some(BufferKey {
@@ -420,7 +418,7 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
         self.storage.json_push_as_oldest(self.session, message)
     }
 
-    /// Same as [`Self:push_as_oldest`] but no serialization step is needed for
+    /// Same as [`Self::push_as_oldest`] but no serialization step is needed for
     /// the incoming message.
     pub fn push_json_as_oldest(
         &mut self,
