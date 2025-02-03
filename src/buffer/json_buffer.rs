@@ -37,9 +37,9 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
-    Buffer, BufferAccessLifecycle, BufferAccessMut, BufferAccessors, BufferError, BufferKey,
-    BufferKeyBuilder, BufferLocation, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer,
-    Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate, OperationError,
+    Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferKey, BufferKeyBuilder,
+    BufferKeyTag, BufferLocation, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer, Gate,
+    GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate, OperationError,
     OperationResult, OrBroken,
 };
 
@@ -137,10 +137,7 @@ impl From<JsonBuffer> for AnyBuffer {
 /// [1]: bevy_ecs::prelude::World
 #[derive(Clone)]
 pub struct JsonBufferKey {
-    buffer: Entity,
-    session: Entity,
-    accessor: Entity,
-    lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    tag: BufferKeyTag,
     interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
 }
 
@@ -149,10 +146,7 @@ impl JsonBufferKey {
     pub fn downcast_for_message<T: 'static>(&self) -> Option<BufferKey<T>> {
         if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
             Some(BufferKey {
-                buffer: self.buffer,
-                session: self.session,
-                accessor: self.accessor,
-                lifecycle: self.lifecycle.clone(),
+                tag: self.tag.clone(),
                 _ignore: Default::default(),
             })
         } else {
@@ -166,33 +160,25 @@ impl JsonBufferKey {
     }
 
     fn deep_clone(&self) -> Self {
-        let mut deep = self.clone();
-        deep.lifecycle = self
-            .lifecycle
-            .as_ref()
-            .map(|l| Arc::new(l.as_ref().clone()));
-        deep
+        Self {
+            tag: self.tag.deep_clone(),
+            interface: self.interface,
+        }
     }
 
     fn is_in_use(&self) -> bool {
-        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
+        self.tag.is_in_use()
     }
 }
 
 impl std::fmt::Debug for JsonBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JsonBufferKey")
-            .field("buffer", &self.buffer)
-            .field("session", &self.session)
-            .field("accessor", &self.accessor)
-            .field(
-                "in_use",
-                &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()),
-            )
             .field(
                 "message_type_name",
                 &self.interface.any_access_interface().message_type_name(),
             )
+            .field("tag", &self.tag)
             .finish()
     }
 }
@@ -201,10 +187,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<BufferKey<T>>
     fn from(value: BufferKey<T>) -> Self {
         let interface = JsonBufferAccessImpl::<T>::get_interface();
         JsonBufferKey {
-            buffer: value.buffer,
-            session: value.session,
-            accessor: value.accessor,
-            lifecycle: value.lifecycle,
+            tag: value.tag,
             interface,
         }
     }
@@ -213,10 +196,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<BufferKey<T>>
 impl From<JsonBufferKey> for AnyBufferKey {
     fn from(value: JsonBufferKey) -> Self {
         AnyBufferKey {
-            buffer: value.buffer,
-            session: value.session,
-            accessor: value.accessor,
-            lifecycle: value.lifecycle,
+            tag: value.tag,
             interface: value.interface.any_access_interface(),
         }
     }
@@ -883,7 +863,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         world: &'a World,
     ) -> Result<JsonBufferView<'a>, BufferError> {
         let buffer_ref = world
-            .get_entity(key.buffer)
+            .get_entity(key.tag.buffer)
             .ok_or(BufferError::BufferMissing)?;
         let storage = buffer_ref
             .get::<BufferStorage<T>>()
@@ -894,7 +874,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         Ok(JsonBufferView {
             storage: Box::new(storage),
             gate,
-            session: key.session,
+            session: key.tag.session,
         })
     }
 
@@ -942,14 +922,14 @@ where
     ) -> Result<JsonBufferMut<'w, 's, 'a>, BufferError> {
         let BufferAccessMut { query, commands } = self;
         let (storage, gate) = query
-            .get_mut(key.buffer)
+            .get_mut(key.tag.buffer)
             .map_err(|_| BufferError::BufferMissing)?;
         Ok(JsonBufferMut {
             storage: Box::new(storage),
             gate,
-            buffer: key.buffer,
-            session: key.session,
-            accessor: Some(key.accessor),
+            buffer: key.tag.buffer,
+            session: key.tag.session,
+            accessor: Some(key.tag.accessor),
             commands,
             modified: false,
         })
@@ -1039,12 +1019,8 @@ impl Accessed for JsonBuffer {
     }
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
-        let components = builder.as_components(self.id());
         JsonBufferKey {
-            buffer: components.buffer,
-            session: components.session,
-            accessor: components.accessor,
-            lifecycle: components.lifecycle,
+            tag: builder.make_tag(self.id()),
             interface: self.interface,
         }
     }

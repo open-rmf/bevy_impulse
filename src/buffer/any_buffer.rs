@@ -35,9 +35,9 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessed, Buffer, BufferAccessLifecycle, BufferAccessMut,
-    BufferAccessors, BufferError, BufferKey, BufferLocation, BufferStorage, Bufferable, Buffered,
-    Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
-    OperationError, OperationResult, OperationRoster, OrBroken,
+    BufferAccessors, BufferError, BufferKey, BufferKeyTag, BufferLocation, BufferStorage,
+    Bufferable, Buffered, Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joined,
+    ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -138,10 +138,7 @@ impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
 /// [1]: bevy_ecs::prelude::World
 #[derive(Clone)]
 pub struct AnyBufferKey {
-    pub(crate) buffer: Entity,
-    pub(crate) session: Entity,
-    pub(crate) accessor: Entity,
-    pub(crate) lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    pub(crate) tag: BufferKeyTag,
     pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
 }
 
@@ -150,10 +147,7 @@ impl AnyBufferKey {
     pub fn downcast<T: 'static>(&self) -> Option<BufferKey<T>> {
         if TypeId::of::<T>() == self.interface.message_type_id() {
             Some(BufferKey {
-                buffer: self.buffer,
-                session: self.session,
-                accessor: self.accessor,
-                lifecycle: self.lifecycle.clone(),
+                tag: self.tag.clone(),
                 _ignore: Default::default(),
             })
         } else {
@@ -163,39 +157,31 @@ impl AnyBufferKey {
 
     /// The buffer ID of this key.
     pub fn id(&self) -> Entity {
-        self.buffer
+        self.tag.buffer
     }
 
     /// The session that this key belongs to.
     pub fn session(&self) -> Entity {
-        self.session
-    }
-
-    fn deep_clone(&self) -> Self {
-        let mut deep = self.clone();
-        deep.lifecycle = self
-            .lifecycle
-            .as_ref()
-            .map(|l| Arc::new(l.as_ref().clone()));
-        deep
+        self.tag.session
     }
 
     fn is_in_use(&self) -> bool {
-        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
+        self.tag.is_in_use()
+    }
+
+    fn deep_clone(&self) -> Self {
+        Self {
+            tag: self.tag.deep_clone(),
+            interface: self.interface,
+        }
     }
 }
 
 impl std::fmt::Debug for AnyBufferKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AnyBufferKey")
-            .field("buffer", &self.buffer)
-            .field("session", &self.session)
-            .field("accessor", &self.accessor)
-            .field(
-                "in_use",
-                &self.lifecycle.as_ref().is_some_and(|l| l.is_in_use()),
-            )
             .field("message_type_name", &self.interface.message_type_name())
+            .field("tag", &self.tag)
             .finish()
     }
 }
@@ -204,10 +190,7 @@ impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
     fn from(value: BufferKey<T>) -> Self {
         let interface = AnyBuffer::interface_for::<T>();
         AnyBufferKey {
-            buffer: value.buffer,
-            session: value.session,
-            accessor: value.accessor,
-            lifecycle: value.lifecycle.clone(),
+            tag: value.tag,
             interface,
         }
     }
@@ -770,14 +753,14 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's>
     ) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError> {
         let BufferAccessMut { query, commands } = self;
         let (storage, gate) = query
-            .get_mut(key.buffer)
+            .get_mut(key.tag.buffer)
             .map_err(|_| BufferError::BufferMissing)?;
         Ok(AnyBufferMut {
             storage: Box::new(storage),
             gate,
-            buffer: key.buffer,
-            session: key.session,
-            accessor: Some(key.accessor),
+            buffer: key.tag.buffer,
+            session: key.tag.session,
+            accessor: Some(key.tag.accessor),
             commands,
             modified: false,
         })
@@ -895,7 +878,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         world: &'a World,
     ) -> Result<AnyBufferView<'a>, BufferError> {
         let buffer_ref = world
-            .get_entity(key.buffer)
+            .get_entity(key.tag.buffer)
             .ok_or(BufferError::BufferMissing)?;
         let storage = buffer_ref
             .get::<BufferStorage<T>>()
@@ -906,7 +889,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         Ok(AnyBufferView {
             storage: Box::new(storage),
             gate,
-            session: key.session,
+            session: key.tag.session,
         })
     }
 
@@ -1001,12 +984,8 @@ impl Accessed for AnyBuffer {
     }
 
     fn create_key(&self, builder: &super::BufferKeyBuilder) -> Self::Key {
-        let components = builder.as_components(self.id());
         AnyBufferKey {
-            buffer: components.buffer,
-            session: components.session,
-            accessor: components.accessor,
-            lifecycle: components.lifecycle,
+            tag: builder.make_tag(self.id()),
             interface: self.interface,
         }
     }

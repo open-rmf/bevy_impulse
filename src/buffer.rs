@@ -123,7 +123,7 @@ impl<T> Clone for Buffer<T> {
 
 impl<T> Copy for Buffer<T> {}
 
-/// Get the general identifying information for a buffer to locate it within the
+/// The general identifying information for a buffer to locate it within the
 /// world. This does not indicate anything about the type of messages that the
 /// buffer can contain.
 #[derive(Clone, Copy, Debug)]
@@ -227,20 +227,14 @@ impl Default for RetentionPolicy {
 /// [1]: crate::Chain::with_access
 /// [2]: crate::Bufferable::listen
 pub struct BufferKey<T> {
-    buffer: Entity,
-    session: Entity,
-    accessor: Entity,
-    lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    tag: BufferKeyTag,
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Clone for BufferKey<T> {
     fn clone(&self) -> Self {
         Self {
-            buffer: self.buffer,
-            session: self.session,
-            accessor: self.accessor,
-            lifecycle: self.lifecycle.as_ref().map(Arc::clone),
+            tag: self.tag.clone(),
             _ignore: Default::default(),
         }
     }
@@ -248,17 +242,21 @@ impl<T> Clone for BufferKey<T> {
 
 impl<T> BufferKey<T> {
     /// The buffer ID of this key.
-    pub fn id(&self) -> Entity {
-        self.buffer
+    pub fn buffer(&self) -> Entity {
+        self.tag.buffer
     }
 
     /// The session that this key belongs to.
     pub fn session(&self) -> Entity {
-        self.session
+        self.tag.session
+    }
+
+    pub(crate) fn tag(&self) -> &BufferKeyTag {
+        &self.tag
     }
 
     pub(crate) fn is_in_use(&self) -> bool {
-        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
+        self.tag.is_in_use()
     }
 
     // We do a deep clone of the key when distributing it to decouple the
@@ -270,12 +268,58 @@ impl<T> BufferKey<T> {
     // need to have their own independent lifecycles or else we won't detect
     // when the workflow has dropped them.
     pub(crate) fn deep_clone(&self) -> Self {
+        Self {
+            tag: self.tag.deep_clone(),
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<T> std::fmt::Debug for BufferKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferKey")
+            .field("message_type_name", &std::any::type_name::<T>())
+            .field("tag", &self.tag)
+            .finish()
+    }
+}
+
+/// The identifying information for a buffer key. This does not indicate
+/// anything about the type of messages that the buffer can contain.
+///
+/// This struct will be internal to the crate until we decide to make
+/// [`BufferAccessLifecycle`] a public struct.
+#[derive(Clone)]
+pub(crate) struct BufferKeyTag {
+    pub buffer: Entity,
+    pub session: Entity,
+    pub accessor: Entity,
+    pub lifecycle: Option<Arc<BufferAccessLifecycle>>,
+}
+
+impl BufferKeyTag {
+    pub fn is_in_use(&self) -> bool {
+        self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
+    }
+
+    pub fn deep_clone(&self) -> Self {
         let mut deep = self.clone();
         deep.lifecycle = self
             .lifecycle
             .as_ref()
             .map(|l| Arc::new(l.as_ref().clone()));
         deep
+    }
+}
+
+impl std::fmt::Debug for BufferKeyTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferKeyTag")
+            .field("buffer", &self.buffer)
+            .field("session", &self.session)
+            .field("accessor", &self.accessor)
+            .field("in_use", &self.is_in_use())
+            .finish()
     }
 }
 
@@ -293,9 +337,9 @@ where
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
     pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
-        let session = key.session;
+        let session = key.session();
         self.query
-            .get(key.buffer)
+            .get(key.buffer())
             .map(|(storage, gate)| BufferView {
                 storage,
                 gate,
@@ -322,9 +366,9 @@ where
     T: 'static + Send + Sync,
 {
     pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
-        let session = key.session;
+        let session = key.session();
         self.query
-            .get(key.buffer)
+            .get(key.buffer())
             .map(|(storage, gate)| BufferView {
                 storage,
                 gate,
@@ -336,10 +380,10 @@ where
         &'a mut self,
         key: &BufferKey<T>,
     ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
-        let buffer = key.buffer;
-        let session = key.session;
-        let accessor = key.accessor;
-        self.query.get_mut(key.buffer).map(|(storage, gate)| {
+        let buffer = key.buffer();
+        let session = key.session();
+        let accessor = key.tag.accessor;
+        self.query.get_mut(key.buffer()).map(|(storage, gate)| {
             BufferMut::new(storage, gate, buffer, session, accessor, &mut self.commands)
         })
     }

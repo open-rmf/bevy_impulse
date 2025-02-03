@@ -19,7 +19,7 @@ use bevy_ecs::prelude::Entity;
 
 use std::sync::Arc;
 
-use crate::{BufferAccessLifecycle, BufferKey, ChannelSender};
+use crate::{BufferAccessLifecycle, BufferKey, BufferKeyTag, ChannelSender};
 
 pub struct BufferKeyBuilder {
     scope: Entity,
@@ -28,37 +28,18 @@ pub struct BufferKeyBuilder {
     lifecycle: Option<(ChannelSender, Arc<()>)>,
 }
 
-pub struct BufferKeyComponents {
-    pub buffer: Entity,
-    pub session: Entity,
-    pub accessor: Entity,
-    pub lifecycle: Option<Arc<BufferAccessLifecycle>>,
-}
-
 impl BufferKeyBuilder {
     pub(crate) fn build<T>(&self, buffer: Entity) -> BufferKey<T> {
         BufferKey {
-            buffer,
-            session: self.session,
-            accessor: self.accessor,
-            lifecycle: self.lifecycle.as_ref().map(|(sender, tracker)| {
-                Arc::new(BufferAccessLifecycle::new(
-                    self.scope,
-                    buffer,
-                    self.session,
-                    self.accessor,
-                    sender.clone(),
-                    tracker.clone(),
-                ))
-            }),
+            tag: self.make_tag(buffer),
             _ignore: Default::default(),
         }
     }
 
     // TODO(@mxgrey): Consider refactoring all the buffer key structs to use a
     // single inner struct like BufferKeyComponents
-    pub(crate) fn as_components(&self, buffer: Entity) -> BufferKeyComponents {
-        BufferKeyComponents {
+    pub(crate) fn make_tag(&self, buffer: Entity) -> BufferKeyTag {
+        BufferKeyTag {
             buffer,
             session: self.session,
             accessor: self.accessor,
