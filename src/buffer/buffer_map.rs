@@ -219,7 +219,7 @@ impl<K> Clone for BufferedMap<K> {
 impl<L: BufferMapLayout> Buffered for BufferedMap<L> {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.map.inner.values() {
-            assert_eq!(scope, buffer.scope);
+            assert_eq!(scope, buffer.scope());
         }
     }
 

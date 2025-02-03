@@ -156,7 +156,7 @@ pub trait Bufferable {
 impl<T: 'static + Send + Sync> Bufferable for Buffer<T> {
     type BufferType = Self;
     fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        assert_eq!(self.scope, builder.scope());
+        assert_eq!(self.scope(), builder.scope());
         self
     }
 }
@@ -164,7 +164,7 @@ impl<T: 'static + Send + Sync> Bufferable for Buffer<T> {
 impl<T: 'static + Send + Sync + Clone> Bufferable for CloneFromBuffer<T> {
     type BufferType = Self;
     fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        assert_eq!(self.scope, builder.scope());
+        assert_eq!(self.scope(), builder.scope());
         self
     }
 }

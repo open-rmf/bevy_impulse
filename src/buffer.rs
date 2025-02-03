@@ -63,8 +63,7 @@ pub use json_buffer::*;
 /// and release data. When a session is finished, the buffered data from the
 /// session will be automatically cleared.
 pub struct Buffer<T> {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
+    pub(crate) location: BufferLocation,
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
@@ -74,11 +73,11 @@ impl<T> Buffer<T> {
         &self,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope, builder.scope);
+        assert_eq!(self.scope(), builder.scope);
         let target = builder.commands.spawn(UnusedTarget).id();
         builder
             .commands
-            .add(OnNewBufferValue::new(self.source, target));
+            .add(OnNewBufferValue::new(self.id(), target));
         Chain::new(target, builder)
     }
 
@@ -90,15 +89,29 @@ impl<T> Buffer<T> {
         T: Clone,
     {
         CloneFromBuffer {
-            scope: self.scope,
-            source: self.source,
+            location: self.location,
             _ignore: Default::default(),
         }
     }
 
     /// Get an input slot for this buffer.
     pub fn input_slot(self) -> InputSlot<T> {
-        InputSlot::new(self.scope, self.source)
+        InputSlot::new(self.scope(), self.id())
+    }
+
+    /// Get the entity ID of the buffer.
+    pub fn id(&self) -> Entity {
+        self.location.source
+    }
+
+    /// Get the ID of the workflow that the buffer is associated with.
+    pub fn scope(&self) -> Entity {
+        self.location.scope
+    }
+
+    /// Get general information about the buffer.
+    pub fn location(&self) -> BufferLocation {
+        self.location
     }
 }
 
@@ -110,11 +123,38 @@ impl<T> Clone for Buffer<T> {
 
 impl<T> Copy for Buffer<T> {}
 
+/// Get the general identifying information for a buffer to locate it within the
+/// world. This does not indicate anything about the type of messages that the
+/// buffer can contain.
+#[derive(Clone, Copy, Debug)]
+pub struct BufferLocation {
+    /// The entity ID of the buffer.
+    pub scope: Entity,
+    /// The ID of the workflow that the buffer is associated with.
+    pub source: Entity,
+}
+
 #[derive(Clone, Copy)]
 pub struct CloneFromBuffer<T: Clone> {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
+    pub(crate) location: BufferLocation,
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
+}
+
+impl<T: Clone> CloneFromBuffer<T> {
+    /// Get the entity ID of the buffer.
+    pub fn id(&self) -> Entity {
+        self.location.source
+    }
+
+    /// Get the ID of the workflow that the buffer is associated with.
+    pub fn scope(&self) -> Entity {
+        self.location.scope
+    }
+
+    /// Get general information about the buffer.
+    pub fn location(&self) -> BufferLocation {
+        self.location
+    }
 }
 
 /// Settings to describe the behavior of a buffer.

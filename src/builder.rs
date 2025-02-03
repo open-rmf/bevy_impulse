@@ -23,13 +23,14 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferKeys, BufferMap, BufferSettings,
-    Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
-    GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap,
-    JoinedItem, JoinedValue, Node, OperateBuffer, OperateBufferAccess, OperateDynamicGate,
-    OperateScope, OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap,
-    Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
-    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferKeys, BufferLocation, BufferMap,
+    BufferSettings, Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput,
+    ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
+    IntoBlockingMap, JoinedItem, JoinedValue, Node, OperateBuffer, OperateBufferAccess,
+    OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
+    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
+    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
+    TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
@@ -165,8 +166,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         ));
 
         Buffer {
-            scope: self.scope,
-            source,
+            location: BufferLocation {
+                scope: self.scope(),
+                source,
+            },
             _ignore: Default::default(),
         }
     }

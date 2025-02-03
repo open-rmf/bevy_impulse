@@ -546,7 +546,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the buffer is broken (e.g. its operation has been despawned) the
     /// workflow will be cancelled.
     pub fn then_push(self, buffer: Buffer<T>) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope(), buffer.scope);
+        assert_eq!(self.scope(), buffer.scope());
         self.with_access(buffer)
             .then(push_into_buffer.into_blocking_callback())
             .cancel_on_err()

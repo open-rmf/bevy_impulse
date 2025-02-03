@@ -19,7 +19,7 @@
 
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     ops::RangeBounds,
     sync::{Arc, Mutex, OnceLock},
 };
@@ -35,8 +35,8 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessed, Buffer, BufferAccessLifecycle, BufferAccessMut,
-    BufferAccessors, BufferError, BufferKey, BufferStorage, Bufferable, Buffered, Builder,
-    DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
+    BufferAccessors, BufferError, BufferKey, BufferLocation, BufferStorage, Bufferable, Buffered,
+    Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
     OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
@@ -44,54 +44,86 @@ use crate::{
 /// type will yield an [`AnyMessage`].
 #[derive(Clone, Copy)]
 pub struct AnyBuffer {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
+    pub(crate) location: BufferLocation,
     pub(crate) interface: &'static (dyn AnyBufferAccessInterface + Send + Sync),
 }
 
 impl AnyBuffer {
     /// The buffer ID for this key.
     pub fn id(&self) -> Entity {
-        self.source
+        self.location.source
+    }
+
+    /// ID of the workflow that this buffer is associated with.
+    pub fn scope(&self) -> Entity {
+        self.location.scope
     }
 
     /// Get the type ID of the messages that this buffer supports.
     pub fn message_type_id(&self) -> TypeId {
         self.interface.message_type_id()
     }
+
+    /// Get the [`AnyBufferAccessInterface`] for this specific instance of [`AnyBuffer`].
+    pub fn get_interface(&self) -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
+        self.interface
+    }
+
+    /// Get the [`AnyBufferAccessInterface`] for a concrete message type.
+    pub fn interface_for<T: 'static + Send + Sync>(
+    ) -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
+        static INTERFACE_MAP: OnceLock<
+            Mutex<HashMap<TypeId, &'static (dyn AnyBufferAccessInterface + Send + Sync)>>,
+        > = OnceLock::new();
+        let interfaces = INTERFACE_MAP.get_or_init(|| Mutex::default());
+
+        let mut interfaces_mut = interfaces.lock().unwrap();
+        *interfaces_mut
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::leak(Box::new(AnyBufferAccessImpl::<T>::new())))
+    }
 }
 
 impl std::fmt::Debug for AnyBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AnyBuffer")
-            .field("scope", &self.scope)
-            .field("source", &self.source)
+            .field("scope", &self.location.scope)
+            .field("source", &self.location.source)
             .field("message_type_name", &self.interface.message_type_name())
             .finish()
     }
 }
 
 impl AnyBuffer {
-    /// Downcast this into a concrete [`Buffer`] type.
-    pub fn downcast<T: 'static>(&self) -> Option<Buffer<T>> {
-        if TypeId::of::<T>() == self.interface.message_type_id() {
+    /// Downcast this into a concrete [`Buffer`] for the specified message type.
+    ///
+    /// To downcast into a specialized kind of buffer, use [`Self::downcast_buffer`] instead.
+    pub fn downcast_for_message<Message: 'static>(&self) -> Option<Buffer<Message>> {
+        if TypeId::of::<Message>() == self.interface.message_type_id() {
             Some(Buffer {
-                scope: self.scope,
-                source: self.source,
+                location: self.location,
                 _ignore: Default::default(),
             })
         } else {
             None
         }
     }
+
+    /// Downcast this into a different special buffer representation, such as a
+    /// `JsonBuffer`.
+    pub fn downcast_buffer<BufferType: 'static>(&self) -> Option<BufferType> {
+        self.interface.buffer_downcast(TypeId::of::<BufferType>())?(self.location)
+            .downcast::<BufferType>()
+            .ok()
+            .map(|x| *x)
+    }
 }
 
 impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
     fn from(value: Buffer<T>) -> Self {
-        let interface = AnyBufferAccessImpl::<T>::get_interface();
+        let interface = AnyBuffer::interface_for::<T>();
         AnyBuffer {
-            scope: value.scope,
-            source: value.source,
+            location: value.location,
             interface,
         }
     }
@@ -100,8 +132,10 @@ impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
 /// Similar to a [`BufferKey`] except it can be used for any buffer without
 /// knowing the buffer's message type at compile time.
 ///
-/// Use this with [`AnyBufferAccess`] to directly view or manipulate the contents
-/// of a buffer.
+/// This can key be used with a [`World`][1] to directly view or manipulate the
+/// contents of a buffer through the [`AnyBufferWorldAccess`] interface.
+///
+/// [1]: bevy_ecs::prelude::World
 #[derive(Clone)]
 pub struct AnyBufferKey {
     pub(crate) buffer: Entity,
@@ -168,7 +202,7 @@ impl std::fmt::Debug for AnyBufferKey {
 
 impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
     fn from(value: BufferKey<T>) -> Self {
-        let interface = AnyBufferAccessImpl::<T>::get_interface();
+        let interface = AnyBuffer::interface_for::<T>();
         AnyBufferKey {
             buffer: value.buffer,
             session: value.session,
@@ -702,7 +736,7 @@ where
     Ok(*value)
 }
 
-pub(crate) trait AnyBufferAccessMutState {
+pub trait AnyBufferAccessMutState {
     fn get_any_buffer_access_mut<'s, 'w: 's>(
         &'s mut self,
         world: &'w mut World,
@@ -720,7 +754,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessMutState
     }
 }
 
-pub(crate) trait AnyBufferAccessMut<'w, 's> {
+pub trait AnyBufferAccessMut<'w, 's> {
     fn as_any_buffer_mut<'a>(
         &'a mut self,
         key: &AnyBufferKey,
@@ -750,7 +784,7 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's>
     }
 }
 
-pub(crate) trait AnyBufferAccessInterface {
+pub trait AnyBufferAccessInterface {
     fn message_type_id(&self) -> TypeId;
 
     fn message_type_name(&self) -> &'static str;
@@ -758,6 +792,10 @@ pub(crate) trait AnyBufferAccessInterface {
     fn buffered_count(&self, entity: &EntityRef, session: Entity) -> Result<usize, OperationError>;
 
     fn ensure_session(&self, entity_mut: &mut EntityWorldMut, session: Entity) -> OperationResult;
+
+    fn register_buffer_downcast(&self, buffer_type: TypeId, f: BufferDowncastBox);
+
+    fn buffer_downcast(&self, buffer_type: TypeId) -> Option<BufferDowncastRef>;
 
     fn pull(
         &self,
@@ -777,21 +815,33 @@ pub(crate) trait AnyBufferAccessInterface {
     ) -> Box<dyn AnyBufferAccessMutState>;
 }
 
-pub(crate) struct AnyBufferAccessImpl<T>(std::marker::PhantomData<T>);
+pub type BufferDowncastBox = Box<dyn Fn(BufferLocation) -> Box<dyn Any> + Send + Sync>;
+pub type BufferDowncastRef = &'static (dyn Fn(BufferLocation) -> Box<dyn Any> + Send + Sync);
 
-impl<T: 'static + Send + Sync + Any> AnyBufferAccessImpl<T> {
-    pub(crate) fn get_interface() -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
-        const INTERFACE_MAP: OnceLock<
-            Mutex<HashMap<TypeId, &'static (dyn AnyBufferAccessInterface + Send + Sync)>>,
-        > = OnceLock::new();
-        let binding = INTERFACE_MAP;
+struct AnyBufferAccessImpl<T> {
+    buffer_downcasts: Mutex<HashMap<TypeId, BufferDowncastRef>>,
+    _ignore: std::marker::PhantomData<fn(T)>,
+}
 
-        let interfaces = binding.get_or_init(|| Mutex::default());
+impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
+    fn new() -> Self {
+        let mut buffer_downcasts: HashMap<_, BufferDowncastRef> = HashMap::new();
 
-        let mut interfaces_mut = interfaces.lock().unwrap();
-        *interfaces_mut
-            .entry(TypeId::of::<T>())
-            .or_insert_with(|| Box::leak(Box::new(AnyBufferAccessImpl::<T>(Default::default()))))
+        // Automatically register a downcast into AnyBuffer
+        buffer_downcasts.insert(
+            TypeId::of::<AnyBuffer>(),
+            Box::leak(Box::new(|location| -> Box<dyn Any> {
+                Box::new(AnyBuffer {
+                    location,
+                    interface: AnyBuffer::interface_for::<T>(),
+                })
+            })),
+        );
+
+        Self {
+            buffer_downcasts: Mutex::new(buffer_downcasts),
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -810,6 +860,23 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
 
     fn ensure_session(&self, entity_mut: &mut EntityWorldMut, session: Entity) -> OperationResult {
         entity_mut.ensure_session::<T>(session)
+    }
+
+    fn register_buffer_downcast(&self, buffer_type: TypeId, f: BufferDowncastBox) {
+        let mut downcasts = self.buffer_downcasts.lock().unwrap();
+
+        if let Entry::Vacant(entry) = downcasts.entry(buffer_type) {
+            // We should only leak this into the register once per type
+            entry.insert(Box::leak(f));
+        }
+    }
+
+    fn buffer_downcast(&self, buffer_type: TypeId) -> Option<BufferDowncastRef> {
+        self.buffer_downcasts
+            .lock()
+            .unwrap()
+            .get(&buffer_type)
+            .copied()
     }
 
     fn pull(
@@ -876,23 +943,23 @@ impl<T: 'static + Send + Sync + Any> DrainAnyBufferInterface for DrainBuffer<'_,
 impl Bufferable for AnyBuffer {
     type BufferType = Self;
     fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        assert_eq!(self.scope, builder.scope());
+        assert_eq!(self.scope(), builder.scope());
         self
     }
 }
 
 impl Buffered for AnyBuffer {
     fn verify_scope(&self, scope: Entity) {
-        assert_eq!(scope, self.scope);
+        assert_eq!(scope, self.scope());
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        let entity_ref = world.get_entity(self.source).or_broken()?;
+        let entity_ref = world.get_entity(self.id()).or_broken()?;
         self.interface.buffered_count(&entity_ref, session)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        add_listener_to_source(self.source, listener, world)
+        add_listener_to_source(self.id(), listener, world)
     }
 
     fn gate_action(
@@ -902,15 +969,15 @@ impl Buffered for AnyBuffer {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        GateState::apply(self.source, session, action, world, roster)
+        GateState::apply(self.id(), session, action, world, roster)
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([self.source])
+        SmallVec::from_iter([self.id()])
     }
 
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
-        let mut entity_mut = world.get_entity_mut(self.source).or_broken()?;
+        let mut entity_mut = world.get_entity_mut(self.id()).or_broken()?;
         self.interface.ensure_session(&mut entity_mut, session)
     }
 }
@@ -918,7 +985,7 @@ impl Buffered for AnyBuffer {
 impl Joined for AnyBuffer {
     type Item = AnyMessage;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-        let mut buffer_mut = world.get_entity_mut(self.source).or_broken()?;
+        let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
         self.interface.pull(&mut buffer_mut, session)
     }
 }
@@ -927,14 +994,14 @@ impl Accessed for AnyBuffer {
     type Key = AnyBufferKey;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
-            .get_mut::<BufferAccessors>(self.source)
+            .get_mut::<BufferAccessors>(self.id())
             .or_broken()?
             .add_accessor(accessor);
         Ok(())
     }
 
     fn create_key(&self, builder: &super::BufferKeyBuilder) -> Self::Key {
-        let components = builder.as_components(self.source);
+        let components = builder.as_components(self.id());
         AnyBufferKey {
             buffer: components.buffer,
             session: components.session,
@@ -1126,20 +1193,26 @@ mod tests {
                     .into();
 
                 let (input_u32, input_i32, input_f32) = scope.input.chain(builder).unzip();
-                input_u32
-                    .chain(builder)
-                    .map_block(|v| 2 * v)
-                    .connect(buffer_u32.downcast::<u32>().unwrap().input_slot());
+                input_u32.chain(builder).map_block(|v| 2 * v).connect(
+                    buffer_u32
+                        .downcast_for_message::<u32>()
+                        .unwrap()
+                        .input_slot(),
+                );
 
-                input_i32
-                    .chain(builder)
-                    .map_block(|v| 2 * v)
-                    .connect(buffer_i32.downcast::<i32>().unwrap().input_slot());
+                input_i32.chain(builder).map_block(|v| 2 * v).connect(
+                    buffer_i32
+                        .downcast_for_message::<i32>()
+                        .unwrap()
+                        .input_slot(),
+                );
 
-                input_f32
-                    .chain(builder)
-                    .map_block(|v| 2.0 * v)
-                    .connect(buffer_f32.downcast::<f32>().unwrap().input_slot());
+                input_f32.chain(builder).map_block(|v| 2.0 * v).connect(
+                    buffer_f32
+                        .downcast_for_message::<f32>()
+                        .unwrap()
+                        .input_slot(),
+                );
 
                 (buffer_u32, buffer_i32, buffer_f32)
                     .join(builder)

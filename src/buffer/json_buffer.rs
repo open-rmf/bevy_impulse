@@ -36,11 +36,11 @@ pub use serde_json::Value as JsonMessage;
 use smallvec::SmallVec;
 
 use crate::{
-    add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessImpl, AnyBufferAccessInterface,
-    AnyBufferKey, AnyRange, Buffer, BufferAccessLifecycle, BufferAccessMut, BufferAccessors,
-    BufferError, BufferKey, BufferKeyBuilder, BufferStorage, Bufferable, Buffered, Builder,
-    DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
-    OperationError, OperationResult, OrBroken,
+    add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
+    Buffer, BufferAccessLifecycle, BufferAccessMut, BufferAccessors, BufferError, BufferKey,
+    BufferKeyBuilder, BufferLocation, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer,
+    Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate, OperationError,
+    OperationResult, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -48,31 +48,71 @@ use crate::{
 /// yield a [`JsonMessage`].
 #[derive(Clone, Copy, Debug)]
 pub struct JsonBuffer {
-    scope: Entity,
-    source: Entity,
+    location: BufferLocation,
     interface: &'static (dyn JsonBufferAccessInterface + Send + Sync),
 }
 
 impl JsonBuffer {
-    /// Downcast this into a concerete [`Buffer`] type.
-    pub fn downcast<T: 'static>(&self) -> Option<Buffer<T>> {
+    /// Downcast this into a concerete [`Buffer`] for the specific message type.
+    ///
+    /// To downcast this into a specialized kind of buffer, use [`Self::downcast_buffer`] instead.
+    pub fn downcast_for_message<T: 'static>(&self) -> Option<Buffer<T>> {
         if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
             Some(Buffer {
-                scope: self.scope,
-                source: self.source,
+                location: self.location,
                 _ignore: Default::default(),
             })
         } else {
             None
         }
     }
+
+    /// Downcast this into a different specialized buffer representation.
+    pub fn downcast_buffer<BufferType: 'static>(&self) -> Option<BufferType> {
+        self.as_any_buffer().downcast_buffer::<BufferType>()
+    }
+
+    /// Cast this into an [`AnyBuffer`].
+    pub fn as_any_buffer(&self) -> AnyBuffer {
+        self.clone().into()
+    }
+
+    /// Register the ability to cast into [`JsonBuffer`] and [`JsonBufferKey`]
+    /// for buffers containing messages of type `T`. This only needs to be done
+    /// once in the entire lifespan of a program.
+    ///
+    /// Note that this will take effect automatically any time you create an
+    /// instance of [`JsonBuffer`] or [`JsonBufferKey`] for a buffer with
+    /// messages of type `T`.
+    pub fn register_for<T>()
+    where
+        T: 'static + Serialize + DeserializeOwned + Send + Sync,
+    {
+        // We just need to ensure that this function gets called so that the
+        // downcast callback gets registered. Nothing more needs to be done.
+        JsonBufferAccessImpl::<T>::get_interface();
+    }
+
+    /// Get the entity ID of the buffer.
+    pub fn id(&self) -> Entity {
+        self.location.source
+    }
+
+    /// Get the ID of the workflow that the buffer is associated with.
+    pub fn scope(&self) -> Entity {
+        self.location.scope
+    }
+
+    /// Get general information about the buffer.
+    pub fn location(&self) -> BufferLocation {
+        self.location
+    }
 }
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<Buffer<T>> for JsonBuffer {
     fn from(value: Buffer<T>) -> Self {
         Self {
-            scope: value.scope,
-            source: value.source,
+            location: value.location,
             interface: JsonBufferAccessImpl::<T>::get_interface(),
         }
     }
@@ -81,8 +121,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> From<Buffer<T>> fo
 impl From<JsonBuffer> for AnyBuffer {
     fn from(value: JsonBuffer) -> Self {
         Self {
-            scope: value.scope,
-            source: value.source,
+            location: value.location,
             interface: value.interface.any_access_interface(),
         }
     }
@@ -92,8 +131,10 @@ impl From<JsonBuffer> for AnyBuffer {
 /// serialization and deserialization without knowing the buffer's specific
 /// message type at compile time.
 ///
-/// Use this with [`JsonBufferAccess`] to directly view or manipulate the contents
-/// of a buffer.
+/// This can key be used with a [`World`][1] to directly view or manipulate the
+/// contents of a buffer through the [`JsonBufferWorldAccess`] interface.
+///
+/// [1]: bevy_ecs::prelude::World
 #[derive(Clone)]
 pub struct JsonBufferKey {
     buffer: Entity,
@@ -104,7 +145,10 @@ pub struct JsonBufferKey {
 }
 
 impl JsonBufferKey {
-    pub fn downcast<T: 'static>(&self) -> Option<BufferKey<T>> {
+    /// Downcast this into a concrete [`BufferKey`] for the specified message type.
+    ///
+    /// To downcast into a specialized kind of buffer key, use [`Self::downcast_buffer_key`] instead.
+    pub fn downcast_for_message<T: 'static>(&self) -> Option<BufferKey<T>> {
         if TypeId::of::<T>() == self.interface.any_access_interface().message_type_id() {
             Some(BufferKey {
                 buffer: self.buffer,
@@ -116,6 +160,11 @@ impl JsonBufferKey {
         } else {
             None
         }
+    }
+
+    /// Cast this into an [`AnyBufferKey`]
+    pub fn as_any_buffer_key(&self) -> AnyBufferKey {
+        self.clone().into()
     }
 
     fn deep_clone(&self) -> Self {
@@ -777,12 +826,23 @@ struct JsonBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessImpl<T> {
     pub(crate) fn get_interface() -> &'static (dyn JsonBufferAccessInterface + Send + Sync) {
-        const INTERFACE_MAP: OnceLock<
+        // Register downcasting for JsonBuffer and JsonBufferKey
+        let any_interface = AnyBuffer::interface_for::<T>();
+        any_interface.register_buffer_downcast(
+            TypeId::of::<JsonBuffer>(),
+            Box::new(|location| {
+                Box::new(JsonBuffer {
+                    location,
+                    interface: Self::get_interface(),
+                })
+            }),
+        );
+
+        // Create and cache the json buffer access interface
+        static INTERFACE_MAP: OnceLock<
             Mutex<HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>>,
         > = OnceLock::new();
-        let binding = INTERFACE_MAP;
-
-        let interfaces = binding.get_or_init(|| Mutex::default());
+        let interfaces = INTERFACE_MAP.get_or_init(|| Mutex::default());
 
         let mut interfaces_mut = interfaces.lock().unwrap();
         *interfaces_mut
@@ -795,7 +855,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
     for JsonBufferAccessImpl<T>
 {
     fn any_access_interface(&self) -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
-        AnyBufferAccessImpl::<T>::get_interface()
+        AnyBuffer::interface_for::<T>()
     }
 
     fn buffered_count(
@@ -923,23 +983,23 @@ impl<T: 'static + Send + Sync + Serialize> DrainJsonBufferInterface for DrainBuf
 impl Bufferable for JsonBuffer {
     type BufferType = Self;
     fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
-        assert_eq!(self.scope, builder.scope());
+        assert_eq!(self.scope(), builder.scope());
         self
     }
 }
 
 impl Buffered for JsonBuffer {
     fn verify_scope(&self, scope: Entity) {
-        assert_eq!(scope, self.scope);
+        assert_eq!(scope, self.scope());
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        let buffer_ref = world.get_entity(self.source).or_broken()?;
+        let buffer_ref = world.get_entity(self.id()).or_broken()?;
         self.interface.buffered_count(&buffer_ref, session)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        add_listener_to_source(self.source, listener, world)
+        add_listener_to_source(self.id(), listener, world)
     }
 
     fn gate_action(
@@ -949,15 +1009,15 @@ impl Buffered for JsonBuffer {
         world: &mut World,
         roster: &mut crate::OperationRoster,
     ) -> OperationResult {
-        GateState::apply(self.source, session, action, world, roster)
+        GateState::apply(self.id(), session, action, world, roster)
     }
 
     fn as_input(&self) -> smallvec::SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([self.source])
+        SmallVec::from_iter([self.id()])
     }
 
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
-        let mut buffer_mut = world.get_entity_mut(self.source).or_broken()?;
+        let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
         self.interface.ensure_session(&mut buffer_mut, session)
     }
 }
@@ -965,7 +1025,7 @@ impl Buffered for JsonBuffer {
 impl Joined for JsonBuffer {
     type Item = JsonMessage;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-        let mut buffer_mut = world.get_entity_mut(self.source).or_broken()?;
+        let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
         self.interface.pull(&mut buffer_mut, session)
     }
 }
@@ -974,14 +1034,14 @@ impl Accessed for JsonBuffer {
     type Key = JsonBufferKey;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
-            .get_mut::<BufferAccessors>(self.source)
+            .get_mut::<BufferAccessors>(self.id())
             .or_broken()?
             .add_accessor(accessor);
         Ok(())
     }
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
-        let components = builder.as_components(self.source);
+        let components = builder.as_components(self.id());
         JsonBufferKey {
             buffer: components.buffer,
             session: components.session,
@@ -1216,7 +1276,7 @@ mod tests {
                         })
                         .connect(
                             buffer_double_u32
-                                .downcast::<TestMessage>()
+                                .downcast_for_message::<TestMessage>()
                                 .unwrap()
                                 .input_slot(),
                         )
@@ -1229,7 +1289,7 @@ mod tests {
                         })
                         .connect(
                             buffer_double_i32
-                                .downcast::<TestMessage>()
+                                .downcast_for_message::<TestMessage>()
                                 .unwrap()
                                 .input_slot(),
                         )
@@ -1242,7 +1302,7 @@ mod tests {
                         })
                         .connect(
                             buffer_double_string
-                                .downcast::<TestMessage>()
+                                .downcast_for_message::<TestMessage>()
                                 .unwrap()
                                 .input_slot(),
                         )
@@ -1266,6 +1326,33 @@ mod tests {
             "hellohello",
             double_string.get("v_string").unwrap().as_str().unwrap()
         );
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_buffer_downcast() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            // We just need to test that these buffers can be downcast without
+            // a panic occurring.
+            JsonBuffer::register_for::<TestMessage>();
+            let buffer = builder.create_buffer::<TestMessage>(BufferSettings::keep_all());
+            let any_buffer: AnyBuffer = buffer.into();
+            let json_buffer: JsonBuffer = any_buffer.downcast_buffer().unwrap();
+            let _original_from_any: Buffer<TestMessage> =
+                any_buffer.downcast_for_message().unwrap();
+            let _original_from_json: Buffer<TestMessage> =
+                json_buffer.downcast_for_message().unwrap();
+
+            builder.connect(scope.input, scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| commands.request(1, workflow).take_response());
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let response = promise.take().available().unwrap();
+        assert_eq!(1, response);
         assert!(context.no_unhandled_errors());
     }
 }

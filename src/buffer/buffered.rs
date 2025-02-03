@@ -61,18 +61,18 @@ pub trait Accessed: Buffered {
 
 impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     fn verify_scope(&self, scope: Entity) {
-        assert_eq!(scope, self.scope);
+        assert_eq!(scope, self.scope());
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         world
-            .get_entity(self.source)
+            .get_entity(self.id())
             .or_broken()?
             .buffered_count::<T>(session)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        add_listener_to_source(self.source, listener, world)
+        add_listener_to_source(self.id(), listener, world)
     }
 
     fn gate_action(
@@ -82,16 +82,16 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        GateState::apply(self.source, session, action, world, roster)
+        GateState::apply(self.id(), session, action, world, roster)
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([self.source])
+        SmallVec::from_iter([self.id()])
     }
 
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         world
-            .get_mut::<BufferStorage<T>>(self.source)
+            .get_mut::<BufferStorage<T>>(self.id())
             .or_broken()?
             .ensure_session(session);
         Ok(())
@@ -102,7 +102,7 @@ impl<T: 'static + Send + Sync> Joined for Buffer<T> {
     type Item = T;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         world
-            .get_entity_mut(self.source)
+            .get_entity_mut(self.id())
             .or_broken()?
             .pull_from_buffer::<T>(session)
     }
@@ -112,14 +112,14 @@ impl<T: 'static + Send + Sync> Accessed for Buffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
-            .get_mut::<BufferAccessors>(self.source)
+            .get_mut::<BufferAccessors>(self.id())
             .or_broken()?
             .add_accessor(accessor);
         Ok(())
     }
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
-        builder.build(self.source)
+        builder.build(self.id())
     }
 
     fn deep_clone_key(key: &Self::Key) -> Self::Key {
@@ -133,18 +133,18 @@ impl<T: 'static + Send + Sync> Accessed for Buffer<T> {
 
 impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     fn verify_scope(&self, scope: Entity) {
-        assert_eq!(scope, self.scope);
+        assert_eq!(scope, self.scope());
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         world
-            .get_entity(self.source)
+            .get_entity(self.id())
             .or_broken()?
             .buffered_count::<T>(session)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        add_listener_to_source(self.source, listener, world)
+        add_listener_to_source(self.id(), listener, world)
     }
 
     fn gate_action(
@@ -154,16 +154,16 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        GateState::apply(self.source, session, action, world, roster)
+        GateState::apply(self.id(), session, action, world, roster)
     }
 
     fn as_input(&self) -> SmallVec<[Entity; 8]> {
-        SmallVec::from_iter([self.source])
+        SmallVec::from_iter([self.id()])
     }
 
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         world
-            .get_entity_mut(self.source)
+            .get_entity_mut(self.id())
             .or_broken()?
             .ensure_session::<T>(session)
     }
@@ -173,7 +173,7 @@ impl<T: 'static + Send + Sync + Clone> Joined for CloneFromBuffer<T> {
     type Item = T;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         world
-            .get_entity(self.source)
+            .get_entity(self.id())
             .or_broken()?
             .try_clone_from_buffer(session)
             .and_then(|r| r.or_broken())
@@ -184,14 +184,14 @@ impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
-            .get_mut::<BufferAccessors>(self.source)
+            .get_mut::<BufferAccessors>(self.id())
             .or_broken()?
             .add_accessor(accessor);
         Ok(())
     }
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
-        builder.build(self.source)
+        builder.build(self.id())
     }
 
     fn deep_clone_key(key: &Self::Key) -> Self::Key {
