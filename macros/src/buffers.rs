@@ -30,7 +30,7 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
             ) -> Result<usize, OperationError> {
                 #(
                     let #field_ident = world
-                        .get_entity(buffers.get(#map_key).unwrap().id())
+                        .get_entity(buffers.get(#map_key).or_broken()?.id())
                         .or_broken()?
                         .buffered_count::<#field_type>(session)?;
                 )*
@@ -49,7 +49,7 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
             ) -> OperationResult {
                 #(
                     world
-                        .get_entity_mut(buffers.get(#map_key).unwrap().id())
+                        .get_entity_mut(buffers.get(#map_key).or_broken()?.id())
                         .or_broken()?
                         .ensure_session::<#field_type>(session)?;
                 )*
@@ -68,7 +68,7 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
             ) -> Result<Self, OperationError> {
                 #(
                     let #field_ident = world
-                        .get_entity_mut(buffers.get(#map_key).unwrap().id())
+                        .get_entity_mut(buffers.get(#map_key).or_broken()?.id())
                         .or_broken()?
                         .pull_from_buffer::<#field_type>(session)?;
                 )*
