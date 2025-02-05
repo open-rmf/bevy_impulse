@@ -365,119 +365,13 @@ mod tests {
     };
 
     use bevy_ecs::prelude::World;
+    use bevy_impulse_derive::Joined;
 
-    #[derive(Clone)]
+    #[derive(Clone, Joined)]
     struct TestJoinedValue {
         integer: i64,
         float: f64,
         string: String,
-    }
-
-    impl BufferMapLayout for TestJoinedValue {
-        fn is_compatible(buffers: &BufferMap) -> Result<(), IncompatibleLayout> {
-            let mut compatibility = IncompatibleLayout::default();
-            compatibility.require_buffer::<i64>("integer", buffers);
-            compatibility.require_buffer::<f64>("float", buffers);
-            compatibility.require_buffer::<String>("string", buffers);
-            compatibility.into_result()
-        }
-
-        fn buffered_count(
-            buffers: &BufferMap,
-            session: Entity,
-            world: &World,
-        ) -> Result<usize, OperationError> {
-            let integer_count = world
-                .get_entity(buffers.get("integer").unwrap().id())
-                .or_broken()?
-                .buffered_count::<i64>(session)?;
-
-            let float_count = world
-                .get_entity(buffers.get("float").unwrap().id())
-                .or_broken()?
-                .buffered_count::<f64>(session)?;
-
-            let string_count = world
-                .get_entity(buffers.get("string").unwrap().id())
-                .or_broken()?
-                .buffered_count::<String>(session)?;
-
-            Ok([integer_count, float_count, string_count]
-                .iter()
-                .min()
-                .copied()
-                .unwrap_or(0))
-        }
-
-        fn ensure_active_session(
-            buffers: &BufferMap,
-            session: Entity,
-            world: &mut World,
-        ) -> OperationResult {
-            world
-                .get_entity_mut(buffers.get("integer").unwrap().id())
-                .or_broken()?
-                .ensure_session::<i64>(session)?;
-
-            world
-                .get_entity_mut(buffers.get("float").unwrap().id())
-                .or_broken()?
-                .ensure_session::<f64>(session)?;
-
-            world
-                .get_entity_mut(buffers.get("string").unwrap().id())
-                .or_broken()?
-                .ensure_session::<String>(session)?;
-
-            Ok(())
-        }
-    }
-
-    impl JoinedValue for TestJoinedValue {
-        type Buffers = TestJoinedValueBuffers;
-
-        fn pull(
-            buffers: &BufferMap,
-            session: Entity,
-            world: &mut World,
-        ) -> Result<Self, OperationError> {
-            let integer = world
-                .get_entity_mut(buffers.get("integer").unwrap().id())
-                .or_broken()?
-                .pull_from_buffer::<i64>(session)?;
-
-            let float = world
-                .get_entity_mut(buffers.get("float").unwrap().id())
-                .or_broken()?
-                .pull_from_buffer::<f64>(session)?;
-
-            let string = world
-                .get_entity_mut(buffers.get("string").unwrap().id())
-                .or_broken()?
-                .pull_from_buffer::<String>(session)?;
-
-            Ok(Self {
-                integer,
-                float,
-                string,
-            })
-        }
-    }
-
-    struct TestJoinedValueBuffers {
-        integer: Buffer<i64>,
-        float: Buffer<f64>,
-        string: Buffer<String>,
-    }
-
-    impl From<TestJoinedValueBuffers> for BufferMap {
-        fn from(value: TestJoinedValueBuffers) -> Self {
-            let mut buffers = BufferMap::default();
-            buffers.insert(Cow::Borrowed("integer"), value.integer);
-            buffers.insert(Cow::Borrowed("float"), value.float);
-            buffers.insert(Cow::Borrowed("string"), value.string);
-            buffers
-        }
     }
 
     #[test]

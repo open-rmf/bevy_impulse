@@ -15,9 +15,12 @@
  *
 */
 
+mod buffers;
+use buffers::impl_buffer_map_layout;
+
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::DeriveInput;
+use syn::{parse_macro_input, DeriveInput};
 
 #[proc_macro_derive(Stream)]
 pub fn simple_stream_macro(item: TokenStream) -> TokenStream {
@@ -57,4 +60,19 @@ pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+// The result error is the compiler error message to be displayed.
+type Result<T> = std::result::Result<T, String>;
+
+#[proc_macro_derive(Joined)]
+pub fn derive_joined(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match impl_buffer_map_layout(input) {
+        Ok(tokens) => tokens,
+        Err(msg) => quote! {
+            compile_error!(#msg);
+        }
+        .into(),
+    }
 }
