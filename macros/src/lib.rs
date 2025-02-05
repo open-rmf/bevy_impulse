@@ -62,7 +62,7 @@ pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
     .into()
 }
 
-// The result error is the compiler error message to be displayed.
+/// The result error is the compiler error message to be displayed.
 type Result<T> = std::result::Result<T, String>;
 
 #[proc_macro_derive(JoinedValue)]

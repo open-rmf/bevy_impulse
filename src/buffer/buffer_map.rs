@@ -375,7 +375,6 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            // ::bevy_impulse::OrBroken::or_broken(self)
             let buffer_i64 = builder.create_buffer(BufferSettings::default());
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());
