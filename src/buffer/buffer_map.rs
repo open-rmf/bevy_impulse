@@ -29,6 +29,8 @@ use crate::{
     OperationRoster, Output, UnusedTarget,
 };
 
+pub use bevy_impulse_derive::JoinedValue;
+
 #[derive(Clone, Default)]
 pub struct BufferMap {
     inner: HashMap<Cow<'static, str>, AnyBuffer>,
@@ -359,15 +361,9 @@ impl BufferMapLayout for AnyBufferKeyMap {
 mod tests {
     use std::borrow::Cow;
 
-    use crate::{
-        prelude::*, testing::*, BufferMap, InspectBuffer, ManageBuffer, OperationError,
-        OperationResult, OrBroken,
-    };
+    use crate::{prelude::*, testing::*, BufferMap};
 
-    use bevy_ecs::prelude::World;
-    use bevy_impulse_derive::Joined;
-
-    #[derive(Clone, Joined)]
+    #[derive(Clone, JoinedValue)]
     struct TestJoinedValue {
         integer: i64,
         float: f64,
@@ -379,6 +375,7 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
+            // ::bevy_impulse::OrBroken::or_broken(self)
             let buffer_i64 = builder.create_buffer(BufferSettings::default());
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());

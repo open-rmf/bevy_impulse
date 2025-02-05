@@ -4,7 +4,7 @@ use syn::{DeriveInput, Ident, Type};
 
 use crate::Result;
 
-pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
+pub(crate) fn impl_joined_value(ast: DeriveInput) -> Result<TokenStream> {
     let struct_ident = ast.ident;
     let (field_ident, field_type) = match ast.data {
         syn::Data::Struct(data) => get_fields_map(data.fields)?,
@@ -15,8 +15,8 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
 
     let gen = quote! {
         impl BufferMapLayout for #struct_ident {
-            fn is_compatible(buffers: &BufferMap) -> Result<(), IncompatibleLayout> {
-                let mut compatibility = IncompatibleLayout::default();
+            fn is_compatible(buffers: &BufferMap) -> Result<(), ::bevy_impulse::IncompatibleLayout> {
+                let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
                 #(
                     compatibility.require_buffer::<#field_type>(#map_key, buffers);
                 )*
@@ -24,10 +24,12 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
             }
 
             fn buffered_count(
-                buffers: &BufferMap,
-                session: Entity,
-                world: &World,
-            ) -> Result<usize, OperationError> {
+                buffers: &::bevy_impulse::BufferMap,
+                session: ::bevy_ecs::prelude::Entity,
+                world: &::bevy_ecs::prelude::World,
+            ) -> Result<usize, ::bevy_impulse::OperationError> {
+                use ::bevy_impulse::{InspectBuffer, OrBroken};
+
                 #(
                     let #field_ident = world
                         .get_entity(buffers.get(#map_key).or_broken()?.id())
@@ -43,10 +45,12 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
             }
 
             fn ensure_active_session(
-                buffers: &BufferMap,
-                session: Entity,
-                world: &mut World,
-            ) -> OperationResult {
+                buffers: &::bevy_impulse::BufferMap,
+                session: ::bevy_ecs::prelude::Entity,
+                world: &mut ::bevy_ecs::prelude::World,
+            ) -> ::bevy_impulse::OperationResult {
+                use ::bevy_impulse::{ManageBuffer, OrBroken};
+
                 #(
                     world
                         .get_entity_mut(buffers.get(#map_key).or_broken()?.id())
@@ -58,14 +62,16 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
             }
         }
 
-        impl JoinedValue for #struct_ident {
+        impl ::bevy_impulse::JoinedValue for #struct_ident {
             type Buffers = #struct_buffer_ident;
 
             fn pull(
-                buffers: &BufferMap,
-                session: Entity,
-                world: &mut World,
-            ) -> Result<Self, OperationError> {
+                buffers: &::bevy_impulse::BufferMap,
+                session: ::bevy_ecs::prelude::Entity,
+                world: &mut ::bevy_ecs::prelude::World,
+            ) -> Result<Self, ::bevy_impulse::OperationError> {
+                use ::bevy_impulse::{ManageBuffer, OrBroken};
+
                 #(
                     let #field_ident = world
                         .get_entity_mut(buffers.get(#map_key).or_broken()?.id())
@@ -83,15 +89,15 @@ pub(crate) fn impl_buffer_map_layout(ast: DeriveInput) -> Result<TokenStream> {
 
         struct #struct_buffer_ident {
             #(
-                #field_ident: Buffer<#field_type>
+                #field_ident: ::bevy_impulse::Buffer<#field_type>
             ),*
         }
 
-        impl From<#struct_buffer_ident> for BufferMap {
+        impl From<#struct_buffer_ident> for ::bevy_impulse::BufferMap {
             fn from(value: #struct_buffer_ident) -> Self {
-                let mut buffers = BufferMap::default();
+                let mut buffers = ::bevy_impulse::BufferMap::default();
                 #(
-                    buffers.insert(Cow::Borrowed(#map_key), value.#field_ident);
+                    buffers.insert(std::borrow::Cow::Borrowed(#map_key), value.#field_ident);
                 )*
                 buffers
             }
