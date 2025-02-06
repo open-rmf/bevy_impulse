@@ -20,137 +20,18 @@ use smallvec::SmallVec;
 
 use crate::{
     Accessed, AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain,
-    CleanupWorkflowConditions, CloneFromBuffer, Join, Joined, Listen, Output, Scope, ScopeSettings,
-    UnusedTarget,
+    CloneFromBuffer, Join, Joined, Output, UnusedTarget,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Accessed>::Key;
 pub type JoinedItem<B> = <<B as Bufferable>::BufferType as Joined>::Item;
 
 pub trait Bufferable {
-    type BufferType: Joined + Accessed;
+    type BufferType: Buffered;
 
     /// Convert these bufferable workflow elements into buffers if they are not
     /// buffers already.
     fn into_buffer(self, builder: &mut Builder) -> Self::BufferType;
-
-    /// Join these bufferable workflow elements. Each time every buffer contains
-    /// at least one element, this will pull the oldest element from each buffer
-    /// and join them into a tuple that gets sent to the target.
-    ///
-    /// If you need a more general way to get access to one or more buffers,
-    /// use [`listen`](Self::listen) instead.
-    fn join<'w, 's, 'a, 'b>(
-        self,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, JoinedItem<Self>>
-    where
-        Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        JoinedItem<Self>: 'static + Send + Sync,
-    {
-        let scope = builder.scope();
-        let buffers = self.into_buffer(builder);
-        buffers.verify_scope(scope);
-
-        let join = builder.commands.spawn(()).id();
-        let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
-            Some(scope),
-            join,
-            Join::new(buffers, target),
-        ));
-
-        Output::new(scope, target).chain(builder)
-    }
-
-    /// Create an operation that will output buffer access keys each time any
-    /// one of the buffers is modified. This can be used to create a node in a
-    /// workflow that wakes up every time one or more buffers change, and then
-    /// operates on those buffers.
-    ///
-    /// For an operation that simply joins the contents of two or more outputs
-    /// or buffers, use [`join`](Self::join) instead.
-    fn listen<'w, 's, 'a, 'b>(
-        self,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<Self>>
-    where
-        Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        BufferKeys<Self>: 'static + Send + Sync,
-    {
-        let scope = builder.scope();
-        let buffers = self.into_buffer(builder);
-        buffers.verify_scope(scope);
-
-        let listen = builder.commands.spawn(()).id();
-        let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
-            Some(scope),
-            listen,
-            Listen::new(buffers, target),
-        ));
-
-        Output::new(scope, target).chain(builder)
-    }
-
-    /// Alternative way to call [`Builder::on_cleanup`].
-    fn on_cleanup<Settings>(
-        self,
-        builder: &mut Builder,
-        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    ) where
-        Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        BufferKeys<Self>: 'static + Send + Sync,
-        Settings: Into<ScopeSettings>,
-    {
-        builder.on_cleanup(self, build)
-    }
-
-    /// Alternative way to call [`Builder::on_cancel`].
-    fn on_cancel<Settings>(
-        self,
-        builder: &mut Builder,
-        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    ) where
-        Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        BufferKeys<Self>: 'static + Send + Sync,
-        Settings: Into<ScopeSettings>,
-    {
-        builder.on_cancel(self, build)
-    }
-
-    /// Alternative way to call [`Builder::on_terminate`].
-    fn on_terminate<Settings>(
-        self,
-        builder: &mut Builder,
-        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    ) where
-        Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        BufferKeys<Self>: 'static + Send + Sync,
-        Settings: Into<ScopeSettings>,
-    {
-        builder.on_terminate(self, build)
-    }
-
-    /// Alternative way to call [`Builder::on_cleanup_if`].
-    fn on_cleanup_if<Settings>(
-        self,
-        builder: &mut Builder,
-        conditions: CleanupWorkflowConditions,
-        build: impl FnOnce(Scope<BufferKeys<Self>, (), ()>, &mut Builder) -> Settings,
-    ) where
-        Self: Sized,
-        Self::BufferType: 'static + Send + Sync,
-        BufferKeys<Self>: 'static + Send + Sync,
-        Settings: Into<ScopeSettings>,
-    {
-        builder.on_cleanup_if(conditions, self, build)
-    }
 }
 
 impl<T: 'static + Send + Sync> Bufferable for Buffer<T> {
@@ -176,6 +57,54 @@ impl<T: 'static + Send + Sync> Bufferable for Output<T> {
         let buffer = builder.create_buffer::<T>(BufferSettings::default());
         builder.connect(self, buffer.input_slot());
         buffer
+    }
+}
+
+pub trait Joinable: Bufferable {
+    type Item;
+
+    fn join<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::Item>;
+}
+
+impl<B> Joinable for B
+where
+    B: Bufferable,
+    B::BufferType: Joined,
+{
+    type Item = JoinedItem<B>;
+
+    fn join<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::Item> {
+        self.into_buffer(builder).join(builder)
+    }
+}
+
+pub trait Accessible: Bufferable {
+    type Keys;
+
+    fn listen<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::Keys>;
+}
+
+impl<B> Accessible for B
+where
+    B: Bufferable,
+    B::BufferType: Accessed,
+{
+    type Keys = BufferKeys<Self>;
+
+    fn listen<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::Keys> {
+        self.into_buffer(builder).listen(builder)
     }
 }
 
@@ -248,6 +177,7 @@ impl<T> IterBufferable for T
 where
     T: IntoIterator,
     T::Item: Bufferable,
+    <T::Item as Bufferable>::BufferType: Joined,
 {
     type BufferElement = <T::Item as Bufferable>::BufferType;
 

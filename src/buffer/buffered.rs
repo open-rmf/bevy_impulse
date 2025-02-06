@@ -16,6 +16,7 @@
 */
 
 use bevy_ecs::prelude::{Entity, World};
+use bevy_hierarchy::BuildChildren;
 use bevy_utils::all_tuples;
 
 use smallvec::SmallVec;
@@ -23,10 +24,12 @@ use smallvec::SmallVec;
 use crate::{
     Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferStorage, CloneFromBuffer,
     ForkTargetStorage, Gate, GateState, InspectBuffer, ManageBuffer, OperationError,
-    OperationResult, OperationRoster, OrBroken, SingleInputStorage,
+    OperationResult, OperationRoster, OrBroken, SingleInputStorage, Join, Output,
+    AddOperation, Chain, Builder, UnusedTarget, Listen, CleanupWorkflowConditions,
+    Scope, ScopeSettings, BeginCleanupWorkflow,
 };
 
-pub trait Buffered: Clone {
+pub trait Buffered: 'static + Send + Sync + Clone {
     fn verify_scope(&self, scope: Entity);
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError>;
@@ -47,16 +50,142 @@ pub trait Buffered: Clone {
 }
 
 pub trait Joined: Buffered {
-    type Item;
+    type Item: 'static + Send + Sync;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError>;
+
+    /// Join these bufferable workflow elements. Each time every buffer contains
+    /// at least one element, this will pull the oldest element from each buffer
+    /// and join them into a tuple that gets sent to the target.
+    ///
+    /// If you need a more general way to get access to one or more buffers,
+    /// use [`listen`](Self::listen) instead.
+    fn join<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::Item> {
+        let scope = builder.scope();
+        self.verify_scope(scope);
+
+        let join = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
+            Some(scope),
+            join,
+            Join::new(self, target),
+        ));
+
+        Output::new(scope, target).chain(builder)
+    }
 }
 
 pub trait Accessed: Buffered {
-    type Key: Clone;
+    type Key: 'static + Send + Sync + Clone;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult;
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key;
     fn deep_clone_key(key: &Self::Key) -> Self::Key;
     fn is_key_in_use(key: &Self::Key) -> bool;
+
+    /// Create an operation that will output buffer access keys each time any
+    /// one of the buffers is modified. This can be used to create a node in a
+    /// workflow that wakes up every time one or more buffers change, and then
+    /// operates on those buffers.
+    ///
+    /// For an operation that simply joins the contents of two or more outputs
+    /// or buffers, use [`join`](Self::join) instead.
+    fn listen<'w, 's, 'a, 'b>(
+        self,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Chain<'w, 's, 'a, 'b, Self::Key> {
+        let scope = builder.scope();
+        self.verify_scope(scope);
+
+        let listen = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
+            Some(scope),
+            listen,
+            Listen::new(self, target),
+        ));
+
+        Output::new(scope, target).chain(builder)
+    }
+
+
+    /// Alternative way to call [`Builder::on_cleanup`].
+    fn on_cleanup<Settings>(
+        self,
+        builder: &mut Builder,
+        build: impl FnOnce(Scope<Self::Key, (), ()>, &mut Builder) -> Settings,
+    ) where
+        Settings: Into<ScopeSettings>,
+    {
+        self.on_cleanup_if(
+            builder,
+            CleanupWorkflowConditions::always_if(true, true),
+            build,
+        )
+    }
+
+    /// Alternative way to call [`Builder::on_cancel`].
+    fn on_cancel<Settings>(
+        self,
+        builder: &mut Builder,
+        build: impl FnOnce(Scope<Self::Key, (), ()>, &mut Builder) -> Settings,
+    ) where
+        Settings: Into<ScopeSettings>,
+    {
+        self.on_cleanup_if(
+            builder,
+            CleanupWorkflowConditions::always_if(false, true),
+            build,
+        )
+    }
+
+    /// Alternative way to call [`Builder::on_terminate`].
+    fn on_terminate<Settings>(
+        self,
+        builder: &mut Builder,
+        build: impl FnOnce(Scope<Self::Key, (), ()>, &mut Builder) -> Settings,
+    ) where
+        Settings: Into<ScopeSettings>,
+    {
+        self.on_cleanup_if(
+            builder,
+            CleanupWorkflowConditions::always_if(true, false),
+            build,
+        )
+    }
+
+    /// Alternative way to call [`Builder::on_cleanup_if`].
+    fn on_cleanup_if<Settings>(
+        self,
+        builder: &mut Builder,
+        conditions: CleanupWorkflowConditions,
+        build: impl FnOnce(Scope<Self::Key, (), ()>, &mut Builder) -> Settings,
+    ) where
+        Settings: Into<ScopeSettings>,
+    {
+        let cancelling_scope_id = builder.commands.spawn(()).id();
+        let _ = builder.create_scope_impl::<Self::Key, (), (), Settings>(
+            cancelling_scope_id,
+            builder.finish_scope_cancel,
+            build,
+        );
+
+        let begin_cancel = builder.commands.spawn(()).set_parent(builder.scope).id();
+        self.verify_scope(builder.scope);
+        builder.commands.add(AddOperation::new(
+            None,
+            begin_cancel,
+            BeginCleanupWorkflow::<Self>::new(
+                builder.scope,
+                self,
+                cancelling_scope_id,
+                conditions.run_on_terminate,
+                conditions.run_on_cancel,
+            ),
+        ));
+    }
 }
 
 impl<T: 'static + Send + Sync> Buffered for Buffer<T> {

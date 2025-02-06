@@ -26,7 +26,7 @@ use bevy_ecs::prelude::{Entity, World};
 use crate::{
     add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox,
     Buffer, BufferKeyBuilder, Buffered, Builder, Chain, Gate, GateState, Join, Joined,
-    OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
+    OperationError, OperationResult, OperationRoster, Output, UnusedTarget, Bufferable,
 };
 
 #[derive(Clone, Default)]
@@ -116,12 +116,20 @@ pub struct BufferIncompatibility {
 /// You do not normally have to implement this yourself. Instead you should
 /// `#[derive(JoinedValue)]` on a struct that you want a join operation to
 /// produce.
-pub trait BufferMapLayout: Sized + Clone {
+pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
     /// Produce a list of the buffers that exist in this layout.
     fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]>;
 
     /// Try to convert a generic [`BufferMap`] into this specific layout.
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout>;
+}
+
+impl<T: BufferMapLayout> Bufferable for T {
+    type BufferType = Self;
+
+    fn into_buffer(self, _: &mut Builder) -> Self::BufferType {
+        self
+    }
 }
 
 impl<T: BufferMapLayout> Buffered for T {
@@ -231,14 +239,6 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
 /// Trait to describe a layout of buffer keys
 pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
     type Buffers: 'static + BufferMapLayout + Accessed<Key=Self> + Send + Sync;
-
-    fn add_accessor(buffers: &BufferMap, accessor: Entity, world: &mut World) -> OperationResult;
-
-    fn create_key(buffers: &BufferMap, builder: &BufferKeyBuilder) -> Self;
-
-    fn deep_clone_key(&self) -> Self;
-
-    fn is_key_in_use(&self) -> bool;
 }
 
 impl BufferMapLayout for BufferMap {
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joined_value() {
+    fn test_try_join() {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
@@ -403,8 +403,44 @@ mod tests {
             ));
 
             builder
-                .try_join_into(&buffers)
+                .try_join(&buffers)
                 .unwrap()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((5_i64, 3.14_f64, "hello".to_string()), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValue = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        assert_eq!(value.string, "hello");
+        assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_joined_value() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffers = TestJoinedValueBuffers {
+                integer: builder.create_buffer(BufferSettings::default()),
+                float: builder.create_buffer(BufferSettings::default()),
+                string: builder.create_buffer(BufferSettings::default()),
+            };
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
+            ));
+
+            builder
+                .join(buffers)
                 .connect(scope.terminate);
         });
 

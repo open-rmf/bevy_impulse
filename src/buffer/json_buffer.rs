@@ -1422,7 +1422,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joined_value_json() {
+    fn test_try_join_json() {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
@@ -1444,8 +1444,48 @@ mod tests {
             ));
 
             builder
-                .try_join_into(&buffers)
+                .try_join(&buffers)
                 .unwrap()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((5_i64, 3.14_f64, TestMessage::new()), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValueJson = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        let deserialized_json: TestMessage = serde_json::from_value(value.json).unwrap();
+        let expected_json = TestMessage::new();
+        assert_eq!(deserialized_json, expected_json);
+    }
+
+    #[test]
+    fn test_joined_value_json() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            JsonBuffer::register_for::<TestMessage>();
+
+            let json_buffer = builder.create_buffer::<TestMessage>(BufferSettings::default());
+            let buffers = TestJoinedValueJsonBuffers {
+                integer: builder.create_buffer(BufferSettings::default()),
+                float: builder.create_buffer(BufferSettings::default()),
+                json: json_buffer.into(),
+            };
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
+                |chain: Chain<_>| chain.connect(json_buffer.input_slot()),
+            ));
+
+            builder
+                .join(buffers)
                 .connect(scope.terminate);
         });
 
