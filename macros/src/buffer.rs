@@ -147,7 +147,7 @@ pub(crate) fn impl_buffer_key_map(ast: DeriveInput) -> Result<TokenStream> {
         buffer_map_layout(&struct_ident, &field_ident, &field_type, &map_key);
 
     // FIXME(koonpeng): `create_key` does not allow failure and we can't guarantee that the buffer
-    // from buffer is valid.
+    // from the buffer map is valid.
     let gen = quote! {
         impl ::bevy_impulse::BufferKeyMap for #struct_ident {
             fn add_accessor(buffers: &::bevy_impulse::BufferMap, accessor: ::bevy_ecs::prelude::Entity, world: &mut ::bevy_ecs::prelude::World) -> ::bevy_impulse::OperationResult {
