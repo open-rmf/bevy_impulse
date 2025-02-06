@@ -245,9 +245,9 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// Try joining a map of buffers into a single value.
     pub fn try_join_into<'b, Joined: JoinedValue>(
         &'b mut self,
-        buffers: impl Into<BufferMap>,
+        buffers: &BufferMap,
     ) -> Result<Chain<'w, 's, 'a, 'b, Joined>, IncompatibleLayout> {
-        Joined::try_join_into(buffers.into(), self)
+        Joined::try_join_into(buffers, self)
     }
 
     /// Join an appropriate layout of buffers into a single value.

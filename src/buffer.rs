@@ -113,6 +113,14 @@ impl<T> Buffer<T> {
     pub fn location(&self) -> BufferLocation {
         self.location
     }
+
+    /// Cast this into an [`AnyBuffer`].
+    pub fn as_any_buffer(&self) -> AnyBuffer
+    where
+        T: 'static + Send + Sync,
+    {
+        self.clone().into()
+    }
 }
 
 impl<T> Clone for Buffer<T> {

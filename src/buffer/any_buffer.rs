@@ -64,6 +64,10 @@ impl AnyBuffer {
         self.interface.message_type_id()
     }
 
+    pub fn message_type_name(&self) -> &'static str {
+        self.interface.message_type_name()
+    }
+
     /// Get the [`AnyBufferAccessInterface`] for this specific instance of [`AnyBuffer`].
     pub fn get_interface(&self) -> &'static (dyn AnyBufferAccessInterface + Send + Sync) {
         self.interface
@@ -176,11 +180,11 @@ impl AnyBufferKey {
         self.tag.session
     }
 
-    fn is_in_use(&self) -> bool {
+    pub(crate) fn is_in_use(&self) -> bool {
         self.tag.is_in_use()
     }
 
-    fn deep_clone(&self) -> Self {
+    pub(crate) fn deep_clone(&self) -> Self {
         Self {
             tag: self.tag.deep_clone(),
             interface: self.interface,
@@ -338,14 +342,14 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     }
 
     /// Pull the oldest message from the buffer.
-    pub fn pull(&mut self) -> Option<AnyMessage> {
+    pub fn pull(&mut self) -> Option<AnyMessageBox> {
         self.modified = true;
         self.storage.any_pull(self.session)
     }
 
     /// Pull the message that was most recently put into the buffer (instead of the
     /// oldest, which is what [`Self::pull`] gives).
-    pub fn pull_newest(&mut self) -> Option<AnyMessage> {
+    pub fn pull_newest(&mut self) -> Option<AnyMessageBox> {
         self.modified = true;
         self.storage.any_pull_newest(self.session)
     }
@@ -385,7 +389,7 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     /// If the input value does not match the message type of the buffer, this
     /// will return [`Err`] and give back an error with the message that you
     /// tried to push and the type information for the expected message type.
-    pub fn push_any(&mut self, value: AnyMessage) -> Result<Option<AnyMessage>, AnyMessageError> {
+    pub fn push_any(&mut self, value: AnyMessageBox) -> Result<Option<AnyMessageBox>, AnyMessageError> {
         self.storage.any_push(self.session, value)
     }
 
@@ -420,8 +424,8 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     /// The result follows the same rules as [`Self::push_any`].
     pub fn push_any_as_oldest(
         &mut self,
-        value: AnyMessage,
-    ) -> Result<Option<AnyMessage>, AnyMessageError> {
+        value: AnyMessageBox,
+    ) -> Result<Option<AnyMessageBox>, AnyMessageError> {
         self.storage.any_push_as_oldest(self.session, value)
     }
 
@@ -520,10 +524,10 @@ trait AnyBufferViewing {
 }
 
 trait AnyBufferManagement: AnyBufferViewing {
-    fn any_push(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
-    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult;
-    fn any_pull(&mut self, session: Entity) -> Option<AnyMessage>;
-    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage>;
+    fn any_push(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult;
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult;
+    fn any_pull(&mut self, session: Entity) -> Option<AnyMessageBox>;
+    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessageBox>;
     fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_newest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
     fn any_get_mut<'a>(&'a mut self, session: Entity, index: usize) -> Option<AnyMessageMut<'a>>;
@@ -650,37 +654,37 @@ impl<T: 'static + Send + Sync + Any> AnyBufferViewing for Mut<'_, BufferStorage<
 
 pub type AnyMessageMut<'a> = &'a mut (dyn Any + 'static + Send + Sync);
 
-pub type AnyMessage = Box<dyn Any + 'static + Send + Sync>;
+pub type AnyMessageBox = Box<dyn Any + 'static + Send + Sync>;
 
 #[derive(ThisError, Debug)]
 #[error("failed to convert a message")]
 pub struct AnyMessageError {
     /// The original value provided
-    pub value: AnyMessage,
+    pub value: AnyMessageBox,
     /// The ID of the type expected by the buffer
     pub type_id: TypeId,
     /// The name of the type expected by the buffer
     pub type_name: &'static str,
 }
 
-pub type AnyMessagePushResult = Result<Option<AnyMessage>, AnyMessageError>;
+pub type AnyMessagePushResult = Result<Option<AnyMessageBox>, AnyMessageError>;
 
 impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStorage<T>> {
-    fn any_push(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult {
+    fn any_push(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult {
         let value = from_any_message::<T>(value)?;
         Ok(self.push(session, value).map(to_any_message))
     }
 
-    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessage) -> AnyMessagePushResult {
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult {
         let value = from_any_message::<T>(value)?;
         Ok(self.push_as_oldest(session, value).map(to_any_message))
     }
 
-    fn any_pull(&mut self, session: Entity) -> Option<AnyMessage> {
+    fn any_pull(&mut self, session: Entity) -> Option<AnyMessageBox> {
         self.pull(session).map(to_any_message)
     }
 
-    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessage> {
+    fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessageBox> {
         self.pull_newest(session).map(to_any_message)
     }
 
@@ -713,11 +717,11 @@ fn to_any_mut<'a, T: 'static + Send + Sync + Any>(x: &'a mut T) -> AnyMessageMut
     x
 }
 
-fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessage {
+fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessageBox {
     Box::new(x)
 }
 
-fn from_any_message<T: 'static + Send + Sync + Any>(value: AnyMessage) -> Result<T, AnyMessageError>
+fn from_any_message<T: 'static + Send + Sync + Any>(value: AnyMessageBox) -> Result<T, AnyMessageError>
 where
     T: 'static,
 {
@@ -799,7 +803,7 @@ pub trait AnyBufferAccessInterface {
         &self,
         entity_mut: &mut EntityWorldMut,
         session: Entity,
-    ) -> Result<AnyMessage, OperationError>;
+    ) -> Result<AnyMessageBox, OperationError>;
 
     fn create_any_buffer_view<'a>(
         &self,
@@ -915,7 +919,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         &self,
         entity_mut: &mut EntityWorldMut,
         session: Entity,
-    ) -> Result<AnyMessage, OperationError> {
+    ) -> Result<AnyMessageBox, OperationError> {
         entity_mut
             .pull_from_buffer::<T>(session)
             .map(to_any_message)
@@ -955,7 +959,7 @@ pub struct DrainAnyBuffer<'a> {
 }
 
 impl<'a> Iterator for DrainAnyBuffer<'a> {
-    type Item = AnyMessage;
+    type Item = AnyMessageBox;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.interface.any_next()
@@ -963,11 +967,11 @@ impl<'a> Iterator for DrainAnyBuffer<'a> {
 }
 
 trait DrainAnyBufferInterface {
-    fn any_next(&mut self) -> Option<AnyMessage>;
+    fn any_next(&mut self) -> Option<AnyMessageBox>;
 }
 
 impl<T: 'static + Send + Sync + Any> DrainAnyBufferInterface for DrainBuffer<'_, T> {
-    fn any_next(&mut self) -> Option<AnyMessage> {
+    fn any_next(&mut self) -> Option<AnyMessageBox> {
         self.next().map(to_any_message)
     }
 }
@@ -1015,7 +1019,7 @@ impl Buffered for AnyBuffer {
 }
 
 impl Joined for AnyBuffer {
-    type Item = AnyMessage;
+    type Item = AnyMessageBox;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
         self.interface.pull(&mut buffer_mut, session)

@@ -1049,7 +1049,7 @@ mod tests {
     use bevy_ecs::prelude::World;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize, Clone)]
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
     struct TestMessage {
         v_i32: i32,
         v_u32: u32,
@@ -1351,5 +1351,116 @@ mod tests {
         let response = promise.take().available().unwrap();
         assert_eq!(1, response);
         assert!(context.no_unhandled_errors());
+    }
+
+    #[derive(Clone)]
+    struct TestJoinedValueJson {
+        integer: i64,
+        float: f64,
+        json: JsonMessage,
+    }
+
+    #[derive(Clone)]
+    struct TestJoinedValueJsonBuffers {
+        integer: Buffer<i64>,
+        float: Buffer<f64>,
+        json: JsonBuffer,
+    }
+
+    impl BufferMapLayout for TestJoinedValueJsonBuffers {
+        fn buffer_list(&self) -> smallvec::SmallVec<[AnyBuffer; 8]> {
+            use smallvec::smallvec;
+            smallvec![
+                self.integer.as_any_buffer(),
+                self.float.as_any_buffer(),
+                self.json.as_any_buffer(),
+            ]
+        }
+
+        fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+            let mut compatibility = IncompatibleLayout::default();
+            let integer = compatibility.require_message_type::<i64>("integer", buffers);
+            let float = compatibility.require_message_type::<f64>("float", buffers);
+            let json = compatibility.require_buffer_type::<JsonBuffer>("json", buffers);
+
+            let Ok(integer) = integer else {
+                return Err(compatibility);
+            };
+            let Ok(float) = float else {
+                return Err(compatibility);
+            };
+            let Ok(json) = json else {
+                return Err(compatibility);
+            };
+
+            Ok(Self {
+                integer,
+                float,
+                json,
+            })
+        }
+    }
+
+    impl crate::Joined for TestJoinedValueJsonBuffers {
+        type Item = TestJoinedValueJson;
+
+        fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, crate::OperationError> {
+            let integer = self.integer.pull(session, world)?;
+            let float = self.float.pull(session, world)?;
+            let json = self.json.pull(session, world)?;
+
+            Ok(TestJoinedValueJson {
+                integer,
+                float,
+                json,
+            })
+        }
+    }
+
+    impl JoinedValue for TestJoinedValueJson {
+        type Buffers = TestJoinedValueJsonBuffers;
+    }
+
+    #[test]
+    fn test_joined_value_json() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            JsonBuffer::register_for::<TestMessage>();
+
+            let buffer_i64 = builder.create_buffer(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer(BufferSettings::default());
+            let buffer_json = builder.create_buffer(BufferSettings::default());
+
+            let mut buffers = BufferMap::default();
+            buffers.insert("integer", buffer_i64);
+            buffers.insert("float", buffer_f64);
+            buffers.insert("json", buffer_json);
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_json.input_slot()),
+            ));
+
+            builder
+                .try_join_into(&buffers)
+                .unwrap()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((5_i64, 3.14_f64, TestMessage::new()), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValueJson = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        let deserialized_json: TestMessage = serde_json::from_value(value.json).unwrap();
+        let expected_json = TestMessage::new();
+        assert_eq!(deserialized_json, expected_json);
     }
 }
