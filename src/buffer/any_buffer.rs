@@ -41,7 +41,7 @@ use crate::{
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
-/// type will yield an [`AnyMessage`].
+/// type will yield an [`AnyMessageBox`].
 #[derive(Clone, Copy)]
 pub struct AnyBuffer {
     pub(crate) location: BufferLocation,

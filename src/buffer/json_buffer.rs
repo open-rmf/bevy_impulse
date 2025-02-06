@@ -1367,6 +1367,10 @@ mod tests {
         json: JsonBuffer,
     }
 
+    impl JoinedValue for TestJoinedValueJson {
+        type Buffers = TestJoinedValueJsonBuffers;
+    }
+
     impl BufferMapLayout for TestJoinedValueJsonBuffers {
         fn buffer_list(&self) -> smallvec::SmallVec<[AnyBuffer; 8]> {
             use smallvec::smallvec;
@@ -1419,10 +1423,6 @@ mod tests {
                 json,
             })
         }
-    }
-
-    impl JoinedValue for TestJoinedValueJson {
-        type Buffers = TestJoinedValueJsonBuffers;
     }
 
     #[test]

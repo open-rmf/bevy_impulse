@@ -199,16 +199,17 @@ impl<T: BufferMapLayout> Buffered for T {
     }
 }
 
-/// This trait can be implemented for structs that are created by joining a
-/// collection of buffers. Usually this
+/// This trait can be implemented for structs that are created by joining together
+/// values from a collection of buffers. Usually you do not need to implement this
+/// yourself. Instead you can use `#[derive(JoinedValue)]`.
 pub trait JoinedValue: 'static + Send + Sync + Sized {
     /// This associated type must represent a buffer map layout that implements
     /// the [`Joined`] trait. The message type yielded by [`Joined`] for this
     /// associated type must match the [`JoinedValue`] type.
     type Buffers: 'static + BufferMapLayout + Joined<Item = Self> + Send + Sync;
 
-    /// Used by [`Builder::join_into`]
-    fn join_into<'w, 's, 'a, 'b>(
+    /// Used by [`Self::try_join_from`]
+    fn join_from<'w, 's, 'a, 'b>(
         buffers: Self::Buffers,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Chain<'w, 's, 'a, 'b, Self> {
@@ -226,17 +227,17 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
         Output::new(scope, target).chain(builder)
     }
 
-    /// Used by [`Builder::try_join_into`]
-    fn try_join_into<'w, 's, 'a, 'b>(
+    /// Used by [`Builder::try_join`]
+    fn try_join_from<'w, 's, 'a, 'b>(
         buffers: &BufferMap,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Result<Chain<'w, 's, 'a, 'b, Self>, IncompatibleLayout> {
         let buffers: Self::Buffers = Self::Buffers::try_from_buffer_map(buffers)?;
-        Ok(Self::join_into(buffers, builder))
+        Ok(Self::join_from(buffers, builder))
     }
 }
 
-/// Trait to describe a layout of buffer keys
+/// Trait to describe a set of buffer keys.
 pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
     type Buffers: 'static + BufferMapLayout + Accessed<Key = Self> + Send + Sync;
 }
@@ -321,6 +322,10 @@ mod tests {
         string: String,
     }
 
+    impl JoinedValue for TestJoinedValue {
+        type Buffers = TestJoinedValueBuffers;
+    }
+
     #[derive(Clone)]
     struct TestJoinedValueBuffers {
         integer: Buffer<i64>,
@@ -376,10 +381,6 @@ mod tests {
                 string,
             })
         }
-    }
-
-    impl JoinedValue for TestJoinedValue {
-        type Buffers = TestJoinedValueBuffers;
     }
 
     #[test]

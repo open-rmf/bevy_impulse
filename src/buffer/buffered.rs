@@ -57,7 +57,7 @@ pub trait Joined: Buffered {
     /// and join them into a tuple that gets sent to the target.
     ///
     /// If you need a more general way to get access to one or more buffers,
-    /// use [`listen`](Self::listen) instead.
+    /// use [`listen`](Accessed::listen) instead.
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
@@ -90,7 +90,7 @@ pub trait Accessed: Buffered {
     /// operates on those buffers.
     ///
     /// For an operation that simply joins the contents of two or more outputs
-    /// or buffers, use [`join`](Self::join) instead.
+    /// or buffers, use [`join`](Joined::join) instead.
     fn listen<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,

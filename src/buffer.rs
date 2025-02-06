@@ -233,7 +233,7 @@ impl Default for RetentionPolicy {
 /// To obtain a `BufferKey`, use [`Chain::with_access`][1], or [`listen`][2].
 ///
 /// [1]: crate::Chain::with_access
-/// [2]: crate::Bufferable::listen
+/// [2]: crate::Accessible::listen
 pub struct BufferKey<T> {
     tag: BufferKeyTag,
     _ignore: std::marker::PhantomData<fn(T)>,

@@ -22,10 +22,10 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessed, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings,
+    Accessed, Accessible, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings,
     Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
-    GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Joined,
-    JoinedItem, JoinedValue, Node, OperateBuffer, OperateBufferAccess, OperateDynamicGate,
+    GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Joinable,
+    JoinedValue, Node, OperateBuffer, OperateBufferAccess, OperateDynamicGate,
     OperateScope, OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap,
     Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
     Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
@@ -231,13 +231,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         )
     }
 
-    /// Alternative way of calling [`Bufferable::join`]
-    pub fn join<'b, B: Bufferable>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, JoinedItem<B>>
-    where
-        B::BufferType: Joined,
-        JoinedItem<B>: 'static + Send + Sync,
-    {
-        buffers.into_buffer(self).join(self)
+    /// Alternative way of calling [`Joinable::join`]
+    pub fn join<'b, B: Joinable>(
+        &'b mut self,
+        buffers: B,
+    ) -> Chain<'w, 's, 'a, 'b, B::Item> {
+        buffers.join(self)
     }
 
     /// Try joining a map of buffers into a single value.
@@ -245,18 +244,15 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         &'b mut self,
         buffers: &BufferMap,
     ) -> Result<Chain<'w, 's, 'a, 'b, Joined>, IncompatibleLayout> {
-        Joined::try_join_into(buffers, self)
+        Joined::try_join_from(buffers, self)
     }
 
-    /// Alternative way of calling [`Bufferable::listen`].
-    pub fn listen<'b, B: Bufferable>(
+    /// Alternative way of calling [`Accessible::listen`].
+    pub fn listen<'b, B: Accessible>(
         &'b mut self,
         buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
-    where
-        B::BufferType: Accessed,
-    {
-        buffers.into_buffer(self).listen(self)
+    ) -> Chain<'w, 's, 'a, 'b, B::Keys> {
+        buffers.listen(self)
     }
 
     /// Create a node that combines its inputs with access to some buffers. You
@@ -266,11 +262,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ///
     /// Other [outputs](Output) can also be passed in as buffers. These outputs
     /// will be transformed into a buffer with default buffer settings.
-    pub fn create_buffer_access<T, B>(&mut self, buffers: B) -> Node<T, (T, BufferKeys<B>)>
+    pub fn create_buffer_access<T, B: Bufferable>(
+        &mut self,
+        buffers: B,
+    ) -> Node<T, (T, BufferKeys<B>)>
     where
-        T: 'static + Send + Sync,
-        B: Bufferable,
         B::BufferType: Accessed,
+        T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
         let source = self.commands.spawn(()).id();

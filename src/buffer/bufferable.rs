@@ -61,7 +61,7 @@ impl<T: 'static + Send + Sync> Bufferable for Output<T> {
 }
 
 pub trait Joinable: Bufferable {
-    type Item;
+    type Item: 'static + Send + Sync;
 
     fn join<'w, 's, 'a, 'b>(
         self,
@@ -69,6 +69,8 @@ pub trait Joinable: Bufferable {
     ) -> Chain<'w, 's, 'a, 'b, Self::Item>;
 }
 
+/// This trait is used to create join operations that pull exactly one value
+/// from multiple buffers or outputs simultaneously.
 impl<B> Joinable for B
 where
     B: Bufferable,
@@ -76,6 +78,12 @@ where
 {
     type Item = JoinedItem<B>;
 
+    /// Join these bufferable workflow elements. Each time every buffer contains
+    /// at least one element, this will pull the oldest element from each buffer
+    /// and join them into a tuple that gets sent to the target.
+    ///
+    /// If you need a more general way to get access to one or more buffers,
+    /// use [`listen`](Accessible::listen) instead.
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
@@ -84,9 +92,17 @@ where
     }
 }
 
+/// This trait is used to create operations that access buffers or outputs.
 pub trait Accessible: Bufferable {
-    type Keys;
+    type Keys: 'static + Send + Sync;
 
+    /// Create an operation that will output buffer access keys each time any
+    /// one of the buffers is modified. This can be used to create a node in a
+    /// workflow that wakes up every time one or more buffers change, and then
+    /// operates on those buffers.
+    ///
+    /// For an operation that simply joins the contents of two or more outputs
+    /// or buffers, use [`join`](Joinable::join) instead.
     fn listen<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
