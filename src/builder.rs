@@ -22,13 +22,14 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessed, Accessible, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings,
-    Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
-    GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Joinable,
-    JoinedValue, Node, OperateBuffer, OperateBufferAccess, OperateDynamicGate,
-    OperateScope, OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap,
-    Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
-    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    Accessed, Accessible, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap,
+    BufferSettings, Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput,
+    ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
+    IntoBlockingMap, Joinable, JoinedValue, Node, OperateBuffer, OperateBufferAccess,
+    OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
+    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
+    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
+    TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
@@ -232,10 +233,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Alternative way of calling [`Joinable::join`]
-    pub fn join<'b, B: Joinable>(
-        &'b mut self,
-        buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, B::Item> {
+    pub fn join<'b, B: Joinable>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, B::Item> {
         buffers.join(self)
     }
 
@@ -248,10 +246,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Alternative way of calling [`Accessible::listen`].
-    pub fn listen<'b, B: Accessible>(
-        &'b mut self,
-        buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, B::Keys> {
+    pub fn listen<'b, B: Accessible>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, B::Keys> {
         buffers.listen(self)
     }
 
