@@ -176,11 +176,11 @@ impl AnyBufferKey {
         self.tag.session
     }
 
-    fn is_in_use(&self) -> bool {
+    pub fn is_in_use(&self) -> bool {
         self.tag.is_in_use()
     }
 
-    fn deep_clone(&self) -> Self {
+    pub fn deep_clone(&self) -> Self {
         Self {
             tag: self.tag.deep_clone(),
             interface: self.interface,
@@ -204,6 +204,14 @@ impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
             tag: value.tag,
             interface,
         }
+    }
+}
+
+impl<T: 'static + Send + Sync + Any> TryFrom<AnyBufferKey> for BufferKey<T> {
+    type Error = OperationError;
+
+    fn try_from(value: AnyBufferKey) -> Result<Self, Self::Error> {
+        value.downcast_for_message().or_broken()
     }
 }
 

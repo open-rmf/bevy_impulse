@@ -29,7 +29,7 @@ use crate::{
     OperationRoster, Output, UnusedTarget,
 };
 
-pub use bevy_impulse_derive::JoinedValue;
+pub use bevy_impulse_derive::{BufferKeyMap, JoinedValue};
 
 #[derive(Clone, Default)]
 pub struct BufferMap {
@@ -408,5 +408,13 @@ mod tests {
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
         assert!(context.no_unhandled_errors());
+    }
+
+    // TODO(koonpeng): Add test that uses `TestBufferKeyMap`.
+    #[derive(Clone, BufferKeyMap)]
+    struct TestBufferKeyMap {
+        integer: BufferKey<i64>,
+        float: BufferKey<f64>,
+        string: AnyBufferKey,
     }
 }
