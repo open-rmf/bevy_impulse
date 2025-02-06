@@ -1404,7 +1404,11 @@ mod tests {
     impl crate::Joined for TestJoinedValueJsonBuffers {
         type Item = TestJoinedValueJson;
 
-        fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, crate::OperationError> {
+        fn pull(
+            &self,
+            session: Entity,
+            world: &mut World,
+        ) -> Result<Self::Item, crate::OperationError> {
             let integer = self.integer.pull(session, world)?;
             let float = self.float.pull(session, world)?;
             let json = self.json.pull(session, world)?;
@@ -1443,10 +1447,7 @@ mod tests {
                 |chain: Chain<_>| chain.connect(buffer_json.input_slot()),
             ));
 
-            builder
-                .try_join(&buffers)
-                .unwrap()
-                .connect(scope.terminate);
+            builder.try_join(&buffers).unwrap().connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| {
@@ -1484,9 +1485,7 @@ mod tests {
                 |chain: Chain<_>| chain.connect(json_buffer.input_slot()),
             ));
 
-            builder
-                .join(buffers)
-                .connect(scope.terminate);
+            builder.join(buffers).connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| {

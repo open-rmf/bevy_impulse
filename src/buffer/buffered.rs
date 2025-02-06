@@ -22,11 +22,10 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    Buffer, BufferAccessors, BufferKey, BufferKeyBuilder, BufferStorage, CloneFromBuffer,
-    ForkTargetStorage, Gate, GateState, InspectBuffer, ManageBuffer, OperationError,
-    OperationResult, OperationRoster, OrBroken, SingleInputStorage, Join, Output,
-    AddOperation, Chain, Builder, UnusedTarget, Listen, CleanupWorkflowConditions,
-    Scope, ScopeSettings, BeginCleanupWorkflow,
+    AddOperation, BeginCleanupWorkflow, Buffer, BufferAccessors, BufferKey, BufferKeyBuilder,
+    BufferStorage, Builder, Chain, CleanupWorkflowConditions, CloneFromBuffer, ForkTargetStorage,
+    Gate, GateState, InspectBuffer, Join, Listen, ManageBuffer, OperationError, OperationResult,
+    OperationRoster, OrBroken, Output, Scope, ScopeSettings, SingleInputStorage, UnusedTarget,
 };
 
 pub trait Buffered: 'static + Send + Sync + Clone {
@@ -109,7 +108,6 @@ pub trait Accessed: Buffered {
 
         Output::new(scope, target).chain(builder)
     }
-
 
     /// Alternative way to call [`Builder::on_cleanup`].
     fn on_cleanup<Settings>(

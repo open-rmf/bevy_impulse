@@ -389,7 +389,10 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     /// If the input value does not match the message type of the buffer, this
     /// will return [`Err`] and give back an error with the message that you
     /// tried to push and the type information for the expected message type.
-    pub fn push_any(&mut self, value: AnyMessageBox) -> Result<Option<AnyMessageBox>, AnyMessageError> {
+    pub fn push_any(
+        &mut self,
+        value: AnyMessageBox,
+    ) -> Result<Option<AnyMessageBox>, AnyMessageError> {
         self.storage.any_push(self.session, value)
     }
 
@@ -525,7 +528,8 @@ trait AnyBufferViewing {
 
 trait AnyBufferManagement: AnyBufferViewing {
     fn any_push(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult;
-    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult;
+    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessageBox)
+        -> AnyMessagePushResult;
     fn any_pull(&mut self, session: Entity) -> Option<AnyMessageBox>;
     fn any_pull_newest(&mut self, session: Entity) -> Option<AnyMessageBox>;
     fn any_oldest_mut<'a>(&'a mut self, session: Entity) -> Option<AnyMessageMut<'a>>;
@@ -675,7 +679,11 @@ impl<T: 'static + Send + Sync + Any> AnyBufferManagement for Mut<'_, BufferStora
         Ok(self.push(session, value).map(to_any_message))
     }
 
-    fn any_push_as_oldest(&mut self, session: Entity, value: AnyMessageBox) -> AnyMessagePushResult {
+    fn any_push_as_oldest(
+        &mut self,
+        session: Entity,
+        value: AnyMessageBox,
+    ) -> AnyMessagePushResult {
         let value = from_any_message::<T>(value)?;
         Ok(self.push_as_oldest(session, value).map(to_any_message))
     }
@@ -721,7 +729,9 @@ fn to_any_message<T: 'static + Send + Sync + Any>(x: T) -> AnyMessageBox {
     Box::new(x)
 }
 
-fn from_any_message<T: 'static + Send + Sync + Any>(value: AnyMessageBox) -> Result<T, AnyMessageError>
+fn from_any_message<T: 'static + Send + Sync + Any>(
+    value: AnyMessageBox,
+) -> Result<T, AnyMessageError>
 where
     T: 'static,
 {

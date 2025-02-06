@@ -19,8 +19,8 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessed, AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain,
-    CloneFromBuffer, Join, Joined, Output, UnusedTarget,
+    Accessed, AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain, CloneFromBuffer,
+    Join, Joined, Output, UnusedTarget,
 };
 
 pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Accessed>::Key;

@@ -24,9 +24,9 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox,
-    Buffer, BufferKeyBuilder, Buffered, Builder, Chain, Gate, GateState, Join, Joined,
-    OperationError, OperationResult, OperationRoster, Output, UnusedTarget, Bufferable,
+    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox, Buffer,
+    BufferKeyBuilder, Bufferable, Buffered, Builder, Chain, Gate, GateState, Join, Joined,
+    OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
 };
 
 #[derive(Clone, Default)]
@@ -59,7 +59,11 @@ pub struct IncompatibleLayout {
 
 impl IncompatibleLayout {
     /// Check whether a named buffer is compatible with a specific concrete message type.
-    pub fn require_message_type<Message: 'static>(&mut self, expected_name: &str, buffers: &BufferMap) -> Result<Buffer<Message>, ()> {
+    pub fn require_message_type<Message: 'static>(
+        &mut self,
+        expected_name: &str,
+        buffers: &BufferMap,
+    ) -> Result<Buffer<Message>, ()> {
         if let Some((name, buffer)) = buffers.inner.get_key_value(expected_name) {
             if let Some(buffer) = buffer.downcast_for_message::<Message>() {
                 return Ok(buffer);
@@ -80,7 +84,11 @@ impl IncompatibleLayout {
 
     /// Check whether a named buffer is compatible with a specialized buffer type,
     /// such as `JsonBuffer`.
-    pub fn require_buffer_type<BufferType: 'static>(&mut self, expected_name: &str, buffers: &BufferMap) -> Result<BufferType, ()> {
+    pub fn require_buffer_type<BufferType: 'static>(
+        &mut self,
+        expected_name: &str,
+        buffers: &BufferMap,
+    ) -> Result<BufferType, ()> {
         if let Some((name, buffer)) = buffers.inner.get_key_value(expected_name) {
             if let Some(buffer) = buffer.downcast_buffer::<BufferType>() {
                 return Ok(buffer);
@@ -139,11 +147,7 @@ impl<T: BufferMapLayout> Buffered for T {
         }
     }
 
-    fn buffered_count(
-        &self,
-        session: Entity,
-        world: &World,
-    ) -> Result<usize, OperationError> {
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         let mut min_count = None;
 
         for buffer in self.buffer_list() {
@@ -158,11 +162,7 @@ impl<T: BufferMapLayout> Buffered for T {
         Ok(min_count.unwrap_or(0))
     }
 
-    fn ensure_active_session(
-        &self,
-        session: Entity,
-        world: &mut World,
-    ) -> OperationResult {
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         for buffer in self.buffer_list() {
             buffer.ensure_active_session(session, world)?;
         }
@@ -238,7 +238,7 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
 
 /// Trait to describe a layout of buffer keys
 pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
-    type Buffers: 'static + BufferMapLayout + Accessed<Key=Self> + Send + Sync;
+    type Buffers: 'static + BufferMapLayout + Accessed<Key = Self> + Send + Sync;
 }
 
 impl BufferMapLayout for BufferMap {
@@ -402,10 +402,7 @@ mod tests {
                 |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
             ));
 
-            builder
-                .try_join(&buffers)
-                .unwrap()
-                .connect(scope.terminate);
+            builder.try_join(&buffers).unwrap().connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| {
@@ -439,9 +436,7 @@ mod tests {
                 |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
             ));
 
-            builder
-                .join(buffers)
-                .connect(scope.terminate);
+            builder.join(buffers).connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| {

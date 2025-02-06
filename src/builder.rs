@@ -22,14 +22,13 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap,
-    BufferSettings, Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput,
-    ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
-    IntoBlockingMap, JoinedItem, JoinedValue, Node, OperateBuffer, OperateBufferAccess,
-    OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
-    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
-    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
-    TrimBranch, UnusedTarget, Joined, Accessed,
+    Accessed, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings,
+    Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
+    GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Joined,
+    JoinedItem, JoinedValue, Node, OperateBuffer, OperateBufferAccess, OperateDynamicGate,
+    OperateScope, OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap,
+    Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
+    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
@@ -456,7 +455,9 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         B::BufferType: Accessed,
         Settings: Into<ScopeSettings>,
     {
-        from_buffers.into_buffer(self).on_cleanup_if(self, conditions, build);
+        from_buffers
+            .into_buffer(self)
+            .on_cleanup_if(self, conditions, build);
     }
 
     /// Create a node that trims (cancels) other nodes in the workflow when it

@@ -336,10 +336,10 @@ impl Plugin for ImpulsePlugin {
 pub mod prelude {
     pub use crate::{
         buffer::{
-            Accessible, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessageBox, Buffer,
-            BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap, BufferMapLayout,
-            BufferSettings, Bufferable, Buffered, IncompatibleLayout, IterBufferable, Joinable, JoinedValue,
-            RetentionPolicy,
+            Accessible, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessageBox,
+            Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap,
+            BufferMapLayout, BufferSettings, Bufferable, Buffered, IncompatibleLayout,
+            IterBufferable, Joinable, JoinedValue, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
