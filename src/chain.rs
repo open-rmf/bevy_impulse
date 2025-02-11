@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 use std::error::Error;
 
 use crate::{
-    make_option_branching, make_result_branching, AddOperation, AsMap, Buffer, BufferKey,
+    make_option_branching, make_result_branching, Accessed, AddOperation, AsMap, Buffer, BufferKey,
     BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
     ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
     IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateSplit,
@@ -298,12 +298,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// will be transformed into a buffer with default buffer settings.
     ///
     /// To obtain a set of buffer keys each time a buffer is modified, use
-    /// [`listen`](crate::Bufferable::listen).
+    /// [`listen`](crate::Accessible::listen).
     pub fn with_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessed,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -324,8 +323,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessed,
     {
         self.with_access(buffers).map_block(|(_, key)| key)
     }
@@ -393,7 +391,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// The return values of the individual chain builders will be zipped into
     /// one tuple return value by this function. If all of the builders return
     /// [`Output`] then you can easily continue chaining more operations using
-    /// [`join`](crate::Bufferable::join), or destructure them into individual
+    /// [`join`](crate::Joinable::join), or destructure them into individual
     /// outputs that you can continue to build with.
     pub fn fork_clone<Build: ForkCloneBuilder<T>>(self, build: Build) -> Build::Outputs
     where
@@ -557,7 +555,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_action<B>(self, action: Gate, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -578,7 +575,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_open<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         self.then_gate_action(Gate::Open, buffers)
     }
@@ -588,7 +584,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_close<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         self.then_gate_action(Gate::Closed, buffers)
     }
