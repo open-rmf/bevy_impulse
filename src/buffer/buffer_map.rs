@@ -316,10 +316,11 @@ mod tests {
     use crate::{prelude::*, testing::*, BufferMap};
 
     #[derive(Clone, JoinedValue)]
-    struct TestJoinedValue {
+    struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
         integer: i64,
         float: f64,
         string: String,
+        generic: T,
     }
 
     #[test]
@@ -330,16 +331,19 @@ mod tests {
             let buffer_i64 = builder.create_buffer(BufferSettings::default());
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());
+            let buffer_generic = builder.create_buffer(BufferSettings::default());
 
             let mut buffers = BufferMap::default();
             buffers.insert("integer", buffer_i64);
             buffers.insert("float", buffer_f64);
             buffers.insert("string", buffer_string);
+            buffers.insert("generic", buffer_generic);
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
             ));
 
             builder.try_join(&buffers).unwrap().connect(scope.terminate);
@@ -347,15 +351,16 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-                .request((5_i64, 3.14_f64, "hello".to_string()), workflow)
+                .request((5_i64, 3.14_f64, "hello".to_string(), "world"), workflow)
                 .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        let value: TestJoinedValue = promise.take().available().unwrap();
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
         assert_eq!(value.integer, 5);
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
         assert!(context.no_unhandled_errors());
     }
 
@@ -368,12 +373,14 @@ mod tests {
                 integer: builder.create_buffer(BufferSettings::default()),
                 float: builder.create_buffer(BufferSettings::default()),
                 string: builder.create_buffer(BufferSettings::default()),
+                generic: builder.create_buffer(BufferSettings::default()),
             };
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
                 |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
                 |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.generic.input_slot()),
             ));
 
             builder.join(buffers).connect(scope.terminate);
@@ -381,15 +388,16 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-                .request((5_i64, 3.14_f64, "hello".to_string()), workflow)
+                .request((5_i64, 3.14_f64, "hello".to_string(), "world"), workflow)
                 .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        let value: TestJoinedValue = promise.take().available().unwrap();
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
         assert_eq!(value.integer, 5);
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
         assert!(context.no_unhandled_errors());
     }
 }

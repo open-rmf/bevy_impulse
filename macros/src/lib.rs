@@ -20,7 +20,7 @@ use buffer::impl_joined_value;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, DeriveInput, ItemStruct};
 
 #[proc_macro_derive(Stream)]
 pub fn simple_stream_macro(item: TokenStream) -> TokenStream {
@@ -67,8 +67,8 @@ type Result<T> = std::result::Result<T, String>;
 
 #[proc_macro_derive(JoinedValue)]
 pub fn derive_joined_value(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    match impl_joined_value(input) {
+    let input = parse_macro_input!(input as ItemStruct);
+    match impl_joined_value(&input) {
         Ok(tokens) => tokens,
         Err(msg) => quote! {
             compile_error!(#msg);
