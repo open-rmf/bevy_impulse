@@ -369,12 +369,12 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let buffers = __bevy_impulse_TestJoinedValue_Buffers {
-                integer: builder.create_buffer(BufferSettings::default()),
-                float: builder.create_buffer(BufferSettings::default()),
-                string: builder.create_buffer(BufferSettings::default()),
-                generic: builder.create_buffer(BufferSettings::default()),
-            };
+            let buffers = TestJoinedValue::select_buffers(
+                builder.create_buffer(BufferSettings::default()),
+                builder.create_buffer(BufferSettings::default()),
+                builder.create_buffer(BufferSettings::default()),
+                builder.create_buffer(BufferSettings::default()),
+            );
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
