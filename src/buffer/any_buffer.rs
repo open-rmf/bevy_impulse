@@ -86,6 +86,10 @@ impl AnyBuffer {
             .entry(TypeId::of::<T>())
             .or_insert_with(|| Box::leak(Box::new(AnyBufferAccessImpl::<T>::new())))
     }
+
+    pub fn as_any_buffer(self) -> AnyBuffer {
+        self
+    }
 }
 
 impl std::fmt::Debug for AnyBuffer {

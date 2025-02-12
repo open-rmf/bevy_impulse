@@ -369,11 +369,17 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_i64 = builder.create_buffer(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer(BufferSettings::default());
+            let buffer_string = builder.create_buffer(BufferSettings::default());
+            let buffer_generic = builder.create_buffer(BufferSettings::default());
+
             let buffers = TestJoinedValue::select_buffers(
-                builder.create_buffer(BufferSettings::default()),
-                builder.create_buffer(BufferSettings::default()),
-                builder.create_buffer(BufferSettings::default()),
-                builder.create_buffer(BufferSettings::default()),
+                builder,
+                buffer_i64,
+                buffer_f64,
+                buffer_string,
+                buffer_generic,
             );
 
             scope.input.chain(builder).fork_unzip((
