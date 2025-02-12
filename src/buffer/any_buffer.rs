@@ -86,10 +86,6 @@ impl AnyBuffer {
             .entry(TypeId::of::<T>())
             .or_insert_with(|| Box::leak(Box::new(AnyBufferAccessImpl::<T>::new())))
     }
-
-    pub fn as_any_buffer(self) -> AnyBuffer {
-        self
-    }
 }
 
 impl std::fmt::Debug for AnyBuffer {
@@ -212,14 +208,6 @@ impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
             tag: value.tag,
             interface,
         }
-    }
-}
-
-impl<T: 'static + Send + Sync + Any> TryFrom<AnyBufferKey> for BufferKey<T> {
-    type Error = OperationError;
-
-    fn try_from(value: AnyBufferKey) -> Result<Self, Self::Error> {
-        value.downcast_for_message().or_broken()
     }
 }
 
