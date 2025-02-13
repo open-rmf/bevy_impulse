@@ -35,14 +35,13 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
 
         impl #impl_generics #struct_ident #ty_generics #where_clause {
             fn select_buffers(
-                builder: &mut ::bevy_impulse::Builder,
                 #(
-                    #field_ident: impl ::bevy_impulse::Bufferable<BufferType = ::bevy_impulse::Buffer<#field_type>>,
+                    #field_ident: ::bevy_impulse::Buffer<#field_type>,
                 )*
             ) -> #buffer_struct_ident #ty_generics {
                 #buffer_struct_ident {
                     #(
-                        #field_ident: #field_ident.into_buffer(builder),
+                        #field_ident,
                     )*
                 }
             }
