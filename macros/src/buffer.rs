@@ -1,21 +1,24 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_quote, Field, Ident, ItemStruct, Type};
+use syn::{parse_quote, Ident, ItemStruct, Type};
 
 use crate::Result;
 
 pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream> {
     let struct_ident = &input_struct.ident;
     let (impl_generics, ty_generics, where_clause) = input_struct.generics.split_for_impl();
-    let (field_ident, field_type, _) = get_fields_map(&input_struct.fields)?;
-    let struct_buffer_ident = format_ident!("__bevy_impulse_{}_Buffers", struct_ident);
+    let (field_ident, field_type) = get_fields_map(&input_struct.fields)?;
+    let BufferStructConfig {
+        struct_name: buffer_struct_ident,
+    } = BufferStructConfig::from_data_struct(&input_struct);
+    let buffer_struct_vis = &input_struct.vis;
 
     let buffer_struct: ItemStruct = parse_quote! {
         #[derive(Clone)]
         #[allow(non_camel_case_types)]
-        struct #struct_buffer_ident #impl_generics #where_clause {
+        #buffer_struct_vis struct #buffer_struct_ident #impl_generics #where_clause {
             #(
-                #field_ident: ::bevy_impulse::Buffer<#field_type>,
+                #buffer_struct_vis #field_ident: ::bevy_impulse::Buffer<#field_type>,
             )*
         }
     };
@@ -25,7 +28,7 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
 
     let gen = quote! {
         impl #impl_generics ::bevy_impulse::JoinedValue for #struct_ident #ty_generics #where_clause {
-            type Buffers = #struct_buffer_ident #ty_generics;
+            type Buffers = #buffer_struct_ident #ty_generics;
         }
 
         #buffer_struct
@@ -36,8 +39,8 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
                 #(
                     #field_ident: impl ::bevy_impulse::Bufferable<BufferType = ::bevy_impulse::Buffer<#field_type>>,
                 )*
-            ) -> #struct_buffer_ident #ty_generics {
-                #struct_buffer_ident {
+            ) -> #buffer_struct_ident #ty_generics {
+                #buffer_struct_ident {
                     #(
                         #field_ident: #field_ident.into_buffer(builder),
                     )*
@@ -53,52 +56,50 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
     Ok(gen.into())
 }
 
-struct FieldConfig {
-    buffer_type: TokenStream,
+struct BufferStructConfig {
+    struct_name: Ident,
 }
 
-impl FieldConfig {
-    fn from_field(field: &Field) -> Self {
-        let ty = &field.ty;
-        let mut buffer_type = quote! { ::bevy_impulse::Buffer<#ty> };
+impl BufferStructConfig {
+    fn from_data_struct(data_struct: &ItemStruct) -> Self {
+        let mut config = Self {
+            struct_name: format_ident!("__bevy_impulse_{}_Buffers", data_struct.ident),
+        };
 
-        let attr = field
+        let attr = data_struct
             .attrs
             .iter()
-            .find(|attr| attr.path().is_ident("bevy_impulse"));
+            .find(|attr| attr.path().is_ident("buffers"));
 
         if let Some(attr) = attr {
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("buffer_type") {
-                    buffer_type = meta.value()?.parse()?;
+                if meta.path.is_ident("struct_name") {
+                    config.struct_name = meta.value()?.parse()?;
                 }
                 Ok(())
             })
-            // panic if attribute is malformed, this will result in a compile error
+            // panic if attribute is malformed, this will result in a compile error which is intended.
             .unwrap();
         }
 
-        Self { buffer_type }
+        config
     }
 }
 
-fn get_fields_map(fields: &syn::Fields) -> Result<(Vec<&Ident>, Vec<&Type>, Vec<FieldConfig>)> {
+fn get_fields_map(fields: &syn::Fields) -> Result<(Vec<&Ident>, Vec<&Type>)> {
     match fields {
         syn::Fields::Named(data) => {
             let mut idents = Vec::new();
             let mut types = Vec::new();
-            let mut configs = Vec::new();
             for field in &data.named {
                 let ident = field
                     .ident
                     .as_ref()
                     .ok_or("expected named fields".to_string())?;
-                let config = FieldConfig::from_field(field);
                 idents.push(ident);
                 types.push(&field.ty);
-                configs.push(config);
             }
-            Ok((idents, types, configs))
+            Ok((idents, types))
         }
         _ => return Err("expected named fields".to_string()),
     }
@@ -113,7 +114,7 @@ fn impl_buffer_map_layout(
 ) -> Result<proc_macro2::TokenStream> {
     let struct_ident = &buffer_struct.ident;
     let (impl_generics, ty_generics, where_clause) = buffer_struct.generics.split_for_impl();
-    let (field_ident, field_type, _) = get_fields_map(&item_struct.fields)?;
+    let (field_ident, field_type) = get_fields_map(&item_struct.fields)?;
     let map_key: Vec<String> = field_ident.iter().map(|v| v.to_string()).collect();
 
     Ok(quote! {
@@ -154,7 +155,7 @@ fn impl_joined(
     let struct_ident = &joined_struct.ident;
     let item_struct_ident = &item_struct.ident;
     let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
-    let (field_ident, _, _) = get_fields_map(&item_struct.fields)?;
+    let (field_ident, _) = get_fields_map(&item_struct.fields)?;
 
     Ok(quote! {
         impl #impl_generics ::bevy_impulse::Joined for #struct_ident #ty_generics #where_clause {

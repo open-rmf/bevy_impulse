@@ -406,4 +406,14 @@ mod tests {
         assert_eq!(value.generic, "world");
         assert!(context.no_unhandled_errors());
     }
+
+    #[derive(Clone, JoinedValue)]
+    #[buffers(struct_name = FooBuffers)]
+    struct TestDeriveWithConfig {}
+
+    #[test]
+    fn test_derive_with_config() {
+        // a compile test to check that the name of the generated struct is correct
+        fn _check_buffer_struct_name(_: FooBuffers) {}
+    }
 }
