@@ -358,7 +358,7 @@ mod tests {
         let mut promise = context.command(|commands| {
             commands
                 .request(
-                    (5_i64, 3.14_f64, "hello".to_string(), "world", ()),
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
                     workflow,
                 )
                 .take_response()
@@ -370,6 +370,7 @@ mod tests {
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
         assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
         assert!(context.no_unhandled_errors());
     }
 
@@ -382,7 +383,7 @@ mod tests {
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());
             let buffer_generic = builder.create_buffer(BufferSettings::default());
-            let buffer_any = builder.create_buffer::<()>(BufferSettings::default());
+            let buffer_any = builder.create_buffer::<i64>(BufferSettings::default());
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
@@ -406,7 +407,7 @@ mod tests {
         let mut promise = context.command(|commands| {
             commands
                 .request(
-                    (5_i64, 3.14_f64, "hello".to_string(), "world", ()),
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
                     workflow,
                 )
                 .take_response()
@@ -418,6 +419,7 @@ mod tests {
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
         assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
         assert!(context.no_unhandled_errors());
     }
 
@@ -435,7 +437,7 @@ mod tests {
             let buffer_generic =
                 JsonBuffer::from(builder.create_buffer::<String>(BufferSettings::default()));
             let buffer_any =
-                JsonBuffer::from(builder.create_buffer::<()>(BufferSettings::default()));
+                JsonBuffer::from(builder.create_buffer::<i64>(BufferSettings::default()));
 
             let buffers = TestJoinedValue::select_buffers(
                 buffer_i64.downcast_for_message().unwrap(),
@@ -466,7 +468,7 @@ mod tests {
                         3.14_f64,
                         "hello".to_string(),
                         "world".to_string(),
-                        (),
+                        42_i64,
                     ),
                     workflow,
                 )
@@ -479,6 +481,7 @@ mod tests {
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
         assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
         assert!(context.no_unhandled_errors());
     }
 
