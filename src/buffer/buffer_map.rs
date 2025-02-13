@@ -315,12 +315,15 @@ impl Accessed for BufferMap {
 mod tests {
     use crate::{prelude::*, testing::*, BufferMap};
 
-    #[derive(Clone, JoinedValue)]
+    #[derive(JoinedValue)]
     struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
         integer: i64,
         float: f64,
         string: String,
         generic: T,
+        #[buffers(buffer_type = AnyBuffer)]
+        #[allow(unused)]
+        any: AnyMessageBox,
     }
 
     #[test]
@@ -332,18 +335,21 @@ mod tests {
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());
             let buffer_generic = builder.create_buffer(BufferSettings::default());
+            let buffer_any = builder.create_buffer(BufferSettings::default());
 
             let mut buffers = BufferMap::default();
             buffers.insert("integer", buffer_i64);
             buffers.insert("float", buffer_f64);
             buffers.insert("string", buffer_string);
             buffers.insert("generic", buffer_generic);
+            buffers.insert("any", buffer_any);
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
             ));
 
             builder.try_join(&buffers).unwrap().connect(scope.terminate);
@@ -351,7 +357,10 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-                .request((5_i64, 3.14_f64, "hello".to_string(), "world"), workflow)
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", ()),
+                    workflow,
+                )
                 .take_response()
         });
 
@@ -373,27 +382,33 @@ mod tests {
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());
             let buffer_generic = builder.create_buffer(BufferSettings::default());
+            let buffer_any = builder.create_buffer::<()>(BufferSettings::default());
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
+            ));
 
             let buffers = TestJoinedValue::select_buffers(
                 buffer_i64,
                 buffer_f64,
                 buffer_string,
                 buffer_generic,
+                buffer_any.into(),
             );
-
-            scope.input.chain(builder).fork_unzip((
-                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.generic.input_slot()),
-            ));
 
             builder.join(buffers).connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| {
             commands
-                .request((5_i64, 3.14_f64, "hello".to_string(), "world"), workflow)
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", ()),
+                    workflow,
+                )
                 .take_response()
         });
 
@@ -419,12 +434,15 @@ mod tests {
                 JsonBuffer::from(builder.create_buffer::<String>(BufferSettings::default()));
             let buffer_generic =
                 JsonBuffer::from(builder.create_buffer::<String>(BufferSettings::default()));
+            let buffer_any =
+                JsonBuffer::from(builder.create_buffer::<()>(BufferSettings::default()));
 
             let buffers = TestJoinedValue::select_buffers(
                 buffer_i64.downcast_for_message().unwrap(),
                 buffer_f64.downcast_for_message().unwrap(),
                 buffer_string.downcast_for_message().unwrap(),
                 buffer_generic.downcast_for_message().unwrap(),
+                buffer_any.downcast_buffer().unwrap(),
             );
 
             scope.input.chain(builder).fork_unzip((
@@ -432,6 +450,9 @@ mod tests {
                 |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
                 |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
                 |chain: Chain<_>| chain.connect(buffers.generic.input_slot()),
+                |chain: Chain<_>| {
+                    chain.connect(buffers.any.downcast_for_message().unwrap().input_slot())
+                },
             ));
 
             builder.join(buffers).connect(scope.terminate);
@@ -440,7 +461,13 @@ mod tests {
         let mut promise = context.command(|commands| {
             commands
                 .request(
-                    (5_i64, 3.14_f64, "hello".to_string(), "world".to_string()),
+                    (
+                        5_i64,
+                        3.14_f64,
+                        "hello".to_string(),
+                        "world".to_string(),
+                        (),
+                    ),
                     workflow,
                 )
                 .take_response()
@@ -456,7 +483,7 @@ mod tests {
     }
 
     #[derive(Clone, JoinedValue)]
-    #[buffers(struct_name = FooBuffers)]
+    #[buffers(buffer_struct_name = FooBuffers)]
     struct TestDeriveWithConfig {}
 
     #[test]

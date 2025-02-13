@@ -121,6 +121,10 @@ impl AnyBuffer {
             .ok()
             .map(|x| *x)
     }
+
+    pub fn as_any_buffer(&self) -> Self {
+        self.clone().into()
+    }
 }
 
 impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
