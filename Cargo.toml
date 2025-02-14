@@ -54,6 +54,9 @@ tracing = "0.1.41"
 strum = { version = "0.26.3", optional = true, features = ["derive"] }
 semver = { version = "1.0.24", optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1.13.1", default-features = false, features = ["js"] }
+
 [features]
 single_threaded_async = ["dep:async-task"]
 diagram = [
