@@ -60,20 +60,26 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
     Ok(gen.into())
 }
 
-/// Converts a list of generics to a [`PhantomData`] TypePath.
-/// e.g. `::std::marker::PhantomData<(T,)>`
-// Currently unused but could be used in the future
-fn _to_phantom_data(generics: &Generics) -> TypePath {
-    let lifetimes: Vec<Type> = generics
-        .lifetimes()
-        .map(|lt| {
-            let lt = &lt.lifetime;
-            let ty: Type = parse_quote! { & #lt () };
-            ty
-        })
-        .collect();
-    let ty_params: Vec<&Ident> = generics.type_params().map(|ty| &ty.ident).collect();
-    parse_quote! { ::std::marker::PhantomData<(#(#lifetimes,)* #(#ty_params,)*)> }
+/// Code that are currently unused but could be used in the future, move them out of this mod if
+/// they are ever used.
+#[allow(unused)]
+mod _unused {
+    use super::*;
+
+    /// Converts a list of generics to a [`PhantomData`] TypePath.
+    /// e.g. `::std::marker::PhantomData<fn(T,)>`
+    fn to_phantom_data(generics: &Generics) -> TypePath {
+        let lifetimes: Vec<Type> = generics
+            .lifetimes()
+            .map(|lt| {
+                let lt = &lt.lifetime;
+                let ty: Type = parse_quote! { & #lt () };
+                ty
+            })
+            .collect();
+        let ty_params: Vec<&Ident> = generics.type_params().map(|ty| &ty.ident).collect();
+        parse_quote! { ::std::marker::PhantomData<fn(#(#lifetimes,)* #(#ty_params,)*)> }
+    }
 }
 
 struct StructConfig {
