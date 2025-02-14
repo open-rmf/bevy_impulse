@@ -423,68 +423,6 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    #[test]
-    fn test_select_buffers_json() {
-        let mut context = TestingContext::minimal_plugins();
-
-        let workflow = context.spawn_io_workflow(|scope, builder| {
-            let buffer_i64 =
-                JsonBuffer::from(builder.create_buffer::<i64>(BufferSettings::default()));
-            let buffer_f64 =
-                JsonBuffer::from(builder.create_buffer::<f64>(BufferSettings::default()));
-            let buffer_string =
-                JsonBuffer::from(builder.create_buffer::<String>(BufferSettings::default()));
-            let buffer_generic =
-                JsonBuffer::from(builder.create_buffer::<String>(BufferSettings::default()));
-            let buffer_any =
-                JsonBuffer::from(builder.create_buffer::<i64>(BufferSettings::default()));
-
-            let buffers = TestJoinedValue::select_buffers(
-                buffer_i64.downcast_for_message().unwrap(),
-                buffer_f64.downcast_for_message().unwrap(),
-                buffer_string.downcast_for_message().unwrap(),
-                buffer_generic.downcast_for_message().unwrap(),
-                buffer_any.downcast_buffer().unwrap(),
-            );
-
-            scope.input.chain(builder).fork_unzip((
-                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.generic.input_slot()),
-                |chain: Chain<_>| {
-                    chain.connect(buffers.any.downcast_for_message().unwrap().input_slot())
-                },
-            ));
-
-            builder.join(buffers).connect(scope.terminate);
-        });
-
-        let mut promise = context.command(|commands| {
-            commands
-                .request(
-                    (
-                        5_i64,
-                        3.14_f64,
-                        "hello".to_string(),
-                        "world".to_string(),
-                        42_i64,
-                    ),
-                    workflow,
-                )
-                .take_response()
-        });
-
-        context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        let value: TestJoinedValue<String> = promise.take().available().unwrap();
-        assert_eq!(value.integer, 5);
-        assert_eq!(value.float, 3.14);
-        assert_eq!(value.string, "hello");
-        assert_eq!(value.generic, "world");
-        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
-        assert!(context.no_unhandled_errors());
-    }
-
     #[derive(Clone, JoinedValue)]
     #[buffers(buffer_struct_name = FooBuffers)]
     struct TestDeriveWithConfig {}

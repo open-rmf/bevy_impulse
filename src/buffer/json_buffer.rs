@@ -1353,76 +1353,13 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, JoinedValue)]
+    #[buffers(buffer_struct_name = TestJoinedValueJsonBuffers)]
     struct TestJoinedValueJson {
         integer: i64,
         float: f64,
+        #[buffers(buffer_type = JsonBuffer)]
         json: JsonMessage,
-    }
-
-    #[derive(Clone)]
-    struct TestJoinedValueJsonBuffers {
-        integer: Buffer<i64>,
-        float: Buffer<f64>,
-        json: JsonBuffer,
-    }
-
-    impl JoinedValue for TestJoinedValueJson {
-        type Buffers = TestJoinedValueJsonBuffers;
-    }
-
-    impl BufferMapLayout for TestJoinedValueJsonBuffers {
-        fn buffer_list(&self) -> smallvec::SmallVec<[AnyBuffer; 8]> {
-            use smallvec::smallvec;
-            smallvec![
-                self.integer.as_any_buffer(),
-                self.float.as_any_buffer(),
-                self.json.as_any_buffer(),
-            ]
-        }
-
-        fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
-            let mut compatibility = IncompatibleLayout::default();
-            let integer = compatibility.require_message_type::<i64>("integer", buffers);
-            let float = compatibility.require_message_type::<f64>("float", buffers);
-            let json = compatibility.require_buffer_type::<JsonBuffer>("json", buffers);
-
-            let Ok(integer) = integer else {
-                return Err(compatibility);
-            };
-            let Ok(float) = float else {
-                return Err(compatibility);
-            };
-            let Ok(json) = json else {
-                return Err(compatibility);
-            };
-
-            Ok(Self {
-                integer,
-                float,
-                json,
-            })
-        }
-    }
-
-    impl crate::Joined for TestJoinedValueJsonBuffers {
-        type Item = TestJoinedValueJson;
-
-        fn pull(
-            &self,
-            session: Entity,
-            world: &mut World,
-        ) -> Result<Self::Item, crate::OperationError> {
-            let integer = self.integer.pull(session, world)?;
-            let float = self.float.pull(session, world)?;
-            let json = self.json.pull(session, world)?;
-
-            Ok(TestJoinedValueJson {
-                integer,
-                float,
-                json,
-            })
-        }
     }
 
     #[test]
@@ -1483,6 +1420,45 @@ mod tests {
                 |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
                 |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
                 |chain: Chain<_>| chain.connect(json_buffer.input_slot()),
+            ));
+
+            builder.join(buffers).connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((5_i64, 3.14_f64, TestMessage::new()), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValueJson = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        let deserialized_json: TestMessage = serde_json::from_value(value.json).unwrap();
+        let expected_json = TestMessage::new();
+        assert_eq!(deserialized_json, expected_json);
+    }
+
+    #[test]
+    fn test_select_buffers_json() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_integer = builder.create_buffer::<i64>(BufferSettings::default());
+            let buffer_float = builder.create_buffer::<f64>(BufferSettings::default());
+            let buffer_json =
+                JsonBuffer::from(builder.create_buffer::<TestMessage>(BufferSettings::default()));
+
+            let buffers =
+                TestJoinedValueJson::select_buffers(buffer_integer, buffer_float, buffer_json);
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
+                |chain: Chain<_>| {
+                    chain.connect(buffers.json.downcast_for_message().unwrap().input_slot())
+                },
             ));
 
             builder.join(buffers).connect(scope.terminate);
