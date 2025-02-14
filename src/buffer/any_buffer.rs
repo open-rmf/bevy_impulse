@@ -861,6 +861,17 @@ impl<T: 'static + Send + Sync> AnyBufferAccessImpl<T> {
             })),
         );
 
+        // Allow downcasting back to the original Buffer<T>
+        buffer_downcasts.insert(
+            TypeId::of::<Buffer<T>>(),
+            Box::leak(Box::new(|location| -> Box<dyn Any> {
+                Box::new(Buffer::<T> {
+                    location,
+                    _ignore: Default::default(),
+                })
+            })),
+        );
+
         let mut key_downcasts: HashMap<_, KeyDowncastRef> = HashMap::new();
 
         // Automatically register a downcast to AnyBufferKey
