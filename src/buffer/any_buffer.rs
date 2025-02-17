@@ -121,10 +121,6 @@ impl AnyBuffer {
             .ok()
             .map(|x| *x)
     }
-
-    pub fn as_any_buffer(&self) -> Self {
-        self.clone().into()
-    }
 }
 
 impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
@@ -134,6 +130,25 @@ impl<T: 'static + Send + Sync + Any> From<Buffer<T>> for AnyBuffer {
             location: value.location,
             interface,
         }
+    }
+}
+
+/// A trait for turning a buffer into an [`AnyBuffer`]. It is expected that all
+/// buffer types implement this trait.
+pub trait AsAnyBuffer {
+    /// Convert this buffer into an [`AnyBuffer`].
+    fn as_any_buffer(&self) -> AnyBuffer;
+}
+
+impl AsAnyBuffer for AnyBuffer {
+    fn as_any_buffer(&self) -> AnyBuffer {
+        *self
+    }
+}
+
+impl<T: 'static + Send + Sync> AsAnyBuffer for Buffer<T> {
+    fn as_any_buffer(&self) -> AnyBuffer {
+        (*self).into()
     }
 }
 

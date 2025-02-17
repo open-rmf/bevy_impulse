@@ -339,7 +339,7 @@ pub mod prelude {
     pub use crate::{
         buffer::{
             Accessible, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessageBox,
-            Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap,
+            AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap,
             BufferMapLayout, BufferSettings, Bufferable, Buffered, IncompatibleLayout,
             IterBufferable, Joinable, JoinedValue, RetentionPolicy,
         },

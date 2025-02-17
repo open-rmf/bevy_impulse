@@ -24,27 +24,66 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox, Buffer,
+    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer,
     BufferKeyBuilder, Bufferable, Buffered, Builder, Chain, Gate, GateState, Join, Joined,
     OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
 };
 
 pub use bevy_impulse_derive::JoinedValue;
 
-#[derive(Clone, Default)]
-pub struct BufferMap {
-    inner: HashMap<Cow<'static, str>, AnyBuffer>,
+/// Uniquely identify a buffer within a buffer map, either by name or by an
+/// index value.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BufferIdentifier<'a> {
+    /// Identify a buffer by name
+    Name(Cow<'a, str>),
+    /// Identify a buffer by an index value
+    Index(usize),
 }
 
-impl BufferMap {
-    /// Insert a named buffer into the map.
-    pub fn insert(&mut self, name: impl Into<Cow<'static, str>>, buffer: impl Into<AnyBuffer>) {
-        self.inner.insert(name.into(), buffer.into());
+impl BufferIdentifier<'static> {
+    /// Clone a name to use as an identifier.
+    pub fn clone_name(name: &str) -> Self {
+        BufferIdentifier::Name(Cow::Owned(name.to_owned()))
     }
 
-    /// Get one of the buffers from the map by its name.
-    pub fn get(&self, name: &str) -> Option<&AnyBuffer> {
-        self.inner.get(name)
+    /// Borrow a string literal name to use as an identifier.
+    pub fn literal_name(name: &'static str) -> Self {
+        BufferIdentifier::Name(Cow::Borrowed(name))
+    }
+
+    /// Use an index as an identifier.
+    pub fn index(index: usize) -> Self {
+        BufferIdentifier::Index(index)
+    }
+}
+
+impl From<&'static str> for BufferIdentifier<'static> {
+    fn from(value: &'static str) -> Self {
+        BufferIdentifier::Name(Cow::Borrowed(value))
+    }
+}
+
+pub type BufferMap = HashMap<BufferIdentifier<'static>, AnyBuffer>;
+
+/// Extension trait that makes it more convenient to insert buffers into a [`BufferMap`].
+pub trait AddBufferToMap {
+    /// Convenience function for inserting items into a [`BufferMap`]. This
+    /// automatically takes care of converting the types.
+    fn insert_buffer<I: Into<BufferIdentifier<'static>>, B: AsAnyBuffer>(
+        &mut self,
+        identifier: I,
+        buffer: B,
+    );
+}
+
+impl AddBufferToMap for BufferMap {
+    fn insert_buffer<I: Into<BufferIdentifier<'static>>, B: AsAnyBuffer>(
+        &mut self,
+        identifier: I,
+        buffer: B,
+    ) {
+        self.insert(identifier.into(), buffer.as_any_buffer());
     }
 }
 
@@ -54,56 +93,57 @@ impl BufferMap {
 #[error("the incoming buffer map is incompatible with the layout")]
 pub struct IncompatibleLayout {
     /// Names of buffers that were missing from the incoming buffer map.
-    pub missing_buffers: Vec<Cow<'static, str>>,
+    pub missing_buffers: Vec<BufferIdentifier<'static>>,
     /// Buffers whose expected type did not match the received type.
     pub incompatible_buffers: Vec<BufferIncompatibility>,
 }
 
 impl IncompatibleLayout {
-    /// Check whether a named buffer is compatible with a specific concrete message type.
-    pub fn require_message_type<Message: 'static>(
-        &mut self,
-        expected_name: &str,
-        buffers: &BufferMap,
-    ) -> Result<Buffer<Message>, ()> {
-        if let Some((name, buffer)) = buffers.inner.get_key_value(expected_name) {
-            if let Some(buffer) = buffer.downcast_for_message::<Message>() {
-                return Ok(buffer);
-            } else {
-                self.incompatible_buffers.push(BufferIncompatibility {
-                    name: name.clone(),
-                    expected: std::any::type_name::<Buffer<Message>>(),
-                    received: buffer.message_type_name(),
-                });
-            }
-        } else {
-            self.missing_buffers
-                .push(Cow::Owned(expected_name.to_owned()));
-        }
-
-        Err(())
-    }
-
     /// Check whether a named buffer is compatible with a specialized buffer type,
     /// such as `JsonBuffer`.
-    pub fn require_buffer_type<BufferType: 'static>(
+    pub fn require_buffer_by_name<BufferType: 'static>(
         &mut self,
         expected_name: &str,
         buffers: &BufferMap,
     ) -> Result<BufferType, ()> {
-        if let Some((name, buffer)) = buffers.inner.get_key_value(expected_name) {
+        let identifier = BufferIdentifier::Name(Cow::Borrowed(expected_name));
+        if let Some(buffer) = buffers.get(&identifier) {
             if let Some(buffer) = buffer.downcast_buffer::<BufferType>() {
                 return Ok(buffer);
             } else {
                 self.incompatible_buffers.push(BufferIncompatibility {
-                    name: name.clone(),
+                    identifier: BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())),
                     expected: std::any::type_name::<BufferType>(),
                     received: buffer.message_type_name(),
                 });
             }
         } else {
-            self.missing_buffers
-                .push(Cow::Owned(expected_name.to_owned()));
+            self.missing_buffers.push(BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())));
+        }
+
+        Err(())
+    }
+
+    /// Same as [`Self::require_buffer_by_name`] but more efficient for names
+    /// given by string literal values.
+    pub fn require_buffer_by_literal<BufferType: 'static>(
+        &mut self,
+        expected_name: &'static str,
+        buffers: &BufferMap,
+    ) -> Result<BufferType, ()> {
+        let identifier = BufferIdentifier::Name(Cow::Borrowed(expected_name));
+        if let Some(buffer) = buffers.get(&identifier) {
+            if let Some(buffer) = buffer.downcast_buffer::<BufferType>() {
+                return Ok(buffer);
+            } else {
+                self.incompatible_buffers.push(BufferIncompatibility {
+                    identifier,
+                    expected: std::any::type_name::<BufferType>(),
+                    received: buffer.message_type_name(),
+                });
+            }
+        } else {
+            self.missing_buffers.push(identifier);
         }
 
         Err(())
@@ -114,7 +154,7 @@ impl IncompatibleLayout {
 #[derive(Debug, Clone)]
 pub struct BufferIncompatibility {
     /// Name of the expected buffer
-    pub name: Cow<'static, str>,
+    pub identifier: BufferIdentifier<'static>,
     /// The type that was expected for this buffer
     pub expected: &'static str,
     /// The type that was received for this buffer
@@ -246,7 +286,7 @@ pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
 
 impl BufferMapLayout for BufferMap {
     fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]> {
-        self.inner.values().cloned().collect()
+        self.values().cloned().collect()
     }
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
         Ok(buffers.clone())
@@ -254,11 +294,11 @@ impl BufferMapLayout for BufferMap {
 }
 
 impl Joined for BufferMap {
-    type Item = HashMap<Cow<'static, str>, AnyMessageBox>;
+    type Item = HashMap<BufferIdentifier<'static>, AnyMessageBox>;
 
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         let mut value = HashMap::new();
-        for (name, buffer) in &self.inner {
+        for (name, buffer) in self.iter() {
             value.insert(name.clone(), buffer.pull(session, world)?);
         }
 
@@ -266,16 +306,16 @@ impl Joined for BufferMap {
     }
 }
 
-impl JoinedValue for HashMap<Cow<'static, str>, AnyMessageBox> {
+impl JoinedValue for HashMap<BufferIdentifier<'static>, AnyMessageBox> {
     type Buffers = BufferMap;
 }
 
 impl Accessed for BufferMap {
-    type Key = HashMap<Cow<'static, str>, AnyBufferKey>;
+    type Key = HashMap<BufferIdentifier<'static>, AnyBufferKey>;
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
         let mut keys = HashMap::new();
-        for (name, buffer) in &self.inner {
+        for (name, buffer) in self.iter() {
             let key = AnyBufferKey {
                 tag: builder.make_tag(buffer.id()),
                 interface: buffer.interface,
@@ -286,7 +326,7 @@ impl Accessed for BufferMap {
     }
 
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
-        for buffer in self.inner.values() {
+        for buffer in self.values() {
             buffer.add_accessor(accessor, world)?;
         }
         Ok(())
@@ -313,7 +353,7 @@ impl Accessed for BufferMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, BufferMap};
+    use crate::{prelude::*, testing::*, BufferMap, AddBufferToMap};
 
     #[derive(JoinedValue)]
     struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
@@ -337,11 +377,11 @@ mod tests {
             let buffer_any = builder.create_buffer(BufferSettings::default());
 
             let mut buffers = BufferMap::default();
-            buffers.insert("integer", buffer_i64);
-            buffers.insert("float", buffer_f64);
-            buffers.insert("string", buffer_string);
-            buffers.insert("generic", buffer_generic);
-            buffers.insert("any", buffer_any);
+            buffers.insert_buffer("integer", buffer_i64);
+            buffers.insert_buffer("float", buffer_f64);
+            buffers.insert_buffer("string", buffer_string);
+            buffers.insert_buffer("generic", buffer_generic);
+            buffers.insert_buffer("any", buffer_any);
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),

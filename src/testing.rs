@@ -32,7 +32,7 @@ pub use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use crate::{
-    flush_impulses, Accessed, AddContinuousServicesExt, AnyBuffer, AsyncServiceInput, BlockingMap,
+    flush_impulses, Accessed, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput, BlockingMap,
     BlockingServiceInput, Buffer, BufferKey, Bufferable, Buffered, Builder, ContinuousQuery,
     ContinuousQueueView, ContinuousService, FlushParameters, GetBufferedSessionsFn, Joined,
     OperationError, OperationResult, OperationRoster, Promise, RunCommandsOnWorldExt, Scope,
@@ -504,15 +504,15 @@ impl<T: 'static + Send + Sync> NonCopyBuffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> NonCopyBuffer<T> {
-    pub fn as_any_buffer(&self) -> AnyBuffer {
-        self.inner.as_any_buffer()
-    }
-}
-
 impl<T> Clone for NonCopyBuffer<T> {
     fn clone(&self) -> Self {
         Self { inner: self.inner }
+    }
+}
+
+impl<T: 'static + Send + Sync> AsAnyBuffer for NonCopyBuffer<T> {
+    fn as_any_buffer(&self) -> AnyBuffer {
+        self.inner.as_any_buffer()
     }
 }
 

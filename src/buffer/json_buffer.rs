@@ -37,7 +37,7 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
-    Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferKey, BufferKeyBuilder,
+    AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferKey, BufferKeyBuilder,
     BufferKeyTag, BufferLocation, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer, Gate,
     GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate, OperationError,
     OperationResult, OrBroken,
@@ -70,11 +70,6 @@ impl JsonBuffer {
     /// Downcast this into a different specialized buffer representation.
     pub fn downcast_buffer<BufferType: 'static>(&self) -> Option<BufferType> {
         self.as_any_buffer().downcast_buffer::<BufferType>()
-    }
-
-    /// Cast this into an [`AnyBuffer`].
-    pub fn as_any_buffer(&self) -> AnyBuffer {
-        self.clone().into()
     }
 
     /// Register the ability to cast into [`JsonBuffer`] and [`JsonBufferKey`]
@@ -124,6 +119,12 @@ impl From<JsonBuffer> for AnyBuffer {
             location: value.location,
             interface: value.interface.any_access_interface(),
         }
+    }
+}
+
+impl AsAnyBuffer for JsonBuffer {
+    fn as_any_buffer(&self) -> AnyBuffer {
+        (*self).into()
     }
 }
 
@@ -1045,7 +1046,7 @@ impl Accessed for JsonBuffer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*};
+    use crate::{prelude::*, testing::*, AddBufferToMap};
     use bevy_ecs::prelude::World;
     use serde::{Deserialize, Serialize};
 
@@ -1374,9 +1375,9 @@ mod tests {
             let buffer_json = builder.create_buffer(BufferSettings::default());
 
             let mut buffers = BufferMap::default();
-            buffers.insert("integer", buffer_i64);
-            buffers.insert("float", buffer_f64);
-            buffers.insert("json", buffer_json);
+            buffers.insert_buffer("integer", buffer_i64);
+            buffers.insert_buffer("float", buffer_f64);
+            buffers.insert_buffer("json", buffer_json);
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
