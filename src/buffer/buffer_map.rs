@@ -431,4 +431,72 @@ mod tests {
         // a compile test to check that the name of the generated struct is correct
         fn _check_buffer_struct_name(_: FooBuffers) {}
     }
+
+    struct MultiGenericValue<T: 'static + Send + Sync, U: 'static + Send + Sync> {
+        t: T,
+        u: U,
+    }
+
+    #[derive(JoinedValue)]
+    #[joined(buffers_struct_name = MultiGenericBuffers)]
+    struct JoinedMultiGenericValue<T: 'static + Send + Sync, U: 'static + Send + Sync> {
+        #[joined(buffer = Buffer<MultiGenericValue<T, U>>)]
+        a: MultiGenericValue<T, U>,
+        b: String,
+    }
+
+    #[test]
+    fn test_multi_generic_joined_value() {
+        let mut context =TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope: Scope<(i32, String), JoinedMultiGenericValue<i32, String>>, builder| {
+            let multi_generic_buffers = MultiGenericBuffers::<i32, String> {
+                a: builder.create_buffer(BufferSettings::default()),
+                b: builder.create_buffer(BufferSettings::default()),
+            };
+
+            let copy = multi_generic_buffers;
+
+            scope
+                .input
+                .chain(builder)
+                .map_block(|(integer, string)|
+                    (
+                        MultiGenericValue {
+                            t: integer,
+                            u: string.clone(),
+                        },
+                        string,
+                    )
+                )
+                .fork_unzip((
+                    |a: Chain<_>| a.connect(multi_generic_buffers.a.input_slot()),
+                    |b: Chain<_>| b.connect(multi_generic_buffers.b.input_slot()),
+                ));
+
+            multi_generic_buffers.join(builder).connect(scope.terminate);
+            copy.join(builder).connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands.request((5, "hello".to_string()), workflow).take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value = promise.take().available().unwrap();
+        assert_eq!(value.a.t, 5);
+        assert_eq!(value.a.u, "hello");
+        assert_eq!(value.b, "hello");
+        assert!(context.no_unhandled_errors());
+    }
+
+    /// We create this struct just to verify that it is able to compile despite
+    /// NonCopyBuffer not being copyable.
+    #[derive(JoinedValue)]
+    #[allow(unused)]
+    struct JoinedValueForNonCopyBuffer {
+        #[joined(buffer = NonCopyBuffer<String>, noncopy_buffer)]
+        _a: String,
+        _b: u32,
+    }
 }

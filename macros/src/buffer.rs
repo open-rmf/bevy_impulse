@@ -14,14 +14,40 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
 
     let (field_ident, _, field_config) = get_fields_map(&input_struct.fields)?;
     let buffer: Vec<&Type> = field_config.iter().map(|config| &config.buffer).collect();
+    let noncopy = field_config.iter().any(|config| config.noncopy);
 
     let buffer_struct: ItemStruct = parse_quote! {
-        #[derive(Clone)]
         #[allow(non_camel_case_types, unused)]
         #buffer_struct_vis struct #buffer_struct_ident #impl_generics #where_clause {
             #(
                 #buffer_struct_vis #field_ident: #buffer,
             )*
+        }
+    };
+
+    let buffer_clone_impl = if noncopy {
+        // Clone impl for structs with a buffer that is not copyable
+        quote! {
+            impl #impl_generics ::std::clone::Clone for #buffer_struct_ident #ty_generics #where_clause {
+                fn clone(&self) -> Self {
+                    Self {
+                        #(
+                            #field_ident: self.#field_ident.clone(),
+                        )*
+                    }
+                }
+            }
+        }
+    } else {
+        // Clone and copy impl for structs with buffers that are all copyable
+        quote! {
+            impl #impl_generics ::std::clone::Clone for #buffer_struct_ident #ty_generics #where_clause {
+                fn clone(&self) -> Self {
+                    *self
+                }
+            }
+
+            impl #impl_generics ::std::marker::Copy for #buffer_struct_ident #ty_generics #where_clause {}
         }
     };
 
@@ -34,6 +60,8 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
         }
 
         #buffer_struct
+
+        #buffer_clone_impl
 
         impl #impl_generics #struct_ident #ty_generics #where_clause {
             fn select_buffers(
@@ -111,6 +139,7 @@ impl StructConfig {
 
 struct FieldConfig {
     buffer: Type,
+    noncopy: bool,
 }
 
 impl FieldConfig {
@@ -118,17 +147,16 @@ impl FieldConfig {
         let ty = &field.ty;
         let mut config = Self {
             buffer: parse_quote! { ::bevy_impulse::Buffer<#ty> },
+            noncopy: false,
         };
 
-        let attr = field
-            .attrs
-            .iter()
-            .find(|attr| attr.path().is_ident("joined"));
-
-        if let Some(attr) = attr {
+        for attr in field.attrs.iter().filter(|attr| attr.path().is_ident("joined")) {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("buffer") {
                     config.buffer = meta.value()?.parse()?;
+                }
+                if meta.path.is_ident("noncopy_buffer") {
+                    config.noncopy = true;
                 }
                 Ok(())
             })
