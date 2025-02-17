@@ -37,10 +37,11 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
-    AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferKey, BufferKeyBuilder,
-    BufferKeyTag, BufferLocation, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer, Gate,
-    GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate, OperationError,
-    OperationResult, OrBroken,
+    AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferIdentifier,
+    BufferKey, BufferKeyBuilder, BufferKeyTag, BufferLocation, BufferMap, BufferMapLayout,
+    BufferMapStruct, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer, Gate, GateState,
+    IncompatibleLayout, InspectBuffer, Joined, JoinedValue, ManageBuffer, NotifyBufferUpdate,
+    OperationError, OperationResult, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -1044,6 +1045,51 @@ impl Accessed for JsonBuffer {
     }
 }
 
+impl JoinedValue for serde_json::Map<String, JsonMessage> {
+    type Buffers = HashMap<String, JsonBuffer>;
+}
+
+impl BufferMapLayout for HashMap<String, JsonBuffer> {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut downcast_buffers = HashMap::new();
+        let mut compatibility = IncompatibleLayout::default();
+        for name in buffers.keys() {
+            match name {
+                BufferIdentifier::Name(name) => {
+                    if let Ok(downcast) =
+                        compatibility.require_buffer_by_name::<JsonBuffer>(&name, buffers)
+                    {
+                        downcast_buffers.insert(name.clone().into_owned(), downcast);
+                    }
+                }
+                BufferIdentifier::Index(index) => {
+                    compatibility
+                        .forbidden_buffers
+                        .push(BufferIdentifier::Index(*index));
+                }
+            }
+        }
+
+        compatibility.as_result()?;
+        Ok(downcast_buffers)
+    }
+}
+
+impl BufferMapStruct for HashMap<String, JsonBuffer> {
+    fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]> {
+        self.values().map(|b| b.as_any_buffer()).collect()
+    }
+}
+
+impl Joined for HashMap<String, JsonBuffer> {
+    type Item = serde_json::Map<String, JsonMessage>;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        self.iter()
+            .map(|(key, value)| value.pull(session, world).map(|v| (key.clone(), v)))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{prelude::*, testing::*, AddBufferToMap};
@@ -1478,5 +1524,50 @@ mod tests {
         let deserialized_json: TestMessage = serde_json::from_value(value.json).unwrap();
         let expected_json = TestMessage::new();
         assert_eq!(deserialized_json, expected_json);
+    }
+
+    #[test]
+    fn test_join_json_buffer_vec() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_u32 = builder.create_buffer::<u32>(BufferSettings::default());
+            let buffer_i32 = builder.create_buffer::<i32>(BufferSettings::default());
+            let buffer_string = builder.create_buffer::<String>(BufferSettings::default());
+            let buffer_msg = builder.create_buffer::<TestMessage>(BufferSettings::default());
+            let buffers: Vec<JsonBuffer> = vec![
+                buffer_i32.into(),
+                buffer_u32.into(),
+                buffer_string.into(),
+                buffer_msg.into(),
+            ];
+
+            scope
+                .input
+                .chain(builder)
+                .map_block(|msg: TestMessage| (msg.v_u32, msg.v_i32, msg.v_string.clone(), msg))
+                .fork_unzip((
+                    |chain: Chain<_>| chain.connect(buffer_u32.input_slot()),
+                    |chain: Chain<_>| chain.connect(buffer_i32.input_slot()),
+                    |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                    |chain: Chain<_>| chain.connect(buffer_msg.input_slot()),
+                ));
+
+            builder.join(buffers).connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request(TestMessage::new(), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let values = promise.take().available().unwrap();
+        assert_eq!(values.len(), 4);
+        assert_eq!(values[0], serde_json::Value::Number(1.into()));
+        assert_eq!(values[1], serde_json::Value::Number(2.into()));
+        assert_eq!(values[2], serde_json::Value::String("hello".to_string()));
+        assert_eq!(values[3], serde_json::to_value(TestMessage::new()).unwrap());
     }
 }

@@ -662,6 +662,103 @@ impl<T: Accessed, const N: usize> Accessed for SmallVec<[T; N]> {
     }
 }
 
+impl<B: Buffered> Buffered for Vec<B> {
+    fn verify_scope(&self, scope: Entity) {
+        for buffer in self {
+            buffer.verify_scope(scope);
+        }
+    }
+
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
+        let mut min_count = None;
+        for buffer in self {
+            let count = buffer.buffered_count(session, world)?;
+            if !min_count.is_some_and(|min| min < count) {
+                min_count = Some(count);
+            }
+        }
+
+        Ok(min_count.unwrap_or(0))
+    }
+
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
+        for buffer in self {
+            buffer.add_listener(listener, world)?;
+        }
+        Ok(())
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: Gate,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        for buffer in self {
+            buffer.gate_action(session, action, world, roster)?;
+        }
+        Ok(())
+    }
+
+    fn as_input(&self) -> SmallVec<[Entity; 8]> {
+        self.iter().flat_map(|buffer| buffer.as_input()).collect()
+    }
+
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        for buffer in self {
+            buffer.ensure_active_session(session, world)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<B: Joined> Joined for Vec<B> {
+    type Item = Vec<B::Item>;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        self.iter()
+            .map(|buffer| buffer.pull(session, world))
+            .collect()
+    }
+}
+
+impl<B: Accessed> Accessed for Vec<B> {
+    type Key = Vec<B::Key>;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
+        for buffer in self {
+            buffer.add_accessor(accessor, world)?;
+        }
+        Ok(())
+    }
+
+    fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
+        let mut keys = Vec::new();
+        for buffer in self {
+            keys.push(buffer.create_key(builder));
+        }
+        keys
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        let mut keys = Vec::new();
+        for k in key {
+            keys.push(B::deep_clone_key(k));
+        }
+        keys
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        for k in key {
+            if B::is_key_in_use(k) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
 pub(crate) fn add_listener_to_source(
     source: Entity,
     listener: Entity,

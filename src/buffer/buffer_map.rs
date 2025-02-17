@@ -24,9 +24,9 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer,
-    BufferKeyBuilder, Bufferable, Buffered, Builder, Chain, Gate, GateState, Join, Joined,
-    OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
+    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox,
+    AsAnyBuffer, Buffer, BufferKeyBuilder, Bufferable, Buffered, Builder, Chain, Gate, GateState,
+    Join, Joined, OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
 };
 
 pub use bevy_impulse_derive::JoinedValue;
@@ -92,15 +92,32 @@ impl AddBufferToMap for BufferMap {
 #[derive(ThisError, Debug, Clone, Default)]
 #[error("the incoming buffer map is incompatible with the layout")]
 pub struct IncompatibleLayout {
-    /// Names of buffers that were missing from the incoming buffer map.
+    /// Identities of buffers that were missing from the incoming buffer map.
     pub missing_buffers: Vec<BufferIdentifier<'static>>,
+    /// Identities of buffers in the incoming buffer map which cannot exist in
+    /// the target layout.
+    pub forbidden_buffers: Vec<BufferIdentifier<'static>>,
     /// Buffers whose expected type did not match the received type.
     pub incompatible_buffers: Vec<BufferIncompatibility>,
 }
 
 impl IncompatibleLayout {
-    /// Check whether a named buffer is compatible with a specialized buffer type,
-    /// such as `JsonBuffer`.
+    /// Convert this into an error if it has any contents inside.
+    pub fn as_result(self) -> Result<(), Self> {
+        if !self.missing_buffers.is_empty() {
+            return Err(self);
+        }
+
+        if !self.incompatible_buffers.is_empty() {
+            return Err(self);
+        }
+
+        Ok(())
+    }
+
+    /// Same as [`Self::require_buffer_by_literal`], but can be used with
+    /// temporary borrows of a string slice. The string slice will be cloned if
+    /// an error message needs to be produced.
     pub fn require_buffer_by_name<BufferType: 'static>(
         &mut self,
         expected_name: &str,
@@ -118,20 +135,38 @@ impl IncompatibleLayout {
                 });
             }
         } else {
-            self.missing_buffers.push(BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())));
+            self.missing_buffers
+                .push(BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())));
         }
 
         Err(())
     }
 
-    /// Same as [`Self::require_buffer_by_name`] but more efficient for names
-    /// given by string literal values.
+    /// Check whether a named buffer is compatible with the required buffer type.
     pub fn require_buffer_by_literal<BufferType: 'static>(
         &mut self,
         expected_name: &'static str,
         buffers: &BufferMap,
     ) -> Result<BufferType, ()> {
-        let identifier = BufferIdentifier::Name(Cow::Borrowed(expected_name));
+        self.require_buffer::<BufferType>(BufferIdentifier::literal_name(expected_name), buffers)
+    }
+
+    /// Check whether an indexed buffer is compatible with the required buffer type.
+    pub fn require_buffer_by_index<BufferType: 'static>(
+        &mut self,
+        expected_index: usize,
+        buffers: &BufferMap,
+    ) -> Result<BufferType, ()> {
+        self.require_buffer::<BufferType>(BufferIdentifier::Index(expected_index), buffers)
+    }
+
+    /// Check whether the buffer associated with the identifier is compatible with
+    /// the required buffer type.
+    pub fn require_buffer<BufferType: 'static>(
+        &mut self,
+        identifier: BufferIdentifier<'static>,
+        buffers: &BufferMap,
+    ) -> Result<BufferType, ()> {
         if let Some(buffer) = buffers.get(&identifier) {
             if let Some(buffer) = buffer.downcast_buffer::<BufferType>() {
                 return Ok(buffer);
@@ -167,14 +202,18 @@ pub struct BufferIncompatibility {
 /// `#[derive(JoinedValue)]` on a struct that you want a join operation to
 /// produce.
 pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
-    /// Produce a list of the buffers that exist in this layout.
-    fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]>;
-
     /// Try to convert a generic [`BufferMap`] into this specific layout.
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout>;
 }
 
-impl<T: BufferMapLayout> Bufferable for T {
+/// This trait helps auto-generated buffer map structs to implement the Buffered
+/// trait.
+pub trait BufferMapStruct: Sized + Clone + 'static + Send + Sync {
+    /// Produce a list of the buffers that exist in this layout.
+    fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]>;
+}
+
+impl<T: BufferMapStruct> Bufferable for T {
     type BufferType = Self;
 
     fn into_buffer(self, _: &mut Builder) -> Self::BufferType {
@@ -182,7 +221,7 @@ impl<T: BufferMapLayout> Bufferable for T {
     }
 }
 
-impl<T: BufferMapLayout> Buffered for T {
+impl<T: BufferMapStruct> Buffered for T {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.buffer_list() {
             assert_eq!(buffer.scope(), scope);
@@ -285,11 +324,14 @@ pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
 }
 
 impl BufferMapLayout for BufferMap {
-    fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]> {
-        self.values().cloned().collect()
-    }
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
         Ok(buffers.clone())
+    }
+}
+
+impl BufferMapStruct for BufferMap {
+    fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]> {
+        self.values().cloned().collect()
     }
 }
 
@@ -351,9 +393,49 @@ impl Accessed for BufferMap {
     }
 }
 
+impl<T: 'static + Send + Sync> JoinedValue for Vec<T> {
+    type Buffers = Vec<Buffer<T>>;
+}
+
+impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut downcast_buffers = Vec::new();
+        let mut compatibility = IncompatibleLayout::default();
+        for i in 0..buffers.len() {
+            if let Ok(downcast) = compatibility.require_buffer_by_index::<B>(i, buffers) {
+                downcast_buffers.push(downcast);
+            }
+        }
+
+        compatibility.as_result()?;
+        Ok(downcast_buffers)
+    }
+}
+
+impl<T: 'static + Send + Sync, const N: usize> JoinedValue for SmallVec<[T; N]> {
+    type Buffers = SmallVec<[Buffer<T>; N]>;
+}
+
+impl<B: 'static + Send + Sync + AsAnyBuffer + Clone, const N: usize> BufferMapLayout
+    for SmallVec<[B; N]>
+{
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut downcast_buffers = SmallVec::new();
+        let mut compatibility = IncompatibleLayout::default();
+        for i in 0..buffers.len() {
+            if let Ok(downcast) = compatibility.require_buffer_by_index::<B>(i, buffers) {
+                downcast_buffers.push(downcast);
+            }
+        }
+
+        compatibility.as_result()?;
+        Ok(downcast_buffers)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, BufferMap, AddBufferToMap};
+    use crate::{prelude::*, testing::*, AddBufferToMap, BufferMap};
 
     #[derive(JoinedValue)]
     struct TestJoinedValue<T: Send + Sync + 'static + Clone> {

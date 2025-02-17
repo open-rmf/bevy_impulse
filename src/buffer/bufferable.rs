@@ -152,6 +152,13 @@ impl<T: Bufferable, const N: usize> Bufferable for [T; N] {
     }
 }
 
+impl<T: Bufferable> Bufferable for Vec<T> {
+    type BufferType = Vec<T::BufferType>;
+    fn into_buffer(self, builder: &mut Builder) -> Self::BufferType {
+        self.into_iter().map(|b| b.into_buffer(builder)).collect()
+    }
+}
+
 pub trait IterBufferable {
     type BufferElement: Buffered + Joined;
 

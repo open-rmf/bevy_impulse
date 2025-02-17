@@ -208,19 +208,17 @@ fn impl_buffer_map_layout(
 
     Ok(quote! {
         impl #impl_generics ::bevy_impulse::BufferMapLayout for #struct_ident #ty_generics #where_clause {
-            fn buffer_list(&self) -> ::smallvec::SmallVec<[AnyBuffer; 8]> {
-                use smallvec::smallvec;
-                smallvec![#(
-                    ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.#field_ident),
-                )*]
-            }
-
             fn try_from_buffer_map(buffers: &::bevy_impulse::BufferMap) -> Result<Self, ::bevy_impulse::IncompatibleLayout> {
                 let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
                 #(
-                    let #field_ident = if let Ok(buffer) = compatibility.require_buffer_by_literal::<#buffer>(#map_key, buffers) {
-                        buffer
-                    } else {
+                    let #field_ident = compatibility.require_buffer_by_literal::<#buffer>(#map_key, buffers);
+                )*
+
+                // Unwrap the Ok after inspecting every field so that the
+                // IncompatibleLayout error can include all information about
+                // which fields were incompatible.
+                #(
+                    let Ok(#field_ident) = #field_ident else {
                         return Err(compatibility);
                     };
                 )*
@@ -230,6 +228,15 @@ fn impl_buffer_map_layout(
                         #field_ident,
                     )*
                 })
+            }
+        }
+
+        impl #impl_generics ::bevy_impulse::BufferMapStruct for #struct_ident #ty_generics #where_clause {
+            fn buffer_list(&self) -> ::smallvec::SmallVec<[AnyBuffer; 8]> {
+                use smallvec::smallvec;
+                smallvec![#(
+                    ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.#field_ident),
+                )*]
             }
         }
     }
