@@ -447,39 +447,43 @@ mod tests {
 
     #[test]
     fn test_multi_generic_joined_value() {
-        let mut context =TestingContext::minimal_plugins();
+        let mut context = TestingContext::minimal_plugins();
 
-        let workflow = context.spawn_io_workflow(|scope: Scope<(i32, String), JoinedMultiGenericValue<i32, String>>, builder| {
-            let multi_generic_buffers = MultiGenericBuffers::<i32, String> {
-                a: builder.create_buffer(BufferSettings::default()),
-                b: builder.create_buffer(BufferSettings::default()),
-            };
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<(i32, String), JoinedMultiGenericValue<i32, String>>, builder| {
+                let multi_generic_buffers = MultiGenericBuffers::<i32, String> {
+                    a: builder.create_buffer(BufferSettings::default()),
+                    b: builder.create_buffer(BufferSettings::default()),
+                };
 
-            let copy = multi_generic_buffers;
+                let copy = multi_generic_buffers;
 
-            scope
-                .input
-                .chain(builder)
-                .map_block(|(integer, string)|
-                    (
-                        MultiGenericValue {
-                            t: integer,
-                            u: string.clone(),
-                        },
-                        string,
-                    )
-                )
-                .fork_unzip((
-                    |a: Chain<_>| a.connect(multi_generic_buffers.a.input_slot()),
-                    |b: Chain<_>| b.connect(multi_generic_buffers.b.input_slot()),
-                ));
+                scope
+                    .input
+                    .chain(builder)
+                    .map_block(|(integer, string)| {
+                        (
+                            MultiGenericValue {
+                                t: integer,
+                                u: string.clone(),
+                            },
+                            string,
+                        )
+                    })
+                    .fork_unzip((
+                        |a: Chain<_>| a.connect(multi_generic_buffers.a.input_slot()),
+                        |b: Chain<_>| b.connect(multi_generic_buffers.b.input_slot()),
+                    ));
 
-            multi_generic_buffers.join(builder).connect(scope.terminate);
-            copy.join(builder).connect(scope.terminate);
-        });
+                multi_generic_buffers.join(builder).connect(scope.terminate);
+                copy.join(builder).connect(scope.terminate);
+            },
+        );
 
         let mut promise = context.command(|commands| {
-            commands.request((5, "hello".to_string()), workflow).take_response()
+            commands
+                .request((5, "hello".to_string()), workflow)
+                .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));

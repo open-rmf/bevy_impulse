@@ -150,7 +150,11 @@ impl FieldConfig {
             noncopy: false,
         };
 
-        for attr in field.attrs.iter().filter(|attr| attr.path().is_ident("joined")) {
+        for attr in field
+            .attrs
+            .iter()
+            .filter(|attr| attr.path().is_ident("joined"))
+        {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("buffer") {
                     config.buffer = meta.value()?.parse()?;

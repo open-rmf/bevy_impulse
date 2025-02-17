@@ -32,11 +32,11 @@ pub use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use crate::{
-    flush_impulses, AddContinuousServicesExt, AsyncServiceInput, BlockingMap, BlockingServiceInput,
-    Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt,
-    StreamOf, StreamPack, UnhandledErrors, WorkflowSettings, OperationRoster, OperationResult,
-    OperationError, Buffered, Bufferable, Joined, Buffer, Accessed, BufferKey, AnyBuffer,
+    flush_impulses, Accessed, AddContinuousServicesExt, AnyBuffer, AsyncServiceInput, BlockingMap,
+    BlockingServiceInput, Buffer, BufferKey, Bufferable, Buffered, Builder, ContinuousQuery,
+    ContinuousQueueView, ContinuousService, FlushParameters, GetBufferedSessionsFn, Joined,
+    OperationError, OperationResult, OperationRoster, Promise, RunCommandsOnWorldExt, Scope,
+    Service, SpawnWorkflowExt, StreamOf, StreamPack, UnhandledErrors, WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -494,9 +494,12 @@ impl<T: 'static + Send + Sync> NonCopyBuffer<T> {
             std::any::TypeId::of::<NonCopyBuffer<T>>(),
             Box::new(|location| {
                 Box::new(NonCopyBuffer::<T> {
-                    inner: Buffer { location, _ignore: Default::default() },
+                    inner: Buffer {
+                        location,
+                        _ignore: Default::default(),
+                    },
                 })
-            })
+            }),
         );
     }
 }
