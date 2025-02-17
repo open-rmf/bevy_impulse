@@ -29,6 +29,8 @@ use crate::{
     OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
 };
 
+pub use bevy_impulse_derive::JoinedValue;
+
 #[derive(Clone, Default)]
 pub struct BufferMap {
     inner: HashMap<Cow<'static, str>, AnyBuffer>,
@@ -311,76 +313,16 @@ impl Accessed for BufferMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, BufferMap, OperationError};
+    use crate::{prelude::*, testing::*, BufferMap};
 
-    use bevy_ecs::prelude::World;
-
-    #[derive(Clone)]
-    struct TestJoinedValue {
+    #[derive(JoinedValue)]
+    struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
         integer: i64,
         float: f64,
         string: String,
-    }
-
-    impl JoinedValue for TestJoinedValue {
-        type Buffers = TestJoinedValueBuffers;
-    }
-
-    #[derive(Clone)]
-    struct TestJoinedValueBuffers {
-        integer: Buffer<i64>,
-        float: Buffer<f64>,
-        string: Buffer<String>,
-    }
-
-    impl BufferMapLayout for TestJoinedValueBuffers {
-        fn buffer_list(&self) -> smallvec::SmallVec<[AnyBuffer; 8]> {
-            use smallvec::smallvec;
-            smallvec![
-                self.integer.as_any_buffer(),
-                self.float.as_any_buffer(),
-                self.string.as_any_buffer(),
-            ]
-        }
-
-        fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
-            let mut compatibility = IncompatibleLayout::default();
-            let integer = compatibility.require_message_type::<i64>("integer", buffers);
-            let float = compatibility.require_message_type::<f64>("float", buffers);
-            let string = compatibility.require_message_type::<String>("string", buffers);
-
-            let Ok(integer) = integer else {
-                return Err(compatibility);
-            };
-            let Ok(float) = float else {
-                return Err(compatibility);
-            };
-            let Ok(string) = string else {
-                return Err(compatibility);
-            };
-
-            Ok(Self {
-                integer,
-                float,
-                string,
-            })
-        }
-    }
-
-    impl crate::Joined for TestJoinedValueBuffers {
-        type Item = TestJoinedValue;
-
-        fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
-            let integer = self.integer.pull(session, world)?;
-            let float = self.float.pull(session, world)?;
-            let string = self.string.pull(session, world)?;
-
-            Ok(TestJoinedValue {
-                integer,
-                float,
-                string,
-            })
-        }
+        generic: T,
+        #[joined(buffer = AnyBuffer)]
+        any: AnyMessageBox,
     }
 
     #[test]
@@ -391,16 +333,22 @@ mod tests {
             let buffer_i64 = builder.create_buffer(BufferSettings::default());
             let buffer_f64 = builder.create_buffer(BufferSettings::default());
             let buffer_string = builder.create_buffer(BufferSettings::default());
+            let buffer_generic = builder.create_buffer(BufferSettings::default());
+            let buffer_any = builder.create_buffer(BufferSettings::default());
 
             let mut buffers = BufferMap::default();
             buffers.insert("integer", buffer_i64);
             buffers.insert("float", buffer_f64);
             buffers.insert("string", buffer_string);
+            buffers.insert("generic", buffer_generic);
+            buffers.insert("any", buffer_any);
 
             scope.input.chain(builder).fork_unzip((
                 |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
                 |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
             ));
 
             builder.try_join(&buffers).unwrap().connect(scope.terminate);
@@ -408,15 +356,20 @@ mod tests {
 
         let mut promise = context.command(|commands| {
             commands
-                .request((5_i64, 3.14_f64, "hello".to_string()), workflow)
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
+                    workflow,
+                )
                 .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        let value: TestJoinedValue = promise.take().available().unwrap();
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
         assert_eq!(value.integer, 5);
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
         assert!(context.no_unhandled_errors());
     }
 
@@ -425,32 +378,129 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let buffers = TestJoinedValueBuffers {
-                integer: builder.create_buffer(BufferSettings::default()),
-                float: builder.create_buffer(BufferSettings::default()),
-                string: builder.create_buffer(BufferSettings::default()),
-            };
+            let buffer_i64 = builder.create_buffer(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer(BufferSettings::default());
+            let buffer_string = builder.create_buffer(BufferSettings::default());
+            let buffer_generic = builder.create_buffer(BufferSettings::default());
+            let buffer_any = builder.create_buffer::<i64>(BufferSettings::default());
 
             scope.input.chain(builder).fork_unzip((
-                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
-                |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
             ));
+
+            let buffers = TestJoinedValue::select_buffers(
+                buffer_i64,
+                buffer_f64,
+                buffer_string,
+                buffer_generic,
+                buffer_any.into(),
+            );
 
             builder.join(buffers).connect(scope.terminate);
         });
 
         let mut promise = context.command(|commands| {
             commands
-                .request((5_i64, 3.14_f64, "hello".to_string()), workflow)
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
+                    workflow,
+                )
                 .take_response()
         });
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        let value: TestJoinedValue = promise.take().available().unwrap();
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
         assert_eq!(value.integer, 5);
         assert_eq!(value.float, 3.14);
         assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
         assert!(context.no_unhandled_errors());
+    }
+
+    #[derive(Clone, JoinedValue)]
+    #[joined(buffers_struct_name = FooBuffers)]
+    struct TestDeriveWithConfig {}
+
+    #[test]
+    fn test_derive_with_config() {
+        // a compile test to check that the name of the generated struct is correct
+        fn _check_buffer_struct_name(_: FooBuffers) {}
+    }
+
+    struct MultiGenericValue<T: 'static + Send + Sync, U: 'static + Send + Sync> {
+        t: T,
+        u: U,
+    }
+
+    #[derive(JoinedValue)]
+    #[joined(buffers_struct_name = MultiGenericBuffers)]
+    struct JoinedMultiGenericValue<T: 'static + Send + Sync, U: 'static + Send + Sync> {
+        #[joined(buffer = Buffer<MultiGenericValue<T, U>>)]
+        a: MultiGenericValue<T, U>,
+        b: String,
+    }
+
+    #[test]
+    fn test_multi_generic_joined_value() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(
+            |scope: Scope<(i32, String), JoinedMultiGenericValue<i32, String>>, builder| {
+                let multi_generic_buffers = MultiGenericBuffers::<i32, String> {
+                    a: builder.create_buffer(BufferSettings::default()),
+                    b: builder.create_buffer(BufferSettings::default()),
+                };
+
+                let copy = multi_generic_buffers;
+
+                scope
+                    .input
+                    .chain(builder)
+                    .map_block(|(integer, string)| {
+                        (
+                            MultiGenericValue {
+                                t: integer,
+                                u: string.clone(),
+                            },
+                            string,
+                        )
+                    })
+                    .fork_unzip((
+                        |a: Chain<_>| a.connect(multi_generic_buffers.a.input_slot()),
+                        |b: Chain<_>| b.connect(multi_generic_buffers.b.input_slot()),
+                    ));
+
+                multi_generic_buffers.join(builder).connect(scope.terminate);
+                copy.join(builder).connect(scope.terminate);
+            },
+        );
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request((5, "hello".to_string()), workflow)
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value = promise.take().available().unwrap();
+        assert_eq!(value.a.t, 5);
+        assert_eq!(value.a.u, "hello");
+        assert_eq!(value.b, "hello");
+        assert!(context.no_unhandled_errors());
+    }
+
+    /// We create this struct just to verify that it is able to compile despite
+    /// NonCopyBuffer not being copyable.
+    #[derive(JoinedValue)]
+    #[allow(unused)]
+    struct JoinedValueForNonCopyBuffer {
+        #[joined(buffer = NonCopyBuffer<String>, noncopy_buffer)]
+        _a: String,
+        _b: u32,
     }
 }

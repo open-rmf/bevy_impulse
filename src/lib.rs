@@ -148,6 +148,8 @@ pub use trim::*;
 use bevy_app::prelude::{App, Plugin, Update};
 use bevy_ecs::prelude::{Entity, In};
 
+extern crate self as bevy_impulse;
+
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///
 /// A blocking service will have exclusive world access while it runs, which
