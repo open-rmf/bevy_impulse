@@ -321,8 +321,7 @@ mod tests {
         float: f64,
         string: String,
         generic: T,
-        #[buffers(buffer_type = AnyBuffer)]
-        #[allow(unused)]
+        #[joined(buffer = AnyBuffer)]
         any: AnyMessageBox,
     }
 
@@ -424,7 +423,7 @@ mod tests {
     }
 
     #[derive(Clone, JoinedValue)]
-    #[buffers(buffer_struct_name = FooBuffers)]
+    #[joined(buffers_struct_name = FooBuffers)]
     struct TestDeriveWithConfig {}
 
     #[test]

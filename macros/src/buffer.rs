@@ -13,17 +13,14 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
     let buffer_struct_vis = &input_struct.vis;
 
     let (field_ident, _, field_config) = get_fields_map(&input_struct.fields)?;
-    let buffer_type: Vec<&Type> = field_config
-        .iter()
-        .map(|config| &config.buffer_type)
-        .collect();
+    let buffer: Vec<&Type> = field_config.iter().map(|config| &config.buffer).collect();
 
     let buffer_struct: ItemStruct = parse_quote! {
         #[derive(Clone)]
-        #[allow(non_camel_case_types)]
+        #[allow(non_camel_case_types, unused)]
         #buffer_struct_vis struct #buffer_struct_ident #impl_generics #where_clause {
             #(
-                #buffer_struct_vis #field_ident: #buffer_type,
+                #buffer_struct_vis #field_ident: #buffer,
             )*
         }
     };
@@ -41,7 +38,7 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
         impl #impl_generics #struct_ident #ty_generics #where_clause {
             fn select_buffers(
                 #(
-                    #field_ident: #buffer_type,
+                    #field_ident: #buffer,
                 )*
             ) -> #buffer_struct_ident #ty_generics {
                 #buffer_struct_ident {
@@ -95,11 +92,11 @@ impl StructConfig {
         let attr = data_struct
             .attrs
             .iter()
-            .find(|attr| attr.path().is_ident("buffers"));
+            .find(|attr| attr.path().is_ident("joined"));
 
         if let Some(attr) = attr {
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("buffer_struct_name") {
+                if meta.path.is_ident("buffers_struct_name") {
                     config.buffer_struct_name = meta.value()?.parse()?;
                 }
                 Ok(())
@@ -113,25 +110,25 @@ impl StructConfig {
 }
 
 struct FieldConfig {
-    buffer_type: Type,
+    buffer: Type,
 }
 
 impl FieldConfig {
     fn from_field(field: &Field) -> Self {
         let ty = &field.ty;
         let mut config = Self {
-            buffer_type: parse_quote! { ::bevy_impulse::Buffer<#ty> },
+            buffer: parse_quote! { ::bevy_impulse::Buffer<#ty> },
         };
 
         let attr = field
             .attrs
             .iter()
-            .find(|attr| attr.path().is_ident("buffers"));
+            .find(|attr| attr.path().is_ident("joined"));
 
         if let Some(attr) = attr {
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("buffer_type") {
-                    config.buffer_type = meta.value()?.parse()?;
+                if meta.path.is_ident("buffer") {
+                    config.buffer = meta.value()?.parse()?;
                 }
                 Ok(())
             })
@@ -174,10 +171,7 @@ fn impl_buffer_map_layout(
     let struct_ident = &buffer_struct.ident;
     let (impl_generics, ty_generics, where_clause) = buffer_struct.generics.split_for_impl();
     let (field_ident, _, field_config) = get_fields_map(&item_struct.fields)?;
-    let buffer_type: Vec<&Type> = field_config
-        .iter()
-        .map(|config| &config.buffer_type)
-        .collect();
+    let buffer: Vec<&Type> = field_config.iter().map(|config| &config.buffer).collect();
     let map_key: Vec<String> = field_ident.iter().map(|v| v.to_string()).collect();
 
     Ok(quote! {
@@ -192,7 +186,7 @@ fn impl_buffer_map_layout(
             fn try_from_buffer_map(buffers: &::bevy_impulse::BufferMap) -> Result<Self, ::bevy_impulse::IncompatibleLayout> {
                 let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
                 #(
-                    let #field_ident = if let Ok(buffer) = compatibility.require_buffer_type::<#buffer_type>(#map_key, buffers) {
+                    let #field_ident = if let Ok(buffer) = compatibility.require_buffer_type::<#buffer>(#map_key, buffers) {
                         buffer
                     } else {
                         return Err(compatibility);

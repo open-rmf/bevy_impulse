@@ -1354,11 +1354,11 @@ mod tests {
     }
 
     #[derive(Clone, JoinedValue)]
-    #[buffers(buffer_struct_name = TestJoinedValueJsonBuffers)]
+    #[joined(buffers_struct_name = TestJoinedValueJsonBuffers)]
     struct TestJoinedValueJson {
         integer: i64,
         float: f64,
-        #[buffers(buffer_type = JsonBuffer)]
+        #[joined(buffer = JsonBuffer)]
         json: JsonMessage,
     }
 
