@@ -169,7 +169,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
             code,
         };
 
-        let mut edge_builder = EdgeBuilder {
+        let edge_builder = EdgeBuilder {
             vertices: &mut vertices,
             edges: &mut edges,
             terminate_edges: &mut terminate_edges,
@@ -178,19 +178,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
         match op {
             DiagramOperation::Node(op) => {
-                let reg = registry
-                    .get_node_registration(&op.builder)
-                    .map_err(with_context)?;
-                let n = reg
-                    .create_node(builder, op.config.clone())
-                    .map_err(with_context)?;
-                inputs.insert(op_id, n.input);
-                edge_builder
-                    .add_edge(Edge {
-                        source: SourceOperation::Source(op_id.clone()),
-                        target: &op.next,
-                        output: Some(n.output),
-                    })
+                op.build_edges(builder, registry, &mut inputs, op_id, edge_builder)
                     .map_err(with_context)?;
             }
             DiagramOperation::ForkClone(op) => {
@@ -399,7 +387,9 @@ fn connect_vertex<'a>(
             let (input, out_edges) = if let Some(result) = map_one_to_many_edges(target, edges)? {
                 result
             } else {
-                return Ok(false);
+                // in theory this should never happen as we checked that all edges are ready
+                // at the start of the function.
+                return Err(unknown_diagram_error!());
             };
             $op.try_connect(builder, input, out_edges, &registry.messages)?;
             Ok(true)
@@ -409,25 +399,9 @@ fn connect_vertex<'a>(
     debug!("connecting [{}]", target.op_id);
 
     match target.op {
-        DiagramOperation::Node(_) => {
-            let output = if let Some(output) = edges
-                .get_mut(&target.in_edges[0])
-                .ok_or_else(|| unknown_diagram_error!())?
-                .output
-                .take()
-            {
-                output
-            } else {
-                return Ok(false);
-            };
-
-            let input = inputs[target.op_id];
-            let deserialized_output =
-                registry
-                    .messages
-                    .deserialize(&input.type_info, builder, output)?;
-            dyn_connect(builder, deserialized_output, input)?;
-            Ok(true)
+        DiagramOperation::Node(op) => {
+            let borrowed_edges = HashMap::from_iter(edges.iter_mut());
+            op.try_connect(builder, target, borrowed_edges, &inputs, &registry.messages)
         }
         DiagramOperation::ForkClone(op) => {
             connect_one_to_many!(op)
@@ -480,7 +454,7 @@ fn connect_vertex<'a>(
 /// ```text
 /// builder.connect(output.into_output::<i64>()?, dyn_input)?;
 /// ```
-fn dyn_connect(
+pub(super) fn dyn_connect(
     builder: &mut Builder,
     output: DynOutput,
     input: DynInputSlot,

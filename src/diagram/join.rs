@@ -53,7 +53,7 @@ impl JoinOp {
                 match edge.output.take() {
                     Some(output) => Ok((edge.source.clone(), output)),
                     // "expected all incoming edges to be ready"
-                    _ => Err(unknown_diagram_error!()),
+                    None => Err(unknown_diagram_error!()),
                 }
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
