@@ -72,6 +72,8 @@ pub use async_execution::Sendish;
 pub mod buffer;
 pub use buffer::*;
 
+pub mod re_exports;
+
 pub mod builder;
 pub use builder::*;
 
@@ -340,8 +342,8 @@ pub mod prelude {
         buffer::{
             Accessible, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessageBox,
             AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap,
-            BufferMapLayout, BufferSettings, Bufferable, Buffered, IncompatibleLayout,
-            IterBufferable, Joinable, JoinedValue, RetentionPolicy,
+            BufferMapLayout, BufferSettings, BufferWorldAccess, Bufferable, Buffered,
+            IncompatibleLayout, IterBufferable, Joinable, JoinedValue, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
