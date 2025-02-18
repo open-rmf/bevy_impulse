@@ -833,6 +833,10 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
+    /// This macro is a manual implementation of the join operation that uses
+    /// the buffer listening mechanism. There isn't any reason to reimplement
+    /// join here except so we can test that listening is working correctly for
+    /// BufferKeyMap.
     fn join_via_listen(
         In(keys): In<TestKeys<&'static str>>,
         world: &mut World,
