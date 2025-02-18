@@ -34,6 +34,7 @@ mod any_buffer;
 pub use any_buffer::*;
 
 mod buffer_access_lifecycle;
+pub use buffer_access_lifecycle::BufferKeyLifecycle;
 pub(crate) use buffer_access_lifecycle::*;
 
 mod buffer_key_builder;
@@ -134,11 +135,14 @@ pub struct BufferLocation {
     pub source: Entity,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct CloneFromBuffer<T: Clone> {
     pub(crate) location: BufferLocation,
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
+
+//
+impl<T: Clone> Copy for CloneFromBuffer<T> {}
 
 impl<T: Clone> CloneFromBuffer<T> {
     /// Get the entity ID of the buffer.
@@ -154,6 +158,15 @@ impl<T: Clone> CloneFromBuffer<T> {
     /// Get general information about the buffer.
     pub fn location(&self) -> BufferLocation {
         self.location
+    }
+}
+
+impl<T: Clone> From<CloneFromBuffer<T>> for Buffer<T> {
+    fn from(value: CloneFromBuffer<T>) -> Self {
+        Buffer {
+            location: value.location,
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -254,20 +267,23 @@ impl<T> BufferKey<T> {
     pub fn tag(&self) -> &BufferKeyTag {
         &self.tag
     }
+}
 
-    pub(crate) fn is_in_use(&self) -> bool {
+impl<T> BufferKeyLifecycle for BufferKey<T> {
+    type TargetBuffer = Buffer<T>;
+
+    fn create_key(buffer: &Self::TargetBuffer, builder: &BufferKeyBuilder) -> Self {
+        BufferKey {
+            tag: builder.make_tag(buffer.id()),
+            _ignore: Default::default(),
+        }
+    }
+
+    fn is_in_use(&self) -> bool {
         self.tag.is_in_use()
     }
 
-    // We do a deep clone of the key when distributing it to decouple the
-    // lifecycle of the keys that we send out from the key that's held by the
-    // accessor node.
-    //
-    // The key instance held by the accessor node will never be dropped until
-    // the session is cleaned up, so the keys that we send out into the workflow
-    // need to have their own independent lifecycles or else we won't detect
-    // when the workflow has dropped them.
-    pub(crate) fn deep_clone(&self) -> Self {
+    fn deep_clone(&self) -> Self {
         Self {
             tag: self.tag.deep_clone(),
             _ignore: Default::default(),

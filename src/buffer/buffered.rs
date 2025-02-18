@@ -23,9 +23,10 @@ use smallvec::SmallVec;
 
 use crate::{
     AddOperation, BeginCleanupWorkflow, Buffer, BufferAccessors, BufferKey, BufferKeyBuilder,
-    BufferStorage, Builder, Chain, CleanupWorkflowConditions, CloneFromBuffer, ForkTargetStorage,
-    Gate, GateState, InspectBuffer, Join, Listen, ManageBuffer, OperationError, OperationResult,
-    OperationRoster, OrBroken, Output, Scope, ScopeSettings, SingleInputStorage, UnusedTarget,
+    BufferKeyLifecycle, BufferStorage, Builder, Chain, CleanupWorkflowConditions, CloneFromBuffer,
+    ForkTargetStorage, Gate, GateState, InputSlot, InspectBuffer, Join, Listen, ManageBuffer, Node,
+    OperateBufferAccess, OperationError, OperationResult, OperationRoster, OrBroken, Output, Scope,
+    ScopeSettings, SingleInputStorage, UnusedTarget,
 };
 
 pub trait Buffered: 'static + Send + Sync + Clone {
@@ -107,6 +108,22 @@ pub trait Accessed: Buffered {
         ));
 
         Output::new(scope, target).chain(builder)
+    }
+
+    fn access<T: 'static + Send + Sync>(self, builder: &mut Builder) -> Node<T, (T, Self::Key)> {
+        let source = builder.commands.spawn(()).id();
+        let target = builder.commands.spawn(UnusedTarget).id();
+        builder.commands.add(AddOperation::new(
+            Some(builder.scope),
+            source,
+            OperateBufferAccess::<T, Self>::new(self, target),
+        ));
+
+        Node {
+            input: InputSlot::new(builder.scope, source),
+            output: Output::new(builder.scope, target),
+            streams: (),
+        }
     }
 
     /// Alternative way to call [`Builder::on_cleanup`].
@@ -246,7 +263,7 @@ impl<T: 'static + Send + Sync> Accessed for Buffer<T> {
     }
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
-        builder.build(self.id())
+        Self::Key::create_key(&self, builder)
     }
 
     fn deep_clone_key(key: &Self::Key) -> Self::Key {
@@ -318,7 +335,7 @@ impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
     }
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
-        builder.build(self.id())
+        Self::Key::create_key(&(*self).into(), builder)
     }
 
     fn deep_clone_key(key: &Self::Key) -> Self::Key {

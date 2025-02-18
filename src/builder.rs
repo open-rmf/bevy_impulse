@@ -22,14 +22,13 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessed, Accessible, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation, BufferMap,
-    BufferSettings, Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput,
+    Accessed, Accessible, AddOperation, AsMap, Buffer, BufferKeyMap, BufferKeys, BufferLocation,
+    BufferMap, BufferSettings, Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput,
     ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
-    IntoBlockingMap, Joinable, JoinedValue, Node, OperateBuffer, OperateBufferAccess,
-    OperateDynamicGate, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
-    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
-    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
-    TrimBranch, UnusedTarget,
+    IntoBlockingMap, Joinable, JoinedValue, Node, OperateBuffer, OperateDynamicGate, OperateScope,
+    OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
+    ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
+    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub(crate) mod connect;
@@ -250,6 +249,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         buffers.listen(self)
     }
 
+    /// Try listening to a map of buffers.
+    pub fn try_listen<'b, Keys: BufferKeyMap>(
+        &'b mut self,
+        buffers: &BufferMap,
+    ) -> Result<Chain<'w, 's, 'a, 'b, Keys>, IncompatibleLayout> {
+        Keys::try_listen_from(buffers, self)
+    }
+
     /// Create a node that combines its inputs with access to some buffers. You
     /// must specify one ore more buffers to access. FOr multiple buffers,
     /// combine then into a tuple or an [`Iterator`]. Tuples of buffers can be
@@ -266,19 +273,20 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
-        let source = self.commands.spawn(()).id();
-        let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(AddOperation::new(
-            Some(self.scope),
-            source,
-            OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
-        ));
+        buffers.access(self)
+    }
 
-        Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
-            streams: (),
-        }
+    /// Try to create access to some buffers. Same as [`Self::create_buffer_access`]
+    /// except it will return an error if the buffers in the [`BufferMap`] are not
+    /// compatible with the keys that are being asked for.
+    pub fn try_create_buffer_access<T, Keys: BufferKeyMap>(
+        &mut self,
+        buffers: &BufferMap,
+    ) -> Result<Node<T, (T, Keys)>, IncompatibleLayout>
+    where
+        T: 'static + Send + Sync,
+    {
+        Keys::try_buffer_access(buffers, self)
     }
 
     /// Collect incoming workflow threads into a container.

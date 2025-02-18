@@ -25,7 +25,7 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
         }
     };
 
-    let buffer_clone_impl = if noncopy {
+    let impl_buffer_clone = if noncopy {
         // Clone impl for structs with a buffer that is not copyable
         quote! {
             impl #impl_generics ::std::clone::Clone for #buffer_struct_ident #ty_generics #where_clause {
@@ -61,7 +61,7 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
 
         #buffer_struct
 
-        #buffer_clone_impl
+        #impl_buffer_clone
 
         impl #impl_generics #struct_ident #ty_generics #where_clause {
             fn select_buffers(

@@ -38,10 +38,10 @@ use smallvec::SmallVec;
 use crate::{
     add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
     AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferIdentifier,
-    BufferKey, BufferKeyBuilder, BufferKeyTag, BufferLocation, BufferMap, BufferMapLayout,
-    BufferMapStruct, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer, Gate, GateState,
-    IncompatibleLayout, InspectBuffer, Joined, JoinedValue, ManageBuffer, NotifyBufferUpdate,
-    OperationError, OperationResult, OrBroken,
+    BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferMap,
+    BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer,
+    Gate, GateState, IncompatibleLayout, InspectBuffer, Joined, JoinedValue, ManageBuffer,
+    NotifyBufferUpdate, OperationError, OperationResult, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized, but which is known to
@@ -159,16 +159,27 @@ impl JsonBufferKey {
     pub fn as_any_buffer_key(self) -> AnyBufferKey {
         self.into()
     }
+}
+
+impl BufferKeyLifecycle for JsonBufferKey {
+    type TargetBuffer = JsonBuffer;
+
+    fn create_key(buffer: &Self::TargetBuffer, builder: &BufferKeyBuilder) -> Self {
+        Self {
+            tag: builder.make_tag(buffer.id()),
+            interface: buffer.interface,
+        }
+    }
+
+    fn is_in_use(&self) -> bool {
+        self.tag.is_in_use()
+    }
 
     fn deep_clone(&self) -> Self {
         Self {
             tag: self.tag.deep_clone(),
             interface: self.interface,
         }
-    }
-
-    fn is_in_use(&self) -> bool {
-        self.tag.is_in_use()
     }
 }
 

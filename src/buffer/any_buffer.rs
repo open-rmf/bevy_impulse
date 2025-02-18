@@ -35,9 +35,9 @@ use smallvec::SmallVec;
 
 use crate::{
     add_listener_to_source, Accessed, Buffer, BufferAccessMut, BufferAccessors, BufferError,
-    BufferKey, BufferKeyTag, BufferLocation, BufferStorage, Bufferable, Buffered, Builder,
-    DrainBuffer, Gate, GateState, InspectBuffer, Joined, ManageBuffer, NotifyBufferUpdate,
-    OperationError, OperationResult, OperationRoster, OrBroken,
+    BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferStorage,
+    Bufferable, Buffered, Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joined,
+    ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -198,12 +198,23 @@ impl AnyBufferKey {
     pub fn session(&self) -> Entity {
         self.tag.session
     }
+}
 
-    pub(crate) fn is_in_use(&self) -> bool {
+impl BufferKeyLifecycle for AnyBufferKey {
+    type TargetBuffer = AnyBuffer;
+
+    fn create_key(buffer: &AnyBuffer, builder: &BufferKeyBuilder) -> Self {
+        AnyBufferKey {
+            tag: builder.make_tag(buffer.id()),
+            interface: buffer.interface,
+        }
+    }
+
+    fn is_in_use(&self) -> bool {
         self.tag.is_in_use()
     }
 
-    pub(crate) fn deep_clone(&self) -> Self {
+    fn deep_clone(&self) -> Self {
         Self {
             tag: self.tag.deep_clone(),
             interface: self.interface,

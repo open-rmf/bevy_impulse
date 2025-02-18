@@ -24,9 +24,9 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    add_listener_to_source, Accessed, AddOperation, AnyBuffer, AnyBufferKey, AnyMessageBox,
-    AsAnyBuffer, Buffer, BufferKeyBuilder, Bufferable, Buffered, Builder, Chain, Gate, GateState,
-    Join, Joined, OperationError, OperationResult, OperationRoster, Output, UnusedTarget,
+    add_listener_to_source, Accessed, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
+    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffered, Builder, Chain, Gate, GateState,
+    Joined, Node, OperationError, OperationResult, OperationRoster,
 };
 
 pub use bevy_impulse_derive::JoinedValue;
@@ -209,7 +209,8 @@ pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
 /// This trait helps auto-generated buffer map structs to implement the Buffered
 /// trait.
 pub trait BufferMapStruct: Sized + Clone + 'static + Send + Sync {
-    /// Produce a list of the buffers that exist in this layout.
+    /// Produce a list of the buffers that exist in this layout. Implementing
+    /// this function alone is sufficient to implement the entire [`Buffered`] trait.
     fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]>;
 }
 
@@ -289,38 +290,35 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
     /// associated type must match the [`JoinedValue`] type.
     type Buffers: 'static + BufferMapLayout + Joined<Item = Self> + Send + Sync;
 
-    /// Used by [`Self::try_join_from`]
-    fn join_from<'w, 's, 'a, 'b>(
-        buffers: Self::Buffers,
-        builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, Self> {
-        let scope = builder.scope();
-        buffers.verify_scope(scope);
-
-        let join = builder.commands.spawn(()).id();
-        let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
-            Some(scope),
-            join,
-            Join::new(buffers, target),
-        ));
-
-        Output::new(scope, target).chain(builder)
-    }
-
     /// Used by [`Builder::try_join`]
     fn try_join_from<'w, 's, 'a, 'b>(
         buffers: &BufferMap,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Result<Chain<'w, 's, 'a, 'b, Self>, IncompatibleLayout> {
         let buffers: Self::Buffers = Self::Buffers::try_from_buffer_map(buffers)?;
-        Ok(Self::join_from(buffers, builder))
+        Ok(buffers.join(builder))
     }
 }
 
 /// Trait to describe a set of buffer keys.
 pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
     type Buffers: 'static + BufferMapLayout + Accessed<Key = Self> + Send + Sync;
+
+    fn try_listen_from<'w, 's, 'a, 'b>(
+        buffers: &BufferMap,
+        builder: &'b mut Builder<'w, 's, 'a>,
+    ) -> Result<Chain<'w, 's, 'a, 'b, Self>, IncompatibleLayout> {
+        let buffers: Self::Buffers = Self::Buffers::try_from_buffer_map(buffers)?;
+        Ok(buffers.listen(builder))
+    }
+
+    fn try_buffer_access<T: 'static + Send + Sync>(
+        buffers: &BufferMap,
+        builder: &mut Builder,
+    ) -> Result<Node<T, (T, Self)>, IncompatibleLayout> {
+        let buffers: Self::Buffers = Self::Buffers::try_from_buffer_map(buffers)?;
+        Ok(buffers.access(builder))
+    }
 }
 
 impl BufferMapLayout for BufferMap {
@@ -435,7 +433,7 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone, const N: usize> BufferMapLa
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, AddBufferToMap, BufferMap};
+    use crate::{prelude::*, testing::*, Accessed, AddBufferToMap, BufferMap};
 
     #[derive(JoinedValue)]
     struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
@@ -624,5 +622,116 @@ mod tests {
         #[joined(buffer = NonCopyBuffer<String>, noncopy_buffer)]
         _a: String,
         _b: u32,
+    }
+
+    #[derive(Clone)]
+    struct TestKeys<T: 'static + Send + Sync + Clone> {
+        integer: BufferKey<i64>,
+        float: BufferKey<f64>,
+        string: BufferKey<String>,
+        generic: BufferKey<T>,
+        any: AnyBufferKey,
+    }
+
+    impl<T: 'static + Send + Sync + Clone> BufferKeyMap for TestKeys<T> {
+        type Buffers = TestKeysBuffers<T>;
+    }
+
+    #[derive(Clone)]
+    struct TestKeysBuffers<T: 'static + Send + Sync + Clone> {
+        integer: <BufferKey<i64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
+        float: <BufferKey<f64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
+        string: <BufferKey<String> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
+        generic: <BufferKey<T> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
+        any: <AnyBufferKey as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
+    }
+
+    impl<T: 'static + Send + Sync + Clone> BufferMapLayout for TestKeysBuffers<T> {
+        fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+            let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
+            let integer = compatibility.require_buffer_by_literal::<<BufferKey<i64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("integer", buffers);
+            let float = compatibility.require_buffer_by_literal::<<BufferKey<f64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("float", buffers);
+            let string = compatibility.require_buffer_by_literal::<<BufferKey<String> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("string", buffers);
+            let generic = compatibility.require_buffer_by_literal::<<BufferKey<T> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("generic", buffers);
+            let any = compatibility.require_buffer_by_literal::<<AnyBufferKey as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("any", buffers);
+
+            let Ok(integer) = integer else {
+                return Err(compatibility);
+            };
+            let Ok(float) = float else {
+                return Err(compatibility);
+            };
+            let Ok(string) = string else {
+                return Err(compatibility);
+            };
+            let Ok(generic) = generic else {
+                return Err(compatibility);
+            };
+            let Ok(any) = any else {
+                return Err(compatibility);
+            };
+
+            Ok(Self {
+                integer,
+                float,
+                string,
+                generic,
+                any,
+            })
+        }
+    }
+
+    impl<T: 'static + Send + Sync + Clone> ::bevy_impulse::BufferMapStruct for TestKeysBuffers<T> {
+        fn buffer_list(&self) -> smallvec::SmallVec<[AnyBuffer; 8]> {
+            smallvec::smallvec![
+                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.integer),
+                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.float),
+                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.string),
+                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.generic),
+                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.any),
+            ]
+        }
+    }
+
+    impl<T: 'static + Send + Sync + Clone> Accessed for TestKeysBuffers<T> {
+        type Key = TestKeys<T>;
+
+        fn add_accessor(&self, accessor: Entity, world: &mut World) -> crate::OperationResult {
+            ::bevy_impulse::Accessed::add_accessor(&self.integer, accessor, world)?;
+            ::bevy_impulse::Accessed::add_accessor(&self.float, accessor, world)?;
+            ::bevy_impulse::Accessed::add_accessor(&self.string, accessor, world)?;
+            ::bevy_impulse::Accessed::add_accessor(&self.generic, accessor, world)?;
+            ::bevy_impulse::Accessed::add_accessor(&self.any, accessor, world)?;
+            Ok(())
+        }
+
+        fn create_key(&self, builder: &crate::BufferKeyBuilder) -> Self::Key {
+            TestKeys {
+                integer: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.integer, builder),
+                float: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.float, builder),
+                string: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.string, builder),
+                generic: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.generic, builder),
+                any: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.any, builder),
+            }
+        }
+
+        fn deep_clone_key(key: &Self::Key) -> Self::Key {
+            TestKeys {
+                integer: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.integer),
+                float: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.float),
+                string: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.string),
+                generic: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.generic),
+                any: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.any),
+            }
+        }
+
+        fn is_key_in_use(key: &Self::Key) -> bool {
+            false
+                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.integer)
+                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.float)
+                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.string)
+                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.generic)
+                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.any)
+        }
     }
 }
