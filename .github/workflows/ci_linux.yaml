@@ -50,5 +50,5 @@ jobs:
       run: cargo test --features single_threaded_async
 
     - name: Build docs
-      run: cargo doc
+      run: cargo doc --all-features
 

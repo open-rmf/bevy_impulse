@@ -23,14 +23,14 @@ pub enum Gate {
     /// receive a wakeup immediately when a gate switches from closed to open,
     /// even if none of the data inside the buffer has changed.
     ///
-    /// [1]: crate::Bufferable::join
+    /// [1]: crate::Joinable::join
     Open,
     /// Close the buffer gate so that listeners (including [join][1] operations)
     /// will not be woken up when the data in the buffer gets modified. This
     /// effectively blocks the workflow nodes that are downstream of the buffer.
     /// Data will build up in the buffer according to its [`BufferSettings`][2].
     ///
-    /// [1]: crate::Bufferable::join
+    /// [1]: crate::Joinable::join
     /// [2]: crate::BufferSettings
     Closed,
 }

@@ -375,37 +375,7 @@ pub struct Diagram {
 }
 
 impl Diagram {
-    /// Spawns a workflow from this diagram.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
-    ///
-    /// let mut app = bevy_app::App::new();
-    /// let mut registry = DiagramElementRegistry::new();
-    /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
-    ///     builder.create_map_block(|msg: String| msg)
-    /// });
-    ///
-    /// let json_str = r#"
-    /// {
-    ///     "version": "0.1.0",
-    ///     "start": "echo",
-    ///     "ops": {
-    ///         "echo": {
-    ///             "type": "node",
-    ///             "builder": "echo",
-    ///             "next": { "builtin": "terminate" }
-    ///         }
-    ///     }
-    /// }
-    /// "#;
-    ///
-    /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
-    /// # Ok::<_, DiagramError>(())
-    /// ```
+    /// Implementation for [Self::spawn_io_workflow].
     // TODO(koonpeng): Support streams other than `()` #43.
     /* pub */
     fn spawn_workflow<Streams>(
@@ -447,7 +417,37 @@ impl Diagram {
         Ok(w)
     }
 
-    /// Wrapper to [spawn_workflow::<()>](Self::spawn_workflow).
+    /// Spawns a workflow from this diagram.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
+    ///
+    /// let mut app = bevy_app::App::new();
+    /// let mut registry = DiagramElementRegistry::new();
+    /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
+    ///     builder.create_map_block(|msg: String| msg)
+    /// });
+    ///
+    /// let json_str = r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "echo",
+    ///     "ops": {
+    ///         "echo": {
+    ///             "type": "node",
+    ///             "builder": "echo",
+    ///             "next": { "builtin": "terminate" }
+    ///         }
+    ///     }
+    /// }
+    /// "#;
+    ///
+    /// let diagram = Diagram::from_json_str(json_str)?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
+    /// # Ok::<_, DiagramError>(())
+    /// ```
     pub fn spawn_io_workflow(
         &self,
         cmds: &mut Commands,

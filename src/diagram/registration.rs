@@ -985,7 +985,7 @@ impl DiagramElementRegistry {
     /// Register a node builder with all the common operations (deserialize the
     /// request, serialize the response, and clone the response) enabled.
     ///
-    /// You will receive a [`RegistrationBuilder`] which you can then use to
+    /// You will receive a [`NodeRegistrationBuilder`] which you can then use to
     /// enable more operations around your node, such as fork result, split,
     /// or unzip. The data types of your node need to be suitable for those
     /// operations or else the compiler will not allow you to enable them.
