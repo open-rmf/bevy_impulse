@@ -38,7 +38,7 @@ pub use buffer_access_lifecycle::BufferKeyLifecycle;
 pub(crate) use buffer_access_lifecycle::*;
 
 mod buffer_key_builder;
-pub(crate) use buffer_key_builder::*;
+pub use buffer_key_builder::*;
 
 mod buffer_map;
 pub use buffer_map::*;
@@ -428,7 +428,7 @@ pub trait BufferWorldAccess {
 impl BufferWorldAccess for World {
     fn buffer_view<T>(&self, key: &BufferKey<T>) -> Result<BufferView<'_, T>, BufferError>
     where
-        T: 'static + Send + Sync
+        T: 'static + Send + Sync,
     {
         let buffer_ref = self
             .get_entity(key.tag.buffer)
@@ -452,11 +452,12 @@ impl BufferWorldAccess for World {
         f: impl FnOnce(BufferMut<T>) -> U,
     ) -> Result<U, BufferError>
     where
-        T: 'static + Send + Sync
+        T: 'static + Send + Sync,
     {
         let mut state = SystemState::<BufferAccessMut<T>>::new(self);
         let mut buffer_access_mut = state.get_mut(self);
-        let buffer_mut = buffer_access_mut.get_mut(key)
+        let buffer_mut = buffer_access_mut
+            .get_mut(key)
             .map_err(|_| BufferError::BufferMissing)?;
         Ok(f(buffer_mut))
     }
