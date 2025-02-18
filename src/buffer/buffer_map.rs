@@ -633,6 +633,104 @@ mod tests {
         any: AnyBufferKey,
     }
 
+    #[test]
+    fn test_buffer_key_map() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_i64 = builder.create_buffer(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer(BufferSettings::default());
+            let buffer_string = builder.create_buffer(BufferSettings::default());
+            let buffer_generic = builder.create_buffer(BufferSettings::default());
+            let buffer_any = builder.create_buffer::<i64>(BufferSettings::default());
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
+            ));
+
+            let buffers = TestKeysBuffers {
+                integer: buffer_i64,
+                float: buffer_f64,
+                string: buffer_string,
+                generic: buffer_generic,
+                any: buffer_any.into(),
+            };
+
+            builder
+                .listen(buffers)
+                .then(join_via_listen.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
+                    workflow,
+                )
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
+        assert!(context.no_unhandled_errors());
+    }
+
+    fn join_via_listen(
+        In(keys): In<TestKeys<&'static str>>,
+        world: &mut World,
+    ) -> Option<TestJoinedValue<&'static str>> {
+        if world.buffer_view(&keys.integer).ok()?.is_empty() {
+            return None;
+        }
+        if world.buffer_view(&keys.float).ok()?.is_empty() {
+            return None;
+        }
+        if world.buffer_view(&keys.string).ok()?.is_empty() {
+            return None;
+        }
+        if world.buffer_view(&keys.generic).ok()?.is_empty() {
+            return None;
+        }
+        if world.any_buffer_view(&keys.any).ok()?.is_empty() {
+            return None;
+        }
+
+        let integer = world.buffer_mut(&keys.integer, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let float = world.buffer_mut(&keys.float, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let string = world.buffer_mut(&keys.string, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let generic = world.buffer_mut(&keys.generic, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let any = world.any_buffer_mut(&keys.any, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+
+        Some(TestJoinedValue {
+            integer,
+            float,
+            string,
+            generic,
+            any,
+        })
+    }
+
     impl<T: 'static + Send + Sync + Clone> BufferKeyMap for TestKeys<T> {
         type Buffers = TestKeysBuffers<T>;
     }

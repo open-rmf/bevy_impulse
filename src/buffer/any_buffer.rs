@@ -517,7 +517,7 @@ pub trait AnyBufferWorldAccess {
     /// For technical reasons this requires direct [`World`] access, but you can
     /// do other read-only queries on the world while holding onto the
     /// [`AnyBufferView`].
-    fn any_buffer_view<'a>(&self, key: &AnyBufferKey) -> Result<AnyBufferView<'_>, BufferError>;
+    fn any_buffer_view(&self, key: &AnyBufferKey) -> Result<AnyBufferView<'_>, BufferError>;
 
     /// Call this to get mutable access to any buffer.
     ///
@@ -531,7 +531,7 @@ pub trait AnyBufferWorldAccess {
 }
 
 impl AnyBufferWorldAccess for World {
-    fn any_buffer_view<'a>(&self, key: &AnyBufferKey) -> Result<AnyBufferView<'_>, BufferError> {
+    fn any_buffer_view(&self, key: &AnyBufferKey) -> Result<AnyBufferView<'_>, BufferError> {
         key.interface.create_any_buffer_view(key, self)
     }
 

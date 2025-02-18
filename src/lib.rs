@@ -340,7 +340,7 @@ pub mod prelude {
         buffer::{
             Accessible, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessageBox,
             AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap,
-            BufferMapLayout, BufferSettings, Bufferable, Buffered, IncompatibleLayout,
+            BufferMapLayout, BufferSettings, Bufferable, Buffered, BufferWorldAccess, IncompatibleLayout,
             IterBufferable, Joinable, JoinedValue, RetentionPolicy,
         },
         builder::Builder,
