@@ -1198,7 +1198,9 @@ mod tests {
             context.command(|commands| commands.request(input, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.take().available().is_some_and(|v| v == expectation));
+        assert!(Promise::take(&mut promise)
+            .available()
+            .is_some_and(|v| v == expectation));
         assert!(context.no_unhandled_errors());
     }
 }
