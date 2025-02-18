@@ -638,10 +638,10 @@ mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let buffer_i64 = builder.create_buffer(BufferSettings::default());
-            let buffer_f64 = builder.create_buffer(BufferSettings::default());
-            let buffer_string = builder.create_buffer(BufferSettings::default());
-            let buffer_generic = builder.create_buffer(BufferSettings::default());
+            let buffer_i64 = builder.create_buffer::<i64>(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer::<f64>(BufferSettings::default());
+            let buffer_string = builder.create_buffer::<String>(BufferSettings::default());
+            let buffer_generic = builder.create_buffer::<&'static str>(BufferSettings::default());
             let buffer_any = builder.create_buffer::<i64>(BufferSettings::default());
 
             scope.input.chain(builder).fork_unzip((
@@ -652,16 +652,16 @@ mod tests {
                 |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
             ));
 
-            let buffers = TestKeysBuffers {
-                integer: buffer_i64,
-                float: buffer_f64,
-                string: buffer_string,
-                generic: buffer_generic,
-                any: buffer_any.into(),
-            };
+            let mut buffer_map = BufferMap::new();
+            buffer_map.insert_buffer("integer", buffer_i64);
+            buffer_map.insert_buffer("float", buffer_f64);
+            buffer_map.insert_buffer("string", buffer_string);
+            buffer_map.insert_buffer("generic", buffer_generic);
+            buffer_map.insert_buffer("any", buffer_any);
 
             builder
-                .listen(buffers)
+                .try_listen(&buffer_map)
+                .unwrap()
                 .then(join_via_listen.into_blocking_callback())
                 .dispose_on_none()
                 .connect(scope.terminate);
