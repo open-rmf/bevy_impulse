@@ -1,4 +1,4 @@
-use std::{any::TypeId, error::Error};
+use std::error::Error;
 
 use cel_interpreter::{Context, ExecutionError, ParseError, Program};
 use schemars::JsonSchema;
@@ -6,9 +6,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::debug;
 
-use crate::{Builder, Output};
+use crate::{diagram::type_info::TypeInfo, unknown_diagram_error, Builder, Output};
 
-use super::{DiagramElementRegistry, DiagramError, DynOutput, NextOperation};
+use super::{
+    workflow_builder::{Edge, EdgeBuilder},
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+};
 
 #[derive(Error, Debug)]
 pub enum TransformError {
@@ -29,18 +32,41 @@ pub struct TransformOp {
     pub(super) next: NextOperation,
 }
 
+impl TransformOp {
+    pub(super) fn build_edges<'a>(
+        &'a self,
+        mut builder: EdgeBuilder<'a, '_>,
+    ) -> Result<(), DiagramErrorCode> {
+        builder.add_output_edge(&self.next, None)?;
+        Ok(())
+    }
+
+    pub(super) fn try_connect<'b>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        mut out_edges: Vec<&mut Edge>,
+        registry: &MessageRegistry,
+    ) -> Result<(), DiagramErrorCode> {
+        let transformed_output = transform_output(builder, registry, output, self)?;
+        let out_edge = out_edges.get_mut(0).ok_or(unknown_diagram_error!())?;
+        out_edge.output = Some(transformed_output.into());
+        Ok(())
+    }
+}
+
 pub(super) fn transform_output(
     builder: &mut Builder,
-    registry: &DiagramElementRegistry,
+    registry: &MessageRegistry,
     output: DynOutput,
     transform_op: &TransformOp,
-) -> Result<Output<serde_json::Value>, DiagramError> {
+) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
     debug!("transform output: {:?}, op: {:?}", output, transform_op);
 
-    let json_output = if output.type_id == TypeId::of::<serde_json::Value>() {
+    let json_output = if output.type_info == TypeInfo::of::<serde_json::Value>() {
         output.into_output()
     } else {
-        registry.messages.serialize(builder, output)
+        registry.serialize(builder, output)
     }?;
 
     let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;

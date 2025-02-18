@@ -1,20 +1,57 @@
-use std::any::TypeId;
+use std::iter::zip;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::Builder;
+use crate::{diagram::type_info::TypeInfo, Builder};
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    DiagramError, DynOutput, NextOperation,
+    workflow_builder::{Edge, EdgeBuilder},
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkCloneOp {
     pub(super) next: Vec<NextOperation>,
+}
+
+impl ForkCloneOp {
+    pub(super) fn build_edges<'a>(
+        &'a self,
+        mut builder: EdgeBuilder<'a, '_>,
+    ) -> Result<(), DiagramErrorCode> {
+        for target in &self.next {
+            builder.add_output_edge(target, None)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn try_connect<'b>(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+        out_edges: Vec<&mut Edge>,
+        registry: &MessageRegistry,
+    ) -> Result<(), DiagramErrorCode> {
+        let outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
+            <DefaultImpl as DynForkClone<serde_json::Value>>::dyn_fork_clone(
+                builder,
+                output,
+                out_edges.len(),
+            )
+        } else {
+            registry.fork_clone(builder, output, out_edges.len())
+        }?;
+
+        for (output, out_edge) in zip(outputs, out_edges) {
+            out_edge.output = Some(output);
+        }
+
+        Ok(())
+    }
 }
 
 pub trait DynForkClone<T> {
@@ -24,7 +61,7 @@ pub trait DynForkClone<T> {
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError>;
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
 }
 
 impl<T> DynForkClone<T> for NotSupported {
@@ -34,8 +71,8 @@ impl<T> DynForkClone<T> for NotSupported {
         _builder: &mut Builder,
         _output: DynOutput,
         _amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
-        Err(DiagramError::NotCloneable)
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+        Err(DiagramErrorCode::NotCloneable)
     }
 }
 
@@ -49,9 +86,9 @@ where
         builder: &mut Builder,
         output: DynOutput,
         amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramError> {
+    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
         debug!("fork clone: {:?}", output);
-        assert_eq!(output.type_id, TypeId::of::<T>());
+        assert_eq!(output.type_info, TypeInfo::of::<T>());
 
         let fork_clone = output.into_output::<T>()?.fork_clone(builder);
         let outputs = (0..amount)
@@ -97,7 +134,11 @@ mod tests {
         }))
         .unwrap();
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err, DiagramError::NotCloneable), "{:?}", err);
+        assert!(
+            matches!(err.code, DiagramErrorCode::NotCloneable),
+            "{:?}",
+            err
+        );
     }
 
     #[test]

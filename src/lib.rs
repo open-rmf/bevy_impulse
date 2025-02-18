@@ -148,6 +148,8 @@ pub use trim::*;
 use bevy_app::prelude::{App, Plugin, Update};
 use bevy_ecs::prelude::{Entity, In};
 
+extern crate self as bevy_impulse;
+
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///
 /// A blocking service will have exclusive world access while it runs, which
@@ -336,8 +338,10 @@ impl Plugin for ImpulsePlugin {
 pub mod prelude {
     pub use crate::{
         buffer::{
-            Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferSettings, Bufferable, Buffered,
-            IterBufferable, RetentionPolicy,
+            Accessible, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess, AnyMessageBox,
+            AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferKeyMap, BufferMap,
+            BufferMapLayout, BufferSettings, Bufferable, Buffered, IncompatibleLayout,
+            IterBufferable, Joinable, JoinedValue, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
@@ -361,5 +365,10 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
+    };
+
+    #[cfg(feature = "diagram")]
+    pub use crate::buffer::{
+        JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage,
     };
 }
