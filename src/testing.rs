@@ -32,10 +32,10 @@ pub use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use crate::{
-    flush_impulses, Accessed, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput,
-    BlockingMap, BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable, Buffered,
-    Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, Joined, OperationError, OperationResult, OperationRoster, Promise,
+    flush_impulses, Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput,
+    BlockingMap, BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable,
+    Buffering, Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
+    GetBufferedSessionsFn, Joining, OperationError, OperationResult, OperationRoster, Promise,
     RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf, StreamPack, UnhandledErrors,
     WorkflowSettings,
 };
@@ -524,7 +524,7 @@ impl<T: 'static + Send + Sync> Bufferable for NonCopyBuffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Buffered for NonCopyBuffer<T> {
+impl<T: 'static + Send + Sync> Buffering for NonCopyBuffer<T> {
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         self.inner.add_listener(listener, world)
     }
@@ -556,14 +556,14 @@ impl<T: 'static + Send + Sync> Buffered for NonCopyBuffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Joined for NonCopyBuffer<T> {
+impl<T: 'static + Send + Sync> Joining for NonCopyBuffer<T> {
     type Item = T;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         self.inner.pull(session, world)
     }
 }
 
-impl<T: 'static + Send + Sync> Accessed for NonCopyBuffer<T> {
+impl<T: 'static + Send + Sync> Accessing for NonCopyBuffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         self.inner.add_accessor(accessor, world)

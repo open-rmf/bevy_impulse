@@ -16,7 +16,7 @@
 */
 
 use crate::{
-    check_reachability, execute_operation, is_downstream_of, Accessed, AddOperation, Blocker,
+    check_reachability, execute_operation, is_downstream_of, Accessing, AddOperation, Blocker,
     BufferKeyBuilder, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
     CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest,
     Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, Operation,
@@ -1124,7 +1124,7 @@ impl<B> BeginCleanupWorkflow<B> {
 
 impl<B> Operation for BeginCleanupWorkflow<B>
 where
-    B: Accessed + 'static + Send + Sync,
+    B: Accessing + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
