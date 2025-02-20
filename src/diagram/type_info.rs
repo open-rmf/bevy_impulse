@@ -4,10 +4,12 @@ use std::{
     hash::Hash,
 };
 
+use serde::Serialize;
+
 #[derive(Copy, Clone, Debug, Eq)]
 pub struct TypeInfo {
-    type_id: TypeId,
-    type_name: &'static str,
+    pub type_id: TypeId,
+    pub type_name: &'static str,
 }
 
 impl TypeInfo {
@@ -37,5 +39,14 @@ impl PartialEq for TypeInfo {
 impl Display for TypeInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.type_name.fmt(f)
+    }
+}
+
+impl Serialize for TypeInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.type_name)
     }
 }

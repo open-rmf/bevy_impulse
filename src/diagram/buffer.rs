@@ -4,19 +4,24 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    unknown_diagram_error, Accessible, Buffer, BufferSettings, Builder, IterBufferable, Joinable,
+    unknown_diagram_error, AnyBuffer, BufferIdentifier, BufferKeyMap, BufferMap, BufferSettings,
+    Builder, InputSlot, Output,
 };
 
 use super::{
+    type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder, Vertex},
-    BoxedMessage, DiagramErrorCode, MessageRegistry, NextOperation, OperationId, SourceOperation,
+    Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
+    MessageRegistry, NextOperation, OperationId,
 };
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BufferOp {
     #[serde(default = "BufferOp::default_buffer_settings")]
     pub(super) settings: BufferSettings,
-    pub(super) next: Option<NextOperation>,
+
+    /// If true, messages will be serialized before sending into the buffer.
+    pub(super) serialize: Option<bool>,
 }
 
 impl BufferOp {
@@ -28,76 +33,166 @@ impl BufferOp {
 impl BufferOp {
     pub(super) fn build_edges<'a>(
         &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+        _builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        if let Some(next) = &self.next {
-            builder.add_output_edge(&next, None)?;
-        }
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect<'a>(
         &self,
         builder: &mut Builder,
-        vertex: &Vertex,
+        vertex: &'a Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
+        buffers: &mut HashMap<&'a OperationId, AnyBuffer>,
         registry: &MessageRegistry,
-        buffers: &HashMap<&OperationId, Buffer<BoxedMessage>>,
     ) -> Result<bool, DiagramErrorCode> {
-        // all buffers are `Buffer<BoxedMessage>`, to connect a buffer,
-        // 1. box the incoming output
-        // 2. connect the boxed output to the buffer input
-        // 3. unbox the output, normally a `BoxedMessage` erases the type so it is not possible
-        //    to unbox, but because we have the original incoming output, we can unbox it.
-        // 4. store the unboxed output in the output edge.
-
         if vertex.in_edges.is_empty() {
-            // output connection is optional for buffers
-            return Ok(true);
+            // this will eventually cause workflow builder to return a [`DiagramErrorCode::IncompleteDiagram`] error.
+            return Ok(false);
         }
 
-        if vertex.in_edges.len() != 1 {
-            return Err(DiagramErrorCode::OnlySingleInput);
-        }
-
-        let output = if let Some(output) = edges
-            .get_mut(&vertex.in_edges[0])
+        let first_output = edges
+            // SAFETY: we checked that `vertex.in_edges` is not empty.
+            .remove(&vertex.in_edges[0])
             .ok_or_else(|| unknown_diagram_error!())?
             .output
             .take()
-        {
-            output
+            // expected all inputs to be ready
+            .ok_or_else(|| unknown_diagram_error!())?;
+        let first_output = if self.serialize.unwrap_or(false) {
+            registry.serialize(builder, first_output)?.into()
         } else {
-            return Ok(false);
+            first_output
         };
 
-        let buffer = buffers
-            .get(vertex.op_id)
-            .ok_or_else(|| DiagramErrorCode::OperationNotFound(vertex.op_id.clone()))?;
-        let output_type_id = output.type_info;
-        let boxed_output = registry.boxed(builder, output)?;
-        builder.connect(boxed_output, buffer.input_slot());
+        let rest_outputs: Vec<DynOutput> = vertex.in_edges[1..]
+            .iter()
+            .map(|edge_id| -> Result<_, DiagramErrorCode> {
+                let output = edges
+                    .remove(edge_id)
+                    .ok_or_else(|| unknown_diagram_error!())?
+                    .output
+                    .take()
+                    // expected all inputs to be ready
+                    .ok_or_else(|| unknown_diagram_error!())?;
+                if self.serialize.unwrap_or(false) {
+                    Ok(registry.serialize(builder, output)?.into())
+                } else {
+                    Ok(output)
+                }
+            })
+            .collect::<Result<_, _>>()?;
 
-        if let Some(out_edge_id) = vertex.out_edges.get(0) {
-            let out_edge = edges.get_mut(out_edge_id).ok_or(unknown_diagram_error!())?;
-            let op_id = match &out_edge.source {
-                SourceOperation::Source(op_id) => op_id,
-                _ => panic!(),
-            };
-            let buffer = buffers[op_id];
-            let buffer_output = buffer.join(builder).output();
-            let unboxed_output = registry.unbox(builder, buffer_output.into(), &output_type_id)?;
-            out_edge.output = Some(unboxed_output);
+        // check that all inputs are the same type
+        let expected_type = first_output.type_info;
+        for output in &rest_outputs {
+            if output.type_info != expected_type {
+                return Err(DiagramErrorCode::TypeMismatch {
+                    source_type: output.type_info,
+                    target_type: expected_type,
+                });
+            }
         }
+
+        // convert the first output into a buffer
+        let entry = buffers
+            .entry(vertex.op_id)
+            .insert_entry(first_output.into_any_buffer(builder)?);
+        let buffer = entry.get();
+
+        // connect the rest of the outputs to the buffer
+        for output in rest_outputs {
+            buffer.receive_output(builder, output)?;
+        }
+
         Ok(true)
     }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+pub(super) fn get_node_request_type(
+    target_node: &OperationId,
+    diagram: &Diagram,
+    registry: &DiagramElementRegistry,
+) -> Result<TypeInfo, DiagramErrorCode> {
+    let target_node = diagram
+        .ops
+        .get(target_node)
+        .ok_or_else(|| DiagramErrorCode::OperationNotFound(target_node.clone()))?;
+    let target_node_op = match target_node {
+        DiagramOperation::Node(op) => op,
+        _ => {
+            return Err(DiagramErrorCode::UnexpectedOperationType {
+                expected: "node".to_string(),
+                got: target_node.to_string(),
+            })
+        }
+    };
+    let target_type = registry
+        .get_node_registration(&target_node_op.builder)?
+        .request;
+    Ok(target_type)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub enum BufferInputs {
+    Dict(HashMap<String, OperationId>),
+    Array(Vec<OperationId>),
+}
+
+impl BufferInputs {
+    /// Creates a [`BufferMap`] from the buffer inputs.
+    /// Returns `None` if one or more buffer does not exist.
+    pub(super) fn as_buffer_map(
+        &self,
+        buffers: &HashMap<&OperationId, AnyBuffer>,
+    ) -> Option<BufferMap> {
+        match self {
+            Self::Dict(mapping) => {
+                let mut buffer_map = BufferMap::with_capacity(mapping.len() * 2);
+                for (k, op_id) in mapping {
+                    let buffer = if let Some(buffer) = buffers.get(op_id) {
+                        buffer
+                    } else {
+                        return None;
+                    };
+                    buffer_map.insert(BufferIdentifier::Name(k.clone().into()), *buffer);
+                }
+                Some(buffer_map)
+            }
+            Self::Array(arr) => {
+                let mut buffer_map = BufferMap::with_capacity(arr.len() * 2);
+                for (i, op_id) in arr.into_iter().enumerate() {
+                    let buffer = if let Some(buffer) = buffers.get(op_id) {
+                        buffer
+                    } else {
+                        return None;
+                    };
+                    buffer_map.insert(BufferIdentifier::Index(i), *buffer);
+                }
+                Some(buffer_map)
+            }
+        }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        match self {
+            Self::Dict(d) => d.is_empty(),
+            Self::Array(a) => a.is_empty(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct BufferAccessOp {
-    pub(super) buffers: Vec<OperationId>,
     pub(super) next: NextOperation,
+
+    /// Map of buffer keys and buffers.
+    pub(super) buffers: BufferInputs,
+
+    /// The id of an operation that this buffer access is for. The id must be a `node` operation.
+    pub(super) target_node: OperationId,
 }
 
 impl BufferAccessOp {
@@ -109,14 +204,21 @@ impl BufferAccessOp {
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect<'a>(
         &self,
         builder: &mut Builder,
         vertex: &Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
-        registry: &MessageRegistry,
-        buffers: &HashMap<&OperationId, Buffer<BoxedMessage>>,
+        registry: &DiagramElementRegistry,
+        buffers: &HashMap<&OperationId, AnyBuffer>,
+        diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
+        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
+            buffers
+        } else {
+            return Ok(false);
+        };
+
         let output = if let Some(output) = edges
             .get_mut(
                 vertex
@@ -133,17 +235,11 @@ impl BufferAccessOp {
             return Ok(false);
         };
 
-        let buffers = self
-            .buffers
-            .iter()
-            .map(|op_id| -> Result<_, DiagramErrorCode> {
-                Ok(buffers
-                    .get(op_id)
-                    .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))?
-                    .clone())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let output = registry.with_buffer_access(builder, output, buffers)?;
+        let target_type = get_node_request_type(&self.target_node, diagram, registry)?;
+        let output =
+            registry
+                .messages
+                .with_buffer_access(builder, output, &buffers, target_type)?;
         let out_edge = edges
             .get_mut(
                 vertex
@@ -151,41 +247,105 @@ impl BufferAccessOp {
                     .get(0)
                     .ok_or_else(|| unknown_diagram_error!())?,
             )
-            .ok_or(unknown_diagram_error!())?;
+            .ok_or_else(|| unknown_diagram_error!())?;
         out_edge.output = Some(output);
         Ok(true)
     }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+pub(super) trait BufferAccessRequest {
+    type Message: Send + Sync + 'static;
+    type BufferKeys: BufferKeyMap;
+}
+
+impl<T, B> BufferAccessRequest for (T, B)
+where
+    T: Send + Sync + 'static,
+    B: BufferKeyMap,
+{
+    type Message = T;
+    type BufferKeys = B;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ListenOp {
-    pub(super) buffers: Vec<OperationId>,
     pub(super) next: NextOperation,
+
+    /// Map of buffer keys and buffers.
+    pub(super) buffers: BufferInputs,
+
+    /// The id of an operation that this operation is for. The id must be a `node` operation.
+    pub(super) target_node: OperationId,
 }
 
 impl ListenOp {
     pub(super) fn build_edges<'a>(
         &'a self,
-        mut edge_builder: EdgeBuilder<'a, '_>,
-        builder: &mut Builder,
-        buffers: &HashMap<&'a OperationId, Buffer<BoxedMessage>>,
+        mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        let listen_buffers = self
-            .buffers
-            .iter()
-            .map(|op_id| -> Result<_, DiagramErrorCode> {
-                Ok(buffers
-                    .get(&op_id)
-                    .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))?
-                    .clone())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let joined_buffers_output = listen_buffers.join_vec::<4>(builder).output();
-        edge_builder.add_output_edge(
-            &self.next,
-            Some(joined_buffers_output.listen(builder).output().into()),
-        )?;
+        builder.add_output_edge(&self.next, None)?;
+        Ok(())
+    }
+
+    pub(super) fn try_connect<'a>(
+        &self,
+        builder: &mut Builder,
+        vertex: &Vertex,
+        mut edges: HashMap<&usize, &mut Edge>,
+        registry: &DiagramElementRegistry,
+        buffers: &HashMap<&OperationId, AnyBuffer>,
+        diagram: &Diagram,
+    ) -> Result<bool, DiagramErrorCode> {
+        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
+            buffers
+        } else {
+            return Ok(false);
+        };
+
+        let target_type = get_node_request_type(&self.target_node, diagram, registry)?;
+        let output = registry.messages.listen(builder, &buffers, target_type)?;
+        let out_edge = edges
+            .get_mut(
+                vertex
+                    .out_edges
+                    .get(0)
+                    .ok_or_else(|| unknown_diagram_error!())?,
+            )
+            .ok_or_else(|| unknown_diagram_error!())?;
+        out_edge.output = Some(output);
+        Ok(true)
+    }
+}
+
+trait ReceiveOutput {
+    fn receive_output(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(), DiagramErrorCode>;
+}
+
+impl ReceiveOutput for AnyBuffer {
+    fn receive_output(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<(), DiagramErrorCode> {
+        if self.message_type_id() != output.type_info.type_id {
+            return Err(DiagramErrorCode::TypeMismatch {
+                source_type: TypeInfo {
+                    type_id: self.message_type_id(),
+                    type_name: self.message_type_name(),
+                },
+                target_type: output.type_info,
+            });
+        }
+        // FIXME(koonpeng): This can potentially cause the workflow to run forever and never halt.
+        // For now this works because neither of these operations creates or use any bevy Components.
+        let input_slot = InputSlot::<()>::new(self.location.scope, self.location.source);
+        let output = Output::<()>::new(output.scope(), output.id());
+        builder.connect(output, input_slot);
         Ok(())
     }
 }

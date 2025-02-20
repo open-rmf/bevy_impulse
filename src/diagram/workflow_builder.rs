@@ -3,12 +3,12 @@ use std::collections::{hash_map::Entry, HashMap};
 use tracing::{debug, warn};
 
 use crate::{
-    diagram::DiagramErrorContext, unknown_diagram_error, Buffer, Builder, InputSlot, Output,
+    diagram::DiagramErrorContext, unknown_diagram_error, AnyBuffer, Builder, InputSlot, Output,
     StreamPack,
 };
 
 use super::{
-    BoxedMessage, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
+    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DiagramScope, DynInputSlot, DynOutput, NextOperation, OperationId,
     SourceOperation,
 };
@@ -158,7 +158,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
     let mut terminate_edges: Vec<usize> = Vec::new();
 
-    let buffers = create_buffers(builder, diagram);
+    let mut buffers: HashMap<&OperationId, AnyBuffer> = HashMap::new();
 
     // create all the edges
     for (op_id, op) in &diagram.ops {
@@ -196,6 +196,9 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
             DiagramOperation::Join(op) => {
                 op.build_edges(edge_builder).map_err(with_context)?;
             }
+            DiagramOperation::SerializedJoin(op) => {
+                op.build_edges(edge_builder).map_err(with_context)?;
+            }
             DiagramOperation::Transform(op) => {
                 op.build_edges(edge_builder).map_err(with_context)?;
             }
@@ -206,8 +209,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 op.build_edges(edge_builder).map_err(with_context)?;
             }
             DiagramOperation::Listen(op) => {
-                op.build_edges(edge_builder, builder, &buffers)
-                    .map_err(with_context)?;
+                op.build_edges(edge_builder).map_err(with_context)?;
             }
         }
     }
@@ -220,13 +222,21 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         unconnected_vertices.clear();
 
         for v in ws {
-            let connected = connect_vertex(builder, registry, &mut edges, &inputs, &buffers, v)
-                .map_err(|code| DiagramError {
-                    context: DiagramErrorContext {
-                        op_id: Some(v.op_id.clone()),
-                    },
-                    code,
-                })?;
+            let connected = connect_vertex(
+                builder,
+                v,
+                registry,
+                &mut edges,
+                &inputs,
+                &mut buffers,
+                diagram,
+            )
+            .map_err(|code| DiagramError {
+                context: DiagramErrorContext {
+                    op_id: Some(v.op_id.clone()),
+                },
+                code,
+            })?;
             if !connected {
                 unconnected_vertices.push(v);
                 continue;
@@ -290,35 +300,6 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
     Ok(())
 }
 
-fn create_buffers<'a>(
-    builder: &mut Builder,
-    diagram: &'a Diagram,
-) -> HashMap<&'a OperationId, Buffer<BoxedMessage>> {
-    // because it is not known what would get sent to a buffer at compile time, the buffer
-    // must be able to accept any type. `Buffer<serde_json::Value>` is an alternative, but
-    // that limits support to only serializable type.
-    //
-    // TODO(koonpeng): Typed buffer is possible by registering a node. It is not very
-    // intuitive as you would need to create a [`bevy_impulse::Node`] manually.
-    // ```rust
-    // let buffer = builder.create_buffer(...);
-    // let node = Node { input: buffer.input_slot(), output: buffer.join(builder).output(), streams: () };
-    // ```
-    // A wrapper to do that can be considered.
-    let buffers = diagram
-        .ops
-        .iter()
-        .filter_map(|(op_id, op)| match op {
-            DiagramOperation::Buffer(desc) => {
-                // should we support unboxed buffers?
-                Some((op_id, builder.create_buffer::<BoxedMessage>(desc.settings)))
-            }
-            _ => None,
-        })
-        .collect::<HashMap<_, _>>();
-    buffers
-}
-
 /// Given a [`Vertex`]
 ///   1. check that it has a single input edge and that the edge is ready
 ///   2. take the output from the input edge
@@ -366,11 +347,12 @@ pub fn map_one_to_many_edges<'a, 'b>(
 /// Attempt to connect all output edges of a vertex, returns true if the connection is done.
 fn connect_vertex<'a>(
     builder: &mut Builder,
+    target: &'a Vertex,
     registry: &DiagramElementRegistry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
-    buffers: &HashMap<&OperationId, Buffer<BoxedMessage>>,
-    target: &'a Vertex,
+    buffers: &mut HashMap<&'a OperationId, AnyBuffer>,
+    diagram: &Diagram,
 ) -> Result<bool, DiagramErrorCode> {
     let in_edges: Vec<&Edge> = target.in_edges.iter().map(|idx| &edges[idx]).collect();
     if in_edges.iter().any(|e| matches!(e.output, None)) {
@@ -417,33 +399,34 @@ fn connect_vertex<'a>(
         }
         DiagramOperation::Join(op) => {
             let borrowed_edges = HashMap::from_iter(edges.iter_mut());
-            op.try_connect(builder, target, borrowed_edges, &registry.messages)?;
-            Ok(true)
+            op.try_connect(
+                builder,
+                target,
+                borrowed_edges,
+                &registry,
+                &buffers,
+                diagram,
+            )
+        }
+        DiagramOperation::SerializedJoin(op) => {
+            let borrowed_edges = HashMap::from_iter(edges.iter_mut());
+            op.try_connect(builder, target, borrowed_edges, &buffers)
         }
         DiagramOperation::Transform(op) => {
             connect_one_to_many!(op)
         }
         DiagramOperation::Buffer(op) => {
             let borrowed_edges = edges.iter_mut().collect();
-            op.try_connect(
-                builder,
-                target,
-                borrowed_edges,
-                &registry.messages,
-                &buffers,
-            )
+            op.try_connect(builder, target, borrowed_edges, buffers, &registry.messages)
         }
         DiagramOperation::BufferAccess(op) => {
             let borrowed_edges = edges.iter_mut().collect();
-            op.try_connect(
-                builder,
-                target,
-                borrowed_edges,
-                &registry.messages,
-                &buffers,
-            )
+            op.try_connect(builder, target, borrowed_edges, registry, buffers, diagram)
         }
-        DiagramOperation::Listen(_) => Ok(true),
+        DiagramOperation::Listen(op) => {
+            let borrowed_edges = edges.iter_mut().collect();
+            op.try_connect(builder, target, borrowed_edges, registry, buffers, diagram)
+        }
     }
 }
 

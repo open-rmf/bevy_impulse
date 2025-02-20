@@ -11,7 +11,7 @@ use super::{
     NextOperation, OperationId,
 };
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeOp {
     pub(super) builder: BuilderId,

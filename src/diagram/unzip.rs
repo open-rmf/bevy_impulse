@@ -9,7 +9,6 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
-    join::register_join_impl,
     workflow_builder::{Edge, EdgeBuilder},
     DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
@@ -119,11 +118,6 @@ macro_rules! dyn_unzip_impl {
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
                 $(
                     registry.register_serialize::<$P, Serializer>();
-                )*
-
-                // Register join impls for T1, T2, T3...
-                $(
-                    register_join_impl::<$P, Serializer>(registry);
                 )*
             }
         }

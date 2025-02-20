@@ -15,7 +15,7 @@ use super::{
     SerializeMessage,
 };
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkResultOp {
     pub(super) ok: NextOperation,

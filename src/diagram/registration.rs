@@ -8,7 +8,8 @@ use std::{
 };
 
 use crate::{
-    unknown_diagram_error, Buffer, Builder, InputSlot, IterBufferable, Node, Output, StreamPack,
+    unknown_diagram_error, AnyBuffer, AsAnyBuffer, BufferKeyMap, BufferMap, Bufferable, Builder,
+    InputSlot, JoinedValue, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
 use schemars::{
@@ -27,10 +28,10 @@ use tracing::debug;
 use crate::SerializeMessage;
 
 use super::{
+    buffer::BufferAccessRequest,
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
-    join::register_join_impl,
     register_serialize,
     type_info::TypeInfo,
     unzip::DynUnzip,
@@ -67,12 +68,13 @@ impl<T: Any> From<InputSlot<T>> for DynInputSlot {
     }
 }
 
-#[derive(Debug)]
 /// A type erased [`crate::Output`]
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
     pub(super) type_info: TypeInfo,
+
+    into_any_buffer_impl: fn(Self, &mut Builder) -> Result<AnyBuffer, DiagramErrorCode>,
 }
 
 impl DynOutput {
@@ -90,12 +92,29 @@ impl DynOutput {
         }
     }
 
+    pub(super) fn into_any_buffer(
+        self,
+        builder: &mut Builder,
+    ) -> Result<AnyBuffer, DiagramErrorCode> {
+        (self.into_any_buffer_impl)(self, builder)
+    }
+
     pub(super) fn scope(&self) -> Entity {
         self.scope
     }
 
     pub(super) fn id(&self) -> Entity {
         self.target
+    }
+}
+
+impl Debug for DynOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynOutput")
+            .field("scope", &self.scope)
+            .field("target", &self.target)
+            .field("type_info", &self.type_info)
+            .finish()
     }
 }
 
@@ -108,6 +127,9 @@ where
             scope: output.scope(),
             target: output.id(),
             type_info: TypeInfo::of::<T>(),
+            into_any_buffer_impl: |me, builder| {
+                Ok(me.into_output::<T>()?.into_buffer(builder).as_any_buffer())
+            },
         }
     }
 }
@@ -149,10 +171,8 @@ where
 pub struct NodeRegistration {
     pub(super) id: BuilderId,
     pub(super) name: String,
-    /// type name of the request
-    pub(super) request: &'static str,
-    /// type name of the response
-    pub(super) response: &'static str,
+    pub(super) request: TypeInfo,
+    pub(super) response: TypeInfo,
     pub(super) config_schema: Schema,
 
     /// Creates an instance of the registered node.
@@ -211,14 +231,10 @@ type SplitFn = Box<
         &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>,
 >;
-type JoinFn = Box<dyn Fn(&mut Builder, Vec<DynOutput>) -> Result<DynOutput, DiagramErrorCode>>;
-type BufferAccessFn = Box<
-    dyn Fn(
-        &mut Builder,
-        DynOutput,
-        Vec<Buffer<BoxedMessage>>,
-    ) -> Result<DynOutput, DiagramErrorCode>,
->;
+type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
+type BufferAccessFn =
+    fn(&mut Builder, DynOutput, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
+type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 
 #[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
@@ -263,8 +279,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         let registration = NodeRegistration {
             id: options.id.clone(),
             name: options.name.unwrap_or(options.id.clone()),
-            request: type_name::<Request>(),
-            response: type_name::<Response>(),
+            request: TypeInfo::of::<Request>(),
+            response: TypeInfo::of::<Response>(),
             config_schema: self
                 .registry
                 .messages
@@ -298,7 +314,6 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.registry
             .messages
             .register_fork_clone::<Message, Cloneable>();
-        register_join_impl::<Message, SerializeImpl>(&mut self.registry.messages);
 
         MessageRegistrationBuilder::<Message>::new(&mut self.registry.messages)
     }
@@ -353,7 +368,7 @@ where
         }
     }
 
-    /// Mark the node as having a unzippable response. This is required in order for the node
+    /// Mark the message as having a unzippable response. This is required in order for the node
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
@@ -363,7 +378,7 @@ where
         self
     }
 
-    /// Mark the node as having an unzippable response whose elements are not serializable.
+    /// Mark the message as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_minimal(&mut self) -> &mut Self
     where
         DefaultImplMarker<(Message, NotSupported)>: DynUnzip,
@@ -372,7 +387,7 @@ where
         self
     }
 
-    /// Mark the node as having a [`Result<_, _>`] response. This is required in order for the node
+    /// Mark the message as having a [`Result<_, _>`] response. This is required in order for the node
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
@@ -383,7 +398,7 @@ where
         self
     }
 
-    /// Mark the node as having a splittable response. This is required in order
+    /// Mark the message as having a splittable response. This is required in order
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
@@ -394,7 +409,7 @@ where
         self
     }
 
-    /// Mark the node as having a splittable response but the items from the split
+    /// Mark the message as having a splittable response but the items from the split
     /// are unserializable.
     pub fn with_split_minimal(&mut self) -> &mut Self
     where
@@ -402,6 +417,33 @@ where
     {
         self.data
             .register_split::<Message, DefaultImpl, NotSupported>();
+        self
+    }
+
+    /// Mark the message as being joinable.
+    pub fn with_join(&mut self) -> &mut Self
+    where
+        Message: JoinedValue,
+    {
+        self.data.register_join::<Message>();
+        self
+    }
+
+    /// Mark the message as being a buffer access.
+    pub fn with_buffer_access(&mut self) -> &mut Self
+    where
+        Message: BufferAccessRequest,
+    {
+        self.data.register_buffer_access::<Message>();
+        self
+    }
+
+    /// Mark the message as being listenable.
+    pub fn with_listen(&mut self) -> &mut Self
+    where
+        Message: BufferKeyMap,
+    {
+        self.data.register_listen::<Message>();
         self
     }
 }
@@ -413,7 +455,7 @@ pub struct NodeRegistrationBuilder<'a, Request, Response, Streams> {
 
 impl<'a, Request, Response, Streams> NodeRegistrationBuilder<'a, Request, Response, Streams>
 where
-    Request: Any,
+    Request: Send + Sync + 'static + Any,
     Response: Send + Sync + 'static + Any,
 {
     fn new(registry: &'a mut MessageRegistry) -> Self {
@@ -471,6 +513,33 @@ where
         MessageRegistrationBuilder::new(self.registry).with_split_minimal();
         self
     }
+
+    /// Mark the node as having a joinable request.
+    pub fn with_join(&mut self) -> &mut Self
+    where
+        Request: JoinedValue,
+    {
+        MessageRegistrationBuilder::<Request>::new(self.registry).with_join();
+        self
+    }
+
+    /// Mark the node as having a buffer access request.
+    pub fn with_buffer_access(&mut self) -> &mut Self
+    where
+        Request: BufferAccessRequest,
+    {
+        MessageRegistrationBuilder::<Request>::new(self.registry).with_buffer_access();
+        self
+    }
+
+    /// Mark the node as having a listen request.
+    pub fn with_listen(&mut self) -> &mut Self
+    where
+        Request: BufferKeyMap,
+    {
+        MessageRegistrationBuilder::<Request>::new(self.registry).with_listen();
+        self
+    }
 }
 
 pub trait IntoNodeRegistration {
@@ -499,7 +568,8 @@ pub(super) struct MessageOperation {
     pub(super) fork_result_impl: Option<ForkResultFn>,
     pub(super) split_impl: Option<SplitFn>,
     pub(super) join_impl: Option<JoinFn>,
-    pub(super) buffer_access_impl: BufferAccessFn,
+    pub(super) buffer_access_impl: Option<BufferAccessFn>,
+    pub(super) listen_impl: Option<ListenFn>,
 }
 
 impl MessageOperation {
@@ -537,15 +607,8 @@ impl MessageOperation {
             fork_result_impl: None,
             split_impl: None,
             join_impl: None,
-            buffer_access_impl: Box::new(|builder, output, buffers| {
-                let buffer_output = buffers.join_vec::<4>(builder).output();
-                Ok(output
-                    .into_output::<T>()?
-                    .chain(builder)
-                    .with_access(buffer_output)
-                    .output()
-                    .into())
-            }),
+            buffer_access_impl: None,
+            listen_impl: None,
         }
     }
 
@@ -640,32 +703,41 @@ impl MessageOperation {
         f(builder, output, split_op)
     }
 
-    pub(super) fn join<OutputIter>(
+    pub(super) fn join(
         &self,
         builder: &mut Builder,
-        outputs: OutputIter,
-    ) -> Result<DynOutput, DiagramErrorCode>
-    where
-        OutputIter: IntoIterator<Item = DynOutput>,
-    {
+        buffers: &BufferMap,
+    ) -> Result<DynOutput, DiagramErrorCode> {
         let f = self
             .join_impl
             .as_ref()
             .ok_or(DiagramErrorCode::NotJoinable)?;
-        f(builder, outputs.into_iter().collect())
+        f(builder, buffers)
     }
 
-    pub(super) fn with_buffer_access<BufferIter>(
+    pub(super) fn with_buffer_access(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        buffers: BufferIter,
-    ) -> Result<DynOutput, DiagramErrorCode>
-    where
-        BufferIter: IntoIterator<Item = Buffer<BoxedMessage>>,
-    {
-        let f = &self.buffer_access_impl;
-        f(builder, output, buffers.into_iter().collect())
+        buffers: &BufferMap,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        let f = self
+            .buffer_access_impl
+            .as_ref()
+            .ok_or(DiagramErrorCode::CannotBufferAccess)?;
+        f(builder, output, buffers)
+    }
+
+    pub(super) fn listen(
+        &self,
+        builder: &mut Builder,
+        buffers: &BufferMap,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        let f = self
+            .listen_impl
+            .as_ref()
+            .ok_or(DiagramErrorCode::CannotBufferAccess)?;
+        f(builder, buffers)
     }
 }
 
@@ -1015,27 +1087,14 @@ impl MessageRegistry {
         true
     }
 
-    pub(super) fn join<OutputIter>(
+    pub(super) fn join(
         &self,
         builder: &mut Builder,
-        outputs: OutputIter,
-    ) -> Result<DynOutput, DiagramErrorCode>
-    where
-        OutputIter: IntoIterator<Item = DynOutput>,
-    {
-        let mut i = outputs.into_iter().peekable();
-        let output_type_id = if let Some(o) = i.peek() {
-            Some(o.type_info.clone())
-        } else {
-            None
-        };
-
-        if let Some(output_type_id) = output_type_id {
-            if let Some(reg) = self.messages.get(&output_type_id) {
-                reg.operations.join(builder, i)
-            } else {
-                Err(DiagramErrorCode::NotJoinable)
-            }
+        buffers: &BufferMap,
+        joinable: TypeInfo,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&joinable) {
+            reg.operations.join(builder, buffers)
         } else {
             Err(DiagramErrorCode::NotJoinable)
         }
@@ -1043,9 +1102,9 @@ impl MessageRegistry {
 
     /// Register a join function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_join<T>(&mut self, f: JoinFn) -> bool
+    pub(super) fn register_join<T>(&mut self) -> bool
     where
-        T: Send + Sync + 'static + Any,
+        T: Send + Sync + 'static + Any + JoinedValue,
     {
         let ops = &mut self
             .messages
@@ -1056,26 +1115,79 @@ impl MessageRegistry {
             return false;
         }
 
-        ops.join_impl = Some(f);
+        ops.join_impl =
+            Some(|builder, buffers| Ok(builder.try_join::<T>(buffers)?.output().into()));
 
         true
     }
 
-    pub(super) fn with_buffer_access<BufferIter>(
+    pub(super) fn with_buffer_access(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        buffers: BufferIter,
-    ) -> Result<DynOutput, DiagramErrorCode>
-    where
-        BufferIter: IntoIterator<Item = Buffer<BoxedMessage>>,
-    {
-        if let Some(reg) = self.messages.get(&output.type_info) {
+        buffers: &BufferMap,
+        target_type: TypeInfo,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&target_type) {
             reg.operations.with_buffer_access(builder, output, buffers)
         } else {
-            // `buffer_access_impl` is auto registered in the constructor.
             Err(unknown_diagram_error!())
         }
+    }
+
+    pub(super) fn register_buffer_access<T>(&mut self) -> bool
+    where
+        T: Send + Sync + 'static + BufferAccessRequest,
+    {
+        let ops = &mut self
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>())
+            .operations;
+        if ops.buffer_access_impl.is_some() {
+            return false;
+        }
+
+        ops.buffer_access_impl = Some(|builder, output, buffers| {
+            let buffer_access =
+                builder.try_create_buffer_access::<T::Message, T::BufferKeys>(buffers)?;
+            builder.connect(output.into_output::<T::Message>()?, buffer_access.input);
+            Ok(buffer_access.output.into())
+        });
+
+        true
+    }
+
+    pub(super) fn listen(
+        &self,
+        builder: &mut Builder,
+        buffers: &BufferMap,
+        target_type: TypeInfo,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(&target_type) {
+            reg.operations.listen(builder, buffers)
+        } else {
+            Err(DiagramErrorCode::CannotListen(target_type))
+        }
+    }
+
+    pub(super) fn register_listen<T>(&mut self) -> bool
+    where
+        T: Send + Sync + 'static + Any + BufferKeyMap,
+    {
+        let ops = &mut self
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>())
+            .operations;
+        if ops.listen_impl.is_some() {
+            return false;
+        }
+
+        ops.listen_impl =
+            Some(|builder, buffers| Ok(builder.try_listen::<T>(buffers)?.output().into()));
+
+        true
     }
 
     fn serialize_messages<S>(
@@ -1513,7 +1625,7 @@ mod tests {
         assert!(!ops.unzippable());
         assert!(!ops.can_fork_result());
         assert!(!ops.splittable());
-        assert!(ops.joinable());
+        assert!(!ops.joinable());
     }
 
     #[test]

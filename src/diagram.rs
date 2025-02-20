@@ -16,8 +16,8 @@ use bevy_ecs::system::Commands;
 use buffer::{BufferAccessOp, BufferOp, ListenOp};
 use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
-use join::JoinOp;
 pub use join::JoinOutput;
+use join::{JoinOp, SerializedJoinOp};
 pub use node::NodeOp;
 pub use registration::*;
 pub use serialization::*;
@@ -32,7 +32,9 @@ use workflow_builder::create_workflow;
 
 use std::{collections::HashMap, fmt::Display, io::Read};
 
-use crate::{Builder, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack};
+use crate::{
+    Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -130,7 +132,7 @@ pub enum BuiltinSource {
 #[serde(rename_all = "snake_case")]
 pub struct TerminateOp {}
 
-#[derive(strum::Display, Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, strum::Display, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 #[strum(serialize_all = "snake_case")]
 pub enum DiagramOperation {
@@ -242,25 +244,40 @@ pub enum DiagramOperation {
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "split",
+    ///     "start": "fork_clone",
     ///     "ops": {
-    ///         "split": {
-    ///             "type": "split",
-    ///             "index": ["op1", "op2"]
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
+    ///             "next": ["foo", "bar"]
     ///         },
-    ///         "op1": {
+    ///         "foo": {
     ///             "type": "node",
     ///             "builder": "foo",
-    ///             "next": "join"
+    ///             "next": "foo_buffer"
     ///         },
-    ///         "op2": {
+    ///         "foo_buffer": {
+    ///             "type": "buffer"
+    ///         },
+    ///         "bar": {
     ///             "type": "node",
     ///             "builder": "bar",
-    ///             "next": "join"
+    ///             "next": "bar_buffer"
+    ///         },
+    ///         "bar_buffer": {
+    ///             "type": "buffer"
     ///         },
     ///         "join": {
     ///             "type": "join",
-    ///             "inputs": ["op1", "op2"],
+    ///             "buffers": {
+    ///                 "foo": "foo_buffer",
+    ///                 "bar": "bar_buffer",
+    ///             },
+    ///             "target_node": "foobar",
+    ///             "next": "foobar"
+    ///         },
+    ///         "foobar": {
+    ///             "type": "node",
+    ///             "builder": "foobar",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
@@ -269,6 +286,51 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     /// ```
     Join(JoinOp),
+
+    /// Wait for an item to be emitted from each of the inputs, then combined the
+    /// oldest of each into an array. Unlike `join`, this only works with serialized buffers.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "fork_clone",
+    ///     "ops": {
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
+    ///             "next": ["foo", "bar"]
+    ///         },
+    ///         "foo": {
+    ///             "type": "node",
+    ///             "builder": "foo",
+    ///             "next": "foo_buffer"
+    ///         },
+    ///         "foo_buffer": {
+    ///             "type": "buffer"
+    ///         },
+    ///         "bar": {
+    ///             "type": "node",
+    ///             "builder": "bar",
+    ///             "next": "bar_buffer"
+    ///         },
+    ///         "bar_buffer": {
+    ///             "type": "buffer"
+    ///         },
+    ///         "serialized_join": {
+    ///             "type": "serialized_join",
+    ///             "buffers": {
+    ///                 "foo": "foo_buffer",
+    ///                 "bar": "bar_buffer",
+    ///             },
+    ///             "next": { "builtin": "terminate" }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    SerializedJoin(SerializedJoinOp),
 
     /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
     /// The context includes a "request" variable which contains the request.
@@ -630,6 +692,9 @@ pub enum DiagramErrorCode {
     #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
 
+    #[error("expected operation type [{expected}], for [{got}]")]
+    UnexpectedOperationType { expected: String, got: String },
+
     #[error("type mismatch, source {source_type}, target {target_type}")]
     TypeMismatch {
         source_type: TypeInfo,
@@ -670,6 +735,15 @@ pub enum DiagramErrorCode {
 
     #[error("box/unbox operation for the message is not registered")]
     CannotBoxOrUnbox,
+
+    #[error("cannot access buffer")]
+    CannotBufferAccess,
+
+    #[error("cannot listen on these buffers to produce a request of [{0}]")]
+    CannotListen(TypeInfo),
+
+    #[error(transparent)]
+    IncompatibleBuffers(#[from] IncompatibleLayout),
 
     #[error("one or more operation is missing inputs")]
     IncompleteDiagram,

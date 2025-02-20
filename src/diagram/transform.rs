@@ -25,7 +25,7 @@ pub enum TransformError {
     Other(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct TransformOp {
     pub(super) cel: String,

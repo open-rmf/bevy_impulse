@@ -29,13 +29,12 @@ use crate::{
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    join::register_join_impl,
     type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder},
     DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SplitOp {
     #[serde(default)]
@@ -314,7 +313,6 @@ where
 
     fn on_register(registry: &mut MessageRegistry) {
         registry.register_serialize::<T::Item, Serializer>();
-        register_join_impl::<T::Item, Serializer>(registry);
     }
 }
 

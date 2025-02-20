@@ -12,7 +12,7 @@ use super::{
     DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
 };
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkCloneOp {
     pub(super) next: Vec<NextOperation>,
