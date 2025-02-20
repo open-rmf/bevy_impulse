@@ -22,10 +22,10 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessed, Accessible, AddOperation, AsMap, Buffer, BufferKeyMap, BufferKeys, BufferLocation,
-    BufferMap, BufferSettings, Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput,
+    Accessible, Accessing, Accessor, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation,
+    BufferMap, BufferSettings, Bufferable, Buffering, Chain, Collect, ForkClone, ForkCloneOutput,
     ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
-    IntoBlockingMap, Joinable, JoinedValue, Node, OperateBuffer, OperateDynamicGate, OperateScope,
+    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
     OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
     ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
     Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
@@ -237,11 +237,11 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Try joining a map of buffers into a single value.
-    pub fn try_join<'b, Joined: JoinedValue>(
+    pub fn try_join<'b, J: Joined>(
         &'b mut self,
         buffers: &BufferMap,
-    ) -> Result<Chain<'w, 's, 'a, 'b, Joined>, IncompatibleLayout> {
-        Joined::try_join_from(buffers, self)
+    ) -> Result<Chain<'w, 's, 'a, 'b, J>, IncompatibleLayout> {
+        J::try_join_from(buffers, self)
     }
 
     /// Alternative way of calling [`Accessible::listen`].
@@ -250,7 +250,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     }
 
     /// Try listening to a map of buffers.
-    pub fn try_listen<'b, Keys: BufferKeyMap>(
+    pub fn try_listen<'b, Keys: Accessor>(
         &'b mut self,
         buffers: &BufferMap,
     ) -> Result<Chain<'w, 's, 'a, 'b, Keys>, IncompatibleLayout> {
@@ -269,7 +269,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         buffers: B,
     ) -> Node<T, (T, BufferKeys<B>)>
     where
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
@@ -279,7 +279,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     /// Try to create access to some buffers. Same as [`Self::create_buffer_access`]
     /// except it will return an error if the buffers in the [`BufferMap`] are not
     /// compatible with the keys that are being asked for.
-    pub fn try_create_buffer_access<T, Keys: BufferKeyMap>(
+    pub fn try_create_buffer_access<T, Keys: Accessor>(
         &mut self,
         buffers: &BufferMap,
     ) -> Result<Node<T, (T, Keys)>, IncompatibleLayout>
@@ -393,7 +393,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
         from_buffers.into_buffer(self).on_cleanup(self, build);
@@ -418,7 +418,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
         from_buffers.into_buffer(self).on_cancel(self, build);
@@ -437,7 +437,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
         from_buffers.into_buffer(self).on_terminate(self, build);
@@ -453,7 +453,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
         from_buffers
@@ -1168,7 +1168,9 @@ mod tests {
             context.command(|commands| commands.request(input, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.take().available().is_some_and(|v| v == expectation));
+        assert!(Promise::take(&mut promise)
+            .available()
+            .is_some_and(|v| v == expectation));
         assert!(context.no_unhandled_errors());
     }
 }

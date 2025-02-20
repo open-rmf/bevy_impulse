@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    unknown_diagram_error, AnyBuffer, BufferIdentifier, BufferKeyMap, BufferMap, BufferSettings,
+    unknown_diagram_error, Accessor, AnyBuffer, BufferIdentifier, BufferMap, BufferSettings,
     Builder, InputSlot, Output,
 };
 
@@ -255,13 +255,13 @@ impl BufferAccessOp {
 
 pub(super) trait BufferAccessRequest {
     type Message: Send + Sync + 'static;
-    type BufferKeys: BufferKeyMap;
+    type BufferKeys: Accessor;
 }
 
 impl<T, B> BufferAccessRequest for (T, B)
 where
     T: Send + Sync + 'static,
-    B: BufferKeyMap,
+    B: Accessor,
 {
     type Message = T;
     type BufferKeys = B;

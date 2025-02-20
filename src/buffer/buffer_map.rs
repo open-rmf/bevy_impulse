@@ -24,12 +24,12 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    add_listener_to_source, Accessed, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
-    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffered, Builder, Chain, Gate, GateState,
-    Joined, Node, OperationError, OperationResult, OperationRoster,
+    add_listener_to_source, Accessing, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
+    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffering, Builder, Chain, Gate, GateState,
+    Joining, Node, OperationError, OperationResult, OperationRoster,
 };
 
-pub use bevy_impulse_derive::JoinedValue;
+pub use bevy_impulse_derive::{Accessor, Joined};
 
 /// Uniquely identify a buffer within a buffer map, either by name or by an
 /// index value.
@@ -199,18 +199,18 @@ pub struct BufferIncompatibility {
 
 /// This trait can be implemented on structs that represent a layout of buffers.
 /// You do not normally have to implement this yourself. Instead you should
-/// `#[derive(JoinedValue)]` on a struct that you want a join operation to
+/// `#[derive(Joined)]` on a struct that you want a join operation to
 /// produce.
 pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
     /// Try to convert a generic [`BufferMap`] into this specific layout.
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout>;
 }
 
-/// This trait helps auto-generated buffer map structs to implement the Buffered
+/// This trait helps auto-generated buffer map structs to implement the Buffering
 /// trait.
 pub trait BufferMapStruct: Sized + Clone + 'static + Send + Sync {
     /// Produce a list of the buffers that exist in this layout. Implementing
-    /// this function alone is sufficient to implement the entire [`Buffered`] trait.
+    /// this function alone is sufficient to implement the entire [`Buffering`] trait.
     fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]>;
 }
 
@@ -222,7 +222,7 @@ impl<T: BufferMapStruct> Bufferable for T {
     }
 }
 
-impl<T: BufferMapStruct> Buffered for T {
+impl<T: BufferMapStruct> Buffering for T {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.buffer_list() {
             assert_eq!(buffer.scope(), scope);
@@ -282,13 +282,71 @@ impl<T: BufferMapStruct> Buffered for T {
 }
 
 /// This trait can be implemented for structs that are created by joining together
-/// values from a collection of buffers. Usually you do not need to implement this
-/// yourself. Instead you can use `#[derive(JoinedValue)]`.
-pub trait JoinedValue: 'static + Send + Sync + Sized {
+/// values from a collection of buffers. This allows [`join`][1] to produce arbitrary
+/// structs. Structs with this trait can be produced by [`try_join`][2].
+///
+/// Each field in this struct needs to have the trait bounds `'static + Send + Sync`.
+///
+/// This does not generally need to be implemented explicitly. Instead you should
+/// use `#[derive(Joined)]`:
+///
+/// ```
+/// use bevy_impulse::prelude::*;
+///
+/// #[derive(Joined)]
+/// struct SomeValues {
+///     integer: i64,
+///     string: String,
+/// }
+/// ```
+///
+/// The above example would allow you to join a value from an `i64` buffer with
+/// a value from a `String` buffer. You can have as many fields in the struct
+/// as you'd like.
+///
+/// This macro will generate a struct of buffers to match the fields of the
+/// struct that it's applied to. The name of that struct is anonymous by default
+/// since you don't generally need to use it directly, but if you want to give
+/// it a name you can use #[joined(buffers_struct_name = ...)]`:
+///
+/// ```
+/// # use bevy_impulse::prelude::*;
+///
+/// #[derive(Joined)]
+/// #[joined(buffers_struct_name = SomeBuffers)]
+/// struct SomeValues {
+///     integer: i64,
+///     string: String,
+/// }
+/// ```
+///
+/// By default each field of the generated buffers struct will have a type of
+/// [`Buffer<T>`], but you can override this using `#[joined(buffer = ...)]`
+/// to specify a special buffer type. For example if your `Joined` struct
+/// contains an [`AnyMessageBox`] then by default the macro will use `Buffer<AnyMessageBox>`,
+/// but you probably really want it to have an [`AnyBuffer`]:
+///
+/// ```
+/// # use bevy_impulse::prelude::*;
+///
+/// #[derive(Joined)]
+/// struct SomeValues {
+///     integer: i64,
+///     string: String,
+///     #[joined(buffer = AnyBuffer)]
+///     any: AnyMessageBox,
+/// }
+/// ```
+///
+/// The above method also works for joining a `JsonMessage` field from a `JsonBuffer`.
+///
+/// [1]: crate::Builder::join
+/// [2]: crate::Builder::try_join
+pub trait Joined: 'static + Send + Sync + Sized {
     /// This associated type must represent a buffer map layout that implements
-    /// the [`Joined`] trait. The message type yielded by [`Joined`] for this
-    /// associated type must match the [`JoinedValue`] type.
-    type Buffers: 'static + BufferMapLayout + Joined<Item = Self> + Send + Sync;
+    /// the [`Joining`] trait. The message type yielded by [`Joining`] for this
+    /// associated type must match the [`Joined`] type.
+    type Buffers: 'static + BufferMapLayout + Joining<Item = Self> + Send + Sync;
 
     /// Used by [`Builder::try_join`]
     fn try_join_from<'w, 's, 'a, 'b>(
@@ -300,9 +358,49 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
     }
 }
 
-/// Trait to describe a set of buffer keys.
-pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
-    type Buffers: 'static + BufferMapLayout + Accessed<Key = Self> + Send + Sync;
+/// Trait to describe a set of buffer keys. This allows [listen][1] and [access][2]
+/// to work for arbitrary structs of buffer keys. Structs with this trait can be
+/// produced by [`try_listen`][3] and [`try_create_buffer_access`][4].
+///
+/// Each field in the struct must be some kind of buffer key.
+///
+/// This does not generally need to be implemented explicitly. Instead you should
+/// define a struct where all fields are buffer keys and then apply
+/// `#[derive(Accessor)]` to it, e.g.:
+///
+/// ```
+/// use bevy_impulse::prelude::*;
+///
+/// #[derive(Clone, Accessor)]
+/// struct SomeKeys {
+///     integer: BufferKey<i64>,
+///     string: BufferKey<String>,
+///     any: AnyBufferKey,
+/// }
+/// ```
+///
+/// The macro will generate a struct of buffers to match the keys. The name of
+/// that struct is anonymous by default since you don't generally need to use it
+/// directly, but if you want to give it a name you can use `#[key(buffers_struct_name = ...)]`:
+///
+/// ```
+/// # use bevy_impulse::prelude::*;
+///
+/// #[derive(Clone, Accessor)]
+/// #[key(buffers_struct_name = SomeBuffers)]
+/// struct SomeKeys {
+///     integer: BufferKey<i64>,
+///     string: BufferKey<String>,
+///     any: AnyBufferKey,
+/// }
+/// ```
+///
+/// [1]: crate::Builder::listen
+/// [2]: crate::Builder::create_buffer_access
+/// [3]: crate::Builder::try_listen
+/// [4]: crate::Builder::try_create_buffer_access
+pub trait Accessor: 'static + Send + Sync + Sized + Clone {
+    type Buffers: 'static + BufferMapLayout + Accessing<Key = Self> + Send + Sync;
 
     fn try_listen_from<'w, 's, 'a, 'b>(
         buffers: &BufferMap,
@@ -333,7 +431,7 @@ impl BufferMapStruct for BufferMap {
     }
 }
 
-impl Joined for BufferMap {
+impl Joining for BufferMap {
     type Item = HashMap<BufferIdentifier<'static>, AnyMessageBox>;
 
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
@@ -346,11 +444,11 @@ impl Joined for BufferMap {
     }
 }
 
-impl JoinedValue for HashMap<BufferIdentifier<'static>, AnyMessageBox> {
+impl Joined for HashMap<BufferIdentifier<'static>, AnyMessageBox> {
     type Buffers = BufferMap;
 }
 
-impl Accessed for BufferMap {
+impl Accessing for BufferMap {
     type Key = HashMap<BufferIdentifier<'static>, AnyBufferKey>;
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
@@ -391,7 +489,7 @@ impl Accessed for BufferMap {
     }
 }
 
-impl<T: 'static + Send + Sync> JoinedValue for Vec<T> {
+impl<T: 'static + Send + Sync> Joined for Vec<T> {
     type Buffers = Vec<Buffer<T>>;
 }
 
@@ -410,7 +508,7 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> 
     }
 }
 
-impl<T: 'static + Send + Sync, const N: usize> JoinedValue for SmallVec<[T; N]> {
+impl<T: 'static + Send + Sync, const N: usize> Joined for SmallVec<[T; N]> {
     type Buffers = SmallVec<[Buffer<T>; N]>;
 }
 
@@ -433,9 +531,9 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone, const N: usize> BufferMapLa
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, Accessed, AddBufferToMap, BufferMap};
+    use crate::{prelude::*, testing::*, AddBufferToMap, BufferMap};
 
-    #[derive(JoinedValue)]
+    #[derive(Joined)]
     struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
         integer: i64,
         float: f64,
@@ -542,7 +640,7 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    #[derive(Clone, JoinedValue)]
+    #[derive(Clone, Joined)]
     #[joined(buffers_struct_name = FooBuffers)]
     struct TestDeriveWithConfig {}
 
@@ -557,7 +655,7 @@ mod tests {
         u: U,
     }
 
-    #[derive(JoinedValue)]
+    #[derive(Joined)]
     #[joined(buffers_struct_name = MultiGenericBuffers)]
     struct JoinedMultiGenericValue<T: 'static + Send + Sync, U: 'static + Send + Sync> {
         #[joined(buffer = Buffer<MultiGenericValue<T, U>>)]
@@ -616,7 +714,7 @@ mod tests {
 
     /// We create this struct just to verify that it is able to compile despite
     /// NonCopyBuffer not being copyable.
-    #[derive(JoinedValue)]
+    #[derive(Joined)]
     #[allow(unused)]
     struct JoinedValueForNonCopyBuffer {
         #[joined(buffer = NonCopyBuffer<String>, noncopy_buffer)]
@@ -624,7 +722,8 @@ mod tests {
         _b: u32,
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Accessor)]
+    #[key(buffers_struct_name = TestKeysBuffers)]
     struct TestKeys<T: 'static + Send + Sync + Clone> {
         integer: BufferKey<i64>,
         float: BufferKey<f64>,
@@ -632,106 +731,159 @@ mod tests {
         generic: BufferKey<T>,
         any: AnyBufferKey,
     }
+    #[test]
+    fn test_listen() {
+        let mut context = TestingContext::minimal_plugins();
 
-    impl<T: 'static + Send + Sync + Clone> BufferKeyMap for TestKeys<T> {
-        type Buffers = TestKeysBuffers<T>;
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_any = builder.create_buffer::<i64>(BufferSettings::default());
+
+            let buffers = TestKeys::select_buffers(
+                builder.create_buffer(BufferSettings::default()),
+                builder.create_buffer(BufferSettings::default()),
+                builder.create_buffer(BufferSettings::default()),
+                builder.create_buffer(BufferSettings::default()),
+                buffer_any.as_any_buffer(),
+            );
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffers.integer.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.float.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffers.generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
+            ));
+
+            builder
+                .listen(buffers)
+                .then(join_via_listen.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
+                    workflow,
+                )
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
+        assert!(context.no_unhandled_errors());
     }
 
-    #[derive(Clone)]
-    struct TestKeysBuffers<T: 'static + Send + Sync + Clone> {
-        integer: <BufferKey<i64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
-        float: <BufferKey<f64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
-        string: <BufferKey<String> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
-        generic: <BufferKey<T> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
-        any: <AnyBufferKey as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer,
+    #[test]
+    fn test_try_listen() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let buffer_i64 = builder.create_buffer::<i64>(BufferSettings::default());
+            let buffer_f64 = builder.create_buffer::<f64>(BufferSettings::default());
+            let buffer_string = builder.create_buffer::<String>(BufferSettings::default());
+            let buffer_generic = builder.create_buffer::<&'static str>(BufferSettings::default());
+            let buffer_any = builder.create_buffer::<i64>(BufferSettings::default());
+
+            scope.input.chain(builder).fork_unzip((
+                |chain: Chain<_>| chain.connect(buffer_i64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_f64.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_string.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_generic.input_slot()),
+                |chain: Chain<_>| chain.connect(buffer_any.input_slot()),
+            ));
+
+            let mut buffer_map = BufferMap::new();
+            buffer_map.insert_buffer("integer", buffer_i64);
+            buffer_map.insert_buffer("float", buffer_f64);
+            buffer_map.insert_buffer("string", buffer_string);
+            buffer_map.insert_buffer("generic", buffer_generic);
+            buffer_map.insert_buffer("any", buffer_any);
+
+            builder
+                .try_listen(&buffer_map)
+                .unwrap()
+                .then(join_via_listen.into_blocking_callback())
+                .dispose_on_none()
+                .connect(scope.terminate);
+        });
+
+        let mut promise = context.command(|commands| {
+            commands
+                .request(
+                    (5_i64, 3.14_f64, "hello".to_string(), "world", 42_i64),
+                    workflow,
+                )
+                .take_response()
+        });
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        let value: TestJoinedValue<&'static str> = promise.take().available().unwrap();
+        assert_eq!(value.integer, 5);
+        assert_eq!(value.float, 3.14);
+        assert_eq!(value.string, "hello");
+        assert_eq!(value.generic, "world");
+        assert_eq!(*value.any.downcast::<i64>().unwrap(), 42);
+        assert!(context.no_unhandled_errors());
     }
 
-    impl<T: 'static + Send + Sync + Clone> BufferMapLayout for TestKeysBuffers<T> {
-        fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
-            let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
-            let integer = compatibility.require_buffer_by_literal::<<BufferKey<i64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("integer", buffers);
-            let float = compatibility.require_buffer_by_literal::<<BufferKey<f64> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("float", buffers);
-            let string = compatibility.require_buffer_by_literal::<<BufferKey<String> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("string", buffers);
-            let generic = compatibility.require_buffer_by_literal::<<BufferKey<T> as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("generic", buffers);
-            let any = compatibility.require_buffer_by_literal::<<AnyBufferKey as ::bevy_impulse::BufferKeyLifecycle>::TargetBuffer>("any", buffers);
-
-            let Ok(integer) = integer else {
-                return Err(compatibility);
-            };
-            let Ok(float) = float else {
-                return Err(compatibility);
-            };
-            let Ok(string) = string else {
-                return Err(compatibility);
-            };
-            let Ok(generic) = generic else {
-                return Err(compatibility);
-            };
-            let Ok(any) = any else {
-                return Err(compatibility);
-            };
-
-            Ok(Self {
-                integer,
-                float,
-                string,
-                generic,
-                any,
-            })
+    /// This macro is a manual implementation of the join operation that uses
+    /// the buffer listening mechanism. There isn't any reason to reimplement
+    /// join here except so we can test that listening is working correctly for
+    /// Accessor.
+    fn join_via_listen(
+        In(keys): In<TestKeys<&'static str>>,
+        world: &mut World,
+    ) -> Option<TestJoinedValue<&'static str>> {
+        if world.buffer_view(&keys.integer).ok()?.is_empty() {
+            return None;
         }
-    }
-
-    impl<T: 'static + Send + Sync + Clone> ::bevy_impulse::BufferMapStruct for TestKeysBuffers<T> {
-        fn buffer_list(&self) -> smallvec::SmallVec<[AnyBuffer; 8]> {
-            smallvec::smallvec![
-                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.integer),
-                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.float),
-                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.string),
-                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.generic),
-                ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.any),
-            ]
+        if world.buffer_view(&keys.float).ok()?.is_empty() {
+            return None;
         }
-    }
-
-    impl<T: 'static + Send + Sync + Clone> Accessed for TestKeysBuffers<T> {
-        type Key = TestKeys<T>;
-
-        fn add_accessor(&self, accessor: Entity, world: &mut World) -> crate::OperationResult {
-            ::bevy_impulse::Accessed::add_accessor(&self.integer, accessor, world)?;
-            ::bevy_impulse::Accessed::add_accessor(&self.float, accessor, world)?;
-            ::bevy_impulse::Accessed::add_accessor(&self.string, accessor, world)?;
-            ::bevy_impulse::Accessed::add_accessor(&self.generic, accessor, world)?;
-            ::bevy_impulse::Accessed::add_accessor(&self.any, accessor, world)?;
-            Ok(())
+        if world.buffer_view(&keys.string).ok()?.is_empty() {
+            return None;
+        }
+        if world.buffer_view(&keys.generic).ok()?.is_empty() {
+            return None;
+        }
+        if world.any_buffer_view(&keys.any).ok()?.is_empty() {
+            return None;
         }
 
-        fn create_key(&self, builder: &crate::BufferKeyBuilder) -> Self::Key {
-            TestKeys {
-                integer: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.integer, builder),
-                float: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.float, builder),
-                string: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.string, builder),
-                generic: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.generic, builder),
-                any: ::bevy_impulse::BufferKeyLifecycle::create_key(&self.any, builder),
-            }
-        }
+        let integer = world
+            .buffer_mut(&keys.integer, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let float = world
+            .buffer_mut(&keys.float, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let string = world
+            .buffer_mut(&keys.string, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let generic = world
+            .buffer_mut(&keys.generic, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
+        let any = world
+            .any_buffer_mut(&keys.any, |mut buffer| buffer.pull())
+            .unwrap()
+            .unwrap();
 
-        fn deep_clone_key(key: &Self::Key) -> Self::Key {
-            TestKeys {
-                integer: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.integer),
-                float: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.float),
-                string: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.string),
-                generic: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.generic),
-                any: ::bevy_impulse::BufferKeyLifecycle::deep_clone(&key.any),
-            }
-        }
-
-        fn is_key_in_use(key: &Self::Key) -> bool {
-            false
-                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.integer)
-                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.float)
-                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.string)
-                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.generic)
-                || ::bevy_impulse::BufferKeyLifecycle::is_in_use(&key.any)
-        }
+        Some(TestJoinedValue {
+            integer,
+            float,
+            string,
+            generic,
+            any,
+        })
     }
 }

@@ -24,12 +24,12 @@ use smallvec::SmallVec;
 use std::error::Error;
 
 use crate::{
-    make_option_branching, make_result_branching, Accessed, AddOperation, AsMap, Buffer, BufferKey,
-    BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
-    ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
-    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateSplit,
-    OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service,
-    Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    make_option_branching, make_result_branching, Accessing, AddOperation, AsMap, Buffer,
+    BufferKey, BufferKeys, Bufferable, Buffering, Builder, Collect, CreateCancelFilter,
+    CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
+    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate,
+    OperateSplit, OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish,
+    Service, Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -302,7 +302,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn with_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
     where
         B: Bufferable,
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -323,7 +323,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
     where
         B: Bufferable,
-        B::BufferType: Accessed,
+        B::BufferType: Accessing,
     {
         self.with_access(buffers).map_block(|(_, key)| key)
     }

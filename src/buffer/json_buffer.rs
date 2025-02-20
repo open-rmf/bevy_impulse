@@ -36,11 +36,11 @@ pub use serde_json::Value as JsonMessage;
 use smallvec::SmallVec;
 
 use crate::{
-    add_listener_to_source, Accessed, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
+    add_listener_to_source, Accessing, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
     AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferIdentifier,
     BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferMap,
-    BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffered, Builder, DrainBuffer,
-    Gate, GateState, IncompatibleLayout, InspectBuffer, Joined, JoinedValue, ManageBuffer,
+    BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffering, Builder, DrainBuffer,
+    Gate, GateState, IncompatibleLayout, InspectBuffer, Joined, Joining, ManageBuffer,
     NotifyBufferUpdate, OperationError, OperationResult, OrBroken,
 };
 
@@ -988,7 +988,7 @@ impl Bufferable for JsonBuffer {
     }
 }
 
-impl Buffered for JsonBuffer {
+impl Buffering for JsonBuffer {
     fn verify_scope(&self, scope: Entity) {
         assert_eq!(scope, self.scope());
     }
@@ -1022,7 +1022,7 @@ impl Buffered for JsonBuffer {
     }
 }
 
-impl Joined for JsonBuffer {
+impl Joining for JsonBuffer {
     type Item = JsonMessage;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
@@ -1030,7 +1030,7 @@ impl Joined for JsonBuffer {
     }
 }
 
-impl Accessed for JsonBuffer {
+impl Accessing for JsonBuffer {
     type Key = JsonBufferKey;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
@@ -1056,7 +1056,7 @@ impl Accessed for JsonBuffer {
     }
 }
 
-impl JoinedValue for serde_json::Map<String, JsonMessage> {
+impl Joined for serde_json::Map<String, JsonMessage> {
     type Buffers = HashMap<String, JsonBuffer>;
 }
 
@@ -1092,7 +1092,7 @@ impl BufferMapStruct for HashMap<String, JsonBuffer> {
     }
 }
 
-impl Joined for HashMap<String, JsonBuffer> {
+impl Joining for HashMap<String, JsonBuffer> {
     type Item = serde_json::Map<String, JsonMessage>;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         self.iter()
@@ -1411,7 +1411,7 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    #[derive(Clone, JoinedValue)]
+    #[derive(Clone, Joined)]
     #[joined(buffers_struct_name = TestJoinedValueJsonBuffers)]
     struct TestJoinedValueJson {
         integer: i64,
@@ -1580,5 +1580,16 @@ mod tests {
         assert_eq!(values[1], serde_json::Value::Number(2.into()));
         assert_eq!(values[2], serde_json::Value::String("hello".to_string()));
         assert_eq!(values[3], serde_json::to_value(TestMessage::new()).unwrap());
+    }
+
+    // We define this struct just to make sure the Accessor macro successfully
+    // compiles with JsonBufferKey.
+    #[derive(Clone, Accessor)]
+    #[allow(unused)]
+    struct TestJsonKeyMap {
+        integer: BufferKey<i64>,
+        string: BufferKey<String>,
+        json: JsonBufferKey,
+        any: AnyBufferKey,
     }
 }

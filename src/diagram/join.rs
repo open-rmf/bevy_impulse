@@ -167,16 +167,16 @@ pub type JoinOutput<T> = SmallVec<[T; 4]>;
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error, sync::Arc};
+    use std::error::Error;
 
-    use bevy_impulse_derive::JoinedValue;
+    use bevy_impulse_derive::Joined;
     use serde_json::json;
     use test_log::test;
 
     use super::*;
     use crate::{
         diagram::testing::DiagramTestFixture, Cancellation, CancellationCause, Diagram,
-        DiagramErrorCode, Filtered, FilteredErr, NodeBuilderOptions,
+        DiagramErrorCode, FilteredErr, NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -187,7 +187,7 @@ mod tests {
         "bar".to_string()
     }
 
-    #[derive(Serialize, Deserialize, JsonSchema, JoinedValue)]
+    #[derive(Serialize, Deserialize, JsonSchema, Joined)]
     struct FooBar {
         foo: String,
         bar: String,
@@ -342,7 +342,7 @@ mod tests {
                     "type": "join",
                     "buffers": [],
                     "target_node": "foobar",
-                    "next": { "builtin": "terminate" },
+                    "next": "foobar",
                 },
                 "foobar": {
                     "type": "node",

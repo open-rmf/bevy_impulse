@@ -8,8 +8,8 @@ use std::{
 };
 
 use crate::{
-    unknown_diagram_error, AnyBuffer, AsAnyBuffer, BufferKeyMap, BufferMap, Bufferable, Builder,
-    InputSlot, JoinedValue, Node, Output, StreamPack,
+    unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, Bufferable, Builder,
+    InputSlot, Joined, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
 use schemars::{
@@ -423,7 +423,7 @@ where
     /// Mark the message as being joinable.
     pub fn with_join(&mut self) -> &mut Self
     where
-        Message: JoinedValue,
+        Message: Joined,
     {
         self.data.register_join::<Message>();
         self
@@ -441,7 +441,7 @@ where
     /// Mark the message as being listenable.
     pub fn with_listen(&mut self) -> &mut Self
     where
-        Message: BufferKeyMap,
+        Message: Accessor,
     {
         self.data.register_listen::<Message>();
         self
@@ -517,7 +517,7 @@ where
     /// Mark the node as having a joinable request.
     pub fn with_join(&mut self) -> &mut Self
     where
-        Request: JoinedValue,
+        Request: Joined,
     {
         MessageRegistrationBuilder::<Request>::new(self.registry).with_join();
         self
@@ -535,7 +535,7 @@ where
     /// Mark the node as having a listen request.
     pub fn with_listen(&mut self) -> &mut Self
     where
-        Request: BufferKeyMap,
+        Request: Accessor,
     {
         MessageRegistrationBuilder::<Request>::new(self.registry).with_listen();
         self
@@ -1104,7 +1104,7 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_join<T>(&mut self) -> bool
     where
-        T: Send + Sync + 'static + Any + JoinedValue,
+        T: Send + Sync + 'static + Any + Joined,
     {
         let ops = &mut self
             .messages
@@ -1173,7 +1173,7 @@ impl MessageRegistry {
 
     pub(super) fn register_listen<T>(&mut self) -> bool
     where
-        T: Send + Sync + 'static + Any + BufferKeyMap,
+        T: Send + Sync + 'static + Any + Accessor,
     {
         let ops = &mut self
             .messages
