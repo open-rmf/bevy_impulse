@@ -65,7 +65,7 @@ pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
 /// The result error is the compiler error message to be displayed.
 type Result<T> = std::result::Result<T, String>;
 
-#[proc_macro_derive(JoinedValue, attributes(joined))]
+#[proc_macro_derive(Joined, attributes(joined))]
 pub fn derive_joined_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     match impl_joined_value(&input) {
@@ -77,7 +77,7 @@ pub fn derive_joined_value(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(BufferKeyMap, attributes(key))]
+#[proc_macro_derive(Accessor, attributes(key))]
 pub fn derive_buffer_key_map(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     match impl_buffer_key_map(&input) {

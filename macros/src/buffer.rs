@@ -57,7 +57,7 @@ pub(crate) fn impl_joined_value(input_struct: &ItemStruct) -> Result<TokenStream
     let impl_joined = impl_joined(&buffer_struct, &input_struct, &field_ident)?;
 
     let gen = quote! {
-        impl #impl_generics ::bevy_impulse::JoinedValue for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::bevy_impulse::Joined for #struct_ident #ty_generics #where_clause {
             type Buffers = #buffer_struct_ident #ty_generics;
         }
 
@@ -122,7 +122,7 @@ pub(crate) fn impl_buffer_key_map(input_struct: &ItemStruct) -> Result<TokenStre
     let impl_accessed = impl_accessed(&buffer_struct, &input_struct, &field_ident, &field_type)?;
 
     let gen = quote! {
-        impl #impl_generics ::bevy_impulse::BufferKeyMap for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::bevy_impulse::Accessor for #struct_ident #ty_generics #where_clause {
             type Buffers = #buffer_struct_ident #ty_generics;
         }
 
@@ -413,8 +413,8 @@ fn impl_buffer_map_layout(
 }
 
 /// Params:
-///   joined_struct: The struct to implement `Joined`.
-///   item_struct: The associated `Item` type to use for the `Joined` implementation.
+///   joined_struct: The struct to implement `Joining`.
+///   item_struct: The associated `Item` type to use for the `Joining` implementation.
 fn impl_joined(
     joined_struct: &ItemStruct,
     item_struct: &ItemStruct,
@@ -425,7 +425,7 @@ fn impl_joined(
     let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
 
     Ok(quote! {
-        impl #impl_generics ::bevy_impulse::Joined for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::bevy_impulse::Joining for #struct_ident #ty_generics #where_clause {
             type Item = #item_struct_ident #ty_generics;
 
             fn pull(&self, session: ::bevy_impulse::re_exports::Entity, world: &mut ::bevy_impulse::re_exports::World) -> Result<Self::Item, ::bevy_impulse::OperationError> {
@@ -452,7 +452,7 @@ fn impl_accessed(
     let (impl_generics, ty_generics, where_clause) = key_struct.generics.split_for_impl();
 
     Ok(quote! {
-        impl #impl_generics ::bevy_impulse::Accessed for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics ::bevy_impulse::Accessing for #struct_ident #ty_generics #where_clause {
             type Key = #key_struct_ident #ty_generics;
 
             fn add_accessor(
@@ -461,7 +461,7 @@ fn impl_accessed(
                 world: &mut ::bevy_impulse::re_exports::World,
             ) -> ::bevy_impulse::OperationResult {
                 #(
-                    ::bevy_impulse::Accessed::add_accessor(&self.#field_ident, accessor, world)?;
+                    ::bevy_impulse::Accessing::add_accessor(&self.#field_ident, accessor, world)?;
                 )*
                 Ok(())
             }

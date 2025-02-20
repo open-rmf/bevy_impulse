@@ -24,12 +24,12 @@ use smallvec::SmallVec;
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::{
-    add_listener_to_source, Accessed, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
-    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffered, Builder, Chain, Gate, GateState,
-    Joined, Node, OperationError, OperationResult, OperationRoster,
+    add_listener_to_source, Accessing, AnyBuffer, AnyBufferKey, AnyMessageBox, AsAnyBuffer, Buffer,
+    BufferKeyBuilder, BufferKeyLifecycle, Bufferable, Buffering, Builder, Chain, Gate, GateState,
+    Joining, Node, OperationError, OperationResult, OperationRoster,
 };
 
-pub use bevy_impulse_derive::{BufferKeyMap, JoinedValue};
+pub use bevy_impulse_derive::{Accessor, Joined};
 
 /// Uniquely identify a buffer within a buffer map, either by name or by an
 /// index value.
@@ -199,18 +199,18 @@ pub struct BufferIncompatibility {
 
 /// This trait can be implemented on structs that represent a layout of buffers.
 /// You do not normally have to implement this yourself. Instead you should
-/// `#[derive(JoinedValue)]` on a struct that you want a join operation to
+/// `#[derive(Joined)]` on a struct that you want a join operation to
 /// produce.
 pub trait BufferMapLayout: Sized + Clone + 'static + Send + Sync {
     /// Try to convert a generic [`BufferMap`] into this specific layout.
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout>;
 }
 
-/// This trait helps auto-generated buffer map structs to implement the Buffered
+/// This trait helps auto-generated buffer map structs to implement the Buffering
 /// trait.
 pub trait BufferMapStruct: Sized + Clone + 'static + Send + Sync {
     /// Produce a list of the buffers that exist in this layout. Implementing
-    /// this function alone is sufficient to implement the entire [`Buffered`] trait.
+    /// this function alone is sufficient to implement the entire [`Buffering`] trait.
     fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]>;
 }
 
@@ -222,7 +222,7 @@ impl<T: BufferMapStruct> Bufferable for T {
     }
 }
 
-impl<T: BufferMapStruct> Buffered for T {
+impl<T: BufferMapStruct> Buffering for T {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.buffer_list() {
             assert_eq!(buffer.scope(), scope);
@@ -288,12 +288,12 @@ impl<T: BufferMapStruct> Buffered for T {
 /// Each field in this struct needs to have the trait bounds `'static + Send + Sync`.
 ///
 /// This does not generally need to be implemented explicitly. Instead you should
-/// use `#[derive(JoinedValue)]`:
+/// use `#[derive(Joined)]`:
 ///
 /// ```
 /// use bevy_impulse::prelude::*;
 ///
-/// #[derive(JoinedValue)]
+/// #[derive(Joined)]
 /// struct SomeValues {
 ///     integer: i64,
 ///     string: String,
@@ -312,7 +312,7 @@ impl<T: BufferMapStruct> Buffered for T {
 /// ```
 /// # use bevy_impulse::prelude::*;
 ///
-/// #[derive(JoinedValue)]
+/// #[derive(Joined)]
 /// #[joined(buffers_struct_name = SomeBuffers)]
 /// struct SomeValues {
 ///     integer: i64,
@@ -322,14 +322,14 @@ impl<T: BufferMapStruct> Buffered for T {
 ///
 /// By default each field of the generated buffers struct will have a type of
 /// [`Buffer<T>`], but you can override this using `#[joined(buffer = ...)]`
-/// to specify a special buffer type. For example if your `JoinedValue` struct
+/// to specify a special buffer type. For example if your `Joined` struct
 /// contains an [`AnyMessageBox`] then by default the macro will use `Buffer<AnyMessageBox>`,
 /// but you probably really want it to have an [`AnyBuffer`]:
 ///
 /// ```
 /// # use bevy_impulse::prelude::*;
 ///
-/// #[derive(JoinedValue)]
+/// #[derive(Joined)]
 /// struct SomeValues {
 ///     integer: i64,
 ///     string: String,
@@ -342,11 +342,11 @@ impl<T: BufferMapStruct> Buffered for T {
 ///
 /// [1]: crate::Builder::join
 /// [2]: crate::Builder::try_join
-pub trait JoinedValue: 'static + Send + Sync + Sized {
+pub trait Joined: 'static + Send + Sync + Sized {
     /// This associated type must represent a buffer map layout that implements
-    /// the [`Joined`] trait. The message type yielded by [`Joined`] for this
-    /// associated type must match the [`JoinedValue`] type.
-    type Buffers: 'static + BufferMapLayout + Joined<Item = Self> + Send + Sync;
+    /// the [`Joining`] trait. The message type yielded by [`Joining`] for this
+    /// associated type must match the [`Joined`] type.
+    type Buffers: 'static + BufferMapLayout + Joining<Item = Self> + Send + Sync;
 
     /// Used by [`Builder::try_join`]
     fn try_join_from<'w, 's, 'a, 'b>(
@@ -366,12 +366,12 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
 ///
 /// This does not generally need to be implemented explicitly. Instead you should
 /// define a struct where all fields are buffer keys and then apply
-/// `#[derive(BufferKeyMap)]` to it, e.g.:
+/// `#[derive(Accessor)]` to it, e.g.:
 ///
 /// ```
 /// use bevy_impulse::prelude::*;
 ///
-/// #[derive(Clone, BufferKeyMap)]
+/// #[derive(Clone, Accessor)]
 /// struct SomeKeys {
 ///     integer: BufferKey<i64>,
 ///     string: BufferKey<String>,
@@ -386,7 +386,7 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
 /// ```
 /// # use bevy_impulse::prelude::*;
 ///
-/// #[derive(Clone, BufferKeyMap)]
+/// #[derive(Clone, Accessor)]
 /// #[key(buffers_struct_name = SomeBuffers)]
 /// struct SomeKeys {
 ///     integer: BufferKey<i64>,
@@ -399,8 +399,8 @@ pub trait JoinedValue: 'static + Send + Sync + Sized {
 /// [2]: crate::Builder::create_buffer_access
 /// [3]: crate::Builder::try_listen
 /// [4]: crate::Builder::try_create_buffer_access
-pub trait BufferKeyMap: 'static + Send + Sync + Sized + Clone {
-    type Buffers: 'static + BufferMapLayout + Accessed<Key = Self> + Send + Sync;
+pub trait Accessor: 'static + Send + Sync + Sized + Clone {
+    type Buffers: 'static + BufferMapLayout + Accessing<Key = Self> + Send + Sync;
 
     fn try_listen_from<'w, 's, 'a, 'b>(
         buffers: &BufferMap,
@@ -431,7 +431,7 @@ impl BufferMapStruct for BufferMap {
     }
 }
 
-impl Joined for BufferMap {
+impl Joining for BufferMap {
     type Item = HashMap<BufferIdentifier<'static>, AnyMessageBox>;
 
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
@@ -444,11 +444,11 @@ impl Joined for BufferMap {
     }
 }
 
-impl JoinedValue for HashMap<BufferIdentifier<'static>, AnyMessageBox> {
+impl Joined for HashMap<BufferIdentifier<'static>, AnyMessageBox> {
     type Buffers = BufferMap;
 }
 
-impl Accessed for BufferMap {
+impl Accessing for BufferMap {
     type Key = HashMap<BufferIdentifier<'static>, AnyBufferKey>;
 
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key {
@@ -489,7 +489,7 @@ impl Accessed for BufferMap {
     }
 }
 
-impl<T: 'static + Send + Sync> JoinedValue for Vec<T> {
+impl<T: 'static + Send + Sync> Joined for Vec<T> {
     type Buffers = Vec<Buffer<T>>;
 }
 
@@ -508,7 +508,7 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> 
     }
 }
 
-impl<T: 'static + Send + Sync, const N: usize> JoinedValue for SmallVec<[T; N]> {
+impl<T: 'static + Send + Sync, const N: usize> Joined for SmallVec<[T; N]> {
     type Buffers = SmallVec<[Buffer<T>; N]>;
 }
 
@@ -533,7 +533,7 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone, const N: usize> BufferMapLa
 mod tests {
     use crate::{prelude::*, testing::*, AddBufferToMap, BufferMap};
 
-    #[derive(JoinedValue)]
+    #[derive(Joined)]
     struct TestJoinedValue<T: Send + Sync + 'static + Clone> {
         integer: i64,
         float: f64,
@@ -640,7 +640,7 @@ mod tests {
         assert!(context.no_unhandled_errors());
     }
 
-    #[derive(Clone, JoinedValue)]
+    #[derive(Clone, Joined)]
     #[joined(buffers_struct_name = FooBuffers)]
     struct TestDeriveWithConfig {}
 
@@ -655,7 +655,7 @@ mod tests {
         u: U,
     }
 
-    #[derive(JoinedValue)]
+    #[derive(Joined)]
     #[joined(buffers_struct_name = MultiGenericBuffers)]
     struct JoinedMultiGenericValue<T: 'static + Send + Sync, U: 'static + Send + Sync> {
         #[joined(buffer = Buffer<MultiGenericValue<T, U>>)]
@@ -714,7 +714,7 @@ mod tests {
 
     /// We create this struct just to verify that it is able to compile despite
     /// NonCopyBuffer not being copyable.
-    #[derive(JoinedValue)]
+    #[derive(Joined)]
     #[allow(unused)]
     struct JoinedValueForNonCopyBuffer {
         #[joined(buffer = NonCopyBuffer<String>, noncopy_buffer)]
@@ -722,7 +722,7 @@ mod tests {
         _b: u32,
     }
 
-    #[derive(Clone, BufferKeyMap)]
+    #[derive(Clone, Accessor)]
     #[key(buffers_struct_name = TestKeysBuffers)]
     struct TestKeys<T: 'static + Send + Sync + Clone> {
         integer: BufferKey<i64>,
@@ -836,7 +836,7 @@ mod tests {
     /// This macro is a manual implementation of the join operation that uses
     /// the buffer listening mechanism. There isn't any reason to reimplement
     /// join here except so we can test that listening is working correctly for
-    /// BufferKeyMap.
+    /// Accessor.
     fn join_via_listen(
         In(keys): In<TestKeys<&'static str>>,
         world: &mut World,

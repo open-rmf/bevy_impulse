@@ -34,9 +34,9 @@ use thiserror::Error as ThisError;
 use smallvec::SmallVec;
 
 use crate::{
-    add_listener_to_source, Accessed, Buffer, BufferAccessMut, BufferAccessors, BufferError,
+    add_listener_to_source, Accessing, Buffer, BufferAccessMut, BufferAccessors, BufferError,
     BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferStorage,
-    Bufferable, Buffered, Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joined,
+    Bufferable, Buffering, Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joining,
     ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
@@ -1035,7 +1035,7 @@ impl Bufferable for AnyBuffer {
     }
 }
 
-impl Buffered for AnyBuffer {
+impl Buffering for AnyBuffer {
     fn verify_scope(&self, scope: Entity) {
         assert_eq!(scope, self.scope());
     }
@@ -1069,7 +1069,7 @@ impl Buffered for AnyBuffer {
     }
 }
 
-impl Joined for AnyBuffer {
+impl Joining for AnyBuffer {
     type Item = AnyMessageBox;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
@@ -1077,7 +1077,7 @@ impl Joined for AnyBuffer {
     }
 }
 
-impl Accessed for AnyBuffer {
+impl Accessing for AnyBuffer {
     type Key = AnyBufferKey;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world

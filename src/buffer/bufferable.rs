@@ -19,15 +19,15 @@ use bevy_utils::all_tuples;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessed, AddOperation, Buffer, BufferSettings, Buffered, Builder, Chain, CloneFromBuffer,
-    Join, Joined, Output, UnusedTarget,
+    Accessing, AddOperation, Buffer, BufferSettings, Buffering, Builder, Chain, CloneFromBuffer,
+    Join, Joining, Output, UnusedTarget,
 };
 
-pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Accessed>::Key;
-pub type JoinedItem<B> = <<B as Bufferable>::BufferType as Joined>::Item;
+pub type BufferKeys<B> = <<B as Bufferable>::BufferType as Accessing>::Key;
+pub type JoinedItem<B> = <<B as Bufferable>::BufferType as Joining>::Item;
 
 pub trait Bufferable {
-    type BufferType: Buffered;
+    type BufferType: Buffering;
 
     /// Convert these bufferable workflow elements into buffers if they are not
     /// buffers already.
@@ -74,7 +74,7 @@ pub trait Joinable: Bufferable {
 impl<B> Joinable for B
 where
     B: Bufferable,
-    B::BufferType: Joined,
+    B::BufferType: Joining,
 {
     type Item = JoinedItem<B>;
 
@@ -112,7 +112,7 @@ pub trait Accessible: Bufferable {
 impl<B> Accessible for B
 where
     B: Bufferable,
-    B::BufferType: Accessed,
+    B::BufferType: Accessing,
 {
     type Keys = BufferKeys<Self>;
 
@@ -160,7 +160,7 @@ impl<T: Bufferable> Bufferable for Vec<T> {
 }
 
 pub trait IterBufferable {
-    type BufferElement: Buffered + Joined;
+    type BufferElement: Buffering + Joining;
 
     /// Convert an iterable collection of bufferable workflow elements into
     /// buffers if they are not buffers already.
@@ -177,11 +177,11 @@ pub trait IterBufferable {
     fn join_vec<'w, 's, 'a, 'b, const N: usize>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
-    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[<Self::BufferElement as Joined>::Item; N]>>
+    ) -> Chain<'w, 's, 'a, 'b, SmallVec<[<Self::BufferElement as Joining>::Item; N]>>
     where
         Self: Sized,
         Self::BufferElement: 'static + Send + Sync,
-        <Self::BufferElement as Joined>::Item: 'static + Send + Sync,
+        <Self::BufferElement as Joining>::Item: 'static + Send + Sync,
     {
         let buffers = self.into_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
@@ -200,7 +200,7 @@ impl<T> IterBufferable for T
 where
     T: IntoIterator,
     T::Item: Bufferable,
-    <T::Item as Bufferable>::BufferType: Joined,
+    <T::Item as Bufferable>::BufferType: Joining,
 {
     type BufferElement = <T::Item as Bufferable>::BufferType;
 

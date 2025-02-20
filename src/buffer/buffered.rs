@@ -29,7 +29,7 @@ use crate::{
     ScopeSettings, SingleInputStorage, UnusedTarget,
 };
 
-pub trait Buffered: 'static + Send + Sync + Clone {
+pub trait Buffering: 'static + Send + Sync + Clone {
     fn verify_scope(&self, scope: Entity);
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError>;
@@ -49,7 +49,7 @@ pub trait Buffered: 'static + Send + Sync + Clone {
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult;
 }
 
-pub trait Joined: Buffered {
+pub trait Joining: Buffering {
     type Item: 'static + Send + Sync;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError>;
 
@@ -58,7 +58,7 @@ pub trait Joined: Buffered {
     /// and join them into a tuple that gets sent to the target.
     ///
     /// If you need a more general way to get access to one or more buffers,
-    /// use [`listen`](Accessed::listen) instead.
+    /// use [`listen`](Accessing::listen) instead.
     fn join<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
@@ -78,7 +78,7 @@ pub trait Joined: Buffered {
     }
 }
 
-pub trait Accessed: Buffered {
+pub trait Accessing: Buffering {
     type Key: 'static + Send + Sync + Clone;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult;
     fn create_key(&self, builder: &BufferKeyBuilder) -> Self::Key;
@@ -91,7 +91,7 @@ pub trait Accessed: Buffered {
     /// operates on those buffers.
     ///
     /// For an operation that simply joins the contents of two or more outputs
-    /// or buffers, use [`join`](Joined::join) instead.
+    /// or buffers, use [`join`](Joining::join) instead.
     fn listen<'w, 's, 'a, 'b>(
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
@@ -203,7 +203,7 @@ pub trait Accessed: Buffered {
     }
 }
 
-impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
+impl<T: 'static + Send + Sync> Buffering for Buffer<T> {
     fn verify_scope(&self, scope: Entity) {
         assert_eq!(scope, self.scope());
     }
@@ -242,7 +242,7 @@ impl<T: 'static + Send + Sync> Buffered for Buffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Joined for Buffer<T> {
+impl<T: 'static + Send + Sync> Joining for Buffer<T> {
     type Item = T;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         world
@@ -252,7 +252,7 @@ impl<T: 'static + Send + Sync> Joined for Buffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync> Accessed for Buffer<T> {
+impl<T: 'static + Send + Sync> Accessing for Buffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
@@ -275,7 +275,7 @@ impl<T: 'static + Send + Sync> Accessed for Buffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
+impl<T: 'static + Send + Sync + Clone> Buffering for CloneFromBuffer<T> {
     fn verify_scope(&self, scope: Entity) {
         assert_eq!(scope, self.scope());
     }
@@ -313,7 +313,7 @@ impl<T: 'static + Send + Sync + Clone> Buffered for CloneFromBuffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync + Clone> Joined for CloneFromBuffer<T> {
+impl<T: 'static + Send + Sync + Clone> Joining for CloneFromBuffer<T> {
     type Item = T;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         world
@@ -324,7 +324,7 @@ impl<T: 'static + Send + Sync + Clone> Joined for CloneFromBuffer<T> {
     }
 }
 
-impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
+impl<T: 'static + Send + Sync + Clone> Accessing for CloneFromBuffer<T> {
     type Key = BufferKey<T>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         world
@@ -350,7 +350,7 @@ impl<T: 'static + Send + Sync + Clone> Accessed for CloneFromBuffer<T> {
 macro_rules! impl_buffered_for_tuple {
     ($(($T:ident, $K:ident)),*) => {
         #[allow(non_snake_case)]
-        impl<$($T: Buffered),*> Buffered for ($($T,)*)
+        impl<$($T: Buffering),*> Buffering for ($($T,)*)
         {
             fn verify_scope(&self, scope: Entity) {
                 let ($($T,)*) = self;
@@ -421,7 +421,7 @@ macro_rules! impl_buffered_for_tuple {
         }
 
         #[allow(non_snake_case)]
-        impl<$($T: Joined),*> Joined for ($($T,)*)
+        impl<$($T: Joining),*> Joining for ($($T,)*)
         {
             type Item = ($($T::Item),*);
             fn pull(
@@ -437,7 +437,7 @@ macro_rules! impl_buffered_for_tuple {
         }
 
         #[allow(non_snake_case)]
-        impl<$($T: Accessed),*> Accessed for ($($T,)*)
+        impl<$($T: Accessing),*> Accessing for ($($T,)*)
         {
             type Key = ($($T::Key), *);
             fn add_accessor(
@@ -479,11 +479,11 @@ macro_rules! impl_buffered_for_tuple {
     }
 }
 
-// Implements the `Buffered` trait for all tuples between size 2 and 12
-// (inclusive) made of types that implement `Buffered`
+// Implements the `Buffering` trait for all tuples between size 2 and 12
+// (inclusive) made of types that implement `Buffering`
 all_tuples!(impl_buffered_for_tuple, 2, 12, T, K);
 
-impl<T: Buffered, const N: usize> Buffered for [T; N] {
+impl<T: Buffering, const N: usize> Buffering for [T; N] {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.iter() {
             buffer.verify_scope(scope);
@@ -535,7 +535,7 @@ impl<T: Buffered, const N: usize> Buffered for [T; N] {
     }
 }
 
-impl<T: Joined, const N: usize> Joined for [T; N] {
+impl<T: Joining, const N: usize> Joining for [T; N] {
     // TODO(@mxgrey) We may be able to use [T::Item; N] here instead of SmallVec
     // when try_map is stabilized: https://github.com/rust-lang/rust/issues/79711
     type Item = SmallVec<[T::Item; N]>;
@@ -546,7 +546,7 @@ impl<T: Joined, const N: usize> Joined for [T; N] {
     }
 }
 
-impl<T: Accessed, const N: usize> Accessed for [T; N] {
+impl<T: Accessing, const N: usize> Accessing for [T; N] {
     type Key = SmallVec<[T::Key; N]>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
@@ -582,7 +582,7 @@ impl<T: Accessed, const N: usize> Accessed for [T; N] {
     }
 }
 
-impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
+impl<T: Buffering, const N: usize> Buffering for SmallVec<[T; N]> {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self.iter() {
             buffer.verify_scope(scope);
@@ -634,7 +634,7 @@ impl<T: Buffered, const N: usize> Buffered for SmallVec<[T; N]> {
     }
 }
 
-impl<T: Joined, const N: usize> Joined for SmallVec<[T; N]> {
+impl<T: Joining, const N: usize> Joining for SmallVec<[T; N]> {
     type Item = SmallVec<[T::Item; N]>;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         self.iter()
@@ -643,7 +643,7 @@ impl<T: Joined, const N: usize> Joined for SmallVec<[T; N]> {
     }
 }
 
-impl<T: Accessed, const N: usize> Accessed for SmallVec<[T; N]> {
+impl<T: Accessing, const N: usize> Accessing for SmallVec<[T; N]> {
     type Key = SmallVec<[T::Key; N]>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
@@ -679,7 +679,7 @@ impl<T: Accessed, const N: usize> Accessed for SmallVec<[T; N]> {
     }
 }
 
-impl<B: Buffered> Buffered for Vec<B> {
+impl<B: Buffering> Buffering for Vec<B> {
     fn verify_scope(&self, scope: Entity) {
         for buffer in self {
             buffer.verify_scope(scope);
@@ -731,7 +731,7 @@ impl<B: Buffered> Buffered for Vec<B> {
     }
 }
 
-impl<B: Joined> Joined for Vec<B> {
+impl<B: Joining> Joining for Vec<B> {
     type Item = Vec<B::Item>;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         self.iter()
@@ -740,7 +740,7 @@ impl<B: Joined> Joined for Vec<B> {
     }
 }
 
-impl<B: Accessed> Accessed for Vec<B> {
+impl<B: Accessing> Accessing for Vec<B> {
     type Key = Vec<B::Key>;
     fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
