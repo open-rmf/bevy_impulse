@@ -46,8 +46,8 @@ pub use buffer_map::*;
 mod buffer_storage;
 pub(crate) use buffer_storage::*;
 
-mod buffered;
-pub use buffered::*;
+mod buffering;
+pub use buffering::*;
 
 mod bufferable;
 pub use bufferable::*;
