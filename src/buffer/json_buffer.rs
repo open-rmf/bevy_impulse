@@ -1581,4 +1581,15 @@ mod tests {
         assert_eq!(values[2], serde_json::Value::String("hello".to_string()));
         assert_eq!(values[3], serde_json::to_value(TestMessage::new()).unwrap());
     }
+
+    // We define this struct just to make sure the BufferKeyMap macro successfully
+    // compiles with JsonBufferKey.
+    #[derive(Clone, BufferKeyMap)]
+    #[allow(unused)]
+    struct TestJsonKeyMap {
+        integer: BufferKey<i64>,
+        string: BufferKey<String>,
+        json: JsonBufferKey,
+        any: AnyBufferKey,
+    }
 }
