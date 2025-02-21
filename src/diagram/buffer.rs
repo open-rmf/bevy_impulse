@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -95,10 +95,14 @@ impl BufferOp {
         }
 
         // convert the first output into a buffer
-        let entry = buffers
-            .entry(vertex.op_id)
-            .insert_entry(first_output.into_any_buffer(builder)?);
-        let buffer = entry.get();
+        let buffer = first_output.into_any_buffer(builder)?;
+        let buffer = match buffers.entry(vertex.op_id) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(buffer);
+                entry.into_mut()
+            }
+            Entry::Vacant(entry) => entry.insert(buffer),
+        };
 
         // connect the rest of the outputs to the buffer
         for output in rest_outputs {
