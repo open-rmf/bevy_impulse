@@ -378,7 +378,7 @@ pub enum DiagramOperation {
     /// ```
     Transform(TransformOp),
 
-    /// Create a [`Buffer`] which can be used to store and pull data within
+    /// Create a [`crate::Buffer`] which can be used to store and pull data within
     /// a scope.
     ///
     /// # Examples
