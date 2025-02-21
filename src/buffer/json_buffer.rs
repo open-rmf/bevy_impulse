@@ -816,28 +816,6 @@ struct JsonBufferAccessImpl<T>(std::marker::PhantomData<T>);
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessImpl<T> {
     pub(crate) fn get_interface() -> &'static (dyn JsonBufferAccessInterface + Send + Sync) {
-        // Register downcasting for JsonBuffer and JsonBufferKey
-        let any_interface = AnyBuffer::interface_for::<T>();
-        any_interface.register_buffer_downcast(
-            TypeId::of::<JsonBuffer>(),
-            Box::new(|location| {
-                Box::new(JsonBuffer {
-                    location,
-                    interface: Self::get_interface(),
-                })
-            }),
-        );
-
-        any_interface.register_key_downcast(
-            TypeId::of::<JsonBufferKey>(),
-            Box::new(|tag| {
-                Box::new(JsonBufferKey {
-                    tag,
-                    interface: Self::get_interface(),
-                })
-            }),
-        );
-
         // Create and cache the json buffer access interface
         static INTERFACE_MAP: OnceLock<
             Mutex<HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>>,
@@ -845,9 +823,34 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIm
         let interfaces = INTERFACE_MAP.get_or_init(|| Mutex::default());
 
         let mut interfaces_mut = interfaces.lock().unwrap();
-        *interfaces_mut
-            .entry(TypeId::of::<T>())
-            .or_insert_with(|| Box::leak(Box::new(JsonBufferAccessImpl::<T>(Default::default()))))
+        *interfaces_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
+            // Register downcasting for JsonBuffer and JsonBufferKey the
+            // first time that we retrieve an interface for this type.
+            let any_interface = AnyBuffer::interface_for::<T>();
+            any_interface.register_buffer_downcast(
+                TypeId::of::<JsonBuffer>(),
+                Box::new(|location| {
+                    Box::new(JsonBuffer {
+                        location,
+                        interface: Self::get_interface(),
+                    })
+                }),
+            );
+
+            any_interface.register_key_downcast(
+                TypeId::of::<JsonBufferKey>(),
+                Box::new(|tag| {
+                    Box::new(JsonBufferKey {
+                        tag,
+                        interface: Self::get_interface(),
+                    })
+                }),
+            );
+
+            // SAFETY: This will leak memory exactly once per type, so the leakage is bounded.
+            // Leaking this allows the interface to be shared freely across all instances.
+            Box::leak(Box::new(JsonBufferAccessImpl::<T>(Default::default())))
+        })
     }
 }
 
@@ -1068,7 +1071,7 @@ impl BufferMapLayout for HashMap<String, JsonBuffer> {
             match name {
                 BufferIdentifier::Name(name) => {
                     if let Ok(downcast) =
-                        compatibility.require_buffer_by_name::<JsonBuffer>(&name, buffers)
+                        compatibility.require_buffer_for_borrowed_name::<JsonBuffer>(&name, buffers)
                     {
                         downcast_buffers.insert(name.clone().into_owned(), downcast);
                     }

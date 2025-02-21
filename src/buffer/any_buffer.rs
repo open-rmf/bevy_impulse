@@ -81,6 +81,8 @@ impl AnyBuffer {
         > = OnceLock::new();
         let interfaces = INTERFACE_MAP.get_or_init(|| Mutex::default());
 
+        // SAFETY: This will leak memory exactly once per type, so the leakage is bounded.
+        // Leaking this allows the interface to be shared freely across all instances.
         let mut interfaces_mut = interfaces.lock().unwrap();
         *interfaces_mut
             .entry(TypeId::of::<T>())
@@ -940,7 +942,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         let mut downcasts = self.buffer_downcasts.lock().unwrap();
 
         if let Entry::Vacant(entry) = downcasts.entry(buffer_type) {
-            // We should only leak this into the register once per type
+            // SAFETY: We only leak this into the register once per type
             entry.insert(Box::leak(f));
         }
     }
@@ -957,7 +959,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
         let mut downcasts = self.key_downcasts.lock().unwrap();
 
         if let Entry::Vacant(entry) = downcasts.entry(key_type) {
-            // We should only leak this in to the register once per type
+            // SAFTY: We only leak this in to the register once per type
             entry.insert(Box::leak(f));
         }
     }
