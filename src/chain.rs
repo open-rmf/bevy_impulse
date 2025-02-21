@@ -24,12 +24,12 @@ use smallvec::SmallVec;
 use std::error::Error;
 
 use crate::{
-    make_option_branching, make_result_branching, AddOperation, AsMap, Buffer, BufferKey,
-    BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
-    ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
-    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateSplit,
-    OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service,
-    Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    make_option_branching, make_result_branching, Accessing, AddOperation, AsMap, Buffer,
+    BufferKey, BufferKeys, Bufferable, Buffering, Builder, Collect, CreateCancelFilter,
+    CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
+    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate,
+    OperateSplit, OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish,
+    Service, Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -298,12 +298,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// will be transformed into a buffer with default buffer settings.
     ///
     /// To obtain a set of buffer keys each time a buffer is modified, use
-    /// [`listen`](crate::Bufferable::listen).
+    /// [`listen`](crate::Accessible::listen).
     pub fn with_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -324,8 +323,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
     {
         self.with_access(buffers).map_block(|(_, key)| key)
     }
@@ -393,7 +391,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// The return values of the individual chain builders will be zipped into
     /// one tuple return value by this function. If all of the builders return
     /// [`Output`] then you can easily continue chaining more operations using
-    /// [`join`](crate::Bufferable::join), or destructure them into individual
+    /// [`join`](crate::Joinable::join), or destructure them into individual
     /// outputs that you can continue to build with.
     pub fn fork_clone<Build: ForkCloneBuilder<T>>(self, build: Build) -> Build::Outputs
     where
@@ -546,7 +544,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the buffer is broken (e.g. its operation has been despawned) the
     /// workflow will be cancelled.
     pub fn then_push(self, buffer: Buffer<T>) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope(), buffer.scope);
+        assert_eq!(self.scope(), buffer.scope());
         self.with_access(buffer)
             .then(push_into_buffer.into_blocking_callback())
             .cancel_on_err()
@@ -557,7 +555,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_action<B>(self, action: Gate, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -578,7 +575,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_open<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         self.then_gate_action(Gate::Open, buffers)
     }
@@ -588,7 +584,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_close<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         self.then_gate_action(Gate::Closed, buffers)
     }

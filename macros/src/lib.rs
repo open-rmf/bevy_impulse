@@ -15,9 +15,12 @@
  *
 */
 
+mod buffer;
+use buffer::{impl_buffer_key_map, impl_joined_value};
+
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::DeriveInput;
+use syn::{parse_macro_input, DeriveInput, ItemStruct};
 
 #[proc_macro_derive(Stream)]
 pub fn simple_stream_macro(item: TokenStream) -> TokenStream {
@@ -57,4 +60,31 @@ pub fn delivery_label_macro(item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+/// The result error is the compiler error message to be displayed.
+type Result<T> = std::result::Result<T, String>;
+
+#[proc_macro_derive(Joined, attributes(joined))]
+pub fn derive_joined_value(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    match impl_joined_value(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(msg) => quote! {
+            compile_error!(#msg);
+        }
+        .into(),
+    }
+}
+
+#[proc_macro_derive(Accessor, attributes(key))]
+pub fn derive_buffer_key_map(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    match impl_buffer_key_map(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(msg) => quote! {
+            compile_error!(#msg);
+        }
+        .into(),
+    }
 }

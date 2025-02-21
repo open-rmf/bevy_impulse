@@ -17,28 +17,37 @@
 
 use bevy_ecs::{
     change_detection::Mut,
-    prelude::{Commands, Entity, Query},
+    prelude::{Commands, Entity, Query, World},
     query::QueryEntityError,
-    system::SystemParam,
+    system::{SystemParam, SystemState},
 };
 
 use std::{ops::RangeBounds, sync::Arc};
+
+use thiserror::Error as ThisError;
 
 use crate::{
     Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
 };
 
+mod any_buffer;
+pub use any_buffer::*;
+
 mod buffer_access_lifecycle;
+pub use buffer_access_lifecycle::BufferKeyLifecycle;
 pub(crate) use buffer_access_lifecycle::*;
 
 mod buffer_key_builder;
-pub(crate) use buffer_key_builder::*;
+pub use buffer_key_builder::*;
+
+mod buffer_map;
+pub use buffer_map::*;
 
 mod buffer_storage;
 pub(crate) use buffer_storage::*;
 
-mod buffered;
-pub use buffered::*;
+mod buffering;
+pub use buffering::*;
 
 mod bufferable;
 pub use bufferable::*;
@@ -46,12 +55,16 @@ pub use bufferable::*;
 mod manage_buffer;
 pub use manage_buffer::*;
 
+#[cfg(feature = "diagram")]
+mod json_buffer;
+#[cfg(feature = "diagram")]
+pub use json_buffer::*;
+
 /// A buffer is a special type of node within a workflow that is able to store
 /// and release data. When a session is finished, the buffered data from the
 /// session will be automatically cleared.
 pub struct Buffer<T> {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
+    pub(crate) location: BufferLocation,
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
 }
 
@@ -61,11 +74,11 @@ impl<T> Buffer<T> {
         &self,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope, builder.scope);
+        assert_eq!(self.scope(), builder.scope);
         let target = builder.commands.spawn(UnusedTarget).id();
         builder
             .commands
-            .add(OnNewBufferValue::new(self.source, target));
+            .add(OnNewBufferValue::new(self.id(), target));
         Chain::new(target, builder)
     }
 
@@ -77,22 +90,84 @@ impl<T> Buffer<T> {
         T: Clone,
     {
         CloneFromBuffer {
-            scope: self.scope,
-            source: self.source,
+            location: self.location,
             _ignore: Default::default(),
         }
     }
 
     /// Get an input slot for this buffer.
     pub fn input_slot(self) -> InputSlot<T> {
-        InputSlot::new(self.scope, self.source)
+        InputSlot::new(self.scope(), self.id())
+    }
+
+    /// Get the entity ID of the buffer.
+    pub fn id(&self) -> Entity {
+        self.location.source
+    }
+
+    /// Get the ID of the workflow that the buffer is associated with.
+    pub fn scope(&self) -> Entity {
+        self.location.scope
+    }
+
+    /// Get general information about the buffer.
+    pub fn location(&self) -> BufferLocation {
+        self.location
     }
 }
 
+impl<T> Clone for Buffer<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Buffer<T> {}
+
+/// The general identifying information for a buffer to locate it within the
+/// world. This does not indicate anything about the type of messages that the
+/// buffer can contain.
+#[derive(Clone, Copy, Debug)]
+pub struct BufferLocation {
+    /// The entity ID of the buffer.
+    pub scope: Entity,
+    /// The ID of the workflow that the buffer is associated with.
+    pub source: Entity,
+}
+
+#[derive(Clone)]
 pub struct CloneFromBuffer<T: Clone> {
-    pub(crate) scope: Entity,
-    pub(crate) source: Entity,
+    pub(crate) location: BufferLocation,
     pub(crate) _ignore: std::marker::PhantomData<fn(T)>,
+}
+
+//
+impl<T: Clone> Copy for CloneFromBuffer<T> {}
+
+impl<T: Clone> CloneFromBuffer<T> {
+    /// Get the entity ID of the buffer.
+    pub fn id(&self) -> Entity {
+        self.location.source
+    }
+
+    /// Get the ID of the workflow that the buffer is associated with.
+    pub fn scope(&self) -> Entity {
+        self.location.scope
+    }
+
+    /// Get general information about the buffer.
+    pub fn location(&self) -> BufferLocation {
+        self.location
+    }
+}
+
+impl<T: Clone> From<CloneFromBuffer<T>> for Buffer<T> {
+    fn from(value: CloneFromBuffer<T>) -> Self {
+        Buffer {
+            location: value.location,
+            _ignore: Default::default(),
+        }
+    }
 }
 
 /// Settings to describe the behavior of a buffer.
@@ -157,44 +232,22 @@ impl Default for RetentionPolicy {
     }
 }
 
-impl<T> Clone for Buffer<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for Buffer<T> {}
-
-impl<T: Clone> Clone for CloneFromBuffer<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Clone> Copy for CloneFromBuffer<T> {}
-
 /// This key can unlock access to the contents of a buffer by passing it into
 /// [`BufferAccess`] or [`BufferAccessMut`].
 ///
 /// To obtain a `BufferKey`, use [`Chain::with_access`][1], or [`listen`][2].
 ///
 /// [1]: crate::Chain::with_access
-/// [2]: crate::Bufferable::listen
+/// [2]: crate::Accessible::listen
 pub struct BufferKey<T> {
-    buffer: Entity,
-    session: Entity,
-    accessor: Entity,
-    lifecycle: Option<Arc<BufferAccessLifecycle>>,
+    tag: BufferKeyTag,
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
 impl<T> Clone for BufferKey<T> {
     fn clone(&self) -> Self {
         Self {
-            buffer: self.buffer,
-            session: self.session,
-            accessor: self.accessor,
-            lifecycle: self.lifecycle.as_ref().map(Arc::clone),
+            tag: self.tag.clone(),
             _ignore: Default::default(),
         }
     }
@@ -202,34 +255,84 @@ impl<T> Clone for BufferKey<T> {
 
 impl<T> BufferKey<T> {
     /// The buffer ID of this key.
-    pub fn id(&self) -> Entity {
-        self.buffer
+    pub fn buffer(&self) -> Entity {
+        self.tag.buffer
     }
 
     /// The session that this key belongs to.
     pub fn session(&self) -> Entity {
-        self.session
+        self.tag.session
     }
 
-    pub(crate) fn is_in_use(&self) -> bool {
+    pub fn tag(&self) -> &BufferKeyTag {
+        &self.tag
+    }
+}
+
+impl<T> BufferKeyLifecycle for BufferKey<T> {
+    type TargetBuffer = Buffer<T>;
+
+    fn create_key(buffer: &Self::TargetBuffer, builder: &BufferKeyBuilder) -> Self {
+        BufferKey {
+            tag: builder.make_tag(buffer.id()),
+            _ignore: Default::default(),
+        }
+    }
+
+    fn is_in_use(&self) -> bool {
+        self.tag.is_in_use()
+    }
+
+    fn deep_clone(&self) -> Self {
+        Self {
+            tag: self.tag.deep_clone(),
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<T> std::fmt::Debug for BufferKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferKey")
+            .field("message_type_name", &std::any::type_name::<T>())
+            .field("tag", &self.tag)
+            .finish()
+    }
+}
+
+/// The identifying information for a buffer key. This does not indicate
+/// anything about the type of messages that the buffer can contain.
+#[derive(Clone)]
+pub struct BufferKeyTag {
+    pub buffer: Entity,
+    pub session: Entity,
+    pub accessor: Entity,
+    pub lifecycle: Option<Arc<BufferAccessLifecycle>>,
+}
+
+impl BufferKeyTag {
+    pub fn is_in_use(&self) -> bool {
         self.lifecycle.as_ref().is_some_and(|l| l.is_in_use())
     }
 
-    // We do a deep clone of the key when distributing it to decouple the
-    // lifecycle of the keys that we send out from the key that's held by the
-    // accessor node.
-    //
-    // The key instance held by the accessor node will never be dropped until
-    // the session is cleaned up, so the keys that we send out into the workflow
-    // need to have their own independent lifecycles or else we won't detect
-    // when the workflow has dropped them.
-    pub(crate) fn deep_clone(&self) -> Self {
+    pub fn deep_clone(&self) -> Self {
         let mut deep = self.clone();
         deep.lifecycle = self
             .lifecycle
             .as_ref()
             .map(|l| Arc::new(l.as_ref().clone()));
         deep
+    }
+}
+
+impl std::fmt::Debug for BufferKeyTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferKeyTag")
+            .field("buffer", &self.buffer)
+            .field("session", &self.session)
+            .field("accessor", &self.accessor)
+            .field("in_use", &self.is_in_use())
+            .finish()
     }
 }
 
@@ -247,9 +350,9 @@ where
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
     pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
-        let session = key.session;
+        let session = key.session();
         self.query
-            .get(key.buffer)
+            .get(key.buffer())
             .map(|(storage, gate)| BufferView {
                 storage,
                 gate,
@@ -276,9 +379,9 @@ where
     T: 'static + Send + Sync,
 {
     pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
-        let session = key.session;
+        let session = key.session();
         self.query
-            .get(key.buffer)
+            .get(key.buffer())
             .map(|(storage, gate)| BufferView {
                 storage,
                 gate,
@@ -290,12 +393,73 @@ where
         &'a mut self,
         key: &BufferKey<T>,
     ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
-        let buffer = key.buffer;
-        let session = key.session;
-        let accessor = key.accessor;
-        self.query.get_mut(key.buffer).map(|(storage, gate)| {
+        let buffer = key.buffer();
+        let session = key.session();
+        let accessor = key.tag.accessor;
+        self.query.get_mut(key.buffer()).map(|(storage, gate)| {
             BufferMut::new(storage, gate, buffer, session, accessor, &mut self.commands)
         })
+    }
+}
+
+/// This trait allows [`World`] to give you access to any buffer using a [`BufferKey`]
+pub trait BufferWorldAccess {
+    /// Call this to get read-only access to a buffer from a [`World`].
+    ///
+    /// Alternatively you can use [`BufferAccess`] as a regular bevy system parameter,
+    /// which does not need direct world access.
+    fn buffer_view<T>(&self, key: &BufferKey<T>) -> Result<BufferView<'_, T>, BufferError>
+    where
+        T: 'static + Send + Sync;
+
+    /// Call this to get mutable access to a buffer.
+    ///
+    /// Pass in a callback that will receive [`BufferMut`], allowing it to view
+    /// and modify the contents of the buffer.
+    fn buffer_mut<T, U>(
+        &mut self,
+        key: &BufferKey<T>,
+        f: impl FnOnce(BufferMut<T>) -> U,
+    ) -> Result<U, BufferError>
+    where
+        T: 'static + Send + Sync;
+}
+
+impl BufferWorldAccess for World {
+    fn buffer_view<T>(&self, key: &BufferKey<T>) -> Result<BufferView<'_, T>, BufferError>
+    where
+        T: 'static + Send + Sync,
+    {
+        let buffer_ref = self
+            .get_entity(key.tag.buffer)
+            .ok_or(BufferError::BufferMissing)?;
+        let storage = buffer_ref
+            .get::<BufferStorage<T>>()
+            .ok_or(BufferError::BufferMissing)?;
+        let gate = buffer_ref
+            .get::<GateState>()
+            .ok_or(BufferError::BufferMissing)?;
+        Ok(BufferView {
+            storage,
+            gate,
+            session: key.tag.session,
+        })
+    }
+
+    fn buffer_mut<T, U>(
+        &mut self,
+        key: &BufferKey<T>,
+        f: impl FnOnce(BufferMut<T>) -> U,
+    ) -> Result<U, BufferError>
+    where
+        T: 'static + Send + Sync,
+    {
+        let mut state = SystemState::<BufferAccessMut<T>>::new(self);
+        let mut buffer_access_mut = state.get_mut(self);
+        let buffer_mut = buffer_access_mut
+            .get_mut(key)
+            .map_err(|_| BufferError::BufferMissing)?;
+        Ok(f(buffer_mut))
     }
 }
 
@@ -424,7 +588,7 @@ where
         self.len() == 0
     }
 
-    /// Check whether the gate of this buffer is open or closed
+    /// Check whether the gate of this buffer is open or closed.
     pub fn gate(&self) -> Gate {
         self.gate
             .map
@@ -467,7 +631,7 @@ where
         self.storage.drain(self.session, range)
     }
 
-    /// Pull the oldest item from the buffer
+    /// Pull the oldest item from the buffer.
     pub fn pull(&mut self) -> Option<T> {
         self.modified = true;
         self.storage.pull(self.session)
@@ -500,7 +664,7 @@ where
     // continuous systems with BufferAccessMut from running at the same time no
     // matter what the buffer type is.
 
-    /// Tell the buffer [`Gate`] to open
+    /// Tell the buffer [`Gate`] to open.
     pub fn open_gate(&mut self) {
         if let Some(gate) = self.gate.map.get_mut(&self.session) {
             if *gate != Gate::Open {
@@ -510,7 +674,7 @@ where
         }
     }
 
-    /// Tell the buffer [`Gate`] to close
+    /// Tell the buffer [`Gate`] to close.
     pub fn close_gate(&mut self) {
         if let Some(gate) = self.gate.map.get_mut(&self.session) {
             *gate = Gate::Closed;
@@ -519,7 +683,7 @@ where
         }
     }
 
-    /// Perform an action on the gate of the buffer
+    /// Perform an action on the gate of the buffer.
     pub fn gate_action(&mut self, action: Gate) {
         match action {
             Gate::Open => self.open_gate(),
@@ -567,6 +731,12 @@ where
             ));
         }
     }
+}
+
+#[derive(ThisError, Debug, Clone)]
+pub enum BufferError {
+    #[error("The key was unable to identify a buffer")]
+    BufferMissing,
 }
 
 #[cfg(test)]
