@@ -58,9 +58,15 @@ impl BufferIdentifier<'static> {
     }
 }
 
-impl From<&'static str> for BufferIdentifier<'static> {
-    fn from(value: &'static str) -> Self {
+impl<'a> From<&'a str> for BufferIdentifier<'a> {
+    fn from(value: &'a str) -> Self {
         BufferIdentifier::Name(Cow::Borrowed(value))
+    }
+}
+
+impl<'a> From<usize> for BufferIdentifier<'a> {
+    fn from(value: usize) -> Self {
+        BufferIdentifier::Index(value)
     }
 }
 
@@ -115,10 +121,51 @@ impl IncompatibleLayout {
         Ok(())
     }
 
-    /// Same as [`Self::require_buffer_by_literal`], but can be used with
+    /// Check whether the buffer associated with the identifier is compatible with
+    /// the required buffer type. You can pass in a `&static str` or a `usize`
+    /// directly as the identifier.
+    ///
+    /// ```
+    /// # use bevy_impulse::prelude::*;
+    ///
+    /// let buffer_map = BufferMap::default();
+    /// let mut compatibility = IncompatibleLayout::default();
+    /// let buffer = compatibility.require_buffer_for_identifier::<Buffer<i64>>("some_field", &buffer_map);
+    /// assert!(buffer.is_err());
+    /// assert!(compatibility.as_result().is_err());
+    ///
+    /// let mut compatibility = IncompatibleLayout::default();
+    /// let buffer = compatibility.require_buffer_for_identifier::<Buffer<String>>(10, &buffer_map);
+    /// assert!(buffer.is_err());
+    /// assert!(compatibility.as_result().is_err());
+    /// ```
+    pub fn require_buffer_for_identifier<BufferType: 'static>(
+        &mut self,
+        identifier: impl Into<BufferIdentifier<'static>>,
+        buffers: &BufferMap,
+    ) -> Result<BufferType, ()> {
+        let identifier = identifier.into();
+        if let Some(buffer) = buffers.get(&identifier) {
+            if let Some(buffer) = buffer.downcast_buffer::<BufferType>() {
+                return Ok(buffer);
+            } else {
+                self.incompatible_buffers.push(BufferIncompatibility {
+                    identifier,
+                    expected: std::any::type_name::<BufferType>(),
+                    received: buffer.message_type_name(),
+                });
+            }
+        } else {
+            self.missing_buffers.push(identifier);
+        }
+
+        Err(())
+    }
+
+    /// Same as [`Self::require_buffer_for_identifier`], but can be used with
     /// temporary borrows of a string slice. The string slice will be cloned if
     /// an error message needs to be produced.
-    pub fn require_buffer_by_name<BufferType: 'static>(
+    pub fn require_buffer_for_borrowed_name<BufferType: 'static>(
         &mut self,
         expected_name: &str,
         buffers: &BufferMap,
@@ -137,48 +184,6 @@ impl IncompatibleLayout {
         } else {
             self.missing_buffers
                 .push(BufferIdentifier::Name(Cow::Owned(expected_name.to_owned())));
-        }
-
-        Err(())
-    }
-
-    /// Check whether a named buffer is compatible with the required buffer type.
-    pub fn require_buffer_by_literal<BufferType: 'static>(
-        &mut self,
-        expected_name: &'static str,
-        buffers: &BufferMap,
-    ) -> Result<BufferType, ()> {
-        self.require_buffer::<BufferType>(BufferIdentifier::literal_name(expected_name), buffers)
-    }
-
-    /// Check whether an indexed buffer is compatible with the required buffer type.
-    pub fn require_buffer_by_index<BufferType: 'static>(
-        &mut self,
-        expected_index: usize,
-        buffers: &BufferMap,
-    ) -> Result<BufferType, ()> {
-        self.require_buffer::<BufferType>(BufferIdentifier::Index(expected_index), buffers)
-    }
-
-    /// Check whether the buffer associated with the identifier is compatible with
-    /// the required buffer type.
-    pub fn require_buffer<BufferType: 'static>(
-        &mut self,
-        identifier: BufferIdentifier<'static>,
-        buffers: &BufferMap,
-    ) -> Result<BufferType, ()> {
-        if let Some(buffer) = buffers.get(&identifier) {
-            if let Some(buffer) = buffer.downcast_buffer::<BufferType>() {
-                return Ok(buffer);
-            } else {
-                self.incompatible_buffers.push(BufferIncompatibility {
-                    identifier,
-                    expected: std::any::type_name::<BufferType>(),
-                    received: buffer.message_type_name(),
-                });
-            }
-        } else {
-            self.missing_buffers.push(identifier);
         }
 
         Err(())
@@ -498,7 +503,7 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> 
         let mut downcast_buffers = Vec::new();
         let mut compatibility = IncompatibleLayout::default();
         for i in 0..buffers.len() {
-            if let Ok(downcast) = compatibility.require_buffer_by_index::<B>(i, buffers) {
+            if let Ok(downcast) = compatibility.require_buffer_for_identifier::<B>(i, buffers) {
                 downcast_buffers.push(downcast);
             }
         }
@@ -519,7 +524,7 @@ impl<B: 'static + Send + Sync + AsAnyBuffer + Clone, const N: usize> BufferMapLa
         let mut downcast_buffers = SmallVec::new();
         let mut compatibility = IncompatibleLayout::default();
         for i in 0..buffers.len() {
-            if let Ok(downcast) = compatibility.require_buffer_by_index::<B>(i, buffers) {
+            if let Ok(downcast) = compatibility.require_buffer_for_identifier::<B>(i, buffers) {
                 downcast_buffers.push(downcast);
             }
         }

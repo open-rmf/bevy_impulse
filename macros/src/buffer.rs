@@ -380,7 +380,7 @@ fn impl_buffer_map_layout(
             fn try_from_buffer_map(buffers: &::bevy_impulse::BufferMap) -> Result<Self, ::bevy_impulse::IncompatibleLayout> {
                 let mut compatibility = ::bevy_impulse::IncompatibleLayout::default();
                 #(
-                    let #field_ident = compatibility.require_buffer_by_literal::<#buffer>(#map_key, buffers);
+                    let #field_ident = compatibility.require_buffer_for_identifier::<#buffer>(#map_key, buffers);
                 )*
 
                 // Unwrap the Ok after inspecting every field so that the

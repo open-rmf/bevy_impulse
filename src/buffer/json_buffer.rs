@@ -1071,7 +1071,7 @@ impl BufferMapLayout for HashMap<String, JsonBuffer> {
             match name {
                 BufferIdentifier::Name(name) => {
                     if let Ok(downcast) =
-                        compatibility.require_buffer_by_name::<JsonBuffer>(&name, buffers)
+                        compatibility.require_buffer_for_borrowed_name::<JsonBuffer>(&name, buffers)
                     {
                         downcast_buffers.insert(name.clone().into_owned(), downcast);
                     }
