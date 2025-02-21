@@ -519,7 +519,7 @@ mod tests {
                     "type": "buffer_access",
                     "buffers": ["string_buffer"],
                     "target_node": "with_buffer_access",
-                    "next": "with_buffer_access"
+                    "next": "with_buffer_access",
                 },
                 "with_buffer_access": {
                     "type": "node",

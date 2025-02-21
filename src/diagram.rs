@@ -270,7 +270,7 @@ pub enum DiagramOperation {
     ///             "type": "join",
     ///             "buffers": {
     ///                 "foo": "foo_buffer",
-    ///                 "bar": "bar_buffer",
+    ///                 "bar": "bar_buffer"
     ///             },
     ///             "target_node": "foobar",
     ///             "next": "foobar"
@@ -307,7 +307,8 @@ pub enum DiagramOperation {
     ///             "next": "foo_buffer"
     ///         },
     ///         "foo_buffer": {
-    ///             "type": "buffer"
+    ///             "type": "buffer",
+    ///             "serialize": true
     ///         },
     ///         "bar": {
     ///             "type": "node",
@@ -315,13 +316,14 @@ pub enum DiagramOperation {
     ///             "next": "bar_buffer"
     ///         },
     ///         "bar_buffer": {
-    ///             "type": "buffer"
+    ///             "type": "buffer",
+    ///             "serialize": true
     ///         },
     ///         "serialized_join": {
     ///             "type": "serialized_join",
     ///             "buffers": {
     ///                 "foo": "foo_buffer",
-    ///                 "bar": "bar_buffer",
+    ///                 "bar": "bar_buffer"
     ///             },
     ///             "next": { "builtin": "terminate" }
     ///         }
@@ -384,27 +386,34 @@ pub enum DiagramOperation {
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "my_op",
+    ///     "start": "fork_clone",
     ///     "ops": {
-    ///         "my_op": {
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
+    ///             "next": ["num_output", "string_output"]
+    ///         },
+    ///         "num_output": {
     ///             "type": "node",
-    ///             "builder": "my_op",
-    ///             "next": "buffer"
+    ///             "builder": "num_output",
+    ///             "next": "buffer_access"
     ///         },
-    ///         "buffer": {
-    ///             "type": "buffer",
-    ///             "settings": {
-    ///                 "retention": { "keep_last": 10 }
-    ///             }
-    ///         },
-    ///         "join": {
-    ///             "type": "join",
-    ///             "inputs": ["buffer"],
-    ///             "next": "collect"
-    ///         },
-    ///         "collect": {
+    ///         "string_output": {
     ///             "type": "node",
-    ///             "builder": "collect",
+    ///             "builder": "string_output",
+    ///             "next": "string_buffer"
+    ///         },
+    ///         "string_buffer": {
+    ///             "type": "buffer"
+    ///         },
+    ///         "buffer_access": {
+    ///             "type": "buffer_access",
+    ///             "buffers": ["string_buffer"],
+    ///             "target_node": "with_buffer_access",
+    ///             "next": "with_buffer_access"
+    ///         },
+    ///         "with_buffer_access": {
+    ///             "type": "node",
+    ///             "builder": "with_buffer_access",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
@@ -421,24 +430,34 @@ pub enum DiagramOperation {
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "my_op",
+    ///     "start": "fork_clone",
     ///     "ops": {
-    ///         "my_buffer": {
-    ///             "type": "buffer"
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
+    ///             "next": ["num_output", "string_output"]
     ///         },
-    ///         "my_op": {
+    ///         "num_output": {
     ///             "type": "node",
-    ///             "builder": "my_op",
+    ///             "builder": "num_output",
     ///             "next": "buffer_access"
+    ///         },
+    ///         "string_output": {
+    ///             "type": "node",
+    ///             "builder": "string_output",
+    ///             "next": "string_buffer"
+    ///         },
+    ///         "string_buffer": {
+    ///             "type": "buffer"
     ///         },
     ///         "buffer_access": {
     ///             "type": "buffer_access",
-    ///             "buffers": ["my_buffer"],
-    ///             "next": "my_op2"
+    ///             "buffers": ["string_buffer"],
+    ///             "target_node": "with_buffer_access",
+    ///             "next": "with_buffer_access"
     ///         },
-    ///         "my_op2": {
+    ///         "with_buffer_access": {
     ///             "type": "node",
-    ///             "builder": "my_op2",
+    ///             "builder": "with_buffer_access",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
@@ -454,24 +473,34 @@ pub enum DiagramOperation {
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "my_op",
+    ///     "start": "fork_clone",
     ///     "ops": {
-    ///         "my_buffer": {
+    ///         "fork_clone": {
+    ///             "type": "fork_clone",
+    ///             "next": ["num_output", "string_output"]
+    ///         },
+    ///         "num_output": {
+    ///             "type": "node",
+    ///             "builder": "num_output",
+    ///             "next": "buffer_access"
+    ///         },
+    ///         "string_output": {
+    ///             "type": "node",
+    ///             "builder": "string_output",
+    ///             "next": "string_buffer"
+    ///         },
+    ///         "string_buffer": {
     ///             "type": "buffer"
     ///         },
-    ///         "my_op": {
-    ///             "type": "node",
-    ///             "builder": "my_op2",
-    ///             "next": "my_buffer"
+    ///         "buffer_access": {
+    ///             "type": "buffer_access",
+    ///             "buffers": ["string_buffer"],
+    ///             "target_node": "with_buffer_access",
+    ///             "next": "with_buffer_access"
     ///         },
-    ///         "listen": {
-    ///             "type": "listen",
-    ///             "buffers": ["my_buffer"],
-    ///             "next": "my_op"
-    ///         },
-    ///         "my_op2": {
+    ///         "with_buffer_access": {
     ///             "type": "node",
-    ///             "builder": "my_op2",
+    ///             "builder": "with_buffer_access",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
