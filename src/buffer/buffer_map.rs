@@ -31,6 +31,8 @@ use crate::{
 
 pub use bevy_impulse_derive::{Accessor, Joined};
 
+use super::BufferKey;
+
 /// Uniquely identify a buffer within a buffer map, either by name or by an
 /// index value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -417,6 +419,13 @@ pub trait Accessor: 'static + Send + Sync + Sized + Clone {
         let buffers: Self::Buffers = Self::Buffers::try_from_buffer_map(buffers)?;
         Ok(buffers.access(builder))
     }
+}
+
+impl<T> Accessor for Vec<BufferKey<T>>
+where
+    T: Send + Sync + 'static,
+{
+    type Buffers = Vec<Buffer<T>>;
 }
 
 impl BufferMapLayout for BufferMap {

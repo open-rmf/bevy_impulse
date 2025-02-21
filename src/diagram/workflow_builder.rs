@@ -321,7 +321,7 @@ pub fn map_one_to_many_edges<'a, 'b>(
             target
                 .in_edges
                 .get(0)
-                .ok_or_else(|| unknown_diagram_error!())?,
+                .ok_or(DiagramErrorCode::OnlySingleInput)?,
         )
         .ok_or(unknown_diagram_error!())?
         .output

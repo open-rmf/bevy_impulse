@@ -195,27 +195,8 @@ impl NodeRegistration {
     }
 }
 
-/// A container that can store any message.
-///
-/// TODO(koonpeng): This is currently only used in buffers, theorically, this can be used
-/// to avoid serialization in `join`, but there are some blockers which stops it from being used.
-///
-/// The problem is that `join` produces a `SmallVec`. "serialize and join" works because the
-/// resulting `SmallVec<[serde_json::Value, 4]>` is converted to a `serde_json::Value`. This
-/// allows other operations like fork_clone, split, serialize etc to work. With "box and join",
-/// we get `SmallVec<[BoxedMessage; 4]>`, unlike `serde_json::Value`, whether a `BoxedMessage`
-/// can be cloned, split etc needs to depend on the inner type, which is lost when we box it.
-///
-/// A way to support "box and join" is to embed the impls into each `DynOutput`,
-/// but we can't because `DynOutput` has to be convertible from `Output`. Though it is probably
-/// possible with a trait bound.
-pub(super) struct BoxedMessage(pub(super) Box<dyn Send + Sync + 'static + Any>);
-
 type CreateNodeFn =
     RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramErrorCode>>>;
-type BoxedFn =
-    Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<BoxedMessage>, DiagramErrorCode>>;
-type UnboxFn = Box<dyn Fn(&mut Builder, DynOutput) -> Result<DynOutput, DiagramErrorCode>>;
 type DeserializeFn =
     Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>>;
 type SerializeFn =
@@ -559,8 +540,6 @@ pub struct DiagramElementRegistry {
 }
 
 pub(super) struct MessageOperation {
-    pub(super) boxed_impl: BoxedFn,
-    pub(super) unbox_impl: UnboxFn,
     pub(super) deserialize_impl: Option<DeserializeFn>,
     pub(super) serialize_impl: Option<SerializeFn>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
@@ -578,28 +557,6 @@ impl MessageOperation {
         T: Send + Sync + 'static + Any,
     {
         Self {
-            boxed_impl: Box::new(|builder, output| {
-                Ok(output
-                    .into_output::<T>()?
-                    .chain(builder)
-                    .map_block(|o| BoxedMessage(Box::new(o)))
-                    .output())
-            }),
-            unbox_impl: Box::new(|builder, output| {
-                Ok(output
-                    .into_output::<BoxedMessage>()?
-                    .chain(builder)
-                    .map_block(|boxed| -> Result<T, DiagramErrorCode> {
-                        let downcasted = boxed
-                            .0
-                            .downcast::<T>()
-                            .map_err(|_| DiagramErrorCode::CannotBoxOrUnbox)?;
-                        Ok(*downcasted)
-                    })
-                    .cancel_on_err()
-                    .output()
-                    .into())
-            }),
             deserialize_impl: None,
             serialize_impl: None,
             fork_clone_impl: None,
@@ -610,22 +567,6 @@ impl MessageOperation {
             buffer_access_impl: None,
             listen_impl: None,
         }
-    }
-
-    pub(super) fn boxed(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Output<BoxedMessage>, DiagramErrorCode> {
-        (self.boxed_impl)(builder, output)
-    }
-
-    pub(super) fn unbox(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<DynOutput, DiagramErrorCode> {
-        (self.unbox_impl)(builder, output)
     }
 
     /// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
@@ -834,44 +775,6 @@ impl MessageRegistry {
         T: Any,
     {
         self.messages.get(&TypeInfo::of::<T>())
-    }
-
-    /// Box the output if it is not boxed, else do nothing.
-    pub(super) fn boxed(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Output<BoxedMessage>, DiagramErrorCode> {
-        if output.type_info == TypeInfo::of::<BoxedMessage>() {
-            // already boxed
-            return Ok(output.into_output()?);
-        }
-        let reg = self
-            .messages
-            .get(&output.type_info)
-            .ok_or(DiagramErrorCode::CannotBoxOrUnbox)?;
-        reg.operations.boxed(builder, output)
-    }
-
-    /// Unbox the output if it is boxed, else do nothing.
-    pub(super) fn unbox(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-        target_type_id: &TypeInfo,
-    ) -> Result<DynOutput, DiagramErrorCode> {
-        if output.type_info != TypeInfo::of::<BoxedMessage>() {
-            // already unboxed
-            return Ok(output);
-        }
-        let reg = self
-            .messages
-            // inner_type_id should always be filled for boxed outputs
-            // TODO(koonpeng): we will be able to have a stronger guaranteed when we move to
-            // a custom `TypeInfo` container.
-            .get(target_type_id)
-            .ok_or(DiagramErrorCode::CannotBoxOrUnbox)?;
-        reg.operations.unbox(builder, output)
     }
 
     pub(super) fn deserialize(

@@ -44,8 +44,12 @@ impl NodeOp {
         inputs: &HashMap<&OperationId, DynInputSlot>,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
+        let in_edge = target
+            .in_edges
+            .get(0)
+            .ok_or(DiagramErrorCode::OnlySingleInput)?;
         let output = if let Some(output) = edges
-            .get_mut(&target.in_edges[0])
+            .get_mut(in_edge)
             .ok_or_else(|| unknown_diagram_error!())?
             .output
             .take()

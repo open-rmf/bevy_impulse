@@ -253,7 +253,7 @@ impl BufferAccessOp {
     }
 }
 
-pub(super) trait BufferAccessRequest {
+pub trait BufferAccessRequest {
     type Message: Send + Sync + 'static;
     type BufferKeys: Accessor;
 }
@@ -352,12 +352,12 @@ impl ReceiveOutput for AnyBuffer {
 
 #[cfg(test)]
 mod tests {
+    use bevy_ecs::system::In;
     use serde_json::json;
 
     use crate::{
-        diagram::{testing::DiagramTestFixture, BoxedMessage},
-        BufferKeys, Diagram, DiagramError, DiagramErrorCode, JoinOutput, NodeBuilderOptions,
-        Output,
+        diagram::testing::DiagramTestFixture, BufferAccess, BufferKey, Diagram, DiagramErrorCode,
+        IntoBlockingCallback, Node, NodeBuilderOptions,
     };
 
     /// create a new [`DiagramTestFixture`] with some extra builders.
@@ -386,61 +386,15 @@ mod tests {
     }
 
     #[test]
-    fn test_buffer() {
-        let mut fixture = DiagramTestFixture::new();
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": "buffer",
-            "ops": {
-                "buffer": {
-                    "type": "buffer",
-                    "next": "op1",
-                },
-                "op1": {
-                    "type": "node",
-                    "builder": "multiply3",
-                    "next": { "builtin": "terminate" },
-                },
-            },
-        }))
-        .unwrap();
-
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
-            .unwrap();
-        assert_eq!(result, 12);
-    }
-
-    #[test]
-    fn test_buffer_into_fork_clone() {
-        let mut fixture = DiagramTestFixture::new();
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": "buffer",
-            "ops": {
-                "buffer": {
-                    "type": "buffer",
-                    "next": "fork_clone",
-                },
-                "fork_clone": {
-                    "type": "fork_clone",
-                    "next": [{ "builtin": "terminate" }],
-                },
-            },
-        }))
-        .unwrap();
-
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
-            .unwrap();
-        assert_eq!(result, 4);
-    }
-
-    #[test]
     fn test_buffer_mismatch_type() {
         let mut fixture = new_fixture();
+        fixture
+            .registry
+            .register_node_builder(
+                NodeBuilderOptions::new("join_i64"),
+                |builder, _config: ()| builder.create_map_block(|i: Vec<i64>| i[0]),
+            )
+            .with_join();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -453,11 +407,16 @@ mod tests {
                 },
                 "buffer": {
                     "type": "buffer",
+                },
+                "join": {
+                    "type": "join",
+                    "buffers": ["buffer"],
+                    "target_node": "op1",
                     "next": "op1",
                 },
                 "op1": {
                     "type": "node",
-                    "builder": "multiply3",
+                    "builder": "join_i64",
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -466,14 +425,8 @@ mod tests {
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(
-                err.code,
-                DiagramErrorCode::TypeMismatch {
-                    target_type: _,
-                    source_type: _
-                }
-            ),
-            "{:?}",
+            matches!(err.code, DiagramErrorCode::IncompatibleBuffers(_)),
+            "{:#?}",
             err
         );
     }
@@ -502,53 +455,11 @@ mod tests {
                 },
                 "buffer": {
                     "type": "buffer",
-                    "next": { "builtin": "terminate" },
-                },
-            },
-        }))
-        .unwrap();
-
-        let err = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
-            .unwrap_err()
-            .downcast::<DiagramError>()
-            .unwrap();
-        assert!(
-            matches!(err.code, DiagramErrorCode::OnlySingleInput),
-            "{:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_buffer_into_join() {
-        let mut fixture = new_fixture();
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": "fork_clone",
-            "ops": {
-                "fork_clone": {
-                    "type": "fork_clone",
-                    "next": ["num_output", "num_output2"],
-                },
-                "num_output": {
-                    "type": "node",
-                    "builder": "num_output",
-                    "next": "buffer",
-                },
-                "buffer": {
-                    "type": "buffer",
-                    "next": "join",
-                },
-                "num_output2": {
-                    "type": "node",
-                    "builder": "num_output",
-                    "next": "join",
+                    "serialize": true,
                 },
                 "join": {
-                    "type": "join",
-                    "inputs": ["buffer", "num_output2"],
+                    "type": "serialized_join",
+                    "buffers": ["buffer"],
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -558,8 +469,13 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
-        assert_eq!(result[0], 1);
-        assert_eq!(result[1], 1);
+        assert_eq!(result.as_array().unwrap().len(), 1);
+        // order that the nodes push to the buffer is not guaranteed.
+        match &result[0] {
+            serde_json::Value::Number(n) => assert_eq!(n.as_i64().unwrap(), 1),
+            serde_json::Value::String(s) => assert_eq!(s, "hello"),
+            _ => panic!("expected number or string"),
+        }
     }
 
     #[test]
@@ -573,27 +489,36 @@ mod tests {
             .register_node_builder(
                 NodeBuilderOptions::new("with_buffer_access"),
                 |builder, _config: ()| {
-                    builder.create_map_block(
-                        |req: (i64, BufferKeys<Output<JoinOutput<BoxedMessage>>>)| req.0,
-                    )
+                    builder.create_map_block(|req: (i64, Vec<BufferKey<String>>)| req.0)
                 },
-            );
+            )
+            .with_buffer_access();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
-            "start": "num_output",
+            "start": "fork_clone",
             "ops": {
-                "buffer": {
-                    "type": "buffer",
+                "fork_clone": {
+                    "type": "fork_clone",
+                    "next": ["num_output", "string_output"],
                 },
                 "num_output": {
                     "type": "node",
                     "builder": "num_output",
                     "next": "buffer_access",
                 },
+                "string_output": {
+                    "type": "node",
+                    "builder": "string_output",
+                    "next": "string_buffer",
+                },
+                "string_buffer": {
+                    "type": "buffer",
+                },
                 "buffer_access": {
                     "type": "buffer_access",
-                    "buffers": ["buffer"],
+                    "buffers": ["string_buffer"],
+                    "target_node": "with_buffer_access",
                     "next": "with_buffer_access"
                 },
                 "with_buffer_access": {
@@ -615,16 +540,21 @@ mod tests {
     fn test_listen() {
         let mut fixture = new_fixture();
 
+        fn listen_buffer(In(request): In<Vec<BufferKey<i64>>>, access: BufferAccess<i64>) -> usize {
+            access.get(&request[0]).unwrap().len()
+        }
+
         fixture
             .registry
             .opt_out()
             .no_request_deserializing()
             .register_node_builder(
                 NodeBuilderOptions::new("listen_buffer"),
-                |builder, _config: ()| {
-                    builder.create_map_block(|_: BufferKeys<Output<JoinOutput<BoxedMessage>>>| 2)
+                |builder, _config: ()| -> Node<Vec<BufferKey<i64>>, usize, ()> {
+                    builder.create_node(listen_buffer.into_blocking_callback())
                 },
-            );
+            )
+            .with_listen();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -641,6 +571,7 @@ mod tests {
                 "listen": {
                     "type": "listen",
                     "buffers": ["buffer"],
+                    "target_node": "listen_buffer",
                     "next": "listen_buffer",
                 },
                 "listen_buffer": {
@@ -655,6 +586,6 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
-        assert_eq!(result, 2);
+        assert_eq!(result, 1);
     }
 }
