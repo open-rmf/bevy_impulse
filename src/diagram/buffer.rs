@@ -95,7 +95,7 @@ impl BufferOp {
         }
 
         // convert the first output into a buffer
-        let buffer = first_output.into_any_buffer(builder)?;
+        let buffer = first_output.into_any_buffer(builder, self.settings)?;
         let buffer = match buffers.entry(vertex.op_id) {
             Entry::Occupied(mut entry) => {
                 entry.insert(buffer);
@@ -438,6 +438,32 @@ mod tests {
     #[test]
     fn test_buffer_multiple_inputs() {
         let mut fixture = new_fixture();
+        fixture
+            .registry
+            .opt_out()
+            .no_request_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("wait_2_strings"),
+                |builder, _config: ()| {
+                    let n = builder.create_node(
+                        (|In(req): In<Vec<BufferKey<String>>>, access: BufferAccess<String>| {
+                            if access.get(&req[0]).unwrap().len() < 2 {
+                                None
+                            } else {
+                                Some("hello world".to_string())
+                            }
+                        })
+                        .into_blocking_callback(),
+                    );
+                    let output = n.output.chain(builder).dispose_on_none().output();
+                    Node::<Vec<BufferKey<String>>, String> {
+                        input: n.input,
+                        output,
+                        streams: n.streams,
+                    }
+                },
+            )
+            .with_listen();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -445,25 +471,33 @@ mod tests {
             "ops": {
                 "fork_clone": {
                     "type": "fork_clone",
-                    "next": ["num_output", "string_output"],
-                },
-                "num_output": {
-                    "type": "node",
-                    "builder": "num_output",
-                    "next": "buffer",
+                    "next": ["string_output", "string_output2"],
                 },
                 "string_output": {
                     "type": "node",
                     "builder": "string_output",
                     "next": "buffer",
                 },
+                "string_output2": {
+                    "type": "node",
+                    "builder": "string_output",
+                    "next": "buffer",
+                },
                 "buffer": {
                     "type": "buffer",
-                    "serialize": true,
+                    "settings": {
+                        "retention": "keep_all",
+                    },
                 },
-                "join": {
-                    "type": "serialized_join",
+                "listen": {
+                    "type": "listen",
                     "buffers": ["buffer"],
+                    "target_node": "wait_2_strings",
+                    "next": "wait_2_strings",
+                },
+                "wait_2_strings": {
+                    "type": "node",
+                    "builder": "wait_2_strings",
                     "next": { "builtin": "terminate" },
                 },
             },
@@ -473,13 +507,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
-        assert_eq!(result.as_array().unwrap().len(), 1);
-        // order that the nodes push to the buffer is not guaranteed.
-        match &result[0] {
-            serde_json::Value::Number(n) => assert_eq!(n.as_i64().unwrap(), 1),
-            serde_json::Value::String(s) => assert_eq!(s, "hello"),
-            _ => panic!("expected number or string"),
-        }
+        assert_eq!(result, "hello world");
     }
 
     #[test]

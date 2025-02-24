@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, Bufferable, Builder,
+    unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
     InputSlot, Joined, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
@@ -74,7 +74,8 @@ pub struct DynOutput {
     target: Entity,
     pub(super) type_info: TypeInfo,
 
-    into_any_buffer_impl: fn(Self, &mut Builder) -> Result<AnyBuffer, DiagramErrorCode>,
+    into_any_buffer_impl:
+        fn(Self, &mut Builder, BufferSettings) -> Result<AnyBuffer, DiagramErrorCode>,
 }
 
 impl DynOutput {
@@ -95,8 +96,9 @@ impl DynOutput {
     pub(super) fn into_any_buffer(
         self,
         builder: &mut Builder,
+        buffer_settings: BufferSettings,
     ) -> Result<AnyBuffer, DiagramErrorCode> {
-        (self.into_any_buffer_impl)(self, builder)
+        (self.into_any_buffer_impl)(self, builder, buffer_settings)
     }
 
     pub(super) fn scope(&self) -> Entity {
@@ -127,8 +129,10 @@ where
             scope: output.scope(),
             target: output.id(),
             type_info: TypeInfo::of::<T>(),
-            into_any_buffer_impl: |me, builder| {
-                Ok(me.into_output::<T>()?.into_buffer(builder).as_any_buffer())
+            into_any_buffer_impl: |me, builder, buffer_settings| {
+                let buffer = builder.create_buffer::<T>(buffer_settings);
+                builder.connect(me.into_output()?, buffer.input_slot());
+                Ok(buffer.as_any_buffer())
             },
         }
     }
