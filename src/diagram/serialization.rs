@@ -166,14 +166,14 @@ where
         std::any::type_name::<T>(),
         std::any::type_name::<Serializer>()
     );
-    ops.serialize_impl = Some(Box::new(|builder, output| {
+    ops.serialize_impl = Some(|builder, output| {
         debug!("serialize output: {:?}", output);
         let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
         builder.connect(output.into_output()?, n.input);
         let serialized_output = n.output.chain(builder).cancel_on_err().output();
         debug!("serialized output: {:?}", serialized_output);
         Ok(serialized_output)
-    }));
+    });
 
     reg.schema = Serializer::json_schema(schema_generator);
 

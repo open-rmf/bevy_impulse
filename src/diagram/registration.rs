@@ -202,13 +202,11 @@ impl NodeRegistration {
 type CreateNodeFn =
     RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramErrorCode>>>;
 type DeserializeFn =
-    Box<dyn Fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>>;
+    fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>;
 type SerializeFn =
-    Box<dyn Fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramErrorCode>>;
-type ForkCloneFn =
-    Box<dyn Fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramErrorCode>>;
-type ForkResultFn =
-    Box<dyn Fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramErrorCode>>;
+    fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramErrorCode>;
+type ForkCloneFn = fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramErrorCode>;
+type ForkResultFn = fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramErrorCode>;
 type SplitFn = Box<
     dyn for<'a> Fn(
         &mut Builder,
@@ -819,7 +817,7 @@ impl MessageRegistry {
             std::any::type_name::<T>(),
             std::any::type_name::<Deserializer>()
         );
-        ops.deserialize_impl = Some(Box::new(|builder, output| {
+        ops.deserialize_impl = Some(|builder, output| {
             debug!("deserialize output: {:?}", output);
             let receiver =
                 builder.create_map_block(|json: serde_json::Value| Deserializer::from_json(json));
@@ -832,7 +830,7 @@ impl MessageRegistry {
                 .into();
             debug!("deserialized output: {:?}", deserialized_output);
             Ok(deserialized_output)
-        }));
+        });
 
         reg.schema = Deserializer::json_schema(&mut self.schema_generator);
 
@@ -893,9 +891,8 @@ impl MessageRegistry {
             return false;
         }
 
-        ops.fork_clone_impl = Some(Box::new(|builder, output, amount| {
-            F::dyn_fork_clone(builder, output, amount)
-        }));
+        ops.fork_clone_impl =
+            Some(|builder, output, amount| F::dyn_fork_clone(builder, output, amount));
 
         true
     }

@@ -62,12 +62,6 @@ impl ForkResultOp {
 }
 
 pub trait DynForkResult {
-    fn dyn_fork_result(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode>;
-
     fn on_register(
         self,
         messages: &mut HashMap<TypeInfo, MessageRegistration>,
@@ -76,14 +70,6 @@ pub trait DynForkResult {
 }
 
 impl<T> DynForkResult for NotSupportedMarker<T> {
-    fn dyn_fork_result(
-        &self,
-        _builder: &mut Builder,
-        _output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
-        Err(DiagramErrorCode::CannotForkResult)
-    }
-
     fn on_register(
         self,
         _messages: &mut HashMap<TypeInfo, MessageRegistration>,
@@ -99,19 +85,6 @@ where
     E: Send + Sync + 'static,
     S: SerializeMessage<T> + 'static,
 {
-    fn dyn_fork_result(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
-        debug!("fork result: {:?}", output);
-
-        let chain = output.into_output::<Result<T, E>>()?.chain(builder);
-        let outputs = chain.fork_result(|c| c.output().into(), |c| c.output().into());
-        debug!("forked outputs: {:?}", outputs);
-        Ok(outputs)
-    }
-
     fn on_register(
         self,
         messages: &mut HashMap<TypeInfo, MessageRegistration>,
@@ -125,9 +98,14 @@ where
             return false;
         }
 
-        ops.fork_result_impl = Some(Box::new(move |builder, output| {
-            self.dyn_fork_result(builder, output)
-        }));
+        ops.fork_result_impl = Some(|builder, output| {
+            debug!("fork result: {:?}", output);
+
+            let chain = output.into_output::<Result<T, E>>()?.chain(builder);
+            let outputs = chain.fork_result(|c| c.output().into(), |c| c.output().into());
+            debug!("forked outputs: {:?}", outputs);
+            Ok(outputs)
+        });
 
         register_serialize::<T, S>(messages, schema_generator);
         true
