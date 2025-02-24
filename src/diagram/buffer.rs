@@ -153,7 +153,7 @@ impl BufferInputs {
     ) -> Option<BufferMap> {
         match self {
             Self::Dict(mapping) => {
-                let mut buffer_map = BufferMap::with_capacity(mapping.len() * 2);
+                let mut buffer_map = BufferMap::with_capacity(mapping.len());
                 for (k, op_id) in mapping {
                     let buffer = if let Some(buffer) = buffers.get(op_id) {
                         buffer
@@ -165,7 +165,7 @@ impl BufferInputs {
                 Some(buffer_map)
             }
             Self::Array(arr) => {
-                let mut buffer_map = BufferMap::with_capacity(arr.len() * 2);
+                let mut buffer_map = BufferMap::with_capacity(arr.len());
                 for (i, op_id) in arr.into_iter().enumerate() {
                     let buffer = if let Some(buffer) = buffers.get(op_id) {
                         buffer
