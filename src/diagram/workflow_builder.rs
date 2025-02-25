@@ -437,7 +437,7 @@ fn connect_vertex<'a>(
 /// ```text
 /// builder.connect(output.into_output::<i64>()?, dyn_input)?;
 /// ```
-pub(super) fn dyn_connect(
+pub fn dyn_connect(
     builder: &mut Builder,
     output: DynOutput,
     input: DynInputSlot,

@@ -5,6 +5,7 @@ mod impls;
 mod join;
 mod node;
 mod registration;
+mod section;
 mod serialization;
 mod split_serialized;
 mod transform;
@@ -20,13 +21,14 @@ pub use join::JoinOutput;
 use join::{JoinOp, SerializedJoinOp};
 pub use node::NodeOp;
 pub use registration::*;
+pub use section::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
 use transform::{TransformError, TransformOp};
 use type_info::TypeInfo;
 use unzip::UnzipOp;
-use workflow_builder::create_workflow;
+pub use workflow_builder::*;
 
 // ----------
 
@@ -772,6 +774,9 @@ pub enum DiagramErrorCode {
 
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),
+
+    #[error(transparent)]
+    SectionError(#[from] SectionError),
 
     #[error("one or more operation is missing inputs")]
     IncompleteDiagram,

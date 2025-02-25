@@ -18,6 +18,9 @@
 mod buffer;
 use buffer::{impl_buffer_key_map, impl_joined_value};
 
+mod section;
+use section::impl_section;
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, ItemStruct};
@@ -81,6 +84,18 @@ pub fn derive_joined_value(input: TokenStream) -> TokenStream {
 pub fn derive_buffer_key_map(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     match impl_buffer_key_map(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(msg) => quote! {
+            compile_error!(#msg);
+        }
+        .into(),
+    }
+}
+
+#[proc_macro_derive(Section)]
+pub fn derive_section(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    match impl_section(&input) {
         Ok(tokens) => tokens.into(),
         Err(msg) => quote! {
             compile_error!(#msg);
