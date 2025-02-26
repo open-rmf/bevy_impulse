@@ -681,6 +681,12 @@ impl Diagram {
     {
         serde_json::from_reader(r)
     }
+
+    fn get_op(&self, op_id: &OperationId) -> Result<&DiagramOperation, DiagramErrorCode> {
+        self.ops
+            .get(op_id)
+            .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))
+    }
 }
 
 #[derive(Debug)]

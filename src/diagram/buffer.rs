@@ -11,7 +11,7 @@ use crate::{
 use super::{
     type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder, Vertex},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
+    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
     MessageRegistry, NextOperation, OperationId,
 };
 
@@ -113,16 +113,30 @@ impl BufferOp {
     }
 }
 
+/// if `target` has a value, return the request type of the operation, else, return the request type of `next`
 pub(super) fn get_node_request_type(
-    target_node: &OperationId,
+    target: &Option<OperationId>,
+    next: &NextOperation,
     diagram: &Diagram,
     registry: &DiagramElementRegistry,
 ) -> Result<TypeInfo, DiagramErrorCode> {
-    let target_node = diagram
-        .ops
-        .get(target_node)
-        .ok_or_else(|| DiagramErrorCode::OperationNotFound(target_node.clone()))?;
-    let target_node_op = match target_node {
+    let target_node = if let Some(target) = target {
+        diagram.get_op(target)?
+    } else {
+        match next {
+            NextOperation::Target(op_id) => diagram.get_op(op_id)?,
+            NextOperation::Builtin { builtin } => match builtin {
+                BuiltinTarget::Terminate => return Ok(TypeInfo::of::<serde_json::Value>()),
+                _ => {
+                    return Err(DiagramErrorCode::UnexpectedOperationType {
+                        expected: "node".to_string(),
+                        got: next.to_string(),
+                    })
+                }
+            },
+        }
+    };
+    let node_op = match target_node {
         DiagramOperation::Node(op) => op,
         _ => {
             return Err(DiagramErrorCode::UnexpectedOperationType {
@@ -131,9 +145,7 @@ pub(super) fn get_node_request_type(
             })
         }
     };
-    let target_type = registry
-        .get_node_registration(&target_node_op.builder)?
-        .request;
+    let target_type = registry.get_node_registration(&node_op.builder)?.request;
     Ok(target_type)
 }
 
@@ -195,8 +207,8 @@ pub struct BufferAccessOp {
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferInputs,
 
-    /// The id of an operation that this buffer access is for. The id must be a `node` operation.
-    pub(super) target_node: OperationId,
+    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
+    pub(super) target_node: Option<OperationId>,
 }
 
 impl BufferAccessOp {
@@ -239,7 +251,7 @@ impl BufferAccessOp {
             return Ok(false);
         };
 
-        let target_type = get_node_request_type(&self.target_node, diagram, registry)?;
+        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output =
             registry
                 .messages
@@ -279,8 +291,8 @@ pub struct ListenOp {
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferInputs,
 
-    /// The id of an operation that this operation is for. The id must be a `node` operation.
-    pub(super) target_node: OperationId,
+    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
+    pub(super) target_node: Option<OperationId>,
 }
 
 impl ListenOp {
@@ -307,7 +319,7 @@ impl ListenOp {
             return Ok(false);
         };
 
-        let target_type = get_node_request_type(&self.target_node, diagram, registry)?;
+        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.listen(builder, &buffers, target_type)?;
         let out_edge = edges
             .get_mut(

@@ -214,7 +214,6 @@
           "required": [
             "buffers",
             "next",
-            "target_node",
             "type"
           ],
           "properties": {
@@ -231,7 +230,10 @@
             },
             "target_node": {
               "description": "The id of an operation that this join is for. The id must be a `node` operation.",
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "type": "string",
@@ -330,7 +332,6 @@
           "required": [
             "buffers",
             "next",
-            "target_node",
             "type"
           ],
           "properties": {
@@ -347,7 +348,10 @@
             },
             "target_node": {
               "description": "The id of an operation that this buffer access is for. The id must be a `node` operation.",
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "type": "string",
@@ -363,7 +367,6 @@
           "required": [
             "buffers",
             "next",
-            "target_node",
             "type"
           ],
           "properties": {
@@ -380,7 +383,10 @@
             },
             "target_node": {
               "description": "The id of an operation that this operation is for. The id must be a `node` operation.",
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "type": "string",

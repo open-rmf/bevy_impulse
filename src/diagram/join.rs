@@ -20,8 +20,8 @@ pub struct JoinOp {
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferInputs,
 
-    /// The id of an operation that this join is for. The id must be a `node` operation.
-    pub(super) target_node: OperationId,
+    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
+    pub(super) target_node: Option<OperationId>,
 }
 
 impl JoinOp {
@@ -51,7 +51,7 @@ impl JoinOp {
         } else {
             return Ok(false);
         };
-        let target_type = get_node_request_type(&self.target_node, diagram, registry)?;
+        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.join(builder, &buffers, target_type)?;
 
         let out_edge = edges
@@ -257,6 +257,59 @@ mod tests {
                         "bar": "bar_buffer",
                     },
                     "target_node": "foobar",
+                    "next": "foobar",
+                },
+                "foobar": {
+                    "type": "node",
+                    "builder": "foobar",
+                    "next": { "builtin": "terminate" },
+                },
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::Null)
+            .unwrap();
+        assert_eq!(result, "foobar");
+    }
+
+    #[test]
+    /// similar to `test_join`, except the `target_node` field is not provided and the target type is inferred from `next`.
+    fn test_join_infer_type() {
+        let mut fixture = DiagramTestFixture::new();
+        register_join_nodes(&mut fixture.registry);
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork_clone",
+            "ops": {
+                "fork_clone": {
+                    "type": "fork_clone",
+                    "next": ["foo", "bar"],
+                },
+                "foo": {
+                    "type": "node",
+                    "builder": "foo",
+                    "next": "foo_buffer",
+                },
+                "foo_buffer": {
+                    "type": "buffer",
+                },
+                "bar": {
+                    "type": "node",
+                    "builder": "bar",
+                    "next": "bar_buffer",
+                },
+                "bar_buffer": {
+                    "type": "buffer",
+                },
+                "join": {
+                    "type": "join",
+                    "buffers": {
+                        "foo": "foo_buffer",
+                        "bar": "bar_buffer",
+                    },
                     "next": "foobar",
                 },
                 "foobar": {
