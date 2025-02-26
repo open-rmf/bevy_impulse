@@ -236,7 +236,7 @@ pub enum DiagramOperation {
     /// ```
     Split(SplitOp),
 
-    /// Wait for an item to be emitted from each of the inputs, then combined the
+    /// Wait for an item to be emitted from each of the inputs, then combine the
     /// oldest of each into an array.
     ///
     /// # Examples
@@ -287,7 +287,7 @@ pub enum DiagramOperation {
     /// ```
     Join(JoinOp),
 
-    /// Wait for an item to be emitted from each of the inputs, then combined the
+    /// Wait for an item to be emitted from each of the inputs, then combine the
     /// oldest of each into an array. Unlike `join`, this only works with serialized buffers.
     ///
     /// # Examples
@@ -473,34 +473,25 @@ pub enum DiagramOperation {
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
+    ///     "start": "num_output",
     ///     "ops": {
-    ///         "fork_clone": {
-    ///             "type": "fork_clone",
-    ///             "next": ["num_output", "string_output"]
+    ///         "buffer": {
+    ///             "type": "buffer"
     ///         },
     ///         "num_output": {
     ///             "type": "node",
     ///             "builder": "num_output",
-    ///             "next": "buffer_access"
+    ///             "next": "buffer"
     ///         },
-    ///         "string_output": {
+    ///         "listen": {
+    ///             "type": "listen",
+    ///             "buffers": ["buffer"],
+    ///             "target_node": "listen_buffer",
+    ///             "next": "listen_buffer"
+    ///         },
+    ///         "listen_buffer": {
     ///             "type": "node",
-    ///             "builder": "string_output",
-    ///             "next": "string_buffer"
-    ///         },
-    ///         "string_buffer": {
-    ///             "type": "buffer"
-    ///         },
-    ///         "buffer_access": {
-    ///             "type": "buffer_access",
-    ///             "buffers": ["string_buffer"],
-    ///             "target_node": "with_buffer_access",
-    ///             "next": "with_buffer_access"
-    ///         },
-    ///         "with_buffer_access": {
-    ///             "type": "node",
-    ///             "builder": "with_buffer_access",
+    ///             "builder": "listen_buffer",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
