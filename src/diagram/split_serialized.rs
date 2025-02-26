@@ -31,7 +31,7 @@ use super::{
     impls::{DefaultImpl, NotSupported},
     type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -268,7 +268,7 @@ where
     })
 }
 
-pub trait DynSplit<T> {
+pub trait DynSplit<T, Serializer> {
     const SUPPORTED: bool;
 
     fn dyn_split<'a>(
@@ -276,9 +276,11 @@ pub trait DynSplit<T> {
         output: DynOutput,
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>;
+
+    fn on_register(registry: &mut MessageRegistry);
 }
 
-impl<T> DynSplit<T> for NotSupported {
+impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
     const SUPPORTED: bool = false;
 
     fn dyn_split<'a>(
@@ -288,12 +290,15 @@ impl<T> DynSplit<T> for NotSupported {
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
         Err(DiagramErrorCode::NotSplittable)
     }
+
+    fn on_register(_registry: &mut MessageRegistry) {}
 }
 
-impl<T> DynSplit<T> for DefaultImpl
+impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
+    Serializer: SerializeMessage<T::Item> + SerializeMessage<Vec<T::Item>>,
 {
     const SUPPORTED: bool = true;
 
@@ -304,6 +309,10 @@ where
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
         let chain = output.into_output::<T>()?.chain(builder);
         split_chain(chain, split_op)
+    }
+
+    fn on_register(registry: &mut MessageRegistry) {
+        registry.register_serialize::<T::Item, Serializer>();
     }
 }
 
@@ -436,12 +445,10 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("split_list", "i64", "Vec<i64>"),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             )
-            .unwrap()
-            .with_split()
-            .unwrap();
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -460,12 +467,6 @@ mod tests {
         }))
         .unwrap();
 
-        fixture
-            .registry
-            .opt_out()
-            .register_message::<(usize, i64)>("(usize, i64)")
-            .unwrap();
-
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
@@ -483,18 +484,10 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("split_list", "i64", "Vec<i64>"),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             )
-            .unwrap()
-            .with_split()
-            .unwrap();
-
-        fixture
-            .registry
-            .opt_out()
-            .register_message::<(usize, i64)>("(usize, i64)")
-            .unwrap();
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -534,18 +527,10 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("split_map", "i64", "HashMap<String, i64>"),
+                NodeBuilderOptions::new("split_map".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
             )
-            .unwrap()
-            .with_split()
-            .unwrap();
-
-        fixture
-            .registry
-            .opt_out()
-            .register_message::<(String, i64)>("(String, i64)")
-            .unwrap();
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -581,12 +566,10 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("split_map", "i64", "HashMap<String, i64>"),
+                NodeBuilderOptions::new("split_map".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_map),
             )
-            .unwrap()
-            .with_split()
-            .unwrap();
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -606,12 +589,6 @@ mod tests {
         }))
         .unwrap();
 
-        fixture
-            .registry
-            .opt_out()
-            .register_message::<(String, i64)>("(String, i64)")
-            .unwrap();
-
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
@@ -630,18 +607,10 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("split_list", "i64", "Vec<i64>"),
+                NodeBuilderOptions::new("split_list".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&split_list),
             )
-            .unwrap()
-            .with_split()
-            .unwrap();
-
-        fixture
-            .registry
-            .opt_out()
-            .register_message::<(usize, i64)>("(usize, i64)")
-            .unwrap();
+            .with_split();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -675,17 +644,10 @@ mod tests {
             pair.1
         }
 
-        fixture
-            .registry
-            .register_node_builder(
-                NodeBuilderOptions::new(
-                    "get_split_value",
-                    "(JsonPosition, serde_json::Value)",
-                    "json",
-                ),
-                |builder, _config: ()| builder.create_map_block(get_split_value),
-            )
-            .unwrap();
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("get_split_value".to_string()),
+            |builder, _config: ()| builder.create_map_block(get_split_value),
+        );
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

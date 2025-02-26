@@ -372,25 +372,19 @@ mod tests {
             1
         }
 
-        fixture
-            .registry
-            .register_node_builder(
-                NodeBuilderOptions::new("num_output", "json", "i64"),
-                |builder, _config: ()| builder.create_map_block(num_output),
-            )
-            .unwrap();
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("num_output".to_string()),
+            |builder, _config: ()| builder.create_map_block(num_output),
+        );
 
         fn string_output(_: serde_json::Value) -> String {
             "hello".to_string()
         }
 
-        fixture
-            .registry
-            .register_node_builder(
-                NodeBuilderOptions::new("string_output", "json", "String"),
-                |builder, _config: ()| builder.create_map_block(string_output),
-            )
-            .unwrap();
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("string_output".to_string()),
+            |builder, _config: ()| builder.create_map_block(string_output),
+        );
 
         fixture
     }
@@ -401,12 +395,10 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("join_i64", "Vec<i64>", "i64"),
+                NodeBuilderOptions::new("join_i64"),
                 |builder, _config: ()| builder.create_map_block(|i: Vec<i64>| i[0]),
             )
-            .unwrap()
-            .with_join()
-            .unwrap();
+            .with_join();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -451,7 +443,7 @@ mod tests {
             .opt_out()
             .no_request_deserializing()
             .register_node_builder(
-                NodeBuilderOptions::new("wait_2_strings", "Vec<BufferKey<String>>", "String"),
+                NodeBuilderOptions::new("wait_2_strings"),
                 |builder, _config: ()| {
                     let n = builder.create_node(
                         (|In(req): In<Vec<BufferKey<String>>>, access: BufferAccess<String>| {
@@ -471,9 +463,7 @@ mod tests {
                     }
                 },
             )
-            .unwrap()
-            .with_listen()
-            .unwrap();
+            .with_listen();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -529,14 +519,12 @@ mod tests {
             .opt_out()
             .no_request_deserializing()
             .register_node_builder(
-                NodeBuilderOptions::new("with_buffer_access", "Vec<BufferKey<String>>", "i64"),
+                NodeBuilderOptions::new("with_buffer_access"),
                 |builder, _config: ()| {
                     builder.create_map_block(|req: (i64, Vec<BufferKey<String>>)| req.0)
                 },
             )
-            .unwrap()
-            .with_buffer_access()
-            .unwrap();
+            .with_buffer_access();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -593,14 +581,12 @@ mod tests {
             .opt_out()
             .no_request_deserializing()
             .register_node_builder(
-                NodeBuilderOptions::new("listen_buffer", "Vec<BufferKey<i64>>", "usize"),
+                NodeBuilderOptions::new("listen_buffer"),
                 |builder, _config: ()| -> Node<Vec<BufferKey<i64>>, usize, ()> {
                     builder.create_node(listen_buffer.into_blocking_callback())
                 },
             )
-            .unwrap()
-            .with_listen()
-            .unwrap();
+            .with_listen();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

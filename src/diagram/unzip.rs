@@ -10,7 +10,7 @@ use crate::Builder;
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -60,6 +60,9 @@ pub trait DynUnzip {
         builder: &mut Builder,
         output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
+
+    /// Called when a node is registered.
+    fn on_register(&self, registry: &mut MessageRegistry);
 }
 
 impl<T> DynUnzip for NotSupportedMarker<T> {
@@ -74,13 +77,16 @@ impl<T> DynUnzip for NotSupportedMarker<T> {
     ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
         Err(DiagramErrorCode::NotUnzippable)
     }
+
+    fn on_register(&self, _registry: &mut MessageRegistry) {}
 }
 
 macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*> DynUnzip for DefaultImplMarker<($($P,)*)>
+        impl<$($P),*, Serializer> DynUnzip for DefaultImplMarker<(($($P,)*), Serializer)>
         where
             $($P: Send + Sync + 'static),*,
+            Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
         {
             fn output_types(&self) -> Vec<&'static str> {
                 vec![$(
@@ -104,6 +110,15 @@ macro_rules! dyn_unzip_impl {
 
                 debug!("unzipped outputs: {:?}", outputs);
                 Ok(outputs)
+            }
+
+            fn on_register(&self, registry: &mut MessageRegistry)
+            {
+                // Register serialize functions for all items in the tuple.
+                // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
+                $(
+                    registry.register_serialize::<$P, Serializer>();
+                )*
             }
         }
     };
@@ -190,12 +205,6 @@ mod tests {
     #[test]
     fn test_unzip_to_terminate() {
         let mut fixture = DiagramTestFixture::new();
-
-        fixture
-            .registry
-            .opt_out()
-            .register_message::<i64>("i64")
-            .unwrap();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

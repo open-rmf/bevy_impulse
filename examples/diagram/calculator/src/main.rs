@@ -23,21 +23,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut registry = DiagramElementRegistry::new();
     registry.register_node_builder(
-        NodeBuilderOptions::new("add", "f64", "f64").with_name("Add"),
+        NodeBuilderOptions::new("add").with_name("Add"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
-    )?;
+    );
     registry.register_node_builder(
-        NodeBuilderOptions::new("sub", "f64", "f64").with_name("Subtract"),
+        NodeBuilderOptions::new("sub").with_name("Subtract"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
-    )?;
+    );
     registry.register_node_builder(
-        NodeBuilderOptions::new("mul", "f64", "f64").with_name("Multiply"),
+        NodeBuilderOptions::new("mul").with_name("Multiply"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
-    )?;
+    );
     registry.register_node_builder(
-        NodeBuilderOptions::new("div", "f64", "f64").with_name("Divide"),
+        NodeBuilderOptions::new("div").with_name("Divide"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
-    )?;
+    );
 
     let mut app = bevy_app::App::new();
     app.add_plugins(ImpulsePlugin::default());

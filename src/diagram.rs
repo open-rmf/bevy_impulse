@@ -565,7 +565,7 @@ impl Diagram {
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
-    /// registry.register_node_builder(NodeBuilderOptions::new("echo", "String", "String"), |builder, _config: ()| {
+    /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
     ///
@@ -637,7 +637,7 @@ impl Diagram {
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
-    /// registry.register_node_builder(NodeBuilderOptions::new("echo", "String", "String"), |builder, _config: ()| {
+    /// registry.register_node_builder(NodeBuilderOptions::new("echo".to_string()), |builder, _config: ()| {
     ///     builder.create_map_block(|msg: String| msg)
     /// });
     ///
@@ -770,9 +770,6 @@ pub enum DiagramErrorCode {
 
     #[error("operation type only accept single input")]
     OnlySingleInput,
-
-    #[error("message name [{0}] is already registered for a different type, or the type is already registered with a different message name")]
-    MessageAlreadyRegistered(String),
 
     #[error(transparent)]
     JsonError(#[from] serde_json::Error),

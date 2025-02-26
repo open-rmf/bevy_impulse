@@ -1,4 +1,6 @@
-use schemars::JsonSchema;
+use std::collections::HashMap;
+
+use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -6,9 +8,11 @@ use crate::{unknown_diagram_error, Builder};
 
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
+    register_serialize,
     type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    DiagramErrorCode, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
+    SerializeMessage,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -60,35 +64,38 @@ impl ForkResultOp {
 pub trait DynForkResult {
     fn on_register(
         self,
-        message_name: impl ToString,
-        registry: &mut MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode>;
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    ) -> bool;
 }
 
 impl<T> DynForkResult for NotSupportedMarker<T> {
     fn on_register(
         self,
-        _message_name: impl ToString,
-        _registry: &mut MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
-        Ok(false)
+        _messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        _schema_generator: &mut SchemaGenerator,
+    ) -> bool {
+        false
     }
 }
 
-impl<T, E> DynForkResult for DefaultImplMarker<Result<T, E>>
+impl<T, E, S> DynForkResult for DefaultImplMarker<(Result<T, E>, S)>
 where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
+    S: SerializeMessage<T> + 'static,
 {
     fn on_register(
         self,
-        message_name: impl ToString,
-        registry: &mut MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
-        let reg = registry.get_or_init_mut::<Result<T, E>>(message_name.to_string())?;
-        let ops = &mut reg.operations;
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    ) -> bool {
+        let ops = &mut messages
+            .entry(TypeInfo::of::<Result<T, E>>())
+            .or_insert(MessageRegistration::new::<T>())
+            .operations;
         if ops.fork_result_impl.is_some() {
-            return Ok(false);
+            return false;
         }
 
         ops.fork_result_impl = Some(|builder, output| {
@@ -100,7 +107,8 @@ where
             Ok(outputs)
         });
 
-        Ok(true)
+        register_serialize::<T, S>(messages, schema_generator);
+        true
     }
 }
 
@@ -126,24 +134,19 @@ mod tests {
         fixture
             .registry
             .register_node_builder(
-                NodeBuilderOptions::new("check_even".to_string(), "i64", "Result<String, String>"),
+                NodeBuilderOptions::new("check_even".to_string()),
                 |builder: &mut Builder, _config: ()| builder.create_map_block(&check_even),
             )
-            .unwrap()
-            .with_fork_result()
-            .unwrap();
+            .with_fork_result();
 
         fn echo(s: String) -> String {
             s
         }
 
-        fixture
-            .registry
-            .register_node_builder(
-                NodeBuilderOptions::new("echo".to_string(), "String", "String"),
-                |builder: &mut Builder, _config: ()| builder.create_map_block(&echo),
-            )
-            .unwrap();
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("echo".to_string()),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(&echo),
+        );
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::debug;
 
-use super::{DiagramErrorCode, MessageRegistry};
+use super::{type_info::TypeInfo, MessageRegistration};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SerializationError {
@@ -144,18 +146,19 @@ impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
 }
 
 pub(super) fn register_serialize<T, Serializer>(
-    message_name: impl ToString,
-    registry: &mut MessageRegistry,
-) -> Result<bool, DiagramErrorCode>
+    messages: &mut HashMap<TypeInfo, MessageRegistration>,
+    schema_generator: &mut SchemaGenerator,
+) -> bool
 where
     T: Send + Sync + 'static,
     Serializer: SerializeMessage<T>,
 {
-    let schema = Serializer::json_schema(&mut registry.schema_generator);
-    let reg = registry.get_or_init_mut::<T>(message_name)?;
+    let reg = &mut messages
+        .entry(TypeInfo::of::<T>())
+        .or_insert(MessageRegistration::new::<T>());
     let ops = &mut reg.operations;
     if !Serializer::serializable() || ops.serialize_impl.is_some() {
-        return Ok(false);
+        return false;
     }
 
     debug!(
@@ -172,7 +175,7 @@ where
         Ok(serialized_output)
     });
 
-    reg.schema = schema;
+    reg.schema = Serializer::json_schema(schema_generator);
 
-    Ok(true)
+    true
 }
