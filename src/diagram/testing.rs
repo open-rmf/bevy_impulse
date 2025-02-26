@@ -101,24 +101,31 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
         .opt_out()
         .no_response_cloning()
         .register_node_builder(
-            NodeBuilderOptions::new("multiply3_uncloneable"),
+            NodeBuilderOptions::new("multiply3_uncloneable", "i64", "Uncloneable<i64>"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_uncloneable),
-        );
-    registry.register_node_builder(
-        NodeBuilderOptions::new("multiply3"),
-        |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
-    );
+        )
+        .unwrap();
     registry
         .register_node_builder(
-            NodeBuilderOptions::new("multiply3_5"),
+            NodeBuilderOptions::new("multiply3", "i64", "i64"),
+            |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3),
+        )
+        .unwrap();
+    registry
+        .register_node_builder(
+            NodeBuilderOptions::new("multiply3_5", "i64", "(i64, i64)"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_5),
         )
-        .with_unzip();
+        .unwrap()
+        .with_unzip()
+        .unwrap();
 
-    registry.register_node_builder(
-        NodeBuilderOptions::new("multiply_by"),
-        |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
-    );
+    registry
+        .register_node_builder(
+            NodeBuilderOptions::new("multiply_by", "i64", "i64"),
+            |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
+        )
+        .unwrap();
 
     registry
         .opt_out()
@@ -126,23 +133,26 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
         .no_response_serializing()
         .no_response_cloning()
         .register_node_builder(
-            NodeBuilderOptions::new("opaque"),
+            NodeBuilderOptions::new("opaque", "Unserializable", "Unserializable"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque),
-        );
+        )
+        .unwrap();
     registry
         .opt_out()
         .no_request_deserializing()
         .register_node_builder(
-            NodeBuilderOptions::new("opaque_request"),
+            NodeBuilderOptions::new("opaque_request", "Unserializable", "()"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
-        );
+        )
+        .unwrap();
     registry
         .opt_out()
         .no_response_serializing()
         .no_response_cloning()
         .register_node_builder(
-            NodeBuilderOptions::new("opaque_response"),
+            NodeBuilderOptions::new("opaque_response", "i64", "Unserializable"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
-        );
+        )
+        .unwrap();
     registry
 }

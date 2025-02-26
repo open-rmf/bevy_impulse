@@ -202,23 +202,34 @@ mod tests {
     }
 
     fn register_join_nodes(registry: &mut DiagramElementRegistry) {
-        registry.register_node_builder(NodeBuilderOptions::new("foo"), |builder, _config: ()| {
-            builder.create_map_block(foo)
-        });
-        registry.register_node_builder(NodeBuilderOptions::new("bar"), |builder, _config: ()| {
-            builder.create_map_block(bar)
-        });
-        registry
-            .register_node_builder(NodeBuilderOptions::new("foobar"), |builder, _config: ()| {
-                builder.create_map_block(foobar)
-            })
-            .with_join();
         registry
             .register_node_builder(
-                NodeBuilderOptions::new("foobar_array"),
+                NodeBuilderOptions::new("foo", "json", "String"),
+                |builder, _config: ()| builder.create_map_block(foo),
+            )
+            .unwrap();
+        registry
+            .register_node_builder(
+                NodeBuilderOptions::new("bar", "json", "String"),
+                |builder, _config: ()| builder.create_map_block(bar),
+            )
+            .unwrap();
+        registry
+            .register_node_builder(
+                NodeBuilderOptions::new("foobar", "foobar", "String"),
+                |builder, _config: ()| builder.create_map_block(foobar),
+            )
+            .unwrap()
+            .with_join()
+            .unwrap();
+        registry
+            .register_node_builder(
+                NodeBuilderOptions::new("foobar_array", "Vec<String>", "String"),
                 |builder, _config: ()| builder.create_map_block(foobar_array),
             )
-            .with_join();
+            .unwrap()
+            .with_join()
+            .unwrap();
     }
 
     #[test]
