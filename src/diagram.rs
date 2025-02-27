@@ -706,8 +706,10 @@ impl Display for DiagramErrorContext {
 #[derive(thiserror::Error, Debug)]
 #[error("{context} {code}")]
 pub struct DiagramError {
-    context: DiagramErrorContext,
-    code: DiagramErrorCode,
+    pub context: DiagramErrorContext,
+
+    #[source]
+    pub code: DiagramErrorCode,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -717,9 +719,6 @@ pub enum DiagramErrorCode {
 
     #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
-
-    #[error("expected operation type [{expected}], for [{got}]")]
-    UnexpectedOperationType { expected: String, got: String },
 
     #[error("type mismatch, source {source_type}, target {target_type}")]
     TypeMismatch {
@@ -750,11 +749,14 @@ pub enum DiagramErrorCode {
     #[error("response cannot be split")]
     NotSplittable,
 
-    #[error("responses cannot be joined")]
+    #[error("message cannot be joined from the input buffers")]
     NotJoinable,
 
     #[error("empty join is not allowed")]
     EmptyJoin,
+
+    #[error("join target type cannot be determined from [next] and [target_node] is not provided")]
+    UnknownTarget,
 
     #[error(transparent)]
     CannotTransform(#[from] TransformError),

@@ -229,7 +229,7 @@
               "$ref": "#/definitions/NextOperation"
             },
             "target_node": {
-              "description": "The id of an operation that this join is for. The id must be a `node` operation.",
+              "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.",
               "type": [
                 "string",
                 "null"
@@ -347,7 +347,7 @@
               "$ref": "#/definitions/NextOperation"
             },
             "target_node": {
-              "description": "The id of an operation that this buffer access is for. The id must be a `node` operation.",
+              "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.",
               "type": [
                 "string",
                 "null"
@@ -382,7 +382,7 @@
               "$ref": "#/definitions/NextOperation"
             },
             "target_node": {
-              "description": "The id of an operation that this operation is for. The id must be a `node` operation.",
+              "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.",
               "type": [
                 "string",
                 "null"

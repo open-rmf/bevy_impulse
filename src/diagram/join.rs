@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use crate::{
         diagram::testing::DiagramTestFixture, Cancellation, CancellationCause, Diagram,
-        DiagramErrorCode, FilteredErr, NodeBuilderOptions,
+        DiagramError, DiagramErrorCode, FilteredErr, NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -325,6 +325,59 @@ mod tests {
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
         assert_eq!(result, "foobar");
+    }
+
+    #[test]
+    /// when `target_node` is not given and next is not a node
+    fn test_join_infer_type_fail() {
+        let mut fixture = DiagramTestFixture::new();
+        register_join_nodes(&mut fixture.registry);
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork_clone",
+            "ops": {
+                "fork_clone": {
+                    "type": "fork_clone",
+                    "next": ["foo", "bar"],
+                },
+                "foo": {
+                    "type": "node",
+                    "builder": "foo",
+                    "next": "foo_buffer",
+                },
+                "foo_buffer": {
+                    "type": "buffer",
+                },
+                "bar": {
+                    "type": "node",
+                    "builder": "bar",
+                    "next": "bar_buffer",
+                },
+                "bar_buffer": {
+                    "type": "buffer",
+                },
+                "join": {
+                    "type": "join",
+                    "buffers": {
+                        "foo": "foo_buffer",
+                        "bar": "bar_buffer",
+                    },
+                    "next": "fork_clone2",
+                },
+                "fork_clone2": {
+                    "type": "fork_clone",
+                    "next": [{ "builtin": "terminate" }],
+                },
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::Null)
+            .unwrap_err();
+        let err_code = &result.downcast_ref::<DiagramError>().unwrap().code;
+        assert!(matches!(err_code, DiagramErrorCode::UnknownTarget,));
     }
 
     #[test]

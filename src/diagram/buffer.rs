@@ -127,23 +127,13 @@ pub(super) fn get_node_request_type(
             NextOperation::Target(op_id) => diagram.get_op(op_id)?,
             NextOperation::Builtin { builtin } => match builtin {
                 BuiltinTarget::Terminate => return Ok(TypeInfo::of::<serde_json::Value>()),
-                _ => {
-                    return Err(DiagramErrorCode::UnexpectedOperationType {
-                        expected: "node".to_string(),
-                        got: next.to_string(),
-                    })
-                }
+                _ => return Err(DiagramErrorCode::UnknownTarget),
             },
         }
     };
     let node_op = match target_node {
         DiagramOperation::Node(op) => op,
-        _ => {
-            return Err(DiagramErrorCode::UnexpectedOperationType {
-                expected: "node".to_string(),
-                got: target_node.to_string(),
-            })
-        }
+        _ => return Err(DiagramErrorCode::UnknownTarget),
     };
     let target_type = registry.get_node_registration(&node_op.builder)?.request;
     Ok(target_type)
