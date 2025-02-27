@@ -310,7 +310,9 @@
             },
             "settings": {
               "default": {
-                "retention": "keep_all"
+                "retention": {
+                  "keep_last": 1
+                }
               },
               "allOf": [
                 {

@@ -17,17 +17,11 @@ use super::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BufferOp {
-    #[serde(default = "BufferOp::default_buffer_settings")]
+    #[serde(default)]
     pub(super) settings: BufferSettings,
 
     /// If true, messages will be serialized before sending into the buffer.
     pub(super) serialize: Option<bool>,
-}
-
-impl BufferOp {
-    fn default_buffer_settings() -> BufferSettings {
-        BufferSettings::keep_all()
-    }
 }
 
 impl BufferOp {
