@@ -359,7 +359,7 @@ where
     fn make_stream_buffer(&self, source: Entity) -> Streams::Buffer {
         // INVARIANT: The query can't fail because all of its components are optional
         let (target_indices, target_map) = self.streams.get(source).unwrap();
-        Streams::make_buffer(target_indices, target_map)
+        Streams::make_stream_buffer(target_indices, target_map)
     }
 }
 
@@ -997,7 +997,7 @@ pub fn event_streaming_service<E>(
 
     for event in events.read() {
         requests.for_each(|order| {
-            order.streams().send(StreamOf(event.clone()));
+            order.streams().send(event.clone());
         });
     }
 }

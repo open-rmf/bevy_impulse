@@ -817,11 +817,11 @@ mod tests {
         // never end.
         let mut result: SmallVec<[_; 3]> = SmallVec::new();
         while let Ok(r) = recipient.streams.try_recv() {
-            result.push(r.0 .0);
+            result.push(r.0);
         }
         assert_eq!(&result[..], &[0, 1, 2]);
     }
 
-    #[derive(Event, Clone, Copy)]
+    #[derive(Event, Clone, Copy, Debug)]
     struct CustomEvent(i64);
 }

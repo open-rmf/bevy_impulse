@@ -121,9 +121,9 @@ mod tests {
         let doubling_service = context.command(|commands| {
             commands.spawn_service(|In(input): BlockingServiceInput<f64, NumberStreams>| {
                 let double = 2.0 * input.request;
-                input.streams.0.send(StreamOf(double as u32));
-                input.streams.1.send(StreamOf(double as i32));
-                input.streams.2.send(StreamOf(double as f32));
+                input.streams.0.send(double as u32);
+                input.streams.1.send(double as i32);
+                input.streams.2.send(double as f32);
                 double
             })
         });

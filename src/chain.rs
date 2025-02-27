@@ -29,7 +29,7 @@ use crate::{
     CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
     IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate,
     OperateSplit, OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish,
-    Service, Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    Service, Spread, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -707,17 +707,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// The target where the chain will be sending its latest output.
     pub fn target(&self) -> Entity {
         self.target
-    }
-}
-
-impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, StreamOf<T>>
-where
-    T: 'static + Send + Sync,
-{
-    /// When the output value is wrapped in a [`StreamOf`] container, this will
-    /// strip it out of that wrapper.
-    pub fn inner(self) -> Chain<'w, 's, 'a, 'b, T> {
-        self.map_block(|v| v.0)
     }
 }
 
@@ -1463,14 +1452,13 @@ mod tests {
                 let node = scope.input.chain(builder).map_node(
                     |input: BlockingMap<i32, StreamOf<i32>>| {
                         for _ in 0..input.request {
-                            input.streams.send(StreamOf(input.request));
+                            input.streams.send(input.request);
                         }
                     },
                 );
 
                 node.streams
                     .chain(builder)
-                    .inner()
                     .collect_all::<16>()
                     .connect(scope.terminate);
             });
@@ -1489,14 +1477,13 @@ mod tests {
                 let node = scope.input.chain(builder).map_node(
                     |input: BlockingMap<i32, StreamOf<i32>>| {
                         for _ in 0..input.request {
-                            input.streams.send(StreamOf(input.request));
+                            input.streams.send(input.request);
                         }
                     },
                 );
 
                 node.streams
                     .chain(builder)
-                    .inner()
                     .collect::<16>(4, None)
                     .connect(scope.terminate);
             });

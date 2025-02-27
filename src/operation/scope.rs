@@ -1637,7 +1637,7 @@ impl<T: Stream> RedirectScopeStream<T> {
     }
 }
 
-impl<T: Stream> Operation for RedirectScopeStream<T> {
+impl<S: Stream> Operation for RedirectScopeStream<S> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world
             .get_entity_mut(self.target)
@@ -1645,7 +1645,7 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
             .insert(SingleInputStorage::new(source));
 
         world.entity_mut(source).insert((
-            InputBundle::<T>::new(),
+            InputBundle::<S::Input>::new(),
             SingleTargetStorage::new(self.target),
         ));
         Ok(())
@@ -1667,22 +1667,25 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
         let Input {
             session: scoped_session,
             data,
-        } = source_mut.take_input::<T>()?;
+        } = source_mut.take_input::<S::Input>()?;
         let parent_session = world
             .get::<ParentSession>(scoped_session)
             .or_broken()?
             .get();
-        data.send(StreamRequest {
-            source,
-            session: parent_session,
-            target,
-            world,
-            roster,
-        })
+        S::send(
+            data,
+            StreamRequest {
+                source,
+                session: parent_session,
+                target,
+                world,
+                roster,
+            },
+        )
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        if r.has_input::<T>()? {
+        if r.has_input::<S>()? {
             return Ok(true);
         }
 
@@ -1697,7 +1700,7 @@ impl<T: Stream> Operation for RedirectScopeStream<T> {
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         // TODO(@mxgrey): Consider whether we should cleanup the inputs by
         // pushing them out of the scope instead of just dropping them.
-        clean.cleanup_inputs::<T>()?;
+        clean.cleanup_inputs::<S>()?;
         clean.notify_cleaned()
     }
 }
@@ -1714,9 +1717,9 @@ impl<T: Stream> RedirectWorkflowStream<T> {
     }
 }
 
-impl<T: Stream> Operation for RedirectWorkflowStream<T> {
+impl<S: Stream> Operation for RedirectWorkflowStream<S> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert(InputBundle::<T>::new());
+        world.entity_mut(source).insert(InputBundle::<S::Input>::new());
         Ok(())
     }
 
@@ -1731,7 +1734,7 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
         let Input {
             session: scoped_session,
             data,
-        } = source_mut.take_input::<T>()?;
+        } = source_mut.take_input::<S::Input>()?;
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
         let exit = world
             .get::<ExitTargetStorage>(scope)
@@ -1749,20 +1752,23 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
 
         let stream_target_map = world.get::<StreamTargetMap>(exit_source).or_broken()?;
         let stream_target = world
-            .get::<StreamTargetStorage<T>>(exit_source)
+            .get::<StreamTargetStorage<S::Output>>(exit_source)
             .and_then(|target| stream_target_map.get(target.get()));
 
-        data.send(StreamRequest {
-            source,
-            session: parent_session,
-            target: stream_target,
-            world,
-            roster,
-        })
+        S::send(
+            data,
+            StreamRequest {
+                source,
+                session: parent_session,
+                target: stream_target,
+                world,
+                roster,
+            },
+        )
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        if r.has_input::<T>()? {
+        if r.has_input::<S>()? {
             return Ok(true);
         }
 
@@ -1777,7 +1783,7 @@ impl<T: Stream> Operation for RedirectWorkflowStream<T> {
     fn cleanup(mut clean: OperationCleanup) -> OperationResult {
         // TODO(@mxgrey): Consider whether we should cleanup the inputs by
         // pushing them out of the scope instead of just dropping them.
-        clean.cleanup_inputs::<T>()?;
+        clean.cleanup_inputs::<S>()?;
         clean.notify_cleaned()
     }
 }

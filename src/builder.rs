@@ -851,7 +851,6 @@ mod tests {
             stream_node
                 .streams
                 .chain(builder)
-                .inner()
                 .map_block(|value| 2 * value)
                 .connect(scope.terminate);
         });
@@ -873,7 +872,6 @@ mod tests {
             stream_node
                 .streams
                 .chain(builder)
-                .inner()
                 .map_block(|value| 2 * value)
                 .connect(scope.terminate);
         });

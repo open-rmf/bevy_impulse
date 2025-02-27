@@ -140,9 +140,9 @@ pub struct StreamChannel<T> {
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-impl<T: Stream> StreamChannel<T> {
+impl<S: Stream> StreamChannel<S> {
     /// Send an instance of data out over a stream.
-    pub fn send(&self, data: T) {
+    pub fn send(&self, data: S::Input) {
         let source = self.inner.source;
         let session = self.inner.session;
         let target = self.target;
@@ -150,13 +150,16 @@ impl<T: Stream> StreamChannel<T> {
             .sender
             .send(Box::new(
                 move |world: &mut World, roster: &mut OperationRoster| {
-                    data.send(StreamRequest {
-                        source,
-                        session,
-                        target,
-                        world,
-                        roster,
-                    })
+                    S::send(
+                        data,
+                        StreamRequest {
+                            source,
+                            session,
+                            target,
+                            world,
+                            roster,
+                        },
+                    )
                     .ok();
                 },
             ))
