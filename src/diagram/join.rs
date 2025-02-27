@@ -39,7 +39,7 @@ impl JoinOp {
         vertex: &Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
         registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
         if self.buffers.is_empty() {
@@ -90,7 +90,7 @@ impl SerializedJoinOp {
         builder: &mut Builder,
         vertex: &Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);

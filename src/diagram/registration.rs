@@ -37,7 +37,7 @@ use super::{
     unzip::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
     DynSplit, DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer,
-    SplitOp,
+    Section, SectionMetadata, SectionMetadataProvider, SplitOp,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -173,7 +173,9 @@ where
 
 #[derive(Serialize)]
 pub struct NodeRegistration {
+    #[serde(rename = "$key$")]
     pub(super) id: BuilderId,
+
     pub(super) name: String,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
@@ -344,7 +346,7 @@ impl<'a, Message> MessageRegistrationBuilder<'a, Message>
 where
     Message: Send + Sync + 'static + Any,
 {
-    fn new(registry: &'a mut MessageRegistry) -> Self {
+    pub fn new(registry: &'a mut MessageRegistry) -> Self {
         Self {
             data: registry,
             _ignore: Default::default(),
@@ -525,18 +527,68 @@ where
     }
 }
 
-pub trait IntoNodeRegistration {
-    fn into_node_registration(
+type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section>;
+
+#[derive(Serialize)]
+pub struct SectionRegistration {
+    pub(super) name: String,
+    pub(super) metadata: SectionMetadata,
+    pub(super) config_schema: Schema,
+
+    #[serde(skip)]
+    create_section_impl: RefCell<Box<CreateSectionFn>>,
+}
+
+impl SectionRegistration {
+    pub(super) fn create_section(
+        &self,
+        builder: &mut Builder,
+        config: serde_json::Value,
+    ) -> Result<Box<dyn Section>, DiagramErrorCode> {
+        let section = (self.create_section_impl.borrow_mut())(builder, config);
+        Ok(section)
+    }
+}
+
+pub trait IntoSectionRegistration<SectionT, Config>
+where
+    SectionT: Section,
+{
+    fn into_section_registration(
         self,
-        id: BuilderId,
         name: String,
         schema_generator: &mut SchemaGenerator,
-    ) -> NodeRegistration;
+    ) -> SectionRegistration;
+}
+
+impl<F, SectionT, Config> IntoSectionRegistration<SectionT, Config> for F
+where
+    F: 'static + FnMut(&mut Builder, Config) -> SectionT,
+    SectionT: 'static + Section + SectionMetadataProvider,
+    Config: DeserializeOwned + JsonSchema,
+{
+    fn into_section_registration(
+        mut self,
+        name: String,
+        schema_generator: &mut SchemaGenerator,
+    ) -> SectionRegistration {
+        SectionRegistration {
+            name,
+            metadata: SectionT::metadata().clone(),
+            config_schema: schema_generator.subschema_for::<()>(),
+            create_section_impl: RefCell::new(Box::new(move |builder, config| {
+                let section = self(builder, serde_json::from_value::<Config>(config).unwrap());
+                Box::new(section)
+            })),
+        }
+    }
 }
 
 #[derive(Serialize)]
 pub struct DiagramElementRegistry {
     pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
+    pub(super) sections: HashMap<BuilderId, SectionRegistration>,
+
     #[serde(flatten)]
     pub(super) messages: MessageRegistry,
 }
@@ -1134,6 +1186,7 @@ impl Default for DiagramElementRegistry {
     fn default() -> Self {
         DiagramElementRegistry {
             nodes: Default::default(),
+            sections: Default::default(),
             messages: MessageRegistry::new(),
         }
     }
@@ -1178,6 +1231,29 @@ impl DiagramElementRegistry {
         Response: Send + Sync + 'static + DynType + Serialize + Clone,
     {
         self.opt_out().register_node_builder(options, builder)
+    }
+
+    /// Register a section builder with the specified common operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Id of the builder, this must be unique.
+    /// * `name` - Friendly name for the builder, this is only used for display purposes.
+    /// * `f` - The section builder to register.
+    pub fn register_section_builder<SectionBuilder, SectionT, Config>(
+        &mut self,
+        options: SectionBuilderOptions,
+        section_builder: SectionBuilder,
+    ) where
+        SectionBuilder: IntoSectionRegistration<SectionT, Config>,
+        SectionT: Section,
+    {
+        let reg = section_builder.into_section_registration(
+            options.name.unwrap_or_else(|| options.id.clone()),
+            &mut self.messages.schema_generator,
+        );
+        self.sections.insert(options.id, reg);
+        SectionT::on_register(&mut self.messages);
     }
 
     /// In some cases the common operations of deserialization, serialization,
@@ -1262,6 +1338,26 @@ pub struct NodeBuilderOptions {
 }
 
 impl NodeBuilderOptions {
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: id.to_string(),
+            name: None,
+        }
+    }
+
+    pub fn with_name(mut self, name: impl ToString) -> Self {
+        self.name = Some(name.to_string());
+        self
+    }
+}
+
+#[non_exhaustive]
+pub struct SectionBuilderOptions {
+    pub id: BuilderId,
+    pub name: Option<String>,
+}
+
+impl SectionBuilderOptions {
     pub fn new(id: impl ToString) -> Self {
         Self {
             id: id.to_string(),

@@ -158,7 +158,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
     let mut terminate_edges: Vec<usize> = Vec::new();
 
-    let mut buffers: HashMap<&OperationId, AnyBuffer> = HashMap::new();
+    let mut buffers: HashMap<OperationId, AnyBuffer> = HashMap::new();
 
     // create all the edges
     for (op_id, op) in &diagram.ops {
@@ -306,7 +306,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 ///   3. borrows the output edges
 /// Return a tuple of the taken output and the borrowed edges, if the input edge is not ready,
 /// returns `None`.
-pub fn map_one_to_many_edges<'a, 'b>(
+fn map_one_to_many_edges<'a, 'b>(
     target: &Vertex,
     edges: &'b mut HashMap<usize, Edge<'a>>,
 ) -> Result<Option<(DynOutput, Vec<&'b mut Edge<'a>>)>, DiagramErrorCode> {
@@ -351,7 +351,7 @@ fn connect_vertex<'a>(
     registry: &DiagramElementRegistry,
     edges: &mut HashMap<usize, Edge<'a>>,
     inputs: &HashMap<&OperationId, DynInputSlot>,
-    buffers: &mut HashMap<&'a OperationId, AnyBuffer>,
+    buffers: &mut HashMap<OperationId, AnyBuffer>,
     diagram: &Diagram,
 ) -> Result<bool, DiagramErrorCode> {
     let in_edges: Vec<&Edge> = target.in_edges.iter().map(|idx| &edges[idx]).collect();

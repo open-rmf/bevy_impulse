@@ -37,7 +37,7 @@ impl BufferOp {
         builder: &mut Builder,
         vertex: &'a Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
-        buffers: &mut HashMap<&'a OperationId, AnyBuffer>,
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
         if vertex.in_edges.is_empty() {
@@ -90,7 +90,7 @@ impl BufferOp {
 
         // convert the first output into a buffer
         let buffer = first_output.into_any_buffer(builder, self.settings)?;
-        let buffer = match buffers.entry(vertex.op_id) {
+        let buffer = match buffers.entry(vertex.op_id.clone()) {
             Entry::Occupied(mut entry) => {
                 entry.insert(buffer);
                 entry.into_mut()
@@ -145,7 +145,7 @@ impl BufferInputs {
     /// Returns `None` if one or more buffer does not exist.
     pub(super) fn as_buffer_map(
         &self,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
     ) -> Option<BufferMap> {
         match self {
             Self::Dict(mapping) => {
@@ -210,7 +210,7 @@ impl BufferAccessOp {
         vertex: &Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
         registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
         let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
@@ -294,7 +294,7 @@ impl ListenOp {
         vertex: &Vertex,
         mut edges: HashMap<&usize, &mut Edge>,
         registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
         let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {

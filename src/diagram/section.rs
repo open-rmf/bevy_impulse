@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnyBuffer, Buffer, Builder, InputSlot, Output};
+use crate::{AnyBuffer, AsAnyBuffer, Buffer, BufferMap, Builder, InputSlot, Output};
 
 use super::{
-    dyn_connect, BuilderId, DiagramErrorCode, DynInputSlot, DynOutput, NextOperation, OperationId,
+    dyn_connect, type_info::TypeInfo, BuilderId, DiagramErrorCode, DynInputSlot, DynOutput,
+    MessageRegistrationBuilder, MessageRegistry, NextOperation, OperationId, SectionRegistration,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -38,165 +39,263 @@ impl SectionOp {
         panic!("TODO")
     }
 
-    fn try_connect(&self) -> Result<(), DiagramErrorCode> {
-        panic!("TODO")
-    }
-}
-
-pub trait Section {
     fn try_connect(
-        self,
+        &self,
+        op_id: &OperationId,
         builder: &mut Builder,
-        // outputs from outside that are connected to this section
+        config: serde_json::Value,
+        sections: &HashMap<BuilderId, SectionRegistration>,
         inputs: HashMap<String, DynOutput>,
-        // inputs from outside that this section connects to
         outputs: HashMap<String, DynInputSlot>,
-    ) -> Result<(), DiagramErrorCode>;
-}
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<bool, DiagramErrorCode> {
+        match &self.builder {
+            SectionProvider::Builder(builder_id) => {
+                let reg = sections
+                    .get(builder_id)
+                    .ok_or(DiagramErrorCode::BuilderNotFound(builder_id.clone()))?;
 
-pub trait SectionItem {
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str);
+                // note that unlike nodes, sections are created only when trying to connect
+                // because we need all the buffers to be created first, and buffers are
+                // created at connect time.
+                let section = reg.create_section(builder, config)?;
+                let mut section_buffers = HashMap::with_capacity(self.buffers.len());
+                section.try_connect(builder, inputs, outputs, &mut section_buffers)?;
+                // for now we just do namespacing by prefixing, if this is insufficient,
+                // a more concrete impl may be done in `OperationId`.
+                for (key, buffer) in section_buffers {
+                    buffers.insert(format!("{}/{}", op_id, key), buffer);
+                }
 
-    fn try_connect(
-        self,
-        key: &'static str,
-        builder: &mut Builder,
-        inputs: &mut HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynInputSlot>,
-    ) -> Result<(), DiagramErrorCode>;
-}
-
-impl<T: 'static> SectionItem for InputSlot<T> {
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
-        metadata.inputs.push(key);
-    }
-
-    fn try_connect(
-        self,
-        key: &'static str,
-        builder: &mut Builder,
-        inputs: &mut HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynInputSlot>,
-    ) -> Result<(), DiagramErrorCode> {
-        let output = inputs.remove(key).ok_or(SectionError::MissingInput(key))?;
-        dyn_connect(builder, output, self.into())
+                Ok(true)
+            }
+            SectionProvider::Template(_template) => panic!("TODO"),
+        }
     }
 }
 
-impl<T: Send + Sync + 'static> SectionItem for Output<T> {
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
-        metadata.outputs.push(key);
-    }
-
-    fn try_connect(
-        self,
-        key: &'static str,
-        builder: &mut Builder,
-        _inputs: &mut HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynInputSlot>,
-    ) -> Result<(), DiagramErrorCode> {
-        let input = outputs
-            .remove(key)
-            .ok_or(SectionError::MissingOutput(key))?;
-        dyn_connect(builder, self.into(), input)
-    }
-}
-
-impl<T> SectionItem for Buffer<T> {
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
-        metadata.buffers.push(key)
-    }
-
-    fn try_connect(
-        self,
-        _key: &'static str,
-        _builder: &mut Builder,
-        _inputs: &mut HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynInputSlot>,
-    ) -> Result<(), DiagramErrorCode> {
-        Ok(())
-    }
-}
-
+#[derive(Serialize, Clone)]
 pub struct SectionMetadata {
-    inputs: Vec<&'static str>,
-    outputs: Vec<&'static str>,
-    buffers: Vec<&'static str>,
+    inputs: HashMap<String, SectionInput>,
+    outputs: HashMap<String, SectionOutput>,
+    buffers: HashMap<String, SectionBuffer>,
+}
+
+impl SectionMetadata {
+    pub fn new() -> Self {
+        Self {
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
+            buffers: HashMap::new(),
+        }
+    }
 }
 
 pub trait SectionMetadataProvider {
     fn metadata() -> &'static SectionMetadata;
 }
 
-pub trait SectionBuilder {
-    fn section_metadata(&self) -> &'static SectionMetadata;
-
-    fn create_section(
-        &mut self,
+pub trait Section {
+    fn try_connect(
+        self: Box<Self>,
         builder: &mut Builder,
-        buffers: HashMap<String, AnyBuffer>,
-    ) -> impl Section;
+        inputs: HashMap<String, DynOutput>,
+        outputs: HashMap<String, DynInputSlot>,
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<(), DiagramErrorCode>;
+
+    fn on_register(registry: &mut MessageRegistry)
+    where
+        Self: Sized;
 }
 
-impl<F, S> SectionBuilder for F
+pub trait SectionItem {
+    type MessageType;
+
+    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str);
+
+    fn try_connect(
+        self,
+        key: &String,
+        builder: &mut Builder,
+        inputs: &mut HashMap<String, DynOutput>,
+        outputs: &mut HashMap<String, DynInputSlot>,
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<(), DiagramErrorCode>;
+
+    fn message_registration(
+        registry: &mut MessageRegistry,
+    ) -> MessageRegistrationBuilder<Self::MessageType>;
+}
+
+impl<T> SectionItem for InputSlot<T>
 where
-    F: FnMut(&mut Builder, HashMap<String, AnyBuffer>) -> S,
-    S: Section + SectionMetadataProvider,
+    T: Send + Sync + 'static,
 {
-    fn section_metadata(&self) -> &'static SectionMetadata {
-        S::metadata()
+    type MessageType = T;
+
+    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+        metadata.inputs.insert(
+            key.to_string(),
+            SectionInput {
+                message_type: TypeInfo::of::<T>(),
+            },
+        );
     }
 
+    fn try_connect(
+        self,
+        key: &String,
+        builder: &mut Builder,
+        inputs: &mut HashMap<String, DynOutput>,
+        _outputs: &mut HashMap<String, DynInputSlot>,
+        _buffers: &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<(), DiagramErrorCode> {
+        let output = inputs
+            .remove(key)
+            .ok_or(SectionError::MissingInput(key.clone()))?;
+        dyn_connect(builder, output, self.into())
+    }
+
+    fn message_registration(
+        registry: &mut MessageRegistry,
+    ) -> MessageRegistrationBuilder<Self::MessageType> {
+        MessageRegistrationBuilder::new(registry)
+    }
+}
+
+impl<T> SectionItem for Output<T>
+where
+    T: Send + Sync + 'static,
+{
+    type MessageType = T;
+
+    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+        metadata.outputs.insert(
+            key.to_string(),
+            SectionOutput {
+                message_type: TypeInfo::of::<T>(),
+            },
+        );
+    }
+
+    fn try_connect(
+        self,
+        key: &String,
+        builder: &mut Builder,
+        _inputs: &mut HashMap<String, DynOutput>,
+        outputs: &mut HashMap<String, DynInputSlot>,
+        _buffers: &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<(), DiagramErrorCode> {
+        let input = outputs
+            .remove(key)
+            .ok_or(SectionError::MissingOutput(key.clone()))?;
+        dyn_connect(builder, self.into(), input)
+    }
+
+    fn message_registration(
+        registry: &mut MessageRegistry,
+    ) -> MessageRegistrationBuilder<Self::MessageType> {
+        MessageRegistrationBuilder::new(registry)
+    }
+}
+
+impl<T> SectionItem for Buffer<T>
+where
+    T: Send + Sync + 'static,
+{
+    type MessageType = T;
+
+    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+        metadata.buffers.insert(
+            key.to_string(),
+            SectionBuffer {
+                item_type: TypeInfo::of::<T>(),
+            },
+        );
+    }
+
+    fn try_connect(
+        self,
+        key: &String,
+        _builder: &mut Builder,
+        _inputs: &mut HashMap<String, DynOutput>,
+        _outputs: &mut HashMap<String, DynInputSlot>,
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<(), DiagramErrorCode> {
+        buffers.insert(key.to_string(), self.as_any_buffer());
+        Ok(())
+    }
+
+    fn message_registration(
+        registry: &mut MessageRegistry,
+    ) -> MessageRegistrationBuilder<Self::MessageType> {
+        MessageRegistrationBuilder::new(registry)
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub struct SectionInput {
+    pub(super) message_type: TypeInfo,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SectionOutput {
+    pub(super) message_type: TypeInfo,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SectionBuffer {
+    pub(super) item_type: TypeInfo,
+}
+
+trait CreateSection {
     fn create_section(
         &mut self,
         builder: &mut Builder,
         buffers: HashMap<String, AnyBuffer>,
-    ) -> impl Section {
-        self(builder, buffers)
-    }
+    ) -> Box<dyn Section>;
 }
 
 pub(super) struct DynSection;
 
 impl Section for DynSection {
     fn try_connect(
-        self,
+        self: Box<Self>,
         builder: &mut Builder,
-        // outputs from outside that are connected to this section
         inputs: HashMap<String, DynOutput>,
-        // inputs from outside that this section connects to
         outputs: HashMap<String, DynInputSlot>,
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
         panic!("TODO")
+    }
+
+    fn on_register(_registry: &mut MessageRegistry)
+    where
+        Self: Sized,
+    {
+        // dyn section cannot register message operations
     }
 }
 
 pub(super) struct SectionTemplate;
 
-impl SectionBuilder for SectionTemplate {
-    fn section_metadata(&self) -> &'static SectionMetadata {
+impl SectionTemplate {
+    fn create_section(&self) -> DynSection {
         panic!("TODO")
-    }
-
-    fn create_section(
-        &mut self,
-        builder: &mut Builder,
-        buffers: HashMap<String, AnyBuffer>,
-    ) -> impl Section {
-        DynSection {}
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum SectionError {
     #[error("section does not have input [{0}]")]
-    MissingInput(&'static str),
+    MissingInput(String),
 
     #[error("section does not have output [{0}] or output is already connected")]
-    MissingOutput(&'static str),
+    MissingOutput(String),
 
     #[error("section does not have buffer [{0}]")]
-    MissingBuffer(&'static str),
+    MissingBuffer(String),
 }
 
 #[cfg(test)]
