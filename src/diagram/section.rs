@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnyBuffer, AsAnyBuffer, Buffer, BufferMap, Builder, InputSlot, Output};
+use crate::{AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
-    dyn_connect, type_info::TypeInfo, BuilderId, DiagramErrorCode, DynInputSlot, DynOutput,
-    MessageRegistrationBuilder, MessageRegistry, NextOperation, OperationId, SectionRegistration,
+    dyn_connect, type_info::TypeInfo, BuilderId, DiagramElementRegistry, DiagramErrorCode,
+    DynInputSlot, DynOutput, NextOperation, OperationId, SectionRegistration,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -104,7 +104,7 @@ pub trait Section {
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode>;
 
-    fn on_register(registry: &mut MessageRegistry)
+    fn on_register(registry: &mut DiagramElementRegistry)
     where
         Self: Sized;
 }
@@ -122,10 +122,6 @@ pub trait SectionItem {
         outputs: &mut HashMap<String, DynInputSlot>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode>;
-
-    fn message_registration(
-        registry: &mut MessageRegistry,
-    ) -> MessageRegistrationBuilder<Self::MessageType>;
 }
 
 impl<T> SectionItem for InputSlot<T>
@@ -155,12 +151,6 @@ where
             .remove(key)
             .ok_or(SectionError::MissingInput(key.clone()))?;
         dyn_connect(builder, output, self.into())
-    }
-
-    fn message_registration(
-        registry: &mut MessageRegistry,
-    ) -> MessageRegistrationBuilder<Self::MessageType> {
-        MessageRegistrationBuilder::new(registry)
     }
 }
 
@@ -192,12 +182,6 @@ where
             .ok_or(SectionError::MissingOutput(key.clone()))?;
         dyn_connect(builder, self.into(), input)
     }
-
-    fn message_registration(
-        registry: &mut MessageRegistry,
-    ) -> MessageRegistrationBuilder<Self::MessageType> {
-        MessageRegistrationBuilder::new(registry)
-    }
 }
 
 impl<T> SectionItem for Buffer<T>
@@ -225,12 +209,6 @@ where
     ) -> Result<(), DiagramErrorCode> {
         buffers.insert(key.to_string(), self.as_any_buffer());
         Ok(())
-    }
-
-    fn message_registration(
-        registry: &mut MessageRegistry,
-    ) -> MessageRegistrationBuilder<Self::MessageType> {
-        MessageRegistrationBuilder::new(registry)
     }
 }
 
@@ -270,7 +248,7 @@ impl Section for DynSection {
         panic!("TODO")
     }
 
-    fn on_register(_registry: &mut MessageRegistry)
+    fn on_register(_registry: &mut DiagramElementRegistry)
     where
         Self: Sized,
     {
@@ -300,12 +278,202 @@ pub enum SectionError {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        diagram::testing::DiagramTestFixture, BufferKey, BufferSettings, SectionBuilderOptions,
+    };
+
     use super::*;
 
     #[derive(Section)]
     struct TestSection {
         foo: InputSlot<i64>,
-        bar: Output<i64>,
-        baz: Buffer<i64>,
+        bar: Output<f64>,
+        baz: Buffer<String>,
+    }
+
+    #[test]
+    fn test_register_section() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: i64| 1_f64);
+                let buffer = builder.create_buffer(BufferSettings::default());
+                TestSection {
+                    foo: node.input,
+                    bar: node.output,
+                    baz: buffer,
+                }
+            },
+        );
+
+        let reg = registry.get_section_registration("test_section").unwrap();
+        assert_eq!(reg.name, "TestSection");
+        let metadata = &reg.metadata;
+        assert_eq!(metadata.inputs.len(), 1);
+        assert_eq!(metadata.inputs["foo"].message_type, TypeInfo::of::<i64>());
+        assert_eq!(metadata.outputs.len(), 1);
+        assert_eq!(metadata.outputs["bar"].message_type, TypeInfo::of::<f64>());
+        assert_eq!(metadata.buffers.len(), 1);
+        assert_eq!(metadata.buffers["baz"].item_type, TypeInfo::of::<String>());
+    }
+
+    struct OpaqueMessage;
+
+    /// A test compile that opaque messages can be used in sections.
+    #[derive(Section)]
+    struct TestSectionNoDeserialize {
+        #[section(no_deserialize, no_serialize, no_clone)]
+        msg: InputSlot<OpaqueMessage>,
+    }
+
+    #[derive(Section)]
+    struct TestSectionUnzip {
+        input: InputSlot<()>,
+        #[section(unzip)]
+        output: Output<(i64, i64)>,
+    }
+
+    #[test]
+    fn test_section_unzip() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: ()| (1, 2));
+                TestSectionUnzip {
+                    input: node.input,
+                    output: node.output,
+                }
+            },
+        );
+        let reg = registry.get_message_registration::<(i64, i64)>().unwrap();
+        assert!(reg.operations.unzip_impl.is_some());
+    }
+
+    #[derive(Section)]
+    struct TestSectionForkResult {
+        input: InputSlot<()>,
+        #[section(fork_result)]
+        output: Output<Result<i64, String>>,
+    }
+
+    #[test]
+    fn test_section_fork_result() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: ()| Ok(1));
+                TestSectionForkResult {
+                    input: node.input,
+                    output: node.output,
+                }
+            },
+        );
+        let reg = registry
+            .get_message_registration::<Result<i64, String>>()
+            .unwrap();
+        assert!(reg.operations.fork_result_impl.is_some());
+    }
+
+    #[derive(Section)]
+    struct TestSectionSplit {
+        input: InputSlot<()>,
+        #[section(split)]
+        output: Output<Vec<i64>>,
+    }
+
+    #[test]
+    fn test_section_split() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: ()| vec![]);
+                TestSectionSplit {
+                    input: node.input,
+                    output: node.output,
+                }
+            },
+        );
+        let reg = registry.get_message_registration::<Vec<i64>>().unwrap();
+        assert!(reg.operations.split_impl.is_some());
+    }
+
+    #[derive(Section)]
+    struct TestSectionJoin {
+        #[section(join)]
+        input: InputSlot<Vec<i64>>,
+        output: Output<()>,
+    }
+
+    #[test]
+    fn test_section_join() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: Vec<i64>| {});
+                TestSectionJoin {
+                    input: node.input,
+                    output: node.output,
+                }
+            },
+        );
+        let reg = registry.get_message_registration::<Vec<i64>>().unwrap();
+        assert!(reg.operations.join_impl.is_some());
+    }
+
+    #[derive(Section)]
+    struct TestSectionBufferAccess {
+        #[section(buffer_access, no_deserialize, no_serialize)]
+        input: InputSlot<(i64, Vec<BufferKey<i64>>)>,
+        output: Output<()>,
+    }
+
+    #[test]
+    fn test_section_buffer_access() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: (i64, Vec<BufferKey<i64>>)| {});
+                TestSectionBufferAccess {
+                    input: node.input,
+                    output: node.output,
+                }
+            },
+        );
+        let reg = registry
+            .get_message_registration::<(i64, Vec<BufferKey<i64>>)>()
+            .unwrap();
+        assert!(reg.operations.buffer_access_impl.is_some());
+    }
+
+    #[derive(Section)]
+    struct TestSectionListen {
+        #[section(listen, no_deserialize, no_serialize)]
+        input: InputSlot<Vec<BufferKey<i64>>>,
+        output: Output<()>,
+    }
+
+    #[test]
+    fn test_section_listen() {
+        let mut registry = DiagramElementRegistry::new();
+        registry.register_section_builder(
+            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            |builder: &mut Builder, _config: ()| {
+                let node = builder.create_map_block(|_: Vec<BufferKey<i64>>| {});
+                TestSectionListen {
+                    input: node.input,
+                    output: node.output,
+                }
+            },
+        );
+        let reg = registry
+            .get_message_registration::<Vec<BufferKey<i64>>>()
+            .unwrap();
+        assert!(reg.operations.listen_impl.is_some());
     }
 }

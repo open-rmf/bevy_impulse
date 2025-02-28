@@ -1253,7 +1253,7 @@ impl DiagramElementRegistry {
             &mut self.messages.schema_generator,
         );
         self.sections.insert(options.id, reg);
-        SectionT::on_register(&mut self.messages);
+        SectionT::on_register(self);
     }
 
     /// In some cases the common operations of deserialization, serialization,
@@ -1321,6 +1321,18 @@ impl DiagramElementRegistry {
         self.nodes
             .get(k)
             .ok_or(DiagramErrorCode::BuilderNotFound(k.to_string()))
+    }
+
+    pub fn get_section_registration<Q>(
+        &self,
+        id: &Q,
+    ) -> Result<&SectionRegistration, DiagramErrorCode>
+    where
+        Q: Borrow<str> + ?Sized,
+    {
+        self.sections
+            .get(id.borrow())
+            .ok_or_else(|| DiagramErrorCode::BuilderNotFound(id.borrow().to_string()))
     }
 
     pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration>

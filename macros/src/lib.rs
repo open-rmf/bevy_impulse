@@ -92,7 +92,7 @@ pub fn derive_buffer_key_map(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(Section)]
+#[proc_macro_derive(Section, attributes(section))]
 pub fn derive_section(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     match impl_section(&input) {
