@@ -54,10 +54,10 @@ impl SplitOp {
         let next_op_ids: Vec<&NextOperation> =
             self.sequential.iter().chain(self.keyed.values()).collect();
         for next_op_id in next_op_ids {
-            builder.add_output_edge(next_op_id, None)?;
+            builder.add_output_edge(next_op_id, None, None)?;
         }
         if let Some(remaining) = &self.remaining {
-            builder.add_output_edge(&remaining, None)?;
+            builder.add_output_edge(&remaining, None, None)?;
         }
         Ok(())
     }

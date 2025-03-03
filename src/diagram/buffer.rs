@@ -109,28 +109,27 @@ impl BufferOp {
 
 /// if `target` has a value, return the request type of the operation, else, return the request type of `next`
 pub(super) fn get_node_request_type(
-    target: &Option<OperationId>,
+    target: &Option<NextOperation>,
     next: &NextOperation,
     diagram: &Diagram,
     registry: &DiagramElementRegistry,
 ) -> Result<TypeInfo, DiagramErrorCode> {
-    let target_node = if let Some(target) = target {
-        diagram.get_op(target)?
-    } else {
-        match next {
-            NextOperation::Target(op_id) => diagram.get_op(op_id)?,
-            NextOperation::Builtin { builtin } => match builtin {
-                BuiltinTarget::Terminate => return Ok(TypeInfo::of::<serde_json::Value>()),
-                _ => return Err(DiagramErrorCode::UnknownTarget),
-            },
+    let target_op = if let Some(op) = target { op } else { next };
+    match target_op {
+        NextOperation::Target(op_id) => match diagram.get_op(op_id)? {
+            DiagramOperation::Node(op) => Ok(registry.get_node_registration(&op.builder)?.request),
+            _ => Err(DiagramErrorCode::UnknownTarget),
+        },
+        NextOperation::Section { section, input } => {
+            let reg = registry.get_section_registration(section)?;
+            let input = reg.metadata.inputs.get(input).unwrap();
+            Ok(input.message_type)
         }
-    };
-    let node_op = match target_node {
-        DiagramOperation::Node(op) => op,
-        _ => return Err(DiagramErrorCode::UnknownTarget),
-    };
-    let target_type = registry.get_node_registration(&node_op.builder)?.request;
-    Ok(target_type)
+        NextOperation::Builtin { builtin } => match builtin {
+            BuiltinTarget::Terminate => Ok(TypeInfo::of::<serde_json::Value>()),
+            BuiltinTarget::Dispose => Err(DiagramErrorCode::UnknownTarget),
+        },
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -192,7 +191,7 @@ pub struct BufferAccessOp {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl BufferAccessOp {
@@ -200,7 +199,7 @@ impl BufferAccessOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
+        builder.add_output_edge(&self.next, None, None)?;
         Ok(())
     }
 
@@ -276,7 +275,7 @@ pub struct ListenOp {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl ListenOp {
@@ -284,7 +283,7 @@ impl ListenOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
+        builder.add_output_edge(&self.next, None, None)?;
         Ok(())
     }
 

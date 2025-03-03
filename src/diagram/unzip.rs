@@ -25,7 +25,7 @@ impl UnzipOp {
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
         for target in &self.next {
-            builder.add_output_edge(target, None)?;
+            builder.add_output_edge(target, None, None)?;
         }
         Ok(())
     }

@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
+use crate::{unknown_diagram_error, AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
     dyn_connect, type_info::TypeInfo, BuilderId, DiagramElementRegistry, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationId, SectionRegistration,
+    DynOutput, Edge, EdgeBuilder, NextOperation, OperationId, Vertex,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -30,41 +30,79 @@ pub struct SectionOp {
 }
 
 impl SectionOp {
-    fn build_edges(&self) -> Result<(), DiagramErrorCode> {
-        // behavior of this depends on if the section is a "builder" or "template".
-        //   1. if it is builder, simply create the section from the registered builder id, then create the output edges.
-        //   2. if it is a template, create a sub diagram, create and connect all the nodes, then create the output edges.
-        //     2.1. it is likely that diagrams will need to support multiple inputs, outputs and input buffers.
-        //     2.2. alternatively, use the same diagram but namespace the operation ids.
-        panic!("TODO")
+    pub(super) fn build_edges<'a>(
+        &'a self,
+        mut builder: EdgeBuilder<'a, '_>,
+    ) -> Result<(), DiagramErrorCode> {
+        match &self.builder {
+            SectionProvider::Builder(_) => {
+                for (key, next_op) in &self.connect {
+                    builder.add_output_edge(next_op, None, Some(key.clone()))?;
+                }
+                Ok(())
+            }
+            SectionProvider::Template(_) => {
+                panic!("TODO")
+            }
+        }
     }
 
-    fn try_connect(
+    pub(super) fn try_connect(
         &self,
-        op_id: &OperationId,
+        vertex: &Vertex,
         builder: &mut Builder,
-        config: serde_json::Value,
-        sections: &HashMap<BuilderId, SectionRegistration>,
-        inputs: HashMap<String, DynOutput>,
-        outputs: HashMap<String, DynInputSlot>,
+        registry: &DiagramElementRegistry,
+        mut edges: HashMap<&usize, &mut Edge>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
+        let mut inputs = HashMap::with_capacity(vertex.in_edges.len());
+        for edge_id in &vertex.in_edges {
+            let edge = edges
+                .remove(edge_id)
+                .ok_or_else(|| unknown_diagram_error!())?;
+            if let Some(output) = edge.output.take() {
+                match edge.target {
+                    NextOperation::Section { section: _, input } => {
+                        inputs.insert(input, output);
+                    }
+                    _ => return Err(DiagramErrorCode::UnknownTarget),
+                }
+            } else {
+                return Ok(false);
+            }
+        }
+
+        // let mut outputs = HashMap::with_capacity(self.connect.len());
+        // for edge_id
+
         match &self.builder {
             SectionProvider::Builder(builder_id) => {
-                let reg = sections
-                    .get(builder_id)
-                    .ok_or(DiagramErrorCode::BuilderNotFound(builder_id.clone()))?;
+                let reg = registry.get_section_registration(builder_id)?;
 
                 // note that unlike nodes, sections are created only when trying to connect
                 // because we need all the buffers to be created first, and buffers are
                 // created at connect time.
-                let section = reg.create_section(builder, config)?;
+                let section = reg.create_section(builder, self.config.clone())?;
                 let mut section_buffers = HashMap::with_capacity(self.buffers.len());
-                section.try_connect(builder, inputs, outputs, &mut section_buffers)?;
+                let mut outputs = HashMap::new();
+                section.try_connect(builder, inputs, &mut outputs, &mut section_buffers)?;
+
+                for edge_id in &vertex.out_edges {
+                    let edge = edges
+                        .remove(edge_id)
+                        .ok_or_else(|| unknown_diagram_error!())?;
+                    if let Some(name) = &edge.tag {
+                        let output = outputs
+                            .remove(name)
+                            .ok_or(DiagramErrorCode::IncompleteDiagram)?;
+                        edge.output = Some(output);
+                    }
+                }
+
                 // for now we just do namespacing by prefixing, if this is insufficient,
                 // a more concrete impl may be done in `OperationId`.
                 for (key, buffer) in section_buffers {
-                    buffers.insert(format!("{}/{}", op_id, key), buffer);
+                    buffers.insert(format!("{}/{}", vertex.op_id, key), buffer);
                 }
 
                 Ok(true)
@@ -76,9 +114,9 @@ impl SectionOp {
 
 #[derive(Serialize, Clone)]
 pub struct SectionMetadata {
-    inputs: HashMap<String, SectionInput>,
-    outputs: HashMap<String, SectionOutput>,
-    buffers: HashMap<String, SectionBuffer>,
+    pub(super) inputs: HashMap<String, SectionInput>,
+    pub(super) outputs: HashMap<String, SectionOutput>,
+    pub(super) buffers: HashMap<String, SectionBuffer>,
 }
 
 impl SectionMetadata {
@@ -99,8 +137,8 @@ pub trait Section {
     fn try_connect(
         self: Box<Self>,
         builder: &mut Builder,
-        inputs: HashMap<String, DynOutput>,
-        outputs: HashMap<String, DynInputSlot>,
+        inputs: HashMap<&String, DynOutput>,
+        outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode>;
 
@@ -118,8 +156,8 @@ pub trait SectionItem {
         self,
         key: &String,
         builder: &mut Builder,
-        inputs: &mut HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynInputSlot>,
+        inputs: &mut HashMap<&String, DynOutput>,
+        outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode>;
 }
@@ -143,8 +181,8 @@ where
         self,
         key: &String,
         builder: &mut Builder,
-        inputs: &mut HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynInputSlot>,
+        inputs: &mut HashMap<&String, DynOutput>,
+        _outputs: &mut HashMap<String, DynOutput>,
         _buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
         let output = inputs
@@ -172,15 +210,13 @@ where
     fn try_connect(
         self,
         key: &String,
-        builder: &mut Builder,
-        _inputs: &mut HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynInputSlot>,
+        _builder: &mut Builder,
+        _inputs: &mut HashMap<&String, DynOutput>,
+        outputs: &mut HashMap<String, DynOutput>,
         _buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
-        let input = outputs
-            .remove(key)
-            .ok_or(SectionError::MissingOutput(key.clone()))?;
-        dyn_connect(builder, self.into(), input)
+        outputs.insert(key.clone(), self.into());
+        Ok(())
     }
 }
 
@@ -203,8 +239,8 @@ where
         self,
         key: &String,
         _builder: &mut Builder,
-        _inputs: &mut HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynInputSlot>,
+        _inputs: &mut HashMap<&String, DynOutput>,
+        _outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
         buffers.insert(key.to_string(), self.as_any_buffer());
@@ -227,22 +263,14 @@ pub struct SectionBuffer {
     pub(super) item_type: TypeInfo,
 }
 
-trait CreateSection {
-    fn create_section(
-        &mut self,
-        builder: &mut Builder,
-        buffers: HashMap<String, AnyBuffer>,
-    ) -> Box<dyn Section>;
-}
-
 pub(super) struct DynSection;
 
 impl Section for DynSection {
     fn try_connect(
         self: Box<Self>,
         builder: &mut Builder,
-        inputs: HashMap<String, DynOutput>,
-        outputs: HashMap<String, DynInputSlot>,
+        inputs: HashMap<&String, DynOutput>,
+        outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
         panic!("TODO")
@@ -278,9 +306,7 @@ pub enum SectionError {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        diagram::testing::DiagramTestFixture, BufferKey, BufferSettings, SectionBuilderOptions,
-    };
+    use crate::{BufferKey, BufferSettings, SectionBuilderOptions};
 
     use super::*;
 

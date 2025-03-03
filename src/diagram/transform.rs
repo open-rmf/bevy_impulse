@@ -37,7 +37,7 @@ impl TransformOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
+        builder.add_output_edge(&self.next, None, None)?;
         Ok(())
     }
 

@@ -230,9 +230,13 @@
             },
             "target_node": {
               "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.",
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/NextOperation"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -350,9 +354,13 @@
             },
             "target_node": {
               "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.",
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/NextOperation"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
@@ -385,15 +393,54 @@
             },
             "target_node": {
               "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.",
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/NextOperation"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "type": {
               "type": "string",
               "enum": [
                 "listen"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "buffers",
+            "builder",
+            "connect",
+            "type"
+          ],
+          "properties": {
+            "buffers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "builder": {
+              "$ref": "#/definitions/SectionProvider"
+            },
+            "config": {
+              "default": null
+            },
+            "connect": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/NextOperation"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "section"
               ]
             }
           }
@@ -404,6 +451,21 @@
       "anyOf": [
         {
           "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "input",
+            "section"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "section": {
+              "type": "string"
+            }
+          }
         },
         {
           "type": "object",
@@ -457,6 +519,34 @@
           "enum": [
             "keep_all"
           ]
+        }
+      ]
+    },
+    "SectionProvider": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "builder"
+          ],
+          "properties": {
+            "builder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "template"
+          ],
+          "properties": {
+            "template": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     }

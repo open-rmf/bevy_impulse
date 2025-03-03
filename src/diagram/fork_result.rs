@@ -27,8 +27,8 @@ impl ForkResultOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.ok, None)?;
-        builder.add_output_edge(&self.err, None)?;
+        builder.add_output_edge(&self.ok, None, None)?;
+        builder.add_output_edge(&self.err, None, None)?;
         Ok(())
     }
 

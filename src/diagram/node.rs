@@ -32,7 +32,7 @@ impl NodeOp {
         let reg = registry.get_node_registration(&self.builder)?;
         let n = reg.create_node(builder, self.config.clone())?;
         inputs.insert(op_id, n.input);
-        edge_builder.add_output_edge(&self.next, Some(n.output))?;
+        edge_builder.add_output_edge(&self.next, Some(n.output), None)?;
         Ok(())
     }
 

@@ -24,6 +24,7 @@ pub(super) struct Edge<'a> {
     pub(super) source: SourceOperation,
     pub(super) target: &'a NextOperation,
     pub(super) output: Option<DynOutput>,
+    pub(super) tag: Option<String>,
 }
 
 pub(super) struct EdgeBuilder<'a, 'b> {
@@ -46,12 +47,19 @@ impl<'a, 'b> EdgeBuilder<'a, 'b> {
             }
             SourceOperation::Builtin { builtin: _ } => {}
         }
-        match &edge.target {
+        match edge.target {
             NextOperation::Target(op_id) => {
                 let target = self
                     .vertices
                     .get_mut(op_id)
                     .ok_or(DiagramErrorCode::OperationNotFound(op_id.clone()))?;
+                target.in_edges.push(new_edge_id);
+            }
+            NextOperation::Section { section, input: _ } => {
+                let target = self
+                    .vertices
+                    .get_mut(section)
+                    .ok_or(DiagramErrorCode::OperationNotFound(section.clone()))?;
                 target.in_edges.push(new_edge_id);
             }
             NextOperation::Builtin { builtin } => match builtin {
@@ -75,11 +83,13 @@ impl<'a, 'b> EdgeBuilder<'a, 'b> {
         &mut self,
         target: &'a NextOperation,
         output: Option<DynOutput>,
+        tag: Option<String>,
     ) -> Result<(), DiagramErrorCode> {
         self.add_edge(Edge {
             source: self.source.clone(),
             target,
             output,
+            tag,
         })?;
         Ok(())
     }
@@ -132,8 +142,9 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         },
         NextOperation::Target(op_id) => {
             edges.insert(
-                edges.len(),
+                0,
                 Edge {
+                    tag: None,
                     source: SourceOperation::Builtin {
                         builtin: super::BuiltinSource::Start,
                     },
@@ -148,6 +159,29 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                         op_id: Some(op_id.clone()),
                     },
                     code: DiagramErrorCode::OperationNotFound(op_id.clone()),
+                })?
+                .in_edges
+                .push(0);
+        }
+        NextOperation::Section { section, input: _ } => {
+            edges.insert(
+                0,
+                Edge {
+                    tag: None,
+                    source: SourceOperation::Builtin {
+                        builtin: super::BuiltinSource::Start,
+                    },
+                    target: &diagram.start,
+                    output: Some(scope.input.into()),
+                },
+            );
+            vertices
+                .get_mut(&section)
+                .ok_or(DiagramError {
+                    context: DiagramErrorContext {
+                        op_id: Some(section.clone()),
+                    },
+                    code: DiagramErrorCode::OperationNotFound(section.clone()),
                 })?
                 .in_edges
                 .push(0);
@@ -209,6 +243,9 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 op.build_edges(edge_builder).map_err(with_context)?;
             }
             DiagramOperation::Listen(op) => {
+                op.build_edges(edge_builder).map_err(with_context)?;
+            }
+            DiagramOperation::Section(op) => {
                 op.build_edges(edge_builder).map_err(with_context)?;
             }
         }
@@ -426,6 +463,10 @@ fn connect_vertex<'a>(
         DiagramOperation::Listen(op) => {
             let borrowed_edges = edges.iter_mut().collect();
             op.try_connect(builder, target, borrowed_edges, registry, buffers, diagram)
+        }
+        DiagramOperation::Section(op) => {
+            let borrowed_edges = edges.iter_mut().collect();
+            op.try_connect(target, builder, registry, borrowed_edges, buffers)
         }
     }
 }

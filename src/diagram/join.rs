@@ -21,7 +21,7 @@ pub struct JoinOp {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl JoinOp {
@@ -29,7 +29,7 @@ impl JoinOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
+        builder.add_output_edge(&self.next, None, None)?;
         Ok(())
     }
 
@@ -81,7 +81,7 @@ impl SerializedJoinOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
+        builder.add_output_edge(&self.next, None, None)?;
         Ok(())
     }
 
