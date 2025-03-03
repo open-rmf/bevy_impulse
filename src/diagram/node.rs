@@ -47,8 +47,7 @@ impl NodeOp {
             let mut edge = edge.try_lock().unwrap();
             let output = edge.output.take().unwrap();
             let input = inputs[&target.op_id];
-            let deserialized_output = registry.deserialize(&input.type_info, builder, output)?;
-            dyn_connect(builder, deserialized_output, input)?;
+            dyn_connect(builder, output, input, registry)?;
         }
         Ok(true)
     }

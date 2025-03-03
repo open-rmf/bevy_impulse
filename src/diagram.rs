@@ -773,8 +773,8 @@ pub enum DiagramErrorCode {
     #[error("cannot access buffer")]
     CannotBufferAccess,
 
-    #[error("cannot listen on these buffers to produce a request of [{0}]")]
-    CannotListen(TypeInfo),
+    #[error("cannot listen")]
+    CannotListen,
 
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),

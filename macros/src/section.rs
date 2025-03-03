@@ -51,9 +51,10 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
                 mut inputs: ::std::collections::HashMap<String, ::bevy_impulse::DynOutput>,
                 outputs: &mut HashMap<String, DynOutput>,
                 buffers: &mut HashMap<OperationId, AnyBuffer>,
+                registry: &MessageRegistry,
             ) -> Result<(), ::bevy_impulse::DiagramErrorCode> {
                 #(
-                    self.#field_ident.try_connect(&#field_name_str.to_string(), builder, &mut inputs, outputs, buffers)?;
+                    self.#field_ident.try_connect(&#field_name_str.to_string(), builder, &mut inputs, outputs, buffers, registry)?;
                 )*
                 Ok(())
             }

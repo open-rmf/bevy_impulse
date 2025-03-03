@@ -731,7 +731,7 @@ impl MessageOperation {
         let f = self
             .listen_impl
             .as_ref()
-            .ok_or(DiagramErrorCode::CannotBufferAccess)?;
+            .ok_or(DiagramErrorCode::CannotListen)?;
         f(builder, buffers)
     }
 }
@@ -1123,7 +1123,7 @@ impl MessageRegistry {
         if let Some(reg) = self.messages.get(&target_type) {
             reg.operations.listen(builder, buffers)
         } else {
-            Err(DiagramErrorCode::CannotListen(target_type))
+            Err(DiagramErrorCode::CannotListen)
         }
     }
 

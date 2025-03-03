@@ -5,12 +5,15 @@ use std::{
 
 use tracing::{debug, warn};
 
-use crate::{diagram::DiagramErrorContext, AnyBuffer, Builder, InputSlot, Output, StreamPack};
+use crate::{
+    diagram::{type_info::TypeInfo, DiagramErrorContext},
+    AnyBuffer, Builder, InputSlot, Output, StreamPack,
+};
 
 use super::{
-    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
-    DiagramOperation, DiagramScope, DynInputSlot, DynOutput, NextOperation, OperationId,
-    SourceOperation,
+    BuiltinSource, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
+    DiagramOperation, DiagramScope, DynInputSlot, DynOutput, MessageRegistry, NextOperation,
+    OperationId, SectionError, SourceOperation,
 };
 
 pub(super) struct Vertex {
@@ -28,6 +31,7 @@ pub(super) struct Edge {
 }
 
 pub(super) struct EdgeBuilder<'a, 'b> {
+    registry: &'b DiagramElementRegistry,
     vertices: &'b mut HashMap<&'a OperationId, Vertex>,
     terminate_edges: &'b mut Vec<Arc<Mutex<Edge>>>,
     source: SourceOperation,
@@ -56,11 +60,15 @@ impl<'a, 'b> EdgeBuilder<'a, 'b> {
                     .ok_or(DiagramErrorCode::OperationNotFound(op_id))?;
                 target.in_edges.push(Arc::clone(&new_edge));
             }
-            NextOperation::Section { section, input: _ } => {
+            NextOperation::Section { section, input } => {
                 let target = self
                     .vertices
                     .get_mut(&section)
-                    .ok_or(DiagramErrorCode::OperationNotFound(section))?;
+                    .ok_or(DiagramErrorCode::OperationNotFound(section.clone()))?;
+                let reg = self.registry.get_section_registration(&section)?;
+                if !reg.metadata.inputs.contains_key(&input) {
+                    return Err(SectionError::ExtraInput(input).into());
+                }
                 target.in_edges.push(Arc::clone(&new_edge));
             }
             NextOperation::Builtin { builtin } => match builtin {
@@ -112,13 +120,22 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         })
         .collect();
 
+    let mut terminate_edges: Vec<Arc<Mutex<Edge>>> = Vec::new();
+
     // process start separately because we need to consume the scope input
     match &diagram.start {
         NextOperation::Builtin { builtin } => match builtin {
             BuiltinTarget::Terminate => {
-                // such a workflow is equivalent to an no-op.
-                builder.connect(scope.input, scope.terminate);
-                return Ok(());
+                terminate_edges.push(Arc::new(Mutex::new(Edge {
+                    source: SourceOperation::Builtin {
+                        builtin: BuiltinSource::Start,
+                    },
+                    target: NextOperation::Builtin {
+                        builtin: BuiltinTarget::Terminate,
+                    },
+                    output: Some(scope.input.into()),
+                    tag: None,
+                })));
             }
             BuiltinTarget::Dispose => {
                 // bevy_impulse will immediate stop with an `CancellationCause::Unreachable` error
@@ -170,8 +187,6 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
     let mut inputs: HashMap<&OperationId, DynInputSlot> = HashMap::with_capacity(diagram.ops.len());
 
-    let mut terminate_edges: Vec<Arc<Mutex<Edge>>> = Vec::new();
-
     let mut buffers: HashMap<OperationId, AnyBuffer> = HashMap::new();
 
     // create all the edges
@@ -184,6 +199,7 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
         };
 
         let edge_builder = EdgeBuilder {
+            registry,
             vertices: &mut vertices,
             terminate_edges: &mut terminate_edges,
             source: SourceOperation::Source(op_id.clone()),
@@ -225,7 +241,8 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
                 op.build_edges(edge_builder).map_err(with_context)?;
             }
             DiagramOperation::Section(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
+                op.build_edges(edge_builder, registry)
+                    .map_err(with_context)?;
             }
         }
     }
@@ -351,9 +368,8 @@ fn connect_vertex<'a>(
     }
 }
 
-/// Connect a [`DynOutput`] to a [`DynInputSlot`]. Use this only when both the output and input
-/// are type erased. To connect an [`Output`] to a [`DynInputSlot`] or vice versa, prefer converting
-/// the type erased output/input slot to the typed equivalent.
+/// Connect a [`DynOutput`] to a [`DynInputSlot`]. If the output is a [`serde_json::Value`], then
+/// this will attempt to deserialize it into the input type.
 ///
 /// ```text
 /// builder.connect(output.into_output::<i64>()?, dyn_input)?;
@@ -362,13 +378,21 @@ pub fn dyn_connect(
     builder: &mut Builder,
     output: DynOutput,
     input: DynInputSlot,
+    registry: &MessageRegistry,
 ) -> Result<(), DiagramErrorCode> {
-    if output.type_info != input.type_info {
-        return Err(DiagramErrorCode::TypeMismatch {
-            source_type: output.type_info,
-            target_type: input.type_info,
-        });
-    }
+    let output = if output.type_info != input.type_info {
+        if output.type_info == TypeInfo::of::<serde_json::Value>() {
+            registry.deserialize(&input.type_info, builder, output)?
+        } else {
+            return Err(DiagramErrorCode::TypeMismatch {
+                source_type: output.type_info,
+                target_type: input.type_info,
+            });
+        }
+    } else {
+        output
+    };
+
     struct TypeErased {}
     let typed_output = Output::<TypeErased>::new(output.scope(), output.id());
     let typed_input = InputSlot::<TypeErased>::new(input.scope(), input.id());
