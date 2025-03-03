@@ -16,7 +16,6 @@ pub use bevy_impulse_derive::Section;
 #[serde(rename_all = "snake_case")]
 pub enum SectionProvider {
     Builder(BuilderId),
-    Template(String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -52,9 +51,6 @@ impl SectionOp {
                     builder.add_output_edge(next_op.clone(), None, Some(key.clone()))?;
                 }
                 Ok(())
-            }
-            SectionProvider::Template(_) => {
-                panic!("TODO")
             }
         }
     }
@@ -117,7 +113,6 @@ impl SectionOp {
 
                 Ok(true)
             }
-            SectionProvider::Template(_template) => panic!("TODO"),
         }
     }
 }
@@ -297,14 +292,6 @@ impl Section for DynSection {
         Self: Sized,
     {
         // dyn section cannot register message operations
-    }
-}
-
-pub(super) struct SectionTemplate;
-
-impl SectionTemplate {
-    fn create_section(&self) -> DynSection {
-        panic!("TODO")
     }
 }
 

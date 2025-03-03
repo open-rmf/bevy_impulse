@@ -412,21 +412,31 @@
         },
         {
           "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "builder"
+              ],
+              "properties": {
+                "builder": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
           "required": [
-            "buffers",
-            "builder",
             "connect",
             "type"
           ],
           "properties": {
             "buffers": {
+              "default": {},
               "type": "object",
               "additionalProperties": {
                 "type": "string"
               }
-            },
-            "builder": {
-              "$ref": "#/definitions/SectionProvider"
             },
             "config": {
               "default": null
@@ -519,34 +529,6 @@
           "enum": [
             "keep_all"
           ]
-        }
-      ]
-    },
-    "SectionProvider": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "builder"
-          ],
-          "properties": {
-            "builder": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "template"
-          ],
-          "properties": {
-            "template": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
         }
       ]
     }
