@@ -48,7 +48,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
             fn try_connect(
                 self: Box<Self>,
                 builder: &mut ::bevy_impulse::Builder,
-                mut inputs: ::std::collections::HashMap<&String, ::bevy_impulse::DynOutput>,
+                mut inputs: ::std::collections::HashMap<String, ::bevy_impulse::DynOutput>,
                 outputs: &mut HashMap<String, DynOutput>,
                 buffers: &mut HashMap<OperationId, AnyBuffer>,
             ) -> Result<(), ::bevy_impulse::DiagramErrorCode> {

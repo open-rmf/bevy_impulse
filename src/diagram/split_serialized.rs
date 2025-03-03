@@ -30,8 +30,9 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
+    validate_single_input,
+    workflow_builder::EdgeBuilder,
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage, Vertex,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -54,21 +55,21 @@ impl SplitOp {
         let next_op_ids: Vec<&NextOperation> =
             self.sequential.iter().chain(self.keyed.values()).collect();
         for next_op_id in next_op_ids {
-            builder.add_output_edge(next_op_id, None, None)?;
+            builder.add_output_edge(next_op_id.clone(), None, None)?;
         }
         if let Some(remaining) = &self.remaining {
-            builder.add_output_edge(&remaining, None, None)?;
+            builder.add_output_edge(remaining.clone(), None, None)?;
         }
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
+        target: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(target)?;
         let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             let chain = output.into_output::<serde_json::Value>()?.chain(builder);
             split_chain(chain, self)
@@ -79,25 +80,26 @@ impl SplitOp {
         // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
         // then the last item will always be the remaining edge.
         if self.remaining.is_some() {
-            let out_edge = out_edges.last_mut().ok_or(unknown_diagram_error!())?;
-            out_edge.output = Some(outputs.remaining);
+            let out_edge = target.out_edges.last().ok_or(unknown_diagram_error!())?;
+            out_edge.try_lock().unwrap().output = Some(outputs.remaining);
         }
 
         let other_edges = if self.remaining.is_some() {
-            let out_edges_len = out_edges.len();
-            &mut out_edges[..(out_edges_len - 1)]
+            let out_edges_len = target.out_edges.len();
+            &target.out_edges[..(out_edges_len - 1)]
         } else {
-            &mut out_edges[..]
+            &target.out_edges[..]
         };
         for out_edge in other_edges {
+            let mut out_edge = out_edge.try_lock().unwrap();
             let output = outputs
                 .outputs
-                .remove(out_edge.target)
+                .remove(&out_edge.target)
                 .ok_or(unknown_diagram_error!())?;
             out_edge.output = Some(output);
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 

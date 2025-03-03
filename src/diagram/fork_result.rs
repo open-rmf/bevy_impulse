@@ -4,15 +4,16 @@ use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::{unknown_diagram_error, Builder};
+use crate::Builder;
 
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     register_serialize,
     type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    SerializeMessage,
+    validate_single_input,
+    workflow_builder::EdgeBuilder,
+    DiagramErrorCode, MessageRegistration, MessageRegistry, NextOperation, SerializeMessage,
+    Vertex,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -27,37 +28,33 @@ impl ForkResultOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.ok, None, None)?;
-        builder.add_output_edge(&self.err, None, None)?;
+        builder.add_output_edge(self.ok.clone(), None, None)?;
+        builder.add_output_edge(self.err.clone(), None, None)?;
         Ok(())
     }
 
     pub(super) fn try_connect<'b>(
         &self,
+        target: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(target)?;
         let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             Err(DiagramErrorCode::CannotForkResult)
         } else {
             registry.fork_result(builder, output)
         }?;
         {
-            let ok_edge = out_edges
-                .get_mut(0)
-                .ok_or_else(|| unknown_diagram_error!())?;
-            ok_edge.output = Some(ok);
+            let ok_edge = &target.out_edges[0];
+            ok_edge.try_lock().unwrap().output = Some(ok);
         }
         {
-            let err_edge = out_edges
-                .get_mut(1)
-                .ok_or_else(|| unknown_diagram_error!())?;
-            err_edge.output = Some(err);
+            let err_edge = &target.out_edges[1];
+            err_edge.try_lock().unwrap().output = Some(err);
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 

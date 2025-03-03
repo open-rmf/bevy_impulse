@@ -8,8 +8,9 @@ use crate::{diagram::type_info::TypeInfo, Builder};
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    validate_single_input,
+    workflow_builder::EdgeBuilder,
+    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, Vertex,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,33 +25,34 @@ impl ForkCloneOp {
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
         for target in &self.next {
-            builder.add_output_edge(target, None, None)?;
+            builder.add_output_edge(target.clone(), None, None)?;
         }
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
+        vertex: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(vertex)?;
+
         let outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             <DefaultImpl as DynForkClone<serde_json::Value>>::dyn_fork_clone(
                 builder,
                 output,
-                out_edges.len(),
+                vertex.out_edges.len(),
             )
         } else {
-            registry.fork_clone(builder, output, out_edges.len())
+            registry.fork_clone(builder, output, vertex.out_edges.len())
         }?;
 
-        for (output, out_edge) in zip(outputs, out_edges) {
-            out_edge.output = Some(output);
+        for (output, out_edge) in zip(outputs, &vertex.out_edges) {
+            out_edge.try_lock().unwrap().output = Some(output);
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 

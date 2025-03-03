@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{unknown_diagram_error, Builder};
+use crate::Builder;
 
 use super::{
-    workflow_builder::{dyn_connect, Edge, EdgeBuilder, Vertex},
+    workflow_builder::{dyn_connect, EdgeBuilder, Vertex},
     BuilderId, DiagramElementRegistry, DiagramErrorCode, DynInputSlot, MessageRegistry,
     NextOperation, OperationId,
 };
@@ -32,36 +32,24 @@ impl NodeOp {
         let reg = registry.get_node_registration(&self.builder)?;
         let n = reg.create_node(builder, self.config.clone())?;
         inputs.insert(op_id, n.input);
-        edge_builder.add_output_edge(&self.next, Some(n.output), None)?;
+        edge_builder.add_output_edge(self.next.clone(), Some(n.output), None)?;
         Ok(())
     }
 
     pub(super) fn try_connect(
         &self,
-        builder: &mut Builder,
         target: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
+        builder: &mut Builder,
         inputs: &HashMap<&OperationId, DynInputSlot>,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
-        let in_edge = target
-            .in_edges
-            .get(0)
-            .ok_or(DiagramErrorCode::OnlySingleInput)?;
-        let output = if let Some(output) = edges
-            .get_mut(in_edge)
-            .ok_or_else(|| unknown_diagram_error!())?
-            .output
-            .take()
-        {
-            output
-        } else {
-            return Ok(false);
-        };
-
-        let input = inputs[target.op_id];
-        let deserialized_output = registry.deserialize(&input.type_info, builder, output)?;
-        dyn_connect(builder, deserialized_output, input)?;
+        for edge in &target.in_edges {
+            let mut edge = edge.try_lock().unwrap();
+            let output = edge.output.take().unwrap();
+            let input = inputs[&target.op_id];
+            let deserialized_output = registry.deserialize(&input.type_info, builder, output)?;
+            dyn_connect(builder, deserialized_output, input)?;
+        }
         Ok(true)
     }
 }

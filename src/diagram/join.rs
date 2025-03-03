@@ -4,11 +4,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{unknown_diagram_error, AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
+use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
     buffer::{get_node_request_type, BufferInputs},
-    workflow_builder::{Edge, EdgeBuilder, Vertex},
+    workflow_builder::{EdgeBuilder, Vertex},
     Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
 };
 
@@ -29,15 +29,14 @@ impl JoinOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None, None)?;
+        builder.add_output_edge(self.next.clone(), None, None)?;
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
+        target: &Vertex,
         builder: &mut Builder,
-        vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
         registry: &DiagramElementRegistry,
         buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
@@ -54,14 +53,7 @@ impl JoinOp {
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.join(builder, &buffers, target_type)?;
 
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
+        let mut out_edge = target.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(output);
         Ok(true)
     }
@@ -81,15 +73,14 @@ impl SerializedJoinOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None, None)?;
+        builder.add_output_edge(self.next.clone(), None, None)?;
         Ok(())
     }
 
     pub(super) fn try_connect<'b>(
         &self,
+        target: &Vertex,
         builder: &mut Builder,
-        vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
         buffers: &HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         if self.buffers.is_empty() {
@@ -147,14 +138,7 @@ impl SerializedJoinOp {
             .output()
             .into();
 
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
+        let mut out_edge = target.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(output);
         Ok(true)
     }

@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{unknown_diagram_error, AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
+use crate::{AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
     dyn_connect, type_info::TypeInfo, BuilderId, DiagramElementRegistry, DiagramErrorCode,
-    DynOutput, Edge, EdgeBuilder, NextOperation, OperationId, Vertex,
+    DynOutput, EdgeBuilder, NextOperation, OperationId, Vertex,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -37,7 +37,7 @@ impl SectionOp {
         match &self.builder {
             SectionProvider::Builder(_) => {
                 for (key, next_op) in &self.connect {
-                    builder.add_output_edge(next_op, None, Some(key.clone()))?;
+                    builder.add_output_edge(next_op.clone(), None, Some(key.clone()))?;
                 }
                 Ok(())
             }
@@ -52,18 +52,15 @@ impl SectionOp {
         vertex: &Vertex,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
-        mut edges: HashMap<&usize, &mut Edge>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         let mut inputs = HashMap::with_capacity(vertex.in_edges.len());
-        for edge_id in &vertex.in_edges {
-            let edge = edges
-                .remove(edge_id)
-                .ok_or_else(|| unknown_diagram_error!())?;
+        for edge in &vertex.in_edges {
+            let mut edge = edge.try_lock().unwrap();
             if let Some(output) = edge.output.take() {
-                match edge.target {
+                match &edge.target {
                     NextOperation::Section { section: _, input } => {
-                        inputs.insert(input, output);
+                        inputs.insert(input.clone(), output);
                     }
                     _ => return Err(DiagramErrorCode::UnknownTarget),
                 }
@@ -87,10 +84,8 @@ impl SectionOp {
                 let mut outputs = HashMap::new();
                 section.try_connect(builder, inputs, &mut outputs, &mut section_buffers)?;
 
-                for edge_id in &vertex.out_edges {
-                    let edge = edges
-                        .remove(edge_id)
-                        .ok_or_else(|| unknown_diagram_error!())?;
+                for edge in &vertex.out_edges {
+                    let mut edge = edge.try_lock().unwrap();
                     if let Some(name) = &edge.tag {
                         let output = outputs
                             .remove(name)
@@ -137,7 +132,7 @@ pub trait Section {
     fn try_connect(
         self: Box<Self>,
         builder: &mut Builder,
-        inputs: HashMap<&String, DynOutput>,
+        inputs: HashMap<String, DynOutput>,
         outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode>;
@@ -156,7 +151,7 @@ pub trait SectionItem {
         self,
         key: &String,
         builder: &mut Builder,
-        inputs: &mut HashMap<&String, DynOutput>,
+        inputs: &mut HashMap<String, DynOutput>,
         outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode>;
@@ -181,7 +176,7 @@ where
         self,
         key: &String,
         builder: &mut Builder,
-        inputs: &mut HashMap<&String, DynOutput>,
+        inputs: &mut HashMap<String, DynOutput>,
         _outputs: &mut HashMap<String, DynOutput>,
         _buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
@@ -211,7 +206,7 @@ where
         self,
         key: &String,
         _builder: &mut Builder,
-        _inputs: &mut HashMap<&String, DynOutput>,
+        _inputs: &mut HashMap<String, DynOutput>,
         outputs: &mut HashMap<String, DynOutput>,
         _buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
@@ -239,7 +234,7 @@ where
         self,
         key: &String,
         _builder: &mut Builder,
-        _inputs: &mut HashMap<&String, DynOutput>,
+        _inputs: &mut HashMap<String, DynOutput>,
         _outputs: &mut HashMap<String, DynOutput>,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
@@ -268,10 +263,10 @@ pub(super) struct DynSection;
 impl Section for DynSection {
     fn try_connect(
         self: Box<Self>,
-        builder: &mut Builder,
-        inputs: HashMap<&String, DynOutput>,
-        outputs: &mut HashMap<String, DynOutput>,
-        buffers: &mut HashMap<OperationId, AnyBuffer>,
+        _builder: &mut Builder,
+        _inputs: HashMap<String, DynOutput>,
+        _outputs: &mut HashMap<String, DynOutput>,
+        _buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<(), DiagramErrorCode> {
         panic!("TODO")
     }

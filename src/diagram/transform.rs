@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::debug;
 
-use crate::{diagram::type_info::TypeInfo, unknown_diagram_error, Builder, Output};
+use crate::{diagram::type_info::TypeInfo, Builder, Output};
 
 use super::{
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    validate_single_input, workflow_builder::EdgeBuilder, DiagramErrorCode, DynOutput,
+    MessageRegistry, NextOperation, Vertex,
 };
 
 #[derive(Error, Debug)]
@@ -37,21 +37,21 @@ impl TransformOp {
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None, None)?;
+        builder.add_output_edge(self.next.clone(), None, None)?;
         Ok(())
     }
 
     pub(super) fn try_connect<'b>(
         &self,
+        target: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(target)?;
         let transformed_output = transform_output(builder, registry, output, self)?;
-        let out_edge = out_edges.get_mut(0).ok_or(unknown_diagram_error!())?;
+        let mut out_edge = target.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(transformed_output.into());
-        Ok(())
+        Ok(true)
     }
 }
 
