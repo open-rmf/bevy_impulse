@@ -43,7 +43,12 @@ impl BufferOp {
             return Ok(false);
         }
 
-        let first_output = vertex.in_edges[0].try_lock().unwrap().output.take().unwrap();
+        let first_output = vertex.in_edges[0]
+            .try_lock()
+            .unwrap()
+            .output
+            .take()
+            .unwrap();
         let first_output = if self.serialize.unwrap_or(false) {
             registry.serialize(builder, first_output)?.into()
         } else {
