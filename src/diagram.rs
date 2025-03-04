@@ -159,6 +159,27 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     Node(NodeOp),
 
+    /// Connect the request to a registered section.
+    ///
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "section_op",
+    ///     "ops": {
+    ///         "section_op": {
+    ///             "type": "section",
+    ///             "builder": "my_section_builder",
+    ///             "connect": {
+    ///                 "my_section_output": { "builtin": "terminate" }
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    Section(SectionOp),
+
     /// If the request is cloneable, clone it into multiple responses.
     ///
     /// # Examples
@@ -503,8 +524,6 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     Listen(ListenOp),
-
-    Section(SectionOp),
 }
 
 type DiagramStart = serde_json::Value;
