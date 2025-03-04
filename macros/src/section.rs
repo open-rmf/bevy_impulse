@@ -83,18 +83,17 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
 
         impl #impl_generics ::bevy_impulse::SectionMetadataProvider for #struct_ident #ty_generics #where_clause {
             fn metadata() -> &'static ::bevy_impulse::SectionMetadata {
-                static METADATA: ::std::sync::LazyLock<::bevy_impulse::SectionMetadata> =
-                    ::std::sync::LazyLock::new(|| {
-                        let mut metadata = ::bevy_impulse::SectionMetadata::new();
-                        #(
-                            <#field_type as ::bevy_impulse::SectionItem>::build_metadata(
-                                &mut metadata,
-                                #field_name_str,
-                            );
-                        )*
-                        metadata
-                    });
-                &*METADATA
+                static METADATA: ::std::sync::OnceLock<::bevy_impulse::SectionMetadata> = ::std::sync::OnceLock::new();
+                METADATA.get_or_init(|| {
+                    let mut metadata = ::bevy_impulse::SectionMetadata::new();
+                    #(
+                        <#field_type as ::bevy_impulse::SectionItem>::build_metadata(
+                            &mut metadata,
+                            #field_name_str,
+                        );
+                    )*
+                    metadata
+                })
             }
         }
     };
