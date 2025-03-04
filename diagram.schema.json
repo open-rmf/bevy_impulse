@@ -103,6 +103,52 @@
           }
         },
         {
+          "description": "Connect the request to a registered section.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"section_op\", \"ops\": { \"section_op\": { \"type\": \"section\", \"builder\": \"my_section_builder\", \"connect\": { \"my_section_output\": { \"builtin\": \"terminate\" } } } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "builder"
+              ],
+              "properties": {
+                "builder": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "required": [
+            "connect",
+            "type"
+          ],
+          "properties": {
+            "buffers": {
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "config": {
+              "default": null
+            },
+            "connect": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/NextOperation"
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "section"
+              ]
+            }
+          }
+        },
+        {
           "description": "If the request is cloneable, clone it into multiple responses.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"fork_clone\", \"ops\": { \"fork_clone\": { \"type\": \"fork_clone\", \"next\": [\"terminate\"] } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
@@ -406,51 +452,6 @@
               "type": "string",
               "enum": [
                 "listen"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "required": [
-                "builder"
-              ],
-              "properties": {
-                "builder": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": false
-            }
-          ],
-          "required": [
-            "connect",
-            "type"
-          ],
-          "properties": {
-            "buffers": {
-              "default": {},
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "config": {
-              "default": null
-            },
-            "connect": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/definitions/NextOperation"
-              }
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "section"
               ]
             }
           }
