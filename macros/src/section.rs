@@ -135,29 +135,21 @@ impl FieldConfig {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("no_deserialize") {
                     config.no_deserialize = true;
-                }
-                if meta.path.is_ident("no_serialize") {
+                } else if meta.path.is_ident("no_serialize") {
                     config.no_serialize = true;
-                }
-                if meta.path.is_ident("no_clone") {
+                } else if meta.path.is_ident("no_clone") {
                     config.no_clone = true;
-                }
-                if meta.path.is_ident("unzip") {
+                } else if meta.path.is_ident("unzip") {
                     config.unzip = true;
-                }
-                if meta.path.is_ident("fork_result") {
+                } else if meta.path.is_ident("fork_result") {
                     config.fork_result = true;
-                }
-                if meta.path.is_ident("split") {
+                } else if meta.path.is_ident("split") {
                     config.split = true;
-                }
-                if meta.path.is_ident("join") {
+                } else if meta.path.is_ident("join") {
                     config.join = true;
-                }
-                if meta.path.is_ident("buffer_access") {
+                } else if meta.path.is_ident("buffer_access") {
                     config.buffer_access = true;
-                }
-                if meta.path.is_ident("listen") {
+                } else if meta.path.is_ident("listen") {
                     config.listen = true;
                 }
                 Ok(())
