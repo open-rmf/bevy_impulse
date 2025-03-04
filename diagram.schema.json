@@ -117,6 +117,18 @@
                 }
               },
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "template"
+              ],
+              "properties": {
+                "template": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
             }
           ],
           "required": [
