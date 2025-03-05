@@ -9,8 +9,8 @@ use tracing::debug;
 use crate::{diagram::type_info::TypeInfo, Builder, Output};
 
 use super::{
-    validate_single_input, workflow_builder::EdgeBuilder, DiagramErrorCode, DynOutput,
-    MessageRegistry, NextOperation, Vertex,
+    validate_single_input, DiagramErrorCode, DynOutput, Edge, MessageRegistry, NextOperation,
+    OperationId, Vertex, WorkflowBuilder,
 };
 
 #[derive(Error, Debug)]
@@ -33,23 +33,29 @@ pub struct TransformOp {
 }
 
 impl TransformOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(self.next.clone(), None, None)?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.next.clone(),
+            output: None,
+            tag: None,
+        })?;
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
-        let output = validate_single_input(target)?;
+        let output = validate_single_input(vertex)?;
         let transformed_output = transform_output(builder, registry, output, self)?;
-        let mut out_edge = target.out_edges[0].try_lock().unwrap();
+        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(transformed_output.into());
         Ok(true)
     }

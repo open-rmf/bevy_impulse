@@ -6,9 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    workflow_builder::{dyn_connect, EdgeBuilder, Vertex},
-    BuilderId, DiagramElementRegistry, DiagramErrorCode, DynInputSlot, MessageRegistry,
-    NextOperation, OperationId,
+    workflow_builder::dyn_connect, BuilderId, DiagramElementRegistry, DiagramErrorCode,
+    DynInputSlot, Edge, NextOperation, OperationId, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -21,34 +20,41 @@ pub struct NodeOp {
 }
 
 impl NodeOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
+    pub(super) fn add_edges<'a>(
+        &self,
+        op_id: &'a OperationId,
+        workflow_builder: &mut WorkflowBuilder,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
         inputs: &mut HashMap<&'a OperationId, DynInputSlot>,
-        op_id: &'a OperationId,
-        mut edge_builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
         let reg = registry.get_node_registration(&self.builder)?;
         let n = reg.create_node(builder, self.config.clone())?;
-        inputs.insert(op_id, n.input);
-        edge_builder.add_output_edge(self.next.clone(), Some(n.output), None)?;
+        inputs.insert(op_id, n.input.into());
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.next.clone(),
+            output: Some(n.output.into()),
+            tag: None,
+        })?;
         Ok(())
     }
 
     pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
+        registry: &DiagramElementRegistry,
+        op_id: &OperationId,
         inputs: &HashMap<&OperationId, DynInputSlot>,
-        registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
-        for edge in &target.in_edges {
+        for edge in &vertex.in_edges {
             let mut edge = edge.try_lock().unwrap();
             let output = edge.output.take().unwrap();
-            let input = inputs[&target.op_id];
-            dyn_connect(builder, output, input, registry)?;
+            let input = inputs[op_id];
+            dyn_connect(builder, output, input.into(), &registry.messages)?;
         }
+
         Ok(true)
     }
 }

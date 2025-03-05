@@ -10,10 +10,8 @@ use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     register_serialize,
     type_info::TypeInfo,
-    validate_single_input,
-    workflow_builder::EdgeBuilder,
-    DiagramErrorCode, MessageRegistration, MessageRegistry, NextOperation, SerializeMessage,
-    Vertex,
+    validate_single_input, DiagramErrorCode, Edge, MessageRegistration, MessageRegistry,
+    NextOperation, OperationId, SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,33 +22,44 @@ pub struct ForkResultOp {
 }
 
 impl ForkResultOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(self.ok.clone(), None, None)?;
-        builder.add_output_edge(self.err.clone(), None, None)?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.ok.clone(),
+            output: None,
+            tag: None,
+        })?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.err.clone(),
+            output: None,
+            tag: None,
+        })?;
         Ok(())
     }
 
     pub(super) fn try_connect<'b>(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
-        let output = validate_single_input(target)?;
+        let output = validate_single_input(vertex)?;
         let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             Err(DiagramErrorCode::CannotForkResult)
         } else {
             registry.fork_result(builder, output)
         }?;
         {
-            let ok_edge = &target.out_edges[0];
+            let ok_edge = &vertex.out_edges[0];
             ok_edge.try_lock().unwrap().output = Some(ok);
         }
         {
-            let err_edge = &target.out_edges[1];
+            let err_edge = &vertex.out_edges[1];
             err_edge.try_lock().unwrap().output = Some(err);
         }
 

@@ -8,8 +8,8 @@ use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
     buffer::{get_node_request_type, BufferInputs},
-    workflow_builder::{EdgeBuilder, Vertex},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
+    Diagram, DiagramElementRegistry, DiagramErrorCode, Edge, NextOperation, OperationId, Vertex,
+    WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -25,17 +25,23 @@ pub struct JoinOp {
 }
 
 impl JoinOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(self.next.clone(), None, None)?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.next.clone(),
+            output: None,
+            tag: None,
+        })?;
         Ok(())
     }
 
     pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
         buffers: &HashMap<OperationId, AnyBuffer>,
@@ -53,7 +59,7 @@ impl JoinOp {
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.join(builder, &buffers, target_type)?;
 
-        let mut out_edge = target.out_edges[0].try_lock().unwrap();
+        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(output);
         Ok(true)
     }
@@ -69,17 +75,22 @@ pub struct SerializedJoinOp {
 }
 
 impl SerializedJoinOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(self.next.clone(), None, None)?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.next.clone(),
+            output: None,
+            tag: None,
+        })?;
         Ok(())
     }
-
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         buffers: &HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
@@ -138,7 +149,7 @@ impl SerializedJoinOp {
             .output()
             .into();
 
-        let mut out_edge = target.out_edges[0].try_lock().unwrap();
+        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(output);
         Ok(true)
     }

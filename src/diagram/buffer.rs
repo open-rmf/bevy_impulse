@@ -8,10 +8,9 @@ use crate::{
 };
 
 use super::{
-    type_info::TypeInfo,
-    workflow_builder::{EdgeBuilder, Vertex},
-    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
-    MessageRegistry, NextOperation, OperationId,
+    type_info::TypeInfo, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode,
+    DiagramOperation, DynOutput, Edge, MessageRegistry, NextOperation, OperationId, Vertex,
+    WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,18 +23,12 @@ pub struct BufferOp {
 }
 
 impl BufferOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        _builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'a>(
+    pub(super) fn try_connect(
         &self,
-        vertex: &'a Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &MessageRegistry,
+        op_id: &String,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         if vertex.in_edges.is_empty() {
@@ -80,7 +73,7 @@ impl BufferOp {
 
         // convert the first output into a buffer
         let buffer = first_output.into_any_buffer(builder, self.settings)?;
-        let buffer = match buffers.entry(vertex.op_id.clone()) {
+        let buffer = match buffers.entry(op_id.clone()) {
             Entry::Occupied(mut entry) => {
                 entry.insert(buffer);
                 entry.into_mut()
@@ -185,17 +178,23 @@ pub struct BufferAccessOp {
 }
 
 impl BufferAccessOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(self.next.clone(), None, None)?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.next.clone(),
+            output: None,
+            tag: None,
+        })?;
         Ok(())
     }
 
     pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
         buffers: &HashMap<OperationId, AnyBuffer>,
@@ -207,7 +206,7 @@ impl BufferAccessOp {
             return Ok(false);
         };
 
-        let output = if let Some(output) = target.in_edges[0].try_lock().unwrap().output.take() {
+        let output = if let Some(output) = vertex.in_edges[0].try_lock().unwrap().output.take() {
             output
         } else {
             return Ok(false);
@@ -218,7 +217,7 @@ impl BufferAccessOp {
             registry
                 .messages
                 .with_buffer_access(builder, output, &buffers, target_type)?;
-        let mut out_edge = target.out_edges[0].try_lock().unwrap();
+        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
         out_edge.output = Some(output);
         Ok(true)
     }
@@ -251,11 +250,17 @@ pub struct ListenOp {
 }
 
 impl ListenOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(self.next.clone(), None, None)?;
+        workflow_builder.add_edge(Edge {
+            source: op_id.clone().into(),
+            target: self.next.clone(),
+            output: None,
+            tag: None,
+        })?;
         Ok(())
     }
 

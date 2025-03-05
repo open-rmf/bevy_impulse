@@ -30,9 +30,8 @@ use crate::{
 use super::{
     impls::{DefaultImpl, NotSupported},
     type_info::TypeInfo,
-    validate_single_input,
-    workflow_builder::EdgeBuilder,
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage, Vertex,
+    validate_single_input, DiagramErrorCode, DynOutput, Edge, MessageRegistry, NextOperation,
+    OperationId, SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -48,28 +47,39 @@ pub struct SplitOp {
 }
 
 impl SplitOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
         let next_op_ids: Vec<&NextOperation> =
             self.sequential.iter().chain(self.keyed.values()).collect();
         for next_op_id in next_op_ids {
-            builder.add_output_edge(next_op_id.clone(), None, None)?;
+            workflow_builder.add_edge(Edge {
+                source: op_id.clone().into(),
+                target: next_op_id.clone(),
+                output: None,
+                tag: None,
+            })?;
         }
         if let Some(remaining) = &self.remaining {
-            builder.add_output_edge(remaining.clone(), None, None)?;
+            workflow_builder.add_edge(Edge {
+                source: op_id.clone().into(),
+                target: remaining.clone(),
+                output: None,
+                tag: None,
+            })?;
         }
         Ok(())
     }
 
     pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
-        let output = validate_single_input(target)?;
+        let output = validate_single_input(vertex)?;
         let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             let chain = output.into_output::<serde_json::Value>()?.chain(builder);
             split_chain(chain, self)
@@ -80,15 +90,15 @@ impl SplitOp {
         // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
         // then the last item will always be the remaining edge.
         if self.remaining.is_some() {
-            let out_edge = target.out_edges.last().ok_or(unknown_diagram_error!())?;
+            let out_edge = vertex.out_edges.last().ok_or(unknown_diagram_error!())?;
             out_edge.try_lock().unwrap().output = Some(outputs.remaining);
         }
 
         let other_edges = if self.remaining.is_some() {
-            let out_edges_len = target.out_edges.len();
-            &target.out_edges[..(out_edges_len - 1)]
+            let out_edges_len = vertex.out_edges.len();
+            &vertex.out_edges[..(out_edges_len - 1)]
         } else {
-            &target.out_edges[..]
+            &vertex.out_edges[..]
         };
         for out_edge in other_edges {
             let mut out_edge = out_edge.try_lock().unwrap();

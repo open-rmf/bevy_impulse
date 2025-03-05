@@ -7,7 +7,7 @@ use crate::{AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
     dyn_connect, type_info::TypeInfo, BuilderId, DiagramElementRegistry, DiagramErrorCode,
-    DynOutput, EdgeBuilder, MessageRegistry, NextOperation, OperationId, Vertex,
+    DynOutput, Edge, MessageRegistry, NextOperation, OperationId, Vertex, WorkflowBuilder,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -31,24 +31,20 @@ pub struct SectionOp {
 }
 
 impl SectionOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-        registry: &DiagramElementRegistry,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
         match &self.builder {
-            SectionProvider::Builder(builder_id) => {
-                let reg = registry.get_section_registration(builder_id)?;
-
-                // check that all outputs are available
-                for k in reg.metadata.outputs.keys() {
-                    if !self.connect.contains_key(k) {
-                        return Err(SectionError::MissingOutput(k.clone()).into());
-                    }
-                }
-
+            SectionProvider::Builder(_) => {
                 for (key, next_op) in &self.connect {
-                    builder.add_output_edge(next_op.clone(), None, Some(key.clone()))?;
+                    workflow_builder.add_edge(Edge {
+                        source: op_id.clone().into(),
+                        target: next_op.clone(),
+                        output: None,
+                        tag: Some(key.clone()),
+                    })?;
                 }
                 Ok(())
             }
@@ -60,6 +56,7 @@ impl SectionOp {
         vertex: &Vertex,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
+        op_id: String,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         let mut inputs = HashMap::with_capacity(vertex.in_edges.len());
@@ -80,6 +77,20 @@ impl SectionOp {
         match &self.builder {
             SectionProvider::Builder(builder_id) => {
                 let reg = registry.get_section_registration(builder_id)?;
+
+                // check that there are no extra inputs
+                for k in inputs.keys() {
+                    if !reg.metadata.inputs.contains_key(k) {
+                        return Err(SectionError::ExtraInput(k.clone()).into());
+                    }
+                }
+
+                // check that all outputs are available
+                for k in reg.metadata.outputs.keys() {
+                    if !self.connect.contains_key(k) {
+                        return Err(SectionError::MissingOutput(k.clone()).into());
+                    }
+                }
 
                 // note that unlike nodes, sections are created only when trying to connect
                 // because we need all the buffers to be created first, and buffers are
@@ -108,7 +119,7 @@ impl SectionOp {
                 // for now we just do namespacing by prefixing, if this is insufficient,
                 // a more concrete impl may be done in `OperationId`.
                 for (key, buffer) in section_buffers {
-                    buffers.insert(format!("{}/{}", vertex.op_id, key), buffer);
+                    buffers.insert(format!("{}/{}", op_id, key), buffer);
                 }
 
                 Ok(true)

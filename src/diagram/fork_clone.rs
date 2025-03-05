@@ -8,9 +8,8 @@ use crate::{diagram::type_info::TypeInfo, Builder};
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    validate_single_input,
-    workflow_builder::EdgeBuilder,
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, Vertex,
+    validate_single_input, DiagramErrorCode, DynOutput, Edge, MessageRegistry, NextOperation,
+    OperationId, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -20,12 +19,18 @@ pub struct ForkCloneOp {
 }
 
 impl ForkCloneOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
         for target in &self.next {
-            builder.add_output_edge(target.clone(), None, None)?;
+            workflow_builder.add_edge(Edge {
+                source: op_id.clone().into(),
+                target: target.clone(),
+                output: None,
+                tag: None,
+            })?;
         }
         Ok(())
     }

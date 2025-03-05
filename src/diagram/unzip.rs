@@ -9,9 +9,8 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
-    validate_single_input,
-    workflow_builder::EdgeBuilder,
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage, Vertex,
+    validate_single_input, DiagramErrorCode, DynOutput, Edge, MessageRegistry, NextOperation,
+    OperationId, SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -21,30 +20,36 @@ pub struct UnzipOp {
 }
 
 impl UnzipOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
+    pub(super) fn add_edges(
+        &self,
+        op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder,
     ) -> Result<(), DiagramErrorCode> {
         for target in &self.next {
-            builder.add_output_edge(target.clone(), None, None)?;
+            workflow_builder.add_edge(Edge {
+                source: op_id.clone().into(),
+                target: target.clone(),
+                output: None,
+                tag: None,
+            })?;
         }
         Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
-        target: &Vertex,
+        vertex: &Vertex,
         builder: &mut Builder,
         registry: &MessageRegistry,
     ) -> Result<bool, DiagramErrorCode> {
-        let output = validate_single_input(target)?;
+        let output = validate_single_input(vertex)?;
         let outputs = registry.unzip(builder, output)?;
 
-        if outputs.len() < target.out_edges.len() {
+        if outputs.len() < vertex.out_edges.len() {
             return Err(DiagramErrorCode::NotUnzippable);
         }
 
-        for (output, out_edge) in zip(outputs, &target.out_edges) {
+        for (output, out_edge) in zip(outputs, &vertex.out_edges) {
             out_edge.try_lock().unwrap().output = Some(output);
         }
 

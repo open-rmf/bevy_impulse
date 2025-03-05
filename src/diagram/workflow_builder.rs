@@ -1,27 +1,18 @@
 use std::{
+    cell::RefCell,
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 
-use tracing::{debug, warn};
-
 use crate::{
     diagram::{type_info::TypeInfo, DiagramErrorContext},
-    AnyBuffer, Builder, InputSlot, Output, StreamPack,
+    AnyBuffer, Builder, InputSlot, Output,
 };
 
 use super::{
-    BuiltinSource, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
-    DiagramOperation, DiagramScope, DynInputSlot, DynOutput, MessageRegistry, NextOperation,
-    OperationId, SectionError, SourceOperation,
+    DiagramElementRegistry, DiagramError, DiagramErrorCode, DynInputSlot, DynOutput,
+    IntoOperationId, MessageRegistry, NextOperation, OperationId, SourceOperation,
 };
-
-pub(super) struct Vertex {
-    pub(super) op_id: OperationId,
-    pub(super) op: DiagramOperation,
-    pub(super) in_edges: Vec<Arc<Mutex<Edge>>>,
-    pub(super) out_edges: Vec<Arc<Mutex<Edge>>>,
-}
 
 pub(super) struct Edge {
     pub(super) source: SourceOperation,
@@ -30,341 +21,130 @@ pub(super) struct Edge {
     pub(super) tag: Option<String>,
 }
 
-pub(super) struct EdgeBuilder<'a, 'b> {
-    registry: &'b DiagramElementRegistry,
-    vertices: &'b mut HashMap<&'a OperationId, Vertex>,
-    terminate_edges: &'b mut Vec<Arc<Mutex<Edge>>>,
-    source: SourceOperation,
+pub(super) type ConnectVisitor<'a> = dyn Fn(
+        &Vertex,
+        &mut Builder,
+        &DiagramElementRegistry,
+        &mut HashMap<OperationId, AnyBuffer>,
+    ) -> Result<bool, DiagramErrorCode>
+    + 'a;
+
+pub(super) struct Vertex {
+    pub(super) in_edges: Vec<Arc<Mutex<Edge>>>,
+    pub(super) out_edges: Vec<Arc<Mutex<Edge>>>,
 }
 
-impl<'a, 'b> EdgeBuilder<'a, 'b> {
-    fn add_edge(&mut self, edge: Edge) -> Result<(), DiagramErrorCode> {
-        let source = edge.source.clone();
-        let target = edge.target.clone();
-        let new_edge = Arc::new(Mutex::new(edge));
-        match source {
-            SourceOperation::Source(op_id) => {
-                let source = self
-                    .vertices
-                    .get_mut(&op_id)
-                    .ok_or(DiagramErrorCode::OperationNotFound(op_id.clone()))?;
-                source.out_edges.push(Arc::clone(&new_edge));
-            }
-            SourceOperation::Builtin { builtin: _ } => {}
-        }
-        match target {
-            NextOperation::Target(op_id) => {
-                let target = self
-                    .vertices
-                    .get_mut(&op_id)
-                    .ok_or(DiagramErrorCode::OperationNotFound(op_id))?;
-                target.in_edges.push(Arc::clone(&new_edge));
-            }
-            NextOperation::Section { section, input } => {
-                let target = self
-                    .vertices
-                    .get_mut(&section)
-                    .ok_or(DiagramErrorCode::OperationNotFound(section.clone()))?;
-                let reg = self.registry.get_section_registration(&section)?;
-                if !reg.metadata.inputs.contains_key(&input) {
-                    return Err(SectionError::ExtraInput(input).into());
-                }
-                target.in_edges.push(Arc::clone(&new_edge));
-            }
-            NextOperation::Builtin { builtin } => match builtin {
-                BuiltinTarget::Terminate => {
-                    self.terminate_edges.push(new_edge);
-                }
-                BuiltinTarget::Dispose => {}
-            },
-        }
-        Ok(())
-    }
-
-    pub(super) fn add_output_edge(
-        &mut self,
-        target: NextOperation,
-        output: Option<DynOutput>,
-        tag: Option<String>,
-    ) -> Result<(), DiagramErrorCode> {
-        self.add_edge(Edge {
-            source: self.source.clone(),
-            target,
-            output,
-            tag,
-        })?;
-        Ok(())
-    }
+struct VertexOperations<'a> {
+    connect_visitor: Box<ConnectVisitor<'a>>,
 }
 
-pub(super) fn create_workflow<'a, Streams: StreamPack>(
-    scope: DiagramScope<Streams>,
-    builder: &mut Builder,
-    registry: &DiagramElementRegistry,
-    diagram: &'a Diagram,
-) -> Result<(), DiagramError> {
-    // first create all the vertices
-    let mut vertices: HashMap<&OperationId, Vertex> = diagram
-        .ops
-        .iter()
-        .map(|(op_id, op)| {
+pub(super) struct WorkflowBuilder<'a> {
+    vertices: HashMap<OperationId, (RefCell<Vertex>, VertexOperations<'a>)>,
+}
+
+impl<'a> WorkflowBuilder<'a> {
+    pub(super) fn new() -> Self {
+        Self {
+            vertices: HashMap::new(),
+        }
+    }
+
+    pub(super) fn add_vertex<AsId, F>(&mut self, op_id: AsId, connect_visitor: F)
+    where
+        AsId: IntoOperationId,
+        F: Fn(
+                &Vertex,
+                &mut Builder,
+                &DiagramElementRegistry,
+                &mut HashMap<OperationId, AnyBuffer>,
+            ) -> Result<bool, DiagramErrorCode>
+            + 'a,
+    {
+        self.vertices.insert(
+            op_id.into_operation_id(),
             (
-                op_id,
-                Vertex {
-                    op_id: op_id.clone(),
-                    op: op.clone(),
+                RefCell::new(Vertex {
                     in_edges: Vec::new(),
                     out_edges: Vec::new(),
+                }),
+                VertexOperations {
+                    connect_visitor: Box::new(connect_visitor),
                 },
-            )
-        })
-        .collect();
-
-    let mut terminate_edges: Vec<Arc<Mutex<Edge>>> = Vec::new();
-
-    // process start separately because we need to consume the scope input
-    match &diagram.start {
-        NextOperation::Builtin { builtin } => match builtin {
-            BuiltinTarget::Terminate => {
-                terminate_edges.push(Arc::new(Mutex::new(Edge {
-                    source: SourceOperation::Builtin {
-                        builtin: BuiltinSource::Start,
-                    },
-                    target: NextOperation::Builtin {
-                        builtin: BuiltinTarget::Terminate,
-                    },
-                    output: Some(scope.input.into()),
-                    tag: None,
-                })));
-            }
-            BuiltinTarget::Dispose => {
-                // bevy_impulse will immediate stop with an `CancellationCause::Unreachable` error
-                // if trying to run such a workflow.
-                return Ok(());
-            }
-        },
-        NextOperation::Target(op_id) => {
-            let out_edge = Edge {
-                source: SourceOperation::Builtin {
-                    builtin: super::BuiltinSource::Start,
-                },
-                target: diagram.start.clone(),
-                output: Some(scope.input.into()),
-                tag: None,
-            };
-            vertices
-                .get_mut(&op_id)
-                .ok_or(DiagramError {
-                    context: DiagramErrorContext {
-                        op_id: Some(op_id.clone()),
-                    },
-                    code: DiagramErrorCode::OperationNotFound(op_id.clone()),
-                })?
-                .in_edges
-                .push(Arc::new(Mutex::new(out_edge)));
-        }
-        NextOperation::Section { section, input } => {
-            let out_edge = Edge {
-                source: SourceOperation::Builtin {
-                    builtin: super::BuiltinSource::Start,
-                },
-                target: diagram.start.clone(),
-                output: Some(scope.input.into()),
-                tag: Some(input.clone()),
-            };
-            vertices
-                .get_mut(&section)
-                .ok_or(DiagramError {
-                    context: DiagramErrorContext {
-                        op_id: Some(section.clone()),
-                    },
-                    code: DiagramErrorCode::OperationNotFound(section.clone()),
-                })?
-                .in_edges
-                .push(Arc::new(Mutex::new(out_edge)));
-        }
-    };
-
-    let mut inputs: HashMap<&OperationId, DynInputSlot> = HashMap::with_capacity(diagram.ops.len());
-
-    let mut buffers: HashMap<OperationId, AnyBuffer> = HashMap::new();
-
-    // create all the edges
-    for (op_id, op) in &diagram.ops {
-        let with_context = |code: DiagramErrorCode| DiagramError {
-            context: DiagramErrorContext {
-                op_id: Some(op_id.clone()),
-            },
-            code,
-        };
-
-        let edge_builder = EdgeBuilder {
-            registry,
-            vertices: &mut vertices,
-            terminate_edges: &mut terminate_edges,
-            source: SourceOperation::Source(op_id.clone()),
-        };
-
-        match op {
-            DiagramOperation::Node(op) => {
-                op.build_edges(builder, registry, &mut inputs, op_id, edge_builder)
-                    .map_err(with_context)?;
-            }
-            DiagramOperation::ForkClone(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Unzip(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::ForkResult(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Split(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Join(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::SerializedJoin(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Transform(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Buffer(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::BufferAccess(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Listen(op) => {
-                op.build_edges(edge_builder).map_err(with_context)?;
-            }
-            DiagramOperation::Section(op) => {
-                op.build_edges(edge_builder, registry)
-                    .map_err(with_context)?;
-            }
-        }
-    }
-
-    // iteratively connect edges
-    let mut unconnected_vertices: Vec<&Vertex> = vertices.values().collect();
-    while unconnected_vertices.len() > 0 {
-        let ws = unconnected_vertices.clone();
-        let ws_length = ws.len();
-        unconnected_vertices.clear();
-
-        for v in ws {
-            let connected = connect_vertex(builder, v, registry, &inputs, &mut buffers, diagram)
-                .map_err(|code| DiagramError {
-                    context: DiagramErrorContext {
-                        op_id: Some(v.op_id.clone()),
-                    },
-                    code,
-                })?;
-            if !connected {
-                unconnected_vertices.push(v);
-                continue;
-            }
-        }
-
-        // can't connect anything and there are still remaining vertices
-        if unconnected_vertices.len() > 0 && ws_length == unconnected_vertices.len() {
-            warn!(
-                "the following operations are not connected {:?}",
-                unconnected_vertices
-                    .iter()
-                    .map(|v| v.op_id.clone())
-                    .collect::<Vec<_>>()
-            );
-            return Err(DiagramError {
-                context: DiagramErrorContext { op_id: None },
-                code: DiagramErrorCode::IncompleteDiagram,
-            });
-        }
-    }
-
-    // connect terminate
-    for edge in terminate_edges {
-        let mut edge = edge.try_lock().unwrap();
-        match edge.output.take() {
-            Some(output) => {
-                debug!(
-                    "connect edge, source: {:?}, target: {:?}",
-                    edge.source, edge.target
-                );
-                let serialized_output =
-                    registry
-                        .messages
-                        .serialize(builder, output)
-                        .map_err(|code| DiagramError {
-                            context: DiagramErrorContext {
-                                op_id: Some(
-                                    NextOperation::Builtin {
-                                        builtin: BuiltinTarget::Terminate,
-                                    }
-                                    .to_string(),
-                                ),
-                            },
-                            code,
-                        })?;
-                builder.connect(serialized_output, scope.terminate);
-            }
-            None => {
-                return Err(DiagramError {
-                    context: DiagramErrorContext { op_id: None },
-                    code: DiagramErrorCode::IncompleteDiagram,
-                })
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Attempt to connect all output edges of a vertex, returns true if the connection is done.
-fn connect_vertex<'a>(
-    builder: &mut Builder,
-    target: &Vertex,
-    registry: &DiagramElementRegistry,
-    inputs: &HashMap<&OperationId, DynInputSlot>,
-    buffers: &mut HashMap<OperationId, AnyBuffer>,
-    diagram: &Diagram,
-) -> Result<bool, DiagramErrorCode> {
-    if target
-        .in_edges
-        .iter()
-        .any(|e| matches!(e.try_lock().unwrap().output, None))
-    {
-        // not all inputs are ready
-        debug!(
-            "defer connecting [{}] until all incoming edges are ready",
-            target.op_id
+            ),
         );
-        return Ok(false);
     }
 
-    debug!("connecting [{}]", target.op_id);
+    pub(super) fn add_edge(&mut self, edge: Edge) -> Result<(), DiagramErrorCode> {
+        let (from_vertex, _) = self
+            .vertices
+            .get(&edge.source.clone().into_operation_id())
+            .ok_or_else(|| DiagramErrorCode::OperationNotFound(edge.source.to_string()))?;
+        let (to_vertex, _) = self
+            .vertices
+            .get(&edge.target.clone().into_operation_id())
+            .ok_or_else(|| DiagramErrorCode::OperationNotFound(edge.target.to_string()))?;
 
-    match &target.op {
-        DiagramOperation::Node(op) => op.try_connect(target, builder, &inputs, &registry.messages),
-        DiagramOperation::ForkClone(op) => op.try_connect(target, builder, &registry.messages),
-        DiagramOperation::Unzip(op) => op.try_connect(target, builder, &registry.messages),
-        DiagramOperation::ForkResult(op) => op.try_connect(target, builder, &registry.messages),
-        DiagramOperation::Split(op) => op.try_connect(target, builder, &registry.messages),
-        DiagramOperation::Join(op) => op.try_connect(target, builder, &registry, buffers, diagram),
-        DiagramOperation::SerializedJoin(op) => op.try_connect(target, builder, &buffers),
-        DiagramOperation::Transform(op) => op.try_connect(target, builder, &registry.messages),
-        DiagramOperation::Buffer(op) => {
-            op.try_connect(target, builder, &registry.messages, buffers)
+        let edge = Arc::new(Mutex::new(edge));
+        from_vertex.borrow_mut().out_edges.push(Arc::clone(&edge));
+        to_vertex.borrow_mut().in_edges.push(Arc::clone(&edge));
+
+        Ok(())
+    }
+
+    pub(super) fn create_workflow(
+        mut self,
+        builder: &mut Builder,
+        registry: &DiagramElementRegistry,
+    ) -> Result<(), DiagramError> {
+        let mut buffers = HashMap::new();
+
+        // iteratively connect the vertices
+        while !self.vertices.is_empty() {
+            let before_len = self.vertices.len();
+            let mut unconnected_vertices = HashMap::new();
+
+            for (op_id, (mut v, mut ops)) in self.vertices.drain() {
+                let vertex = v.get_mut();
+
+                // skip if one or more edges is not ready yet
+                if vertex
+                    .in_edges
+                    .iter()
+                    .any(|edge| edge.try_lock().unwrap().output.is_none())
+                {
+                    unconnected_vertices.insert(op_id, (v, ops));
+                    continue;
+                }
+
+                // need to take ownership to avoid multiple mutable borrows, it is always
+                // put back so the unwrap should never fail.
+                let connect_visitor = &mut ops.connect_visitor;
+                let connected =
+                    connect_visitor(vertex, builder, registry, &mut buffers).map_err(|code| {
+                        DiagramError {
+                            code,
+                            context: DiagramErrorContext {
+                                op_id: Some(op_id.clone()),
+                            },
+                        }
+                    })?;
+
+                if !connected {
+                    unconnected_vertices.insert(op_id, (v, ops));
+                }
+            }
+            self.vertices.extend(unconnected_vertices);
+
+            // no progress is made and diagram is not fully connected
+            if !self.vertices.is_empty() && self.vertices.len() == before_len {
+                return Err(DiagramError {
+                    code: DiagramErrorCode::IncompleteDiagram,
+                    context: DiagramErrorContext { op_id: None },
+                });
+            }
         }
-        DiagramOperation::BufferAccess(op) => {
-            op.try_connect(target, builder, registry, buffers, diagram)
-        }
-        DiagramOperation::Listen(op) => {
-            op.try_connect(target, builder, registry, &buffers, diagram)
-        }
-        DiagramOperation::Section(op) => op.try_connect(target, builder, registry, buffers),
+
+        Ok(())
     }
 }
 

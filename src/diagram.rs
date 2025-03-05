@@ -32,7 +32,7 @@ pub use workflow_builder::*;
 
 // ----------
 
-use std::{collections::HashMap, fmt::Display, io::Read};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, io::Read};
 
 use crate::{
     Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
@@ -45,6 +45,16 @@ const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
 pub type BuilderId = String;
 pub type OperationId = String;
 
+pub trait IntoOperationId {
+    fn into_operation_id(self) -> OperationId;
+}
+
+impl IntoOperationId for String {
+    fn into_operation_id(self) -> OperationId {
+        self
+    }
+}
+
 #[derive(
     Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
 )]
@@ -53,6 +63,16 @@ pub enum NextOperation {
     Target(OperationId),
     Section { section: OperationId, input: String },
     Builtin { builtin: BuiltinTarget },
+}
+
+impl IntoOperationId for NextOperation {
+    fn into_operation_id(self) -> OperationId {
+        match self {
+            Self::Target(operation_id) => operation_id,
+            Self::Section { section, input: _ } => section,
+            Self::Builtin { builtin } => format!("builtin:{}", builtin),
+        }
+    }
 }
 
 impl Display for NextOperation {
@@ -96,6 +116,12 @@ pub enum BuiltinTarget {
 pub enum SourceOperation {
     Source(OperationId),
     Builtin { builtin: BuiltinSource },
+}
+
+impl IntoOperationId for SourceOperation {
+    fn into_operation_id(self) -> OperationId {
+        self.to_string()
+    }
 }
 
 impl From<OperationId> for SourceOperation {
@@ -622,35 +648,227 @@ impl Diagram {
     where
         Streams: StreamPack,
     {
-        let mut err: Option<DiagramError> = None;
-
-        macro_rules! unwrap_or_return {
-            ($v:expr) => {
-                match $v {
-                    Ok(v) => v,
-                    Err(e) => {
-                        err = Some(e);
-                        return;
-                    }
-                }
-            };
-        }
-
-        let w = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
+        let build = |scope: DiagramScope<Streams>, builder: &mut Builder| {
             debug!(
                 "spawn workflow, scope input: {:?}, terminate: {:?}",
                 scope.input.id(),
                 scope.terminate.id()
             );
 
-            unwrap_or_return!(create_workflow(scope, builder, registry, self));
-        });
+            let node_inputs: RefCell<HashMap<&OperationId, DynInputSlot>> =
+                RefCell::new(HashMap::new());
+            let mut workflow_builder = WorkflowBuilder::new();
 
-        if let Some(err) = err {
-            return Err(err);
+            // add start vertex
+            let start = SourceOperation::Builtin {
+                builtin: BuiltinSource::Start,
+            };
+            workflow_builder.add_vertex(start.clone(), move |_, _, _, _| Ok(true));
+
+            // add terminate vertex
+            let terminate = NextOperation::Builtin {
+                builtin: BuiltinTarget::Terminate,
+            };
+            workflow_builder.add_vertex(terminate, move |vertex, builder, registry, _| {
+                for edge in &vertex.in_edges {
+                    let output = edge.try_lock().unwrap().output.take().unwrap();
+                    let serialized_output = registry.messages.serialize(builder, output)?;
+                    builder.connect(serialized_output, scope.terminate.into());
+                }
+                Ok(true)
+            });
+
+            let dispose = NextOperation::Builtin {
+                builtin: BuiltinTarget::Dispose,
+            };
+            workflow_builder.add_vertex(dispose, move |_, _, _, _| Ok(true));
+
+            // add other vertices
+            for (op_id, op) in &self.ops {
+                match op {
+                    DiagramOperation::Node(op) => {
+                        workflow_builder.add_vertex(
+                            op_id.clone(),
+                            |vertex, builder, registry, _| {
+                                op.try_connect(
+                                    vertex,
+                                    builder,
+                                    registry,
+                                    op_id,
+                                    &node_inputs.borrow(),
+                                )
+                            },
+                        );
+                    }
+                    DiagramOperation::Section(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, buffers| {
+                            op.try_connect(vertex, builder, registry, op_id.clone(), buffers)
+                        },
+                    ),
+                    DiagramOperation::ForkClone(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, _| {
+                            op.try_connect(vertex, builder, &registry.messages)
+                        },
+                    ),
+                    DiagramOperation::Unzip(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, _| {
+                            op.try_connect(vertex, builder, &registry.messages)
+                        },
+                    ),
+                    DiagramOperation::ForkResult(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, _| {
+                            op.try_connect(vertex, builder, &registry.messages)
+                        },
+                    ),
+                    DiagramOperation::Split(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, _| {
+                            op.try_connect(vertex, builder, &registry.messages)
+                        },
+                    ),
+                    DiagramOperation::Join(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, buffers| {
+                            op.try_connect(vertex, builder, &registry, buffers, self)
+                        },
+                    ),
+                    DiagramOperation::SerializedJoin(op) => workflow_builder
+                        .add_vertex(op_id.clone(), |vertex, builder, _, buffers| {
+                            op.try_connect(vertex, builder, buffers)
+                        }),
+                    DiagramOperation::Transform(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, _| {
+                            op.try_connect(vertex, builder, &registry.messages)
+                        },
+                    ),
+                    DiagramOperation::Buffer(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, buffers| {
+                            op.try_connect(vertex, builder, &registry.messages, op_id, buffers)
+                        },
+                    ),
+                    DiagramOperation::BufferAccess(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, buffers| {
+                            op.try_connect(vertex, builder, registry, buffers, self)
+                        },
+                    ),
+                    DiagramOperation::Listen(op) => workflow_builder.add_vertex(
+                        op_id.clone(),
+                        |vertex, builder, registry, buffers| {
+                            op.try_connect(vertex, builder, registry, buffers, self)
+                        },
+                    ),
+                }
+            }
+
+            // add start edge
+            workflow_builder
+                .add_edge(Edge {
+                    source: start,
+                    target: self.start.clone(),
+                    output: Some(scope.input.into()),
+                    tag: None,
+                })
+                .map_err(|code| DiagramError {
+                    code,
+                    context: DiagramErrorContext {
+                        op_id: Some(
+                            SourceOperation::Builtin {
+                                builtin: BuiltinSource::Start,
+                            }
+                            .to_string(),
+                        ),
+                    },
+                })?;
+
+            for (op_id, op) in &self.ops {
+                let with_context = |code: DiagramErrorCode| DiagramError {
+                    code,
+                    context: DiagramErrorContext {
+                        op_id: Some(op_id.clone()),
+                    },
+                };
+
+                match op {
+                    DiagramOperation::Node(op) => {
+                        op.add_edges(
+                            op_id,
+                            &mut workflow_builder,
+                            builder,
+                            registry,
+                            &mut node_inputs.borrow_mut(),
+                        )
+                        .map_err(with_context)?;
+                    }
+                    DiagramOperation::Section(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::ForkClone(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::Unzip(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::ForkResult(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::Split(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::Join(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::SerializedJoin(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::Transform(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::Buffer(_) => {
+                        // buffer has no output edges
+                    }
+                    DiagramOperation::BufferAccess(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                    DiagramOperation::Listen(op) => {
+                        op.add_edges(op_id, &mut workflow_builder)
+                            .map_err(with_context)?;
+                    }
+                }
+            }
+
+            workflow_builder.create_workflow(builder, registry)
+        };
+
+        let mut err: Option<DiagramError> = None;
+        let wf = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
+            match build(scope, builder) {
+                Ok(_) => {}
+                Err(e) => {
+                    err = Some(e);
+                }
+            };
+        });
+        if let Some(e) = err {
+            return Err(e);
         }
 
-        Ok(w)
+        Ok(wf)
     }
 
     /// Spawns a workflow from this diagram.
@@ -744,6 +962,9 @@ pub enum DiagramErrorCode {
 
     #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
+
+    #[error("section template [{0}] does not exist")]
+    TemplateNotFound(OperationId),
 
     #[error("type mismatch, source {source_type}, target {target_type}")]
     TypeMismatch {
@@ -978,7 +1199,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
-            CancellationCause::Unreachable(_)
+            CancellationCause::Unreachable(_),
         ));
     }
 
