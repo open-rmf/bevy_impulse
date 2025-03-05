@@ -22,7 +22,7 @@ use bevy_ecs::{
 };
 
 use crate::{
-    dispose_for_despawned_service, make_stream_buffer_from_world,
+    dispose_for_despawned_service, make_stream_buffers_from_world,
     service::service_builder::BlockingChosen, BlockingService, BlockingServiceInput, Input,
     IntoService, ManageDisposal, ManageInput, OperationError, OperationRequest, OrBroken,
     ServiceBundle, ServiceRequest, ServiceTrait, StreamPack, UnusedStreams,
@@ -130,7 +130,7 @@ where
             return Ok(());
         };
 
-        let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
+        let streams = make_stream_buffers_from_world::<Streams>(source, world)?;
         let response = service.run(
             BlockingService {
                 request,
@@ -144,7 +144,7 @@ where
         service.apply_deferred(world);
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
+        Streams::process_stream_buffers(streams, source, session, &mut unused_streams, world, roster)?;
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) =

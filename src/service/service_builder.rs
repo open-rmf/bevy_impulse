@@ -133,7 +133,11 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
         let mut entity_mut = app.world.spawn(());
         self.service.insert_service_mut(&mut entity_mut);
         let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
-        entity_mut.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
+
+        let mut stream_availability = StreamAvailability::default();
+        <Srv::Streams as StreamPack>::set_stream_availability(&mut stream_availability);
+        entity_mut.insert(stream_availability);
+
         self.deliver
             .apply_entity_mut::<Srv::Request>(&mut entity_mut);
         self.with.apply(entity_mut);
@@ -193,7 +197,11 @@ where
         let mut entity_cmds = commands.spawn(());
         self.service.insert_service_commands(&mut entity_cmds);
         let provider = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_cmds.id());
-        entity_cmds.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
+
+        let mut stream_availability = StreamAvailability::default();
+        <Srv::Streams as StreamPack>::set_stream_availability(&mut stream_availability);
+        entity_cmds.insert(stream_availability);
+
         self.deliver
             .apply_entity_commands::<Srv::Request>(&mut entity_cmds);
         self.with.apply(&mut entity_cmds);

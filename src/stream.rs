@@ -15,59 +15,56 @@
  *
 */
 
-use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
-    prelude::{Bundle, Commands, Component, Entity, With, World},
-    query::{ReadOnlyWorldQuery, WorldQuery},
+    prelude::{Commands, Component, Entity, World},
     system::Command,
 };
 use bevy_hierarchy::BuildChildren;
 pub use bevy_impulse_derive::Stream;
 use bevy_utils::all_tuples;
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver as Receiver};
+use tokio::sync::mpsc::unbounded_channel;
+pub use tokio::sync::mpsc::UnboundedReceiver as Receiver;
 
 use std::{
     any::TypeId,
+    borrow::Cow,
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashSet, HashMap, hash_map::Entry},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use smallvec::SmallVec;
 
 use crate::{
-    AddImpulse, AddOperation, Broken, Builder, DeferredRoster, InnerChannel, InputSlot,
+    AddImpulse, AddOperation, AnonymousStreamRedirect, Broken, Builder, DeferredRoster, InnerChannel, InputSlot,
     ManageInput, OperationError, OperationResult, OperationRoster, OrBroken, Output, Push,
-    RedirectScopeStream, RedirectWorkflowStream, SingleInputStorage, StreamChannel, TakenStream,
-    UnhandledErrors, UnusedStreams, UnusedTarget,
+    RedirectScopeStream, RedirectWorkflowStream, SingleInputStorage, TakenStream,
+    UnhandledErrors, UnusedStreams, UnusedTarget, DuplicateStream, ReportUnhandled,
 };
 
-pub trait Stream: 'static + Send + Sync + Sized {
+mod named_stream;
+pub use named_stream::*;
+
+mod stream_channel;
+pub use stream_channel::*;
+
+pub trait StreamEffect: 'static + Send + Sync + Sized {
     type Input: 'static + Send + Sync;
     type Output: 'static + Send + Sync;
-    type Container: IntoIterator<Item = Self::Input> + Extend<Self::Input> + Default + 'static + Send + Sync;
 
-    fn send(
+    /// Specify a side effect that is meant to happen whenever a stream value is
+    /// sent.
+    fn side_effect(
         input: Self::Input,
-        StreamRequest {
-            session,
-            target,
-            world,
-            roster,
-            ..
-        }: StreamRequest,
-    ) -> OperationResult {
-        if let Some(target) = target {
-            world
-                .get_entity_mut(target)
-                .or_broken()?
-                .give_input(session, input, roster)?;
-        }
+        request: &mut StreamRequest,
+    ) -> Result<Self::Output, OperationError>;
+}
 
-        Ok(())
-    }
+pub trait Stream: StreamEffect {
+    type StreamChannel: Send;
+    type StreamBuffer: Clone;
 
     fn spawn_scope_stream(
         in_scope: Entity,
@@ -88,12 +85,191 @@ pub trait Stream: 'static + Send + Sync + Sized {
         )
     }
 
+    fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self::Input>;
+
+    fn spawn_node_stream(
+        source: Entity,
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> Output<Self::Output>;
+
+    fn take_stream(
+        source: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) -> Receiver<Self::Output> {
+        let (sender, receiver) = unbounded_channel::<Self::Output>();
+        let target = commands
+            .spawn(())
+            // Set the parent of this stream to be the impulse so it can be
+            // recursively despawned together.
+            .set_parent(source)
+            .id();
+
+        map.add_anonymous::<Self::Output>(target, commands);
+        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
+
+        receiver
+    }
+
+    fn collect_stream(
+        source: Entity,
+        target: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) {
+        let redirect = commands.spawn(()).set_parent(source).id();
+        commands.add(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
+        map.add_anonymous::<Self::Output>(redirect, commands);
+    }
+
+    fn make_stream_channel(
+        inner: &Arc<InnerChannel>,
+        world: &World,
+    ) -> Self::StreamChannel;
+
+    fn make_stream_buffer(
+        target_map: Option<&StreamTargetMap>,
+    ) -> Self::StreamBuffer;
+
+    fn process_stream_buffer(
+        buffer: Self::StreamBuffer,
+        source: Entity,
+        session: Entity,
+        unused: &mut UnusedStreams,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult;
+
+    fn defer_buffer(
+        buffer: Self::StreamBuffer,
+        source: Entity,
+        session: Entity,
+        commands: &mut Commands,
+    );
+}
+
+/// A wrapper to make an anonymous (unnamed) stream for any type `T` that
+/// implements `'static + Send + Sync`. This simply transmits the `T` with no
+/// side-effects.
+pub struct StreamOf<T: 'static + Send + Sync>(std::marker::PhantomData<fn(T)>);
+
+impl<T: 'static + Send + Sync> Clone for StreamOf<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static + Send + Sync> Copy for StreamOf<T> {}
+
+impl<T: 'static + Send + Sync> std::fmt::Debug for StreamOf<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        static NAME: OnceLock<String> = OnceLock::new();
+        let name = NAME.get_or_init(|| {
+            format!(
+                "StreamOf<{}>",
+                std::any::type_name::<T>(),
+            )
+        });
+
+        f.debug_struct(name.as_str())
+            .finish()
+    }
+}
+
+pub type DefaultStreamContainer<T> = SmallVec<[T; 16]>;
+
+impl<T: 'static + Send + Sync> StreamEffect for StreamOf<T> {
+    type Input = T;
+    type Output = T;
+
+    fn side_effect(
+        input: Self::Input,
+        _: &mut StreamRequest,
+    ) -> Result<Self::Output, OperationError> {
+        Ok(input)
+    }
+}
+
+impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
+    type StreamChannel = StreamChannel<Self>;
+    type StreamBuffer = StreamBuffer<T>;
+
+    fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self::Input> {
+        AnonymousStream::<StreamOf<T>>::spawn_workflow_stream(builder)
+    }
+
+    fn spawn_node_stream(
+        source: Entity,
+        map: &mut StreamTargetMap,
+        builder: &mut Builder,
+    ) -> Output<Self::Output> {
+        AnonymousStream::<StreamOf<T>>::spawn_node_stream(source, map, builder)
+    }
+
+    fn make_stream_channel(
+        inner: &Arc<InnerChannel>,
+        world: &World,
+    ) -> Self::StreamChannel {
+        AnonymousStream::<StreamOf<T>>::make_stream_channel(inner, world)
+    }
+
+    fn make_stream_buffer(
+        target_map: Option<&StreamTargetMap>,
+    ) -> Self::StreamBuffer {
+        AnonymousStream::<StreamOf<T>>::make_stream_buffer(target_map)
+    }
+
+    fn process_stream_buffer(
+        buffer: Self::StreamBuffer,
+        source: Entity,
+        session: Entity,
+        unused: &mut UnusedStreams,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        AnonymousStream::<StreamOf<T>>::process_stream_buffer(
+            buffer, source, session, unused, world, roster,
+        )
+    }
+
+    fn defer_buffer(
+        buffer: Self::StreamBuffer,
+        source: Entity,
+        session: Entity,
+        commands: &mut Commands,
+    ) {
+        AnonymousStream::<StreamOf<T>>::defer_buffer(buffer, source, session, commands);
+    }
+}
+
+/// A wrapper to turn any [`StreamEffect`] into an anonymous (unnamed) stream.
+/// This should be used if you want a stream with the same behavior as [`StreamOf`]
+/// but with some additional side effect. The input and output data types of the
+/// stream may be different.
+pub struct AnonymousStream<S: StreamEffect>(std::marker::PhantomData<fn(S)>);
+
+impl<S: StreamEffect> StreamEffect for AnonymousStream<S> {
+    type Input = S::Input;
+    type Output = S::Output;
+    fn side_effect(
+        input: Self::Input,
+        request: &mut StreamRequest,
+    ) -> Result<Self::Output, OperationError> {
+        S::side_effect(input, request)
+    }
+}
+
+impl<S: StreamEffect> Stream for AnonymousStream<S> {
+    type StreamChannel = StreamChannel<S>;
+    type StreamBuffer = StreamBuffer<S::Input>;
+
     fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self::Input> {
         let source = builder.commands.spawn(()).id();
         builder.commands.add(AddOperation::new(
             Some(builder.scope()),
             source,
-            RedirectWorkflowStream::<Self>::new(),
+            RedirectWorkflowStream::new(AnonymousStreamRedirect::<Self>::new(None)),
         ));
         InputSlot::new(builder.scope, source)
     }
@@ -102,84 +278,98 @@ pub trait Stream: 'static + Send + Sync + Sized {
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> (StreamTargetStorage<Self::Output>, Output<Self::Output>) {
+    ) -> Output<Self::Output> {
         let target = builder
             .commands
             .spawn((SingleInputStorage::new(source), UnusedTarget))
             .id();
 
-        let index = map.add(target);
-        (
-            StreamTargetStorage::new(index),
-            Output::new(builder.scope, target),
-        )
+        map.add_anonymous::<Self::Output>(target, builder.commands());
+        Output::new(builder.scope, target)
     }
 
-    fn extract_target_storage(
-        source: Entity,
+    fn make_stream_channel(
+        inner: &Arc<InnerChannel>,
         world: &World,
-    ) -> Result<StreamTargetStorage<Self::Output>, OperationError> {
-        world
-            .get::<StreamTargetStorage<Self::Output>>(source)
-            .or_broken()
-            .cloned()
+    ) -> Self::StreamChannel {
+        let target = world
+            .get::<StreamTargetMap>(inner.source())
+            .and_then(|t| t.get_anonymous::<S::Output>());
+        StreamChannel::new(target, Arc::clone(inner))
     }
 
-    fn take_stream(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> (StreamTargetStorage<Self::Output>, Receiver<Self::Output>) {
-        let (sender, receiver) = unbounded_channel::<Self::Output>();
-        let target = commands
-            .spawn(())
-            // Set the parent of this stream to be the session so it can be
-            // recursively despawned together.
-            .set_parent(source)
-            .id();
+    fn make_stream_buffer(
+        target_map: Option<&StreamTargetMap>,
+    ) -> Self::StreamBuffer  {
+        let target = target_map
+            .and_then(|map| map.get_anonymous::<S::Output>());
 
-        let index = map.add(target);
-
-        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
-
-        (StreamTargetStorage::new(index), receiver)
+        StreamBuffer {
+            container: Default::default(),
+            target,
+        }
     }
 
-    fn collect_stream(
+    fn process_stream_buffer(
+        buffer: Self::StreamBuffer,
         source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
+        session: Entity,
+        unused: &mut UnusedStreams,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        let target = buffer.target;
+        let mut was_unused = true;
+        for data in Rc::into_inner(buffer.container)
+            .or_broken()?
+            .into_inner()
+            .into_iter()
+        {
+            was_unused = false;
+            let mut request = StreamRequest {
+                source,
+                session,
+                target,
+                world,
+                roster,
+            };
+
+            Self::side_effect(data, &mut request)
+                .and_then(|output| request.send_output(output))
+                .report_unhandled(source, world);
+        }
+
+        if was_unused {
+            unused.streams.push(std::any::type_name::<Self>());
+        }
+
+        Ok(())
+    }
+
+    fn defer_buffer(
+        buffer: Self::StreamBuffer,
+        source: Entity,
+        session: Entity,
         commands: &mut Commands,
-    ) -> StreamTargetStorage<Self::Output> {
-        let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
-        let index = map.add(redirect);
-        StreamTargetStorage::new(index)
+    ) {
+        commands.add(SendAnonymousStreams::<S, DefaultStreamContainer<S::Input>>::new(
+            buffer.container.take(),
+            source,
+            session,
+            buffer.target,
+        ));
     }
 }
 
-/// A simple newtype wrapper that turns any suitable data structure
-/// (`'static + Send + Sync`) into a stream.
-#[derive(Clone, Copy, Debug, Deref, DerefMut)]
-pub struct StreamOf<T: 'static + Send + Sync>(std::marker::PhantomData<T>);
-
-pub type DefaultStreamContainer<T> = SmallVec<[T; 16]>;
-
-impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
-    type Input = T;
-    type Output = T;
-    type Container = DefaultStreamContainer<Self::Output>;
-}
-
-pub struct StreamBuffer<T: Stream> {
+pub struct StreamBuffer<T> {
     // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
     // no heap allocation is needed each time a stream is used in a blocking
     // function.
-    container: Rc<RefCell<T::Container>>,
+    container: Rc<RefCell<DefaultStreamContainer<T>>>,
     target: Option<Entity>,
 }
 
-impl<T: Stream> Clone for StreamBuffer<T> {
+impl<Container> Clone for StreamBuffer<Container> {
     fn clone(&self) -> Self {
         Self {
             container: Rc::clone(&self.container),
@@ -188,9 +378,9 @@ impl<T: Stream> Clone for StreamBuffer<T> {
     }
 }
 
-impl<S: Stream> StreamBuffer<S> {
-    pub fn send(&self, input: S::Input) {
-        self.container.borrow_mut().extend([input]);
+impl<T> StreamBuffer<T> {
+    pub fn send(&self, input: T) {
+        self.container.borrow_mut().push(input);
     }
 
     pub fn target(&self) -> Option<Entity> {
@@ -211,46 +401,59 @@ pub struct StreamRequest<'a> {
     pub roster: &'a mut OperationRoster,
 }
 
-/// [`StreamAvailable`] is a marker component that indicates what streams are offered by
+impl<'a> StreamRequest<'a> {
+    pub fn send_output<T: 'static + Send + Sync>(self, output: T) -> OperationResult {
+        let Self { session, target, world, roster, .. } = self;
+        if let Some(target) = target {
+            world
+                .get_entity_mut(target)
+                .or_broken()?
+                .give_input(session, output, roster)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// [`StreamAvailability`] is a component that indicates what streams are offered by
 /// a service.
-#[derive(Component)]
-pub struct StreamAvailable<T: 'static + Send + Sync> {
-    _ignore: std::marker::PhantomData<fn(T)>,
+#[derive(Component, Default)]
+pub struct StreamAvailability {
+    anonymous: HashSet<TypeId>,
+    named: HashMap<Cow<'static, str>, TypeId>,
 }
 
-impl<T: 'static + Send + Sync> Default for StreamAvailable<T> {
-    fn default() -> Self {
-        Self {
-            _ignore: Default::default(),
-        }
+impl StreamAvailability {
+    pub fn add_anonymous<T: 'static + Send + Sync>(&mut self) {
+        self.anonymous.insert(TypeId::of::<T>());
     }
-}
 
-/// [`StreamTargetStorage`] keeps track of the target for each stream for a source.
-#[derive(Component)]
-pub struct StreamTargetStorage<T: 'static + Send + Sync> {
-    index: usize,
-    _ignore: std::marker::PhantomData<fn(T)>,
-}
-
-impl<T: 'static + Send + Sync> Clone for StreamTargetStorage<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: 'static + Send + Sync> Copy for StreamTargetStorage<T> {}
-
-impl<T: 'static + Send + Sync> StreamTargetStorage<T> {
-    fn new(index: usize) -> Self {
-        Self {
-            index,
-            _ignore: Default::default(),
+    pub fn add_named<T: 'static + Send + Sync>(&mut self, name: Cow<'static, str>) -> Result<(), TypeId> {
+        match self.named.entry(name) {
+            Entry::Vacant(vacant) => {
+                vacant.insert(TypeId::of::<T>());
+                Ok(())
+            }
+            Entry::Occupied(occupied) => {
+                Err(*occupied.get())
+            }
         }
     }
 
-    pub fn get(&self) -> usize {
-        self.index
+    pub fn has_anonymous<T: 'static + Send + Sync>(&self) -> bool {
+        self.dyn_has_anonymous(&TypeId::of::<T>())
+    }
+
+    pub fn dyn_has_anonymous(&self, target_type: &TypeId) -> bool {
+        self.anonymous.contains(target_type)
+    }
+
+    pub fn has_named<T: 'static + Send + Sync>(&self, name: &str) -> bool {
+        self.dyn_has_named(name, &TypeId::of::<T>())
+    }
+
+    pub fn dyn_has_named(&self, name: &str, target_type: &TypeId) -> bool {
+        self.named.get(name).is_some_and(|ty| *ty == *target_type)
     }
 }
 
@@ -259,26 +462,94 @@ impl<T: 'static + Send + Sync> StreamTargetStorage<T> {
 /// targets of the streams coming out of the node without knowing the concrete
 /// type of the streams. This is crucial for being able to redirect the stream
 /// targets.
-//
-// TODO(@mxgrey): Consider whether we should store stream type information in here
 #[derive(Component, Default, Clone, Debug)]
 pub struct StreamTargetMap {
-    pub(crate) map: SmallVec<[Entity; 8]>,
+    pub(crate) anonymous: HashMap<TypeId, Entity>,
+    pub(crate) named: HashMap<Cow<'static, str>, (TypeId, Entity)>,
 }
 
 impl StreamTargetMap {
-    fn add(&mut self, target: Entity) -> usize {
-        let index = self.map.len();
-        self.map.push(target);
-        index
+    pub fn add_anonymous<T: 'static + Send + Sync>(
+        &mut self,
+        target: Entity,
+        commands: &mut Commands,
+    ) {
+        match self.anonymous.entry(TypeId::of::<T>()) {
+            Entry::Vacant(vacant) => {
+                vacant.insert(target);
+            }
+            Entry::Occupied(_) => {
+                commands.add(move |world: &mut World| {
+                    world
+                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .duplicate_streams
+                        .push(DuplicateStream {
+                            target,
+                            type_name: std::any::type_name::<T>(),
+                            stream_name: None,
+                        })
+                });
+            }
+        }
     }
 
-    pub fn map(&self) -> &SmallVec<[Entity; 8]> {
-        &self.map
+    pub fn add_named<T: 'static + Send + Sync>(
+        &mut self,
+        name: Cow<'static, str>,
+        target: Entity,
+        commands: &mut Commands,
+    ) {
+        match self.named.entry(name.clone()) {
+            Entry::Vacant(vacant) => {
+                vacant.insert((TypeId::of::<T>(), target));
+            }
+            Entry::Occupied(_) => {
+                commands.add(move |world: &mut World| {
+                    world
+                        .get_resource_or_insert_with(|| UnhandledErrors::default())
+                        .duplicate_streams
+                        .push(DuplicateStream {
+                            target,
+                            type_name: std::any::type_name::<T>(),
+                            stream_name: Some(name.clone()),
+                        });
+                });
+            }
+        }
     }
 
-    pub fn get(&self, index: usize) -> Option<Entity> {
-        self.map.get(index).copied()
+    pub fn anonymous(&self) -> &HashMap<TypeId, Entity> {
+        &self.anonymous
+    }
+
+    pub fn get_anonymous<T: 'static + Send + Sync>(&self) -> Option<Entity> {
+        self.anonymous.get(&TypeId::of::<T>()).copied()
+    }
+
+    pub fn get_named<T: 'static + Send + Sync>(&self, name: &str) -> Option<Entity> {
+        let target_type = TypeId::of::<T>();
+        self
+            .named
+            .get(name)
+            .filter(|(ty, _)| *ty == target_type)
+            .map(|(_, target)| *target)
+    }
+
+    pub fn get_named_or_anonymous<T: 'static + Send + Sync>(
+        &self,
+        name: &str,
+    ) -> Option<NamedTarget> {
+        self
+            .get_named::<T>(name)
+            .map(NamedTarget::Value)
+            .or_else(||
+                self.get_anonymous::<NamedValue<T>>()
+                .map(NamedTarget::NamedValue)
+            )
+            .or_else(||
+                self.get_anonymous::<T>()
+                .map(NamedTarget::Value)
+            )
     }
 }
 
@@ -287,15 +558,11 @@ impl StreamTargetMap {
 /// that may be sent out while it's running. The `StreamPack` allows those
 /// streams to be packed together as one generic argument.
 pub trait StreamPack: 'static + Send + Sync {
-    type StreamAvailableBundle: Bundle + Default;
-    type StreamFilter: ReadOnlyWorldQuery;
-    type StreamStorageBundle: Bundle + Clone;
     type StreamInputPack;
     type StreamOutputPack;
-    type Receiver: Send + Sync;
-    type Channel: Send;
-    type Buffer: Clone;
-    type TargetIndexQuery: ReadOnlyWorldQuery;
+    type StreamReceivers: Send + Sync;
+    type StreamChannels: Send;
+    type StreamBuffers: Clone;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -309,35 +576,32 @@ pub trait StreamPack: 'static + Send + Sync {
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack);
-
-    fn extract_target_storage(
-        source: Entity,
-        world: &World,
-    ) -> Result<Self::StreamStorageBundle, OperationError>;
+    ) -> Self::StreamOutputPack;
 
     fn take_streams(
         source: Entity,
         map: &mut StreamTargetMap,
-        builder: &mut Commands,
-    ) -> (Self::StreamStorageBundle, Self::Receiver);
+        commands: &mut Commands,
+    ) -> Self::StreamReceivers;
 
     fn collect_streams(
         source: Entity,
         target: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
-    ) -> Self::StreamStorageBundle;
+    );
 
-    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
+    fn make_stream_channels(
+        inner: &Arc<InnerChannel>,
+        world: &World,
+    ) -> Self::StreamChannels;
 
-    fn make_stream_buffer(
-        target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
+    fn make_stream_buffers(
         target_map: Option<&StreamTargetMap>,
-    ) -> Self::Buffer;
+    ) -> Self::StreamBuffers;
 
-    fn process_buffer(
-        buffer: Self::Buffer,
+    fn process_stream_buffers(
+        buffer: Self::StreamBuffers,
         source: Entity,
         session: Entity,
         unused: &mut UnusedStreams,
@@ -345,7 +609,11 @@ pub trait StreamPack: 'static + Send + Sync {
         roster: &mut OperationRoster,
     ) -> OperationResult;
 
-    fn defer_buffer(buffer: Self::Buffer, source: Entity, session: Entity, commands: &mut Commands);
+    fn defer_buffers(buffer: Self::StreamBuffers, source: Entity, session: Entity, commands: &mut Commands);
+
+    fn set_stream_availability(availability: &mut StreamAvailability);
+
+    fn are_streams_available(availability: &StreamAvailability) -> bool;
 
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
@@ -354,15 +622,11 @@ pub trait StreamPack: 'static + Send + Sync {
 }
 
 impl<T: Stream + Unpin> StreamPack for T {
-    type StreamAvailableBundle = StreamAvailable<<Self as Stream>::Output>;
-    type StreamFilter = With<StreamAvailable<<Self as Stream>::Output>>;
-    type StreamStorageBundle = StreamTargetStorage<<Self as Stream>::Output>;
-    type StreamInputPack = InputSlot<<Self as Stream>::Input>;
-    type StreamOutputPack = Output<<Self as Stream>::Output>;
-    type Receiver = Receiver<<Self as Stream>::Output>;
-    type Channel = StreamChannel<Self>;
-    type Buffer = StreamBuffer<Self>;
-    type TargetIndexQuery = Option<&'static StreamTargetStorage<<Self as Stream>::Output>>;
+    type StreamInputPack = InputSlot<<Self as StreamEffect>::Input>;
+    type StreamOutputPack = Output<<Self as StreamEffect>::Output>;
+    type StreamReceivers = Receiver<<Self as StreamEffect>::Output>;
+    type StreamChannels = <Self as Stream>::StreamChannel;
+    type StreamBuffers = <Self as Stream>::StreamBuffer;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -380,22 +644,15 @@ impl<T: Stream + Unpin> StreamPack for T {
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack) {
+    ) -> Self::StreamOutputPack {
         T::spawn_node_stream(source, map, builder)
-    }
-
-    fn extract_target_storage(
-        source: Entity,
-        world: &World,
-    ) -> Result<Self::StreamStorageBundle, OperationError> {
-        T::extract_target_storage(source, world)
     }
 
     fn take_streams(
         source: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
-    ) -> (Self::StreamStorageBundle, Self::Receiver) {
+    ) -> Self::StreamReceivers {
         Self::take_stream(source, map, commands)
     }
 
@@ -404,84 +661,46 @@ impl<T: Stream + Unpin> StreamPack for T {
         target: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
-    ) -> Self::StreamStorageBundle {
+    ) {
         Self::collect_stream(source, target, map, commands)
     }
 
-    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel {
-        let index = world
-            .get::<StreamTargetStorage<<Self as Stream>::Output>>(inner.source())
-            .map(|t| t.index);
-        let target = index.and_then(|index| {
-            world
-                .get::<StreamTargetMap>(inner.source())
-                .and_then(|t| t.get(index))
-        });
-        StreamChannel::new(target, Arc::clone(inner))
+    fn make_stream_channels(inner: &Arc<InnerChannel>, world: &World) -> Self::StreamChannels {
+        Self::make_stream_channel(inner, world)
     }
 
-    fn make_stream_buffer(
-        target_index: Option<&StreamTargetStorage<<Self as Stream>::Output>>,
+    fn make_stream_buffers(
         target_map: Option<&StreamTargetMap>,
-    ) -> Self::Buffer {
-        let target = target_index
-            .and_then(|s| target_map.map(|t| t.map.get(s.index)))
-            .flatten()
-            .copied();
-
-        StreamBuffer {
-            container: Default::default(),
-            target,
-        }
+    ) -> Self::StreamBuffers {
+        Self::make_stream_buffer(target_map)
     }
 
-    fn process_buffer(
-        buffer: Self::Buffer,
+    fn process_stream_buffers(
+        buffer: Self::StreamBuffers,
         source: Entity,
         session: Entity,
         unused: &mut UnusedStreams,
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
-        let target = buffer.target;
-        let mut was_unused = true;
-        for data in Rc::into_inner(buffer.container)
-            .or_broken()?
-            .into_inner()
-            .into_iter()
-        {
-            was_unused = false;
-            Self::send(
-                data,
-                StreamRequest {
-                    source,
-                    session,
-                    target,
-                    world,
-                    roster,
-                }
-            )?;
-        }
-
-        if was_unused {
-            unused.streams.push(std::any::type_name::<Self>());
-        }
-
-        Ok(())
+        Self::process_stream_buffer(buffer, source, session, unused, world, roster)
     }
 
-    fn defer_buffer(
-        buffer: Self::Buffer,
+    fn defer_buffers(
+        buffer: Self::StreamBuffers,
         source: Entity,
         session: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(SendStreams::<Self> {
-            source,
-            session,
-            container: buffer.container.take(),
-            target: buffer.target,
-        });
+        Self::defer_buffer(buffer, source, session, commands);
+    }
+
+    fn set_stream_availability(availability: &mut StreamAvailability) {
+        availability.add_anonymous::<<Self as StreamEffect>::Output>();
+    }
+
+    fn are_streams_available(availability: &StreamAvailability) -> bool {
+        availability.has_anonymous::<<Self as StreamEffect>::Output>()
     }
 
     fn has_streams() -> bool {
@@ -494,15 +713,11 @@ impl<T: Stream + Unpin> StreamPack for T {
 }
 
 impl StreamPack for () {
-    type StreamAvailableBundle = ();
-    type StreamFilter = ();
-    type StreamStorageBundle = ();
     type StreamInputPack = ();
     type StreamOutputPack = ();
-    type Receiver = ();
-    type Channel = ();
-    type Buffer = ();
-    type TargetIndexQuery = ();
+    type StreamReceivers = ();
+    type StreamChannels = ();
+    type StreamBuffers = ();
 
     fn spawn_scope_streams(
         _: Entity,
@@ -520,23 +735,16 @@ impl StreamPack for () {
         _: Entity,
         _: &mut StreamTargetMap,
         _: &mut Builder,
-    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack) {
-        ((), ())
-    }
-
-    fn extract_target_storage(
-        _: Entity,
-        _: &World,
-    ) -> Result<Self::StreamStorageBundle, OperationError> {
-        Ok(())
+    ) -> Self::StreamOutputPack {
+        // Just return ()
     }
 
     fn take_streams(
         _: Entity,
         _: &mut StreamTargetMap,
         _: &mut Commands,
-    ) -> (Self::StreamStorageBundle, Self::Receiver) {
-        ((), ())
+    ) -> Self::StreamReceivers {
+        // Just return ()
     }
 
     fn collect_streams(
@@ -544,20 +752,20 @@ impl StreamPack for () {
         _: Entity,
         _: &mut StreamTargetMap,
         _: &mut Commands,
-    ) -> Self::StreamStorageBundle {
+    ) {
+        // Do nothing
+    }
+
+    fn make_stream_channels(_: &Arc<InnerChannel>, _: &World) -> Self::StreamChannels {
         // Just return ()
     }
 
-    fn make_channel(_: &Arc<InnerChannel>, _: &World) -> Self::Channel {
+    fn make_stream_buffers(_: Option<&StreamTargetMap>) -> Self::StreamBuffers {
         // Just return ()
     }
 
-    fn make_stream_buffer(_: Self::TargetIndexQuery, _: Option<&StreamTargetMap>) -> Self::Buffer {
-        // Just return ()
-    }
-
-    fn process_buffer(
-        _: Self::Buffer,
+    fn process_stream_buffers(
+        _: Self::StreamBuffers,
         _: Entity,
         _: Entity,
         _: &mut UnusedStreams,
@@ -567,7 +775,15 @@ impl StreamPack for () {
         Ok(())
     }
 
-    fn defer_buffer(_: Self::Buffer, _: Entity, _: Entity, _: &mut Commands) {}
+    fn defer_buffers(_: Self::StreamBuffers, _: Entity, _: Entity, _: &mut Commands) {}
+
+    fn set_stream_availability(_: &mut StreamAvailability) {
+        // Do nothing
+    }
+
+    fn are_streams_available(_: &StreamAvailability) -> bool {
+        true
+    }
 
     fn has_streams() -> bool {
         false
@@ -582,15 +798,11 @@ macro_rules! impl_streampack_for_tuple {
     ($(($T:ident, $U:ident)),*) => {
         #[allow(non_snake_case)]
         impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
-            type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
-            type StreamFilter = ($($T::StreamFilter,)*);
-            type StreamStorageBundle = ($($T::StreamStorageBundle,)*);
             type StreamInputPack = ($($T::StreamInputPack,)*);
             type StreamOutputPack = ($($T::StreamOutputPack,)*);
-            type Receiver = ($($T::Receiver,)*);
-            type Channel = ($($T::Channel,)*);
-            type Buffer = ($($T::Buffer,)*);
-            type TargetIndexQuery = ($($T::TargetIndexQuery,)*);
+            type StreamReceivers = ($($T::StreamReceivers,)*);
+            type StreamChannels = ($($T::StreamChannels,)*);
+            type StreamBuffers = ($($T::StreamBuffers,)*);
 
             fn spawn_scope_streams(
                 in_scope: Entity,
@@ -622,7 +834,8 @@ macro_rules! impl_streampack_for_tuple {
 
             fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
                 (
-                    $($T::spawn_workflow_streams(builder),
+                    $(
+                        $T::spawn_workflow_streams(builder),
                     )*
                  )
             }
@@ -631,60 +844,19 @@ macro_rules! impl_streampack_for_tuple {
                 source: Entity,
                 map: &mut StreamTargetMap,
                 builder: &mut Builder,
-            ) -> (
-                Self::StreamStorageBundle,
-                Self::StreamOutputPack,
-            ) {
-                let ($($T,)*) = (
+            ) -> Self::StreamOutputPack {
+                (
                     $(
                         $T::spawn_node_streams(source, map, builder),
                     )*
-                );
-                // Now unpack the tuples
-                (
-                    (
-                        $(
-                            $T.0,
-                        )*
-                    ),
-                    (
-                        $(
-                            $T.1,
-                        )*
-                    )
                 )
             }
 
-            fn extract_target_storage(
-                source: Entity,
-                world: &World,
-            ) -> Result<Self::StreamStorageBundle, OperationError> {
-                Ok(($(
-                    $T::extract_target_storage(source, world)?,
-                )*))
-            }
-
-            fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
-                Self::StreamStorageBundle,
-                Self::Receiver,
-            ) {
-                let ($($T,)*) = (
+            fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> Self::StreamReceivers {
+                (
                     $(
                         $T::take_streams(source, map, builder),
                     )*
-                );
-                // Now unpack the tuples
-                (
-                    (
-                        $(
-                            $T.0,
-                        )*
-                    ),
-                    (
-                        $(
-                            $T.1,
-                        )*
-                    )
                 )
             }
 
@@ -693,39 +865,35 @@ macro_rules! impl_streampack_for_tuple {
                 target: Entity,
                 map: &mut StreamTargetMap,
                 commands: &mut Commands,
-            ) -> Self::StreamStorageBundle {
-                (
-                    $(
-                        $T::collect_streams(source, target, map, commands),
-                    )*
-                )
+            ) {
+                $(
+                    $T::collect_streams(source, target, map, commands);
+                )*
             }
 
-            fn make_channel(
+            fn make_stream_channels(
                 inner: &Arc<InnerChannel>,
                 world: &World,
-            ) -> Self::Channel {
+            ) -> Self::StreamChannels {
                 (
                     $(
-                        $T::make_channel(inner, world),
+                        $T::make_stream_channels(inner, world),
                     )*
                 )
             }
 
-            fn make_stream_buffer(
-                target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
+            fn make_stream_buffers(
                 target_map: Option<&StreamTargetMap>,
-            ) -> Self::Buffer {
-                let ($($T,)*) = target_index;
+            ) -> Self::StreamBuffers {
                 (
                     $(
-                        $T::make_stream_buffer($T, target_map),
+                        $T::make_stream_buffers(target_map),
                     )*
                 )
             }
 
-            fn process_buffer(
-                buffer: Self::Buffer,
+            fn process_stream_buffers(
+                buffer: Self::StreamBuffers,
                 source: Entity,
                 session: Entity,
                 unused: &mut UnusedStreams,
@@ -734,20 +902,33 @@ macro_rules! impl_streampack_for_tuple {
             ) -> OperationResult {
                 let ($($T,)*) = buffer;
                 $(
-                    $T::process_buffer($T, source, session, unused, world, roster)?;
+                    $T::process_stream_buffers($T, source, session, unused, world, roster)?;
                 )*
                 Ok(())
             }
 
-            fn defer_buffer(
-                buffer: Self::Buffer,
+            fn defer_buffers(
+                buffer: Self::StreamBuffers,
                 source: Entity,
                 session: Entity,
                 commands: &mut Commands,
             ) {
                 let ($($T,)*) = buffer;
                 $(
-                    $T::defer_buffer($T, source, session, commands);
+                    $T::defer_buffers($T, source, session, commands);
+                )*
+            }
+
+            fn set_stream_availability(availability: &mut StreamAvailability) {
+                $(
+                    $T::set_stream_availability(availability);
+                )*
+            }
+
+            fn are_streams_available(availability: &StreamAvailability) -> bool {
+                true
+                $(
+                    && $T::are_streams_available(availability)
                 )*
             }
 
@@ -772,48 +953,59 @@ macro_rules! impl_streampack_for_tuple {
 // (inclusive) made of types that implement `StreamPack`
 all_tuples!(impl_streampack_for_tuple, 1, 12, T, U);
 
-pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
+pub(crate) fn make_stream_buffers_from_world<Streams: StreamPack>(
     source: Entity,
     world: &mut World,
-) -> Result<Streams::Buffer, OperationError> {
-    let mut stream_query =
-        world.query::<(Streams::TargetIndexQuery, Option<&'static StreamTargetMap>)>();
-    let (target_indices, target_map) = stream_query.get(world, source).or_broken()?;
-    Ok(Streams::make_stream_buffer(target_indices, target_map))
+) -> Result<Streams::StreamBuffers, OperationError> {
+    let target_map = world.get::<StreamTargetMap>(source);
+    Ok(Streams::make_stream_buffers(target_map))
 }
 
-struct SendStreams<S: Stream> {
-    container: S::Container,
+pub struct SendAnonymousStreams<S, Container> {
+    container: Container,
     source: Entity,
     session: Entity,
     target: Option<Entity>,
+    _ignore: std::marker::PhantomData<fn(S)>,
 }
 
-impl<S: Stream> Command for SendStreams<S> {
+impl<S, Container> SendAnonymousStreams<S, Container> {
+    pub fn new(
+        container: Container,
+        source: Entity,
+        session: Entity,
+        target: Option<Entity>,
+    ) -> Self {
+        Self {
+            container,
+            source,
+            session,
+            target,
+            _ignore: Default::default(),
+        }
+    }
+}
+
+impl<S, Container> Command for SendAnonymousStreams<S, Container>
+where
+    S: StreamEffect,
+    Container: 'static + Send + Sync + IntoIterator<Item = S::Input>,
+{
     fn apply(self, world: &mut World) {
         world.get_resource_or_insert_with(DeferredRoster::default);
         world.resource_scope::<DeferredRoster, _>(|world, mut deferred| {
             for data in self.container {
-                let r = S::send(
-                    data,
-                    StreamRequest {
-                        source: self.source,
-                        session: self.session,
-                        target: self.target,
-                        world,
-                        roster: &mut deferred,
-                    },
-                );
+                let mut request = StreamRequest {
+                    source: self.source,
+                    session: self.session,
+                    target: self.target,
+                    world,
+                    roster: &mut deferred,
+                };
 
-                if let Err(OperationError::Broken(backtrace)) = r {
-                    world
-                        .get_resource_or_insert_with(UnhandledErrors::default)
-                        .broken
-                        .push(Broken {
-                            node: self.source,
-                            backtrace,
-                        });
-                }
+                S::side_effect(data, &mut request)
+                    .and_then(move |output| request.send_output(output))
+                    .report_unhandled(self.source, world);
             }
         });
     }
@@ -855,8 +1047,8 @@ impl<S: Stream> Command for SendStreams<S> {
 /// }
 /// ```
 pub trait StreamFilter {
-    type Filter: ReadOnlyWorldQuery;
     type Pack: StreamPack;
+    fn are_required_streams_available(availability: Option<&StreamAvailability>) -> bool;
 }
 
 /// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to indicate that a
@@ -870,21 +1062,35 @@ pub struct Require<T> {
 }
 
 impl<T: StreamPack> StreamFilter for Require<T> {
-    type Filter = T::StreamFilter;
     type Pack = T;
+    fn are_required_streams_available(availability: Option<&StreamAvailability>) -> bool {
+        let Some(availability) = availability else {
+            return false;
+        };
+        T::are_streams_available(availability)
+    }
 }
 
 impl<T: StreamPack> StreamFilter for Option<T> {
-    type Filter = ();
     type Pack = T;
+
+    fn are_required_streams_available(_: Option<&StreamAvailability>) -> bool {
+        true
+    }
 }
 
 macro_rules! impl_streamfilter_for_tuple {
     ($($T:ident),*) => {
         #[allow(non_snake_case)]
         impl<$($T: StreamFilter),*> StreamFilter for ($($T,)*) {
-            type Filter = ($($T::Filter,)*);
             type Pack = ($($T::Pack,)*);
+
+            fn are_required_streams_available(_availability: Option<&StreamAvailability>) -> bool {
+                true
+                $(
+                    && $T::are_required_streams_available(_availability)
+                )*
+            }
         }
     }
 }
@@ -1095,7 +1301,7 @@ mod tests {
 
     fn impl_formatting_streams_blocking(
         request: String,
-        streams: <FormatStreams as StreamPack>::Buffer,
+        streams: <FormatStreams as StreamPack>::StreamBuffers,
     ) {
         if let Ok(value) = request.parse::<u32>() {
             streams.0.send(value);
@@ -1112,7 +1318,7 @@ mod tests {
 
     fn impl_formatting_streams_async(
         request: String,
-        streams: <FormatStreams as StreamPack>::Channel,
+        streams: <FormatStreams as StreamPack>::StreamChannels,
     ) {
         if let Ok(value) = request.parse::<u32>() {
             streams.0.send(value);
@@ -1228,5 +1434,50 @@ mod tests {
 
             result
         }
+    }
+
+    use crate::{StreamChannel, StreamAvailability, Receiver};
+
+    struct TestStreamMap {
+        stream_u32: StreamOf<u32>,
+        stream_i32: StreamOf<i32>,
+        stream_string: StreamOf<String>,
+    }
+
+    // impl StreamPack for TestStreamMap {
+    //     type StreamAvailableBundle = (NamedStreamAvailable<u32>, NamedStreamAvailable<i32>, NamedStreamAvailable<String>);
+    //     type StreamFilter = (
+    //         ::bevy_impulse::re_exports::With<NamedStreamAvailable<u32>>,
+    //         ::bevy_impulse::re_exports::With<NamedStreamAvailable<i32>>,
+    //         ::bevy_impulse::re_exports::With<NamedStreamAvailable<String>>,
+    //     );
+    //     type StreamStorageBundle = (NamedStreamTargetStorage<u32>, NamedStreamTargetStorage<i32>, NamedStreamTargetStorage<String>);
+    //     type StreamInputPack = TestStreamMapInputs;
+    //     type StreamOutputPack = TestStreamMapOutputs;
+    //     type Receiver = TestStreamMapReceiver;
+    // }
+
+    struct TestStreamMapInputs {
+        stream_u32: InputSlot<u32>,
+        stream_i32: InputSlot<i32>,
+        stream_string: InputSlot<String>,
+    }
+
+    struct TestStreamMapOutputs {
+        stream_u32: Output<u32>,
+        stream_i32: Output<i32>,
+        stream_string: Output<String>,
+    }
+
+    struct TestStreamMapChannel {
+        stream_u32: StreamChannel<StreamOf<u32>>,
+        stream_i32: StreamChannel<StreamOf<i32>>,
+        stream_string: StreamChannel<StreamOf<String>>,
+    }
+
+    struct TestStreamMapReceiver {
+        stream_u32: Receiver<u32>,
+        stream_i32: Receiver<i32>,
+        stream_string: Receiver<String>,
     }
 }

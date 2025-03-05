@@ -19,21 +19,25 @@ use crate::{
     check_reachability, execute_operation, is_downstream_of, Accessing, AddOperation, Blocker,
     BufferKeyBuilder, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
     CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest,
-    Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, Operation,
+    Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, NamedStream, Operation,
     OperationCancel, OperationCleanup, OperationError, OperationReachability, OperationRequest,
     OperationResult, OperationRoster, OperationSetup, OrBroken, ReachabilityResult, ScopeSettings,
-    SingleInputStorage, SingleTargetStorage, Stream, StreamPack, StreamRequest, StreamTargetMap,
-    StreamTargetStorage, UnhandledErrors, Unreachability, UnusedTarget,
+    SingleInputStorage, SingleTargetStorage, Stream, StreamEffect, StreamPack, StreamRequest, StreamTargetMap,
+    UnhandledErrors, Unreachability, UnusedTarget, NamedTarget, ReportUnhandled, NamedValue,
 };
 
 use backtrace::Backtrace;
 
 use bevy_ecs::prelude::{Commands, Component, Entity, World};
+use bevy_derive::Deref;
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    borrow::Cow,
+    collections::{hash_map::Entry, HashMap},
+};
 
 #[derive(Component)]
 pub struct ParentSession(Entity);
@@ -1048,7 +1052,7 @@ impl<T> std::fmt::Debug for Staging<T> {
 }
 
 /// The scope that the node exists inside of.
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Deref)]
 pub struct ScopeStorage(Entity);
 
 impl ScopeStorage {
@@ -1672,16 +1676,17 @@ impl<S: Stream> Operation for RedirectScopeStream<S> {
             .get::<ParentSession>(scoped_session)
             .or_broken()?
             .get();
-        S::send(
-            data,
-            StreamRequest {
-                source,
-                session: parent_session,
-                target,
-                world,
-                roster,
-            },
-        )
+
+        let mut request = StreamRequest {
+            source,
+            session: parent_session,
+            target,
+            world,
+            roster,
+        };
+
+        let output = S::side_effect(data, &mut request)?;
+        request.send_output(output)
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
@@ -1705,21 +1710,77 @@ impl<S: Stream> Operation for RedirectScopeStream<S> {
     }
 }
 
-pub(crate) struct RedirectWorkflowStream<T: Stream> {
-    _ignore: std::marker::PhantomData<fn(T)>,
+pub struct RedirectWorkflowStream<S: StreamRedirect> {
+    pub redirect: S,
 }
 
-impl<T: Stream> RedirectWorkflowStream<T> {
-    pub(crate) fn new() -> Self {
+impl<S: StreamRedirect> RedirectWorkflowStream<S> {
+    pub fn new(redirect: S) -> Self {
+        Self { redirect }
+    }
+}
+
+#[derive(Component, Deref)]
+pub struct StreamNameStorage(pub Option<Cow<'static, str>>);
+
+impl<S: StreamRedirect> Operation for RedirectWorkflowStream<S> {
+    fn setup(self, info: OperationSetup) -> OperationResult {
+        StreamRedirect::setup(self.redirect, info)
+    }
+
+    fn execute(request: OperationRequest) -> OperationResult {
+        S::execute(request)
+    }
+
+    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        if r.has_input::<S::Input>()? {
+            return Ok(true);
+        }
+
+        let scope = r.world.get::<ScopeStorage>(r.source).or_broken()?.get();
+        r.check_upstream(scope)
+
+        // TODO(@mxgrey): Consider whether we can/should identify more
+        // specifically whether the current state of the scope would be able to
+        // reach this specific stream.
+    }
+
+    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
+        // TODO(@mxgrey): Consider whether we should cleanup the inputs by
+        // pushing them out of the scope instead of just dropping them.
+        clean.cleanup_inputs::<S::Input>()?;
+        clean.notify_cleaned()
+    }
+}
+
+pub trait StreamRedirect {
+    type Input: 'static + Send + Sync;
+    fn setup(self, info: OperationSetup) -> OperationResult;
+    fn execute(request: OperationRequest) -> OperationResult;
+}
+
+pub struct AnonymousStreamRedirect<S: StreamEffect> {
+    name: Option<Cow<'static, str>>,
+    _ignore: std::marker::PhantomData<fn(S)>,
+}
+
+impl<S: StreamEffect> AnonymousStreamRedirect<S> {
+    pub fn new(name: Option<Cow<'static, str>>) -> Self {
         Self {
+            name,
             _ignore: Default::default(),
         }
     }
 }
 
-impl<S: Stream> Operation for RedirectWorkflowStream<S> {
+impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
+    type Input = S::Input;
+
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert(InputBundle::<S::Input>::new());
+        world.entity_mut(source).insert((
+            StreamNameStorage(self.name),
+            InputBundle::<S::Input>::new(),
+        ));
         Ok(())
     }
 
@@ -1728,7 +1789,7 @@ impl<S: Stream> Operation for RedirectWorkflowStream<S> {
             source,
             world,
             roster,
-        }: OperationRequest,
+        }: OperationRequest
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input {
@@ -1736,6 +1797,8 @@ impl<S: Stream> Operation for RedirectWorkflowStream<S> {
             data,
         } = source_mut.take_input::<S::Input>()?;
         let scope = source_mut.get::<ScopeStorage>().or_broken()?.get();
+        let name = source_mut.get::<StreamNameStorage>().or_broken()?.0.clone();
+
         let exit = world
             .get::<ExitTargetStorage>(scope)
             .or_broken()?
@@ -1750,40 +1813,40 @@ impl<S: Stream> Operation for RedirectWorkflowStream<S> {
         let exit_source = exit.source;
         let parent_session = exit.parent_session;
 
-        let stream_target_map = world.get::<StreamTargetMap>(exit_source).or_broken()?;
-        let stream_target = world
-            .get::<StreamTargetStorage<S::Output>>(exit_source)
-            .and_then(|target| stream_target_map.get(target.get()));
+        let stream_targets = world
+            .get::<StreamTargetMap>(exit_source)
+            .or_broken()?;
 
-        S::send(
-            data,
-            StreamRequest {
+        if let Some(name) = name {
+            let target = stream_targets.get_named_or_anonymous::<S::Output>(&name);
+            let mut request = StreamRequest {
                 source,
                 session: parent_session,
-                target: stream_target,
+                target: target.map(NamedTarget::as_entity),
                 world,
                 roster,
-            },
-        )
-    }
+            };
 
-    fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
-        if r.has_input::<S>()? {
-            return Ok(true);
+            S::side_effect(data, &mut request)
+                .and_then(|value|
+                    target
+                    .map(|t| t.send_output(NamedValue { name, value }, request))
+                    .unwrap_or(Ok(()))
+                )?;
+        } else {
+            let target = stream_targets.get_anonymous::<S::Output>();
+            let mut request = StreamRequest {
+                source,
+                session: parent_session,
+                target,
+                world,
+                roster,
+            };
+
+            S::side_effect(data, &mut request)
+                .and_then(|output| request.send_output(output))?;
         }
 
-        let scope = r.world.get::<ScopeStorage>(r.source).or_broken()?.get();
-        r.check_upstream(scope)
-
-        // TODO(@mxgrey): Consider whether we can/should identify more
-        // specifically whether the current state of the scope would be able to
-        // reach this specific stream.
-    }
-
-    fn cleanup(mut clean: OperationCleanup) -> OperationResult {
-        // TODO(@mxgrey): Consider whether we should cleanup the inputs by
-        // pushing them out of the scope instead of just dropping them.
-        clean.cleanup_inputs::<S>()?;
-        clean.notify_cleaned()
+        Ok(())
     }
 }

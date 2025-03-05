@@ -123,9 +123,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         provider.connect(Some(self.scope()), source, target, self.builder.commands);
 
         let mut map = StreamTargetMap::default();
-        let (bundle, streams) =
+        let streams =
             <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self.builder);
-        self.builder.commands.entity(source).insert((bundle, map));
+        self.builder.commands.entity(source).insert(map);
         Node {
             input: InputSlot::new(self.builder.scope, source),
             output: Output::new(self.builder.scope, target),
@@ -1040,7 +1040,6 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync + Unpin,
     Streams: StreamPack,
-    Streams::Receiver: Unpin,
 {
     /// Given the input `(request, service)`, pass `request` into `service` and
     /// forward its response. This is called `injection` because it's a

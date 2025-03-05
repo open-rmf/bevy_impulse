@@ -80,23 +80,10 @@ where
         let provider = service.provider();
         let instructions = service.instructions().copied();
 
-        let (streams, stream_map) = match source_mut.get::<InjectionStreams<Streams>>() {
-            Some(s) => (s.streams.clone(), s.stream_map.clone()),
-            None => {
-                // We have to wait until the first execution to grab this information
-                // because the targets can get changed by connect(~) actions while the
-                // workflow is being built.
-                let streams = Streams::extract_target_storage(source, world)?;
-                let map = world.get::<StreamTargetMap>(source).or_broken()?.clone();
-                world
-                    .entity_mut(source)
-                    .insert(InjectionStreams::<Streams>::new(
-                        streams.clone(),
-                        map.clone(),
-                    ));
-                (streams, map)
-            }
-        };
+        let stream_targets = source_mut
+            .get::<StreamTargetMap>()
+            .cloned()
+            .unwrap_or_else(|| StreamTargetMap::default());
 
         let finish = world
             .spawn((InputBundle::<Response>::new(), InjectionSource(source)))
@@ -111,8 +98,7 @@ where
                 ActiveTasksStorage::default(),
                 DisposeForUnavailableService::new::<Request>(),
                 ScopeStorage::new(scope),
-                streams,
-                stream_map,
+                stream_targets,
             ))
             .id();
 
@@ -271,30 +257,6 @@ impl InjectionStorage {
             .list
             .iter()
             .any(|injected| injected.session == r.session))
-    }
-}
-
-#[derive(Component)]
-struct InjectionStreams<Streams: StreamPack> {
-    streams: Streams::StreamStorageBundle,
-    stream_map: StreamTargetMap,
-}
-
-impl<Streams: StreamPack> Clone for InjectionStreams<Streams> {
-    fn clone(&self) -> Self {
-        Self {
-            streams: self.streams.clone(),
-            stream_map: self.stream_map.clone(),
-        }
-    }
-}
-
-impl<Streams: StreamPack> InjectionStreams<Streams> {
-    fn new(streams: Streams::StreamStorageBundle, stream_map: StreamTargetMap) -> Self {
-        Self {
-            streams,
-            stream_map,
-        }
     }
 }
 

@@ -21,7 +21,7 @@ use bevy_ecs::{
     system::SystemParam,
 };
 
-use crate::{Service, ServiceMarker, StreamFilter};
+use crate::{Service, ServiceMarker, StreamFilter, StreamAvailability};
 
 /// `ServiceDiscovery` is a system parameter that lets you find services that
 /// exist in the world.
@@ -31,80 +31,106 @@ use crate::{Service, ServiceMarker, StreamFilter};
 /// to indicate which streams you are interested in.
 #[derive(SystemParam)]
 #[allow(clippy::type_complexity)]
-pub struct ServiceDiscovery<'w, 's, Request, Response, Streams = (), Filter = ()>
+pub struct ServiceDiscovery<'w, 's, Request, Response, StreamFilters = (), ServiceFilter = ()>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: StreamFilter + 'static,
-    Filter: ReadOnlyWorldQuery + 'static,
+    StreamFilters: StreamFilter + 'static,
+    ServiceFilter: ReadOnlyWorldQuery + 'static,
 {
     query: Query<
         'w,
         's,
-        Entity,
+        (
+            Entity,
+            Option<&'static StreamAvailability>,
+        ),
         (
             With<ServiceMarker<Request, Response>>,
-            <Streams as StreamFilter>::Filter,
-            Filter,
+            ServiceFilter,
         ),
     >,
+    _ignore: std::marker::PhantomData<fn(StreamFilters)>,
 }
 
-impl<'w, 's, Request, Response, Streams, Filter>
-    ServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
+impl<'w, 's, Request, Response, StreamFilters, ServiceFilter>
+    ServiceDiscovery<'w, 's, Request, Response, StreamFilters, ServiceFilter>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: StreamFilter,
-    Filter: ReadOnlyWorldQuery + 'static,
+    StreamFilters: StreamFilter,
+    ServiceFilter: ReadOnlyWorldQuery + 'static,
 {
-    pub fn iter(&self) -> IterServiceDiscovery<'_, 's, Request, Response, Streams, Filter> {
+    pub fn iter(&self) -> IterServiceDiscovery<'_, 's, Request, Response, StreamFilters, ServiceFilter> {
         IterServiceDiscovery {
             inner: self.query.iter(),
+            _ignore: Default::default(),
         }
     }
 
     pub fn get(
         &self,
         entity: Entity,
-    ) -> Result<Service<Request, Response, Streams>, QueryEntityError> {
-        self.query.get(entity).map(|e| Service::new(e))
+    ) -> Result<Service<Request, Response, StreamFilters::Pack>, QueryEntityError> {
+        self.query.get(entity)
+            .and_then(|(e, availability)| {
+                if StreamFilters::are_required_streams_available(availability) {
+                    Ok(Service::new(e))
+                } else {
+                    Err(QueryEntityError::QueryDoesNotMatch(e))
+                }
+            })
     }
 }
 
 #[allow(clippy::type_complexity)]
-pub struct IterServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
+pub struct IterServiceDiscovery<'w, 's, Request, Response, StreamFilters, ServiceFilter>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: StreamFilter,
-    Filter: ReadOnlyWorldQuery + 'static,
+    StreamFilters: StreamFilter,
+    ServiceFilter: ReadOnlyWorldQuery + 'static,
 {
     inner: QueryIter<
         'w,
         's,
-        Entity,
+        (
+            Entity,
+            Option<&'static StreamAvailability>,
+        ),
         (
             With<ServiceMarker<Request, Response>>,
-            <Streams as StreamFilter>::Filter,
-            Filter,
+            ServiceFilter,
         ),
     >,
+    _ignore: std::marker::PhantomData<fn(StreamFilters)>,
 }
 
-impl<'w, 's, Request, Response, Streams, Filter> Iterator
-    for IterServiceDiscovery<'w, 's, Request, Response, Streams, Filter>
+impl<'w, 's, Request, Response, StreamFilters, ServiceFilter> Iterator
+    for IterServiceDiscovery<'w, 's, Request, Response, StreamFilters, ServiceFilter>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: StreamFilter,
-    Filter: ReadOnlyWorldQuery + 'static,
+    StreamFilters: StreamFilter,
+    ServiceFilter: ReadOnlyWorldQuery + 'static,
 {
-    type Item = Service<Request, Response, Streams::Pack>;
+    type Item = Service<Request, Response, StreamFilters::Pack>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let service = self.inner.next();
-        service.map(|s| Service::new(s))
+        loop {
+            match self.inner.next() {
+                Some((service, availability)) => {
+                    if StreamFilters::are_required_streams_available(availability) {
+                        return Some(Service::new(service));
+                    }
+
+                    // Continue looping
+                }
+                None => {
+                    return None;
+                }
+            }
+        }
     }
 }
 

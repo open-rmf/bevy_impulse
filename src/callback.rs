@@ -17,7 +17,7 @@
 
 use crate::{
     async_execution::{spawn_task, task_cancel_sender},
-    make_stream_buffer_from_world, AddOperation, AsyncCallback, BlockingCallback, Channel,
+    make_stream_buffers_from_world, AddOperation, AsyncCallback, BlockingCallback, Channel,
     ChannelQueue, Input, ManageDisposal, ManageInput, OperateCallback, OperateTask, OperationError,
     OperationRoster, OrBroken, ProvideOnce, Provider, Sendish, StreamPack, UnusedStreams,
 };
@@ -228,7 +228,7 @@ impl<'a> CallbackRequest<'a> {
     fn get_channel<Streams: StreamPack>(
         &mut self,
         session: Entity,
-    ) -> Result<(Channel, Streams::Channel), OperationError> {
+    ) -> Result<(Channel, Streams::StreamChannels), OperationError> {
         let sender = self
             .world
             .get_resource_or_insert_with(ChannelQueue::new)
@@ -289,7 +289,7 @@ where
             self.initialized = true;
         }
 
-        let streams = make_stream_buffer_from_world::<Streams>(input.source, input.world)?;
+        let streams = make_stream_buffers_from_world::<Streams>(input.source, input.world)?;
 
         let response = self.system.run(
             BlockingCallback {
@@ -303,7 +303,7 @@ where
         self.system.apply_deferred(input.world);
 
         let mut unused_streams = UnusedStreams::new(input.source);
-        Streams::process_buffer(
+        Streams::process_stream_buffers(
             streams,
             input.source,
             session,
@@ -445,7 +445,7 @@ where
                 session,
                 data: request,
             } = input.get_request::<Self::Request>()?;
-            let streams = make_stream_buffer_from_world::<Streams>(input.source, input.world)?;
+            let streams = make_stream_buffers_from_world::<Streams>(input.source, input.world)?;
             let response = (self)(BlockingCallback {
                 request,
                 streams: streams.clone(),
@@ -454,7 +454,7 @@ where
             });
 
             let mut unused_streams = UnusedStreams::new(input.source);
-            Streams::process_buffer(
+            Streams::process_stream_buffers(
                 streams,
                 input.source,
                 session,

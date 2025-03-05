@@ -23,7 +23,7 @@ use bevy_hierarchy::BuildChildren;
 
 use crate::{
     Builder, DeliveryChoice, InputSlot, OperateScope, Output, ScopeEndpoints, ScopeSettingsStorage,
-    Service, ServiceBundle, StreamPack, WorkflowService, WorkflowStorage,
+    Service, ServiceBundle, StreamAvailability, StreamPack, WorkflowService, WorkflowStorage,
 };
 
 mod internal;
@@ -251,10 +251,12 @@ impl<'w, 's> SpawnWorkflowExt for Commands<'w, 's> {
 
         let settings: WorkflowSettings = build(scope, &mut builder).into();
 
+        let mut stream_availability = StreamAvailability::default();
+        Streams::set_stream_availability(&mut stream_availability);
         let mut service = self.spawn((
             ServiceBundle::<WorkflowService<Request, Response, Streams>>::new(),
             WorkflowStorage::new(scope_id),
-            Streams::StreamAvailableBundle::default(),
+            stream_availability,
         ));
         settings
             .delivery

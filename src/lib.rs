@@ -185,7 +185,7 @@ pub struct BlockingService<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
-    pub streams: Streams::Buffer,
+    pub streams: Streams::StreamBuffers,
     /// The entity providing the service
     pub provider: Entity,
     /// The node in a workflow or impulse chain that asked for the service
@@ -210,7 +210,7 @@ pub struct AsyncService<Request, Streams: StreamPack = ()> {
     /// Stream channels that will let you send stream information. This will
     /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+    pub streams: Streams::StreamChannels,
     /// The channel that allows querying and syncing with the world while the
     /// service runs asynchronously.
     pub channel: Channel,
@@ -250,7 +250,7 @@ pub struct BlockingCallback<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
-    pub streams: Streams::Buffer,
+    pub streams: Streams::StreamBuffers,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
@@ -271,7 +271,7 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// Stream channels that will let you send stream information. This will
     /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+    pub streams: Streams::StreamChannels,
     /// The channel that allows querying and syncing with the world while the
     /// callback executes asynchronously.
     pub channel: Channel,
@@ -292,7 +292,7 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
-    pub streams: Streams::Buffer,
+    pub streams: Streams::StreamBuffers,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
@@ -312,7 +312,7 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// Stream channels that will let you send stream information. This will
     /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+    pub streams: Streams::StreamChannels,
     /// The channel that allows querying and syncing with the world while the
     /// map executes asynchronously.
     pub channel: Channel,
