@@ -108,7 +108,14 @@ where
         map.f = Some(f);
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_stream_buffers(streams, source, session, &mut unused_streams, world, roster)?;
+        Streams::process_stream_buffers(
+            streams,
+            source,
+            session,
+            &mut unused_streams,
+            world,
+            roster,
+        )?;
         if !unused_streams.streams.is_empty() {
             world.get_entity_mut(source).or_broken()?.emit_disposal(
                 session,

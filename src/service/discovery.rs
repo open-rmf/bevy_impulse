@@ -21,7 +21,7 @@ use bevy_ecs::{
     system::SystemParam,
 };
 
-use crate::{Service, ServiceMarker, StreamFilter, StreamAvailability};
+use crate::{Service, ServiceMarker, StreamAvailability, StreamFilter};
 
 /// `ServiceDiscovery` is a system parameter that lets you find services that
 /// exist in the world.
@@ -41,14 +41,8 @@ where
     query: Query<
         'w,
         's,
-        (
-            Entity,
-            Option<&'static StreamAvailability>,
-        ),
-        (
-            With<ServiceMarker<Request, Response>>,
-            ServiceFilter,
-        ),
+        (Entity, Option<&'static StreamAvailability>),
+        (With<ServiceMarker<Request, Response>>, ServiceFilter),
     >,
     _ignore: std::marker::PhantomData<fn(StreamFilters)>,
 }
@@ -61,7 +55,9 @@ where
     StreamFilters: StreamFilter,
     ServiceFilter: ReadOnlyWorldQuery + 'static,
 {
-    pub fn iter(&self) -> IterServiceDiscovery<'_, 's, Request, Response, StreamFilters, ServiceFilter> {
+    pub fn iter(
+        &self,
+    ) -> IterServiceDiscovery<'_, 's, Request, Response, StreamFilters, ServiceFilter> {
         IterServiceDiscovery {
             inner: self.query.iter(),
             _ignore: Default::default(),
@@ -72,14 +68,13 @@ where
         &self,
         entity: Entity,
     ) -> Result<Service<Request, Response, StreamFilters::Pack>, QueryEntityError> {
-        self.query.get(entity)
-            .and_then(|(e, availability)| {
-                if StreamFilters::are_required_streams_available(availability) {
-                    Ok(Service::new(e))
-                } else {
-                    Err(QueryEntityError::QueryDoesNotMatch(e))
-                }
-            })
+        self.query.get(entity).and_then(|(e, availability)| {
+            if StreamFilters::are_required_streams_available(availability) {
+                Ok(Service::new(e))
+            } else {
+                Err(QueryEntityError::QueryDoesNotMatch(e))
+            }
+        })
     }
 }
 
@@ -94,14 +89,8 @@ where
     inner: QueryIter<
         'w,
         's,
-        (
-            Entity,
-            Option<&'static StreamAvailability>,
-        ),
-        (
-            With<ServiceMarker<Request, Response>>,
-            ServiceFilter,
-        ),
+        (Entity, Option<&'static StreamAvailability>),
+        (With<ServiceMarker<Request, Response>>, ServiceFilter),
     >,
     _ignore: std::marker::PhantomData<fn(StreamFilters)>,
 }

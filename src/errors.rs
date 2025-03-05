@@ -21,10 +21,7 @@ use backtrace::Backtrace;
 
 use anyhow::Error as Anyhow;
 
-use std::{
-    borrow::Cow,
-    sync::Arc
-};
+use std::{borrow::Cow, sync::Arc};
 
 use crate::{Broken, Cancel, Disposal, OperationError};
 

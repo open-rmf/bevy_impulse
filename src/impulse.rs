@@ -95,8 +95,7 @@ where
             TakenResponse::<Response>::new(response_sender),
         ));
         let mut map = StreamTargetMap::default();
-        let stream_receivers =
-            Streams::take_streams(self.target, &mut map, self.commands);
+        let stream_receivers = Streams::take_streams(self.target, &mut map, self.commands);
         self.commands.entity(self.source).insert(map);
 
         Recipient {

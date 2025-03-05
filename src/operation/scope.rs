@@ -19,17 +19,18 @@ use crate::{
     check_reachability, execute_operation, is_downstream_of, Accessing, AddOperation, Blocker,
     BufferKeyBuilder, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
     CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest,
-    Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, NamedStream, Operation,
-    OperationCancel, OperationCleanup, OperationError, OperationReachability, OperationRequest,
-    OperationResult, OperationRoster, OperationSetup, OrBroken, ReachabilityResult, ScopeSettings,
-    SingleInputStorage, SingleTargetStorage, Stream, StreamEffect, StreamPack, StreamRequest, StreamTargetMap,
-    UnhandledErrors, Unreachability, UnusedTarget, NamedTarget, ReportUnhandled, NamedValue,
+    Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, NamedStream,
+    NamedTarget, NamedValue, Operation, OperationCancel, OperationCleanup, OperationError,
+    OperationReachability, OperationRequest, OperationResult, OperationRoster, OperationSetup,
+    OrBroken, ReachabilityResult, ReportUnhandled, ScopeSettings, SingleInputStorage,
+    SingleTargetStorage, Stream, StreamEffect, StreamPack, StreamRequest, StreamTargetMap,
+    UnhandledErrors, Unreachability, UnusedTarget,
 };
 
 use backtrace::Backtrace;
 
-use bevy_ecs::prelude::{Commands, Component, Entity, World};
 use bevy_derive::Deref;
+use bevy_ecs::prelude::{Commands, Component, Entity, World};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
@@ -1777,10 +1778,9 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
     type Input = S::Input;
 
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert((
-            StreamNameStorage(self.name),
-            InputBundle::<S::Input>::new(),
-        ));
+        world
+            .entity_mut(source)
+            .insert((StreamNameStorage(self.name), InputBundle::<S::Input>::new()));
         Ok(())
     }
 
@@ -1789,7 +1789,7 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
             source,
             world,
             roster,
-        }: OperationRequest
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input {
@@ -1813,9 +1813,7 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
         let exit_source = exit.source;
         let parent_session = exit.parent_session;
 
-        let stream_targets = world
-            .get::<StreamTargetMap>(exit_source)
-            .or_broken()?;
+        let stream_targets = world.get::<StreamTargetMap>(exit_source).or_broken()?;
 
         if let Some(name) = name {
             let target = stream_targets.get_named_or_anonymous::<S::Output>(&name);
@@ -1827,12 +1825,11 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
                 roster,
             };
 
-            S::side_effect(data, &mut request)
-                .and_then(|value|
-                    target
+            S::side_effect(data, &mut request).and_then(|value| {
+                target
                     .map(|t| t.send_output(NamedValue { name, value }, request))
                     .unwrap_or(Ok(()))
-                )?;
+            })?;
         } else {
             let target = stream_targets.get_anonymous::<S::Output>();
             let mut request = StreamRequest {
@@ -1843,8 +1840,7 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
                 roster,
             };
 
-            S::side_effect(data, &mut request)
-                .and_then(|output| request.send_output(output))?;
+            S::side_effect(data, &mut request).and_then(|output| request.send_output(output))?;
         }
 
         Ok(())

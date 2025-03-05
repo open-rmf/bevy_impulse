@@ -68,8 +68,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         provider.connect(Some(self.scope), source, target, self.commands);
 
         let mut map = StreamTargetMap::default();
-        let streams =
-            <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self);
+        let streams = <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self);
         self.commands.entity(source).insert(map);
         Node {
             input: InputSlot::new(self.scope, source),

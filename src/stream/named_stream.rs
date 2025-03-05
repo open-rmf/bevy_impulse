@@ -20,19 +20,14 @@ use bevy_ecs::{
     system::Command,
 };
 
-use std::{
-    borrow::Cow,
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
-    sync::Arc,
-};
+use std::{borrow::Cow, cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use crate::{
-    AddOperation, DefaultStreamContainer, OperationResult, OperationRoster, Stream, StreamEffect, StreamRequest, StreamTargetMap,
-    UnusedStreams, OrBroken, ReportUnhandled, SingleInputStorage, UnusedTarget, InnerChannel, Builder, StreamRedirect,
-    DeferredRoster, OperationRequest, Input, ManageInput, ScopeStorage, ExitTargetStorage, OperationSetup,
-    InputBundle, Output, InputSlot, RedirectWorkflowStream,
+    AddOperation, Builder, DefaultStreamContainer, DeferredRoster, ExitTargetStorage, InnerChannel,
+    Input, InputBundle, InputSlot, ManageInput, OperationRequest, OperationResult, OperationRoster,
+    OperationSetup, OrBroken, Output, RedirectWorkflowStream, ReportUnhandled, ScopeStorage,
+    SingleInputStorage, Stream, StreamEffect, StreamRedirect, StreamRequest, StreamTargetMap,
+    UnusedStreams, UnusedTarget,
 };
 
 /// A wrapper to turn any stream type into a named stream. Each item that moves
@@ -47,8 +42,7 @@ impl<S: StreamEffect> StreamEffect for NamedStream<S> {
         request: &mut StreamRequest,
     ) -> Result<Self::Output, crate::OperationError> {
         let NamedValue { name, value } = input;
-        S::side_effect(value, request)
-            .map(|value| NamedValue { name, value })
+        S::side_effect(value, request).map(|value| NamedValue { name, value })
     }
 }
 
@@ -80,19 +74,13 @@ impl<S: StreamEffect> Stream for NamedStream<S> {
         Output::new(builder.scope, target)
     }
 
-    fn make_stream_channel(
-        inner: &Arc<InnerChannel>,
-        world: &World,
-    ) -> Self::StreamChannel {
-        let targets = NamedStreamTargets::new::<S::Output>(
-            world.get::<StreamTargetMap>(inner.source())
-        );
+    fn make_stream_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::StreamChannel {
+        let targets =
+            NamedStreamTargets::new::<S::Output>(world.get::<StreamTargetMap>(inner.source()));
         NamedStreamChannel::new(Arc::new(targets), Arc::clone(&inner))
     }
 
-    fn make_stream_buffer(
-        target_map: Option<&StreamTargetMap>,
-    ) -> Self::StreamBuffer {
+    fn make_stream_buffer(target_map: Option<&StreamTargetMap>) -> Self::StreamBuffer {
         let targets = NamedStreamTargets::new::<S::Output>(target_map);
         NamedStreamBuffer {
             targets: Arc::new(targets),
@@ -126,10 +114,11 @@ impl<S: StreamEffect> Stream for NamedStream<S> {
             };
 
             S::side_effect(value, &mut request)
-                .and_then(|value|
-                    target.map(|t| t.send_output(NamedValue { name, value }, request))
-                    .unwrap_or(Ok(()))
-                )
+                .and_then(|value| {
+                    target
+                        .map(|t| t.send_output(NamedValue { name, value }, request))
+                        .unwrap_or(Ok(()))
+                })
                 .report_unhandled(source, world);
         }
 
@@ -146,11 +135,11 @@ impl<S: StreamEffect> Stream for NamedStream<S> {
         session: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(SendNamedStreams::<S, DefaultStreamContainer<NamedValue<S::Input>>>::new(
-            buffer.container.take(),
-            source,
-            session,
-            buffer.targets,
+        commands.add(SendNamedStreams::<
+            S,
+            DefaultStreamContainer<NamedValue<S::Input>>,
+        >::new(
+            buffer.container.take(), source, session, buffer.targets
         ));
     }
 }
@@ -190,7 +179,11 @@ impl NamedStreamTargets {
         let general = targets.get_anonymous::<NamedValue<T>>();
         let anonymous = targets.get_anonymous::<T>();
 
-        Self { specific, general, anonymous }
+        Self {
+            specific,
+            general,
+            anonymous,
+        }
     }
 
     fn get(&self, name: &str) -> Option<NamedTarget> {
@@ -231,12 +224,8 @@ impl NamedTarget {
         request: StreamRequest,
     ) -> OperationResult {
         match self {
-            NamedTarget::NamedValue(_) => {
-                request.send_output(NamedValue { name, value })
-            }
-            NamedTarget::Value(_) => {
-                request.send_output(value)
-            }
+            NamedTarget::NamedValue(_) => request.send_output(NamedValue { name, value }),
+            NamedTarget::Value(_) => request.send_output(value),
         }
     }
 }
@@ -267,20 +256,18 @@ impl<S: StreamEffect> NamedStreamChannel<S> {
                     };
 
                     S::side_effect(value, &mut request)
-                        .and_then(|value| target
-                            .map(|t| t.send_output(NamedValue { name, value }, request))
-                            .unwrap_or(Ok(()))
-                        )
+                        .and_then(|value| {
+                            target
+                                .map(|t| t.send_output(NamedValue { name, value }, request))
+                                .unwrap_or(Ok(()))
+                        })
                         .report_unhandled(source, world);
-                }
+                },
             ))
             .ok();
     }
 
-    fn new(
-        targets: Arc<NamedStreamTargets>,
-        inner: Arc<InnerChannel>,
-    ) -> Self {
+    fn new(targets: Arc<NamedStreamTargets>, inner: Arc<InnerChannel>) -> Self {
         Self {
             targets,
             inner,
@@ -348,10 +335,11 @@ where
                 };
 
                 S::side_effect(value, &mut request)
-                    .and_then(move |value| target
-                        .map(|t| t.send_output(NamedValue { name, value }, request))
-                        .unwrap_or(Ok(()))
-                    )
+                    .and_then(move |value| {
+                        target
+                            .map(|t| t.send_output(NamedValue { name, value }, request))
+                            .unwrap_or(Ok(()))
+                    })
                     .report_unhandled(self.source, world);
             }
         });
@@ -365,7 +353,7 @@ pub struct NamedStreamRedirect<S: StreamEffect> {
 impl<S: StreamEffect> Default for NamedStreamRedirect<S> {
     fn default() -> Self {
         Self {
-            _ignore: Default::default()
+            _ignore: Default::default(),
         }
     }
 }
@@ -374,9 +362,9 @@ impl<S: StreamEffect> StreamRedirect for NamedStreamRedirect<S> {
     type Input = NamedValue<S::Input>;
 
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world.entity_mut(source).insert(
-            InputBundle::<NamedValue<S::Input>>::new()
-        );
+        world
+            .entity_mut(source)
+            .insert(InputBundle::<NamedValue<S::Input>>::new());
         Ok(())
     }
 
@@ -385,7 +373,7 @@ impl<S: StreamEffect> StreamRedirect for NamedStreamRedirect<S> {
             source,
             world,
             roster,
-        }: OperationRequest
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input {
@@ -404,9 +392,7 @@ impl<S: StreamEffect> StreamRedirect for NamedStreamRedirect<S> {
         let exit_source = exit.source;
         let parent_session = exit.parent_session;
 
-        let stream_targets = world
-            .get::<StreamTargetMap>(exit_source)
-            .or_broken()?;
+        let stream_targets = world.get::<StreamTargetMap>(exit_source).or_broken()?;
 
         let target = stream_targets.get_named_or_anonymous::<S::Output>(&name);
         let mut request = StreamRequest {
@@ -417,12 +403,11 @@ impl<S: StreamEffect> StreamRedirect for NamedStreamRedirect<S> {
             roster,
         };
 
-        S::side_effect(value, &mut request)
-            .and_then(|value|
-                target
+        S::side_effect(value, &mut request).and_then(|value| {
+            target
                 .map(|t| t.send_output(NamedValue { name, value }, request))
                 .unwrap_or(Ok(()))
-            )?;
+        })?;
 
         Ok(())
     }

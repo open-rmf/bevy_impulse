@@ -19,7 +19,7 @@ use bevy_ecs::prelude::{Entity, World};
 
 use std::sync::Arc;
 
-use crate::{InnerChannel, OperationRoster, StreamEffect, StreamRequest, ReportUnhandled};
+use crate::{InnerChannel, OperationRoster, ReportUnhandled, StreamEffect, StreamRequest};
 
 /// Use this channel to stream data using the [`StreamChannel::send`] method.
 pub struct StreamChannel<S> {

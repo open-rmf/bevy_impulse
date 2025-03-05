@@ -144,7 +144,14 @@ where
         service.apply_deferred(world);
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_stream_buffers(streams, source, session, &mut unused_streams, world, roster)?;
+        Streams::process_stream_buffers(
+            streams,
+            source,
+            session,
+            &mut unused_streams,
+            world,
+            roster,
+        )?;
 
         if let Some(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) =

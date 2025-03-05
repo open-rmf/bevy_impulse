@@ -107,7 +107,14 @@ where
         });
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_stream_buffers(streams, source, session, &mut unused_streams, world, roster)?;
+        Streams::process_stream_buffers(
+            streams,
+            source,
+            session,
+            &mut unused_streams,
+            world,
+            roster,
+        )?;
         // Note: We do not need to emit a disposal for any unused streams since
         // this is only used for impulses, not workflows.
 

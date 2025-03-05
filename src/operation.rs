@@ -760,7 +760,9 @@ pub fn immediately_downstream_of(source: Entity, world: &World) -> DownstreamIte
         DownstreamFinishIter::Single(None)
     };
 
-    let streams = world.get::<StreamTargetMap>(source).map(|s| s.anonymous.iter());
+    let streams = world
+        .get::<StreamTargetMap>(source)
+        .map(|s| s.anonymous.iter());
 
     DownstreamIter { output, streams }
 }
