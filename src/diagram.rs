@@ -600,6 +600,9 @@ pub struct Diagram {
     #[schemars(schema_with = "schema_with_string")]
     version: semver::Version,
 
+    #[serde(default)]
+    templates: HashMap<String, SectionTemplate>,
+
     /// Signifies the start of a workflow.
     start: NextOperation,
 
@@ -655,7 +658,7 @@ impl Diagram {
                 scope.terminate.id()
             );
 
-            let node_inputs: RefCell<HashMap<&OperationId, DynInputSlot>> =
+            let node_inputs: RefCell<HashMap<OperationId, DynInputSlot>> =
                 RefCell::new(HashMap::new());
             let mut workflow_builder = WorkflowBuilder::new();
 
@@ -685,86 +688,14 @@ impl Diagram {
 
             // add other vertices
             for (op_id, op) in &self.ops {
-                match op {
-                    DiagramOperation::Node(op) => {
-                        workflow_builder.add_vertex(
-                            op_id.clone(),
-                            |vertex, builder, registry, _| {
-                                op.try_connect(
-                                    vertex,
-                                    builder,
-                                    registry,
-                                    op_id,
-                                    &node_inputs.borrow(),
-                                )
-                            },
-                        );
-                    }
-                    DiagramOperation::Section(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, buffers| {
-                            op.try_connect(vertex, builder, registry, op_id.clone(), buffers)
+                workflow_builder
+                    .add_vertex_from_op(op_id.clone(), op, self, &node_inputs)
+                    .map_err(|code| DiagramError {
+                        code,
+                        context: DiagramErrorContext {
+                            op_id: Some(op_id.clone()),
                         },
-                    ),
-                    DiagramOperation::ForkClone(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, _| {
-                            op.try_connect(vertex, builder, &registry.messages)
-                        },
-                    ),
-                    DiagramOperation::Unzip(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, _| {
-                            op.try_connect(vertex, builder, &registry.messages)
-                        },
-                    ),
-                    DiagramOperation::ForkResult(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, _| {
-                            op.try_connect(vertex, builder, &registry.messages)
-                        },
-                    ),
-                    DiagramOperation::Split(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, _| {
-                            op.try_connect(vertex, builder, &registry.messages)
-                        },
-                    ),
-                    DiagramOperation::Join(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, buffers| {
-                            op.try_connect(vertex, builder, &registry, buffers, self)
-                        },
-                    ),
-                    DiagramOperation::SerializedJoin(op) => workflow_builder
-                        .add_vertex(op_id.clone(), |vertex, builder, _, buffers| {
-                            op.try_connect(vertex, builder, buffers)
-                        }),
-                    DiagramOperation::Transform(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, _| {
-                            op.try_connect(vertex, builder, &registry.messages)
-                        },
-                    ),
-                    DiagramOperation::Buffer(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, buffers| {
-                            op.try_connect(vertex, builder, &registry.messages, op_id, buffers)
-                        },
-                    ),
-                    DiagramOperation::BufferAccess(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, buffers| {
-                            op.try_connect(vertex, builder, registry, buffers, self)
-                        },
-                    ),
-                    DiagramOperation::Listen(op) => workflow_builder.add_vertex(
-                        op_id.clone(),
-                        |vertex, builder, registry, buffers| {
-                            op.try_connect(vertex, builder, registry, buffers, self)
-                        },
-                    ),
-                }
+                    })?;
             }
 
             // add start edge
@@ -788,68 +719,14 @@ impl Diagram {
                 })?;
 
             for (op_id, op) in &self.ops {
-                let with_context = |code: DiagramErrorCode| DiagramError {
-                    code,
-                    context: DiagramErrorContext {
-                        op_id: Some(op_id.clone()),
-                    },
-                };
-
-                match op {
-                    DiagramOperation::Node(op) => {
-                        op.add_edges(
-                            op_id,
-                            &mut workflow_builder,
-                            builder,
-                            registry,
-                            &mut node_inputs.borrow_mut(),
-                        )
-                        .map_err(with_context)?;
-                    }
-                    DiagramOperation::Section(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::ForkClone(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::Unzip(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::ForkResult(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::Split(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::Join(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::SerializedJoin(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::Transform(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::Buffer(_) => {
-                        // buffer has no output edges
-                    }
-                    DiagramOperation::BufferAccess(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                    DiagramOperation::Listen(op) => {
-                        op.add_edges(op_id, &mut workflow_builder)
-                            .map_err(with_context)?;
-                    }
-                }
+                workflow_builder
+                    .add_edge_from_op(op_id, op, builder, registry, self, &node_inputs)
+                    .map_err(|code| DiagramError {
+                        code,
+                        context: DiagramErrorContext {
+                            op_id: Some(op_id.clone()),
+                        },
+                    })?;
             }
 
             workflow_builder.create_workflow(builder, registry)
@@ -929,6 +806,12 @@ impl Diagram {
         self.ops
             .get(op_id)
             .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))
+    }
+
+    fn get_template(&self, template_id: &String) -> Result<&SectionTemplate, DiagramErrorCode> {
+        self.templates
+            .get(template_id)
+            .ok_or_else(|| DiagramErrorCode::OperationNotFound(template_id.clone()))
     }
 }
 

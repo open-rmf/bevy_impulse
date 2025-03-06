@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
-    dyn_connect, type_info::TypeInfo, BuilderId, DiagramElementRegistry, DiagramErrorCode,
-    DynOutput, Edge, MessageRegistry, NextOperation, OperationId, Vertex, WorkflowBuilder,
+    dyn_connect, type_info::TypeInfo, BuilderId, Diagram, DiagramElementRegistry, DiagramErrorCode,
+    DiagramOperation, DynInputSlot, DynOutput, Edge, MessageRegistry, NextOperation, OperationId,
+    Vertex, WorkflowBuilder,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -32,10 +33,38 @@ pub struct SectionOp {
 }
 
 impl SectionOp {
-    pub(super) fn add_edges(
+    pub(super) fn add_vertices<'a>(
+        &'a self,
+        op_id: OperationId,
+        workflow_builder: &mut WorkflowBuilder<'a>,
+        diagram: &'a Diagram,
+        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+    ) -> Result<(), DiagramErrorCode> {
+        match &self.builder {
+            SectionProvider::Builder(_) => {
+                workflow_builder.add_vertex(
+                    op_id.clone(),
+                    move |vertex, builder, registry, buffers| {
+                        self.try_connect(vertex, builder, registry, &op_id, buffers)
+                    },
+                );
+                Ok(())
+            }
+            SectionProvider::Template(template_id) => {
+                let template = diagram.get_template(template_id)?;
+                template.add_vertices(&op_id, workflow_builder, diagram, node_inputs)
+            }
+        }
+    }
+
+    pub(super) fn add_edges<'a>(
         &self,
         op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder,
+        workflow_builder: &mut WorkflowBuilder<'a>,
+        builder: &mut Builder,
+        registry: &DiagramElementRegistry,
+        diagram: &Diagram,
+        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
     ) -> Result<(), DiagramErrorCode> {
         match &self.builder {
             SectionProvider::Builder(_) => {
@@ -49,8 +78,16 @@ impl SectionOp {
                 }
                 Ok(())
             }
-            SectionProvider::Template(_) => {
-                panic!("TODO")
+            SectionProvider::Template(template_id) => {
+                let template = diagram.get_template(template_id)?;
+                template.add_edges(
+                    op_id,
+                    workflow_builder,
+                    builder,
+                    registry,
+                    diagram,
+                    node_inputs,
+                )
             }
         }
     }
@@ -60,7 +97,7 @@ impl SectionOp {
         vertex: &Vertex,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
-        op_id: String,
+        op_id: &OperationId,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         let mut inputs = HashMap::with_capacity(vertex.in_edges.len());
@@ -289,7 +326,9 @@ pub struct SectionBuffer {
     pub(super) item_type: TypeInfo,
 }
 
-pub(super) struct DynSection;
+pub(super) struct DynSection {
+    outputs: HashMap<String, DynOutput>,
+}
 
 impl Section for DynSection {
     fn try_connect(
@@ -311,11 +350,50 @@ impl Section for DynSection {
     }
 }
 
-pub(super) struct SectionTemplate;
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub(super) struct SectionTemplate {
+    inputs: Vec<String>,
+    outputs: Vec<String>,
+    buffers: Vec<String>,
+    ops: HashMap<OperationId, DiagramOperation>,
+}
 
 impl SectionTemplate {
-    fn create_section(&self) -> DynSection {
-        panic!("TODO")
+    fn add_vertices<'a>(
+        &'a self,
+        section_op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder<'a>,
+        diagram: &'a Diagram,
+        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+    ) -> Result<(), DiagramErrorCode> {
+        for (op_id, op) in &self.ops {
+            let op_id = format!("{}/{}", section_op_id, op_id);
+            workflow_builder.add_vertex_from_op(op_id, op, diagram, node_inputs)?;
+        }
+        Ok(())
+    }
+
+    fn add_edges<'a>(
+        &self,
+        section_op_id: &OperationId,
+        workflow_builder: &mut WorkflowBuilder<'a>,
+        builder: &mut Builder,
+        registry: &DiagramElementRegistry,
+        diagram: &Diagram,
+        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+    ) -> Result<(), DiagramErrorCode> {
+        for (op_id, op) in &self.ops {
+            let op_id = format!("{}/{}", section_op_id, op_id);
+            workflow_builder.add_edge_from_op(
+                &op_id,
+                op,
+                builder,
+                registry,
+                diagram,
+                node_inputs,
+            )?;
+        }
+        Ok(())
     }
 }
 

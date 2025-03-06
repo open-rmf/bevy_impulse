@@ -28,7 +28,7 @@ impl BufferOp {
         vertex: &Vertex,
         builder: &mut Builder,
         registry: &MessageRegistry,
-        op_id: &String,
+        op_id: &OperationId,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         if vertex.in_edges.is_empty() {

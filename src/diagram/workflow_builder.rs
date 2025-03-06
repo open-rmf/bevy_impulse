@@ -10,8 +10,9 @@ use crate::{
 };
 
 use super::{
-    DiagramElementRegistry, DiagramError, DiagramErrorCode, DynInputSlot, DynOutput,
-    IntoOperationId, MessageRegistry, NextOperation, OperationId, SourceOperation,
+    Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DiagramOperation,
+    DynInputSlot, DynOutput, IntoOperationId, MessageRegistry, NextOperation, OperationId,
+    SourceOperation,
 };
 
 pub(super) struct Edge {
@@ -74,6 +75,84 @@ impl<'a> WorkflowBuilder<'a> {
         );
     }
 
+    pub(super) fn add_vertex_from_op(
+        &mut self,
+        op_id: OperationId,
+        op: &'a DiagramOperation,
+        diagram: &'a Diagram,
+        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+    ) -> Result<(), DiagramErrorCode> {
+        match op {
+            DiagramOperation::Node(op) => {
+                self.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                    op.try_connect(vertex, builder, registry, &op_id, &node_inputs.borrow())
+                });
+                Ok(())
+            }
+            DiagramOperation::Section(op) => op.add_vertices(op_id, self, diagram, node_inputs),
+            DiagramOperation::ForkClone(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, _| {
+                    op.try_connect(vertex, builder, &registry.messages)
+                });
+                Ok(())
+            }
+            DiagramOperation::Unzip(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, _| {
+                    op.try_connect(vertex, builder, &registry.messages)
+                });
+                Ok(())
+            }
+            DiagramOperation::ForkResult(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, _| {
+                    op.try_connect(vertex, builder, &registry.messages)
+                });
+                Ok(())
+            }
+            DiagramOperation::Split(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, _| {
+                    op.try_connect(vertex, builder, &registry.messages)
+                });
+                Ok(())
+            }
+            DiagramOperation::Join(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, buffers| {
+                    op.try_connect(vertex, builder, &registry, buffers, diagram)
+                });
+                Ok(())
+            }
+            DiagramOperation::SerializedJoin(op) => {
+                self.add_vertex(op_id, |vertex, builder, _, buffers| {
+                    op.try_connect(vertex, builder, buffers)
+                });
+                Ok(())
+            }
+            DiagramOperation::Transform(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, _| {
+                    op.try_connect(vertex, builder, &registry.messages)
+                });
+                Ok(())
+            }
+            DiagramOperation::Buffer(op) => {
+                self.add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                    op.try_connect(vertex, builder, &registry.messages, &op_id, buffers)
+                });
+                Ok(())
+            }
+            DiagramOperation::BufferAccess(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, buffers| {
+                    op.try_connect(vertex, builder, registry, buffers, diagram)
+                });
+                Ok(())
+            }
+            DiagramOperation::Listen(op) => {
+                self.add_vertex(op_id, |vertex, builder, registry, buffers| {
+                    op.try_connect(vertex, builder, registry, buffers, diagram)
+                });
+                Ok(())
+            }
+        }
+    }
+
     pub(super) fn add_edge(&mut self, edge: Edge) -> Result<(), DiagramErrorCode> {
         let (from_vertex, _) = self
             .vertices
@@ -89,6 +168,42 @@ impl<'a> WorkflowBuilder<'a> {
         to_vertex.borrow_mut().in_edges.push(Arc::clone(&edge));
 
         Ok(())
+    }
+
+    pub(super) fn add_edge_from_op(
+        &mut self,
+        op_id: &OperationId,
+        op: &DiagramOperation,
+        builder: &mut Builder,
+        registry: &DiagramElementRegistry,
+        diagram: &Diagram,
+        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+    ) -> Result<(), DiagramErrorCode> {
+        match op {
+            DiagramOperation::Node(op) => op.add_edges(
+                op_id,
+                self,
+                builder,
+                registry,
+                &mut node_inputs.borrow_mut(),
+            ),
+            DiagramOperation::Section(op) => {
+                op.add_edges(op_id, self, builder, registry, diagram, node_inputs)
+            }
+            DiagramOperation::ForkClone(op) => op.add_edges(op_id, self),
+            DiagramOperation::Unzip(op) => op.add_edges(op_id, self),
+            DiagramOperation::ForkResult(op) => op.add_edges(op_id, self),
+            DiagramOperation::Split(op) => op.add_edges(op_id, self),
+            DiagramOperation::Join(op) => op.add_edges(op_id, self),
+            DiagramOperation::SerializedJoin(op) => op.add_edges(op_id, self),
+            DiagramOperation::Transform(op) => op.add_edges(op_id, self),
+            DiagramOperation::Buffer(_) => {
+                // buffer has no output edges
+                Ok(())
+            }
+            DiagramOperation::BufferAccess(op) => op.add_edges(op_id, self),
+            DiagramOperation::Listen(op) => op.add_edges(op_id, self),
+        }
     }
 
     pub(super) fn create_workflow(

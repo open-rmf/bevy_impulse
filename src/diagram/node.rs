@@ -26,11 +26,11 @@ impl NodeOp {
         workflow_builder: &mut WorkflowBuilder,
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
-        inputs: &mut HashMap<&'a OperationId, DynInputSlot>,
+        inputs: &mut HashMap<OperationId, DynInputSlot>,
     ) -> Result<(), DiagramErrorCode> {
         let reg = registry.get_node_registration(&self.builder)?;
         let n = reg.create_node(builder, self.config.clone())?;
-        inputs.insert(op_id, n.input.into());
+        inputs.insert(op_id.clone(), n.input.into());
         workflow_builder.add_edge(Edge {
             source: op_id.clone().into(),
             target: self.next.clone(),
@@ -46,7 +46,7 @@ impl NodeOp {
         builder: &mut Builder,
         registry: &DiagramElementRegistry,
         op_id: &OperationId,
-        inputs: &HashMap<&OperationId, DynInputSlot>,
+        inputs: &HashMap<OperationId, DynInputSlot>,
     ) -> Result<bool, DiagramErrorCode> {
         for edge in &vertex.in_edges {
             let mut edge = edge.try_lock().unwrap();
