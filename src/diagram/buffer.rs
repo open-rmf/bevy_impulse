@@ -9,7 +9,7 @@ use crate::{
 
 use super::{
     type_info::TypeInfo, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode,
-    DiagramOperation, DynOutput, Edge, MessageRegistry, NextOperation, OperationId, Vertex,
+    DiagramOperation, DynOutput, MessageRegistry, NextOperation, OperationId, Vertex,
     WorkflowBuilder,
 };
 
@@ -23,6 +23,12 @@ pub struct BufferOp {
 }
 
 impl BufferOp {
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+            self.try_connect(vertex, builder, &registry.messages, &op_id, buffers)
+        });
+    }
+
     pub(super) fn try_connect(
         &self,
         vertex: &Vertex,
@@ -36,12 +42,7 @@ impl BufferOp {
             return Ok(false);
         }
 
-        let first_output = vertex.in_edges[0]
-            .try_lock()
-            .unwrap()
-            .output
-            .take()
-            .unwrap();
+        let first_output = vertex.in_edges[0].take_output();
         let first_output = if self.serialize.unwrap_or(false) {
             registry.serialize(builder, first_output)?.into()
         } else {
@@ -51,7 +52,7 @@ impl BufferOp {
         let rest_outputs: Vec<DynOutput> = vertex.in_edges[1..]
             .iter()
             .map(|edge| -> Result<_, DiagramErrorCode> {
-                let output = edge.try_lock().unwrap().output.take().unwrap();
+                let output = edge.take_output();
                 if self.serialize.unwrap_or(false) {
                     Ok(registry.serialize(builder, output)?.into())
                 } else {
@@ -178,18 +179,17 @@ pub struct BufferAccessOp {
 }
 
 impl BufferAccessOp {
-    pub(super) fn add_edges(
-        &self,
-        op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder,
-    ) -> Result<(), DiagramErrorCode> {
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.next.clone(),
-            output: None,
-            tag: None,
-        })?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
+        diagram: &'a Diagram,
+    ) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                self.try_connect(vertex, builder, registry, buffers, diagram)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
     pub(super) fn try_connect(
@@ -206,19 +206,14 @@ impl BufferAccessOp {
             return Ok(false);
         };
 
-        let output = if let Some(output) = vertex.in_edges[0].try_lock().unwrap().output.take() {
-            output
-        } else {
-            return Ok(false);
-        };
+        let output = vertex.in_edges[0].take_output();
 
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output =
             registry
                 .messages
                 .with_buffer_access(builder, output, &buffers, target_type)?;
-        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }
@@ -250,18 +245,17 @@ pub struct ListenOp {
 }
 
 impl ListenOp {
-    pub(super) fn add_edges(
-        &self,
-        op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder,
-    ) -> Result<(), DiagramErrorCode> {
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.next.clone(),
-            output: None,
-            tag: None,
-        })?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
+        diagram: &'a Diagram,
+    ) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                self.try_connect(vertex, builder, registry, buffers, diagram)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
     pub(super) fn try_connect(
@@ -280,8 +274,7 @@ impl ListenOp {
 
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.listen(builder, &buffers, target_type)?;
-        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }

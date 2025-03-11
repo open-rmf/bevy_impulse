@@ -8,7 +8,7 @@ use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
     buffer::{get_node_request_type, BufferInputs},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, Edge, NextOperation, OperationId, Vertex,
+    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId, Vertex,
     WorkflowBuilder,
 };
 
@@ -25,18 +25,17 @@ pub struct JoinOp {
 }
 
 impl JoinOp {
-    pub(super) fn add_edges(
-        &self,
-        op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder,
-    ) -> Result<(), DiagramErrorCode> {
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.next.clone(),
-            output: None,
-            tag: None,
-        })?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
+        diagram: &'a Diagram,
+    ) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                self.try_connect(vertex, builder, registry, buffers, diagram)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
     pub(super) fn try_connect(
@@ -59,8 +58,7 @@ impl JoinOp {
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.join(builder, &buffers, target_type)?;
 
-        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }
@@ -75,19 +73,14 @@ pub struct SerializedJoinOp {
 }
 
 impl SerializedJoinOp {
-    pub(super) fn add_edges(
-        &self,
-        op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder,
-    ) -> Result<(), DiagramErrorCode> {
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.next.clone(),
-            output: None,
-            tag: None,
-        })?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, _, buffers| {
+                self.try_connect(vertex, builder, buffers)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
+
     pub(super) fn try_connect(
         &self,
         vertex: &Vertex,
@@ -149,8 +142,7 @@ impl SerializedJoinOp {
             .output()
             .into();
 
-        let mut out_edge = vertex.out_edges[0].try_lock().unwrap();
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }

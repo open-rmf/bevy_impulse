@@ -10,8 +10,8 @@ use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     register_serialize,
     type_info::TypeInfo,
-    validate_single_input, DiagramErrorCode, Edge, MessageRegistration, MessageRegistry,
-    NextOperation, OperationId, SerializeMessage, Vertex, WorkflowBuilder,
+    validate_single_input, DiagramErrorCode, MessageRegistration, MessageRegistry, NextOperation,
+    SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -22,24 +22,13 @@ pub struct ForkResultOp {
 }
 
 impl ForkResultOp {
-    pub(super) fn add_edges(
-        &self,
-        op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder,
-    ) -> Result<(), DiagramErrorCode> {
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.ok.clone(),
-            output: None,
-            tag: None,
-        })?;
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.err.clone(),
-            output: None,
-            tag: None,
-        })?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        let mut edge_builder =
+            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                self.try_connect(vertex, builder, &registry.messages)
+            });
+        edge_builder.add_output_edge(self.ok.clone(), None);
+        edge_builder.add_output_edge(self.err.clone(), None);
     }
 
     pub(super) fn try_connect<'b>(
@@ -56,11 +45,11 @@ impl ForkResultOp {
         }?;
         {
             let ok_edge = &vertex.out_edges[0];
-            ok_edge.try_lock().unwrap().output = Some(ok);
+            ok_edge.set_output(ok);
         }
         {
             let err_edge = &vertex.out_edges[1];
-            err_edge.try_lock().unwrap().output = Some(err);
+            err_edge.set_output(err);
         }
 
         Ok(true)

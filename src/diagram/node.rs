@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +5,7 @@ use crate::Builder;
 
 use super::{
     workflow_builder::dyn_connect, BuilderId, DiagramElementRegistry, DiagramErrorCode,
-    DynInputSlot, Edge, NextOperation, OperationId, Vertex, WorkflowBuilder,
+    NextOperation, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -20,41 +18,26 @@ pub struct NodeOp {
 }
 
 impl NodeOp {
-    pub(super) fn add_edges<'a>(
-        &self,
-        op_id: &'a OperationId,
-        workflow_builder: &mut WorkflowBuilder,
+    pub(super) fn add_vertices<'a>(
+        &'a self,
         builder: &mut Builder,
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
         registry: &DiagramElementRegistry,
-        inputs: &mut HashMap<OperationId, DynInputSlot>,
     ) -> Result<(), DiagramErrorCode> {
         let reg = registry.get_node_registration(&self.builder)?;
-        let n = reg.create_node(builder, self.config.clone())?;
-        inputs.insert(op_id.clone(), n.input.into());
-        workflow_builder.add_edge(Edge {
-            source: op_id.clone().into(),
-            target: self.next.clone(),
-            output: Some(n.output.into()),
-            tag: None,
-        })?;
+        let node = reg.create_node(builder, self.config.clone())?;
+
+        let mut edge_builder =
+            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                for edge in &vertex.in_edges {
+                    let output = edge.take_output();
+                    dyn_connect(builder, output, node.input.into(), &registry.messages)?;
+                }
+                Ok(true)
+            });
+        edge_builder.add_output_edge(self.next.clone(), Some(node.output));
+
         Ok(())
-    }
-
-    pub(super) fn try_connect(
-        &self,
-        vertex: &Vertex,
-        builder: &mut Builder,
-        registry: &DiagramElementRegistry,
-        op_id: &OperationId,
-        inputs: &HashMap<OperationId, DynInputSlot>,
-    ) -> Result<bool, DiagramErrorCode> {
-        for edge in &vertex.in_edges {
-            let mut edge = edge.try_lock().unwrap();
-            let output = edge.output.take().unwrap();
-            let input = inputs[op_id];
-            dyn_connect(builder, output, input.into(), &registry.messages)?;
-        }
-
-        Ok(true)
     }
 }

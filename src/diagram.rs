@@ -32,7 +32,7 @@ pub use workflow_builder::*;
 
 // ----------
 
-use std::{cell::RefCell, collections::HashMap, fmt::Display, io::Read};
+use std::{collections::HashMap, fmt::Display, io::Read};
 
 use crate::{
     Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
@@ -69,7 +69,7 @@ impl IntoOperationId for NextOperation {
     fn into_operation_id(self) -> OperationId {
         match self {
             Self::Target(operation_id) => operation_id,
-            Self::Section { section, input: _ } => section,
+            Self::Section { section, input } => format!("{}/{}", section, input),
             Self::Builtin { builtin } => format!("builtin:{}", builtin),
         }
     }
@@ -183,6 +183,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Node(NodeOp),
 
     /// Connect the request to a registered section.
@@ -204,6 +205,41 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    ///
+    /// Custom sections can also be created via templates
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "templates": {
+    ///         "my_template": {
+    ///             "inputs": ["section_input"],
+    ///             "outputs": ["section_output"],
+    ///             "buffers": [],
+    ///             "ops": {
+    ///                 "section_input": {
+    ///                     "type": "node",
+    ///                     "builder": "my_node",
+    ///                     "next": "section_output"
+    ///                 }
+    ///             }
+    ///         }
+    ///     },
+    ///     "start": "section_op",
+    ///     "ops": {
+    ///         "section_op": {
+    ///             "type": "section",
+    ///             "template": "my_template",
+    ///             "connect": {
+    ///                 "section_output": { "builtin": "terminate" }
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Section(SectionOp),
 
     /// If the request is cloneable, clone it into multiple responses.
@@ -223,6 +259,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     ForkClone(ForkCloneOp),
 
     /// If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses
@@ -243,6 +280,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Unzip(UnzipOp),
 
     /// If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.
@@ -263,6 +301,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     ForkResult(ForkResultOp),
 
     /// If the request is a list-like or map-like object, split it into multiple responses.
@@ -515,6 +554,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     BufferAccess(BufferAccessOp),
 
     /// Listen on a buffer.
@@ -549,6 +589,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Listen(ListenOp),
 }
 
@@ -658,15 +699,15 @@ impl Diagram {
                 scope.terminate.id()
             );
 
-            let node_inputs: RefCell<HashMap<OperationId, DynInputSlot>> =
-                RefCell::new(HashMap::new());
             let mut workflow_builder = WorkflowBuilder::new();
 
             // add start vertex
             let start = SourceOperation::Builtin {
                 builtin: BuiltinSource::Start,
             };
-            workflow_builder.add_vertex(start.clone(), move |_, _, _, _| Ok(true));
+            workflow_builder
+                .add_vertex(start.clone(), move |_, _, _, _| Ok(true))
+                .add_output_edge(self.start.clone(), Some(scope.input.into()));
 
             // add terminate vertex
             let terminate = NextOperation::Builtin {
@@ -674,7 +715,7 @@ impl Diagram {
             };
             workflow_builder.add_vertex(terminate, move |vertex, builder, registry, _| {
                 for edge in &vertex.in_edges {
-                    let output = edge.try_lock().unwrap().output.take().unwrap();
+                    let output = edge.take_output();
                     let serialized_output = registry.messages.serialize(builder, output)?;
                     builder.connect(serialized_output, scope.terminate.into());
                 }
@@ -689,38 +730,7 @@ impl Diagram {
             // add other vertices
             for (op_id, op) in &self.ops {
                 workflow_builder
-                    .add_vertex_from_op(op_id.clone(), op, self, &node_inputs)
-                    .map_err(|code| DiagramError {
-                        code,
-                        context: DiagramErrorContext {
-                            op_id: Some(op_id.clone()),
-                        },
-                    })?;
-            }
-
-            // add start edge
-            workflow_builder
-                .add_edge(Edge {
-                    source: start,
-                    target: self.start.clone(),
-                    output: Some(scope.input.into()),
-                    tag: None,
-                })
-                .map_err(|code| DiagramError {
-                    code,
-                    context: DiagramErrorContext {
-                        op_id: Some(
-                            SourceOperation::Builtin {
-                                builtin: BuiltinSource::Start,
-                            }
-                            .to_string(),
-                        ),
-                    },
-                })?;
-
-            for (op_id, op) in &self.ops {
-                workflow_builder
-                    .add_edge_from_op(op_id, op, builder, registry, self, &node_inputs)
+                    .add_vertices_from_op(op_id.clone(), op, builder, self, registry)
                     .map_err(|code| DiagramError {
                         code,
                         context: DiagramErrorContext {

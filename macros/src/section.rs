@@ -45,18 +45,14 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
 
     let gen = quote! {
         impl #impl_generics ::bevy_impulse::Section for #struct_ident #ty_generics #where_clause {
-            fn try_connect(
+            fn into_slots(
                 self: Box<Self>,
-                builder: &mut ::bevy_impulse::Builder,
-                mut inputs: ::std::collections::HashMap<String, ::bevy_impulse::DynOutput>,
-                outputs: &mut HashMap<String, DynOutput>,
-                buffers: &mut HashMap<OperationId, AnyBuffer>,
-                registry: &MessageRegistry,
-            ) -> Result<(), ::bevy_impulse::DiagramErrorCode> {
+            ) -> SectionSlots {
+                let mut slots = SectionSlots::new();
                 #(
-                    self.#field_ident.try_connect(&#field_name_str.to_string(), builder, &mut inputs, outputs, buffers, registry)?;
+                    self.#field_ident.insert_into_slots(#field_name_str.to_string(), &mut slots);
                 )*
-                Ok(())
+                slots
             }
 
             fn on_register(registry: &mut DiagramElementRegistry)

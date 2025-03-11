@@ -1,14 +1,14 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnyBuffer, AsAnyBuffer, Buffer, Builder, InputSlot, Output};
+use crate::{AnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
-    dyn_connect, type_info::TypeInfo, BuilderId, Diagram, DiagramElementRegistry, DiagramErrorCode,
-    DiagramOperation, DynInputSlot, DynOutput, Edge, MessageRegistry, NextOperation, OperationId,
-    Vertex, WorkflowBuilder,
+    dyn_connect, type_info::TypeInfo, validate_single_input, BuilderId, Diagram,
+    DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
+    IntoOperationId, NextOperation, OperationId, WorkflowBuilder,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -24,7 +24,7 @@ pub enum SectionProvider {
 #[serde(rename_all = "snake_case")]
 pub struct SectionOp {
     #[serde(flatten)]
-    pub(super) builder: SectionProvider,
+    pub(super) provider: SectionProvider,
     #[serde(default)]
     pub(super) config: serde_json::Value,
     #[serde(default)]
@@ -33,139 +33,70 @@ pub struct SectionOp {
 }
 
 impl SectionOp {
+    fn scoped_op_id(section_op_id: &OperationId, inner_op_id: &OperationId) -> OperationId {
+        format!("{}/{}", section_op_id, inner_op_id)
+    }
+
     pub(super) fn add_vertices<'a>(
         &'a self,
         op_id: OperationId,
-        workflow_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a>,
+        builder: &mut Builder,
         diagram: &'a Diagram,
-        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+        registry: &'a DiagramElementRegistry,
     ) -> Result<(), DiagramErrorCode> {
-        match &self.builder {
-            SectionProvider::Builder(_) => {
-                workflow_builder.add_vertex(
-                    op_id.clone(),
-                    move |vertex, builder, registry, buffers| {
-                        self.try_connect(vertex, builder, registry, &op_id, buffers)
-                    },
-                );
-                Ok(())
-            }
-            SectionProvider::Template(template_id) => {
-                let template = diagram.get_template(template_id)?;
-                template.add_vertices(&op_id, workflow_builder, diagram, node_inputs)
-            }
-        }
-    }
-
-    pub(super) fn add_edges<'a>(
-        &self,
-        op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder<'a>,
-        builder: &mut Builder,
-        registry: &DiagramElementRegistry,
-        diagram: &Diagram,
-        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
-    ) -> Result<(), DiagramErrorCode> {
-        match &self.builder {
-            SectionProvider::Builder(_) => {
-                for (key, next_op) in &self.connect {
-                    workflow_builder.add_edge(Edge {
-                        source: op_id.clone().into(),
-                        target: next_op.clone(),
-                        output: None,
-                        tag: Some(key.clone()),
-                    })?;
-                }
-                Ok(())
-            }
-            SectionProvider::Template(template_id) => {
-                let template = diagram.get_template(template_id)?;
-                template.add_edges(
-                    op_id,
-                    workflow_builder,
-                    builder,
-                    registry,
-                    diagram,
-                    node_inputs,
-                )
-            }
-        }
-    }
-
-    pub(super) fn try_connect(
-        &self,
-        vertex: &Vertex,
-        builder: &mut Builder,
-        registry: &DiagramElementRegistry,
-        op_id: &OperationId,
-        buffers: &mut HashMap<OperationId, AnyBuffer>,
-    ) -> Result<bool, DiagramErrorCode> {
-        let mut inputs = HashMap::with_capacity(vertex.in_edges.len());
-        for edge in &vertex.in_edges {
-            let mut edge = edge.try_lock().unwrap();
-            if let Some(output) = edge.output.take() {
-                match &edge.target {
-                    NextOperation::Section { section: _, input } => {
-                        inputs.insert(input.clone(), output);
-                    }
-                    _ => return Err(DiagramErrorCode::UnknownTarget),
-                }
-            } else {
-                return Ok(false);
-            }
-        }
-
-        match &self.builder {
+        match &self.provider {
             SectionProvider::Builder(builder_id) => {
                 let reg = registry.get_section_registration(builder_id)?;
-
-                // check that there are no extra inputs
-                for k in inputs.keys() {
-                    if !reg.metadata.inputs.contains_key(k) {
-                        return Err(SectionError::ExtraInput(k.clone()).into());
-                    }
-                }
-
-                // check that all outputs are available
-                for k in reg.metadata.outputs.keys() {
-                    if !self.connect.contains_key(k) {
-                        return Err(SectionError::MissingOutput(k.clone()).into());
-                    }
-                }
-
-                // note that unlike nodes, sections are created only when trying to connect
-                // because we need all the buffers to be created first, and buffers are
-                // created at connect time.
                 let section = reg.create_section(builder, self.config.clone())?;
-                let mut section_buffers = HashMap::with_capacity(self.buffers.len());
-                let mut outputs = HashMap::new();
-                section.try_connect(
-                    builder,
-                    inputs,
-                    &mut outputs,
-                    &mut section_buffers,
-                    &registry.messages,
-                )?;
+                let slots = section.into_slots();
 
-                for edge in &vertex.out_edges {
-                    let mut edge = edge.try_lock().unwrap();
-                    if let Some(output_key) = &edge.tag {
-                        let output = outputs
-                            .remove(output_key)
-                            .ok_or(SectionError::ExtraOutput(output_key.clone()))?;
-                        edge.output = Some(output);
+                // check for extra outputs
+                for k in self.connect.keys() {
+                    if !slots.outputs.contains_key(k) {
+                        return Err(SectionError::ExtraOutput(k.clone()).into());
                     }
                 }
 
-                // for now we just do namespacing by prefixing, if this is insufficient,
-                // a more concrete impl may be done in `OperationId`.
-                for (key, buffer) in section_buffers {
-                    buffers.insert(format!("{}/{}", op_id, key), buffer);
+                for (k, input) in slots.inputs {
+                    wf_builder.add_vertex(
+                        Self::scoped_op_id(&op_id, &k),
+                        move |vertex, builder, _, _| {
+                            let output = validate_single_input(vertex)?;
+                            dyn_connect(builder, output, input, &registry.messages)?;
+                            Ok(true)
+                        },
+                    );
                 }
 
-                Ok(true)
+                for (k, output) in slots.outputs {
+                    let target = self
+                        .connect
+                        .get(&k)
+                        .ok_or_else(|| SectionError::MissingOutput(k.clone()))?;
+
+                    wf_builder
+                        .add_vertex(Self::scoped_op_id(&op_id, &k), move |_, _, _, _| {
+                            // already connected when section is created
+                            Ok(true)
+                        })
+                        .add_output_edge(target.clone(), Some(output));
+                }
+
+                for (k, buffer) in slots.buffers {
+                    let scoped_id = Self::scoped_op_id(&op_id, &k);
+                    wf_builder.add_vertex(scoped_id.clone(), move |_, _, _, buffers| {
+                        buffers.insert(scoped_id.clone(), buffer);
+                        Ok(true)
+                    });
+                }
+
+                Ok(())
             }
-            SectionProvider::Template(_template) => panic!("TODO"),
+            SectionProvider::Template(template_id) => {
+                let template = diagram.get_template(template_id)?;
+                template.add_vertices(&op_id, self, wf_builder, builder, diagram, registry)
+            }
         }
     }
 }
@@ -191,15 +122,24 @@ pub trait SectionMetadataProvider {
     fn metadata() -> &'static SectionMetadata;
 }
 
+pub struct SectionSlots {
+    inputs: HashMap<String, DynInputSlot>,
+    outputs: HashMap<String, DynOutput>,
+    buffers: HashMap<String, AnyBuffer>,
+}
+
+impl SectionSlots {
+    pub fn new() -> Self {
+        Self {
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
+            buffers: HashMap::new(),
+        }
+    }
+}
+
 pub trait Section {
-    fn try_connect(
-        self: Box<Self>,
-        builder: &mut Builder,
-        inputs: HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynOutput>,
-        buffers: &mut HashMap<OperationId, AnyBuffer>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode>;
+    fn into_slots(self: Box<Self>) -> SectionSlots;
 
     fn on_register(registry: &mut DiagramElementRegistry)
     where
@@ -211,15 +151,7 @@ pub trait SectionItem {
 
     fn build_metadata(metadata: &mut SectionMetadata, key: &'static str);
 
-    fn try_connect(
-        self,
-        key: &String,
-        builder: &mut Builder,
-        inputs: &mut HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynOutput>,
-        buffers: &mut HashMap<OperationId, AnyBuffer>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode>;
+    fn insert_into_slots(self, key: String, slots: &mut SectionSlots);
 }
 
 impl<T> SectionItem for InputSlot<T>
@@ -237,19 +169,8 @@ where
         );
     }
 
-    fn try_connect(
-        self,
-        key: &String,
-        builder: &mut Builder,
-        inputs: &mut HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynOutput>,
-        _buffers: &mut HashMap<OperationId, AnyBuffer>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        let output = inputs
-            .remove(key)
-            .ok_or(SectionError::MissingInput(key.clone()))?;
-        dyn_connect(builder, output, self.into(), registry)
+    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
+        slots.inputs.insert(key, self.into());
     }
 }
 
@@ -268,17 +189,8 @@ where
         );
     }
 
-    fn try_connect(
-        self,
-        key: &String,
-        _builder: &mut Builder,
-        _inputs: &mut HashMap<String, DynOutput>,
-        outputs: &mut HashMap<String, DynOutput>,
-        _buffers: &mut HashMap<OperationId, AnyBuffer>,
-        _registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        outputs.insert(key.clone(), self.into());
-        Ok(())
+    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
+        slots.outputs.insert(key, self.into());
     }
 }
 
@@ -297,17 +209,8 @@ where
         );
     }
 
-    fn try_connect(
-        self,
-        key: &String,
-        _builder: &mut Builder,
-        _inputs: &mut HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynOutput>,
-        buffers: &mut HashMap<OperationId, AnyBuffer>,
-        _registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        buffers.insert(key.to_string(), self.as_any_buffer());
-        Ok(())
+    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
+        slots.buffers.insert(key, self.into());
     }
 }
 
@@ -326,30 +229,6 @@ pub struct SectionBuffer {
     pub(super) item_type: TypeInfo,
 }
 
-pub(super) struct DynSection {
-    outputs: HashMap<String, DynOutput>,
-}
-
-impl Section for DynSection {
-    fn try_connect(
-        self: Box<Self>,
-        _builder: &mut Builder,
-        _inputs: HashMap<String, DynOutput>,
-        _outputs: &mut HashMap<String, DynOutput>,
-        _buffers: &mut HashMap<OperationId, AnyBuffer>,
-        _registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        panic!("TODO")
-    }
-
-    fn on_register(_registry: &mut DiagramElementRegistry)
-    where
-        Self: Sized,
-    {
-        // dyn section cannot register message operations
-    }
-}
-
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub(super) struct SectionTemplate {
     inputs: Vec<String>,
@@ -362,36 +241,24 @@ impl SectionTemplate {
     fn add_vertices<'a>(
         &'a self,
         section_op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder<'a>,
-        diagram: &'a Diagram,
-        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
-    ) -> Result<(), DiagramErrorCode> {
-        for (op_id, op) in &self.ops {
-            let op_id = format!("{}/{}", section_op_id, op_id);
-            workflow_builder.add_vertex_from_op(op_id, op, diagram, node_inputs)?;
-        }
-        Ok(())
-    }
-
-    fn add_edges<'a>(
-        &self,
-        section_op_id: &OperationId,
-        workflow_builder: &mut WorkflowBuilder<'a>,
+        section_op: &SectionOp,
+        wf_builder: &mut WorkflowBuilder<'a>,
         builder: &mut Builder,
-        registry: &DiagramElementRegistry,
-        diagram: &Diagram,
-        node_inputs: &'a RefCell<HashMap<OperationId, DynInputSlot>>,
+        diagram: &'a Diagram,
+        registry: &'a DiagramElementRegistry,
     ) -> Result<(), DiagramErrorCode> {
         for (op_id, op) in &self.ops {
-            let op_id = format!("{}/{}", section_op_id, op_id);
-            workflow_builder.add_edge_from_op(
-                &op_id,
-                op,
-                builder,
-                registry,
-                diagram,
-                node_inputs,
-            )?;
+            let op_id = SectionOp::scoped_op_id(section_op_id, op_id);
+            let mut target_aliases = HashMap::new();
+            for k in &self.outputs {
+                let target = section_op
+                    .connect
+                    .get(k)
+                    .ok_or_else(|| SectionError::MissingOutput(k.clone()))?;
+                target_aliases.insert(k.clone(), target.clone().into_operation_id());
+            }
+            wf_builder.set_target_aliases(target_aliases);
+            wf_builder.add_vertices_from_op(op_id, op, builder, diagram, registry)?;
         }
         Ok(())
     }
@@ -399,12 +266,6 @@ impl SectionTemplate {
 
 #[derive(thiserror::Error, Debug)]
 pub enum SectionError {
-    #[error("section does not have input [{0}]")]
-    MissingInput(String),
-
-    #[error("operation has extra input [{0}] that is not in the section")]
-    ExtraInput(String),
-
     #[error("section does not have output [{0}]")]
     MissingOutput(String),
 
@@ -759,11 +620,7 @@ mod tests {
             .world
             .command(|cmds| diagram.spawn_io_workflow(cmds, &registry))
             .unwrap_err();
-        let section_err = match err.code {
-            DiagramErrorCode::SectionError(section_err) => section_err,
-            _ => panic!("expected SectionError"),
-        };
-        assert!(matches!(section_err, SectionError::MissingInput(_)));
+        assert!(matches!(err.code, DiagramErrorCode::OnlySingleInput));
     }
 
     #[test]
@@ -804,11 +661,7 @@ mod tests {
             .world
             .command(|cmds| diagram.spawn_io_workflow(cmds, &fixture.registry))
             .unwrap_err();
-        let section_err = match err.code {
-            DiagramErrorCode::SectionError(section_err) => section_err,
-            _ => panic!("expected SectionError"),
-        };
-        assert!(matches!(section_err, SectionError::ExtraInput(_)));
+        assert!(matches!(err.code, DiagramErrorCode::OperationNotFound(_)));
     }
 
     #[derive(Section)]
@@ -882,5 +735,57 @@ mod tests {
         context.run_while_pending(&mut promise);
         let result = promise.take().available().unwrap();
         assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_section_template() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "test_template": {
+                    "inputs": ["input1", "input2"],
+                    "outputs": ["output1", "output2"],
+                    "buffers": [],
+                    "ops": {
+                        "input1": {
+                            "type": "node",
+                            "builder": "multiply3",
+                            "next": "output1",
+                        },
+                        "input2": {
+                            "type": "node",
+                            "builder": "multiply3",
+                            "next": "output2",
+                        },
+                    },
+                },
+            },
+            "start": "fork_clone",
+            "ops": {
+                "fork_clone": {
+                    "type": "fork_clone",
+                    "next": [
+                        { "section": "test_tmpl", "input": "input1" },
+                        { "section": "test_tmpl", "input": "input2" },
+                    ],
+                },
+                "test_tmpl": {
+                    "type": "section",
+                    "template": "test_template",
+                    "connect": {
+                        "output1": { "builtin": "terminate" },
+                        "output2": { "builtin": "terminate" },
+                    },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .unwrap();
+        assert_eq!(result, 12);
     }
 }

@@ -214,7 +214,7 @@ type SplitFn = Box<
         &mut Builder,
         DynOutput,
         &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>,
+    ) -> Result<DynSplitOutputs, DiagramErrorCode>,
 >;
 type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 type BufferAccessFn =
@@ -690,7 +690,7 @@ impl MessageOperation {
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
+    ) -> Result<DynSplitOutputs, DiagramErrorCode> {
         let f = self
             .split_impl
             .as_ref()
@@ -1011,7 +1011,7 @@ impl MessageRegistry {
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'b SplitOp,
-    ) -> Result<DynSplitOutputs<'b>, DiagramErrorCode> {
+    ) -> Result<DynSplitOutputs, DiagramErrorCode> {
         if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.split(builder, output, split_op)
         } else {
