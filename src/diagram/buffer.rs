@@ -4,15 +4,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    unknown_diagram_error, Accessor, AnyBuffer, BufferIdentifier, BufferMap, BufferSettings,
-    Builder, InputSlot, Output,
+    Accessor, AnyBuffer, BufferIdentifier, BufferMap, BufferSettings, Builder, InputSlot, Output,
 };
 
 use super::{
-    type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder, Vertex},
-    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
-    MessageRegistry, NextOperation, OperationId,
+    type_info::TypeInfo, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode,
+    DiagramOperation, DynOutput, MessageRegistry, NextOperation, OperationId, Vertex,
+    WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -25,34 +23,26 @@ pub struct BufferOp {
 }
 
 impl BufferOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        _builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        Ok(())
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+            self.try_connect(vertex, builder, &registry.messages, &op_id, buffers)
+        });
     }
 
-    pub(super) fn try_connect<'a>(
+    pub(super) fn try_connect(
         &self,
+        vertex: &Vertex,
         builder: &mut Builder,
-        vertex: &'a Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        buffers: &mut HashMap<&'a OperationId, AnyBuffer>,
         registry: &MessageRegistry,
+        op_id: &OperationId,
+        buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         if vertex.in_edges.is_empty() {
             // this will eventually cause workflow builder to return a [`DiagramErrorCode::IncompleteDiagram`] error.
             return Ok(false);
         }
 
-        let first_output = edges
-            // SAFETY: we checked that `vertex.in_edges` is not empty.
-            .remove(&vertex.in_edges[0])
-            .ok_or_else(|| unknown_diagram_error!())?
-            .output
-            .take()
-            // expected all inputs to be ready
-            .ok_or_else(|| unknown_diagram_error!())?;
+        let first_output = vertex.in_edges[0].take_output();
         let first_output = if self.serialize.unwrap_or(false) {
             registry.serialize(builder, first_output)?.into()
         } else {
@@ -61,14 +51,8 @@ impl BufferOp {
 
         let rest_outputs: Vec<DynOutput> = vertex.in_edges[1..]
             .iter()
-            .map(|edge_id| -> Result<_, DiagramErrorCode> {
-                let output = edges
-                    .remove(edge_id)
-                    .ok_or_else(|| unknown_diagram_error!())?
-                    .output
-                    .take()
-                    // expected all inputs to be ready
-                    .ok_or_else(|| unknown_diagram_error!())?;
+            .map(|edge| -> Result<_, DiagramErrorCode> {
+                let output = edge.take_output();
                 if self.serialize.unwrap_or(false) {
                     Ok(registry.serialize(builder, output)?.into())
                 } else {
@@ -90,7 +74,7 @@ impl BufferOp {
 
         // convert the first output into a buffer
         let buffer = first_output.into_any_buffer(builder, self.settings)?;
-        let buffer = match buffers.entry(vertex.op_id) {
+        let buffer = match buffers.entry(op_id.clone()) {
             Entry::Occupied(mut entry) => {
                 entry.insert(buffer);
                 entry.into_mut()
@@ -109,28 +93,27 @@ impl BufferOp {
 
 /// if `target` has a value, return the request type of the operation, else, return the request type of `next`
 pub(super) fn get_node_request_type(
-    target: &Option<OperationId>,
+    target: &Option<NextOperation>,
     next: &NextOperation,
     diagram: &Diagram,
     registry: &DiagramElementRegistry,
 ) -> Result<TypeInfo, DiagramErrorCode> {
-    let target_node = if let Some(target) = target {
-        diagram.get_op(target)?
-    } else {
-        match next {
-            NextOperation::Target(op_id) => diagram.get_op(op_id)?,
-            NextOperation::Builtin { builtin } => match builtin {
-                BuiltinTarget::Terminate => return Ok(TypeInfo::of::<serde_json::Value>()),
-                _ => return Err(DiagramErrorCode::UnknownTarget),
-            },
+    let target_op = if let Some(op) = target { op } else { next };
+    match target_op {
+        NextOperation::Target(op_id) => match diagram.get_op(op_id)? {
+            DiagramOperation::Node(op) => Ok(registry.get_node_registration(&op.builder)?.request),
+            _ => Err(DiagramErrorCode::UnknownTarget),
+        },
+        NextOperation::Section { section, input } => {
+            let reg = registry.get_section_registration(section)?;
+            let input = reg.metadata.inputs.get(input).unwrap();
+            Ok(input.message_type)
         }
-    };
-    let node_op = match target_node {
-        DiagramOperation::Node(op) => op,
-        _ => return Err(DiagramErrorCode::UnknownTarget),
-    };
-    let target_type = registry.get_node_registration(&node_op.builder)?.request;
-    Ok(target_type)
+        NextOperation::Builtin { builtin } => match builtin {
+            BuiltinTarget::Terminate => Ok(TypeInfo::of::<serde_json::Value>()),
+            BuiltinTarget::Dispose => Err(DiagramErrorCode::UnknownTarget),
+        },
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -145,7 +128,7 @@ impl BufferInputs {
     /// Returns `None` if one or more buffer does not exist.
     pub(super) fn as_buffer_map(
         &self,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
     ) -> Option<BufferMap> {
         match self {
             Self::Dict(mapping) => {
@@ -192,25 +175,29 @@ pub struct BufferAccessOp {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl BufferAccessOp {
-    pub(super) fn build_edges<'a>(
+    pub(super) fn add_vertices<'a>(
         &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
+        diagram: &'a Diagram,
+    ) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                self.try_connect(vertex, builder, registry, buffers, diagram)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect<'a>(
+    pub(super) fn try_connect(
         &self,
-        builder: &mut Builder,
         vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
+        builder: &mut Builder,
         registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
         let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
@@ -219,36 +206,14 @@ impl BufferAccessOp {
             return Ok(false);
         };
 
-        let output = if let Some(output) = edges
-            .get_mut(
-                vertex
-                    .in_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?
-            .output
-            .take()
-        {
-            output
-        } else {
-            return Ok(false);
-        };
+        let output = vertex.in_edges[0].take_output();
 
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output =
             registry
                 .messages
                 .with_buffer_access(builder, output, &buffers, target_type)?;
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }
@@ -276,25 +241,29 @@ pub struct ListenOp {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl ListenOp {
-    pub(super) fn build_edges<'a>(
+    pub(super) fn add_vertices<'a>(
         &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
+        diagram: &'a Diagram,
+    ) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                self.try_connect(vertex, builder, registry, buffers, diagram)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect<'a>(
+    pub(super) fn try_connect(
         &self,
-        builder: &mut Builder,
         vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
+        builder: &mut Builder,
         registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
         let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
@@ -305,15 +274,7 @@ impl ListenOp {
 
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.listen(builder, &buffers, target_type)?;
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }

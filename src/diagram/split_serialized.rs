@@ -24,14 +24,14 @@ use tracing::debug;
 
 use crate::{
     unknown_diagram_error, Builder, Chain, ForRemaining, FromSequential, FromSpecific,
-    ListSplitKey, MapSplitKey, OperationResult, SplitDispatcher, Splittable,
+    IntoOperationId, ListSplitKey, MapSplitKey, OperationResult, SplitDispatcher, Splittable,
 };
 
 use super::{
     impls::{DefaultImpl, NotSupported},
     type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
+    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    OperationId, SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -47,28 +47,28 @@ pub struct SplitOp {
 }
 
 impl SplitOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        let mut edge_builder =
+            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                self.try_connect(vertex, builder, &registry.messages)
+            });
         let next_op_ids: Vec<&NextOperation> =
             self.sequential.iter().chain(self.keyed.values()).collect();
         for next_op_id in next_op_ids {
-            builder.add_output_edge(next_op_id, None)?;
+            edge_builder.add_output_edge(next_op_id.clone(), None);
         }
         if let Some(remaining) = &self.remaining {
-            builder.add_output_edge(&remaining, None)?;
+            edge_builder.add_output_edge(remaining.clone(), None);
         }
-        Ok(())
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
+        vertex: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(vertex)?;
         let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             let chain = output.into_output::<serde_json::Value>()?.chain(builder);
             split_chain(chain, self)
@@ -79,25 +79,25 @@ impl SplitOp {
         // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
         // then the last item will always be the remaining edge.
         if self.remaining.is_some() {
-            let out_edge = out_edges.last_mut().ok_or(unknown_diagram_error!())?;
-            out_edge.output = Some(outputs.remaining);
+            let out_edge = vertex.out_edges.last().ok_or(unknown_diagram_error!())?;
+            out_edge.set_output(outputs.remaining);
         }
 
         let other_edges = if self.remaining.is_some() {
-            let out_edges_len = out_edges.len();
-            &mut out_edges[..(out_edges_len - 1)]
+            let out_edges_len = vertex.out_edges.len();
+            &vertex.out_edges[..(out_edges_len - 1)]
         } else {
-            &mut out_edges[..]
+            &vertex.out_edges[..]
         };
         for out_edge in other_edges {
             let output = outputs
                 .outputs
-                .remove(out_edge.target)
+                .remove(out_edge.target())
                 .ok_or(unknown_diagram_error!())?;
-            out_edge.output = Some(output);
+            out_edge.set_output(output);
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -214,15 +214,15 @@ impl FromSpecific for ListSplitKey {
 }
 
 #[derive(Debug)]
-pub struct DynSplitOutputs<'a> {
-    pub(super) outputs: HashMap<&'a NextOperation, DynOutput>,
+pub struct DynSplitOutputs {
+    pub(super) outputs: HashMap<OperationId, DynOutput>,
     pub(super) remaining: DynOutput,
 }
 
 pub(super) fn split_chain<'a, T>(
     chain: Chain<T>,
     split_op: &'a SplitOp,
-) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>
+) -> Result<DynSplitOutputs, DiagramErrorCode>
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
@@ -239,7 +239,7 @@ where
     }
 
     chain.split(|mut sb| -> Result<DynSplitOutputs, DiagramErrorCode> {
-        let outputs: HashMap<&NextOperation, DynOutput> = split_op
+        let outputs: HashMap<OperationId, DynOutput> = split_op
             .sequential
             .iter()
             .enumerate()
@@ -251,10 +251,16 @@ where
                     .map(|(k, op_id)| (SeqOrKey::Key(k), op_id)),
             )
             .map(
-                |(ki, op_id)| -> Result<(&NextOperation, DynOutput), DiagramErrorCode> {
+                |(ki, op_id)| -> Result<(OperationId, DynOutput), DiagramErrorCode> {
                     match ki {
-                        SeqOrKey::Seq(i) => Ok((op_id, sb.sequential_output(i)?.into())),
-                        SeqOrKey::Key(k) => Ok((op_id, sb.specific_output(k.clone())?.into())),
+                        SeqOrKey::Seq(i) => Ok((
+                            op_id.clone().into_operation_id(),
+                            sb.sequential_output(i)?.into(),
+                        )),
+                        SeqOrKey::Key(k) => Ok((
+                            op_id.clone().into_operation_id(),
+                            sb.specific_output(k.clone())?.into(),
+                        )),
                     }
                 },
             )
@@ -275,7 +281,7 @@ pub trait DynSplit<T, Serializer> {
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>;
+    ) -> Result<DynSplitOutputs, DiagramErrorCode>;
 
     fn on_register(registry: &mut MessageRegistry);
 }
@@ -287,7 +293,7 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
         _builder: &mut Builder,
         _output: DynOutput,
         _split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
+    ) -> Result<DynSplitOutputs, DiagramErrorCode> {
         Err(DiagramErrorCode::NotSplittable)
     }
 
@@ -306,7 +312,7 @@ where
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
+    ) -> Result<DynSplitOutputs, DiagramErrorCode> {
         let chain = output.into_output::<T>()?.chain(builder);
         split_chain(chain, split_op)
     }

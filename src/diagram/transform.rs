@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::debug;
 
-use crate::{diagram::type_info::TypeInfo, unknown_diagram_error, Builder, Output};
+use crate::{diagram::type_info::TypeInfo, Builder, Output};
 
 use super::{
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, Vertex,
+    WorkflowBuilder,
 };
 
 #[derive(Error, Debug)]
@@ -33,25 +33,24 @@ pub struct TransformOp {
 }
 
 impl TransformOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                self.try_connect(vertex, builder, &registry.messages)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
+        vertex: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(vertex)?;
         let transformed_output = transform_output(builder, registry, output, self)?;
-        let out_edge = out_edges.get_mut(0).ok_or(unknown_diagram_error!())?;
-        out_edge.output = Some(transformed_output.into());
-        Ok(())
+        vertex.out_edges[0].set_output(transformed_output.into());
+        Ok(true)
     }
 }
 

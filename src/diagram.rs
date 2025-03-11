@@ -5,6 +5,7 @@ mod impls;
 mod join;
 mod node;
 mod registration;
+mod section;
 mod serialization;
 mod split_serialized;
 mod transform;
@@ -20,13 +21,14 @@ pub use join::JoinOutput;
 use join::{JoinOp, SerializedJoinOp};
 pub use node::NodeOp;
 pub use registration::*;
+pub use section::*;
 pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
 use transform::{TransformError, TransformOp};
 use type_info::TypeInfo;
 use unzip::UnzipOp;
-use workflow_builder::create_workflow;
+pub use workflow_builder::*;
 
 // ----------
 
@@ -43,19 +45,41 @@ const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
 pub type BuilderId = String;
 pub type OperationId = String;
 
+pub trait IntoOperationId {
+    fn into_operation_id(self) -> OperationId;
+}
+
+impl IntoOperationId for String {
+    fn into_operation_id(self) -> OperationId {
+        self
+    }
+}
+
 #[derive(
     Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum NextOperation {
     Target(OperationId),
+    Section { section: OperationId, input: String },
     Builtin { builtin: BuiltinTarget },
+}
+
+impl IntoOperationId for NextOperation {
+    fn into_operation_id(self) -> OperationId {
+        match self {
+            Self::Target(operation_id) => operation_id,
+            Self::Section { section, input } => format!("{}/{}", section, input),
+            Self::Builtin { builtin } => format!("builtin:{}", builtin),
+        }
+    }
 }
 
 impl Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Target(operation_id) => f.write_str(operation_id),
+            Self::Section { section, input } => write!(f, "section:{}({})", section, input),
             Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
         }
     }
@@ -92,6 +116,12 @@ pub enum BuiltinTarget {
 pub enum SourceOperation {
     Source(OperationId),
     Builtin { builtin: BuiltinSource },
+}
+
+impl IntoOperationId for SourceOperation {
+    fn into_operation_id(self) -> OperationId {
+        self.to_string()
+    }
 }
 
 impl From<OperationId> for SourceOperation {
@@ -153,7 +183,64 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Node(NodeOp),
+
+    /// Connect the request to a registered section.
+    ///
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "section_op",
+    ///     "ops": {
+    ///         "section_op": {
+    ///             "type": "section",
+    ///             "builder": "my_section_builder",
+    ///             "connect": {
+    ///                 "my_section_output": { "builtin": "terminate" }
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    ///
+    /// Custom sections can also be created via templates
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "templates": {
+    ///         "my_template": {
+    ///             "inputs": ["section_input"],
+    ///             "outputs": ["section_output"],
+    ///             "buffers": [],
+    ///             "ops": {
+    ///                 "section_input": {
+    ///                     "type": "node",
+    ///                     "builder": "my_node",
+    ///                     "next": "section_output"
+    ///                 }
+    ///             }
+    ///         }
+    ///     },
+    ///     "start": "section_op",
+    ///     "ops": {
+    ///         "section_op": {
+    ///             "type": "section",
+    ///             "template": "my_template",
+    ///             "connect": {
+    ///                 "section_output": { "builtin": "terminate" }
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    Section(SectionOp),
 
     /// If the request is cloneable, clone it into multiple responses.
     ///
@@ -172,6 +259,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     ForkClone(ForkCloneOp),
 
     /// If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses
@@ -192,6 +280,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Unzip(UnzipOp),
 
     /// If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.
@@ -212,6 +301,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     ForkResult(ForkResultOp),
 
     /// If the request is a list-like or map-like object, split it into multiple responses.
@@ -464,6 +554,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     BufferAccess(BufferAccessOp),
 
     /// Listen on a buffer.
@@ -498,6 +589,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Listen(ListenOp),
 }
 
@@ -549,6 +641,9 @@ pub struct Diagram {
     #[schemars(schema_with = "schema_with_string")]
     version: semver::Version,
 
+    #[serde(default)]
+    templates: HashMap<String, SectionTemplate>,
+
     /// Signifies the start of a workflow.
     start: NextOperation,
 
@@ -597,35 +692,70 @@ impl Diagram {
     where
         Streams: StreamPack,
     {
-        let mut err: Option<DiagramError> = None;
-
-        macro_rules! unwrap_or_return {
-            ($v:expr) => {
-                match $v {
-                    Ok(v) => v,
-                    Err(e) => {
-                        err = Some(e);
-                        return;
-                    }
-                }
-            };
-        }
-
-        let w = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
+        let build = |scope: DiagramScope<Streams>, builder: &mut Builder| {
             debug!(
                 "spawn workflow, scope input: {:?}, terminate: {:?}",
                 scope.input.id(),
                 scope.terminate.id()
             );
 
-            unwrap_or_return!(create_workflow(scope, builder, registry, self));
-        });
+            let mut workflow_builder = WorkflowBuilder::new();
 
-        if let Some(err) = err {
-            return Err(err);
+            // add start vertex
+            let start = SourceOperation::Builtin {
+                builtin: BuiltinSource::Start,
+            };
+            workflow_builder
+                .add_vertex(start.clone(), move |_, _, _, _| Ok(true))
+                .add_output_edge(self.start.clone(), Some(scope.input.into()));
+
+            // add terminate vertex
+            let terminate = NextOperation::Builtin {
+                builtin: BuiltinTarget::Terminate,
+            };
+            workflow_builder.add_vertex(terminate, move |vertex, builder, registry, _| {
+                for edge in &vertex.in_edges {
+                    let output = edge.take_output();
+                    let serialized_output = registry.messages.serialize(builder, output)?;
+                    builder.connect(serialized_output, scope.terminate.into());
+                }
+                Ok(true)
+            });
+
+            let dispose = NextOperation::Builtin {
+                builtin: BuiltinTarget::Dispose,
+            };
+            workflow_builder.add_vertex(dispose, move |_, _, _, _| Ok(true));
+
+            // add other vertices
+            for (op_id, op) in &self.ops {
+                workflow_builder
+                    .add_vertices_from_op(op_id.clone(), op, builder, self, registry)
+                    .map_err(|code| DiagramError {
+                        code,
+                        context: DiagramErrorContext {
+                            op_id: Some(op_id.clone()),
+                        },
+                    })?;
+            }
+
+            workflow_builder.create_workflow(builder, registry)
+        };
+
+        let mut err: Option<DiagramError> = None;
+        let wf = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
+            match build(scope, builder) {
+                Ok(_) => {}
+                Err(e) => {
+                    err = Some(e);
+                }
+            };
+        });
+        if let Some(e) = err {
+            return Err(e);
         }
 
-        Ok(w)
+        Ok(wf)
     }
 
     /// Spawns a workflow from this diagram.
@@ -687,6 +817,12 @@ impl Diagram {
             .get(op_id)
             .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))
     }
+
+    fn get_template(&self, template_id: &String) -> Result<&SectionTemplate, DiagramErrorCode> {
+        self.templates
+            .get(template_id)
+            .ok_or_else(|| DiagramErrorCode::OperationNotFound(template_id.clone()))
+    }
 }
 
 #[derive(Debug)]
@@ -719,6 +855,9 @@ pub enum DiagramErrorCode {
 
     #[error("operation [{0}] not found")]
     OperationNotFound(OperationId),
+
+    #[error("section template [{0}] does not exist")]
+    TemplateNotFound(OperationId),
 
     #[error("type mismatch, source {source_type}, target {target_type}")]
     TypeMismatch {
@@ -767,11 +906,14 @@ pub enum DiagramErrorCode {
     #[error("cannot access buffer")]
     CannotBufferAccess,
 
-    #[error("cannot listen on these buffers to produce a request of [{0}]")]
-    CannotListen(TypeInfo),
+    #[error("cannot listen")]
+    CannotListen,
 
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),
+
+    #[error(transparent)]
+    SectionError(#[from] SectionError),
 
     #[error("one or more operation is missing inputs")]
     IncompleteDiagram,
@@ -950,7 +1092,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
-            CancellationCause::Unreachable(_)
+            CancellationCause::Unreachable(_),
         ));
     }
 

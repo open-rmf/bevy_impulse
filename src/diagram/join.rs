@@ -4,12 +4,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{unknown_diagram_error, AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
+use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
     buffer::{get_node_request_type, BufferInputs},
-    workflow_builder::{Edge, EdgeBuilder, Vertex},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
+    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId, Vertex,
+    WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -21,25 +21,29 @@ pub struct JoinOp {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl JoinOp {
-    pub(super) fn build_edges<'a>(
+    pub(super) fn add_vertices<'a>(
         &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
+        diagram: &'a Diagram,
+    ) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
+                self.try_connect(vertex, builder, registry, buffers, diagram)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
-        builder: &mut Builder,
         vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
+        builder: &mut Builder,
         registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
         if self.buffers.is_empty() {
@@ -54,15 +58,7 @@ impl JoinOp {
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
         let output = registry.messages.join(builder, &buffers, target_type)?;
 
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }
@@ -77,20 +73,19 @@ pub struct SerializedJoinOp {
 }
 
 impl SerializedJoinOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        wf_builder
+            .add_vertex(op_id.clone(), move |vertex, builder, _, buffers| {
+                self.try_connect(vertex, builder, buffers)
+            })
+            .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect(
         &self,
-        builder: &mut Builder,
         vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
+        builder: &mut Builder,
+        buffers: &HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
@@ -147,15 +142,7 @@ impl SerializedJoinOp {
             .output()
             .into();
 
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
+        vertex.out_edges[0].set_output(output);
         Ok(true)
     }
 }

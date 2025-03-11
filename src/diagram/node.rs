@@ -1,14 +1,11 @@
-use std::collections::HashMap;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{unknown_diagram_error, Builder};
+use crate::Builder;
 
 use super::{
-    workflow_builder::{dyn_connect, Edge, EdgeBuilder, Vertex},
-    BuilderId, DiagramElementRegistry, DiagramErrorCode, DynInputSlot, MessageRegistry,
-    NextOperation, OperationId,
+    workflow_builder::dyn_connect, BuilderId, DiagramElementRegistry, DiagramErrorCode,
+    NextOperation, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -21,47 +18,26 @@ pub struct NodeOp {
 }
 
 impl NodeOp {
-    pub(super) fn build_edges<'a>(
+    pub(super) fn add_vertices<'a>(
         &'a self,
         builder: &mut Builder,
+        wf_builder: &mut WorkflowBuilder<'a>,
+        op_id: String,
         registry: &DiagramElementRegistry,
-        inputs: &mut HashMap<&'a OperationId, DynInputSlot>,
-        op_id: &'a OperationId,
-        mut edge_builder: EdgeBuilder<'a, '_>,
     ) -> Result<(), DiagramErrorCode> {
         let reg = registry.get_node_registration(&self.builder)?;
-        let n = reg.create_node(builder, self.config.clone())?;
-        inputs.insert(op_id, n.input);
-        edge_builder.add_output_edge(&self.next, Some(n.output))?;
+        let node = reg.create_node(builder, self.config.clone())?;
+
+        let mut edge_builder =
+            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                for edge in &vertex.in_edges {
+                    let output = edge.take_output();
+                    dyn_connect(builder, output, node.input.into(), &registry.messages)?;
+                }
+                Ok(true)
+            });
+        edge_builder.add_output_edge(self.next.clone(), Some(node.output));
+
         Ok(())
-    }
-
-    pub(super) fn try_connect(
-        &self,
-        builder: &mut Builder,
-        target: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        inputs: &HashMap<&OperationId, DynInputSlot>,
-        registry: &MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
-        let in_edge = target
-            .in_edges
-            .get(0)
-            .ok_or(DiagramErrorCode::OnlySingleInput)?;
-        let output = if let Some(output) = edges
-            .get_mut(in_edge)
-            .ok_or_else(|| unknown_diagram_error!())?
-            .output
-            .take()
-        {
-            output
-        } else {
-            return Ok(false);
-        };
-
-        let input = inputs[target.op_id];
-        let deserialized_output = registry.deserialize(&input.type_info, builder, output)?;
-        dyn_connect(builder, deserialized_output, input)?;
-        Ok(true)
     }
 }

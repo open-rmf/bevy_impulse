@@ -4,15 +4,14 @@ use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::{unknown_diagram_error, Builder};
+use crate::Builder;
 
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     register_serialize,
     type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    SerializeMessage,
+    validate_single_input, DiagramErrorCode, MessageRegistration, MessageRegistry, NextOperation,
+    SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -23,41 +22,37 @@ pub struct ForkResultOp {
 }
 
 impl ForkResultOp {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.ok, None)?;
-        builder.add_output_edge(&self.err, None)?;
-        Ok(())
+    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+        let mut edge_builder =
+            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
+                self.try_connect(vertex, builder, &registry.messages)
+            });
+        edge_builder.add_output_edge(self.ok.clone(), None);
+        edge_builder.add_output_edge(self.err.clone(), None);
     }
 
     pub(super) fn try_connect<'b>(
         &self,
+        vertex: &Vertex,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
         registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode> {
+        let output = validate_single_input(vertex)?;
         let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             Err(DiagramErrorCode::CannotForkResult)
         } else {
             registry.fork_result(builder, output)
         }?;
         {
-            let ok_edge = out_edges
-                .get_mut(0)
-                .ok_or_else(|| unknown_diagram_error!())?;
-            ok_edge.output = Some(ok);
+            let ok_edge = &vertex.out_edges[0];
+            ok_edge.set_output(ok);
         }
         {
-            let err_edge = out_edges
-                .get_mut(1)
-                .ok_or_else(|| unknown_diagram_error!())?;
-            err_edge.output = Some(err);
+            let err_edge = &vertex.out_edges[1];
+            err_edge.set_output(err);
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 
