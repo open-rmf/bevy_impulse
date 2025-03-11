@@ -24,6 +24,10 @@ impl Edge {
         &self.target
     }
 
+    /// Take the output of an edge, this will panic if the edge does not have an output.
+    ///
+    /// Calling this for an input edge from the connect handler of a vertex should never panic
+    /// because the workflow builder ensures that all input edges are ready before calling the handler.
     pub(super) fn take_output(&self) -> DynOutput {
         self.output.try_lock().unwrap().take().unwrap()
     }
