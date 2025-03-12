@@ -8,13 +8,12 @@ use crate::{
 };
 
 use super::{
-    Diagram, DiagramElementRegistry, DiagramError, DiagramStart, DiagramTerminate,
-    NodeBuilderOptions,
+    Diagram, DiagramError, DiagramStart, DiagramTerminate, JsonDiagramRegistry, NodeBuilderOptions,
 };
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
-    pub(super) registry: DiagramElementRegistry,
+    pub(super) registry: JsonDiagramRegistry,
 }
 
 impl DiagramTestFixture {
@@ -95,8 +94,8 @@ fn opaque_response(_: i64) -> Unserializable {
 }
 
 /// create a new node registry with some basic nodes registered
-fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
-    let mut registry = DiagramElementRegistry::new();
+fn new_registry_with_basic_nodes() -> JsonDiagramRegistry {
+    let mut registry = JsonDiagramRegistry::new();
     registry
         .opt_out()
         .no_response_cloning()

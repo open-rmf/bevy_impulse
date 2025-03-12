@@ -8,7 +8,7 @@ use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
     buffer::{get_node_request_type, BufferInputs},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId, Vertex,
+    Diagram, DiagramErrorCode, JsonDiagramRegistry, NextOperation, OperationId, Vertex,
     WorkflowBuilder,
 };
 
@@ -42,7 +42,7 @@ impl JoinOp {
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &DiagramElementRegistry,
+        registry: &JsonDiagramRegistry,
         buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
     ) -> Result<bool, DiagramErrorCode> {
@@ -188,7 +188,7 @@ mod tests {
         format!("{}{}", foobar[0], foobar[1])
     }
 
-    fn register_join_nodes(registry: &mut DiagramElementRegistry) {
+    fn register_join_nodes(registry: &mut JsonDiagramRegistry) {
         registry.register_node_builder(NodeBuilderOptions::new("foo"), |builder, _config: ()| {
             builder.create_map_block(foo)
         });

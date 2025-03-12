@@ -9,8 +9,8 @@ use crate::{
 
 use super::{
     type_info::TypeInfo, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode,
-    DiagramOperation, DynOutput, MessageRegistry, NextOperation, OperationId, Vertex,
-    WorkflowBuilder,
+    DiagramOperation, DynOutput, MessageRegistry, NextOperation, OperationId, SerializationOptions,
+    Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -29,14 +29,17 @@ impl BufferOp {
         });
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<Serialized>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry,
+        registry: &MessageRegistry<Serialized>,
         op_id: &OperationId,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
-    ) -> Result<bool, DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        Serialized: Send + Sync + 'static,
+    {
         if vertex.in_edges.is_empty() {
             // this will eventually cause workflow builder to return a [`DiagramErrorCode::IncompleteDiagram`] error.
             return Ok(false);
@@ -92,12 +95,15 @@ impl BufferOp {
 }
 
 /// if `target` has a value, return the request type of the operation, else, return the request type of `next`
-pub(super) fn get_node_request_type(
+pub(super) fn get_node_request_type<SerializationOptionsT>(
     target: &Option<NextOperation>,
     next: &NextOperation,
     diagram: &Diagram,
-    registry: &DiagramElementRegistry,
-) -> Result<TypeInfo, DiagramErrorCode> {
+    registry: &DiagramElementRegistry<SerializationOptionsT>,
+) -> Result<TypeInfo, DiagramErrorCode>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     let target_op = if let Some(op) = target { op } else { next };
     match target_op {
         NextOperation::Target(op_id) => match diagram.get_op(op_id)? {
@@ -192,14 +198,17 @@ impl BufferAccessOp {
             .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &DiagramElementRegistry,
+        registry: &DiagramElementRegistry<SerializationOptionsT>,
         buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
             buffers
         } else {
@@ -258,14 +267,17 @@ impl ListenOp {
             .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &DiagramElementRegistry,
+        registry: &DiagramElementRegistry<SerializationOptionsT>,
         buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
             buffers
         } else {

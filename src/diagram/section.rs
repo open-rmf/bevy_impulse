@@ -8,7 +8,8 @@ use crate::{AnyBuffer, Buffer, Builder, InputSlot, Output};
 use super::{
     dyn_connect, type_info::TypeInfo, validate_single_input, BuilderId, Diagram,
     DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
-    IntoOperationId, NextOperation, OperationId, WorkflowBuilder,
+    IntoOperationId, JsonDiagramRegistry, NextOperation, OperationId, SerializationOptions,
+    WorkflowBuilder,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -43,7 +44,7 @@ impl SectionOp {
         wf_builder: &mut WorkflowBuilder<'a>,
         builder: &mut Builder,
         diagram: &'a Diagram,
-        registry: &'a DiagramElementRegistry,
+        registry: &'a JsonDiagramRegistry,
     ) -> Result<(), DiagramErrorCode> {
         match &self.provider {
             SectionProvider::Builder(builder_id) => {
@@ -138,10 +139,13 @@ impl SectionSlots {
     }
 }
 
-pub trait Section {
+pub trait Section<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     fn into_slots(self: Box<Self>) -> SectionSlots;
 
-    fn on_register(registry: &mut DiagramElementRegistry)
+    fn on_register(registry: &mut DiagramElementRegistry<SerializationOptionsT>)
     where
         Self: Sized;
 }
@@ -245,7 +249,7 @@ impl SectionTemplate {
         wf_builder: &mut WorkflowBuilder<'a>,
         builder: &mut Builder,
         diagram: &'a Diagram,
-        registry: &'a DiagramElementRegistry,
+        registry: &'a JsonDiagramRegistry,
     ) -> Result<(), DiagramErrorCode> {
         for (op_id, op) in &self.ops {
             let op_id = SectionOp::scoped_op_id(section_op_id, op_id);
@@ -295,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_register_section() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -338,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_section_unzip() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -362,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_section_fork_result() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -388,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_section_split() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -412,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_section_join() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -436,7 +440,7 @@ mod tests {
 
     #[test]
     fn test_section_buffer_access() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -462,7 +466,7 @@ mod tests {
 
     #[test]
     fn test_section_listen() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("test_section").with_name("TestSection"),
             |builder: &mut Builder, _config: ()| {
@@ -485,7 +489,7 @@ mod tests {
         test_output: Output<i64>,
     }
 
-    fn register_add_one(registry: &mut DiagramElementRegistry) {
+    fn register_add_one(registry: &mut JsonDiagramRegistry) {
         registry.register_section_builder(
             SectionBuilderOptions::new("add_one"),
             |builder: &mut Builder, _config: ()| {
@@ -500,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_section_workflow() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         register_add_one(&mut registry);
 
         let diagram = Diagram::from_json(json!({
@@ -531,7 +535,7 @@ mod tests {
 
     #[test]
     fn test_section_workflow_missing_output() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         register_add_one(&mut registry);
 
         let diagram = Diagram::from_json(json!({
@@ -562,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_section_workflow_extra_output() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         register_add_one(&mut registry);
 
         let diagram = Diagram::from_json(json!({
@@ -596,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_section_workflow_missing_input() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         register_add_one(&mut registry);
 
         let diagram = Diagram::from_json(json!({
@@ -672,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_section_workflow_buffer() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_section_builder(
             SectionBuilderOptions::new("add_one_to_buffer"),
             |builder: &mut Builder, _config: ()| {

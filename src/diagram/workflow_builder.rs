@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::{
-    Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DiagramOperation,
-    DynInputSlot, DynOutput, IntoOperationId, MessageRegistry, NextOperation, OperationId,
+    Diagram, DiagramError, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
+    IntoOperationId, JsonDiagramRegistry, MessageRegistry, NextOperation, OperationId,
 };
 
 pub(super) struct Edge {
@@ -44,7 +44,7 @@ impl Edge {
 pub(super) type ConnectVisitor<'a> = dyn Fn(
         &Vertex,
         &mut Builder,
-        &DiagramElementRegistry,
+        &JsonDiagramRegistry,
         &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode>
     + 'a;
@@ -98,7 +98,7 @@ impl<'a> WorkflowBuilder<'a> {
         F: Fn(
                 &Vertex,
                 &mut Builder,
-                &DiagramElementRegistry,
+                &JsonDiagramRegistry,
                 &mut HashMap<OperationId, AnyBuffer>,
             ) -> Result<bool, DiagramErrorCode>
             + 'a,
@@ -135,7 +135,7 @@ impl<'a> WorkflowBuilder<'a> {
         op: &'a DiagramOperation,
         builder: &mut Builder,
         diagram: &'a Diagram,
-        registry: &'a DiagramElementRegistry,
+        registry: &'a JsonDiagramRegistry,
     ) -> Result<(), DiagramErrorCode> {
         match op {
             DiagramOperation::Node(op) => op.add_vertices(builder, self, op_id, registry),
@@ -215,7 +215,7 @@ impl<'a> WorkflowBuilder<'a> {
     pub(super) fn create_workflow(
         mut self,
         builder: &mut Builder,
-        registry: &DiagramElementRegistry,
+        registry: &JsonDiagramRegistry,
     ) -> Result<(), DiagramError> {
         self.connect_edges()?;
         let mut buffers = HashMap::new();
@@ -272,12 +272,15 @@ impl<'a> WorkflowBuilder<'a> {
 /// ```text
 /// builder.connect(output.into_output::<i64>()?, dyn_input)?;
 /// ```
-pub fn dyn_connect(
+pub fn dyn_connect<Serialized>(
     builder: &mut Builder,
     output: DynOutput,
     input: DynInputSlot,
-    registry: &MessageRegistry,
-) -> Result<(), DiagramErrorCode> {
+    registry: &MessageRegistry<Serialized>,
+) -> Result<(), DiagramErrorCode>
+where
+    Serialized: Send + Sync + 'static,
+{
     let output = if output.type_info != input.type_info {
         if output.type_info == TypeInfo::of::<serde_json::Value>() {
             registry.deserialize(&input.type_info, builder, output)?

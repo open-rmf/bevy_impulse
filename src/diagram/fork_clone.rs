@@ -29,11 +29,11 @@ impl ForkCloneOp {
         }
     }
 
-    fn try_connect(
+    fn try_connect<Serialized>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry,
+        registry: &MessageRegistry<Serialized>,
     ) -> Result<bool, DiagramErrorCode> {
         let output = validate_single_input(vertex)?;
 

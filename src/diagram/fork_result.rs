@@ -8,10 +8,9 @@ use crate::Builder;
 
 use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
-    register_serialize,
     type_info::TypeInfo,
     validate_single_input, DiagramErrorCode, MessageRegistration, MessageRegistry, NextOperation,
-    SerializeMessage, Vertex, WorkflowBuilder,
+    Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -31,11 +30,11 @@ impl ForkResultOp {
         edge_builder.add_output_edge(self.err.clone(), None);
     }
 
-    pub(super) fn try_connect<'b>(
+    pub(super) fn try_connect<Serialized>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry,
+        registry: &MessageRegistry<Serialized>,
     ) -> Result<bool, DiagramErrorCode> {
         let output = validate_single_input(vertex)?;
         let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
@@ -57,17 +56,17 @@ impl ForkResultOp {
 }
 
 pub trait DynForkResult {
-    fn on_register(
+    fn on_register<Serialized>(
         self,
-        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        messages: &mut HashMap<TypeInfo, MessageRegistration<Serialized>>,
         schema_generator: &mut SchemaGenerator,
     ) -> bool;
 }
 
 impl<T> DynForkResult for NotSupportedMarker<T> {
-    fn on_register(
+    fn on_register<Serialized>(
         self,
-        _messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        _messages: &mut HashMap<TypeInfo, MessageRegistration<Serialized>>,
         _schema_generator: &mut SchemaGenerator,
     ) -> bool {
         false
@@ -78,11 +77,11 @@ impl<T, E, S> DynForkResult for DefaultImplMarker<(Result<T, E>, S)>
 where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
-    S: SerializeMessage<T> + 'static,
+    // S: SerializeMessage<T>,
 {
-    fn on_register(
+    fn on_register<Serialized>(
         self,
-        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        messages: &mut HashMap<TypeInfo, MessageRegistration<Serialized>>,
         schema_generator: &mut SchemaGenerator,
     ) -> bool {
         let ops = &mut messages
@@ -102,7 +101,7 @@ where
             Ok(outputs)
         });
 
-        register_serialize::<T, S>(messages, schema_generator);
+        // register_serialize::<T, S>(messages, schema_generator);
         true
     }
 }

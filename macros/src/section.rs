@@ -2,13 +2,14 @@ use std::iter::zip;
 
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
-use syn::{parse_quote_spanned, spanned::Spanned, Field, Ident, ItemStruct, Member, Type};
+use syn::{
+    parse_quote, parse_quote_spanned, spanned::Spanned, Field, Ident, ItemStruct, Member, Type,
+};
 
 use crate::Result;
 
 pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
     let struct_ident = &input_struct.ident;
-    let (impl_generics, ty_generics, where_clause) = input_struct.generics.split_for_impl();
     let field_ident: Vec<Ident> = input_struct
         .fields
         .members()
@@ -24,6 +25,25 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
         .iter()
         .map(|f| (FieldConfig::from_field(f), f.ty.span()))
         .collect();
+
+    let (impl_generics, ty_generics, where_clause) = input_struct.generics.split_for_impl();
+    let mut add_generics = input_struct.generics.clone();
+    add_generics
+        .params
+        .push(parse_quote!(__SerializationOptionsT__));
+    let add_where_clause = add_generics.make_where_clause();
+    add_where_clause
+        .predicates
+        .push(parse_quote!(__SerializationOptionsT__: ::bevy_impulse::SerializationOptions));
+    for ((field_config, _), ty) in zip(&field_configs, &field_type) {
+        if !field_config.no_deserialize {
+            add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultDeserializer: ::bevy_impulse::DeserializeMessage<<#ty as ::bevy_impulse::SectionItem>::MessageType, __SerializationOptionsT__::Serialized>));
+        }
+        if !field_config.no_serialize {
+            add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultSerializer: ::bevy_impulse::SerializeMessage<<#ty as ::bevy_impulse::SectionItem>::MessageType, __SerializationOptionsT__::Serialized>));
+        }
+    }
+    let (impl_generics_with_ser, _, where_clause_with_ser) = add_generics.split_for_impl();
 
     let register_deserialize = gen_register_deserialize(&field_configs);
     let register_serialize = gen_register_serialize(&field_configs);
@@ -44,7 +64,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
         .collect();
 
     let gen = quote! {
-        impl #impl_generics ::bevy_impulse::Section for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics_with_ser ::bevy_impulse::Section<__SerializationOptionsT__> for #struct_ident #ty_generics #where_clause_with_ser {
             fn into_slots(
                 self: Box<Self>,
             ) -> SectionSlots {
@@ -55,9 +75,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
                 slots
             }
 
-            fn on_register(registry: &mut DiagramElementRegistry)
-            where
-                Self: Sized,
+            fn on_register(registry: &mut ::bevy_impulse::DiagramElementRegistry<__SerializationOptionsT__>)
             {
                 #({
                     let _opt_out = registry.opt_out();

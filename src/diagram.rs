@@ -3,10 +3,12 @@ mod fork_clone;
 mod fork_result;
 mod impls;
 mod join;
+mod json;
+mod message;
 mod node;
 mod registration;
 mod section;
-mod serialization;
+// mod serialization;
 mod split_serialized;
 mod transform;
 mod type_info;
@@ -19,10 +21,12 @@ use fork_clone::ForkCloneOp;
 use fork_result::ForkResultOp;
 pub use join::JoinOutput;
 use join::{JoinOp, SerializedJoinOp};
+pub use json::*;
+pub use message::*;
 pub use node::NodeOp;
 pub use registration::*;
 pub use section::*;
-pub use serialization::*;
+// pub use serialization::*;
 pub use split_serialized::*;
 use tracing::debug;
 use transform::{TransformError, TransformOp};
@@ -687,7 +691,7 @@ impl Diagram {
     fn spawn_workflow<Streams>(
         &self,
         cmds: &mut Commands,
-        registry: &DiagramElementRegistry,
+        registry: &JsonDiagramRegistry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
     where
         Streams: StreamPack,
@@ -792,7 +796,7 @@ impl Diagram {
     pub fn spawn_io_workflow(
         &self,
         cmds: &mut Commands,
-        registry: &DiagramElementRegistry,
+        registry: &JsonDiagramRegistry,
     ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
         self.spawn_workflow::<()>(cmds, registry)
     }

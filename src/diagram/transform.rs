@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use cel_interpreter::{Context, ExecutionError, ParseError, Program};
+use cel_interpreter::{ExecutionError, ParseError, Program};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -41,12 +41,15 @@ impl TransformOp {
             .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<Serialized>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
+        registry: &MessageRegistry<Serialized>,
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        Serialized: Send + Sync + 'static,
+    {
         let output = validate_single_input(vertex)?;
         let transformed_output = transform_output(builder, registry, output, self)?;
         vertex.out_edges[0].set_output(transformed_output.into());
@@ -54,15 +57,18 @@ impl TransformOp {
     }
 }
 
-pub(super) fn transform_output(
+pub(super) fn transform_output<Serialized>(
     builder: &mut Builder,
-    registry: &MessageRegistry,
+    registry: &MessageRegistry<Serialized>,
     output: DynOutput,
     transform_op: &TransformOp,
-) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
+) -> Result<Output<Serialized>, DiagramErrorCode>
+where
+    Serialized: Send + Sync + 'static,
+{
     debug!("transform output: {:?}, op: {:?}", output, transform_op);
 
-    let json_output = if output.type_info == TypeInfo::of::<serde_json::Value>() {
+    let json_output = if output.type_info == TypeInfo::of::<Serialized>() {
         output.into_output()
     } else {
         registry.serialize(builder, output)
@@ -70,17 +76,18 @@ pub(super) fn transform_output(
 
     let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;
     let transform_node = builder.create_map_block(
-        move |req: serde_json::Value| -> Result<serde_json::Value, TransformError> {
-            let mut context = Context::default();
-            context
-                .add_variable("request", req)
-                // cannot keep the original error because it is not Send + Sync
-                .map_err(|err| TransformError::Other(err.to_string().into()))?;
-            program
-                .execute(&context)?
-                .json()
-                // cel_interpreter::json is private so we have to type erase ConvertToJsonError
-                .map_err(|err| TransformError::Other(err.to_string().into()))
+        move |req: Serialized| -> Result<Serialized, TransformError> {
+            panic!("FIXME")
+            // let mut context = Context::default();
+            // context
+            //     .add_variable("request", req)
+            //     // cannot keep the original error because it is not Send + Sync
+            //     .map_err(|err| TransformError::Other(err.to_string().into()))?;
+            // program
+            //     .execute(&context)?
+            //     .json()
+            //     // cel_interpreter::json is private so we have to type erase ConvertToJsonError
+            //     .map_err(|err| TransformError::Other(err.to_string().into()))
         },
     );
     builder.connect(json_output, transform_node.input);

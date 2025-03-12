@@ -62,11 +62,11 @@ impl SplitOp {
         }
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<Serialized>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry,
+        registry: &MessageRegistry<Serialized>,
     ) -> Result<bool, DiagramErrorCode> {
         let output = validate_single_input(vertex)?;
         let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
@@ -274,7 +274,10 @@ where
     })
 }
 
-pub trait DynSplit<T, Serializer> {
+pub trait DynSplit<T, Serializer>
+where
+    T: Splittable,
+{
     const SUPPORTED: bool;
 
     fn dyn_split<'a>(
@@ -283,10 +286,15 @@ pub trait DynSplit<T, Serializer> {
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs, DiagramErrorCode>;
 
-    fn on_register(registry: &mut MessageRegistry);
+    fn on_register<Serialized>(registry: &mut MessageRegistry<Serialized>)
+    where
+        Serializer: SerializeMessage<T::Item, Serialized>;
 }
 
-impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
+impl<T, Serializer> DynSplit<T, Serializer> for NotSupported
+where
+    T: Splittable,
+{
     const SUPPORTED: bool = false;
 
     fn dyn_split<'a>(
@@ -297,14 +305,13 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
         Err(DiagramErrorCode::NotSplittable)
     }
 
-    fn on_register(_registry: &mut MessageRegistry) {}
+    fn on_register<Serialized>(_registry: &mut MessageRegistry<Serialized>) {}
 }
 
-impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
+impl<T, SerializerT> DynSplit<T, SerializerT> for DefaultImpl
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
-    Serializer: SerializeMessage<T::Item> + SerializeMessage<Vec<T::Item>>,
 {
     const SUPPORTED: bool = true;
 
@@ -317,8 +324,11 @@ where
         split_chain(chain, split_op)
     }
 
-    fn on_register(registry: &mut MessageRegistry) {
-        registry.register_serialize::<T::Item, Serializer>();
+    fn on_register<Serialized>(registry: &mut MessageRegistry<Serialized>)
+    where
+        SerializerT: SerializeMessage<T::Item, Serialized>,
+    {
+        registry.register_serialize::<T::Item, SerializerT>();
     }
 }
 

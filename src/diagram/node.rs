@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    workflow_builder::dyn_connect, BuilderId, DiagramElementRegistry, DiagramErrorCode,
-    NextOperation, WorkflowBuilder,
+    workflow_builder::dyn_connect, BuilderId, DiagramErrorCode, JsonDiagramRegistry, NextOperation,
+    WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -23,7 +23,7 @@ impl NodeOp {
         builder: &mut Builder,
         wf_builder: &mut WorkflowBuilder<'a>,
         op_id: String,
-        registry: &DiagramElementRegistry,
+        registry: &JsonDiagramRegistry,
     ) -> Result<(), DiagramErrorCode> {
         let reg = registry.get_node_registration(&self.builder)?;
         let node = reg.create_node(builder, self.config.clone())?;

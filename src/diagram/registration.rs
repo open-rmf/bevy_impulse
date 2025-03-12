@@ -3,15 +3,13 @@ use std::{
     borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
-    fmt::Debug,
     marker::PhantomData,
 };
 
 use crate::{
-    unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
-    InputSlot, Joined, Node, Output, StreamPack,
+    unknown_diagram_error, Accessor, BufferMap, Builder, InputSlot, Joined, Node, Output,
+    Splittable, StreamPack,
 };
-use bevy_ecs::entity::Entity;
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
     schema::Schema,
@@ -25,118 +23,17 @@ use serde::{
 use serde_json::json;
 use tracing::debug;
 
-use crate::SerializeMessage;
-
 use super::{
     buffer::BufferAccessRequest,
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
-    register_serialize,
     type_info::TypeInfo,
     unzip::DynUnzip,
-    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
-    DynSplit, DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer,
-    Section, SectionMetadata, SectionMetadataProvider, SplitOp,
+    BuilderId, DeserializeFn, DeserializeMessage, DiagramErrorCode, DynInputSlot, DynOutput,
+    DynSplit, DynSplitOutputs, JsonDeserializer, JsonSerializer, Section, SectionMetadata,
+    SectionMetadataProvider, SerializeFn, SerializeMessage, SplitOp,
 };
-
-/// A type erased [`crate::InputSlot`]
-#[derive(Copy, Clone, Debug)]
-pub struct DynInputSlot {
-    scope: Entity,
-    source: Entity,
-    pub(super) type_info: TypeInfo,
-}
-
-impl DynInputSlot {
-    pub(super) fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    pub(super) fn id(&self) -> Entity {
-        self.source
-    }
-}
-
-impl<T: Any> From<InputSlot<T>> for DynInputSlot {
-    fn from(input: InputSlot<T>) -> Self {
-        Self {
-            scope: input.scope(),
-            source: input.id(),
-            type_info: TypeInfo::of::<T>(),
-        }
-    }
-}
-
-/// A type erased [`crate::Output`]
-pub struct DynOutput {
-    scope: Entity,
-    target: Entity,
-    pub(super) type_info: TypeInfo,
-
-    into_any_buffer_impl:
-        fn(Self, &mut Builder, BufferSettings) -> Result<AnyBuffer, DiagramErrorCode>,
-}
-
-impl DynOutput {
-    pub(super) fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
-    where
-        T: Send + Sync + 'static + Any,
-    {
-        if self.type_info != TypeInfo::of::<T>() {
-            Err(DiagramErrorCode::TypeMismatch {
-                source_type: self.type_info,
-                target_type: TypeInfo::of::<T>(),
-            })
-        } else {
-            Ok(Output::<T>::new(self.scope, self.target))
-        }
-    }
-
-    pub(super) fn into_any_buffer(
-        self,
-        builder: &mut Builder,
-        buffer_settings: BufferSettings,
-    ) -> Result<AnyBuffer, DiagramErrorCode> {
-        (self.into_any_buffer_impl)(self, builder, buffer_settings)
-    }
-
-    pub(super) fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    pub(super) fn id(&self) -> Entity {
-        self.target
-    }
-}
-
-impl Debug for DynOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynOutput")
-            .field("scope", &self.scope)
-            .field("target", &self.target)
-            .field("type_info", &self.type_info)
-            .finish()
-    }
-}
-
-impl<T> From<Output<T>> for DynOutput
-where
-    T: Send + Sync + 'static + Any,
-{
-    fn from(output: Output<T>) -> Self {
-        Self {
-            scope: output.scope(),
-            target: output.id(),
-            type_info: TypeInfo::of::<T>(),
-            into_any_buffer_impl: |me, builder, buffer_settings| {
-                let buffer = builder.create_buffer::<T>(buffer_settings);
-                builder.connect(me.into_output()?, buffer.input_slot());
-                Ok(buffer.as_any_buffer())
-            },
-        }
-    }
-}
 
 /// A type erased [`bevy_impulse::Node`]
 pub(super) struct DynNode {
@@ -203,10 +100,6 @@ impl NodeRegistration {
 
 type CreateNodeFn =
     RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramErrorCode>>>;
-type DeserializeFn =
-    fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>;
-type SerializeFn =
-    fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramErrorCode>;
 type ForkCloneFn = fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramErrorCode>;
 type ForkResultFn = fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramErrorCode>;
 type SplitFn = Box<
@@ -222,13 +115,18 @@ type BufferAccessFn =
 type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 
 #[must_use]
-pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
-    registry: &'a mut DiagramElementRegistry,
+pub struct CommonOperations<'a, SerializationOptionsT, Deserialize, Serialize, Cloneable>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    registry: &'a mut DiagramElementRegistry<SerializationOptionsT>,
     _ignore: PhantomData<(Deserialize, Serialize, Cloneable)>,
 }
 
-impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
-    CommonOperations<'a, DeserializeImpl, SerializeImpl, Cloneable>
+impl<'a, SerializationOptionsT, DeserializerT, SerializerT, Cloneable>
+    CommonOperations<'a, SerializationOptionsT, DeserializerT, SerializerT, Cloneable>
+where
+    SerializationOptionsT: SerializationOptions,
 {
     /// Register a node builder with the specified common operations.
     ///
@@ -241,22 +139,22 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self,
         options: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<'a, SerializationOptionsT::Serialized, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static,
         Response: Send + Sync + 'static,
         Streams: StreamPack,
-        DeserializeImpl: DeserializeMessage<Request>,
-        SerializeImpl: SerializeMessage<Response>,
+        DeserializerT: DeserializeMessage<Request, SerializationOptionsT::Serialized>,
+        SerializerT: SerializeMessage<Response, SerializationOptionsT::Serialized>,
         Cloneable: DynForkClone<Response>,
     {
         self.registry
             .messages
-            .register_deserialize::<Request, DeserializeImpl>();
+            .register_deserialize::<Request, DeserializerT>();
         self.registry
             .messages
-            .register_serialize::<Response, SerializeImpl>();
+            .register_serialize::<Response, SerializerT>();
         self.registry
             .messages
             .register_fork_clone::<Response, Cloneable>();
@@ -279,35 +177,41 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
-        NodeRegistrationBuilder::<Request, Response, Streams>::new(&mut self.registry.messages)
+        NodeRegistrationBuilder::<SerializationOptionsT::Serialized, Request, Response, Streams>::new(
+            &mut self.registry.messages,
+        )
     }
 
     /// Register a message with the specified common operations.
-    pub fn register_message<Message>(self) -> MessageRegistrationBuilder<'a, Message>
+    pub fn register_message<Message>(
+        self,
+    ) -> MessageRegistrationBuilder<'a, Message, SerializationOptionsT::Serialized>
     where
         Message: Send + Sync + 'static,
-        DeserializeImpl: DeserializeMessage<Message>,
-        SerializeImpl: SerializeMessage<Message> + SerializeMessage<Vec<Message>>,
+        DeserializerT: DeserializeMessage<Message, SerializationOptionsT::Serialized>,
+        SerializerT: SerializeMessage<Message, SerializationOptionsT::Serialized>,
         Cloneable: DynForkClone<Message>,
     {
         self.registry
             .messages
-            .register_deserialize::<Message, DeserializeImpl>();
+            .register_deserialize::<Message, DeserializerT>();
         self.registry
             .messages
-            .register_serialize::<Message, SerializeImpl>();
+            .register_serialize::<Message, SerializerT>();
         self.registry
             .messages
             .register_fork_clone::<Message, Cloneable>();
 
-        MessageRegistrationBuilder::<Message>::new(&mut self.registry.messages)
+        MessageRegistrationBuilder::<Message, SerializationOptionsT::Serialized>::new(
+            &mut self.registry.messages,
+        )
     }
 
     /// Opt out of deserializing the request of the node. Use this to build a
     /// node whose request type is not deserializable.
     pub fn no_request_deserializing(
         self,
-    ) -> CommonOperations<'a, OpaqueMessageDeserializer, SerializeImpl, Cloneable> {
+    ) -> CommonOperations<'a, SerializationOptionsT, NotSupported, SerializerT, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -318,7 +222,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     /// node whose response type is not serializable.
     pub fn no_response_serializing(
         self,
-    ) -> CommonOperations<'a, DeserializeImpl, OpaqueMessageSerializer, Cloneable> {
+    ) -> CommonOperations<'a, SerializationOptionsT, DeserializerT, NotSupported, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -329,7 +233,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     /// whose response type is not cloneable.
     pub fn no_response_cloning(
         self,
-    ) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
+    ) -> CommonOperations<'a, SerializationOptionsT, DeserializerT, SerializerT, NotSupported> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -337,16 +241,16 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     }
 }
 
-pub struct MessageRegistrationBuilder<'a, Message> {
-    data: &'a mut MessageRegistry,
+pub struct MessageRegistrationBuilder<'a, Message, Serialized> {
+    data: &'a mut MessageRegistry<Serialized>,
     _ignore: PhantomData<Message>,
 }
 
-impl<'a, Message> MessageRegistrationBuilder<'a, Message>
+impl<'a, Message, Serialized> MessageRegistrationBuilder<'a, Message, Serialized>
 where
     Message: Send + Sync + 'static + Any,
 {
-    pub fn new(registry: &'a mut MessageRegistry) -> Self {
+    pub fn new(registry: &'a mut MessageRegistry<Serialized>) -> Self {
         Self {
             data: registry,
             _ignore: Default::default(),
@@ -357,9 +261,9 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, DefaultSerializer)>: DynUnzip,
+        DefaultImplMarker<(Message, JsonSerialization)>: DynUnzip,
     {
-        self.data.register_unzip::<Message, DefaultSerializer>();
+        self.data.register_unzip::<Message, JsonSerialization>();
         self
     }
 
@@ -376,10 +280,10 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, OpaqueMessageSerializer)>: DynForkResult,
+        DefaultImplMarker<(Message, NotSupported)>: DynForkResult,
     {
         self.data
-            .register_fork_result(DefaultImplMarker::<(Message, OpaqueMessageSerializer)>::new());
+            .register_fork_result(DefaultImplMarker::<(Message, NotSupported)>::new());
         self
     }
 
@@ -387,10 +291,11 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
-        DefaultImpl: DynSplit<Message, DefaultSerializer>,
+        Message: Splittable,
+        DefaultImpl: DynSplit<Message, JsonSerialization>,
     {
         self.data
-            .register_split::<Message, DefaultImpl, DefaultSerializer>();
+            .register_split::<Message, DefaultImpl, JsonSerialization>();
         self
     }
 
@@ -398,6 +303,7 @@ where
     /// are unserializable.
     pub fn with_split_minimal(&mut self) -> &mut Self
     where
+        Message: Splittable,
         DefaultImpl: DynSplit<Message, NotSupported>,
     {
         self.data
@@ -433,17 +339,18 @@ where
     }
 }
 
-pub struct NodeRegistrationBuilder<'a, Request, Response, Streams> {
-    registry: &'a mut MessageRegistry,
+pub struct NodeRegistrationBuilder<'a, Serialized, Request, Response, Streams> {
+    registry: &'a mut MessageRegistry<Serialized>,
     _ignore: PhantomData<(Request, Response, Streams)>,
 }
 
-impl<'a, Request, Response, Streams> NodeRegistrationBuilder<'a, Request, Response, Streams>
+impl<'a, Serialized, Request, Response, Streams>
+    NodeRegistrationBuilder<'a, Serialized, Request, Response, Streams>
 where
     Request: Send + Sync + 'static + Any,
     Response: Send + Sync + 'static + Any,
 {
-    fn new(registry: &'a mut MessageRegistry) -> Self {
+    fn new(registry: &'a mut MessageRegistry<Serialized>) -> Self {
         Self {
             registry,
             _ignore: Default::default(),
@@ -454,7 +361,7 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, DefaultSerializer)>: DynUnzip,
+        DefaultImplMarker<(Response, JsonSerialization)>: DynUnzip,
     {
         MessageRegistrationBuilder::new(self.registry).with_unzip();
         self
@@ -473,7 +380,7 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, OpaqueMessageSerializer)>: DynForkResult,
+        DefaultImplMarker<(Response, NotSupported)>: DynForkResult,
     {
         MessageRegistrationBuilder::new(self.registry).with_fork_result();
         self
@@ -483,7 +390,8 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
-        DefaultImpl: DynSplit<Response, DefaultSerializer>,
+        Response: Splittable,
+        DefaultImpl: DynSplit<Response, JsonSerialization>,
     {
         MessageRegistrationBuilder::new(self.registry).with_split();
         self
@@ -493,6 +401,7 @@ where
     /// are unserializable.
     pub fn with_split_unserializable(&mut self) -> &mut Self
     where
+        Response: Splittable,
         DefaultImpl: DynSplit<Response, NotSupported>,
     {
         MessageRegistrationBuilder::new(self.registry).with_split_minimal();
@@ -504,7 +413,7 @@ where
     where
         Request: Joined,
     {
-        MessageRegistrationBuilder::<Request>::new(self.registry).with_join();
+        MessageRegistrationBuilder::<Request, Serialized>::new(self.registry).with_join();
         self
     }
 
@@ -513,7 +422,7 @@ where
     where
         Request: BufferAccessRequest,
     {
-        MessageRegistrationBuilder::<Request>::new(self.registry).with_buffer_access();
+        MessageRegistrationBuilder::<Request, Serialized>::new(self.registry).with_buffer_access();
         self
     }
 
@@ -522,56 +431,65 @@ where
     where
         Request: Accessor,
     {
-        MessageRegistrationBuilder::<Request>::new(self.registry).with_listen();
+        MessageRegistrationBuilder::<Request, Serialized>::new(self.registry).with_listen();
         self
     }
 }
 
-type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section>;
+type CreateSectionFn<SerializationOptionsT> =
+    dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section<SerializationOptionsT>>;
 
 #[derive(Serialize)]
-pub struct SectionRegistration {
+pub struct SectionRegistration<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     pub(super) name: String,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
 
     #[serde(skip)]
-    create_section_impl: RefCell<Box<CreateSectionFn>>,
+    create_section_impl: RefCell<Box<CreateSectionFn<SerializationOptionsT>>>,
 }
 
-impl SectionRegistration {
+impl<SerializationOptionsT> SectionRegistration<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     pub(super) fn create_section(
         &self,
         builder: &mut Builder,
         config: serde_json::Value,
-    ) -> Result<Box<dyn Section>, DiagramErrorCode> {
+    ) -> Result<Box<dyn Section<SerializationOptionsT>>, DiagramErrorCode> {
         let section = (self.create_section_impl.borrow_mut())(builder, config);
         Ok(section)
     }
 }
 
-pub trait IntoSectionRegistration<SectionT, Config>
+pub trait IntoSectionRegistration<SerializationOptionsT, SectionT, Config>
 where
-    SectionT: Section,
+    SerializationOptionsT: SerializationOptions,
 {
     fn into_section_registration(
         self,
         name: String,
         schema_generator: &mut SchemaGenerator,
-    ) -> SectionRegistration;
+    ) -> SectionRegistration<SerializationOptionsT>;
 }
 
-impl<F, SectionT, Config> IntoSectionRegistration<SectionT, Config> for F
+impl<F, SerializationOptionsT, SectionT, Config>
+    IntoSectionRegistration<SerializationOptionsT, SectionT, Config> for F
 where
     F: 'static + FnMut(&mut Builder, Config) -> SectionT,
-    SectionT: 'static + Section + SectionMetadataProvider,
+    SectionT: 'static + Section<SerializationOptionsT> + SectionMetadataProvider,
+    SerializationOptionsT: SerializationOptions,
     Config: DeserializeOwned + JsonSchema,
 {
     fn into_section_registration(
         mut self,
         name: String,
         schema_generator: &mut SchemaGenerator,
-    ) -> SectionRegistration {
+    ) -> SectionRegistration<SerializationOptionsT> {
         SectionRegistration {
             name,
             metadata: SectionT::metadata().clone(),
@@ -584,18 +502,38 @@ where
     }
 }
 
-#[derive(Serialize)]
-pub struct DiagramElementRegistry {
-    pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
-    pub(super) sections: HashMap<BuilderId, SectionRegistration>,
-
-    #[serde(flatten)]
-    pub(super) messages: MessageRegistry,
+pub trait SerializationOptions {
+    type Serialized: Send + Sync + 'static;
+    type DefaultDeserializer;
+    type DefaultSerializer;
 }
 
-pub(super) struct MessageOperation {
-    pub(super) deserialize_impl: Option<DeserializeFn>,
-    pub(super) serialize_impl: Option<SerializeFn>,
+#[derive(Serialize)]
+pub struct JsonSerialization;
+
+impl SerializationOptions for JsonSerialization {
+    type Serialized = serde_json::Value;
+    type DefaultDeserializer = JsonDeserializer;
+    type DefaultSerializer = JsonSerializer;
+}
+
+#[derive(Serialize)]
+pub struct DiagramElementRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
+    pub(super) sections: HashMap<BuilderId, SectionRegistration<SerializationOptionsT>>,
+
+    #[serde(flatten)]
+    pub(super) messages: MessageRegistry<SerializationOptionsT::Serialized>,
+}
+
+pub type JsonDiagramRegistry = DiagramElementRegistry<JsonSerialization>;
+
+pub(super) struct MessageOperation<Serialized> {
+    pub(super) deserialize_impl: Option<DeserializeFn<Serialized>>,
+    pub(super) serialize_impl: Option<SerializeFn<Serialized>>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
     pub(super) unzip_impl: Option<Box<dyn DynUnzip>>,
     pub(super) fork_result_impl: Option<ForkResultFn>,
@@ -605,7 +543,7 @@ pub(super) struct MessageOperation {
     pub(super) listen_impl: Option<ListenFn>,
 }
 
-impl MessageOperation {
+impl<Serialized> MessageOperation<Serialized> {
     fn new<T>() -> Self
     where
         T: Send + Sync + 'static + Any,
@@ -628,24 +566,27 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<DynOutput, DiagramErrorCode> {
+    ) -> Result<DynOutput, DiagramErrorCode>
+    where
+        Serialized: Send + Sync + 'static,
+    {
         let f = self
             .deserialize_impl
             .as_ref()
             .ok_or(DiagramErrorCode::NotSerializable)?;
-        f(builder, output.into_output()?)
+        f(output.into_output()?, builder)
     }
 
     pub(super) fn serialize(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
+    ) -> Result<Output<Serialized>, DiagramErrorCode> {
         let f = self
             .serialize_impl
             .as_ref()
             .ok_or(DiagramErrorCode::NotSerializable)?;
-        f(builder, output)
+        f(output, builder)
     }
 
     pub(super) fn fork_clone(
@@ -736,7 +677,7 @@ impl MessageOperation {
     }
 }
 
-impl Serialize for MessageOperation {
+impl<Serialized> Serialize for MessageOperation<Serialized> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -767,13 +708,13 @@ impl Serialize for MessageOperation {
     }
 }
 
-pub struct MessageRegistration {
+pub struct MessageRegistration<Serialized> {
     pub(super) type_name: &'static str,
     pub(super) schema: Option<schemars::schema::Schema>,
-    pub(super) operations: MessageOperation,
+    pub(super) operations: MessageOperation<Serialized>,
 }
 
-impl MessageRegistration {
+impl<Serialized> MessageRegistration<Serialized> {
     pub(super) fn new<T>() -> Self
     where
         T: Send + Sync + 'static + Any,
@@ -786,7 +727,7 @@ impl MessageRegistration {
     }
 }
 
-impl Serialize for MessageRegistration {
+impl<Serialized> Serialize for MessageRegistration<Serialized> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -799,18 +740,18 @@ impl Serialize for MessageRegistration {
 }
 
 #[derive(Serialize)]
-pub struct MessageRegistry {
-    #[serde(serialize_with = "MessageRegistry::serialize_messages")]
-    messages: HashMap<TypeInfo, MessageRegistration>,
+pub struct MessageRegistry<Serialized> {
+    #[serde(serialize_with = "MessageRegistry::<Serialized>::serialize_messages")]
+    messages: HashMap<TypeInfo, MessageRegistration<Serialized>>,
 
     #[serde(
         rename = "schemas",
-        serialize_with = "MessageRegistry::serialize_schemas"
+        serialize_with = "MessageRegistry::<Serialized>::serialize_schemas"
     )]
     schema_generator: SchemaGenerator,
 }
 
-impl MessageRegistry {
+impl<Serialized> MessageRegistry<Serialized> {
     fn new() -> Self {
         let mut settings = SchemaSettings::default();
         settings.definitions_path = "#/schemas/".to_string();
@@ -824,7 +765,7 @@ impl MessageRegistry {
         }
     }
 
-    fn get<T>(&self) -> Option<&MessageRegistration>
+    fn get<T>(&self) -> Option<&MessageRegistration<Serialized>>
     where
         T: Any,
     {
@@ -836,7 +777,10 @@ impl MessageRegistry {
         target_type: &TypeInfo,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<DynOutput, DiagramErrorCode> {
+    ) -> Result<DynOutput, DiagramErrorCode>
+    where
+        Serialized: Send + Sync + 'static,
+    {
         if output.type_info != TypeInfo::of::<serde_json::Value>()
             || &output.type_info == target_type
         {
@@ -850,41 +794,30 @@ impl MessageRegistry {
 
     /// Register a deserialize function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_deserialize<T, Deserializer>(&mut self) -> bool
+    pub(super) fn register_deserialize<T, DeserializerT>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        Deserializer: DeserializeMessage<T>,
+        DeserializerT: DeserializeMessage<T, Serialized>,
     {
+        let deserialize_impl = if let Some(f) = DeserializerT::deserialize_fn() {
+            f
+        } else {
+            return false;
+        };
+
         let reg = self
             .messages
             .entry(TypeInfo::of::<T>())
             .or_insert(MessageRegistration::new::<T>());
         let ops = &mut reg.operations;
-        if !Deserializer::deserializable() || ops.deserialize_impl.is_some() {
-            return false;
-        }
 
         debug!(
-            "register deserialize for type: {}, with deserializer: {}",
+            "register deserialize for type: {}",
             std::any::type_name::<T>(),
-            std::any::type_name::<Deserializer>()
         );
-        ops.deserialize_impl = Some(|builder, output| {
-            debug!("deserialize output: {:?}", output);
-            let receiver =
-                builder.create_map_block(|json: serde_json::Value| Deserializer::from_json(json));
-            builder.connect(output, receiver.input);
-            let deserialized_output = receiver
-                .output
-                .chain(builder)
-                .cancel_on_err()
-                .output()
-                .into();
-            debug!("deserialized output: {:?}", deserialized_output);
-            Ok(deserialized_output)
-        });
+        ops.deserialize_impl = Some(deserialize_impl);
 
-        reg.schema = Deserializer::json_schema(&mut self.schema_generator);
+        // reg.schema = Deserializer::json_schema(&mut self.schema_generator);
 
         true
     }
@@ -893,7 +826,10 @@ impl MessageRegistry {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
+    ) -> Result<Output<Serialized>, DiagramErrorCode>
+    where
+        Serialized: Send + Sync + 'static,
+    {
         debug!("serialize {:?}", output);
         if output.type_info == TypeInfo::of::<serde_json::Value>() {
             output.into_output()
@@ -906,12 +842,30 @@ impl MessageRegistry {
 
     /// Register a serialize function if not already registered, returns true if the new
     /// function is registered.
-    pub(super) fn register_serialize<T, Serializer>(&mut self) -> bool
+    pub(super) fn register_serialize<T, SerializerT>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        Serializer: SerializeMessage<T>,
+        SerializerT: SerializeMessage<T, Serialized>,
     {
-        register_serialize::<T, Serializer>(&mut self.messages, &mut self.schema_generator)
+        let serialize_impl = if let Some(f) = SerializerT::serialize_fn() {
+            f
+        } else {
+            return false;
+        };
+
+        let reg = self
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>());
+        let ops = &mut reg.operations;
+
+        debug!(
+            "register serialize for type: {}",
+            std::any::type_name::<T>(),
+        );
+        ops.serialize_impl = Some(serialize_impl);
+
+        true
     }
 
     pub(super) fn fork_clone(
@@ -970,7 +924,7 @@ impl MessageRegistry {
         DefaultImplMarker<(T, Serializer)>: DynUnzip,
     {
         let unzip_impl = DefaultImplMarker::<(T, Serializer)>::new();
-        unzip_impl.on_register(self);
+        // unzip_impl.on_register(self);
 
         let ops = &mut self
             .messages
@@ -1023,7 +977,7 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_split<T, F, S>(&mut self) -> bool
     where
-        T: Send + Sync + 'static + Any,
+        T: Send + Sync + 'static + Any + Splittable,
         F: DynSplit<T, S>,
     {
         let ops = &mut self
@@ -1038,7 +992,7 @@ impl MessageRegistry {
         ops.split_impl = Some(Box::new(|builder, output, split_op| {
             F::dyn_split(builder, output, split_op)
         }));
-        F::on_register(self);
+        // F::on_register(self);
 
         true
     }
@@ -1147,7 +1101,7 @@ impl MessageRegistry {
     }
 
     fn serialize_messages<S>(
-        v: &HashMap<TypeInfo, MessageRegistration>,
+        v: &HashMap<TypeInfo, MessageRegistration<Serialized>>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -1182,7 +1136,10 @@ impl MessageRegistry {
     }
 }
 
-impl Default for DiagramElementRegistry {
+impl<SerializationOptionsT> Default for DiagramElementRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     fn default() -> Self {
         DiagramElementRegistry {
             nodes: Default::default(),
@@ -1192,7 +1149,10 @@ impl Default for DiagramElementRegistry {
     }
 }
 
-impl DiagramElementRegistry {
+impl<SerializationOptionsT> DiagramElementRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     pub fn new() -> Self {
         Self::default()
     }
@@ -1224,11 +1184,15 @@ impl DiagramElementRegistry {
         &mut self,
         options: NodeBuilderOptions,
         builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) -> NodeRegistrationBuilder<Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<SerializationOptionsT::Serialized, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
-        Request: Send + Sync + 'static + DynType + DeserializeOwned,
-        Response: Send + Sync + 'static + DynType + Serialize + Clone,
+        Request: Send + Sync + 'static + DeserializeOwned,
+        Response: Send + Sync + 'static + Serialize + Clone,
+        SerializationOptionsT::DefaultDeserializer:
+            DeserializeMessage<Request, SerializationOptionsT::Serialized>,
+        SerializationOptionsT::DefaultSerializer:
+            SerializeMessage<Response, SerializationOptionsT::Serialized>,
     {
         self.opt_out().register_node_builder(options, builder)
     }
@@ -1245,8 +1209,8 @@ impl DiagramElementRegistry {
         options: SectionBuilderOptions,
         section_builder: SectionBuilder,
     ) where
-        SectionBuilder: IntoSectionRegistration<SectionT, Config>,
-        SectionT: Section,
+        SectionBuilder: IntoSectionRegistration<SerializationOptionsT, SectionT, Config>,
+        SectionT: Section<SerializationOptionsT>,
     {
         let reg = section_builder.into_section_registration(
             options.name.unwrap_or_else(|| options.id.clone()),
@@ -1306,7 +1270,12 @@ impl DiagramElementRegistry {
     /// be connected to the workflow termination.
     pub fn opt_out(
         &mut self,
-    ) -> CommonOperations<DefaultDeserializer, DefaultSerializer, DefaultImpl> {
+    ) -> CommonOperations<
+        SerializationOptionsT,
+        SerializationOptionsT::DefaultDeserializer,
+        SerializationOptionsT::DefaultSerializer,
+        DefaultImpl,
+    > {
         CommonOperations {
             registry: self,
             _ignore: Default::default(),
@@ -1326,7 +1295,7 @@ impl DiagramElementRegistry {
     pub fn get_section_registration<Q>(
         &self,
         id: &Q,
-    ) -> Result<&SectionRegistration, DiagramErrorCode>
+    ) -> Result<&SectionRegistration<SerializationOptionsT>, DiagramErrorCode>
     where
         Q: Borrow<str> + ?Sized,
     {
@@ -1335,7 +1304,9 @@ impl DiagramElementRegistry {
             .ok_or_else(|| DiagramErrorCode::BuilderNotFound(id.borrow().to_string()))
     }
 
-    pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration>
+    pub fn get_message_registration<T>(
+        &self,
+    ) -> Option<&MessageRegistration<SerializationOptionsT::Serialized>>
     where
         T: Any,
     {
@@ -1396,7 +1367,7 @@ mod tests {
 
     /// Some extra impl only used in tests (for now).
     /// If these impls are needed outside tests, then move them to the main impl.
-    impl MessageOperation {
+    impl<Serialized> MessageOperation<Serialized> {
         fn deserializable(&self) -> bool {
             self.deserialize_impl.is_some()
         }
@@ -1428,7 +1399,7 @@ mod tests {
 
     #[test]
     fn test_register_node_builder() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.opt_out().register_node_builder(
             NodeBuilderOptions::new("multiply3").with_name("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
@@ -1446,7 +1417,7 @@ mod tests {
 
     #[test]
     fn test_register_cloneable_node() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry.register_node_builder(
             NodeBuilderOptions::new("multiply3").with_name("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
@@ -1460,7 +1431,7 @@ mod tests {
 
     #[test]
     fn test_register_unzippable_node() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         let tuple_resp = |_: ()| -> (i64,) { (1,) };
         registry
             .opt_out()
@@ -1479,7 +1450,7 @@ mod tests {
 
     #[test]
     fn test_register_splittable_node() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         let vec_resp = |_: ()| -> Vec<i64> { vec![1, 2] };
 
         registry
@@ -1525,7 +1496,7 @@ mod tests {
 
     #[test]
     fn test_register_with_config() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
 
         #[derive(Deserialize, JsonSchema)]
         struct TestConfig {
@@ -1547,7 +1518,7 @@ mod tests {
     fn test_register_opaque_node() {
         let opaque_request_map = |_: NonSerializableRequest| {};
 
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
         registry
             .opt_out()
             .no_request_deserializing()
@@ -1620,7 +1591,7 @@ mod tests {
 
     #[test]
     fn test_register_message() {
-        let mut registry = DiagramElementRegistry::new();
+        let mut registry = JsonDiagramRegistry::new();
 
         #[derive(Deserialize, Serialize, JsonSchema, Clone)]
         struct TestMessage;
@@ -1642,7 +1613,7 @@ mod tests {
 
     #[test]
     fn test_serialize_registry() {
-        let mut reg = DiagramElementRegistry::new();
+        let mut reg = JsonDiagramRegistry::new();
 
         #[derive(Deserialize, Serialize, JsonSchema, Clone)]
         struct Foo {
