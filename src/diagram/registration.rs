@@ -79,7 +79,7 @@ pub struct DynOutput {
 }
 
 impl DynOutput {
-    pub(super) fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
+    pub fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
     where
         T: Send + Sync + 'static + Any,
     {

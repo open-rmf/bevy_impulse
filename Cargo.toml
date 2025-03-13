@@ -82,3 +82,7 @@ name = "generate_schema"
 path = "src/diagram/generate_schema.rs"
 required-features = ["diagram"]
 doc = false
+
+[[example]]
+name = "generic_serialization_poc"
+path = "generic_serialization_poc/main.rs"
