@@ -95,25 +95,49 @@ where
             _unused: Default::default(),
         }
     }
+
+    fn register_section<SectionT>(&mut self)
+    where
+        SectionT: Section<SerializationOptionsT>,
+    {
+    }
 }
 
-trait Section {
-    fn on_register<SerializationOptionsT>(
-        registry: &mut DiagramElementRegistry<SerializationOptionsT>,
-    ) where
-        SerializationOptionsT: SerializationOptions;
+trait Section<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    fn on_register(registry: &mut DiagramElementRegistry<SerializationOptionsT>);
 }
+
+struct OpaqueMessage;
 
 struct TestSection {
     foo: InputSlot<i64>,
+    bar: Output<OpaqueMessage>,
 }
 
-impl Section for TestSection {
-    fn on_register<SerializationOptionsT>(
-        registry: &mut DiagramElementRegistry<SerializationOptionsT>,
-    ) where
-        SerializationOptionsT: SerializationOptions,
-    {
+impl<SerializationOptionsT> Section<SerializationOptionsT> for TestSection
+where
+    SerializationOptionsT: SerializationOptions,
+    // need to add this bound ONLY for messages that does not opt out
+    SerializationOptionsT::DefaultDeserializer:
+        DeserializeMessage<i64, SerializationOptionsT::Serialized>,
+    // SerializationOptionsT::DefaultDeserializer:
+    //     DeserializeMessage<OpaqueMessage, SerializationOptionsT::Serialized>,
+{
+    fn on_register(registry: &mut DiagramElementRegistry<SerializationOptionsT>) {
         registry.opt_out().register_message::<i64>();
+        registry
+            .opt_out()
+            .no_request_deserializing()
+            .register_message::<OpaqueMessage>();
     }
+}
+
+fn test_register_section() {
+    let mut registry = DiagramElementRegistry::<JsonSerialization> {
+        _unused: Default::default(),
+    };
+    registry.register_section::<TestSection>();
 }

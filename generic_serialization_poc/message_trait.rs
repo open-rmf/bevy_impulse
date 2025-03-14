@@ -50,23 +50,23 @@ where
     }
 }
 
-trait Section {
-    fn on_register<SerializationOptionsT>(
-        registry: &mut DiagramElementRegistry<SerializationOptionsT>,
-    ) where
-        SerializationOptionsT: SerializationOptions;
+trait Section<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    fn on_register(registry: &mut DiagramElementRegistry<SerializationOptionsT>);
 }
 
 struct TestSection {
     foo: InputSlot<i64>,
 }
 
-impl Section for TestSection {
-    fn on_register<SerializationOptionsT>(
-        registry: &mut DiagramElementRegistry<SerializationOptionsT>,
-    ) where
-        SerializationOptionsT: SerializationOptions,
-    {
+impl<SerializationOptionsT> Section<SerializationOptionsT> for TestSection
+where
+    SerializationOptionsT: SerializationOptions,
+    i64: DeserializeMessage<SerializationOptionsT::Serialized>,
+{
+    fn on_register(registry: &mut DiagramElementRegistry<SerializationOptionsT>) {
         registry.register_message::<i64>();
     }
 }
