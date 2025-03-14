@@ -139,7 +139,7 @@ where
         self,
         options: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) -> NodeRegistrationBuilder<'a, SerializationOptionsT::Serialized, Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<'a, SerializationOptionsT, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static,
@@ -177,7 +177,7 @@ where
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
-        NodeRegistrationBuilder::<SerializationOptionsT::Serialized, Request, Response, Streams>::new(
+        NodeRegistrationBuilder::<SerializationOptionsT, Request, Response, Streams>::new(
             &mut self.registry.messages,
         )
     }
@@ -185,7 +185,7 @@ where
     /// Register a message with the specified common operations.
     pub fn register_message<Message>(
         self,
-    ) -> MessageRegistrationBuilder<'a, Message, SerializationOptionsT::Serialized>
+    ) -> MessageRegistrationBuilder<'a, Message, SerializationOptionsT>
     where
         Message: Send + Sync + 'static,
         DeserializerT: DeserializeMessage<Message, SerializationOptionsT::Serialized>,
@@ -202,7 +202,7 @@ where
             .messages
             .register_fork_clone::<Message, Cloneable>();
 
-        MessageRegistrationBuilder::<Message, SerializationOptionsT::Serialized>::new(
+        MessageRegistrationBuilder::<Message, SerializationOptionsT>::new(
             &mut self.registry.messages,
         )
     }
@@ -241,16 +241,21 @@ where
     }
 }
 
-pub struct MessageRegistrationBuilder<'a, Message, Serialized> {
-    data: &'a mut MessageRegistry<Serialized>,
+pub struct MessageRegistrationBuilder<'a, Message, SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    data: &'a mut MessageRegistry<SerializationOptionsT::Serialized>,
     _ignore: PhantomData<Message>,
 }
 
-impl<'a, Message, Serialized> MessageRegistrationBuilder<'a, Message, Serialized>
+impl<'a, Message, SerializationOptionsT>
+    MessageRegistrationBuilder<'a, Message, SerializationOptionsT>
 where
     Message: Send + Sync + 'static + Any,
+    SerializationOptionsT: SerializationOptions,
 {
-    pub fn new(registry: &'a mut MessageRegistry<Serialized>) -> Self {
+    pub fn new(registry: &'a mut MessageRegistry<SerializationOptionsT::Serialized>) -> Self {
         Self {
             data: registry,
             _ignore: Default::default(),
@@ -261,16 +266,19 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, JsonSerialization)>: DynUnzip,
+        DefaultImplMarker<(Message, SerializationOptionsT::DefaultSerializer)>:
+            DynUnzip<SerializationOptionsT::Serialized>,
+        SerializationOptionsT::DefaultSerializer: 'static,
     {
-        self.data.register_unzip::<Message, JsonSerialization>();
+        self.data
+            .register_unzip::<Message, SerializationOptionsT::DefaultSerializer>();
         self
     }
 
     /// Mark the message as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_minimal(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, NotSupported)>: DynUnzip,
+        DefaultImplMarker<(Message, NotSupported)>: DynUnzip<SerializationOptionsT::Serialized>,
     {
         self.data.register_unzip::<Message, NotSupported>();
         self
@@ -292,10 +300,10 @@ where
     pub fn with_split(&mut self) -> &mut Self
     where
         Message: Splittable,
-        DefaultImpl: DynSplit<Message, JsonSerialization>,
+        DefaultImpl: DynSplit<Message, SerializationOptionsT::DefaultDeserializer>,
     {
         self.data
-            .register_split::<Message, DefaultImpl, JsonSerialization>();
+            .register_split::<Message, DefaultImpl, SerializationOptionsT::DefaultDeserializer>();
         self
     }
 
@@ -339,18 +347,22 @@ where
     }
 }
 
-pub struct NodeRegistrationBuilder<'a, Serialized, Request, Response, Streams> {
-    registry: &'a mut MessageRegistry<Serialized>,
+pub struct NodeRegistrationBuilder<'a, SerializationOptionsT, Request, Response, Streams>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    registry: &'a mut MessageRegistry<SerializationOptionsT::Serialized>,
     _ignore: PhantomData<(Request, Response, Streams)>,
 }
 
-impl<'a, Serialized, Request, Response, Streams>
-    NodeRegistrationBuilder<'a, Serialized, Request, Response, Streams>
+impl<'a, SerializationOptionsT, Request, Response, Streams>
+    NodeRegistrationBuilder<'a, SerializationOptionsT, Request, Response, Streams>
 where
+    SerializationOptionsT: SerializationOptions,
     Request: Send + Sync + 'static + Any,
     Response: Send + Sync + 'static + Any,
 {
-    fn new(registry: &'a mut MessageRegistry<Serialized>) -> Self {
+    fn new(registry: &'a mut MessageRegistry<SerializationOptionsT::Serialized>) -> Self {
         Self {
             registry,
             _ignore: Default::default(),
@@ -361,18 +373,22 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, JsonSerialization)>: DynUnzip,
+        DefaultImplMarker<(Response, SerializationOptionsT::DefaultSerializer)>:
+            DynUnzip<SerializationOptionsT::Serialized>,
+        SerializationOptionsT::DefaultSerializer: 'static,
     {
-        MessageRegistrationBuilder::new(self.registry).with_unzip();
+        MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
+            .with_unzip();
         self
     }
 
     /// Mark the node as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_unserializable(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, NotSupported)>: DynUnzip,
+        DefaultImplMarker<(Response, NotSupported)>: DynUnzip<SerializationOptionsT::Serialized>,
     {
-        MessageRegistrationBuilder::new(self.registry).with_unzip_minimal();
+        MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
+            .with_unzip_minimal();
         self
     }
 
@@ -382,7 +398,8 @@ where
     where
         DefaultImplMarker<(Response, NotSupported)>: DynForkResult,
     {
-        MessageRegistrationBuilder::new(self.registry).with_fork_result();
+        MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
+            .with_fork_result();
         self
     }
 
@@ -391,9 +408,10 @@ where
     pub fn with_split(&mut self) -> &mut Self
     where
         Response: Splittable,
-        DefaultImpl: DynSplit<Response, JsonSerialization>,
+        DefaultImpl: DynSplit<Response, SerializationOptionsT::DefaultDeserializer>,
     {
-        MessageRegistrationBuilder::new(self.registry).with_split();
+        MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
+            .with_split();
         self
     }
 
@@ -404,7 +422,8 @@ where
         Response: Splittable,
         DefaultImpl: DynSplit<Response, NotSupported>,
     {
-        MessageRegistrationBuilder::new(self.registry).with_split_minimal();
+        MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
+            .with_split_minimal();
         self
     }
 
@@ -413,7 +432,8 @@ where
     where
         Request: Joined,
     {
-        MessageRegistrationBuilder::<Request, Serialized>::new(self.registry).with_join();
+        MessageRegistrationBuilder::<Request, SerializationOptionsT>::new(self.registry)
+            .with_join();
         self
     }
 
@@ -422,7 +442,8 @@ where
     where
         Request: BufferAccessRequest,
     {
-        MessageRegistrationBuilder::<Request, Serialized>::new(self.registry).with_buffer_access();
+        MessageRegistrationBuilder::<Request, SerializationOptionsT>::new(self.registry)
+            .with_buffer_access();
         self
     }
 
@@ -431,7 +452,8 @@ where
     where
         Request: Accessor,
     {
-        MessageRegistrationBuilder::<Request, Serialized>::new(self.registry).with_listen();
+        MessageRegistrationBuilder::<Request, SerializationOptionsT>::new(self.registry)
+            .with_listen();
         self
     }
 }
@@ -535,7 +557,7 @@ pub(super) struct MessageOperation<Serialized> {
     pub(super) deserialize_impl: Option<DeserializeFn<Serialized>>,
     pub(super) serialize_impl: Option<SerializeFn<Serialized>>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
-    pub(super) unzip_impl: Option<Box<dyn DynUnzip>>,
+    pub(super) unzip_impl: Option<Box<dyn DynUnzip<Serialized>>>,
     pub(super) fork_result_impl: Option<ForkResultFn>,
     pub(super) split_impl: Option<SplitFn>,
     pub(super) join_impl: Option<JoinFn>,
@@ -921,10 +943,10 @@ impl<Serialized> MessageRegistry<Serialized> {
     where
         T: Send + Sync + 'static + Any,
         Serializer: 'static,
-        DefaultImplMarker<(T, Serializer)>: DynUnzip,
+        DefaultImplMarker<(T, Serializer)>: DynUnzip<Serialized>,
     {
         let unzip_impl = DefaultImplMarker::<(T, Serializer)>::new();
-        // unzip_impl.on_register(self);
+        unzip_impl.on_register(self);
 
         let ops = &mut self
             .messages
@@ -1184,7 +1206,7 @@ where
         &mut self,
         options: NodeBuilderOptions,
         builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
-    ) -> NodeRegistrationBuilder<SerializationOptionsT::Serialized, Request, Response, Streams>
+    ) -> NodeRegistrationBuilder<SerializationOptionsT, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static + DeserializeOwned,

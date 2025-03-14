@@ -35,12 +35,18 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
     add_where_clause
         .predicates
         .push(parse_quote!(__SerializationOptionsT__: ::bevy_impulse::SerializationOptions));
+    add_where_clause
+        .predicates
+        .push(parse_quote!(__SerializationOptionsT__::DefaultSerializer: 'static));
     for ((field_config, _), ty) in zip(&field_configs, &field_type) {
         if !field_config.no_deserialize {
             add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultDeserializer: ::bevy_impulse::DeserializeMessage<<#ty as ::bevy_impulse::SectionItem>::MessageType, __SerializationOptionsT__::Serialized>));
         }
         if !field_config.no_serialize {
             add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultSerializer: ::bevy_impulse::SerializeMessage<<#ty as ::bevy_impulse::SectionItem>::MessageType, __SerializationOptionsT__::Serialized>));
+        }
+        if field_config.unzip {
+            add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultSerializer: ::bevy_impulse::UnzipSerialize<<#ty as ::bevy_impulse::SectionItem>::MessageType, __SerializationOptionsT__::Serialized>));
         }
     }
     let (impl_generics_with_ser, _, where_clause_with_ser) = add_generics.split_for_impl();

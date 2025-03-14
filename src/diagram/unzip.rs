@@ -8,9 +8,9 @@ use tracing::debug;
 use crate::Builder;
 
 use super::{
-    impls::{DefaultImplMarker, NotSupportedMarker},
-    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, Vertex,
-    WorkflowBuilder,
+    impls::{DefaultImplMarker, NotSupported},
+    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -51,7 +51,7 @@ impl UnzipOp {
     }
 }
 
-pub trait DynUnzip {
+pub trait DynUnzip<Serialized> {
     /// Returns a list of type names that this message unzips to.
     fn output_types(&self) -> Vec<&'static str>;
 
@@ -61,11 +61,11 @@ pub trait DynUnzip {
         output: DynOutput,
     ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
 
-    // /// Called when a node is registered.
-    // fn on_register<Serialized>(&self, registry: &mut MessageRegistry<Serialized>);
+    /// Called when a node is registered.
+    fn on_register(&self, registry: &mut MessageRegistry<Serialized>);
 }
 
-impl<T> DynUnzip for NotSupportedMarker<T> {
+impl<Serialized> DynUnzip<Serialized> for NotSupported {
     fn output_types(&self) -> Vec<&'static str> {
         Vec::new()
     }
@@ -78,15 +78,35 @@ impl<T> DynUnzip for NotSupportedMarker<T> {
         Err(DiagramErrorCode::NotUnzippable)
     }
 
-    // fn on_register<Serialized>(&self, _registry: &mut MessageRegistry<Serialized>) {}
+    fn on_register(&self, _registry: &mut MessageRegistry<Serialized>) {}
+}
+
+pub trait UnzipSerialize<T, Serialized> {
+    fn on_register(registry: &mut MessageRegistry<Serialized>);
 }
 
 macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*, SerializerT> DynUnzip for DefaultImplMarker<(($($P,)*), SerializerT)>
+        impl<$($P),*, Serialized, Serializer> UnzipSerialize<($($P,)*), Serialized> for Serializer
+        where
+        $(
+            $P: Send + Sync + 'static,
+            Serializer: SerializeMessage<$P, Serialized>,
+        )*
+        {
+            fn on_register(registry: &mut MessageRegistry<Serialized>) {
+                // Register serialize functions for all items in the tuple.
+                // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
+                $(
+                    registry.register_serialize::<$P, Serializer>();
+                )*
+            }
+        }
+
+        impl<$($P),*, Serializer, Serialized> DynUnzip<Serialized> for DefaultImplMarker<(($($P,)*), Serializer)>
         where
             $($P: Send + Sync + 'static),*,
-            // SerializerT: $(Serializer<$P> +)* $(Serializer<Vec<$P>> +)*,
+            Serializer: UnzipSerialize<($($P,)*), Serialized>,
         {
             fn output_types(&self) -> Vec<&'static str> {
                 vec![$(
@@ -112,14 +132,10 @@ macro_rules! dyn_unzip_impl {
                 Ok(outputs)
             }
 
-            // fn on_register<Serialized>(&self, registry: &mut MessageRegistry<Serialized>)
-            // {
-                // Register serialize functions for all items in the tuple.
-                // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
-                // $(
-                //     registry.register_serialize::<$P, Serializer>();
-                // )*
-            // }
+            fn on_register(&self, registry: &mut MessageRegistry<Serialized>)
+            {
+                <Serializer as UnzipSerialize<($($P,)*), Serialized>>::on_register(registry);
+            }
         }
     };
 }
