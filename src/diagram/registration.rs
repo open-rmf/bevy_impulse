@@ -300,10 +300,12 @@ where
     pub fn with_split(&mut self) -> &mut Self
     where
         Message: Splittable,
-        DefaultImpl: DynSplit<Message, SerializationOptionsT::DefaultDeserializer>,
+        DefaultImpl: DynSplit<Message, SerializationOptionsT::DefaultSerializer>,
+        SerializationOptionsT::DefaultSerializer:
+            SerializeMessage<Message::Item, SerializationOptionsT::Serialized>,
     {
         self.data
-            .register_split::<Message, DefaultImpl, SerializationOptionsT::DefaultDeserializer>();
+            .register_split::<Message, DefaultImpl, SerializationOptionsT::DefaultSerializer>();
         self
     }
 
@@ -408,7 +410,9 @@ where
     pub fn with_split(&mut self) -> &mut Self
     where
         Response: Splittable,
-        DefaultImpl: DynSplit<Response, SerializationOptionsT::DefaultDeserializer>,
+        DefaultImpl: DynSplit<Response, SerializationOptionsT::DefaultSerializer>,
+        SerializationOptionsT::DefaultSerializer:
+            SerializeMessage<Response::Item, SerializationOptionsT::Serialized>,
     {
         MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
             .with_split();
@@ -1001,6 +1005,7 @@ impl<Serialized> MessageRegistry<Serialized> {
     where
         T: Send + Sync + 'static + Any + Splittable,
         F: DynSplit<T, S>,
+        S: SerializeMessage<T::Item, Serialized>,
     {
         let ops = &mut self
             .messages
@@ -1014,7 +1019,7 @@ impl<Serialized> MessageRegistry<Serialized> {
         ops.split_impl = Some(Box::new(|builder, output, split_op| {
             F::dyn_split(builder, output, split_op)
         }));
-        // F::on_register(self);
+        F::on_register(self);
 
         true
     }

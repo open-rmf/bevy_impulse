@@ -48,6 +48,9 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
         if field_config.unzip {
             add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultSerializer: ::bevy_impulse::UnzipSerialize<<#ty as ::bevy_impulse::SectionItem>::MessageType, __SerializationOptionsT__::Serialized>));
         }
+        if field_config.split {
+            add_where_clause.predicates.push(parse_quote!(__SerializationOptionsT__::DefaultSerializer: ::bevy_impulse::SerializeMessage<<<#ty as ::bevy_impulse::SectionItem>::MessageType as ::bevy_impulse::Splittable>::Item, __SerializationOptionsT__::Serialized>));
+        }
     }
     let (impl_generics_with_ser, _, where_clause_with_ser) = add_generics.split_for_impl();
 
