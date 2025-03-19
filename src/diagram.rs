@@ -136,17 +136,43 @@ pub struct TerminateSchema {}
 #[serde(rename_all = "snake_case", tag = "type")]
 #[strum(serialize_all = "snake_case")]
 pub enum DiagramOperation {
-    /// Connect the request to a registered node.
+    /// Create an operation that that takes an input message and produces an
+    /// output message.
     ///
+    /// The behavior is determined by the choice of node `builder` and
+    /// optioanlly the `config` that you provide. Each type of node builder has
+    /// its own schema for the config.
+    ///
+    /// The output message will be sent to the operation specified by `next`.
+    ///
+    /// TODO(@mxgrey): Support stream outputs
+    /// https://github.com/open-rmf/bevy_impulse/issues/43
+    ///
+    /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "node_op",
+    ///     "start": "cutting_board",
     ///     "ops": {
-    ///         "node_op": {
+    ///         "cutting_board": {
     ///             "type": "node",
-    ///             "builder": "my_node_builder",
+    ///             "builder": "chop",
+    ///             "config": "diced",
+    ///             "next": "bowl"
+    ///         },
+    ///         "bowl": {
+    ///             "type": "node",
+    ///             "builder": "stir",
+    ///             "next": "oven"
+    ///         },
+    ///         "oven": {
+    ///             "type": "node",
+    ///             "builder": "bake",
+    ///             "config": {
+    ///                 "temperature": 200,
+    ///                 "duration": 120
+    ///             },
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
@@ -155,18 +181,43 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     Node(NodeSchema),
 
-    /// If the request is cloneable, clone it into multiple responses.
+    /// If the request is cloneable, clone it into multiple responses that can
+    /// each be sent to a different operation. The `next` property is an array.
+    ///
+    /// This creates multiple simultaneous branches of execution within the
+    /// workflow. Usually when you have multiple branches you will either
+    /// * race - connect all branches to `terminate` and the first branch to
+    ///   finish "wins" the race and gets to the be output
+    /// * join - connect each branch into a buffer and then use the `join`
+    ///   operation to reunite them
+    /// * collect - TODO(@mxgrey): add the collect operation
+    ///   https://github.com/open-rmf/bevy_impulse/issues/59
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
+    ///     "start": "begin_race",
     ///     "ops": {
-    ///         "fork_clone": {
+    ///         "begin_race": {
     ///             "type": "fork_clone",
-    ///             "next": ["terminate"]
+    ///             "next": [
+    ///                 "ferrari",
+    ///                 "mustang"
+    ///             ]
+    ///         },
+    ///         "ferrari": {
+    ///             "type": "node",
+    ///             "builder": "drive",
+    ///             "config": "ferrari",
+    ///             "next": { "builtin": "terminate" }
+    ///         },
+    ///         "mustang": {
+    ///             "type": "node",
+    ///             "builder": "drive",
+    ///             "config": "mustang",
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
@@ -174,19 +225,55 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     ForkClone(ForkCloneSchema),
 
-    /// If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses
-    /// of T1, T2, T3, ...
+    /// If the input message is a tuple of (T1, T2, T3, ...), unzip it into
+    /// multiple output messages of T1, T2, T3, ...
+    ///
+    /// Each output message may have a different type and can be sent to a
+    /// different operation. This creates multiple simultaneous branches of
+    /// execution within the workflow. See [`DiagramOperation::ForkClone`] for
+    /// more information on parallel branches.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "unzip",
+    ///     "start": "name_phone_address",
     ///     "ops": {
-    ///         "unzip": {
+    ///         "name_phone_address": {
     ///             "type": "unzip",
-    ///             "next": [{ "builtin": "terminate" }]
+    ///             "next": [
+    ///                 "process_name",
+    ///                 "process_phone_number",
+    ///                 "process_address"
+    ///             ]
+    ///         },
+    ///         "process_name": {
+    ///             "type": "node",
+    ///             "builder": "process_name",
+    ///             "next": "name_processed"
+    ///         },
+    ///         "process_phone_number": {
+    ///             "type": "node",
+    ///             "builder": "process_phone_number",
+    ///             "next": "phone_number_processed"
+    ///         },
+    ///         "process_address": {
+    ///             "type": "node",
+    ///             "builder": "process_address",
+    ///             "next": "address_processed"
+    ///         },
+    ///         "name_processed": { "type": "buffer" },
+    ///         "phone_number_processed": { "type": "buffer" },
+    ///         "address_processed": { "type": "buffer" },
+    ///         "finished": {
+    ///             "type": "join",
+    ///             "buffers": [
+    ///                 "name_processed",
+    ///                 "phone_number_processed",
+    ///                 "address_processed"
+    ///             ],
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
@@ -194,7 +281,13 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     Unzip(UnzipSchema),
 
-    /// If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.
+    /// If the request is a [`Result<T, E>`], send the output message down an
+    /// `ok` branch or down an `err` branch depending on whether the result has
+    /// an [`Ok`] or [`Err`] value. The `ok` branch will receive a `T` while the
+    /// `err` branch will receive an `E`.
+    ///
+    /// Only one branch will be activated by each input message that enters the
+    /// operation.
     ///
     /// # Examples
     /// ```
@@ -214,70 +307,120 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     ForkResult(ForkResultSchema),
 
-    /// If the request is a list-like or map-like object, split it into multiple responses.
-    /// Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split
-    /// output should have request of that type instead of just the value type.
+    /// If the input message is a list-like or map-like object, split it into
+    /// multiple output messages.
+    ///
+    /// Note that the type of output message from the split depends on how the
+    /// input message implements the [`Splittable`][1] trait. In many cases this
+    /// will be a tuple of `(key, value)`.
+    ///
+    /// There are three ways to specify where the split output messages should
+    /// go, and all can be used at the same time:
+    /// * `sequential` - For array-like collections, send the "first" element of
+    ///   the collection to the first operation listed in the `sequential` array.
+    ///   The "second" element of the collection goes to the second operation
+    ///   listed in the `sequential` array. And so on for all elements in the
+    ///   collection. If one of the elements in the collection is mentioned in
+    ///   the `keyed` set, then the sequence will pass over it as if the element
+    ///   does not exist at all.
+    /// * `keyed` - For map-like collections, send the split element associated
+    ///   with the specified key to its associated output.
+    /// * `remaining` - Any elements that are were not captured by `sequential`
+    ///   or by `keyed` will be sent to this.
+    ///
+    /// [1]: crate::Splittable
     ///
     /// # Examples
+    ///
+    /// Suppose I am an animal rescuer sorting through a new collection of
+    /// animals that need recuing. My home has space for three exotic animals
+    /// plus any number of dogs and cats.
+    ///
+    /// I have a custom `SpeciesCollection` data structure that implements
+    /// [`Splittable`][1] by allowing you to key on the type of animal.
+    ///
+    /// In the workflow below, we send all cats and dogs to `home`, and we also
+    /// send the first three non-dog and non-cat species to `home`. All
+    /// remaining animals go to the zoo.
+    ///
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "split",
+    ///     "start": "select_animals",
     ///     "ops": {
-    ///         "split": {
+    ///         "select_animals": {
     ///             "type": "split",
-    ///             "index": [{ "builtin": "terminate" }]
+    ///             "sequential": [
+    ///                 "home",
+    ///                 "home",
+    ///                 "home"
+    ///             ],
+    ///             "keyed": {
+    ///                 "cat": "home",
+    ///                 "dog": "home"
+    ///             },
+    ///             "remaining": "zoo"
     ///         }
     ///     }
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
+    ///
+    /// If we input `["frog", "cat", "bear", "beaver", "dog", "rabbit", "dog", "monkey"]`
+    /// then `frog`, `bear`, and `beaver` will be sent to `home` since those are
+    /// the first three animals that are not `dog` or `cat`, and we will also
+    /// send one `cat` and two `dog` home. `rabbit` and `monkey` will be sent to the zoo.
     Split(SplitSchema),
 
-    /// Wait for an item to be emitted from each of the inputs, then combine the
-    /// oldest of each into an array.
+    /// Wait for exactly one item to be available in each buffer listed in
+    /// `buffers`, then join each of those items into a single output message
+    /// that gets sent to `next`.
+    ///
+    /// If the `next` operation is not a `node` type (e.g. `fork_clone`) then
+    /// you must specify a `target_node` so that the diagram knows what data
+    /// structure to join the values into.
+    ///
+    /// The output message type must be registered as joinable at compile time.
+    /// If you want to join into a dynamic data structure then you should use
+    /// [`DiagramOperation::SerializedJoin`] instead.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
+    ///     "start": "fork_measuring",
     ///     "ops": {
-    ///         "fork_clone": {
+    ///         "fork_measuring": {
     ///             "type": "fork_clone",
-    ///             "next": ["foo", "bar"]
+    ///             "next": ["localize", "imu"]
     ///         },
-    ///         "foo": {
+    ///         "localize": {
     ///             "type": "node",
-    ///             "builder": "foo",
-    ///             "next": "foo_buffer"
+    ///             "builder": "localize",
+    ///             "next": "estimated_position"
     ///         },
-    ///         "foo_buffer": {
-    ///             "type": "buffer"
-    ///         },
-    ///         "bar": {
+    ///         "imu": {
     ///             "type": "node",
-    ///             "builder": "bar",
-    ///             "next": "bar_buffer"
+    ///             "builder": "imu",
+    ///             "config": "velocity",
+    ///             "next": "estimated_velocity"
     ///         },
-    ///         "bar_buffer": {
-    ///             "type": "buffer"
-    ///         },
-    ///         "join": {
+    ///         "estimated_position": { "type": "buffer" },
+    ///         "estimated_velocity": { "type": "buffer" },
+    ///         "gather_state": {
     ///             "type": "join",
     ///             "buffers": {
-    ///                 "foo": "foo_buffer",
-    ///                 "bar": "bar_buffer"
+    ///                 "position": "estimate_position",
+    ///                 "velocity": "estimate_velocity"
     ///             },
-    ///             "target_node": "foobar",
-    ///             "next": "foobar"
+    ///             "next": "report_state"
     ///         },
-    ///         "foobar": {
+    ///         "report_state": {
     ///             "type": "node",
-    ///             "builder": "foobar",
+    ///             "builder": "publish_state",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
@@ -287,51 +430,15 @@ pub enum DiagramOperation {
     /// ```
     Join(JoinSchema),
 
-    /// Wait for an item to be emitted from each of the inputs, then combine the
-    /// oldest of each into an array. Unlike `join`, this only works with serialized buffers.
+    /// Same as [`DiagramOperation::Join`] but all input messages must be
+    /// serializable, and the output message will always be [`serde_json::Value`].
     ///
-    /// # Examples
-    /// ```
-    /// # bevy_impulse::Diagram::from_json_str(r#"
-    /// {
-    ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
-    ///     "ops": {
-    ///         "fork_clone": {
-    ///             "type": "fork_clone",
-    ///             "next": ["foo", "bar"]
-    ///         },
-    ///         "foo": {
-    ///             "type": "node",
-    ///             "builder": "foo",
-    ///             "next": "foo_buffer"
-    ///         },
-    ///         "foo_buffer": {
-    ///             "type": "buffer",
-    ///             "serialize": true
-    ///         },
-    ///         "bar": {
-    ///             "type": "node",
-    ///             "builder": "bar",
-    ///             "next": "bar_buffer"
-    ///         },
-    ///         "bar_buffer": {
-    ///             "type": "buffer",
-    ///             "serialize": true
-    ///         },
-    ///         "serialized_join": {
-    ///             "type": "serialized_join",
-    ///             "buffers": {
-    ///                 "foo": "foo_buffer",
-    ///                 "bar": "bar_buffer"
-    ///             },
-    ///             "next": { "builtin": "terminate" }
-    ///         }
-    ///     }
-    /// }
-    /// # "#)?;
-    /// # Ok::<_, serde_json::Error>(())
-    /// ```
+    /// If you use an array for `buffers` then the output message will be a
+    /// [`serde_json::Value::Array`]. If you use a map for `buffers` then the
+    /// output message will be a [`serde_json::Value::Object`].
+    ///
+    /// Unlike [`DiagramOperation::Join`], the `target_node` property does not
+    /// exist for this schema.
     SerializedJoin(SerializedJoinSchema),
 
     /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
