@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{unknown_diagram_error, AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
+use crate::{unknown_diagram_error, AnyBuffer, Builder, JsonMessage};
 
 use super::{
     buffer_schema::{get_node_request_type, BufferInputs},
@@ -46,9 +46,7 @@ impl JoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
-            buffers
-        } else {
+        let Some(buffers) = self.buffers.as_buffer_map(buffers) else {
             return Ok(false);
         };
         let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
@@ -96,54 +94,12 @@ impl SerializedJoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
-            buffers
-        } else {
+        let Some(buffers) = self.buffers.as_buffer_map(buffers) else {
             return Ok(false);
         };
-        let buffer_inputs = self.buffers.clone();
-        let output = builder
-            .try_join::<HashMap<BufferIdentifier<'static>, AnyMessageBox>>(&buffers)?
-            .map_block(
-                move |joined| -> Result<serde_json::Value, DiagramErrorCode> {
-                    if joined.is_empty() {
-                        return Ok(serde_json::Value::Null);
-                    }
 
-                    match &buffer_inputs {
-                        BufferInputs::Dict(_) => {
-                            let values = joined
-                                .iter()
-                                .filter_map(|(k, any_msg)| match k {
-                                    BufferIdentifier::Name(k) => {
-                                        match any_msg
-                                            .downcast_ref::<serde_json::Value>()
-                                            .ok_or(DiagramErrorCode::NotSerializable)
-                                        {
-                                            Ok(value) => Some(Ok((k, value))),
-                                            Err(err) => Some(Err(err)),
-                                        }
-                                    }
-                                    _ => None,
-                                })
-                                .collect::<Result<HashMap<_, _>, DiagramErrorCode>>()?;
-                            Ok(serde_json::to_value(values).unwrap())
-                        }
-                        BufferInputs::Array(arr) => {
-                            let values = (0..arr.len())
-                                .map(|i| {
-                                    let value = joined.get(&BufferIdentifier::Index(i)).unwrap();
-                                    value
-                                        .downcast_ref::<serde_json::Value>()
-                                        .ok_or(DiagramErrorCode::NotSerializable)
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-                            Ok(serde_json::to_value(values).unwrap())
-                        }
-                    }
-                },
-            )
-            .cancel_on_err()
+        let output = builder
+            .try_join::<JsonMessage>(&buffers)?
             .output()
             .into();
 
@@ -167,16 +123,14 @@ pub type JoinOutput<T> = SmallVec<[T; 4]>;
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
     use bevy_impulse_derive::Joined;
     use serde_json::json;
     use test_log::test;
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Cancellation, CancellationCause, Diagram,
-        DiagramError, DiagramErrorCode, FilteredErr, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Diagram,
+        DiagramError, DiagramErrorCode, NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -191,6 +145,15 @@ mod tests {
     struct FooBar {
         foo: String,
         bar: String,
+    }
+
+    impl Default for FooBar {
+        fn default() -> Self {
+            FooBar {
+                foo: "foo".to_owned(),
+                bar: "bar".to_owned(),
+            }
+        }
     }
 
     fn foobar(foobar: FooBar) -> String {
@@ -209,6 +172,8 @@ mod tests {
             builder.create_map_block(bar)
         });
         registry
+            .opt_out()
+            .no_cloning()
             .register_node_builder(NodeBuilderOptions::new("foobar"), |builder, _config: ()| {
                 builder.create_map_block(foobar)
             })
@@ -219,6 +184,15 @@ mod tests {
                 |builder, _config: ()| builder.create_map_block(foobar_array),
             )
             .with_join();
+        registry
+            .opt_out()
+            .no_cloning()
+            .register_node_builder(NodeBuilderOptions::new("create_foobar"), |builder, config: FooBar| {
+                builder.create_map_block(move |_: JsonMessage| FooBar {
+                    foo: config.foo.clone(),
+                    bar: config.bar.clone(),
+                })
+            });
     }
 
     #[test]
@@ -524,29 +498,37 @@ mod tests {
             "ops": {
                 "fork_clone": {
                     "type": "fork_clone",
-                    "next": ["foo", "bar"],
+                    "next": ["create_foobar_1", "create_foobar_2"],
                 },
-                "foo": {
+                "create_foobar_1": {
                     "type": "node",
-                    "builder": "foo",
-                    "next": "foo_buffer",
+                    "builder": "create_foobar",
+                    "config": {
+                        "foo": "foo_1",
+                        "bar": "bar_1",
+                    },
+                    "next": "foobar_buffer_1",
                 },
-                "foo_buffer": {
+                "create_foobar_2": {
+                    "type": "node",
+                    "builder": "create_foobar",
+                    "config": {
+                        "foo": "foo_2",
+                        "bar": "bar_2",
+                    },
+                    "next": "foobar_buffer_2",
+                },
+                "foobar_buffer_1": {
                     "type": "buffer",
                 },
-                "bar": {
-                    "type": "node",
-                    "builder": "bar",
-                    "next": "bar_buffer",
-                },
-                "bar_buffer": {
+                "foobar_buffer_2": {
                     "type": "buffer",
                 },
                 "serialized_join": {
                     "type": "serialized_join",
                     "buffers": {
-                        "foo": "foo_buffer",
-                        "bar": "bar_buffer",
+                        "foobar_1": "foobar_buffer_1",
+                        "foobar_2": "foobar_buffer_2",
                     },
                     "next": { "builtin": "terminate" },
                 },
@@ -556,24 +538,12 @@ mod tests {
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap_err();
-        let cause = result.downcast::<Cancellation>().unwrap().cause;
-        let filtered = match cause.as_ref() {
-            CancellationCause::Filtered(filtered) => filtered,
-            _ => panic!("expected filtered"),
-        };
-        assert!(matches!(
-            filtered
-                .reason
-                .as_ref()
-                .unwrap()
-                .downcast_ref::<FilteredErr<DiagramErrorCode>>()
-                .unwrap()
-                .source()
-                .unwrap()
-                .downcast_ref::<DiagramErrorCode>()
-                .unwrap(),
-            DiagramErrorCode::NotSerializable
-        ));
+            .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        let object = result.as_object().unwrap();
+        assert_eq!(object["foobar_1"].as_object().unwrap()["foo"], "foo_1");
+        assert_eq!(object["foobar_1"].as_object().unwrap()["bar"], "bar_1");
+        assert_eq!(object["foobar_2"].as_object().unwrap()["foo"], "foo_2");
+        assert_eq!(object["foobar_2"].as_object().unwrap()["bar"], "bar_2");
     }
 }

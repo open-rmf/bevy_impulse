@@ -5,6 +5,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tracing::debug;
 
 use super::{type_info::TypeInfo, MessageRegistration};
+use crate::JsonBuffer;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SerializationError {
@@ -50,7 +51,7 @@ pub struct DefaultSerializer;
 
 impl<T> SerializeMessage<T> for DefaultSerializer
 where
-    T: Serialize + DynType,
+    T: Serialize + DynType + Send + Sync + 'static,
 {
     fn type_name() -> String {
         T::type_name()
@@ -65,6 +66,7 @@ where
     }
 
     fn serializable() -> bool {
+        // Register the ability to cast this message's buffer type
         true
     }
 }
@@ -178,4 +180,46 @@ where
     reg.schema = Serializer::json_schema(schema_generator);
 
     true
+}
+
+pub trait RegisterJson<T> {
+    fn register_json();
+}
+
+pub struct JsonRegistration<Serializer, Deserializer> {
+    _ignore: std::marker::PhantomData<fn(Serializer, Deserializer)>
+}
+
+impl<T> RegisterJson<T> for JsonRegistration<DefaultSerializer, DefaultDeserializer>
+where
+    T: 'static + Send + Sync + Serialize + DeserializeOwned,
+{
+    fn register_json() {
+        JsonBuffer::register_for::<T>();
+    }
+}
+
+impl<T> RegisterJson<T> for JsonRegistration<DefaultSerializer, OpaqueMessageDeserializer> {
+    fn register_json() {
+        // Do nothing
+    }
+}
+
+impl<T> RegisterJson<T> for JsonRegistration<OpaqueMessageSerializer, DefaultDeserializer> {
+    fn register_json() {
+        // Do nothing
+    }
+}
+
+impl<T> RegisterJson<T> for JsonRegistration<OpaqueMessageSerializer, OpaqueMessageDeserializer> {
+    fn register_json() {
+        // Do nothing
+    }
+}
+
+pub(super) fn register_json<T, Serializer, Deserializer>()
+where
+    JsonRegistration<Serializer, Deserializer>: RegisterJson<T>,
+{
+    JsonRegistration::<Serializer, Deserializer>::register_json();
 }

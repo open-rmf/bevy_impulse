@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
-    InputSlot, Joined, Node, Output, StreamPack,
+    InputSlot, Joined, JsonBuffer, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
 use schemars::{
@@ -25,19 +25,18 @@ use serde::{
 use serde_json::json;
 use tracing::debug;
 
-use crate::SerializeMessage;
-
 use super::{
     buffer_schema::BufferAccessRequest,
     fork_clone_schema::DynForkClone,
     fork_result_schema::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
     register_serialize,
+    register_json,
     type_info::TypeInfo,
     unzip_schema::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
-    DynSplit, DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer,
-    SplitSchema,
+    DynSplit, DynSplitOutputs, DynType, JsonRegistration, OpaqueMessageDeserializer, OpaqueMessageSerializer,
+    RegisterJson, SerializeMessage, SplitSchema,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -236,7 +235,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     /// * `name` - Friendly name for the builder, this is only used for display purposes.
     /// * `f` - The node builder to register.
     pub fn register_node_builder<Config, Request, Response, Streams>(
-        self,
+        mut self,
         options: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
     ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
@@ -246,18 +245,16 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Response: Send + Sync + 'static,
         Streams: StreamPack,
         DeserializeImpl: DeserializeMessage<Request>,
+        DeserializeImpl: DeserializeMessage<Response>,
+        SerializeImpl: SerializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
+        Cloneable: DynForkClone<Request>,
         Cloneable: DynForkClone<Response>,
+        JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
+        JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
-        self.registry
-            .messages
-            .register_deserialize::<Request, DeserializeImpl>();
-        self.registry
-            .messages
-            .register_serialize::<Response, SerializeImpl>();
-        self.registry
-            .messages
-            .register_fork_clone::<Response, Cloneable>();
+        self.impl_register_message::<Request>();
+        self.impl_register_message::<Response>();
 
         let registration = NodeRegistration {
             id: options.id.clone(),
@@ -277,16 +274,29 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
-        NodeRegistrationBuilder::<Request, Response, Streams>::new(&mut self.registry.messages)
+        NodeRegistrationBuilder::<Request, Response, Streams>::new(self.registry)
     }
 
     /// Register a message with the specified common operations.
-    pub fn register_message<Message>(self) -> MessageRegistrationBuilder<'a, Message>
+    pub fn register_message<Message>(mut self) -> MessageRegistrationBuilder<'a, Message>
     where
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
         Cloneable: DynForkClone<Message>,
+        JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
+    {
+        self.impl_register_message();
+        MessageRegistrationBuilder::<Message>::new(&mut self.registry.messages)
+    }
+
+    fn impl_register_message<Message>(&mut self)
+    where
+        Message: Send + Sync + 'static,
+        DeserializeImpl: DeserializeMessage<Message>,
+        SerializeImpl: SerializeMessage<Message>,
+        Cloneable: DynForkClone<Message>,
+        JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.registry
             .messages
@@ -298,12 +308,18 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
             .messages
             .register_fork_clone::<Message, Cloneable>();
 
-        MessageRegistrationBuilder::<Message>::new(&mut self.registry.messages)
+        register_json::<Message, SerializeImpl, DeserializeImpl>();
     }
 
-    /// Opt out of deserializing the request of the node. Use this to build a
-    /// node whose request type is not deserializable.
-    pub fn no_request_deserializing(
+    /// Opt out of deserializing the input and output messages of the node.
+    ///
+    /// If you want to enable deserializing for only the input or only the output
+    /// then use [`DiagramElementRegistry::register_message`] on the message type
+    /// directly.
+    ///
+    /// Note that [`JsonBuffer`] is only enabled for message types that enable
+    /// both serializing AND deserializing.
+    pub fn no_deserializing(
         self,
     ) -> CommonOperations<'a, OpaqueMessageDeserializer, SerializeImpl, Cloneable> {
         CommonOperations {
@@ -312,9 +328,15 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         }
     }
 
-    /// Opt out of serializing the response of the node. Use this to build a
-    /// node whose response type is not serializable.
-    pub fn no_response_serializing(
+    /// Opt out of serializing the input and output messages of the node.
+    ///
+    /// If you want to enable serialization for only the input or only the output
+    /// then use [`DiagramElementRegistry::register_message`] on the message type
+    /// directly.
+    ///
+    /// Note that [`JsonBuffer`] is only enabled for message types that enable
+    /// both serializing AND deserializing.
+    pub fn no_serializing(
         self,
     ) -> CommonOperations<'a, DeserializeImpl, OpaqueMessageSerializer, Cloneable> {
         CommonOperations {
@@ -323,9 +345,12 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         }
     }
 
-    /// Opt out of cloning the response of the node. Use this to build a node
-    /// whose response type is not cloneable.
-    pub fn no_response_cloning(
+    /// Opt out of cloning the input and output messages of the node.
+    ///
+    /// If you want to enable cloning for only the input or only the output
+    /// then use [`DiagramElementRegistry::register_message`] on the message type
+    /// directly.
+    pub fn no_cloning(
         self,
     ) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
         CommonOperations {
@@ -432,7 +457,7 @@ where
 }
 
 pub struct NodeRegistrationBuilder<'a, Request, Response, Streams> {
-    registry: &'a mut MessageRegistry,
+    registry: &'a mut DiagramElementRegistry,
     _ignore: PhantomData<(Request, Response, Streams)>,
 }
 
@@ -441,11 +466,73 @@ where
     Request: Send + Sync + 'static + Any,
     Response: Send + Sync + 'static + Any,
 {
-    fn new(registry: &'a mut MessageRegistry) -> Self {
+    fn new(registry: &'a mut DiagramElementRegistry) -> Self {
         Self {
             registry,
             _ignore: Default::default(),
         }
+    }
+
+    /// If you opted out of any common operations in order to accommodate your
+    /// response type, you can enable all common operations for your response
+    /// type using this.
+    pub fn with_common_request(&mut self) -> &mut Self
+    where
+        Request: DynType + DeserializeOwned + Serialize + Clone,
+    {
+        self.registry.register_message::<Request>();
+        self
+    }
+
+    /// If you opted out of cloning, you can enable it specifically for the
+    /// input message with this.
+    pub fn with_clone_request(&mut self) -> &mut Self
+    where
+        Request: Clone,
+    {
+        self.registry.messages.register_fork_clone::<Request, DefaultImpl>();
+        self
+    }
+
+    /// If you opted out of deserialization, you can enable it specifically for
+    /// the input message with this.
+    pub fn with_deserialize_request(&mut self) -> &mut Self
+    where
+        Request: DeserializeOwned + DynType,
+    {
+        self.registry.messages.register_deserialize::<Request, DefaultDeserializer>();
+        self
+    }
+
+    /// If you opted out of any common operations in order to accommodate your
+    /// request type, you can enable all common operations for your response
+    /// type using this.
+    pub fn with_common_response(&mut self) -> &mut Self
+    where
+        Response: DynType + DeserializeOwned + Serialize + Clone,
+    {
+        self.registry.register_message::<Response>();
+        self
+    }
+
+    /// If you opted out of cloning, you can enable it specifically for the
+    /// output message with this.
+    pub fn with_clone_response(&mut self) -> &mut Self
+    where
+        Response: Clone,
+    {
+        self.registry.messages.register_fork_clone::<Response, DefaultImpl>();
+        self
+    }
+
+    /// If you opted out of serialization, you can enable it specifically for
+    /// the output message with this.
+    pub fn with_serialize_response(&mut self) -> &mut Self
+    where
+        Response: Serialize + DynType,
+    {
+        self.registry.messages.register_serialize::<Response, DefaultSerializer>();
+        self
     }
 
     /// Mark the node as having a unzippable response. This is required in order for the node
@@ -454,7 +541,7 @@ where
     where
         DefaultImplMarker<(Response, DefaultSerializer)>: DynUnzip,
     {
-        MessageRegistrationBuilder::new(self.registry).with_unzip();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_unzip();
         self
     }
 
@@ -463,7 +550,7 @@ where
     where
         DefaultImplMarker<(Response, NotSupported)>: DynUnzip,
     {
-        MessageRegistrationBuilder::new(self.registry).with_unzip_minimal();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_unzip_minimal();
         self
     }
 
@@ -473,7 +560,7 @@ where
     where
         DefaultImplMarker<(Response, OpaqueMessageSerializer)>: DynForkResult,
     {
-        MessageRegistrationBuilder::new(self.registry).with_fork_result();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_fork_result();
         self
     }
 
@@ -483,7 +570,7 @@ where
     where
         DefaultImpl: DynSplit<Response, DefaultSerializer>,
     {
-        MessageRegistrationBuilder::new(self.registry).with_split();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_split();
         self
     }
 
@@ -493,7 +580,7 @@ where
     where
         DefaultImpl: DynSplit<Response, NotSupported>,
     {
-        MessageRegistrationBuilder::new(self.registry).with_split_minimal();
+        MessageRegistrationBuilder::new(&mut self.registry.messages).with_split_minimal();
         self
     }
 
@@ -502,7 +589,7 @@ where
     where
         Request: Joined,
     {
-        MessageRegistrationBuilder::<Request>::new(self.registry).with_join();
+        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages).with_join();
         self
     }
 
@@ -511,7 +598,7 @@ where
     where
         Request: BufferAccessRequest,
     {
-        MessageRegistrationBuilder::<Request>::new(self.registry).with_buffer_access();
+        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages).with_buffer_access();
         self
     }
 
@@ -520,7 +607,7 @@ where
     where
         Request: Accessor,
     {
-        MessageRegistrationBuilder::<Request>::new(self.registry).with_listen();
+        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages).with_listen();
         self
     }
 }
@@ -1132,6 +1219,10 @@ impl MessageRegistry {
 
 impl Default for DiagramElementRegistry {
     fn default() -> Self {
+        // Ensure buffer downcasting is automatically registered for all basic
+        // serializable types.
+        JsonBuffer::register_for::<()>();
+
         DiagramElementRegistry {
             nodes: Default::default(),
             messages: MessageRegistry::new(),
@@ -1174,8 +1265,8 @@ impl DiagramElementRegistry {
     ) -> NodeRegistrationBuilder<Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
-        Request: Send + Sync + 'static + DynType + DeserializeOwned,
-        Response: Send + Sync + 'static + DynType + Serialize + Clone,
+        Request: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
+        Response: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
     {
         self.opt_out().register_node_builder(options, builder)
     }
@@ -1201,28 +1292,26 @@ impl DiagramElementRegistry {
     }
 
     /// In some cases the common operations of deserialization, serialization,
-    /// and cloning cannot be performed for the request or response of a node.
+    /// and cloning cannot be performed for the input or output message of a node.
     /// When that happens you can still register your node builder by calling
     /// this function and explicitly disabling the common operations that your
     /// node cannot support.
     ///
-    ///
-    /// In order for the request to be deserializable, it must implement [`schemars::JsonSchema`] and [`serde::de::DeserializeOwned`].
-    /// In order for the response to be serializable, it must implement [`schemars::JsonSchema`] and [`serde::Serialize`].
+    /// In order for a message type to support all the common operations, it
+    /// must implement [`schemars::JsonSchema`], [`serde::de::DeserializeOwned`],
+    /// [`serde::Serialize`], and [`Clone`].
     ///
     /// ```
     /// use schemars::JsonSchema;
     /// use serde::{Deserialize, Serialize};
     ///
-    /// #[derive(JsonSchema, Deserialize)]
-    /// struct DeserializableRequest {}
-    ///
-    /// #[derive(JsonSchema, Serialize)]
-    /// struct SerializableResponse {}
+    /// #[derive(JsonSchema, Serialize, Deserialize, Clone)]
+    /// struct MyCommonMessage {}
     /// ```
     ///
-    /// If your node have a request or response that is not serializable, there is still
-    /// a way to register it.
+    /// If your node has an input or output message that is missing one of these
+    /// traits, you can still register it by opting out of the relevant common
+    /// operation(s):
     ///
     /// ```
     /// use bevy_impulse::{NodeBuilderOptions, DiagramElementRegistry};
@@ -1234,9 +1323,9 @@ impl DiagramElementRegistry {
     /// let mut registry = DiagramElementRegistry::new();
     /// registry
     ///     .opt_out()
-    ///     .no_request_deserializing()
-    ///     .no_response_serializing()
-    ///     .no_response_cloning()
+    ///     .no_deserializing()
+    ///     .no_serializing()
+    ///     .no_cloning()
     ///     .register_node_builder(
     ///         NodeBuilderOptions::new("echo"),
     ///         |builder, _config: ()| {
@@ -1376,7 +1465,7 @@ mod tests {
         let tuple_resp = |_: ()| -> (i64,) { (1,) };
         registry
             .opt_out()
-            .no_response_cloning()
+            .no_cloning()
             .register_node_builder(
                 NodeBuilderOptions::new("multiply3_uncloneable").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
@@ -1462,12 +1551,14 @@ mod tests {
         let mut registry = DiagramElementRegistry::new();
         registry
             .opt_out()
-            .no_request_deserializing()
-            .no_response_cloning()
+            .no_serializing()
+            .no_deserializing()
+            .no_cloning()
             .register_node_builder(
                 NodeBuilderOptions::new("opaque_request_map").with_name("Test Name"),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
-            );
+            )
+            .with_serialize_response();
         assert!(registry.get_node_registration("opaque_request_map").is_ok());
         let req_ops = &registry
             .messages
@@ -1481,14 +1572,16 @@ mod tests {
         let opaque_response_map = |_: ()| NonSerializableRequest {};
         registry
             .opt_out()
-            .no_response_serializing()
-            .no_response_cloning()
+            .no_serializing()
+            .no_deserializing()
+            .no_cloning()
             .register_node_builder(
                 NodeBuilderOptions::new("opaque_response_map").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_response_map)
                 },
-            );
+            )
+            .with_deserialize_request();
         assert!(registry
             .get_node_registration("opaque_response_map")
             .is_ok());
@@ -1504,9 +1597,9 @@ mod tests {
         let opaque_req_resp_map = |_: NonSerializableRequest| NonSerializableRequest {};
         registry
             .opt_out()
-            .no_request_deserializing()
-            .no_response_serializing()
-            .no_response_cloning()
+            .no_deserializing()
+            .no_serializing()
+            .no_cloning()
             .register_node_builder(
                 NodeBuilderOptions::new("opaque_req_resp_map").with_name("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
@@ -1569,7 +1662,9 @@ mod tests {
         struct Opaque;
 
         reg.opt_out()
-            .no_request_deserializing()
+            .no_serializing()
+            .no_deserializing()
+            .no_cloning()
             .register_node_builder(NodeBuilderOptions::new("test"), |builder, _config: ()| {
                 builder.create_map_block(|_: Opaque| {
                     (

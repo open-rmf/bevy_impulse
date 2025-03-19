@@ -820,10 +820,20 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIm
         static INTERFACE_MAP: OnceLock<
             Mutex<HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>>,
         > = OnceLock::new();
-        let interfaces = INTERFACE_MAP.get_or_init(|| Mutex::default());
+        let interfaces = INTERFACE_MAP.get_or_init(|| {
+            let mut interfaces = HashMap::new();
+            register_basic_types(&mut interfaces);
+            Mutex::new(interfaces)
+        });
 
         let mut interfaces_mut = interfaces.lock().unwrap();
-        *interfaces_mut.entry(TypeId::of::<T>()).or_insert_with(|| {
+        Self::get_or_register_type(&mut *interfaces_mut)
+    }
+
+    fn get_or_register_type(
+        interfaces: &mut HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>,
+    ) -> &'static (dyn JsonBufferAccessInterface + Send + Sync) {
+        *interfaces.entry(TypeId::of::<T>()).or_insert_with(|| {
             // Register downcasting for JsonBuffer and JsonBufferKey the
             // first time that we retrieve an interface for this type.
             let any_interface = AnyBuffer::interface_for::<T>();
@@ -852,6 +862,29 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIm
             Box::leak(Box::new(JsonBufferAccessImpl::<T>(Default::default())))
         })
     }
+}
+
+fn register_basic_types(
+    interfaces: &mut HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>
+) {
+    JsonBufferAccessImpl::<JsonMessage>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<String>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<std::borrow::Cow<'static, str>>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<u8>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<u16>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<u32>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<u64>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<usize>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<i8>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<i16>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<i32>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<i64>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<isize>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<f32>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<f64>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<bool>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<char>::get_or_register_type(interfaces);
+    JsonBufferAccessImpl::<()>::get_or_register_type(interfaces);
 }
 
 impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessInterface
@@ -1067,8 +1100,8 @@ impl BufferMapLayout for HashMap<String, JsonBuffer> {
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
         let mut downcast_buffers = HashMap::new();
         let mut compatibility = IncompatibleLayout::default();
-        for name in buffers.keys() {
-            match name {
+        for identifier in buffers.keys() {
+            match identifier {
                 BufferIdentifier::Name(name) => {
                     if let Ok(downcast) =
                         compatibility.require_buffer_for_borrowed_name::<JsonBuffer>(&name, buffers)
@@ -1101,6 +1134,84 @@ impl Joining for HashMap<String, JsonBuffer> {
         self.iter()
             .map(|(key, value)| value.pull(session, world).map(|v| (key.clone(), v)))
             .collect()
+    }
+}
+
+impl Joined for JsonMessage {
+    type Buffers = HashMap<BufferIdentifier<'static>, JsonBuffer>;
+}
+
+impl BufferMapLayout for HashMap<BufferIdentifier<'static>, JsonBuffer> {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut downcast_buffers = HashMap::new();
+        let mut compatibility = IncompatibleLayout::default();
+        for identifier in buffers.keys() {
+            if let Ok(downcast) =
+                compatibility.require_buffer_for_identifier::<JsonBuffer>(identifier.clone(), buffers)
+            {
+                downcast_buffers.insert(identifier.clone(), downcast);
+            }
+        }
+
+        compatibility.as_result()?;
+        Ok(downcast_buffers)
+    }
+}
+
+impl BufferMapStruct for HashMap<BufferIdentifier<'static>, JsonBuffer> {
+    fn buffer_list(&self) -> SmallVec<[AnyBuffer; 8]> {
+        self.values().map(|b| b.as_any_buffer()).collect()
+    }
+}
+
+impl Joining for HashMap<BufferIdentifier<'static>, JsonBuffer> {
+    type Item = JsonMessage;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        let mut object = serde_json::Map::<String, JsonMessage>::new();
+        let mut array = Vec::<JsonMessage>::new();
+
+        for (identifier, buffer) in self.iter() {
+            match identifier {
+                BufferIdentifier::Index(index) => {
+                    if *index >= array.len() {
+                        // Ensure we have enough items in the array to reach the
+                        // specified index.
+                        array.resize(*index + 1, JsonMessage::Null);
+                    }
+
+                    array[*index] = buffer.pull(session, world)?;
+                }
+                BufferIdentifier::Name(name) => {
+                    object.insert(
+                        name.as_ref().to_owned(),
+                        buffer.pull(session, world)?,
+                    );
+                }
+            }
+        }
+
+        let value = if !object.is_empty() && !array.is_empty() {
+            // There are keyed buffers as well as arrayed buffers, so we need to
+            // organize them into two different fields in a json object.
+            JsonMessage::Object(serde_json::Map::from_iter([
+                ("array".to_owned(), JsonMessage::Array(array)),
+                ("object".to_owned(), JsonMessage::Object(object)),
+            ]))
+        } else if !object.is_empty() {
+            // There are only object entries, so we will join them into a
+            // top-level object.
+            JsonMessage::Object(object)
+        } else if !array.is_empty() {
+            // There are only array entries, so we will join them into a
+            // top-level array.
+            JsonMessage::Array(array)
+        } else {
+            // There are no entries at all. This shouldn't happen, but we will
+            // handle it by returning a null value.
+            JsonMessage::Null
+        };
+
+        Ok(value)
     }
 }
 

@@ -437,7 +437,8 @@ mod tests {
         fixture
             .registry
             .opt_out()
-            .no_request_deserializing()
+            .no_serializing()
+            .no_deserializing()
             .register_node_builder(
                 NodeBuilderOptions::new("wait_2_strings"),
                 |builder, _config: ()| {
@@ -513,7 +514,8 @@ mod tests {
         fixture
             .registry
             .opt_out()
-            .no_request_deserializing()
+            .no_serializing()
+            .no_deserializing()
             .register_node_builder(
                 NodeBuilderOptions::new("with_buffer_access"),
                 |builder, _config: ()| {
@@ -575,14 +577,16 @@ mod tests {
         fixture
             .registry
             .opt_out()
-            .no_request_deserializing()
+            .no_serializing()
+            .no_deserializing()
             .register_node_builder(
                 NodeBuilderOptions::new("listen_buffer"),
                 |builder, _config: ()| -> Node<Vec<BufferKey<i64>>, usize, ()> {
                     builder.create_node(listen_buffer.into_blocking_callback())
                 },
             )
-            .with_listen();
+            .with_listen()
+            .with_serialize_response();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",

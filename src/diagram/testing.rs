@@ -99,7 +99,7 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
     let mut registry = DiagramElementRegistry::new();
     registry
         .opt_out()
-        .no_response_cloning()
+        .no_cloning()
         .register_node_builder(
             NodeBuilderOptions::new("multiply3_uncloneable"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(multiply3_uncloneable),
@@ -122,24 +122,27 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
 
     registry
         .opt_out()
-        .no_request_deserializing()
-        .no_response_serializing()
-        .no_response_cloning()
+        .no_deserializing()
+        .no_serializing()
+        .no_cloning()
         .register_node_builder(
             NodeBuilderOptions::new("opaque"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque),
         );
     registry
         .opt_out()
-        .no_request_deserializing()
+        .no_deserializing()
+        .no_serializing()
+        .no_cloning()
         .register_node_builder(
             NodeBuilderOptions::new("opaque_request"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_request),
         );
     registry
         .opt_out()
-        .no_response_serializing()
-        .no_response_cloning()
+        .no_deserializing()
+        .no_serializing()
+        .no_cloning()
         .register_node_builder(
             NodeBuilderOptions::new("opaque_response"),
             |builder: &mut Builder, _config: ()| builder.create_map_block(opaque_response),
