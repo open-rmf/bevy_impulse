@@ -1,31 +1,31 @@
-mod buffer;
-mod fork_clone;
-mod fork_result;
+mod buffer_schema;
+mod fork_clone_schema;
+mod fork_result_schema;
 mod impls;
-mod join;
-mod node;
+mod join_schema;
+mod node_schema;
 mod registration;
 mod serialization;
-mod split_serialized;
-mod transform;
+mod split_schema;
+mod transform_schema;
 mod type_info;
-mod unzip;
+mod unzip_schema;
 mod workflow_builder;
 
 use bevy_ecs::system::Commands;
-use buffer::{BufferAccessOp, BufferOp, ListenOp};
-use fork_clone::ForkCloneOp;
-use fork_result::ForkResultOp;
-pub use join::JoinOutput;
-use join::{JoinOp, SerializedJoinOp};
-pub use node::NodeOp;
+use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
+use fork_clone_schema::ForkCloneSchema;
+use fork_result_schema::ForkResultSchema;
+pub use join_schema::JoinOutput;
+use join_schema::{JoinSchema, SerializedJoinSchema};
+pub use node_schema::NodeSchema;
 pub use registration::*;
 pub use serialization::*;
-pub use split_serialized::*;
+pub use split_schema::*;
 use tracing::debug;
-use transform::{TransformError, TransformOp};
+use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
-use unzip::UnzipOp;
+use unzip_schema::UnzipSchema;
 use workflow_builder::create_workflow;
 
 // ----------
@@ -130,7 +130,7 @@ pub enum BuiltinSource {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct TerminateOp {}
+pub struct TerminateSchema {}
 
 #[derive(Clone, strum::Display, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
@@ -153,7 +153,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    Node(NodeOp),
+    Node(NodeSchema),
 
     /// If the request is cloneable, clone it into multiple responses.
     ///
@@ -172,7 +172,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    ForkClone(ForkCloneOp),
+    ForkClone(ForkCloneSchema),
 
     /// If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses
     /// of T1, T2, T3, ...
@@ -192,7 +192,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    Unzip(UnzipOp),
+    Unzip(UnzipSchema),
 
     /// If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.
     ///
@@ -212,7 +212,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    ForkResult(ForkResultOp),
+    ForkResult(ForkResultSchema),
 
     /// If the request is a list-like or map-like object, split it into multiple responses.
     /// Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split
@@ -234,7 +234,7 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Split(SplitOp),
+    Split(SplitSchema),
 
     /// Wait for an item to be emitted from each of the inputs, then combine the
     /// oldest of each into an array.
@@ -285,7 +285,7 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Join(JoinOp),
+    Join(JoinSchema),
 
     /// Wait for an item to be emitted from each of the inputs, then combine the
     /// oldest of each into an array. Unlike `join`, this only works with serialized buffers.
@@ -332,7 +332,7 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    SerializedJoin(SerializedJoinOp),
+    SerializedJoin(SerializedJoinSchema),
 
     /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
     /// The context includes a "request" variable which contains the request.
@@ -376,7 +376,7 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Transform(TransformOp),
+    Transform(TransformSchema),
 
     /// Create a [`crate::Buffer`] which can be used to store and pull data within
     /// a scope.
@@ -421,7 +421,7 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Buffer(BufferOp),
+    Buffer(BufferSchema),
 
     /// Zip a response with a buffer access.
     ///
@@ -464,7 +464,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    BufferAccess(BufferAccessOp),
+    BufferAccess(BufferAccessSchema),
 
     /// Listen on a buffer.
     ///
@@ -498,7 +498,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    Listen(ListenOp),
+    Listen(ListenSchema),
 }
 
 type DiagramStart = serde_json::Value;

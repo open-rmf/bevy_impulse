@@ -17,12 +17,12 @@ use super::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct ForkResultOp {
+pub struct ForkResultSchema {
     pub(super) ok: NextOperation,
     pub(super) err: NextOperation,
 }
 
-impl ForkResultOp {
+impl ForkResultSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,

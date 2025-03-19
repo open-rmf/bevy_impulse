@@ -16,7 +16,7 @@ use super::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct BufferOp {
+pub struct BufferSchema {
     #[serde(default)]
     pub(super) settings: BufferSettings,
 
@@ -24,7 +24,7 @@ pub struct BufferOp {
     pub(super) serialize: Option<bool>,
 }
 
-impl BufferOp {
+impl BufferSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         _builder: EdgeBuilder<'a, '_>,
@@ -185,7 +185,7 @@ impl BufferInputs {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct BufferAccessOp {
+pub struct BufferAccessSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
@@ -195,7 +195,7 @@ pub struct BufferAccessOp {
     pub(super) target_node: Option<OperationId>,
 }
 
-impl BufferAccessOp {
+impl BufferAccessSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
@@ -269,7 +269,7 @@ where
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct ListenOp {
+pub struct ListenSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
@@ -279,7 +279,7 @@ pub struct ListenOp {
     pub(super) target_node: Option<OperationId>,
 }
 
-impl ListenOp {
+impl ListenSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,

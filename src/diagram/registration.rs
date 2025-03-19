@@ -28,16 +28,16 @@ use tracing::debug;
 use crate::SerializeMessage;
 
 use super::{
-    buffer::BufferAccessRequest,
-    fork_clone::DynForkClone,
-    fork_result::DynForkResult,
+    buffer_schema::BufferAccessRequest,
+    fork_clone_schema::DynForkClone,
+    fork_result_schema::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
     register_serialize,
     type_info::TypeInfo,
-    unzip::DynUnzip,
+    unzip_schema::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
     DynSplit, DynSplitOutputs, DynType, OpaqueMessageDeserializer, OpaqueMessageSerializer,
-    SplitOp,
+    SplitSchema,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -211,7 +211,7 @@ type SplitFn = Box<
     dyn for<'a> Fn(
         &mut Builder,
         DynOutput,
-        &'a SplitOp,
+        &'a SplitSchema,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>,
 >;
 type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
@@ -637,7 +637,7 @@ impl MessageOperation {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'a SplitOp,
+        split_op: &'a SplitSchema,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
         let f = self
             .split_impl
@@ -958,7 +958,7 @@ impl MessageRegistry {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'b SplitOp,
+        split_op: &'b SplitSchema,
     ) -> Result<DynSplitOutputs<'b>, DiagramErrorCode> {
         if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.split(builder, output, split_op)

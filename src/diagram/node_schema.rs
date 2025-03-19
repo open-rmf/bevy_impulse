@@ -13,14 +13,14 @@ use super::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct NodeOp {
+pub struct NodeSchema {
     pub(super) builder: BuilderId,
     #[serde(default)]
     pub(super) config: serde_json::Value,
     pub(super) next: NextOperation,
 }
 
-impl NodeOp {
+impl NodeSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         builder: &mut Builder,

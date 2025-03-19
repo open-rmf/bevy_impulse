@@ -15,11 +15,11 @@ use super::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct UnzipOp {
+pub struct UnzipSchema {
     pub(super) next: Vec<NextOperation>,
 }
 
-impl UnzipOp {
+impl UnzipSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,

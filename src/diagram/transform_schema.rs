@@ -27,12 +27,12 @@ pub enum TransformError {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct TransformOp {
+pub struct TransformSchema {
     pub(super) cel: String,
     pub(super) next: NextOperation,
 }
 
-impl TransformOp {
+impl TransformSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
@@ -59,7 +59,7 @@ pub(super) fn transform_output(
     builder: &mut Builder,
     registry: &MessageRegistry,
     output: DynOutput,
-    transform_op: &TransformOp,
+    transform_op: &TransformSchema,
 ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
     debug!("transform output: {:?}, op: {:?}", output, transform_op);
 

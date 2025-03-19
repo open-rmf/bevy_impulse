@@ -36,7 +36,7 @@ use super::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SplitOp {
+pub struct SplitSchema {
     #[serde(default)]
     pub(super) sequential: Vec<NextOperation>,
 
@@ -46,7 +46,7 @@ pub struct SplitOp {
     pub(super) remaining: Option<NextOperation>,
 }
 
-impl SplitOp {
+impl SplitSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
@@ -221,7 +221,7 @@ pub struct DynSplitOutputs<'a> {
 
 pub(super) fn split_chain<'a, T>(
     chain: Chain<T>,
-    split_op: &'a SplitOp,
+    split_op: &'a SplitSchema,
 ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>
 where
     T: Send + Sync + 'static + Splittable,
@@ -274,7 +274,7 @@ pub trait DynSplit<T, Serializer> {
     fn dyn_split<'a>(
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'a SplitOp,
+        split_op: &'a SplitSchema,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode>;
 
     fn on_register(registry: &mut MessageRegistry);
@@ -286,7 +286,7 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
     fn dyn_split<'a>(
         _builder: &mut Builder,
         _output: DynOutput,
-        _split_op: &'a SplitOp,
+        _split_op: &'a SplitSchema,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
         Err(DiagramErrorCode::NotSplittable)
     }
@@ -305,7 +305,7 @@ where
     fn dyn_split<'a>(
         builder: &mut Builder,
         output: DynOutput,
-        split_op: &'a SplitOp,
+        split_op: &'a SplitSchema,
     ) -> Result<DynSplitOutputs<'a>, DiagramErrorCode> {
         let chain = output.into_output::<T>()?.chain(builder);
         split_chain(chain, split_op)

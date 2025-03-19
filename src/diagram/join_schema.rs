@@ -7,14 +7,14 @@ use smallvec::SmallVec;
 use crate::{unknown_diagram_error, AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
-    buffer::{get_node_request_type, BufferInputs},
+    buffer_schema::{get_node_request_type, BufferInputs},
     workflow_builder::{Edge, EdgeBuilder, Vertex},
     Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct JoinOp {
+pub struct JoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
@@ -24,7 +24,7 @@ pub struct JoinOp {
     pub(super) target_node: Option<OperationId>,
 }
 
-impl JoinOp {
+impl JoinSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
@@ -69,14 +69,14 @@ impl JoinOp {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SerializedJoinOp {
+pub struct SerializedJoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferInputs,
 }
 
-impl SerializedJoinOp {
+impl SerializedJoinSchema {
     pub(super) fn build_edges<'a>(
         &'a self,
         mut builder: EdgeBuilder<'a, '_>,
