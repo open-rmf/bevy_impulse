@@ -78,8 +78,11 @@ impl SplitOp {
         SerializationOptionsT: SerializationOptions,
     {
         let output = validate_single_input(vertex)?;
-        let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            let chain = output.into_output::<serde_json::Value>()?.chain(builder);
+        let mut outputs = if output.type_info == TypeInfo::of::<SerializationOptionsT::Serialized>()
+        {
+            let chain = output
+                .into_output::<SerializationOptionsT::Serialized>()?
+                .chain(builder);
             split_chain(chain, self)
         } else {
             registry.split(builder, output, self)

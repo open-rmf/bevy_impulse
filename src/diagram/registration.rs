@@ -1,14 +1,14 @@
 use std::{
     any::{type_name, Any},
-    borrow::Borrow,
+    borrow::{Borrow, Cow},
     cell::RefCell,
     collections::HashMap,
     marker::PhantomData,
 };
 
 use crate::{
-    unknown_diagram_error, Accessor, BufferMap, Builder, InputSlot, Joined, Node, Output,
-    Splittable, StreamPack,
+    unknown_diagram_error, Accessor, BufferMap, Builder, ForRemaining, FromSequential,
+    FromSpecific, InputSlot, Joined, MapSplitKey, Node, Output, Splittable, StreamPack,
 };
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
@@ -531,15 +531,19 @@ where
 }
 
 pub trait SerializationOptions {
-    type Serialized: Send + Sync + 'static;
+    type SplitKey: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining;
+    type Serialized: Send + Sync + 'static + Splittable<Key = Self::SplitKey> + Clone;
     type DefaultDeserializer;
-    type DefaultSerializer: SerializeCel<Self::Serialized>;
+    type DefaultSerializer: SerializeCel<Self::Serialized>
+        + SerializeMessage<Vec<Self::Serialized>, Self::Serialized>
+        + SerializeMessage<HashMap<Cow<'static, str>, Self::Serialized>, Self::Serialized>;
 }
 
 #[derive(Serialize)]
 pub struct JsonSerialization;
 
 impl SerializationOptions for JsonSerialization {
+    type SplitKey = MapSplitKey<String>;
     type Serialized = serde_json::Value;
     type DefaultDeserializer = JsonDeserializer;
     type DefaultSerializer = JsonSerializer;
@@ -848,6 +852,7 @@ where
         };
         registry.register_serialize::<SerializationOptionsT::Serialized, SerializationOptionsT::DefaultSerializer>();
         registry.register_deserialize::<SerializationOptionsT::Serialized, SerializationOptionsT::DefaultDeserializer>();
+        registry.register_fork_clone::<SerializationOptionsT::Serialized, DefaultImpl>();
         registry
     }
 }

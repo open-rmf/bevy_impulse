@@ -46,11 +46,7 @@ impl ForkResultOp {
         SerializationOptionsT: SerializationOptions,
     {
         let output = validate_single_input(vertex)?;
-        let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            Err(DiagramErrorCode::CannotForkResult)
-        } else {
-            registry.fork_result(builder, output)
-        }?;
+        let (ok, err) = registry.fork_result(builder, output)?;
         {
             let ok_edge = &vertex.out_edges[0];
             ok_edge.set_output(ok);

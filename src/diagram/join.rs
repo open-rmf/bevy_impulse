@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 use super::{
     buffer::{get_node_request_type, BufferInputs},
     Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
-    SerializationOptions, Vertex, WorkflowBuilder,
+    SerializationOptions, SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -87,17 +87,20 @@ impl SerializedJoinOp {
     {
         wf_builder
             .add_vertex(op_id.clone(), move |vertex, builder, _, buffers| {
-                self.try_connect(vertex, builder, buffers)
+                self.try_connect::<SerializationOptionsT>(vertex, builder, buffers)
             })
             .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
         buffers: &HashMap<OperationId, AnyBuffer>,
-    ) -> Result<bool, DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
@@ -108,52 +111,64 @@ impl SerializedJoinOp {
             return Ok(false);
         };
         let buffer_inputs = self.buffers.clone();
-        let output = builder
-            .try_join::<HashMap<BufferIdentifier<'static>, AnyMessageBox>>(&buffers)?
-            .map_block(
-                move |joined| -> Result<serde_json::Value, DiagramErrorCode> {
-                    if joined.is_empty() {
-                        return Ok(serde_json::Value::Null);
-                    }
-
-                    match &buffer_inputs {
-                        BufferInputs::Dict(_) => {
-                            let values = joined
-                                .iter()
-                                .filter_map(|(k, any_msg)| match k {
-                                    BufferIdentifier::Name(k) => {
-                                        match any_msg
-                                            .downcast_ref::<serde_json::Value>()
-                                            .ok_or(DiagramErrorCode::NotSerializable)
-                                        {
-                                            Ok(value) => Some(Ok((k, value))),
-                                            Err(err) => Some(Err(err)),
-                                        }
+        let chain =
+            builder.try_join::<HashMap<BufferIdentifier<'static>, AnyMessageBox>>(&buffers)?;
+        let output = match buffer_inputs {
+            BufferInputs::Dict(_) => {
+                let joined = chain
+                    .map_block(move |joined| -> Result<_, DiagramErrorCode> {
+                        let values = joined
+                            .into_iter()
+                            .filter_map(|(k, any_msg)| match k {
+                                BufferIdentifier::Name(k) => {
+                                    match any_msg
+                                        .downcast::<SerializationOptionsT::Serialized>()
+                                        .map_err(|_| DiagramErrorCode::NotSerializable)
+                                    {
+                                        Ok(value) => Some(Ok((k, *value))),
+                                        Err(err) => Some(Err(err)),
                                     }
-                                    _ => None,
-                                })
-                                .collect::<Result<HashMap<_, _>, DiagramErrorCode>>()?;
-                            Ok(serde_json::to_value(values).unwrap())
-                        }
-                        BufferInputs::Array(arr) => {
-                            let values = (0..arr.len())
-                                .map(|i| {
-                                    let value = joined.get(&BufferIdentifier::Index(i)).unwrap();
-                                    value
-                                        .downcast_ref::<serde_json::Value>()
-                                        .ok_or(DiagramErrorCode::NotSerializable)
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-                            Ok(serde_json::to_value(values).unwrap())
-                        }
-                    }
-                },
-            )
-            .cancel_on_err()
-            .output()
-            .into();
+                                }
+                                _ => None,
+                            })
+                            .collect::<Result<HashMap<_, _>, DiagramErrorCode>>()?;
+                        Ok(values)
+                    })
+                    .cancel_on_err()
+                    .output();
+                let serialize_fn = <SerializationOptionsT::DefaultSerializer as SerializeMessage<
+                    HashMap<Cow<'static, str>, SerializationOptionsT::Serialized>,
+                    SerializationOptionsT::Serialized,
+                >>::serialize_fn()
+                .ok_or(DiagramErrorCode::NotSerializable)?;
+                serialize_fn(joined.into(), builder)
+            }
+            BufferInputs::Array(arr) => {
+                let joined = chain
+                    .map_block(move |mut joined| -> Result<_, DiagramErrorCode> {
+                        let values = (0..arr.len())
+                            .map(|i| {
+                                let value = joined.remove(&BufferIdentifier::Index(i)).unwrap();
+                                let boxed = value
+                                    .downcast::<SerializationOptionsT::Serialized>()
+                                    .map_err(|_| DiagramErrorCode::NotSerializable)?;
+                                Ok(*boxed)
+                            })
+                            .collect::<Result<Vec<_>, DiagramErrorCode>>()?;
+                        Ok(values)
+                    })
+                    .cancel_on_err()
+                    .output();
+                let serialize_fn = <SerializationOptionsT::DefaultSerializer as SerializeMessage<
+                    Vec<SerializationOptionsT::Serialized>,
+                    SerializationOptionsT::Serialized,
+                >>::serialize_fn()
+                .ok_or(DiagramErrorCode::NotSerializable)?;
+                serialize_fn(joined.into(), builder)
+            }
+        }?;
 
-        vertex.out_edges[0].set_output(output);
+        vertex.out_edges[0].set_output(output.into());
         Ok(true)
     }
 }

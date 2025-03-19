@@ -46,15 +46,7 @@ impl ForkCloneOp {
     {
         let output = validate_single_input(vertex)?;
 
-        let outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            <DefaultImpl as DynForkClone<serde_json::Value>>::dyn_fork_clone(
-                builder,
-                output,
-                vertex.out_edges.len(),
-            )
-        } else {
-            registry.fork_clone(builder, output, vertex.out_edges.len())
-        }?;
+        let outputs = registry.fork_clone(builder, output, vertex.out_edges.len())?;
 
         for (output, out_edge) in zip(outputs, &vertex.out_edges) {
             out_edge.set_output(output);
