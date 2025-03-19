@@ -145,8 +145,7 @@ pub enum DiagramOperation {
     ///
     /// The output message will be sent to the operation specified by `next`.
     ///
-    /// TODO(@mxgrey): Support stream outputs
-    /// https://github.com/open-rmf/bevy_impulse/issues/43
+    /// TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)
     ///
     /// # Examples
     /// ```
@@ -190,8 +189,7 @@ pub enum DiagramOperation {
     ///   finish "wins" the race and gets to the be output
     /// * join - connect each branch into a buffer and then use the `join`
     ///   operation to reunite them
-    /// * collect - TODO(@mxgrey): add the collect operation
-    ///   https://github.com/open-rmf/bevy_impulse/issues/59
+    /// * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)
     ///
     /// # Examples
     /// ```
