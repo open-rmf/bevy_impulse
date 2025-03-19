@@ -5,7 +5,7 @@ use crate::Builder;
 
 use super::{
     workflow_builder::dyn_connect, BuilderId, DiagramErrorCode, JsonDiagramRegistry, NextOperation,
-    WorkflowBuilder,
+    SerializationOptions, SerializeCel, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -18,13 +18,17 @@ pub struct NodeOp {
 }
 
 impl NodeOp {
-    pub(super) fn add_vertices<'a>(
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
         &'a self,
         builder: &mut Builder,
-        wf_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
         op_id: String,
         registry: &JsonDiagramRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<(), DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+        SerializationOptionsT::DefaultSerializer: SerializeCel<SerializationOptionsT::Serialized>,
+    {
         let reg = registry.get_node_registration(&self.builder)?;
         let node = reg.create_node(builder, self.config.clone())?;
 

@@ -23,22 +23,28 @@ pub struct BufferOp {
 }
 
 impl BufferOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
+        op_id: String,
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
             self.try_connect(vertex, builder, &registry.messages, &op_id, buffers)
         });
     }
 
-    pub(super) fn try_connect<Serialized>(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry<Serialized>,
+        registry: &MessageRegistry<SerializationOptionsT>,
         op_id: &OperationId,
         buffers: &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode>
     where
-        Serialized: Send + Sync + 'static,
+        SerializationOptionsT: SerializationOptions,
     {
         if vertex.in_edges.is_empty() {
             // this will eventually cause workflow builder to return a [`DiagramErrorCode::IncompleteDiagram`] error.
@@ -185,12 +191,14 @@ pub struct BufferAccessOp {
 }
 
 impl BufferAccessOp {
-    pub(super) fn add_vertices<'a>(
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
         &'a self,
-        wf_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
         op_id: String,
         diagram: &'a Diagram,
-    ) {
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         wf_builder
             .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
                 self.try_connect(vertex, builder, registry, buffers, diagram)
@@ -254,12 +262,14 @@ pub struct ListenOp {
 }
 
 impl ListenOp {
-    pub(super) fn add_vertices<'a>(
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
         &'a self,
-        wf_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
         op_id: String,
         diagram: &'a Diagram,
-    ) {
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         wf_builder
             .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
                 self.try_connect(vertex, builder, registry, buffers, diagram)

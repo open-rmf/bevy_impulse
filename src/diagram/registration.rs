@@ -28,11 +28,13 @@ use super::{
     fork_clone::DynForkClone,
     fork_result::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
+    transform::TransformError,
     type_info::TypeInfo,
     unzip::DynUnzip,
     BuilderId, DeserializeFn, DeserializeMessage, DiagramErrorCode, DynInputSlot, DynOutput,
-    DynSplit, DynSplitOutputs, JsonDeserializer, JsonSerializer, Section, SectionMetadata,
-    SectionMetadataProvider, SerializeFn, SerializeMessage, SplitOp,
+    DynSplit, DynSplitOutputs, FromCelValueFn, JsonDeserializer, JsonSerializer, Section,
+    SectionMetadata, SectionMetadataProvider, SerializeCel, SerializeFn, SerializeMessage, SplitOp,
+    ToCelValueFn,
 };
 
 /// A type erased [`bevy_impulse::Node`]
@@ -245,7 +247,7 @@ pub struct MessageRegistrationBuilder<'a, Message, SerializationOptionsT>
 where
     SerializationOptionsT: SerializationOptions,
 {
-    data: &'a mut MessageRegistry<SerializationOptionsT::Serialized>,
+    data: &'a mut MessageRegistry<SerializationOptionsT>,
     _ignore: PhantomData<Message>,
 }
 
@@ -255,7 +257,7 @@ where
     Message: Send + Sync + 'static + Any,
     SerializationOptionsT: SerializationOptions,
 {
-    pub fn new(registry: &'a mut MessageRegistry<SerializationOptionsT::Serialized>) -> Self {
+    pub fn new(registry: &'a mut MessageRegistry<SerializationOptionsT>) -> Self {
         Self {
             data: registry,
             _ignore: Default::default(),
@@ -267,7 +269,7 @@ where
     pub fn with_unzip(&mut self) -> &mut Self
     where
         DefaultImplMarker<(Message, SerializationOptionsT::DefaultSerializer)>:
-            DynUnzip<SerializationOptionsT::Serialized>,
+            DynUnzip<SerializationOptionsT>,
         SerializationOptionsT::DefaultSerializer: 'static,
     {
         self.data
@@ -278,7 +280,7 @@ where
     /// Mark the message as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_minimal(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, NotSupported)>: DynUnzip<SerializationOptionsT::Serialized>,
+        DefaultImplMarker<(Message, NotSupported)>: DynUnzip<SerializationOptionsT>,
     {
         self.data.register_unzip::<Message, NotSupported>();
         self
@@ -353,7 +355,7 @@ pub struct NodeRegistrationBuilder<'a, SerializationOptionsT, Request, Response,
 where
     SerializationOptionsT: SerializationOptions,
 {
-    registry: &'a mut MessageRegistry<SerializationOptionsT::Serialized>,
+    registry: &'a mut MessageRegistry<SerializationOptionsT>,
     _ignore: PhantomData<(Request, Response, Streams)>,
 }
 
@@ -364,7 +366,7 @@ where
     Request: Send + Sync + 'static + Any,
     Response: Send + Sync + 'static + Any,
 {
-    fn new(registry: &'a mut MessageRegistry<SerializationOptionsT::Serialized>) -> Self {
+    fn new(registry: &'a mut MessageRegistry<SerializationOptionsT>) -> Self {
         Self {
             registry,
             _ignore: Default::default(),
@@ -376,7 +378,7 @@ where
     pub fn with_unzip(&mut self) -> &mut Self
     where
         DefaultImplMarker<(Response, SerializationOptionsT::DefaultSerializer)>:
-            DynUnzip<SerializationOptionsT::Serialized>,
+            DynUnzip<SerializationOptionsT>,
         SerializationOptionsT::DefaultSerializer: 'static,
     {
         MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
@@ -387,7 +389,7 @@ where
     /// Mark the node as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_unserializable(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, NotSupported)>: DynUnzip<SerializationOptionsT::Serialized>,
+        DefaultImplMarker<(Response, NotSupported)>: DynUnzip<SerializationOptionsT>,
     {
         MessageRegistrationBuilder::<Response, SerializationOptionsT>::new(self.registry)
             .with_unzip_minimal();
@@ -531,7 +533,7 @@ where
 pub trait SerializationOptions {
     type Serialized: Send + Sync + 'static;
     type DefaultDeserializer;
-    type DefaultSerializer;
+    type DefaultSerializer: SerializeCel<Self::Serialized>;
 }
 
 #[derive(Serialize)]
@@ -552,16 +554,21 @@ where
     pub(super) sections: HashMap<BuilderId, SectionRegistration<SerializationOptionsT>>,
 
     #[serde(flatten)]
-    pub(super) messages: MessageRegistry<SerializationOptionsT::Serialized>,
+    pub(super) messages: MessageRegistry<SerializationOptionsT>,
 }
 
 pub type JsonDiagramRegistry = DiagramElementRegistry<JsonSerialization>;
 
-pub(super) struct MessageOperation<Serialized> {
-    pub(super) deserialize_impl: Option<DeserializeFn<Serialized>>,
-    pub(super) serialize_impl: Option<SerializeFn<Serialized>>,
+pub(super) struct MessageOperation<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    pub(super) from_cel_value_impl: Option<FromCelValueFn>,
+    pub(super) deserialize_impl: Option<DeserializeFn<SerializationOptionsT::Serialized>>,
+    pub(super) to_cel_value_impl: Option<ToCelValueFn>,
+    pub(super) serialize_impl: Option<SerializeFn<SerializationOptionsT::Serialized>>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
-    pub(super) unzip_impl: Option<Box<dyn DynUnzip<Serialized>>>,
+    pub(super) unzip_impl: Option<Box<dyn DynUnzip<SerializationOptionsT>>>,
     pub(super) fork_result_impl: Option<ForkResultFn>,
     pub(super) split_impl: Option<SplitFn>,
     pub(super) join_impl: Option<JoinFn>,
@@ -569,13 +576,18 @@ pub(super) struct MessageOperation<Serialized> {
     pub(super) listen_impl: Option<ListenFn>,
 }
 
-impl<Serialized> MessageOperation<Serialized> {
+impl<SerializationOptionsT> MessageOperation<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     fn new<T>() -> Self
     where
         T: Send + Sync + 'static + Any,
     {
         Self {
+            from_cel_value_impl: None,
             deserialize_impl: None,
+            to_cel_value_impl: None,
             serialize_impl: None,
             fork_clone_impl: None,
             unzip_impl: None,
@@ -587,27 +599,51 @@ impl<Serialized> MessageOperation<Serialized> {
         }
     }
 
+    pub(super) fn from_cel_value(
+        &self,
+        builder: &mut Builder,
+        output: Output<cel_interpreter::Value>,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        let f = self
+            .from_cel_value_impl
+            .as_ref()
+            .ok_or(TransformError::NotSupported)?;
+        f(output, builder)
+    }
+
     /// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
     pub(super) fn deserialize(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
+        output: Output<SerializationOptionsT::Serialized>,
     ) -> Result<DynOutput, DiagramErrorCode>
     where
-        Serialized: Send + Sync + 'static,
+        SerializationOptionsT::Serialized: Send + Sync + 'static,
     {
         let f = self
             .deserialize_impl
             .as_ref()
             .ok_or(DiagramErrorCode::NotSerializable)?;
-        f(output.into_output()?, builder)
+        f(output, builder)
+    }
+
+    pub(super) fn to_cel_value(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Output<cel_interpreter::Value>, DiagramErrorCode> {
+        let f = self
+            .to_cel_value_impl
+            .as_ref()
+            .ok_or(TransformError::NotSupported)?;
+        f(output, builder)
     }
 
     pub(super) fn serialize(
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<Serialized>, DiagramErrorCode> {
+    ) -> Result<Output<SerializationOptionsT::Serialized>, DiagramErrorCode> {
         let f = self
             .serialize_impl
             .as_ref()
@@ -703,7 +739,10 @@ impl<Serialized> MessageOperation<Serialized> {
     }
 }
 
-impl<Serialized> Serialize for MessageOperation<Serialized> {
+impl<SerializationOptionsT> Serialize for MessageOperation<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -734,13 +773,19 @@ impl<Serialized> Serialize for MessageOperation<Serialized> {
     }
 }
 
-pub struct MessageRegistration<Serialized> {
+pub struct MessageRegistration<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     pub(super) type_name: &'static str,
     pub(super) schema: Option<schemars::schema::Schema>,
-    pub(super) operations: MessageOperation<Serialized>,
+    pub(super) operations: MessageOperation<SerializationOptionsT>,
 }
 
-impl<Serialized> MessageRegistration<Serialized> {
+impl<SerializationOptionsT> MessageRegistration<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     pub(super) fn new<T>() -> Self
     where
         T: Send + Sync + 'static + Any,
@@ -753,7 +798,10 @@ impl<Serialized> MessageRegistration<Serialized> {
     }
 }
 
-impl<Serialized> Serialize for MessageRegistration<Serialized> {
+impl<SerializationOptionsT> Serialize for MessageRegistration<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -766,52 +814,97 @@ impl<Serialized> Serialize for MessageRegistration<Serialized> {
 }
 
 #[derive(Serialize)]
-pub struct MessageRegistry<Serialized> {
-    #[serde(serialize_with = "MessageRegistry::<Serialized>::serialize_messages")]
-    messages: HashMap<TypeInfo, MessageRegistration<Serialized>>,
+pub struct MessageRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+    SerializationOptionsT::Serialized: Send + Sync + 'static,
+{
+    #[serde(serialize_with = "MessageRegistry::<SerializationOptionsT>::serialize_messages")]
+    messages: HashMap<TypeInfo, MessageRegistration<SerializationOptionsT>>,
 
     #[serde(
         rename = "schemas",
-        serialize_with = "MessageRegistry::<Serialized>::serialize_schemas"
+        serialize_with = "MessageRegistry::<SerializationOptionsT>::serialize_schemas"
     )]
     schema_generator: SchemaGenerator,
 }
 
-impl<Serialized> MessageRegistry<Serialized> {
+impl<SerializationOptionsT> MessageRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+    SerializationOptionsT::Serialized: Send + Sync + 'static,
+    SerializationOptionsT::DefaultSerializer:
+        SerializeMessage<SerializationOptionsT::Serialized, SerializationOptionsT::Serialized>,
+    SerializationOptionsT::DefaultDeserializer:
+        DeserializeMessage<SerializationOptionsT::Serialized, SerializationOptionsT::Serialized>,
+{
     fn new() -> Self {
         let mut settings = SchemaSettings::default();
         settings.definitions_path = "#/schemas/".to_string();
 
-        Self {
+        let mut registry = Self {
             schema_generator: SchemaGenerator::new(settings),
-            messages: HashMap::from([(
-                TypeInfo::of::<serde_json::Value>(),
-                MessageRegistration::new::<serde_json::Value>(),
-            )]),
-        }
+            messages: HashMap::new(),
+        };
+        registry.register_serialize::<SerializationOptionsT::Serialized, SerializationOptionsT::DefaultSerializer>();
+        registry.register_deserialize::<SerializationOptionsT::Serialized, SerializationOptionsT::DefaultDeserializer>();
+        registry
     }
-
-    fn get<T>(&self) -> Option<&MessageRegistration<Serialized>>
+}
+impl<SerializationOptionsT> MessageRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+    SerializationOptionsT::Serialized: Send + Sync + 'static,
+{
+    fn get<T>(&self) -> Option<&MessageRegistration<SerializationOptionsT>>
     where
         T: Any,
     {
         self.messages.get(&TypeInfo::of::<T>())
     }
 
+    pub(super) fn from_cel_value(
+        &self,
+        target_type: &TypeInfo,
+        builder: &mut Builder,
+        output: Output<cel_interpreter::Value>,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(target_type) {
+            reg.operations.from_cel_value(builder, output)
+        } else {
+            Err(TransformError::NotSupported.into())
+        }
+    }
+
+    fn register_from_cel_value<T, DeserializerT>(&mut self) -> bool
+    where
+        T: Send + Sync + 'static + Any,
+        DeserializerT: DeserializeMessage<T, SerializationOptionsT::Serialized>,
+    {
+        let from_cel_value_impl = if let Some(f) = DeserializerT::from_cel_value_fn() {
+            f
+        } else {
+            return false;
+        };
+
+        let reg = self
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>());
+        let ops = &mut reg.operations;
+
+        ops.from_cel_value_impl = Some(from_cel_value_impl);
+
+        true
+    }
+
     pub(super) fn deserialize(
         &self,
         target_type: &TypeInfo,
         builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<DynOutput, DiagramErrorCode>
-    where
-        Serialized: Send + Sync + 'static,
-    {
-        if output.type_info != TypeInfo::of::<serde_json::Value>()
-            || &output.type_info == target_type
-        {
-            Ok(output)
-        } else if let Some(reg) = self.messages.get(target_type) {
+        output: Output<SerializationOptionsT::Serialized>,
+    ) -> Result<DynOutput, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(target_type) {
             reg.operations.deserialize(builder, output)
         } else {
             Err(DiagramErrorCode::NotSerializable)
@@ -823,7 +916,7 @@ impl<Serialized> MessageRegistry<Serialized> {
     pub(super) fn register_deserialize<T, DeserializerT>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        DeserializerT: DeserializeMessage<T, Serialized>,
+        DeserializerT: DeserializeMessage<T, SerializationOptionsT::Serialized>,
     {
         let deserialize_impl = if let Some(f) = DeserializerT::deserialize_fn() {
             f
@@ -842,8 +935,45 @@ impl<Serialized> MessageRegistry<Serialized> {
             std::any::type_name::<T>(),
         );
         ops.deserialize_impl = Some(deserialize_impl);
+        self.register_from_cel_value::<T, DeserializerT>();
 
         // reg.schema = Deserializer::json_schema(&mut self.schema_generator);
+
+        true
+    }
+
+    pub(super) fn to_cel_value(
+        &self,
+        builder: &mut Builder,
+        output: DynOutput,
+    ) -> Result<Output<cel_interpreter::Value>, DiagramErrorCode> {
+        if output.type_info == TypeInfo::of::<cel_interpreter::Value>() {
+            output.into_output()
+        } else if let Some(reg) = self.messages.get(&output.type_info) {
+            reg.operations.to_cel_value(builder, output)
+        } else {
+            Err(TransformError::NotSupported.into())
+        }
+    }
+
+    fn register_to_cel_value<T, SerializerT>(&mut self) -> bool
+    where
+        T: Send + Sync + 'static + Any,
+        SerializerT: SerializeMessage<T, SerializationOptionsT::Serialized>,
+    {
+        let to_cel_value_impl = if let Some(f) = SerializerT::to_cel_value_fn() {
+            f
+        } else {
+            return false;
+        };
+
+        let reg = self
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>());
+        let ops = &mut reg.operations;
+
+        ops.to_cel_value_impl = Some(to_cel_value_impl);
 
         true
     }
@@ -852,13 +982,17 @@ impl<Serialized> MessageRegistry<Serialized> {
         &self,
         builder: &mut Builder,
         output: DynOutput,
-    ) -> Result<Output<Serialized>, DiagramErrorCode>
-    where
-        Serialized: Send + Sync + 'static,
-    {
+    ) -> Result<Output<SerializationOptionsT::Serialized>, DiagramErrorCode> {
         debug!("serialize {:?}", output);
-        if output.type_info == TypeInfo::of::<serde_json::Value>() {
+        if output.type_info == TypeInfo::of::<SerializationOptionsT::Serialized>() {
             output.into_output()
+        } else if output.type_info == TypeInfo::of::<cel_interpreter::Value>() {
+            Ok(
+                SerializationOptionsT::DefaultSerializer::serialize_cel_output(
+                    builder,
+                    output.into_output()?,
+                ),
+            )
         } else if let Some(reg) = self.messages.get(&output.type_info) {
             reg.operations.serialize(builder, output)
         } else {
@@ -871,7 +1005,7 @@ impl<Serialized> MessageRegistry<Serialized> {
     pub(super) fn register_serialize<T, SerializerT>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        SerializerT: SerializeMessage<T, Serialized>,
+        SerializerT: SerializeMessage<T, SerializationOptionsT::Serialized>,
     {
         let serialize_impl = if let Some(f) = SerializerT::serialize_fn() {
             f
@@ -890,6 +1024,7 @@ impl<Serialized> MessageRegistry<Serialized> {
             std::any::type_name::<T>(),
         );
         ops.serialize_impl = Some(serialize_impl);
+        self.register_to_cel_value::<T, SerializerT>();
 
         true
     }
@@ -947,7 +1082,7 @@ impl<Serialized> MessageRegistry<Serialized> {
     where
         T: Send + Sync + 'static + Any,
         Serializer: 'static,
-        DefaultImplMarker<(T, Serializer)>: DynUnzip<Serialized>,
+        DefaultImplMarker<(T, Serializer)>: DynUnzip<SerializationOptionsT>,
     {
         let unzip_impl = DefaultImplMarker::<(T, Serializer)>::new();
         unzip_impl.on_register(self);
@@ -1005,7 +1140,7 @@ impl<Serialized> MessageRegistry<Serialized> {
     where
         T: Send + Sync + 'static + Any + Splittable,
         F: DynSplit<T, S>,
-        S: SerializeMessage<T::Item, Serialized>,
+        S: SerializeMessage<T::Item, SerializationOptionsT::Serialized>,
     {
         let ops = &mut self
             .messages
@@ -1128,7 +1263,7 @@ impl<Serialized> MessageRegistry<Serialized> {
     }
 
     fn serialize_messages<S>(
-        v: &HashMap<TypeInfo, MessageRegistration<Serialized>>,
+        v: &HashMap<TypeInfo, MessageRegistration<SerializationOptionsT>>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -1166,6 +1301,10 @@ impl<Serialized> MessageRegistry<Serialized> {
 impl<SerializationOptionsT> Default for DiagramElementRegistry<SerializationOptionsT>
 where
     SerializationOptionsT: SerializationOptions,
+    SerializationOptionsT::DefaultSerializer:
+        SerializeMessage<SerializationOptionsT::Serialized, SerializationOptionsT::Serialized>,
+    SerializationOptionsT::DefaultDeserializer:
+        DeserializeMessage<SerializationOptionsT::Serialized, SerializationOptionsT::Serialized>,
 {
     fn default() -> Self {
         DiagramElementRegistry {
@@ -1179,11 +1318,20 @@ where
 impl<SerializationOptionsT> DiagramElementRegistry<SerializationOptionsT>
 where
     SerializationOptionsT: SerializationOptions,
+    SerializationOptionsT::DefaultSerializer:
+        SerializeMessage<SerializationOptionsT::Serialized, SerializationOptionsT::Serialized>,
+    SerializationOptionsT::DefaultDeserializer:
+        DeserializeMessage<SerializationOptionsT::Serialized, SerializationOptionsT::Serialized>,
 {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<SerializationOptionsT> DiagramElementRegistry<SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
     /// Register a node builder with all the common operations (deserialize the
     /// request, serialize the response, and clone the response) enabled.
     ///
@@ -1331,9 +1479,7 @@ where
             .ok_or_else(|| DiagramErrorCode::BuilderNotFound(id.borrow().to_string()))
     }
 
-    pub fn get_message_registration<T>(
-        &self,
-    ) -> Option<&MessageRegistration<SerializationOptionsT::Serialized>>
+    pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration<SerializationOptionsT>>
     where
         T: Any,
     {
@@ -1394,7 +1540,10 @@ mod tests {
 
     /// Some extra impl only used in tests (for now).
     /// If these impls are needed outside tests, then move them to the main impl.
-    impl<Serialized> MessageOperation<Serialized> {
+    impl<SerializationOptionsT> MessageOperation<SerializationOptionsT>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         fn deserializable(&self) -> bool {
             self.deserialize_impl.is_some()
         }

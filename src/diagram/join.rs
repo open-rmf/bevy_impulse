@@ -8,8 +8,8 @@ use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
 
 use super::{
     buffer::{get_node_request_type, BufferInputs},
-    Diagram, DiagramErrorCode, JsonDiagramRegistry, NextOperation, OperationId, Vertex,
-    WorkflowBuilder,
+    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
+    SerializationOptions, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -25,12 +25,14 @@ pub struct JoinOp {
 }
 
 impl JoinOp {
-    pub(super) fn add_vertices<'a>(
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
         &'a self,
-        wf_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
         op_id: String,
         diagram: &'a Diagram,
-    ) {
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         wf_builder
             .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
                 self.try_connect(vertex, builder, registry, buffers, diagram)
@@ -38,14 +40,17 @@ impl JoinOp {
             .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &JsonDiagramRegistry,
+        registry: &DiagramElementRegistry<SerializationOptionsT>,
         buffers: &HashMap<OperationId, AnyBuffer>,
         diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
@@ -73,7 +78,13 @@ pub struct SerializedJoinOp {
 }
 
 impl SerializedJoinOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
+        op_id: String,
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         wf_builder
             .add_vertex(op_id.clone(), move |vertex, builder, _, buffers| {
                 self.try_connect(vertex, builder, buffers)
@@ -163,7 +174,7 @@ mod tests {
     use super::*;
     use crate::{
         diagram::testing::DiagramTestFixture, Cancellation, CancellationCause, Diagram,
-        DiagramError, DiagramErrorCode, FilteredErr, NodeBuilderOptions,
+        DiagramError, DiagramErrorCode, FilteredErr, JsonDiagramRegistry, NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {

@@ -10,7 +10,7 @@ use super::{
     impls::{DefaultImplMarker, NotSupportedMarker},
     type_info::TypeInfo,
     validate_single_input, DiagramErrorCode, MessageRegistration, MessageRegistry, NextOperation,
-    Vertex, WorkflowBuilder,
+    SerializationOptions, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -21,7 +21,13 @@ pub struct ForkResultOp {
 }
 
 impl ForkResultOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
+        op_id: String,
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         let mut edge_builder =
             wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
                 self.try_connect(vertex, builder, &registry.messages)
@@ -30,12 +36,15 @@ impl ForkResultOp {
         edge_builder.add_output_edge(self.err.clone(), None);
     }
 
-    pub(super) fn try_connect<Serialized>(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry<Serialized>,
-    ) -> Result<bool, DiagramErrorCode> {
+        registry: &MessageRegistry<SerializationOptionsT>,
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         let output = validate_single_input(vertex)?;
         let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             Err(DiagramErrorCode::CannotForkResult)
@@ -56,19 +65,24 @@ impl ForkResultOp {
 }
 
 pub trait DynForkResult {
-    fn on_register<Serialized>(
+    fn on_register<SerializationOptionsT>(
         self,
-        messages: &mut HashMap<TypeInfo, MessageRegistration<Serialized>>,
+        messages: &mut HashMap<TypeInfo, MessageRegistration<SerializationOptionsT>>,
         schema_generator: &mut SchemaGenerator,
-    ) -> bool;
+    ) -> bool
+    where
+        SerializationOptionsT: SerializationOptions;
 }
 
 impl<T> DynForkResult for NotSupportedMarker<T> {
-    fn on_register<Serialized>(
+    fn on_register<SerializationOptionsT>(
         self,
-        _messages: &mut HashMap<TypeInfo, MessageRegistration<Serialized>>,
+        _messages: &mut HashMap<TypeInfo, MessageRegistration<SerializationOptionsT>>,
         _schema_generator: &mut SchemaGenerator,
-    ) -> bool {
+    ) -> bool
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         false
     }
 }
@@ -79,11 +93,14 @@ where
     E: Send + Sync + 'static,
     // S: SerializeMessage<T>,
 {
-    fn on_register<Serialized>(
+    fn on_register<SerializationOptionsT>(
         self,
-        messages: &mut HashMap<TypeInfo, MessageRegistration<Serialized>>,
+        messages: &mut HashMap<TypeInfo, MessageRegistration<SerializationOptionsT>>,
         schema_generator: &mut SchemaGenerator,
-    ) -> bool {
+    ) -> bool
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         let ops = &mut messages
             .entry(TypeInfo::of::<Result<T, E>>())
             .or_insert(MessageRegistration::new::<T>())

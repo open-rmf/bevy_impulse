@@ -8,8 +8,8 @@ use crate::{diagram::type_info::TypeInfo, Builder};
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, Vertex,
-    WorkflowBuilder,
+    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    SerializationOptions, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -19,7 +19,13 @@ pub struct ForkCloneOp {
 }
 
 impl ForkCloneOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
+        op_id: String,
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         let mut edge_builder =
             wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
                 self.try_connect(vertex, builder, &registry.messages)
@@ -29,12 +35,15 @@ impl ForkCloneOp {
         }
     }
 
-    fn try_connect<Serialized>(
+    fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry<Serialized>,
-    ) -> Result<bool, DiagramErrorCode> {
+        registry: &MessageRegistry<SerializationOptionsT>,
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         let output = validate_single_input(vertex)?;
 
         let outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {

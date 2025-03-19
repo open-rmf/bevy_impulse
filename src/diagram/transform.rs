@@ -1,16 +1,16 @@
 use std::error::Error;
 
-use cel_interpreter::{ExecutionError, ParseError, Program};
+use cel_interpreter::{Context, ExecutionError, ParseError, Program};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::debug;
 
-use crate::{diagram::type_info::TypeInfo, Builder, Output};
+use crate::{Builder, Output};
 
 use super::{
-    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, Vertex,
-    WorkflowBuilder,
+    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    SerializationOptions, Vertex, WorkflowBuilder,
 };
 
 #[derive(Error, Debug)]
@@ -21,8 +21,11 @@ pub enum TransformError {
     #[error(transparent)]
     Execution(#[from] ExecutionError),
 
+    #[error("not supported")]
+    NotSupported,
+
     #[error(transparent)]
-    Other(#[from] Box<dyn Error + Send + Sync + 'static>),
+    Other(#[from] Box<dyn Error + Send + Sync>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -33,7 +36,13 @@ pub struct TransformOp {
 }
 
 impl TransformOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
+        op_id: String,
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         wf_builder
             .add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
                 self.try_connect(vertex, builder, &registry.messages)
@@ -41,14 +50,14 @@ impl TransformOp {
             .add_output_edge(self.next.clone(), None);
     }
 
-    pub(super) fn try_connect<Serialized>(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry<Serialized>,
+        registry: &MessageRegistry<SerializationOptionsT>,
     ) -> Result<bool, DiagramErrorCode>
     where
-        Serialized: Send + Sync + 'static,
+        SerializationOptionsT: SerializationOptions,
     {
         let output = validate_single_input(vertex)?;
         let transformed_output = transform_output(builder, registry, output, self)?;
@@ -57,40 +66,28 @@ impl TransformOp {
     }
 }
 
-pub(super) fn transform_output<Serialized>(
+pub(super) fn transform_output<SerializationOptionsT>(
     builder: &mut Builder,
-    registry: &MessageRegistry<Serialized>,
+    registry: &MessageRegistry<SerializationOptionsT>,
     output: DynOutput,
     transform_op: &TransformOp,
-) -> Result<Output<Serialized>, DiagramErrorCode>
+) -> Result<Output<cel_interpreter::Value>, DiagramErrorCode>
 where
-    Serialized: Send + Sync + 'static,
+    SerializationOptionsT: SerializationOptions,
 {
     debug!("transform output: {:?}, op: {:?}", output, transform_op);
 
-    let json_output = if output.type_info == TypeInfo::of::<Serialized>() {
-        output.into_output()
-    } else {
-        registry.serialize(builder, output)
-    }?;
-
+    let cel_output = registry.to_cel_value(builder, output)?;
     let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;
-    let transform_node = builder.create_map_block(
-        move |req: Serialized| -> Result<Serialized, TransformError> {
-            panic!("FIXME")
-            // let mut context = Context::default();
-            // context
-            //     .add_variable("request", req)
-            //     // cannot keep the original error because it is not Send + Sync
-            //     .map_err(|err| TransformError::Other(err.to_string().into()))?;
-            // program
-            //     .execute(&context)?
-            //     .json()
-            //     // cel_interpreter::json is private so we have to type erase ConvertToJsonError
-            //     .map_err(|err| TransformError::Other(err.to_string().into()))
-        },
-    );
-    builder.connect(json_output, transform_node.input);
+    let transform_node = builder.create_map_block(move |req| -> Result<_, TransformError> {
+        let mut context = Context::default();
+        context
+            .add_variable("request", req)
+            // cannot keep the original error because it is not Send + Sync
+            .map_err(|err| TransformError::Other(err.to_string().into()))?;
+        Ok(program.execute(&context)?)
+    });
+    builder.connect(cel_output, transform_node.input);
     let transformed_output = transform_node
         .output
         .chain(builder)

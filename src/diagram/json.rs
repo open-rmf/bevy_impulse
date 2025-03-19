@@ -1,4 +1,9 @@
-use super::{DeserializeFn, DeserializeMessage, SerializeFn, SerializeMessage};
+use crate::{Builder, Output};
+
+use super::{
+    transform::TransformError, DeserializeFn, DeserializeMessage, DiagramErrorCode, DynOutput,
+    SerializeCel, SerializeFn, SerializeMessage, ToCelValueFn,
+};
 
 pub struct JsonDeserializer;
 
@@ -15,6 +20,25 @@ where
                 .output()
                 .into())
         })
+    }
+
+    fn from_cel_value_fn() -> Option<super::FromCelValueFn> {
+        Some(
+            |output: Output<cel_interpreter::Value>,
+             builder: &mut Builder|
+             -> Result<DynOutput, DiagramErrorCode> {
+                let node = builder.create_map_block(
+                    |msg: cel_interpreter::Value| -> Result<_, TransformError> {
+                        let json_value = msg
+                            .json()
+                            .map_err(|err| TransformError::Other(err.to_string().into()))?;
+                        Ok(serde_json::from_value::<T>(json_value).unwrap())
+                    },
+                );
+                builder.connect(output, node.input);
+                Ok(node.output.chain(builder).cancel_on_err().output().into())
+            },
+        )
     }
 }
 
@@ -33,5 +57,31 @@ where
                 .cancel_on_err()
                 .output())
         })
+    }
+
+    fn to_cel_value_fn() -> Option<ToCelValueFn> {
+        Some(|output, builder| {
+            let node = builder.create_map_block(|msg: T| cel_interpreter::to_value(msg));
+            builder.connect(output.into_output()?, node.input);
+            Ok(node.output.chain(builder).cancel_on_err().output().into())
+        })
+    }
+}
+
+impl SerializeCel<serde_json::Value> for JsonSerializer {
+    fn serialize_cel_output(
+        builder: &mut Builder,
+        output: Output<cel_interpreter::Value>,
+    ) -> Output<serde_json::Value> {
+        output
+            .chain(builder)
+            .map_block(|val| {
+                val.json()
+                    // the error returned borrows `val`, so we need to break ownership
+                    // by converting the error.
+                    .map_err(|e| TransformError::Other(e.to_string().into()))
+            })
+            .cancel_on_err()
+            .output()
     }
 }

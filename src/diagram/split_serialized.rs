@@ -31,7 +31,7 @@ use super::{
     impls::{DefaultImpl, NotSupported},
     type_info::TypeInfo,
     validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
-    OperationId, SerializeMessage, Vertex, WorkflowBuilder,
+    OperationId, SerializationOptions, SerializeMessage, Vertex, WorkflowBuilder,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -47,7 +47,13 @@ pub struct SplitOp {
 }
 
 impl SplitOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
+        &'a self,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
+        op_id: String,
+    ) where
+        SerializationOptionsT: SerializationOptions,
+    {
         let mut edge_builder =
             wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
                 self.try_connect(vertex, builder, &registry.messages)
@@ -62,12 +68,15 @@ impl SplitOp {
         }
     }
 
-    pub(super) fn try_connect<Serialized>(
+    pub(super) fn try_connect<SerializationOptionsT>(
         &self,
         vertex: &Vertex,
         builder: &mut Builder,
-        registry: &MessageRegistry<Serialized>,
-    ) -> Result<bool, DiagramErrorCode> {
+        registry: &MessageRegistry<SerializationOptionsT>,
+    ) -> Result<bool, DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         let output = validate_single_input(vertex)?;
         let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
             let chain = output.into_output::<serde_json::Value>()?.chain(builder);
@@ -286,9 +295,10 @@ where
         split_op: &'a SplitOp,
     ) -> Result<DynSplitOutputs, DiagramErrorCode>;
 
-    fn on_register<Serialized>(registry: &mut MessageRegistry<Serialized>)
+    fn on_register<SerializationOptionsT>(registry: &mut MessageRegistry<SerializationOptionsT>)
     where
-        Serializer: SerializeMessage<T::Item, Serialized>;
+        SerializationOptionsT: SerializationOptions,
+        Serializer: SerializeMessage<T::Item, SerializationOptionsT::Serialized>;
 }
 
 impl<T, Serializer> DynSplit<T, Serializer> for NotSupported
@@ -305,7 +315,12 @@ where
         Err(DiagramErrorCode::NotSplittable)
     }
 
-    fn on_register<Serialized>(_registry: &mut MessageRegistry<Serialized>) {}
+    fn on_register<SerializationOptionsT>(_registry: &mut MessageRegistry<SerializationOptionsT>)
+    where
+        SerializationOptionsT: SerializationOptions,
+        SerializationOptionsT::Serialized: Send + Sync + 'static,
+    {
+    }
 }
 
 impl<T, SerializerT> DynSplit<T, SerializerT> for DefaultImpl
@@ -324,9 +339,10 @@ where
         split_chain(chain, split_op)
     }
 
-    fn on_register<Serialized>(registry: &mut MessageRegistry<Serialized>)
+    fn on_register<SerializationOptionsT>(registry: &mut MessageRegistry<SerializationOptionsT>)
     where
-        SerializerT: SerializeMessage<T::Item, Serialized>,
+        SerializationOptionsT: SerializationOptions,
+        SerializerT: SerializeMessage<T::Item, SerializationOptionsT::Serialized>,
     {
         registry.register_serialize::<T::Item, SerializerT>();
     }

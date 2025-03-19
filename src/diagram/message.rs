@@ -104,28 +104,53 @@ impl<T: Any> From<InputSlot<T>> for DynInputSlot {
     }
 }
 
-pub(super) type DeserializeFn<Serialized> =
+pub type DeserializeFn<Serialized> =
     fn(Output<Serialized>, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
+
+pub type FromCelValueFn =
+    fn(Output<cel_interpreter::Value>, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
 
 pub trait DeserializeMessage<T, Serialized> {
     fn deserialize_fn() -> Option<DeserializeFn<Serialized>>;
+
+    fn from_cel_value_fn() -> Option<FromCelValueFn>;
 }
 
-pub(super) type SerializeFn<Serialized> =
+pub type SerializeFn<Serialized> =
     fn(DynOutput, &mut Builder) -> Result<Output<Serialized>, DiagramErrorCode>;
+
+pub type ToCelValueFn =
+    fn(DynOutput, &mut Builder) -> Result<Output<cel_interpreter::Value>, DiagramErrorCode>;
 
 pub trait SerializeMessage<T, Serialized> {
     fn serialize_fn() -> Option<SerializeFn<Serialized>>;
+
+    fn to_cel_value_fn() -> Option<ToCelValueFn>;
+}
+
+pub trait SerializeCel<Serialized> {
+    fn serialize_cel_output(
+        builder: &mut Builder,
+        output: Output<cel_interpreter::Value>,
+    ) -> Output<Serialized>;
 }
 
 impl<T, Serialized> DeserializeMessage<T, Serialized> for NotSupported {
     fn deserialize_fn() -> Option<DeserializeFn<Serialized>> {
         None
     }
+
+    fn from_cel_value_fn() -> Option<FromCelValueFn> {
+        None
+    }
 }
 
 impl<T, Serialized> SerializeMessage<T, Serialized> for NotSupported {
     fn serialize_fn() -> Option<SerializeFn<Serialized>> {
+        None
+    }
+
+    fn to_cel_value_fn() -> Option<ToCelValueFn> {
         None
     }
 }

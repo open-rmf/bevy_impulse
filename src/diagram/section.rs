@@ -38,14 +38,17 @@ impl SectionOp {
         format!("{}/{}", section_op_id, inner_op_id)
     }
 
-    pub(super) fn add_vertices<'a>(
+    pub(super) fn add_vertices<'a, SerializationOptionsT>(
         &'a self,
         op_id: OperationId,
-        wf_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
         builder: &mut Builder,
         diagram: &'a Diagram,
         registry: &'a JsonDiagramRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<(), DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         match &self.provider {
             SectionProvider::Builder(builder_id) => {
                 let reg = registry.get_section_registration(builder_id)?;
@@ -242,15 +245,18 @@ pub(super) struct SectionTemplate {
 }
 
 impl SectionTemplate {
-    fn add_vertices<'a>(
+    fn add_vertices<'a, SerializationOptionsT>(
         &'a self,
         section_op_id: &OperationId,
         section_op: &SectionOp,
-        wf_builder: &mut WorkflowBuilder<'a>,
+        wf_builder: &mut WorkflowBuilder<'a, SerializationOptionsT>,
         builder: &mut Builder,
         diagram: &'a Diagram,
         registry: &'a JsonDiagramRegistry,
-    ) -> Result<(), DiagramErrorCode> {
+    ) -> Result<(), DiagramErrorCode>
+    where
+        SerializationOptionsT: SerializationOptions,
+    {
         for (op_id, op) in &self.ops {
             let op_id = SectionOp::scoped_op_id(section_op_id, op_id);
             let mut target_aliases = HashMap::new();

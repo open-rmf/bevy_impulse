@@ -10,8 +10,9 @@ use crate::{
 };
 
 use super::{
-    Diagram, DiagramError, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
-    IntoOperationId, JsonDiagramRegistry, MessageRegistry, NextOperation, OperationId,
+    Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DiagramOperation,
+    DynInputSlot, DynOutput, IntoOperationId, JsonDiagramRegistry, MessageRegistry, NextOperation,
+    OperationId, SerializationOptions, SerializeCel,
 };
 
 pub(super) struct Edge {
@@ -41,10 +42,10 @@ impl Edge {
     }
 }
 
-pub(super) type ConnectVisitor<'a> = dyn Fn(
+pub(super) type ConnectVisitor<'a, SerializationOptionsT> = dyn Fn(
         &Vertex,
         &mut Builder,
-        &JsonDiagramRegistry,
+        &DiagramElementRegistry<SerializationOptionsT>,
         &mut HashMap<OperationId, AnyBuffer>,
     ) -> Result<bool, DiagramErrorCode>
     + 'a;
@@ -54,8 +55,11 @@ pub(super) struct Vertex {
     pub(super) out_edges: Vec<Edge>,
 }
 
-struct VertexOperations<'a> {
-    connect_visitor: Box<ConnectVisitor<'a>>,
+struct VertexOperations<'a, SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    connect_visitor: Box<ConnectVisitor<'a, SerializationOptionsT>>,
 }
 
 pub(super) struct EdgeBuilder<'a> {
@@ -79,12 +83,19 @@ impl<'a> EdgeBuilder<'a> {
     }
 }
 
-pub(super) struct WorkflowBuilder<'a> {
-    vertices: HashMap<OperationId, (RefCell<Vertex>, VertexOperations<'a>)>,
+pub(super) struct WorkflowBuilder<'a, SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+{
+    vertices: HashMap<OperationId, (RefCell<Vertex>, VertexOperations<'a, SerializationOptionsT>)>,
     target_aliases: HashMap<OperationId, OperationId>,
 }
 
-impl<'a> WorkflowBuilder<'a> {
+impl<'a, SerializationOptionsT> WorkflowBuilder<'a, SerializationOptionsT>
+where
+    SerializationOptionsT: SerializationOptions,
+    SerializationOptionsT::DefaultSerializer: SerializeCel<SerializationOptionsT::Serialized>,
+{
     pub(super) fn new() -> Self {
         Self {
             vertices: HashMap::new(),
@@ -98,7 +109,7 @@ impl<'a> WorkflowBuilder<'a> {
         F: Fn(
                 &Vertex,
                 &mut Builder,
-                &JsonDiagramRegistry,
+                &DiagramElementRegistry<SerializationOptionsT>,
                 &mut HashMap<OperationId, AnyBuffer>,
             ) -> Result<bool, DiagramErrorCode>
             + 'a,
@@ -215,7 +226,7 @@ impl<'a> WorkflowBuilder<'a> {
     pub(super) fn create_workflow(
         mut self,
         builder: &mut Builder,
-        registry: &JsonDiagramRegistry,
+        registry: &DiagramElementRegistry<SerializationOptionsT>,
     ) -> Result<(), DiagramError> {
         self.connect_edges()?;
         let mut buffers = HashMap::new();
@@ -266,24 +277,26 @@ impl<'a> WorkflowBuilder<'a> {
     }
 }
 
-/// Connect a [`DynOutput`] to a [`DynInputSlot`]. If the output is a [`serde_json::Value`], then
+/// Connect a [`DynOutput`] to a [`DynInputSlot`]. If the output is a serialized, then
 /// this will attempt to deserialize it into the input type.
 ///
 /// ```text
 /// builder.connect(output.into_output::<i64>()?, dyn_input)?;
 /// ```
-pub fn dyn_connect<Serialized>(
+pub fn dyn_connect<SerializationOptionsT>(
     builder: &mut Builder,
     output: DynOutput,
     input: DynInputSlot,
-    registry: &MessageRegistry<Serialized>,
+    registry: &MessageRegistry<SerializationOptionsT>,
 ) -> Result<(), DiagramErrorCode>
 where
-    Serialized: Send + Sync + 'static,
+    SerializationOptionsT: SerializationOptions,
 {
     let output = if output.type_info != input.type_info {
-        if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            registry.deserialize(&input.type_info, builder, output)?
+        if output.type_info == TypeInfo::of::<SerializationOptionsT::Serialized>() {
+            registry.deserialize(&input.type_info, builder, output.into_output()?)?
+        } else if output.type_info == TypeInfo::of::<cel_interpreter::Value>() {
+            registry.from_cel_value(&input.type_info, builder, output.into_output()?)?
         } else {
             return Err(DiagramErrorCode::TypeMismatch {
                 source_type: output.type_info,
