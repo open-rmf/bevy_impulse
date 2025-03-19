@@ -30,13 +30,12 @@ use super::{
     fork_clone_schema::DynForkClone,
     fork_result_schema::DynForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
-    register_serialize,
-    register_json,
+    register_json, register_serialize,
     type_info::TypeInfo,
     unzip_schema::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
-    DynSplit, DynSplitOutputs, DynType, JsonRegistration, OpaqueMessageDeserializer, OpaqueMessageSerializer,
-    RegisterJson, SerializeMessage, SplitSchema,
+    DynSplit, DynSplitOutputs, DynType, JsonRegistration, OpaqueMessageDeserializer,
+    OpaqueMessageSerializer, RegisterJson, SerializeMessage, SplitSchema,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -350,9 +349,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     /// If you want to enable cloning for only the input or only the output
     /// then use [`DiagramElementRegistry::register_message`] on the message type
     /// directly.
-    pub fn no_cloning(
-        self,
-    ) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
+    pub fn no_cloning(self) -> CommonOperations<'a, DeserializeImpl, SerializeImpl, NotSupported> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -490,7 +487,9 @@ where
     where
         Request: Clone,
     {
-        self.registry.messages.register_fork_clone::<Request, DefaultImpl>();
+        self.registry
+            .messages
+            .register_fork_clone::<Request, DefaultImpl>();
         self
     }
 
@@ -500,7 +499,9 @@ where
     where
         Request: DeserializeOwned + DynType,
     {
-        self.registry.messages.register_deserialize::<Request, DefaultDeserializer>();
+        self.registry
+            .messages
+            .register_deserialize::<Request, DefaultDeserializer>();
         self
     }
 
@@ -521,7 +522,9 @@ where
     where
         Response: Clone,
     {
-        self.registry.messages.register_fork_clone::<Response, DefaultImpl>();
+        self.registry
+            .messages
+            .register_fork_clone::<Response, DefaultImpl>();
         self
     }
 
@@ -531,7 +534,9 @@ where
     where
         Response: Serialize + DynType,
     {
-        self.registry.messages.register_serialize::<Response, DefaultSerializer>();
+        self.registry
+            .messages
+            .register_serialize::<Response, DefaultSerializer>();
         self
     }
 
@@ -598,7 +603,8 @@ where
     where
         Request: BufferAccessRequest,
     {
-        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages).with_buffer_access();
+        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages)
+            .with_buffer_access();
         self
     }
 

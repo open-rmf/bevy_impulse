@@ -187,7 +187,7 @@ pub trait RegisterJson<T> {
 }
 
 pub struct JsonRegistration<Serializer, Deserializer> {
-    _ignore: std::marker::PhantomData<fn(Serializer, Deserializer)>
+    _ignore: std::marker::PhantomData<fn(Serializer, Deserializer)>,
 }
 
 impl<T> RegisterJson<T> for JsonRegistration<DefaultSerializer, DefaultDeserializer>

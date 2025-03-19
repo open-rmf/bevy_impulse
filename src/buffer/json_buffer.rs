@@ -865,7 +865,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIm
 }
 
 fn register_basic_types(
-    interfaces: &mut HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>
+    interfaces: &mut HashMap<TypeId, &'static (dyn JsonBufferAccessInterface + Send + Sync)>,
 ) {
     JsonBufferAccessImpl::<JsonMessage>::get_or_register_type(interfaces);
     JsonBufferAccessImpl::<String>::get_or_register_type(interfaces);
@@ -1146,8 +1146,8 @@ impl BufferMapLayout for HashMap<BufferIdentifier<'static>, JsonBuffer> {
         let mut downcast_buffers = HashMap::new();
         let mut compatibility = IncompatibleLayout::default();
         for identifier in buffers.keys() {
-            if let Ok(downcast) =
-                compatibility.require_buffer_for_identifier::<JsonBuffer>(identifier.clone(), buffers)
+            if let Ok(downcast) = compatibility
+                .require_buffer_for_identifier::<JsonBuffer>(identifier.clone(), buffers)
             {
                 downcast_buffers.insert(identifier.clone(), downcast);
             }
@@ -1182,10 +1182,7 @@ impl Joining for HashMap<BufferIdentifier<'static>, JsonBuffer> {
                     array[*index] = buffer.pull(session, world)?;
                 }
                 BufferIdentifier::Name(name) => {
-                    object.insert(
-                        name.as_ref().to_owned(),
-                        buffer.pull(session, world)?,
-                    );
+                    object.insert(name.as_ref().to_owned(), buffer.pull(session, world)?);
                 }
             }
         }

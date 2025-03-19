@@ -98,10 +98,7 @@ impl SerializedJoinSchema {
             return Ok(false);
         };
 
-        let output = builder
-            .try_join::<JsonMessage>(&buffers)?
-            .output()
-            .into();
+        let output = builder.try_join::<JsonMessage>(&buffers)?.output().into();
 
         let out_edge = edges
             .get_mut(
@@ -129,8 +126,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Diagram,
-        DiagramError, DiagramErrorCode, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramError, DiagramErrorCode,
+        NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -184,15 +181,15 @@ mod tests {
                 |builder, _config: ()| builder.create_map_block(foobar_array),
             )
             .with_join();
-        registry
-            .opt_out()
-            .no_cloning()
-            .register_node_builder(NodeBuilderOptions::new("create_foobar"), |builder, config: FooBar| {
+        registry.opt_out().no_cloning().register_node_builder(
+            NodeBuilderOptions::new("create_foobar"),
+            |builder, config: FooBar| {
                 builder.create_map_block(move |_: JsonMessage| FooBar {
                     foo: config.foo.clone(),
                     bar: config.bar.clone(),
                 })
-            });
+            },
+        );
     }
 
     #[test]
