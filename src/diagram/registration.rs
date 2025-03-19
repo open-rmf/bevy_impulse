@@ -285,7 +285,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     where
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
-        SerializeImpl: SerializeMessage<Message> + SerializeMessage<Vec<Message>>,
+        SerializeImpl: SerializeMessage<Message>,
         Cloneable: DynForkClone<Message>,
     {
         self.registry
@@ -1178,6 +1178,26 @@ impl DiagramElementRegistry {
         Response: Send + Sync + 'static + DynType + Serialize + Clone,
     {
         self.opt_out().register_node_builder(options, builder)
+    }
+
+    /// Register a single message for general use between nodes. This will
+    /// include all common operations for the message (deserialize, serialize,
+    /// and clone).
+    ///
+    /// You will receive a [`MessageRegistrationBuilder`] which you can then use
+    /// to enable more operations for the message, such as forking, splitting,
+    /// unzipping, and joining. The message type needs to be suitable for each
+    /// operation that you register for it or else the compiler will not allow
+    /// you to enable them.
+    ///
+    /// Use [`Self::opt_out`] to opt out of specified common operations before
+    /// beginning to register the message. This allows you to register message
+    /// types that do not support one or more of the common operations.
+    pub fn register_message<Message>(&mut self) -> MessageRegistrationBuilder<Message>
+    where
+        Message: Send + Sync + 'static + DynType + DeserializeOwned + Serialize + Clone,
+    {
+        self.opt_out().register_message()
     }
 
     /// In some cases the common operations of deserialization, serialization,
