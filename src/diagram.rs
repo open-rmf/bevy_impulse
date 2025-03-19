@@ -483,8 +483,19 @@ pub enum DiagramOperation {
     /// ```
     Transform(TransformSchema),
 
-    /// Create a [`crate::Buffer`] which can be used to store and pull data within
+    /// Create a [`Buffer`][1] which can be used to store and pull data within
     /// a scope.
+    ///
+    /// By default the [`BufferSettings`][2] will keep the single last message
+    /// pushed to the buffer. You can change that with the optional `settings`
+    /// property.
+    ///
+    /// Use the `"serialize": true` option to serialize the messages into
+    /// [`serde_json::Value`] before they are inserted into the buffer. This
+    /// allows any serializable message type to be pushed into the buffer.
+    ///
+    /// [1]: crate::Buffer
+    /// [2]: crate::BufferSettings
     ///
     /// # Examples
     /// ```
@@ -495,7 +506,7 @@ pub enum DiagramOperation {
     ///     "ops": {
     ///         "fork_clone": {
     ///             "type": "fork_clone",
-    ///             "next": ["num_output", "string_output"]
+    ///             "next": ["num_output", "string_output", "all_num_buffer", "serialized_num_buffer"]
     ///         },
     ///         "num_output": {
     ///             "type": "node",
@@ -508,7 +519,20 @@ pub enum DiagramOperation {
     ///             "next": "string_buffer"
     ///         },
     ///         "string_buffer": {
-    ///             "type": "buffer"
+    ///             "type": "buffer",
+    ///             "settings": {
+    ///                 "retention": { "keep_last": 10 }
+    ///             }
+    ///         },
+    ///         "all_num_buffer": {
+    ///             "type": "buffer",
+    ///             "settings": {
+    ///                 "retention": "keep_all"
+    ///             }
+    ///         },
+    ///         "serialized_num_buffer": {
+    ///             "type": "buffer",
+    ///             "serialize": true
     ///         },
     ///         "buffer_access": {
     ///             "type": "buffer_access",
