@@ -440,7 +440,7 @@ pub enum DiagramOperation {
     SerializedJoin(SerializedJoinSchema),
 
     /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
-    /// The context includes a "request" variable which contains the request.
+    /// The context includes a "request" variable which contains the input message.
     ///
     /// # Examples
     /// ```
@@ -491,11 +491,15 @@ pub enum DiagramOperation {
     /// property.
     ///
     /// Use the `"serialize": true` option to serialize the messages into
-    /// [`serde_json::Value`] before they are inserted into the buffer. This
-    /// allows any serializable message type to be pushed into the buffer.
+    /// [`JsonMessage`][3] before they are inserted into the buffer. This
+    /// allows any serializable message type to be pushed into the buffer. If
+    /// left unspecified, the buffer will store the specific data type that gets
+    /// pushed into it. If the buffer inputs are not being serialized, then all
+    /// incoming messages being pushed into the buffer must have the same type.
     ///
     /// [1]: crate::Buffer
     /// [2]: crate::BufferSettings
+    /// [3]: crate::JsonMessage
     ///
     /// # Examples
     /// ```
@@ -552,7 +556,12 @@ pub enum DiagramOperation {
     /// ```
     Buffer(BufferSchema),
 
-    /// Zip a response with a buffer access.
+    /// Zip a message together with access to one or more buffers.
+    ///
+    /// The receiving node must have an input type of `(Message, Keys)`
+    /// where `Keys` implements the [`Accessor`][1] trait.
+    ///
+    /// [1]: crate::Accessor
     ///
     /// # Examples
     /// ```
@@ -855,36 +864,33 @@ pub enum DiagramErrorCode {
         target_type: TypeInfo,
     },
 
-    #[error("missing start or terminate")]
+    #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
-    #[error("cannot connect to start")]
-    CannotConnectStart,
-
-    #[error("request or response cannot be serialized or deserialized")]
+    #[error("Serialization was disabled for the target message type.")]
     NotSerializable,
 
-    #[error("response cannot be cloned")]
+    #[error("Cloning was disabled for the target message type.")]
     NotCloneable,
 
-    #[error("the number of unzip slots in response does not match the number of inputs")]
+    #[error("The number of unzip slots in response does not match the number of inputs.")]
     NotUnzippable,
 
-    #[error(
-        "node must be registered with \"with_fork_result()\" to be able to perform fork result"
-    )]
+    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
     CannotForkResult,
 
-    #[error("response cannot be split")]
+    #[error("Response cannot be split. Make sure to use .with_split() when building the node.")]
     NotSplittable,
 
-    #[error("message cannot be joined from the input buffers")]
+    #[error(
+        "Message cannot be joined. Make sure to use .with_join() when building the target node."
+    )]
     NotJoinable,
 
-    #[error("empty join is not allowed")]
+    #[error("Empty join is not allowed.")]
     EmptyJoin,
 
-    #[error("join target type cannot be determined from [next] and [target_node] is not provided")]
+    #[error("Target type cannot be determined from [next] and [target_node] is not provided.")]
     UnknownTarget,
 
     #[error(transparent)]
@@ -893,7 +899,7 @@ pub enum DiagramErrorCode {
     #[error("box/unbox operation for the message is not registered")]
     CannotBoxOrUnbox,
 
-    #[error("cannot access buffer")]
+    #[error("Buffer access was not enabled for a node connected to a buffer access operation. Make sure to use .with_buffer_access() when building the node.")]
     CannotBufferAccess,
 
     #[error("cannot listen on these buffers to produce a request of [{0}]")]
@@ -960,6 +966,7 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
+        assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
             CancellationCause::Unreachable(_)
@@ -1077,6 +1084,7 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
+        assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
             CancellationCause::Unreachable(_)
@@ -1112,6 +1120,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);
     }
 
@@ -1129,6 +1138,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 4);
     }
 
@@ -1157,6 +1167,7 @@ mod tests {
                 serde_json::Value::from(4),
             )
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 28);
     }
 
@@ -1191,6 +1202,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
     }
 }

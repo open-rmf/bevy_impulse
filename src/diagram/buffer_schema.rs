@@ -136,6 +136,7 @@ pub(super) fn get_node_request_type(
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub enum BufferInputs {
+    Single(OperationId),
     Dict(HashMap<String, OperationId>),
     Array(Vec<OperationId>),
 }
@@ -148,12 +149,15 @@ impl BufferInputs {
         buffers: &HashMap<&OperationId, AnyBuffer>,
     ) -> Option<BufferMap> {
         match self {
+            Self::Single(op_id) => {
+                let mut buffer_map = BufferMap::with_capacity(1);
+                buffer_map.insert(BufferIdentifier::Index(0), *buffers.get(op_id)?);
+                Some(buffer_map)
+            }
             Self::Dict(mapping) => {
                 let mut buffer_map = BufferMap::with_capacity(mapping.len());
                 for (k, op_id) in mapping {
-                    let buffer = if let Some(buffer) = buffers.get(op_id) {
-                        buffer
-                    } else {
+                    let Some(buffer) = buffers.get(op_id) else {
                         return None;
                     };
                     buffer_map.insert(BufferIdentifier::Name(k.clone().into()), *buffer);
@@ -177,6 +181,7 @@ impl BufferInputs {
 
     pub(super) fn is_empty(&self) -> bool {
         match self {
+            Self::Single(_) => false,
             Self::Dict(d) => d.is_empty(),
             Self::Array(a) => a.is_empty(),
         }
@@ -352,12 +357,13 @@ impl ReceiveOutput for AnyBuffer {
 
 #[cfg(test)]
 mod tests {
-    use bevy_ecs::system::In;
+    use bevy_ecs::{prelude::World, system::In};
     use serde_json::json;
 
     use crate::{
-        diagram::testing::DiagramTestFixture, BufferAccess, BufferKey, Diagram, DiagramErrorCode,
-        IntoBlockingCallback, Node, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, AnyBufferKey, AnyBufferWorldAccess, BufferAccess,
+        BufferAccessMut, BufferKey, Diagram, DiagramErrorCode, IntoBlockingCallback, JsonBufferKey,
+        JsonBufferWorldAccess, JsonMessage, Node, NodeBuilderOptions,
     };
 
     /// create a new [`DiagramTestFixture`] with some extra builders.
@@ -383,6 +389,107 @@ mod tests {
         );
 
         fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("insert_json_buffer_entries".to_owned()),
+                |builder, config: usize| {
+                    builder.create_node(
+                        (move |In((value, key)): In<(JsonMessage, JsonBufferKey)>,
+                               world: &mut World| {
+                            world
+                                .json_buffer_mut(&key, |mut buffer| {
+                                    for _ in 0..config {
+                                        buffer.push(value.clone()).unwrap();
+                                    }
+                                })
+                                .unwrap();
+                        })
+                        .into_blocking_callback(),
+                    )
+                },
+            )
+            .with_buffer_access()
+            .with_common_response();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("count_json_buffer_entries".to_owned()),
+                |builder, _config: ()| {
+                    builder.create_node(count_json_buffer_entries.into_blocking_callback())
+                },
+            )
+            .with_buffer_access()
+            .with_common_response();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("listen_count_json_buffer_entries".to_owned()),
+                |builder, _config: ()| {
+                    builder.create_node(listen_count_json_buffer_entries.into_blocking_callback())
+                },
+            )
+            .with_listen()
+            .with_common_response();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("count_any_buffer_entries".to_owned()),
+                |builder, _config: ()| {
+                    builder.create_node(count_any_buffer_entries.into_blocking_callback())
+                },
+            )
+            .with_buffer_access()
+            .with_common_response();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("listen_count_any_buffer_entries".to_owned()),
+                |builder, _config: ()| {
+                    builder.create_node(listen_count_any_buffer_entries.into_blocking_callback())
+                },
+            )
+            .with_listen()
+            .with_common_response();
+
+        fixture
+    }
+
+    fn count_json_buffer_entries(
+        In(((), key)): In<((), JsonBufferKey)>,
+        world: &mut World,
+    ) -> usize {
+        world.json_buffer_view(&key).unwrap().len()
+    }
+
+    fn listen_count_json_buffer_entries(In(key): In<JsonBufferKey>, world: &mut World) -> usize {
+        world.json_buffer_view(&key).unwrap().len()
+    }
+
+    fn count_any_buffer_entries(In(((), key)): In<((), AnyBufferKey)>, world: &mut World) -> usize {
+        world.any_buffer_view(&key).unwrap().len()
+    }
+
+    fn listen_count_any_buffer_entries(In(key): In<AnyBufferKey>, world: &mut World) -> usize {
+        world.any_buffer_view(&key).unwrap().len()
     }
 
     #[test]
@@ -504,6 +611,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "hello world");
     }
 
@@ -563,11 +671,179 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
 
     #[test]
-    fn test_listen() {
+    fn test_json_buffer_access() {
+        let mut fixture = new_fixture();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork_input",
+            "ops": {
+                "fork_input": {
+                    "type": "fork_clone",
+                    "next": [
+                        "json_buffer",
+                        "insert_access",
+                    ],
+                },
+                "json_buffer": {
+                    "type": "buffer",
+                    "settings": { "retention": "keep_all" },
+                },
+                "insert_access": {
+                    "type": "buffer_access",
+                    "buffers": ["json_buffer"],
+                    "next": "insert",
+                },
+                "insert": {
+                    "type": "node",
+                    "builder": "insert_json_buffer_entries",
+                    "config": 10,
+                    "next": "count_access",
+                },
+                "count_access": {
+                    "type": "buffer_access",
+                    "buffers": "json_buffer",
+                    "next": "count",
+                },
+                "count": {
+                    "type": "node",
+                    "builder": "count_json_buffer_entries",
+                    "next": { "builtin": "terminate" },
+                },
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::String("hello".to_owned()))
+            .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 11);
+    }
+
+    #[test]
+    fn test_any_buffer_access() {
+        let mut fixture = new_fixture();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork_input",
+            "ops": {
+                "fork_input": {
+                    "type": "fork_clone",
+                    "next": [
+                        "json_buffer",
+                        "insert_access",
+                    ],
+                },
+                "json_buffer": {
+                    "type": "buffer",
+                    "settings": { "retention": "keep_all" },
+                },
+                "insert_access": {
+                    "type": "buffer_access",
+                    "buffers": ["json_buffer"],
+                    "next": "insert",
+                },
+                "insert": {
+                    "type": "node",
+                    "builder": "insert_json_buffer_entries",
+                    "config": 10,
+                    "next": "count_access",
+                },
+                "count_access": {
+                    "type": "buffer_access",
+                    "buffers": "json_buffer",
+                    "next": "count",
+                },
+                "count": {
+                    "type": "node",
+                    "builder": "count_any_buffer_entries",
+                    "next": { "builtin": "terminate" },
+                },
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, serde_json::Value::String("hello".to_owned()))
+            .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 11);
+    }
+
+    #[test]
+    fn test_generic_listen() {
+        let mut fixture = new_fixture();
+
+        fn count_generic_buffer(
+            In(key): In<BufferKey<i64>>,
+            mut access: BufferAccessMut<i64>,
+        ) -> i64 {
+            access.get_mut(&key).unwrap().pull().unwrap()
+        }
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("pull_generic_buffer"),
+                |builder, _config: ()| {
+                    builder.create_node(count_generic_buffer.into_blocking_callback())
+                },
+            )
+            .with_listen()
+            .with_common_response();
+
+        // TODO(@mxgrey): Replace this with a general deserializing operation
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("deserialize_number"),
+            |builder, _config: ()| {
+                builder
+                    .create_map_block(|msg: JsonMessage| msg.as_number().unwrap().as_i64().unwrap())
+            },
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "deserialize",
+            "ops": {
+                "deserialize": {
+                    "type": "node",
+                    "builder": "deserialize_number",
+                    "next": "buffer",
+                },
+                "buffer": { "type": "buffer" },
+                "listen": {
+                    "type": "listen",
+                    "buffers": "buffer",
+                    "next": "count",
+                },
+                "count": {
+                    "type": "node",
+                    "builder": "pull_generic_buffer",
+                    "next": { "builtin": "terminate" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run(&diagram, JsonMessage::Number(5_i64.into()))
+            .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 5_i64);
+    }
+
+    #[test]
+    fn test_vec_listen() {
         let mut fixture = new_fixture();
 
         fn listen_buffer(In(request): In<Vec<BufferKey<i64>>>, access: BufferAccess<i64>) -> usize {
@@ -586,7 +862,7 @@ mod tests {
                 },
             )
             .with_listen()
-            .with_serialize_response();
+            .with_common_response();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -615,9 +891,64 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_json_buffer_listen() {
+        let mut fixture = new_fixture();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "buffer",
+            "ops": {
+                "buffer": { "type": "buffer" },
+                "listen": {
+                    "type": "listen",
+                    "buffers": "buffer",
+                    "next": "count",
+                },
+                "count": {
+                    "type": "node",
+                    "builder": "listen_count_json_buffer_entries",
+                    "next": { "builtin": "terminate" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_any_buffer_listen() {
+        let mut fixture = new_fixture();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "buffer",
+            "ops": {
+                "buffer": { "type": "buffer" },
+                "listen": {
+                    "type": "listen",
+                    "buffers": "buffer",
+                    "next": "count",
+                },
+                "count": {
+                    "type": "node",
+                    "builder": "listen_count_any_buffer_entries",
+                    "next": { "builtin": "terminate" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
 }

@@ -126,6 +126,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
     }
 
@@ -149,6 +150,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
     }
 
@@ -172,6 +174,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 12);
     }
 
@@ -195,6 +198,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result["request"], 4);
         assert_eq!(result["seven"], 7);
     }
@@ -222,6 +226,7 @@ mod tests {
         });
 
         let result = fixture.spawn_and_run(&diagram, request).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 40);
     }
 }

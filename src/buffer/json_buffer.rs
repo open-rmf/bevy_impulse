@@ -36,8 +36,8 @@ pub use serde_json::Value as JsonMessage;
 use smallvec::SmallVec;
 
 use crate::{
-    add_listener_to_source, Accessing, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey, AnyRange,
-    AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferIdentifier,
+    add_listener_to_source, Accessing, Accessor, AnyBuffer, AnyBufferAccessInterface, AnyBufferKey,
+    AnyRange, AsAnyBuffer, Buffer, BufferAccessMut, BufferAccessors, BufferError, BufferIdentifier,
     BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferMap,
     BufferMapLayout, BufferMapStruct, BufferStorage, Bufferable, Buffering, Builder, DrainBuffer,
     Gate, GateState, IncompatibleLayout, InspectBuffer, Joined, Joining, ManageBuffer,
@@ -1089,6 +1089,24 @@ impl Accessing for JsonBuffer {
 
     fn is_key_in_use(key: &Self::Key) -> bool {
         key.is_in_use()
+    }
+}
+
+impl Accessor for JsonBufferKey {
+    type Buffers = JsonBuffer;
+}
+
+impl BufferMapLayout for JsonBuffer {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut compatibility = IncompatibleLayout::default();
+
+        if let Ok(downcast_buffer) =
+            compatibility.require_buffer_for_identifier::<JsonBuffer>(0, buffers)
+        {
+            return Ok(downcast_buffer);
+        }
+
+        Err(compatibility)
     }
 }
 

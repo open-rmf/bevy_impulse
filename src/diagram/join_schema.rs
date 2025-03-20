@@ -242,6 +242,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
@@ -295,6 +296,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
@@ -347,6 +349,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap_err();
+        assert!(fixture.context.no_unhandled_errors());
         let err_code = &result.downcast_ref::<DiagramError>().unwrap().code;
         assert!(matches!(err_code, DiagramErrorCode::UnknownTarget,));
     }
@@ -398,6 +401,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
@@ -480,6 +484,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result["foo"], "foo");
         assert_eq!(result["bar"], "bar");
     }
