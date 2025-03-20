@@ -11,9 +11,15 @@ use super::{
     register_serialize,
     type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
+    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
     SerializeMessage,
 };
+
+pub(super) struct DynForkResult {
+    input: DynInputSlot,
+    ok: DynOutput,
+    err: DynOutput,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -54,6 +60,7 @@ impl ForkResultSchema {
             let err_edge = out_edges
                 .get_mut(1)
                 .ok_or_else(|| unknown_diagram_error!())?;
+
             err_edge.output = Some(err);
         }
 
@@ -61,7 +68,7 @@ impl ForkResultSchema {
     }
 }
 
-pub trait DynForkResult {
+pub trait RegisterForkResult {
     fn on_register(
         self,
         messages: &mut HashMap<TypeInfo, MessageRegistration>,
@@ -69,7 +76,7 @@ pub trait DynForkResult {
     ) -> bool;
 }
 
-impl<T> DynForkResult for NotSupportedMarker<T> {
+impl<T> RegisterForkResult for NotSupportedMarker<T> {
     fn on_register(
         self,
         _messages: &mut HashMap<TypeInfo, MessageRegistration>,
@@ -79,7 +86,7 @@ impl<T> DynForkResult for NotSupportedMarker<T> {
     }
 }
 
-impl<T, E, S> DynForkResult for DefaultImplMarker<(Result<T, E>, S)>
+impl<T, E, S> RegisterForkResult for DefaultImplMarker<(Result<T, E>, S)>
 where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
@@ -98,13 +105,13 @@ where
             return false;
         }
 
-        ops.fork_result_impl = Some(|builder, output| {
-            debug!("fork result: {:?}", output);
-
-            let chain = output.into_output::<Result<T, E>>()?.chain(builder);
-            let outputs = chain.fork_result(|c| c.output().into(), |c| c.output().into());
-            debug!("forked outputs: {:?}", outputs);
-            Ok(outputs)
+        ops.fork_result_impl = Some(|builder| {
+            let (input, outputs) = builder.create_fork_result::<T, E>();
+            Ok(DynForkResult {
+                input: input.into(),
+                ok: outputs.ok.into(),
+                err: outputs.err.into(),
+            })
         });
 
         register_serialize::<T, S>(messages, schema_generator);

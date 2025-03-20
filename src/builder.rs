@@ -22,10 +22,11 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
+    make_result_branching, make_option_branching,
     Accessible, Accessing, Accessor, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation,
     BufferMap, BufferSettings, Bufferable, Buffering, Chain, Collect, ForkClone, ForkCloneOutput,
-    ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
-    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
+    ForkOptionOutput, ForkResultOutput, ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot,
+    IntoAsyncMap, IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
     OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
     ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
     Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
@@ -213,8 +214,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.create_scope::<Request, Response, (), Settings>(build)
     }
 
-    /// Create a node that clones its inputs and sends them off to any number of
-    /// targets.
+    /// Create an operation that clones its inputs and sends them off to any
+    /// number of targets.
     pub fn create_fork_clone<T>(&mut self) -> (InputSlot<T>, ForkCloneOutput<T>)
     where
         T: Clone + 'static + Send + Sync,
@@ -228,6 +229,62 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         (
             InputSlot::new(self.scope, source),
             ForkCloneOutput::new(self.scope, source),
+        )
+    }
+
+    /// Create an operation that creates a fork for a [`Result`] input. The value
+    /// inside the [`Result`] will be unpacked and sent down a different branch
+    /// depending on whether it was in the [`Ok`] or [`Err`] variant.
+    pub fn create_fork_result<T, E>(&mut self) -> (InputSlot<Result<T, E>>, ForkResultOutput<T, E>)
+    where
+        T: 'static + Send + Sync,
+        E: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        let target_ok = self.commands.spawn(UnusedTarget).id();
+        let target_err = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            ForkResultOutput {
+                ok: Output::new(self.scope, target_ok),
+                err: Output::new(self.scope, target_err),
+            },
+        )
+    }
+
+    /// Create an operation that creates a fork for an [`Option`] input. The value
+    /// inside the [`Option`] will be unpacked and sent down a different branch
+    /// depending on whether it was in the [`Some`] or [`None`] variant.
+    ///
+    /// For the [`None`] variant a unit `()` output will be sent, also called
+    /// a trigger.
+    pub fn create_fork_option<T>(&mut self) -> (InputSlot<Option<T>>, ForkOptionOutput<T>)
+    where
+        T: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        let target_some = self.commands.spawn(UnusedTarget).id();
+        let target_none = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            ForkOptionOutput {
+                some: Output::new(self.scope, target_some),
+                none: Output::new(self.scope, target_none),
+            },
         )
     }
 

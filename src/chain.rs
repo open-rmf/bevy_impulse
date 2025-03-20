@@ -1585,4 +1585,34 @@ mod tests {
         }
         assert!(context.no_unhandled_errors());
     }
+
+    #[test]
+    fn test_unused_branch() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow =
+            context.spawn_io_workflow(|scope: Scope<Vec<Result<i64, ()>>, i64>, builder| {
+                scope
+                    .input
+                    .chain(builder)
+                    .spread()
+                    .fork_result(
+                        |ok| ok.connect(scope.terminate),
+                        |err| err.unused(),
+                    );
+            });
+
+        let test_set = vec![
+            Err(()),
+            Err(()),
+            Ok(5),
+            Err(()),
+            Ok(10),
+        ];
+        let mut promise = context.command(|commands| commands.request(test_set, workflow).take_response());
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(context.no_unhandled_errors());
+        assert_eq!(promise.take().available().unwrap(), 5);
+    }
 }

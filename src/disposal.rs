@@ -30,7 +30,7 @@ use thiserror::Error as ThisError;
 
 use crate::{
     operation::ScopeStorage, Cancel, Cancellation, DisposalFailure, ImpulseMarker, OperationResult,
-    OperationRoster, OrBroken, UnhandledErrors,
+    OperationRoster, OrBroken, UnhandledErrors, UnusedTarget,
 };
 
 #[derive(ThisError, Debug, Clone)]
@@ -452,9 +452,13 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
                 // TODO(@mxgrey): Consider whether there is a more sound way to
                 // decide whether a disposal should be converted into a
                 // cancellation for impulses.
-            } else {
-                // If the emitting node does not have a scope as not part of an
-                // impulse chain, then something is broken.
+            } else if !self.contains::<UnusedTarget>() {
+                // If the emitting node does not have a scope, is not part of
+                // an impulse chain, and is not an unused target, then something
+                // is broken.
+                //
+                // We can safely ignore disposals for unused targets because
+                // unused targets cannot affect the reachability of a workflow.
                 let broken_node = self.id();
                 self.world_scope(|world| {
                     world

@@ -14,8 +14,8 @@ mod workflow_builder;
 
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
-use fork_clone_schema::ForkCloneSchema;
-use fork_result_schema::ForkResultSchema;
+use fork_clone_schema::{ForkCloneSchema, DynForkClone};
+use fork_result_schema::{ForkResultSchema, DynForkResult};
 pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
@@ -26,7 +26,7 @@ use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
-use workflow_builder::create_workflow;
+use workflow_builder::{create_workflow, BuildDiagramOperation, DiagramConstruction};
 
 // ----------
 

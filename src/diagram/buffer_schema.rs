@@ -361,9 +361,9 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        diagram::testing::DiagramTestFixture, AnyBufferKey, AnyBufferWorldAccess, BufferAccess,
-        BufferAccessMut, BufferKey, Diagram, DiagramErrorCode, IntoBlockingCallback, JsonBufferKey,
-        JsonBufferWorldAccess, JsonMessage, Node, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Accessor, AnyBufferKey, AnyBufferWorldAccess, BufferAccess,
+        BufferAccessMut, BufferKey, BufferWorldAccess, Diagram, DiagramErrorCode, IntoBlockingCallback, JsonBufferKey,
+        JsonBufferWorldAccess, JsonMessage, JsonPosition, Node, NodeBuilderOptions,
     };
 
     /// create a new [`DiagramTestFixture`] with some extra builders.
@@ -469,6 +469,29 @@ mod tests {
             )
             .with_listen()
             .with_common_response();
+
+        // TODO(@mxgrey): Replace these with a general deserializing operation
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("deserialize_i64"),
+            |builder, _config: ()| {
+                builder
+                    .create_map_block(|msg: JsonMessage| msg.as_number().unwrap().as_i64().unwrap())
+            },
+        );
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("json_split_i64"),
+            |builder, _config: ()| {
+                builder.create_map_block(|(_, msg): (JsonPosition, JsonMessage)| msg.as_number().unwrap().as_i64().unwrap())
+            }
+        );
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("json_split_string"),
+            |builder, _config: ()| {
+                builder.create_map_block(|(_, msg): (JsonPosition, JsonMessage)| msg.as_str().unwrap().to_owned())
+            }
+        );
 
         fixture
     }
@@ -802,22 +825,13 @@ mod tests {
             .with_listen()
             .with_common_response();
 
-        // TODO(@mxgrey): Replace this with a general deserializing operation
-        fixture.registry.register_node_builder(
-            NodeBuilderOptions::new("deserialize_number"),
-            |builder, _config: ()| {
-                builder
-                    .create_map_block(|msg: JsonMessage| msg.as_number().unwrap().as_i64().unwrap())
-            },
-        );
-
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
             "start": "deserialize",
             "ops": {
                 "deserialize": {
                     "type": "node",
-                    "builder": "deserialize_number",
+                    "builder": "deserialize_i64",
                     "next": "buffer",
                 },
                 "buffer": { "type": "buffer" },
@@ -950,5 +964,245 @@ mod tests {
         let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
+    }
+
+    #[derive(Accessor, Clone)]
+    struct TestAccessor {
+        integer: BufferKey<i64>,
+        string: BufferKey<String>,
+        json: JsonBufferKey,
+        any: AnyBufferKey,
+    }
+
+    #[test]
+    fn test_struct_accessor_access() {
+        let mut fixture = new_fixture();
+
+        let input = JsonMessage::Object(serde_json::Map::from_iter([
+            ("integer".to_owned(), JsonMessage::Number(5_i64.into())),
+            ("string".to_owned(), JsonMessage::String("hello".to_owned())),
+        ]));
+
+        let expected = input.clone();
+
+        // TODO(@mxgrey): Replace this with a builtin trigger operation
+        fixture
+            .registry
+            .register_node_builder(
+                NodeBuilderOptions::new("trigger"),
+                |builder, _: ()| {
+                    builder.create_map_block(|_: JsonMessage| ())
+                }
+            );
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("check_for_all"),
+                move |builder, _config: ()| {
+                    let expected = expected.clone();
+                    builder.create_node((
+                    move |In((_, keys)): In<((), TestAccessor)>, world: &mut World| {
+                        wait_for_all(keys, world, &expected)
+                    }).into_blocking_callback())
+                },
+            )
+            .with_buffer_access()
+            .with_fork_result()
+            .with_common_response();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork",
+            "ops": {
+                "fork": {
+                    "type": "fork_clone",
+                    "next": [
+                        "split",
+                        "json_buffer",
+                        "any_buffer",
+                        "trigger",
+                    ],
+                },
+                "split": {
+                    "type": "split",
+                    "keyed": {
+                        "integer": "push_integer",
+                        "string": "push_string",
+                    },
+                },
+                "push_integer": {
+                    "type": "node",
+                    "builder": "json_split_i64",
+                    "next": "integer_buffer",
+                },
+                "push_string": {
+                    "type": "node",
+                    "builder": "json_split_string",
+                    "next": "string_buffer",
+                },
+                "integer_buffer": { "type": "buffer" },
+                "string_buffer": { "type": "buffer" },
+                "json_buffer": { "type": "buffer" },
+                "any_buffer": { "type": "buffer" },
+                "trigger": {
+                    "type": "node",
+                    "builder": "trigger",
+                    "next": "access",
+                },
+                "access": {
+                    "type": "buffer_access",
+                    "buffers": {
+                        "integer": "integer_buffer",
+                        "string": "string_buffer",
+                        "json": "json_buffer",
+                        "any": "any_buffer",
+                    },
+                    "next": "check_for_all"
+                },
+                "check_for_all": {
+                    "type": "node",
+                    "builder": "check_for_all",
+                    "next": "filter",
+                },
+                "filter": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": "access",
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture.spawn_and_run(&diagram, input).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, JsonMessage::Null);
+    }
+
+    #[test]
+    fn test_struct_accessor_listen() {
+        let mut fixture = new_fixture();
+
+        let input = JsonMessage::Object(serde_json::Map::from_iter([
+            ("integer".to_owned(), JsonMessage::Number(5_i64.into())),
+            ("string".to_owned(), JsonMessage::String("hello".to_owned())),
+        ]));
+
+        let expected = input.clone();
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("listen_for_all"),
+                move |builder, _config: ()| {
+                    let expected = expected.clone();
+                    builder.create_node((
+                    move |In(keys): In<TestAccessor>, world: &mut World| {
+                        wait_for_all(keys, world, &expected)
+                    }).into_blocking_callback())
+                },
+            )
+            .with_listen()
+            .with_fork_result()
+            .with_common_response();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fork",
+            "ops": {
+                "fork": {
+                    "type": "fork_clone",
+                    "next": [
+                        "split",
+                        "json_buffer",
+                        "any_buffer",
+                    ],
+                },
+                "split": {
+                    "type": "split",
+                    "keyed": {
+                        "integer": "push_integer",
+                        "string": "push_string",
+                    },
+                },
+                "push_integer": {
+                    "type": "node",
+                    "builder": "json_split_i64",
+                    "next": "integer_buffer",
+                },
+                "push_string": {
+                    "type": "node",
+                    "builder": "json_split_string",
+                    "next": "string_buffer",
+                },
+                "integer_buffer": { "type": "buffer" },
+                "string_buffer": { "type": "buffer" },
+                "json_buffer": { "type": "buffer" },
+                "any_buffer": { "type": "buffer" },
+                "listen": {
+                    "type": "listen",
+                    "buffers": {
+                        "integer": "integer_buffer",
+                        "string": "string_buffer",
+                        "json": "json_buffer",
+                        "any": "any_buffer",
+                    },
+                    "next": "listen_for_all"
+                },
+                "listen_for_all": {
+                    "type": "node",
+                    "builder": "listen_for_all",
+                    "next": "filter",
+                },
+                "filter": {
+                    "type": "fork_result",
+                    "ok": { "builtin": "terminate" },
+                    "err": { "builtin": "dispose" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture.spawn_and_run(&diagram, input).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, JsonMessage::Null);
+    }
+
+    fn wait_for_all(
+        keys: TestAccessor,
+        world: &mut World,
+        expected: &JsonMessage,
+    ) -> Result<(), ()> {
+        if let Some(integer) = world.buffer_view(&keys.integer).unwrap().newest() {
+            assert_eq!(*integer, 5);
+        } else {
+            return Err(());
+        }
+
+        if let Some(string) = world.buffer_view(&keys.string).unwrap().newest() {
+            assert_eq!(string, "hello");
+        } else {
+            return Err(());
+        }
+
+        if let Ok(Some(json)) = world.json_buffer_view(&keys.json).unwrap().newest() {
+            assert_eq!(&json, expected);
+        } else {
+            return Err(());
+        }
+
+        if let Some(any) = world.any_buffer_view(&keys.any).unwrap().newest() {
+            assert_eq!(any.downcast_ref::<JsonMessage>().unwrap(), expected);
+        } else {
+            return Err(());
+        }
+
+        Ok(())
     }
 }

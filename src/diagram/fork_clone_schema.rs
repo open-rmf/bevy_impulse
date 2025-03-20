@@ -1,15 +1,15 @@
-use std::iter::zip;
+use std::any::Any;
+use bevy_ecs::prelude::Entity;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
-use crate::{diagram::type_info::TypeInfo, Builder};
+use crate::{Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget, AddBranchToForkClone};
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    BuildDiagramOperation, Diagram, DiagramConstruction, DiagramElementRegistry, DiagramErrorCode,
+    DynInputSlot, DynOutput, NextOperation, OperationId, DynOutputInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -18,85 +18,112 @@ pub struct ForkCloneSchema {
     pub(super) next: Vec<NextOperation>,
 }
 
-impl ForkCloneSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        for target in &self.next {
-            builder.add_output_edge(target, None)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for ForkCloneSchema {
+    fn build_diagram_operation(
         &self,
+        id: &OperationId,
         builder: &mut Builder,
-        output: DynOutput,
-        out_edges: Vec<&mut Edge>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        let outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            <DefaultImpl as DynForkClone<serde_json::Value>>::dyn_fork_clone(
-                builder,
-                output,
-                out_edges.len(),
-            )
-        } else {
-            registry.fork_clone(builder, output, out_edges.len())
-        }?;
+        construction: &mut DiagramConstruction,
+        _: &Diagram,
+        registry: &DiagramElementRegistry,
+    ) -> Result<Option<DynInputSlot>, DiagramErrorCode> {
+        let Some(incoming) = construction.get_outputs_into_operation_target(id) else {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(None);
+        };
 
-        for (output, out_edge) in zip(outputs, out_edges) {
-            out_edge.output = Some(output);
+        if incoming.is_empty() {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(None);
         }
 
-        Ok(())
+        let sample_input = &incoming[0];
+        let fork = registry.messages.fork_clone(builder, sample_input.info().message_info())?;
+        for target in &self.next {
+            construction.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
+        }
+
+        Ok(Some(fork.input))
     }
 }
 
-pub trait DynForkClone<T> {
+pub trait PerformForkClone<T> {
     const CLONEABLE: bool;
 
-    fn dyn_fork_clone(
+    fn perform_fork_clone(
         builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
+    ) -> Result<DynForkClone, DiagramErrorCode>;
 }
 
-impl<T> DynForkClone<T> for NotSupported {
+impl<T> PerformForkClone<T> for NotSupported {
     const CLONEABLE: bool = false;
 
-    fn dyn_fork_clone(
+    fn perform_fork_clone(
         _builder: &mut Builder,
-        _output: DynOutput,
-        _amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+    ) -> Result<DynForkClone, DiagramErrorCode> {
         Err(DiagramErrorCode::NotCloneable)
     }
 }
 
-impl<T> DynForkClone<T> for DefaultImpl
+impl<T> PerformForkClone<T> for DefaultImpl
 where
     T: Send + Sync + 'static + Clone,
 {
     const CLONEABLE: bool = true;
 
-    fn dyn_fork_clone(
+    fn perform_fork_clone(
         builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-        debug!("fork clone: {:?}", output);
-        assert_eq!(output.type_info, TypeInfo::of::<T>());
+    ) -> Result<DynForkClone, DiagramErrorCode> {
+        let (input, outputs) = builder.create_fork_clone::<T>();
 
-        let fork_clone = output.into_output::<T>()?.fork_clone(builder);
-        let outputs = (0..amount)
-            .map(|_| fork_clone.clone_output(builder).into())
-            .collect();
-        debug!("forked outputs: {:?}", outputs);
-        Ok(outputs)
+        Ok(DynForkClone {
+            input: input.into(),
+            outputs: outputs.into(),
+        })
     }
+}
+
+pub(super) struct DynForkCloneOutput {
+    scope: Entity,
+    source: Entity,
+    info: DynOutputInfo,
+}
+
+impl DynForkCloneOutput {
+    pub fn clone_output(&self, builder: &mut Builder) -> DynOutput {
+        assert_eq!(self.scope, builder.scope);
+        let target = builder
+            .commands
+            .spawn((SingleInputStorage::new(self.id()), UnusedTarget))
+            .id();
+        builder.commands.add(AddBranchToForkClone {
+            source: self.id(),
+            target,
+        });
+
+        DynOutput::new(self.scope, target, self.info)
+    }
+
+    pub fn id(&self) -> Entity {
+        self.source
+    }
+}
+
+impl<T: 'static + Send + Sync + Any> From<ForkCloneOutput<T>> for DynForkCloneOutput {
+    fn from(value: ForkCloneOutput<T>) -> Self {
+        DynForkCloneOutput {
+            scope: value.scope(),
+            source: value.id(),
+            info: DynOutputInfo::new::<T>(),
+        }
+    }
+}
+
+pub(super) struct DynForkClone {
+    pub(super) input: DynInputSlot,
+    pub(super) outputs: DynForkCloneOutput,
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ use super::{
     SourceOperation,
 };
 
+#[derive(Debug)]
 pub(super) struct Vertex<'a> {
     pub(super) op_id: &'a OperationId,
     pub(super) op: &'a DiagramOperation,
@@ -20,6 +21,13 @@ pub(super) struct Vertex<'a> {
     pub(super) out_edges: Vec<usize>,
 }
 
+
+struct EdgeKey {
+    source: SourceOperation,
+    target: NextOperation,
+}
+
+#[derive(Debug)]
 pub(super) struct Edge<'a> {
     pub(super) source: SourceOperation,
     pub(super) target: &'a NextOperation,
@@ -85,6 +93,40 @@ impl<'a, 'b> EdgeBuilder<'a, 'b> {
     }
 }
 
+pub struct DiagramConstruction {
+    outputs_to_operation_target: HashMap<OperationId, Vec<DynOutput>>,
+    outputs_to_builtin_target: HashMap<BuiltinTarget, Vec<DynOutput>>,
+    buffers: HashMap<OperationId, AnyBuffer>,
+}
+
+impl DiagramConstruction {
+    pub fn get_outputs_into_operation_target(&self, id: &OperationId) -> Option<&Vec<DynOutput>> {
+        self.outputs_to_operation_target.get(id)
+    }
+
+    pub fn add_output_into_target(&mut self, target: NextOperation, output: DynOutput) {
+        match target {
+            NextOperation::Target(id) => {
+                self.outputs_to_operation_target.entry(id).or_default().push(output);
+            }
+            NextOperation::Builtin { builtin } => {
+                self.outputs_to_builtin_target.entry(builtin).or_default().push(output);
+            }
+        }
+    }
+}
+
+pub trait BuildDiagramOperation {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationId,
+        builder: &mut Builder,
+        construction: &mut DiagramConstruction,
+        diagram: &Diagram,
+        registry: &DiagramElementRegistry,
+    ) -> Result<Option<DynInputSlot>, DiagramErrorCode>;
+}
+
 pub(super) fn create_workflow<'a, Streams: StreamPack>(
     scope: DiagramScope<Streams>,
     builder: &mut Builder,
@@ -107,6 +149,10 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
             )
         })
         .collect();
+
+    let mut input_for_operation: HashMap<&OperationId, DynInputSlot> = HashMap::new();
+    let mut outputs_to_target: HashMap<&NextOperation, Vec<DynOutput>> = HashMap::new();
+
 
     // init with some capacity to reduce resizing. HashMap for faster removal.
     // NOTE: There are many `unknown_diagram_errors!()` used when accessing this.

@@ -1,5 +1,5 @@
 use std::{
-    any::{type_name, Any},
+    any::{type_name, Any, TypeId},
     borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
@@ -27,14 +27,14 @@ use tracing::debug;
 
 use super::{
     buffer_schema::BufferAccessRequest,
-    fork_clone_schema::DynForkClone,
-    fork_result_schema::DynForkResult,
+    fork_clone_schema::PerformForkClone,
+    fork_result_schema::RegisterForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
     register_json, register_serialize,
     type_info::TypeInfo,
     unzip_schema::DynUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
-    DynSplit, DynSplitOutputs, DynType, JsonRegistration, OpaqueMessageDeserializer,
+    RegisterSplit, DynForkClone, DynForkResult, DynSplitOutputs, DynType, JsonRegistration, OpaqueMessageDeserializer,
     OpaqueMessageSerializer, RegisterJson, SerializeMessage, SplitSchema,
 };
 
@@ -70,20 +70,29 @@ impl<T: Any> From<InputSlot<T>> for DynInputSlot {
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
-    pub(super) type_info: TypeInfo,
-
-    into_any_buffer_impl:
-        fn(Self, &mut Builder, BufferSettings) -> Result<AnyBuffer, DiagramErrorCode>,
+    info: DynOutputInfo,
 }
 
 impl DynOutput {
-    pub(super) fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
+    pub fn new(
+        scope: Entity,
+        target: Entity,
+        info: DynOutputInfo,
+    ) -> Self {
+        Self { scope, target, info }
+    }
+
+    pub fn info(&self) -> &DynOutputInfo {
+        &self.info
+    }
+
+    pub fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
     where
         T: Send + Sync + 'static + Any,
     {
-        if self.type_info != TypeInfo::of::<T>() {
+        if self.info.type_info != TypeInfo::of::<T>() {
             Err(DiagramErrorCode::TypeMismatch {
-                source_type: self.type_info,
+                source_type: self.info.type_info,
                 target_type: TypeInfo::of::<T>(),
             })
         } else {
@@ -91,19 +100,19 @@ impl DynOutput {
         }
     }
 
-    pub(super) fn into_any_buffer(
+    pub fn into_any_buffer(
         self,
         builder: &mut Builder,
         buffer_settings: BufferSettings,
     ) -> Result<AnyBuffer, DiagramErrorCode> {
-        (self.into_any_buffer_impl)(self, builder, buffer_settings)
+        (self.info.into_any_buffer_impl)(self, builder, buffer_settings)
     }
 
-    pub(super) fn scope(&self) -> Entity {
+    pub fn scope(&self) -> Entity {
         self.scope
     }
 
-    pub(super) fn id(&self) -> Entity {
+    pub fn id(&self) -> Entity {
         self.target
     }
 }
@@ -113,7 +122,7 @@ impl Debug for DynOutput {
         f.debug_struct("DynOutput")
             .field("scope", &self.scope)
             .field("target", &self.target)
-            .field("type_info", &self.type_info)
+            .field("type_info", &self.info.type_info)
             .finish()
     }
 }
@@ -126,6 +135,29 @@ where
         Self {
             scope: output.scope(),
             target: output.id(),
+            info: DynOutputInfo::new::<T>(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DynOutputInfo {
+    type_info: TypeInfo,
+    into_any_buffer_impl:
+        fn(DynOutput, &mut Builder, BufferSettings) -> Result<AnyBuffer, DiagramErrorCode>,
+}
+
+impl Debug for DynOutputInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynOutputInfo")
+            .field("type_info", &self.type_info)
+            .finish()
+    }
+}
+
+impl DynOutputInfo {
+    pub fn new<T: 'static + Send + Sync + Any>() -> Self {
+        Self {
             type_info: TypeInfo::of::<T>(),
             into_any_buffer_impl: |me, builder, buffer_settings| {
                 let buffer = builder.create_buffer::<T>(buffer_settings);
@@ -133,6 +165,10 @@ where
                 Ok(buffer.as_any_buffer())
             },
         }
+    }
+
+    pub fn message_info(&self) -> &TypeInfo {
+        &self.type_info
     }
 }
 
@@ -203,8 +239,8 @@ type DeserializeFn =
     fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>;
 type SerializeFn =
     fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramErrorCode>;
-type ForkCloneFn = fn(&mut Builder, DynOutput, usize) -> Result<Vec<DynOutput>, DiagramErrorCode>;
-type ForkResultFn = fn(&mut Builder, DynOutput) -> Result<(DynOutput, DynOutput), DiagramErrorCode>;
+type ForkCloneFn = fn(&mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
+type ForkResultFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type SplitFn = Box<
     dyn for<'a> Fn(
         &mut Builder,
@@ -214,7 +250,7 @@ type SplitFn = Box<
 >;
 type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 type BufferAccessFn =
-    fn(&mut Builder, DynOutput, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
+    fn(&mut Builder, DynOutput, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
 type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 
 #[must_use]
@@ -247,8 +283,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         DeserializeImpl: DeserializeMessage<Response>,
         SerializeImpl: SerializeMessage<Request>,
         SerializeImpl: SerializeMessage<Response>,
-        Cloneable: DynForkClone<Request>,
-        Cloneable: DynForkClone<Response>,
+        Cloneable: PerformForkClone<Request>,
+        Cloneable: PerformForkClone<Response>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
@@ -282,7 +318,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
-        Cloneable: DynForkClone<Message>,
+        Cloneable: PerformForkClone<Message>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.impl_register_message();
@@ -294,7 +330,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         Message: Send + Sync + 'static,
         DeserializeImpl: DeserializeMessage<Message>,
         SerializeImpl: SerializeMessage<Message>,
-        Cloneable: DynForkClone<Message>,
+        Cloneable: PerformForkClone<Message>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Message>,
     {
         self.registry
@@ -396,7 +432,7 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, OpaqueMessageSerializer)>: DynForkResult,
+        DefaultImplMarker<(Message, OpaqueMessageSerializer)>: RegisterForkResult,
     {
         self.data
             .register_fork_result(DefaultImplMarker::<(Message, OpaqueMessageSerializer)>::new());
@@ -407,7 +443,7 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
-        DefaultImpl: DynSplit<Message, DefaultSerializer>,
+        DefaultImpl: RegisterSplit<Message, DefaultSerializer>,
     {
         self.data
             .register_split::<Message, DefaultImpl, DefaultSerializer>();
@@ -418,7 +454,7 @@ where
     /// are unserializable.
     pub fn with_split_minimal(&mut self) -> &mut Self
     where
-        DefaultImpl: DynSplit<Message, NotSupported>,
+        DefaultImpl: RegisterSplit<Message, NotSupported>,
     {
         self.data
             .register_split::<Message, DefaultImpl, NotSupported>();
@@ -563,7 +599,7 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, OpaqueMessageSerializer)>: DynForkResult,
+        DefaultImplMarker<(Response, OpaqueMessageSerializer)>: RegisterForkResult,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_fork_result();
         self
@@ -573,7 +609,7 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
-        DefaultImpl: DynSplit<Response, DefaultSerializer>,
+        DefaultImpl: RegisterSplit<Response, DefaultSerializer>,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_split();
         self
@@ -583,7 +619,7 @@ where
     /// are unserializable.
     pub fn with_split_unserializable(&mut self) -> &mut Self
     where
-        DefaultImpl: DynSplit<Response, NotSupported>,
+        DefaultImpl: RegisterSplit<Response, NotSupported>,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_split_minimal();
         self
@@ -692,14 +728,12 @@ impl MessageOperation {
     pub(super) fn fork_clone(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+    ) -> Result<DynForkClone, DiagramErrorCode> {
         let f = self
             .fork_clone_impl
             .as_ref()
             .ok_or(DiagramErrorCode::NotCloneable)?;
-        f(builder, output, amount)
+        f(builder)
     }
 
     pub(super) fn unzip(
@@ -717,13 +751,12 @@ impl MessageOperation {
     pub(super) fn fork_result(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(DynOutput, DynOutput), DiagramErrorCode> {
+    ) -> Result<DynForkResult, DiagramErrorCode> {
         let f = self
             .fork_result_impl
             .as_ref()
             .ok_or(DiagramErrorCode::CannotForkResult)?;
-        f(builder, output)
+        f(builder)
     }
 
     pub(super) fn split<'a>(
@@ -936,9 +969,9 @@ impl MessageRegistry {
         output: DynOutput,
     ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
         debug!("serialize {:?}", output);
-        if output.type_info == TypeInfo::of::<serde_json::Value>() {
+        if output.info.type_info == TypeInfo::of::<serde_json::Value>() {
             output.into_output()
-        } else if let Some(reg) = self.messages.get(&output.type_info) {
+        } else if let Some(reg) = self.messages.get(&output.info.type_info) {
             reg.operations.serialize(builder, output)
         } else {
             Err(DiagramErrorCode::NotSerializable)
@@ -958,11 +991,10 @@ impl MessageRegistry {
     pub(super) fn fork_clone(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(&output.type_info) {
-            reg.operations.fork_clone(builder, output, amount)
+        message_type: &TypeInfo,
+    ) -> Result<DynForkClone, DiagramErrorCode> {
+        if let Some(reg) = self.messages.get(message_type) {
+            reg.operations.fork_clone(builder)
         } else {
             Err(DiagramErrorCode::NotCloneable)
         }
@@ -973,7 +1005,7 @@ impl MessageRegistry {
     pub(super) fn register_fork_clone<T, F>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        F: DynForkClone<T>,
+        F: PerformForkClone<T>,
     {
         let ops = &mut self
             .messages
@@ -985,7 +1017,7 @@ impl MessageRegistry {
         }
 
         ops.fork_clone_impl =
-            Some(|builder, output, amount| F::dyn_fork_clone(builder, output, amount));
+            Some(|builder, amount| F::perform_fork_clone(builder));
 
         true
     }
@@ -1042,7 +1074,7 @@ impl MessageRegistry {
     /// function is registered.
     pub(super) fn register_fork_result<T>(&mut self, implementation: T) -> bool
     where
-        T: DynForkResult,
+        T: RegisterForkResult,
     {
         implementation.on_register(&mut self.messages, &mut self.schema_generator)
     }
@@ -1065,7 +1097,7 @@ impl MessageRegistry {
     pub(super) fn register_split<T, F, S>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
-        F: DynSplit<T, S>,
+        F: RegisterSplit<T, S>,
     {
         let ops = &mut self
             .messages
@@ -1077,7 +1109,7 @@ impl MessageRegistry {
         }
 
         ops.split_impl = Some(Box::new(|builder, output, split_op| {
-            F::dyn_split(builder, output, split_op)
+            F::register_split(builder, output, split_op)
         }));
         F::on_register(self);
 

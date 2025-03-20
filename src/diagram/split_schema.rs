@@ -268,10 +268,10 @@ where
     })
 }
 
-pub trait DynSplit<T, Serializer> {
+pub trait RegisterSplit<T, Serializer> {
     const SUPPORTED: bool;
 
-    fn dyn_split<'a>(
+    fn register_split<'a>(
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'a SplitSchema,
@@ -280,10 +280,10 @@ pub trait DynSplit<T, Serializer> {
     fn on_register(registry: &mut MessageRegistry);
 }
 
-impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
+impl<T, Serializer> RegisterSplit<T, Serializer> for NotSupported {
     const SUPPORTED: bool = false;
 
-    fn dyn_split<'a>(
+    fn register_split<'a>(
         _builder: &mut Builder,
         _output: DynOutput,
         _split_op: &'a SplitSchema,
@@ -294,7 +294,7 @@ impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
     fn on_register(_registry: &mut MessageRegistry) {}
 }
 
-impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
+impl<T, Serializer> RegisterSplit<T, Serializer> for DefaultImpl
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
@@ -302,7 +302,7 @@ where
 {
     const SUPPORTED: bool = true;
 
-    fn dyn_split<'a>(
+    fn register_split<'a>(
         builder: &mut Builder,
         output: DynOutput,
         split_op: &'a SplitSchema,
