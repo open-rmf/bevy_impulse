@@ -26,7 +26,7 @@ use crate::{Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget, AddBranc
 use super::{
     impls::{DefaultImpl, NotSupported},
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationId, DynOutputInfo,
+    DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -97,7 +97,7 @@ where
 pub(super) struct DynForkCloneOutput {
     scope: Entity,
     source: Entity,
-    info: DynOutputInfo,
+    message_info: TypeInfo,
 }
 
 impl DynForkCloneOutput {
@@ -112,7 +112,7 @@ impl DynForkCloneOutput {
             target,
         });
 
-        DynOutput::new(self.scope, target, self.info)
+        DynOutput::new(self.scope, target, self.message_info)
     }
 
     pub fn id(&self) -> Entity {
@@ -125,7 +125,7 @@ impl<T: 'static + Send + Sync + Any> From<ForkCloneOutput<T>> for DynForkCloneOu
         DynForkCloneOutput {
             scope: value.scope(),
             source: value.id(),
-            info: DynOutputInfo::new::<T>(),
+            message_info: TypeInfo::of::<T>(),
         }
     }
 }

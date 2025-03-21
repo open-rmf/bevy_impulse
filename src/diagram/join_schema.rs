@@ -22,7 +22,6 @@ use smallvec::SmallVec;
 use crate::{Builder, JsonMessage};
 
 use super::{
-    buffer_schema::get_node_request_type,
     BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, NextOperation, OperationId,
     BufferInputs,
@@ -56,9 +55,7 @@ impl BuildDiagramOperation for JoinSchema {
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = get_node_request_type(
-            &self.target_node, &self.next, &ctx.diagram, &ctx.registry,
-        )?;
+        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
 
         let output = ctx.registry.messages.join(builder, &buffer_map, target_type)?;
         ctx.construction.add_output_into_target(self.next.clone(), output);

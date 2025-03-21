@@ -907,6 +907,9 @@ pub enum DiagramErrorCode {
     #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
     MultipleInputsCreated(OperationId),
 
+    #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
+    MultipleBuffersCreated(OperationId),
+
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
@@ -968,6 +971,9 @@ pub enum DiagramErrorCode {
     /// in the algorithm.
     #[error("an unknown error occurred while building the diagram, {0}")]
     UnknownError(String),
+
+    #[error("a type being used in the diagram was not registered {0}")]
+    UnregisteredType(&'static str),
 
     #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
     BuildHalted{

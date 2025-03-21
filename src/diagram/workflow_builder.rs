@@ -24,13 +24,13 @@ use tracing::{debug, warn};
 
 use crate::{
     diagram::DiagramErrorContext, unknown_diagram_error, AnyBuffer, Builder, InputSlot, Output,
-    StreamPack, BufferMap, BufferIdentifier,
+    StreamPack, BufferMap, BufferIdentifier, JsonMessage,
 };
 
 use super::{
     BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DiagramScope, DynInputSlot, DynOutput, NextOperation, OperationId,
-    SourceOperation, BufferInputs,
+    SourceOperation, BufferInputs, TypeInfo,
 };
 
 #[derive(Debug)]
@@ -127,12 +127,6 @@ pub struct DiagramConstruction {
     buffers: HashMap<OperationId, AnyBuffer>,
 }
 
-pub struct DiagramContext<'a> {
-    pub construction: &'a mut DiagramConstruction,
-    pub diagram: &'a Diagram,
-    pub registry: &'a DiagramElementRegistry,
-}
-
 impl DiagramConstruction {
     /// Get all the currently known outputs that are aimed at this target operation.
     pub fn get_outputs_into_operation_target(&self, id: &OperationId) -> Option<&Vec<DynOutput>> {
@@ -194,6 +188,26 @@ impl DiagramConstruction {
         Ok(())
     }
 
+    /// Set the buffer that should be used for a certain operation. This will
+    /// also set its connection callback.
+    pub fn set_buffer_for_operation(
+        &mut self,
+        operation: &OperationId,
+        buffer: AnyBuffer,
+    ) -> Result<(), DiagramErrorCode> {
+        match self.buffers.entry(operation.clone()) {
+            Entry::Occupied(_) => {
+                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.clone()));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(buffer);
+            }
+        }
+
+        let input: DynInputSlot = buffer.into();
+        self.set_input_for_target(operation, input)
+    }
+
     /// Create a buffer map based on the buffer inputs provided. If one or more
     /// of the buffers in BufferInputs is not available, get an error including
     /// the name of the missing buffer.
@@ -231,6 +245,46 @@ impl DiagramConstruction {
                 Ok(buffer_map)
             }
         }
+    }
+}
+
+pub struct DiagramContext<'a> {
+    pub construction: &'a mut DiagramConstruction,
+    pub diagram: &'a Diagram,
+    pub registry: &'a DiagramElementRegistry,
+}
+
+impl<'a> DiagramContext<'a> {
+    /// Get the type information for the request message that goes into a node.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Optionally indicate a specific node in the diagram to treat
+    ///   as the target node, even if it is not the actual target. Using [`Some`]
+    ///   for this will override whatever is used for `next`.
+    /// * `next` - Indicate the next operation, i.e. the true target.
+    pub fn get_node_request_type(
+        &self,
+        target: Option<&OperationId>,
+        next: &NextOperation
+    ) -> Result<TypeInfo, DiagramErrorCode> {
+        let target_node = if let Some(target) = target {
+            self.diagram.get_op(target)?
+        } else {
+            match next {
+                NextOperation::Target(op_id) => self.diagram.get_op(op_id)?,
+                NextOperation::Builtin { builtin } => match builtin {
+                    BuiltinTarget::Terminate => return Ok(TypeInfo::of::<JsonMessage>()),
+                    BuiltinTarget::Dispose => return Err(DiagramErrorCode::UnknownTarget),
+                },
+            }
+        };
+        let node_op = match target_node {
+            DiagramOperation::Node(op) => op,
+            _ => return Err(DiagramErrorCode::UnknownTarget),
+        };
+        let target_type = self.registry.get_node_registration(&node_op.builder)?.request;
+        Ok(target_type)
     }
 }
 

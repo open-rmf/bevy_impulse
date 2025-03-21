@@ -15,22 +15,16 @@
  *
 */
 
-use std::collections::{hash_map::Entry, HashMap};
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    unknown_diagram_error, Accessor, AnyBuffer, BufferIdentifier, BufferMap, BufferSettings,
-    Builder, InputSlot, Output, JsonMessage,
-};
+use crate::{Accessor, BufferSettings, Builder,  JsonMessage};
 
 use super::{
     type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder, Vertex},
     BuildDiagramOperation, BuildStatus, DiagramContext,
-    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
-    MessageRegistry, NextOperation, OperationId, BufferInputs,
+    DiagramErrorCode,
+    NextOperation, OperationId, BufferInputs,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -65,118 +59,10 @@ impl BuildDiagramOperation for BufferSchema {
             *sample_input.message_info()
         };
 
-
+        let buffer = ctx.registry.messages.create_buffer(builder, &message_info, self.settings.clone())?;
+        ctx.construction.set_buffer_for_operation(id, buffer)?;
+        Ok(BuildStatus::Finished)
     }
-}
-
-
-impl BufferSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        _builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'a>(
-        &self,
-        builder: &mut Builder,
-        vertex: &'a Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        buffers: &mut HashMap<&'a OperationId, AnyBuffer>,
-        registry: &MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
-        if vertex.in_edges.is_empty() {
-            // this will eventually cause workflow builder to return a [`DiagramErrorCode::IncompleteDiagram`] error.
-            return Ok(false);
-        }
-
-        let first_output = edges
-            // SAFETY: we checked that `vertex.in_edges` is not empty.
-            .remove(&vertex.in_edges[0])
-            .ok_or_else(|| unknown_diagram_error!())?
-            .output
-            .take()
-            // expected all inputs to be ready
-            .ok_or_else(|| unknown_diagram_error!())?;
-        let first_output = if self.serialize.unwrap_or(false) {
-            registry.serialize(builder, first_output)?.into()
-        } else {
-            first_output
-        };
-
-        let rest_outputs: Vec<DynOutput> = vertex.in_edges[1..]
-            .iter()
-            .map(|edge_id| -> Result<_, DiagramErrorCode> {
-                let output = edges
-                    .remove(edge_id)
-                    .ok_or_else(|| unknown_diagram_error!())?
-                    .output
-                    .take()
-                    // expected all inputs to be ready
-                    .ok_or_else(|| unknown_diagram_error!())?;
-                if self.serialize.unwrap_or(false) {
-                    Ok(registry.serialize(builder, output)?.into())
-                } else {
-                    Ok(output)
-                }
-            })
-            .collect::<Result<_, _>>()?;
-
-        // check that all inputs are the same type
-        let expected_type = first_output.type_info;
-        for output in &rest_outputs {
-            if output.type_info != expected_type {
-                return Err(DiagramErrorCode::TypeMismatch {
-                    source_type: output.type_info,
-                    target_type: expected_type,
-                });
-            }
-        }
-
-        // convert the first output into a buffer
-        let buffer = first_output.into_any_buffer(builder, self.settings)?;
-        let buffer = match buffers.entry(vertex.op_id) {
-            Entry::Occupied(mut entry) => {
-                entry.insert(buffer);
-                entry.into_mut()
-            }
-            Entry::Vacant(entry) => entry.insert(buffer),
-        };
-
-        // connect the rest of the outputs to the buffer
-        for output in rest_outputs {
-            buffer.receive_output(builder, output)?;
-        }
-
-        Ok(true)
-    }
-}
-
-/// if `target` has a value, return the request type of the operation, else, return the request type of `next`
-pub(super) fn get_node_request_type(
-    target: &Option<OperationId>,
-    next: &NextOperation,
-    diagram: &Diagram,
-    registry: &DiagramElementRegistry,
-) -> Result<TypeInfo, DiagramErrorCode> {
-    let target_node = if let Some(target) = target {
-        diagram.get_op(target)?
-    } else {
-        match next {
-            NextOperation::Target(op_id) => diagram.get_op(op_id)?,
-            NextOperation::Builtin { builtin } => match builtin {
-                BuiltinTarget::Terminate => return Ok(TypeInfo::of::<serde_json::Value>()),
-                _ => return Err(DiagramErrorCode::UnknownTarget),
-            },
-        }
-    };
-    let node_op = match target_node {
-        DiagramOperation::Node(op) => op,
-        _ => return Err(DiagramErrorCode::UnknownTarget),
-    };
-    let target_type = registry.get_node_registration(&node_op.builder)?.request;
-    Ok(target_type)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -191,61 +77,23 @@ pub struct BufferAccessSchema {
     pub(super) target_node: Option<OperationId>,
 }
 
-impl BufferAccessSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'a>(
+impl BuildDiagramOperation for BufferAccessSchema {
+    fn build_diagram_operation(
         &self,
+        id: &OperationId,
         builder: &mut Builder,
-        vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
-        diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
-        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
-            buffers
-        } else {
-            return Ok(false);
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+            Ok(buffer_map) => buffer_map,
+            Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let output = if let Some(output) = edges
-            .get_mut(
-                vertex
-                    .in_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?
-            .output
-            .take()
-        {
-            output
-        } else {
-            return Ok(false);
-        };
-
-        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
-        let output =
-            registry
-                .messages
-                .with_buffer_access(builder, output, &buffers, target_type)?;
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
-        Ok(true)
+        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
+        let node = ctx.registry.messages.with_buffer_access(builder, &buffer_map, target_type)?;
+        ctx.construction.set_input_for_target(id, node.input);
+        ctx.construction.add_output_into_target(self.next.clone(), node.output);
+        Ok(BuildStatus::Finished)
     }
 }
 
@@ -275,74 +123,22 @@ pub struct ListenSchema {
     pub(super) target_node: Option<OperationId>,
 }
 
-impl ListenSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'a>(
+impl BuildDiagramOperation for ListenSchema {
+    fn build_diagram_operation(
         &self,
+        _: &OperationId,
         builder: &mut Builder,
-        vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
-        diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
-        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
-            buffers
-        } else {
-            return Ok(false);
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+            Ok(buffer_map) => buffer_map,
+            Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
-        let output = registry.messages.listen(builder, &buffers, target_type)?;
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
-        Ok(true)
-    }
-}
-
-trait ReceiveOutput {
-    fn receive_output(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(), DiagramErrorCode>;
-}
-
-impl ReceiveOutput for AnyBuffer {
-    fn receive_output(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<(), DiagramErrorCode> {
-        if self.message_type_id() != output.type_info.type_id {
-            return Err(DiagramErrorCode::TypeMismatch {
-                source_type: TypeInfo {
-                    type_id: self.message_type_id(),
-                    type_name: self.message_type_name(),
-                },
-                target_type: output.type_info,
-            });
-        }
-        // FIXME(koonpeng): This can potentially cause the workflow to run forever and never halt.
-        // For now this works because neither of these operations creates or use any bevy Components.
-        let input_slot = InputSlot::<()>::new(self.location.scope, self.location.source);
-        let output = Output::<()>::new(output.scope(), output.id());
-        builder.connect(output, input_slot);
-        Ok(())
+        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
+        let output = ctx.registry.messages.listen(builder, &buffer_map, target_type)?;
+        ctx.construction.add_output_into_target(self.next.clone(), output);
+        Ok(BuildStatus::Finished)
     }
 }
 

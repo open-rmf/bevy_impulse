@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
-    InputSlot, Joined, JsonBuffer, Node, Output, StreamPack, Connect,
+    InputSlot, Joined, JsonBuffer, Node, Output, StreamPack, Connect, JsonMessage,
 };
 use bevy_ecs::entity::Entity;
 use schemars::{
@@ -70,50 +70,52 @@ impl<T: Any> From<InputSlot<T>> for DynInputSlot {
     }
 }
 
+impl From<AnyBuffer> for DynInputSlot {
+    fn from(buffer: AnyBuffer) -> Self {
+        let any_interface = buffer.get_interface();
+        Self {
+            scope: buffer.scope(),
+            source: buffer.id(),
+            type_info: TypeInfo {
+                type_id: any_interface.message_type_id(),
+                type_name: any_interface.message_type_name(),
+            },
+        }
+    }
+}
+
 /// A type erased [`crate::Output`]
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
-    info: DynOutputInfo,
+    message_info: TypeInfo,
 }
 
 impl DynOutput {
     pub fn new(
         scope: Entity,
         target: Entity,
-        info: DynOutputInfo,
+        message_info: TypeInfo,
     ) -> Self {
-        Self { scope, target, info }
+        Self { scope, target, message_info }
     }
 
     pub fn message_info(&self) -> &TypeInfo {
-        &self.info.message_info
-    }
-
-    pub fn info(&self) -> &DynOutputInfo {
-        &self.info
+        &self.message_info
     }
 
     pub fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
     where
         T: Send + Sync + 'static + Any,
     {
-        if self.info.message_info != TypeInfo::of::<T>() {
+        if self.message_info != TypeInfo::of::<T>() {
             Err(DiagramErrorCode::TypeMismatch {
-                source_type: self.info.message_info,
+                source_type: self.message_info,
                 target_type: TypeInfo::of::<T>(),
             })
         } else {
             Ok(Output::<T>::new(self.scope, self.target))
         }
-    }
-
-    pub fn into_any_buffer(
-        self,
-        builder: &mut Builder,
-        buffer_settings: BufferSettings,
-    ) -> Result<AnyBuffer, DiagramErrorCode> {
-        (self.info.into_any_buffer_impl)(self, builder, buffer_settings)
     }
 
     pub fn scope(&self) -> Entity {
@@ -147,7 +149,7 @@ impl Debug for DynOutput {
         f.debug_struct("DynOutput")
             .field("scope", &self.scope)
             .field("target", &self.target)
-            .field("type_info", &self.info.message_info)
+            .field("type_info", &self.message_info)
             .finish()
     }
 }
@@ -160,43 +162,10 @@ where
         Self {
             scope: output.scope(),
             target: output.id(),
-            info: DynOutputInfo::new::<T>(),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct DynOutputInfo {
-    message_info: TypeInfo,
-    into_any_buffer_impl:
-        fn(DynOutput, &mut Builder, BufferSettings) -> Result<AnyBuffer, DiagramErrorCode>,
-}
-
-impl Debug for DynOutputInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynOutputInfo")
-            .field("type_info", &self.message_info)
-            .finish()
-    }
-}
-
-impl DynOutputInfo {
-    pub fn new<T: 'static + Send + Sync + Any>() -> Self {
-        Self {
             message_info: TypeInfo::of::<T>(),
-            into_any_buffer_impl: |me, builder, buffer_settings| {
-                let buffer = builder.create_buffer::<T>(buffer_settings);
-                builder.connect(me.into_output()?, buffer.input_slot());
-                Ok(buffer.as_any_buffer())
-            },
         }
     }
-
-    pub fn message_info(&self) -> &TypeInfo {
-        &self.message_info
-    }
 }
-
 /// A type erased [`bevy_impulse::Node`]
 pub(super) struct DynNode {
     pub(super) input: DynInputSlot,
@@ -269,8 +238,9 @@ type ForkResultFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type SplitFn = fn(&mut Builder, &SplitSchema) -> Result<DynSplit, DiagramErrorCode>;
 type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 type BufferAccessFn =
-    fn(&mut Builder, DynOutput, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
+    fn(&mut Builder, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
 type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
+type CreateBufferFn = fn(&mut Builder, BufferSettings) -> AnyBuffer;
 
 #[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
@@ -720,6 +690,7 @@ pub(super) struct MessageOperation {
     pub(super) join_impl: Option<JoinFn>,
     pub(super) buffer_access_impl: Option<BufferAccessFn>,
     pub(super) listen_impl: Option<ListenFn>,
+    pub(super) create_buffer_impl: CreateBufferFn,
 }
 
 impl MessageOperation {
@@ -737,6 +708,9 @@ impl MessageOperation {
             join_impl: None,
             buffer_access_impl: None,
             listen_impl: None,
+            create_buffer_impl: |builder, settings| {
+                builder.create_buffer::<T>(settings).as_any_buffer()
+            }
         }
     }
 
@@ -825,14 +799,13 @@ impl MessageOperation {
     pub(super) fn with_buffer_access(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
         buffers: &BufferMap,
-    ) -> Result<DynOutput, DiagramErrorCode> {
+    ) -> Result<DynNode, DiagramErrorCode> {
         let f = self
             .buffer_access_impl
             .as_ref()
             .ok_or(DiagramErrorCode::CannotBufferAccess)?;
-        f(builder, output, buffers)
+        f(builder, buffers)
     }
 
     pub(super) fn listen(
@@ -1007,9 +980,9 @@ impl MessageRegistry {
         output: DynOutput,
     ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
         debug!("serialize {:?}", output);
-        if output.info.message_info == TypeInfo::of::<serde_json::Value>() {
+        if output.message_info == TypeInfo::of::<serde_json::Value>() {
             output.into_output()
-        } else if let Some(reg) = self.messages.get(&output.info.message_info) {
+        } else if let Some(reg) = self.messages.get(&output.message_info) {
             reg.operations.serialize(builder, output)
         } else {
             Err(DiagramErrorCode::NotSerializable)
@@ -1139,7 +1112,21 @@ impl MessageRegistry {
         DefaultImplMarker::<(T, S, C)>::on_register(self);
     }
 
-    pub(super) fn join(
+    pub fn create_buffer(
+        &self,
+        builder: &mut Builder,
+        message_info: &TypeInfo,
+        settings: BufferSettings,
+    ) -> Result<AnyBuffer, DiagramErrorCode> {
+        let f = self.messages.get(message_info)
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(message_info.type_name))?
+            .operations
+            .create_buffer_impl;
+
+        Ok(f(builder, settings))
+    }
+
+    pub fn join(
         &self,
         builder: &mut Builder,
         buffers: &BufferMap,
@@ -1176,14 +1163,13 @@ impl MessageRegistry {
     pub(super) fn with_buffer_access(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
         buffers: &BufferMap,
         target_type: TypeInfo,
-    ) -> Result<DynOutput, DiagramErrorCode> {
+    ) -> Result<DynNode, DiagramErrorCode> {
         if let Some(reg) = self.messages.get(&target_type) {
-            reg.operations.with_buffer_access(builder, output, buffers)
+            reg.operations.with_buffer_access(builder, buffers)
         } else {
-            Err(unknown_diagram_error!())
+            Err(DiagramErrorCode::UnregisteredType(target_type.type_name))
         }
     }
 
@@ -1200,11 +1186,9 @@ impl MessageRegistry {
             return false;
         }
 
-        ops.buffer_access_impl = Some(|builder, output, buffers| {
-            let buffer_access =
-                builder.try_create_buffer_access::<T::Message, T::BufferKeys>(buffers)?;
-            builder.connect(output.into_output::<T::Message>()?, buffer_access.input);
-            Ok(buffer_access.output.into())
+        ops.buffer_access_impl = Some(|builder, buffers| {
+            let buffer_access = builder.try_create_buffer_access::<T::Message, T::BufferKeys>(buffers)?;
+            Ok(buffer_access.into())
         });
 
         true
@@ -1284,16 +1268,30 @@ impl Default for DiagramElementRegistry {
         // serializable types.
         JsonBuffer::register_for::<()>();
 
-        DiagramElementRegistry {
+        let mut registry = DiagramElementRegistry {
             nodes: Default::default(),
             messages: MessageRegistry::new(),
-        }
+        };
+
+        registry.register_builtin_messages();
+        registry
     }
 }
 
 impl DiagramElementRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a new registry that does not automatically register any of the
+    /// builtin types. Only advanced users who know what they are doing should
+    /// use this.
+    pub fn blank() -> Self {
+        JsonBuffer::register_for::<()>();
+        DiagramElementRegistry {
+            nodes: Default::default(),
+            messages: MessageRegistry::new(),
+        }
     }
 
     /// Register a node builder with all the common operations (deserialize the
@@ -1422,6 +1420,32 @@ impl DiagramElementRegistry {
         T: Any,
     {
         self.messages.get::<T>()
+    }
+
+    /// Register useful messages that are known to the bevy impulse library.
+    /// This will be run automatically when you create using [`Self::default()`]
+    /// or [`Self::new()`].
+    pub fn register_builtin_messages(&mut self) {
+        self.register_message::<JsonMessage>()
+            .with_join()
+            .with_split();
+
+        self.register_message::<String>();
+        self.register_message::<u8>();
+        self.register_message::<u16>();
+        self.register_message::<u32>();
+        self.register_message::<u64>();
+        self.register_message::<usize>();
+        self.register_message::<i8>();
+        self.register_message::<i16>();
+        self.register_message::<i32>();
+        self.register_message::<i64>();
+        self.register_message::<isize>();
+        self.register_message::<f32>();
+        self.register_message::<f64>();
+        self.register_message::<bool>();
+        self.register_message::<char>();
+        self.register_message::<()>();
     }
 }
 
