@@ -22,11 +22,11 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    make_result_branching, make_option_branching,
-    Accessible, Accessing, Accessor, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation,
-    BufferMap, BufferSettings, Bufferable, Buffering, Chain, Collect, ForkClone, ForkCloneOutput,
-    ForkOptionOutput, ForkResultOutput, ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot,
-    IntoAsyncMap, IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
+    make_option_branching, make_result_branching, Accessible, Accessing, Accessor, AddOperation,
+    AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings, Bufferable, Buffering,
+    Chain, Collect, ForkClone, ForkCloneOutput, ForkOptionOutput, ForkResultOutput,
+    ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
+    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
     OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
     ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
     Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,

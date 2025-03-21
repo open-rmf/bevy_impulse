@@ -20,12 +20,12 @@ use crate::{
     UnhandledErrors,
 };
 
+use bevy_derive::Deref;
 use bevy_ecs::{
     prelude::{Component, Entity, World},
     system::Command,
 };
 use bevy_hierarchy::prelude::BuildWorldChildren;
-use bevy_derive::Deref;
 
 use backtrace::Backtrace;
 
@@ -611,7 +611,9 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
             OperationExecuteStorage(perform_operation::<Op>),
             OperationCleanupStorage(Op::cleanup),
             OperationReachabilityStorage(Op::is_reachable),
-            OperationType { name: std::any::type_name::<Op>() },
+            OperationType {
+                name: std::any::type_name::<Op>(),
+            },
         ));
         if let Some(scope) = self.scope {
             source_mut

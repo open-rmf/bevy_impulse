@@ -18,13 +18,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Accessor, BufferSettings, Builder,  JsonMessage};
+use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    type_info::TypeInfo,
-    BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode,
-    NextOperation, OperationId, BufferInputs,
+    type_info::TypeInfo, BufferInputs, BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, NextOperation, OperationId,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -59,7 +57,10 @@ impl BuildDiagramOperation for BufferSchema {
             *sample_input.message_info()
         };
 
-        let buffer = ctx.registry.messages.create_buffer(builder, &message_info, self.settings.clone())?;
+        let buffer =
+            ctx.registry
+                .messages
+                .create_buffer(builder, &message_info, self.settings.clone())?;
         ctx.construction.set_buffer_for_operation(id, buffer)?;
         Ok(BuildStatus::Finished)
     }
@@ -90,9 +91,13 @@ impl BuildDiagramOperation for BufferAccessSchema {
         };
 
         let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
-        let node = ctx.registry.messages.with_buffer_access(builder, &buffer_map, target_type)?;
+        let node = ctx
+            .registry
+            .messages
+            .with_buffer_access(builder, &buffer_map, target_type)?;
         ctx.construction.set_input_for_target(id, node.input);
-        ctx.construction.add_output_into_target(self.next.clone(), node.output);
+        ctx.construction
+            .add_output_into_target(self.next.clone(), node.output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -136,8 +141,12 @@ impl BuildDiagramOperation for ListenSchema {
         };
 
         let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
-        let output = ctx.registry.messages.listen(builder, &buffer_map, target_type)?;
-        ctx.construction.add_output_into_target(self.next.clone(), output);
+        let output = ctx
+            .registry
+            .messages
+            .listen(builder, &buffer_map, target_type)?;
+        ctx.construction
+            .add_output_into_target(self.next.clone(), output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -148,9 +157,10 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        diagram::testing::DiagramTestFixture, Accessor, AnyBufferKey, AnyBufferWorldAccess, BufferAccess,
-        BufferAccessMut, BufferKey, BufferWorldAccess, Diagram, DiagramErrorCode, IntoBlockingCallback, JsonBufferKey,
-        JsonBufferWorldAccess, JsonMessage, JsonPosition, Node, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Accessor, AnyBufferKey, AnyBufferWorldAccess,
+        BufferAccess, BufferAccessMut, BufferKey, BufferWorldAccess, Diagram, DiagramErrorCode,
+        IntoBlockingCallback, JsonBufferKey, JsonBufferWorldAccess, JsonMessage, JsonPosition,
+        Node, NodeBuilderOptions,
     };
 
     /// create a new [`DiagramTestFixture`] with some extra builders.
@@ -269,15 +279,19 @@ mod tests {
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("json_split_i64"),
             |builder, _config: ()| {
-                builder.create_map_block(|(_, msg): (JsonPosition, JsonMessage)| msg.as_number().unwrap().as_i64().unwrap())
-            }
+                builder.create_map_block(|(_, msg): (JsonPosition, JsonMessage)| {
+                    msg.as_number().unwrap().as_i64().unwrap()
+                })
+            },
         );
 
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("json_split_string"),
             |builder, _config: ()| {
-                builder.create_map_block(|(_, msg): (JsonPosition, JsonMessage)| msg.as_str().unwrap().to_owned())
-            }
+                builder.create_map_block(|(_, msg): (JsonPosition, JsonMessage)| {
+                    msg.as_str().unwrap().to_owned()
+                })
+            },
         );
 
         fixture
@@ -775,12 +789,9 @@ mod tests {
         // TODO(@mxgrey): Replace this with a builtin trigger operation
         fixture
             .registry
-            .register_node_builder(
-                NodeBuilderOptions::new("trigger"),
-                |builder, _: ()| {
-                    builder.create_map_block(|_: JsonMessage| ())
-                }
-            );
+            .register_node_builder(NodeBuilderOptions::new("trigger"), |builder, _: ()| {
+                builder.create_map_block(|_: JsonMessage| ())
+            });
 
         fixture
             .registry
@@ -791,10 +802,12 @@ mod tests {
                 NodeBuilderOptions::new("check_for_all"),
                 move |builder, _config: ()| {
                     let expected = expected.clone();
-                    builder.create_node((
-                    move |In((_, keys)): In<((), TestAccessor)>, world: &mut World| {
-                        wait_for_all(keys, world, &expected)
-                    }).into_blocking_callback())
+                    builder.create_node(
+                        (move |In((_, keys)): In<((), TestAccessor)>, world: &mut World| {
+                            wait_for_all(keys, world, &expected)
+                        })
+                        .into_blocking_callback(),
+                    )
                 },
             )
             .with_buffer_access()
@@ -889,10 +902,12 @@ mod tests {
                 NodeBuilderOptions::new("listen_for_all"),
                 move |builder, _config: ()| {
                     let expected = expected.clone();
-                    builder.create_node((
-                    move |In(keys): In<TestAccessor>, world: &mut World| {
-                        wait_for_all(keys, world, &expected)
-                    }).into_blocking_callback())
+                    builder.create_node(
+                        (move |In(keys): In<TestAccessor>, world: &mut World| {
+                            wait_for_all(keys, world, &expected)
+                        })
+                        .into_blocking_callback(),
+                    )
                 },
             )
             .with_listen()

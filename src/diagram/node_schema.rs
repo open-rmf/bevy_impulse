@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    BuildDiagramOperation, BuilderId, BuildStatus, DiagramContext, DiagramErrorCode,
-    NextOperation, OperationId,
+    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode, NextOperation,
+    OperationId,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -44,8 +44,10 @@ impl BuildDiagramOperation for NodeSchema {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
         let node = node_registration.create_node(builder, self.config.clone())?;
 
-        ctx.construction.set_input_for_target(id, node.input.into())?;
-        ctx.construction.add_output_into_target(self.next.clone(), node.output);
+        ctx.construction
+            .set_input_for_target(id, node.input.into())?;
+        ctx.construction
+            .add_output_into_target(self.next.clone(), node.output);
         Ok(BuildStatus::Finished)
     }
 }

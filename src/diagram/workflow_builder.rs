@@ -23,14 +23,14 @@ use std::{
 use tracing::{debug, warn};
 
 use crate::{
-    diagram::DiagramErrorContext, unknown_diagram_error, AnyBuffer, Builder, InputSlot, Output,
-    StreamPack, BufferMap, BufferIdentifier, JsonMessage,
+    diagram::DiagramErrorContext, unknown_diagram_error, AnyBuffer, BufferIdentifier, BufferMap,
+    Builder, InputSlot, JsonMessage, Output, StreamPack,
 };
 
 use super::{
-    BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
+    BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DiagramScope, DynInputSlot, DynOutput, NextOperation, OperationId,
-    SourceOperation, BufferInputs, TypeInfo,
+    SourceOperation, TypeInfo,
 };
 
 #[derive(Debug)]
@@ -40,7 +40,6 @@ pub(super) struct Vertex<'a> {
     pub(super) in_edges: Vec<usize>,
     pub(super) out_edges: Vec<usize>,
 }
-
 
 struct EdgeKey {
     source: SourceOperation,
@@ -118,7 +117,14 @@ pub struct ConnectionContext<'a> {
     pub registry: &'a DiagramElementRegistry,
 }
 
-pub type ConnectFn = Box<dyn FnMut(&OperationId, DynOutput, &mut Builder, ConnectionContext) -> Result<(), DiagramErrorCode>>;
+pub type ConnectFn = Box<
+    dyn FnMut(
+        &OperationId,
+        DynOutput,
+        &mut Builder,
+        ConnectionContext,
+    ) -> Result<(), DiagramErrorCode>,
+>;
 
 pub struct DiagramConstruction {
     input_for_operation: HashMap<OperationId, ConnectFn>,
@@ -140,16 +146,23 @@ impl DiagramConstruction {
     /// operation share the same message type, so getting a single sample is
     /// usually enough to infer what is needed to build the operation.
     pub fn get_sample_output_into_target(&self, id: &OperationId) -> Option<&DynOutput> {
-        self.get_outputs_into_operation_target(id).and_then(|outputs| outputs.first())
+        self.get_outputs_into_operation_target(id)
+            .and_then(|outputs| outputs.first())
     }
 
     pub fn add_output_into_target(&mut self, target: NextOperation, output: DynOutput) {
         match target {
             NextOperation::Target(id) => {
-                self.outputs_to_operation_target.entry(id).or_default().push(output);
+                self.outputs_to_operation_target
+                    .entry(id)
+                    .or_default()
+                    .push(output);
             }
             NextOperation::Builtin { builtin } => {
-                self.outputs_to_builtin_target.entry(builtin).or_default().push(output);
+                self.outputs_to_builtin_target
+                    .entry(builtin)
+                    .or_default()
+                    .push(output);
             }
         }
     }
@@ -162,10 +175,9 @@ impl DiagramConstruction {
         operation: &OperationId,
         input: DynInputSlot,
     ) -> Result<(), DiagramErrorCode> {
-        self.set_connect_into_target(
-            operation,
-            move |_, output, builder, _| output.connect_to(&input, builder),
-        )
+        self.set_connect_into_target(operation, move |_, output, builder, _| {
+            output.connect_to(&input, builder)
+        })
     }
 
     /// Set a callback that will allow outputs to connect into this target. This
@@ -174,7 +186,13 @@ impl DiagramConstruction {
     pub fn set_connect_into_target(
         &mut self,
         operation: &OperationId,
-        connect: impl FnMut(&OperationId, DynOutput, &mut Builder, ConnectionContext) -> Result<(), DiagramErrorCode> + 'static,
+        connect: impl FnMut(
+                &OperationId,
+                DynOutput,
+                &mut Builder,
+                ConnectionContext,
+            ) -> Result<(), DiagramErrorCode>
+            + 'static,
     ) -> Result<(), DiagramErrorCode> {
         let f = Box::new(connect);
         match self.input_for_operation.entry(operation.clone()) {
@@ -213,9 +231,10 @@ impl DiagramConstruction {
     /// the name of the missing buffer.
     pub fn create_buffer_map(&self, inputs: &BufferInputs) -> Result<BufferMap, String> {
         let attempt_get_buffer = |name: &String| -> Result<AnyBuffer, String> {
-            self.buffers.get(name).copied().ok_or_else(|| {
-                format!("cannot find buffer named [{name}]")
-            })
+            self.buffers
+                .get(name)
+                .copied()
+                .ok_or_else(|| format!("cannot find buffer named [{name}]"))
         };
 
         match inputs {
@@ -237,10 +256,7 @@ impl DiagramConstruction {
             BufferInputs::Array(arr) => {
                 let mut buffer_map = BufferMap::with_capacity(arr.len());
                 for (i, op_id) in arr.into_iter().enumerate() {
-                    buffer_map.insert(
-                        BufferIdentifier::Index(i),
-                        attempt_get_buffer(op_id)?,
-                    );
+                    buffer_map.insert(BufferIdentifier::Index(i), attempt_get_buffer(op_id)?);
                 }
                 Ok(buffer_map)
             }
@@ -266,7 +282,7 @@ impl<'a> DiagramContext<'a> {
     pub fn get_node_request_type(
         &self,
         target: Option<&OperationId>,
-        next: &NextOperation
+        next: &NextOperation,
     ) -> Result<TypeInfo, DiagramErrorCode> {
         let target_node = if let Some(target) = target {
             self.diagram.get_op(target)?
@@ -283,7 +299,10 @@ impl<'a> DiagramContext<'a> {
             DiagramOperation::Node(op) => op,
             _ => return Err(DiagramErrorCode::UnknownTarget),
         };
-        let target_type = self.registry.get_node_registration(&node_op.builder)?.request;
+        let target_type = self
+            .registry
+            .get_node_registration(&node_op.builder)?
+            .request;
         Ok(target_type)
     }
 }
@@ -303,7 +322,7 @@ pub enum BuildStatus {
         /// build the diagram.
         progress: bool,
         reason: Cow<'static, str>,
-    }
+    },
 }
 
 impl BuildStatus {
@@ -318,7 +337,7 @@ impl BuildStatus {
     /// Indicate that the operation made progress, even if it's deferred.
     pub fn with_progress(mut self) -> Self {
         match &mut self {
-            Self::Defer { progress, .. }  => {
+            Self::Defer { progress, .. } => {
                 *progress = true;
             }
             Self::Finished => {

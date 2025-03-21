@@ -22,9 +22,9 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    impls::DefaultImplMarker,
-    BuildDiagramOperation, BuildStatus, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistry, NextOperation,
-    SerializeMessage, PerformForkClone, OperationId, DiagramContext,
+    impls::DefaultImplMarker, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationId, PerformForkClone,
+    SerializeMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -46,10 +46,14 @@ impl BuildDiagramOperation for UnzipSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let unzip = ctx.registry.messages.unzip(builder, sample_input.message_info())?;
+        let unzip = ctx
+            .registry
+            .messages
+            .unzip(builder, sample_input.message_info())?;
         ctx.construction.set_input_for_target(id, unzip.input)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
-            ctx.construction.add_output_into_target(target.clone(), output);
+            ctx.construction
+                .add_output_into_target(target.clone(), output);
         }
         Ok(BuildStatus::Finished)
     }
@@ -64,10 +68,7 @@ pub trait PerformUnzip {
     /// Returns a list of type names that this message unzips to.
     fn output_types(&self) -> Vec<&'static str>;
 
-    fn perform_unzip(
-        &self,
-        builder: &mut Builder,
-    ) -> Result<DynUnzip, DiagramErrorCode>;
+    fn perform_unzip(&self, builder: &mut Builder) -> Result<DynUnzip, DiagramErrorCode>;
 
     /// Called when a node is registered.
     fn on_register(&self, registry: &mut MessageRegistry);

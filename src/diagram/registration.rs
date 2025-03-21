@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
-    InputSlot, Joined, JsonBuffer, Node, Output, StreamPack, Connect, JsonMessage,
+    Connect, InputSlot, Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
 use schemars::{
@@ -33,9 +33,10 @@ use super::{
     register_json, register_serialize,
     type_info::TypeInfo,
     unzip_schema::PerformUnzip,
-    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode, DynUnzip,
-    RegisterSplit, DynForkClone, DynForkResult, DynSplit, DynType, JsonRegistration, OpaqueMessageDeserializer,
-    OpaqueMessageSerializer, RegisterJson, SerializeMessage, SplitSchema,
+    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
+    DynForkClone, DynForkResult, DynSplit, DynType, DynUnzip, JsonRegistration,
+    OpaqueMessageDeserializer, OpaqueMessageSerializer, RegisterJson, RegisterSplit,
+    SerializeMessage, SplitSchema,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -92,12 +93,12 @@ pub struct DynOutput {
 }
 
 impl DynOutput {
-    pub fn new(
-        scope: Entity,
-        target: Entity,
-        message_info: TypeInfo,
-    ) -> Self {
-        Self { scope, target, message_info }
+    pub fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
+        Self {
+            scope,
+            target,
+            message_info,
+        }
     }
 
     pub fn message_info(&self) -> &TypeInfo {
@@ -127,7 +128,11 @@ impl DynOutput {
     }
 
     /// Connect a [`DynOutput`] to a [`DynInputSlot`].
-    pub fn connect_to(self, input: &DynInputSlot, builder: &mut Builder) -> Result<(), DiagramErrorCode> {
+    pub fn connect_to(
+        self,
+        input: &DynInputSlot,
+        builder: &mut Builder,
+    ) -> Result<(), DiagramErrorCode> {
         if self.message_info() != input.message_info() {
             return Err(DiagramErrorCode::TypeMismatch {
                 source_type: *self.message_info(),
@@ -237,8 +242,7 @@ type ForkCloneFn = fn(&mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 type ForkResultFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type SplitFn = fn(&mut Builder, &SplitSchema) -> Result<DynSplit, DiagramErrorCode>;
 type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
-type BufferAccessFn =
-    fn(&mut Builder, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
+type BufferAccessFn = fn(&mut Builder, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
 type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 type CreateBufferFn = fn(&mut Builder, BufferSettings) -> AnyBuffer;
 
@@ -404,7 +408,8 @@ where
     where
         DefaultImplMarker<(Message, DefaultSerializer, DefaultImpl)>: PerformUnzip,
     {
-        self.data.register_unzip::<Message, DefaultSerializer, DefaultImpl>();
+        self.data
+            .register_unzip::<Message, DefaultSerializer, DefaultImpl>();
         self
     }
 
@@ -413,7 +418,8 @@ where
     where
         DefaultImplMarker<(Message, NotSupported, NotSupported)>: PerformUnzip,
     {
-        self.data.register_unzip::<Message, NotSupported, NotSupported>();
+        self.data
+            .register_unzip::<Message, NotSupported, NotSupported>();
         self
     }
 
@@ -710,7 +716,7 @@ impl MessageOperation {
             listen_impl: None,
             create_buffer_impl: |builder, settings| {
                 builder.create_buffer::<T>(settings).as_any_buffer()
-            }
+            },
         }
     }
 
@@ -750,10 +756,7 @@ impl MessageOperation {
         f(builder)
     }
 
-    pub(super) fn unzip(
-        &self,
-        builder: &mut Builder,
-    ) -> Result<DynUnzip, DiagramErrorCode> {
+    pub(super) fn unzip(&self, builder: &mut Builder) -> Result<DynUnzip, DiagramErrorCode> {
         let unzip_impl = &self
             .unzip_impl
             .as_ref()
@@ -1118,7 +1121,9 @@ impl MessageRegistry {
         message_info: &TypeInfo,
         settings: BufferSettings,
     ) -> Result<AnyBuffer, DiagramErrorCode> {
-        let f = self.messages.get(message_info)
+        let f = self
+            .messages
+            .get(message_info)
             .ok_or_else(|| DiagramErrorCode::UnregisteredType(message_info.type_name))?
             .operations
             .create_buffer_impl;
@@ -1187,7 +1192,8 @@ impl MessageRegistry {
         }
 
         ops.buffer_access_impl = Some(|builder, buffers| {
-            let buffer_access = builder.try_create_buffer_access::<T::Message, T::BufferKeys>(buffers)?;
+            let buffer_access =
+                builder.try_create_buffer_access::<T::Message, T::BufferKeys>(buffers)?;
             Ok(buffer_access.into())
         });
 

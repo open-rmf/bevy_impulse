@@ -22,16 +22,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    Builder, ForRemaining, FromSequential, FromSpecific,
-    ListSplitKey, MapSplitKey, OperationResult, SplitDispatcher, Splittable,
+    Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
+    OperationResult, SplitDispatcher, Splittable,
 };
 
 use super::{
-    impls::DefaultImplMarker,
-    type_info::TypeInfo,
-    BuildDiagramOperation, BuildStatus, DiagramContext, OperationId, MessageRegistration,
-    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
-    PerformForkClone,
+    impls::DefaultImplMarker, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
+    DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
+    MessageRegistry, NextOperation, OperationId, PerformForkClone, SerializeMessage,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -59,7 +57,10 @@ impl BuildDiagramOperation for SplitSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let split = ctx.registry.messages.split(builder, sample_input.message_info(), self)?;
+        let split = ctx
+            .registry
+            .messages
+            .split(builder, sample_input.message_info(), self)?;
         ctx.construction.set_input_for_target(id, split.input)?;
         for (target, output) in split.outputs {
             ctx.construction.add_output_into_target(target, output);

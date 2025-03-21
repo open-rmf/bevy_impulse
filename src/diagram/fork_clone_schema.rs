@@ -15,18 +15,18 @@
  *
 */
 
-use std::any::Any;
 use bevy_ecs::prelude::Entity;
+use std::any::Any;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget, AddBranchToForkClone};
+use crate::{AddBranchToForkClone, Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget};
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
+    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput,
+    NextOperation, OperationId, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -48,10 +48,14 @@ impl BuildDiagramOperation for ForkCloneSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_clone(builder, sample_input.message_info())?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_clone(builder, sample_input.message_info())?;
         ctx.construction.set_input_for_target(id, fork.input)?;
         for target in &self.next {
-            ctx.construction.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
+            ctx.construction
+                .add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
         }
 
         Ok(BuildStatus::Finished)
@@ -61,17 +65,13 @@ impl BuildDiagramOperation for ForkCloneSchema {
 pub trait PerformForkClone<T> {
     const CLONEABLE: bool;
 
-    fn perform_fork_clone(
-        builder: &mut Builder,
-    ) -> Result<DynForkClone, DiagramErrorCode>;
+    fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 }
 
 impl<T> PerformForkClone<T> for NotSupported {
     const CLONEABLE: bool = false;
 
-    fn perform_fork_clone(
-        _builder: &mut Builder,
-    ) -> Result<DynForkClone, DiagramErrorCode> {
+    fn perform_fork_clone(_builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
         Err(DiagramErrorCode::NotCloneable)
     }
 }
@@ -82,9 +82,7 @@ where
 {
     const CLONEABLE: bool = true;
 
-    fn perform_fork_clone(
-        builder: &mut Builder,
-    ) -> Result<DynForkClone, DiagramErrorCode> {
+    fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
         let (input, outputs) = builder.create_fork_clone::<T>();
 
         Ok(DynForkClone {

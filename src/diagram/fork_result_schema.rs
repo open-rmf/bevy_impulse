@@ -21,11 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    impls::DefaultImplMarker,
-    type_info::TypeInfo, OperationId,
-    BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    SerializeMessage, PerformForkClone,
+    impls::DefaultImplMarker, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
+    DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
+    MessageRegistry, NextOperation, OperationId, PerformForkClone, SerializeMessage,
 };
 
 pub(super) struct DynForkResult {
@@ -54,18 +52,21 @@ impl BuildDiagramOperation for ForkResultSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_result(builder, input_sample.message_info())?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_result(builder, input_sample.message_info())?;
         ctx.construction.set_input_for_target(id, fork.input)?;
-        ctx.construction.add_output_into_target(self.ok.clone(), fork.ok);
-        ctx.construction.add_output_into_target(self.err.clone(), fork.err);
+        ctx.construction
+            .add_output_into_target(self.ok.clone(), fork.ok);
+        ctx.construction
+            .add_output_into_target(self.err.clone(), fork.err);
         Ok(BuildStatus::Finished)
     }
 }
 
 pub trait RegisterForkResult {
-    fn on_register(
-        registry: &mut MessageRegistry,
-    ) -> bool;
+    fn on_register(registry: &mut MessageRegistry) -> bool;
 }
 
 impl<T, E, S, C> RegisterForkResult for DefaultImplMarker<(Result<T, E>, S, C)>
@@ -75,9 +76,7 @@ where
     S: SerializeMessage<T> + SerializeMessage<E>,
     C: PerformForkClone<T> + PerformForkClone<E>,
 {
-    fn on_register(
-        registry: &mut MessageRegistry,
-    ) -> bool {
+    fn on_register(registry: &mut MessageRegistry) -> bool {
         let ops = &mut registry
             .messages
             .entry(TypeInfo::of::<Result<T, E>>())

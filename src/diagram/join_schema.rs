@@ -22,9 +22,8 @@ use smallvec::SmallVec;
 use crate::{Builder, JsonMessage};
 
 use super::{
-    BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, NextOperation, OperationId,
-    BufferInputs,
+    BufferInputs, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    NextOperation, OperationId,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -57,8 +56,12 @@ impl BuildDiagramOperation for JoinSchema {
 
         let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
 
-        let output = ctx.registry.messages.join(builder, &buffer_map, target_type)?;
-        ctx.construction.add_output_into_target(self.next.clone(), output);
+        let output = ctx
+            .registry
+            .messages
+            .join(builder, &buffer_map, target_type)?;
+        ctx.construction
+            .add_output_into_target(self.next.clone(), output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -89,7 +92,8 @@ impl BuildDiagramOperation for SerializedJoinSchema {
         };
 
         let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
-        ctx.construction.add_output_into_target(self.next.clone(), output.into());
+        ctx.construction
+            .add_output_into_target(self.next.clone(), output.into());
 
         Ok(BuildStatus::Finished)
     }
@@ -108,8 +112,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramError, DiagramErrorCode,
-        NodeBuilderOptions, DiagramElementRegistry,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry, DiagramError,
+        DiagramErrorCode, NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {

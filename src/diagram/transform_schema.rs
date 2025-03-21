@@ -22,11 +22,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{JsonMessage, Builder};
+use crate::{Builder, JsonMessage};
 
 use super::{
-    BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, NextOperation, OperationId, TypeInfo,
+    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, NextOperation,
+    OperationId, TypeInfo,
 };
 
 #[derive(Error, Debug)]
@@ -74,18 +74,16 @@ impl BuildDiagramOperation for TransformSchema {
                     .json()
                     // cel_interpreter::json is private so we have to type erase ConvertToJsonError
                     .map_err(|err| TransformError::Other(err.to_string().into()))
-            }
+            },
         );
 
         let output = if let Some(on_error) = &self.on_error {
             let (ok, _) = node.output.chain(builder).fork_result(
                 |ok| ok.output(),
                 |err| {
-                    ctx.construction.add_output_into_target(
-                        on_error.clone(),
-                        err.output().into(),
-                    );
-                }
+                    ctx.construction
+                        .add_output_into_target(on_error.clone(), err.output().into());
+                },
             );
             ok
         } else {
@@ -93,9 +91,8 @@ impl BuildDiagramOperation for TransformSchema {
         };
 
         let input = node.input;
-        ctx.construction.set_connect_into_target(
-            id,
-            move |_, output, builder, ctx| {
+        ctx.construction
+            .set_connect_into_target(id, move |_, output, builder, ctx| {
                 let json_output = if output.message_info() == &TypeInfo::of::<JsonMessage>() {
                     output.into_output()?
                 } else {
@@ -104,10 +101,10 @@ impl BuildDiagramOperation for TransformSchema {
 
                 builder.connect(json_output, input);
                 Ok(())
-            }
-        )?;
+            })?;
 
-        ctx.construction.add_output_into_target(self.next.clone(), output.into());
+        ctx.construction
+            .add_output_into_target(self.next.clone(), output.into());
         Ok(BuildStatus::Finished)
     }
 }

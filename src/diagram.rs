@@ -31,8 +31,8 @@ mod workflow_builder;
 
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
-use fork_clone_schema::{ForkCloneSchema, DynForkClone, PerformForkClone};
-use fork_result_schema::{ForkResultSchema, DynForkResult};
+use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
+use fork_result_schema::{DynForkResult, ForkResultSchema};
 pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
@@ -42,17 +42,12 @@ pub use split_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
-use unzip_schema::{UnzipSchema, DynUnzip};
+use unzip_schema::{DynUnzip, UnzipSchema};
 use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
 
 // ----------
 
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    fmt::Display,
-    io::Read,
-};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read};
 
 use crate::{
     Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
@@ -976,7 +971,7 @@ pub enum DiagramErrorCode {
     UnregisteredType(&'static str),
 
     #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
-    BuildHalted{
+    BuildHalted {
         /// Reasons that operations were unable to make progress building
         reasons: HashMap<OperationId, Cow<'static, str>>,
     },
