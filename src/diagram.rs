@@ -50,7 +50,8 @@ use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, Diag
 use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read};
 
 use crate::{
-    Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
+    Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
+    SplitConnectionError, StreamPack,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -674,9 +675,28 @@ pub enum DiagramOperation {
     Listen(ListenSchema),
 }
 
-type DiagramStart = serde_json::Value;
-type DiagramTerminate = serde_json::Value;
-type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>;
+impl BuildDiagramOperation for DiagramOperation {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationId,
+        builder: &mut Builder,
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        match self {
+            Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::BufferAccess(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::ForkClone(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::ForkResult(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
+        }
+    }
+}
 
 /// Returns the schema for [`String`]
 fn schema_with_string(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -762,12 +782,14 @@ impl Diagram {
     /// ```
     // TODO(koonpeng): Support streams other than `()` #43.
     /* pub */
-    fn spawn_workflow<Streams>(
+    fn spawn_workflow<Request, Response, Streams>(
         &self,
         cmds: &mut Commands,
         registry: &DiagramElementRegistry,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
+    ) -> Result<Service<Request, Response, Streams>, DiagramError>
     where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
         let mut err: Option<DiagramError> = None;
@@ -784,15 +806,17 @@ impl Diagram {
             };
         }
 
-        let w = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
-            debug!(
-                "spawn workflow, scope input: {:?}, terminate: {:?}",
-                scope.input.id(),
-                scope.terminate.id()
-            );
+        let w = cmds.spawn_workflow(
+            |scope: Scope<Request, Response, Streams>, builder: &mut Builder| {
+                debug!(
+                    "spawn workflow, scope input: {:?}, terminate: {:?}",
+                    scope.input.id(),
+                    scope.terminate.id()
+                );
 
-            unwrap_or_return!(create_workflow(scope, builder, registry, self));
-        });
+                unwrap_or_return!(create_workflow(scope, builder, registry, self));
+            },
+        );
 
         if let Some(err) = err {
             return Err(err);
@@ -832,12 +856,16 @@ impl Diagram {
     /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn spawn_io_workflow(
+    pub fn spawn_io_workflow<Request, Response>(
         &self,
         cmds: &mut Commands,
         registry: &DiagramElementRegistry,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
-        self.spawn_workflow::<()>(cmds, registry)
+    ) -> Result<Service<Request, Response, ()>, DiagramError>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
+        self.spawn_workflow::<Request, Response, ()>(cmds, registry)
     }
 
     pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
@@ -862,6 +890,24 @@ impl Diagram {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("{context} {code}")]
+pub struct DiagramError {
+    pub context: DiagramErrorContext,
+
+    #[source]
+    pub code: DiagramErrorCode,
+}
+
+impl DiagramError {
+    pub fn in_operation(op_id: OperationId, code: DiagramErrorCode) -> Self {
+        Self {
+            context: DiagramErrorContext { op_id: Some(op_id) },
+            code,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DiagramErrorContext {
     op_id: Option<OperationId>,
@@ -874,15 +920,6 @@ impl Display for DiagramErrorContext {
         }
         Ok(())
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("{context} {code}")]
-pub struct DiagramError {
-    pub context: DiagramErrorContext,
-
-    #[source]
-    pub code: DiagramErrorCode,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -934,6 +971,9 @@ pub enum DiagramErrorCode {
     #[error("Target type cannot be determined from [next] and [target_node] is not provided.")]
     UnknownTarget,
 
+    #[error("There was an attempt to access an unknown operation: [{0}]")]
+    UnknownOperation(NextOperation),
+
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
 
@@ -975,6 +1015,15 @@ pub enum DiagramErrorCode {
         /// Reasons that operations were unable to make progress building
         reasons: HashMap<OperationId, Cow<'static, str>>,
     },
+}
+
+impl From<DiagramErrorCode> for DiagramError {
+    fn from(code: DiagramErrorCode) -> Self {
+        DiagramError {
+            context: DiagramErrorContext { op_id: None },
+            code,
+        }
+    }
 }
 
 #[macro_export]

@@ -95,7 +95,7 @@ impl BuildDiagramOperation for BufferAccessSchema {
             .registry
             .messages
             .with_buffer_access(builder, &buffer_map, target_type)?;
-        ctx.construction.set_input_for_target(id, node.input);
+        ctx.construction.set_input_for_target(id, node.input)?;
         ctx.construction
             .add_output_into_target(self.next.clone(), node.output);
         Ok(BuildStatus::Finished)
