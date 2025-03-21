@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::collections::{hash_map::Entry, HashMap};
 
 use schemars::JsonSchema;
@@ -5,14 +22,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     unknown_diagram_error, Accessor, AnyBuffer, BufferIdentifier, BufferMap, BufferSettings,
-    Builder, InputSlot, Output,
+    Builder, InputSlot, Output, JsonMessage,
 };
 
 use super::{
     type_info::TypeInfo,
     workflow_builder::{Edge, EdgeBuilder, Vertex},
+    BuildDiagramOperation, BuildStatus, DiagramContext,
     BuiltinTarget, Diagram, DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynOutput,
-    MessageRegistry, NextOperation, OperationId,
+    MessageRegistry, NextOperation, OperationId, BufferInputs,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -23,6 +41,34 @@ pub struct BufferSchema {
     /// If true, messages will be serialized before sending into the buffer.
     pub(super) serialize: Option<bool>,
 }
+
+impl BuildDiagramOperation for BufferSchema {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationId,
+        builder: &mut Builder,
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let message_info = if self.serialize.is_some_and(|v| v) {
+            TypeInfo::of::<JsonMessage>()
+        } else {
+            let Some(sample_input) = ctx.construction.get_sample_output_into_target(id) else {
+                // There are no outputs ready for this target, so we can't do
+                // anything yet. The builder should try again later.
+
+                // TODO(@mxgrey): We should allow users to explicitly specify the
+                // message type for the buffer. When they do, we won't need to wait
+                // for an input.
+                return Ok(BuildStatus::defer("waiting for an input"));
+            };
+
+            *sample_input.message_info()
+        };
+
+
+    }
+}
+
 
 impl BufferSchema {
     pub(super) fn build_edges<'a>(
@@ -131,61 +177,6 @@ pub(super) fn get_node_request_type(
     };
     let target_type = registry.get_node_registration(&node_op.builder)?.request;
     Ok(target_type)
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
-pub enum BufferInputs {
-    Single(OperationId),
-    Dict(HashMap<String, OperationId>),
-    Array(Vec<OperationId>),
-}
-
-impl BufferInputs {
-    /// Creates a [`BufferMap`] from the buffer inputs.
-    /// Returns `None` if one or more buffer does not exist.
-    pub(super) fn as_buffer_map(
-        &self,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
-    ) -> Option<BufferMap> {
-        match self {
-            Self::Single(op_id) => {
-                let mut buffer_map = BufferMap::with_capacity(1);
-                buffer_map.insert(BufferIdentifier::Index(0), *buffers.get(op_id)?);
-                Some(buffer_map)
-            }
-            Self::Dict(mapping) => {
-                let mut buffer_map = BufferMap::with_capacity(mapping.len());
-                for (k, op_id) in mapping {
-                    let Some(buffer) = buffers.get(op_id) else {
-                        return None;
-                    };
-                    buffer_map.insert(BufferIdentifier::Name(k.clone().into()), *buffer);
-                }
-                Some(buffer_map)
-            }
-            Self::Array(arr) => {
-                let mut buffer_map = BufferMap::with_capacity(arr.len());
-                for (i, op_id) in arr.into_iter().enumerate() {
-                    let buffer = if let Some(buffer) = buffers.get(op_id) {
-                        buffer
-                    } else {
-                        return None;
-                    };
-                    buffer_map.insert(BufferIdentifier::Index(i), *buffer);
-                }
-                Some(buffer_map)
-            }
-        }
-    }
-
-    pub(super) fn is_empty(&self) -> bool {
-        match self {
-            Self::Single(_) => false,
-            Self::Dict(d) => d.is_empty(),
-            Self::Array(a) => a.is_empty(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

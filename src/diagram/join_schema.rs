@@ -1,15 +1,31 @@
-use std::collections::HashMap;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{unknown_diagram_error, AnyBuffer, Builder, JsonMessage};
+use crate::{Builder, JsonMessage};
 
 use super::{
-    buffer_schema::{get_node_request_type, BufferInputs},
-    workflow_builder::{Edge, EdgeBuilder, Vertex},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId,
+    buffer_schema::get_node_request_type,
+    BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, NextOperation, OperationId,
+    BufferInputs,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -24,44 +40,29 @@ pub struct JoinSchema {
     pub(super) target_node: Option<OperationId>,
 }
 
-impl JoinSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for JoinSchema {
+    fn build_diagram_operation(
         &self,
+        _: &OperationId,
         builder: &mut Builder,
-        vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        registry: &DiagramElementRegistry,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
-        diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let Some(buffers) = self.buffers.as_buffer_map(buffers) else {
-            return Ok(false);
+        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+            Ok(buffer_map) => buffer_map,
+            Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
-        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
-        let output = registry.messages.join(builder, &buffers, target_type)?;
 
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
-        Ok(true)
+        let target_type = get_node_request_type(
+            &self.target_node, &self.next, &ctx.diagram, &ctx.registry,
+        )?;
+
+        let output = ctx.registry.messages.join(builder, &buffer_map, target_type)?;
+        ctx.construction.add_output_into_target(self.next.clone(), output);
+        Ok(BuildStatus::Finished)
     }
 }
 
@@ -74,42 +75,26 @@ pub struct SerializedJoinSchema {
     pub(super) buffers: BufferInputs,
 }
 
-impl SerializedJoinSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for SerializedJoinSchema {
+    fn build_diagram_operation(
         &self,
+        _: &OperationId,
         builder: &mut Builder,
-        vertex: &Vertex,
-        mut edges: HashMap<&usize, &mut Edge>,
-        buffers: &HashMap<&OperationId, AnyBuffer>,
-    ) -> Result<bool, DiagramErrorCode> {
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let Some(buffers) = self.buffers.as_buffer_map(buffers) else {
-            return Ok(false);
+        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+            Ok(buffer_map) => buffer_map,
+            Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let output = builder.try_join::<JsonMessage>(&buffers)?.output().into();
+        let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
+        ctx.construction.add_output_into_target(self.next.clone(), output.into());
 
-        let out_edge = edges
-            .get_mut(
-                vertex
-                    .out_edges
-                    .get(0)
-                    .ok_or_else(|| unknown_diagram_error!())?,
-            )
-            .ok_or_else(|| unknown_diagram_error!())?;
-        out_edge.output = Some(output);
-        Ok(true)
+        Ok(BuildStatus::Finished)
     }
 }
 
@@ -127,7 +112,7 @@ mod tests {
     use super::*;
     use crate::{
         diagram::testing::DiagramTestFixture, Diagram, DiagramError, DiagramErrorCode,
-        NodeBuilderOptions,
+        NodeBuilderOptions, DiagramElementRegistry,
     };
 
     fn foo(_: serde_json::Value) -> String {

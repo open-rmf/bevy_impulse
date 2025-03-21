@@ -1,16 +1,36 @@
-use std::collections::{hash_map::Entry, HashMap};
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
+use std::{
+    borrow::Cow,
+    collections::{hash_map::Entry, HashMap},
+};
 
 use tracing::{debug, warn};
 
 use crate::{
     diagram::DiagramErrorContext, unknown_diagram_error, AnyBuffer, Builder, InputSlot, Output,
-    StreamPack,
+    StreamPack, BufferMap, BufferIdentifier,
 };
 
 use super::{
     BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DiagramScope, DynInputSlot, DynOutput, NextOperation, OperationId,
-    SourceOperation,
+    SourceOperation, BufferInputs,
 };
 
 #[derive(Debug)]
@@ -93,15 +113,40 @@ impl<'a, 'b> EdgeBuilder<'a, 'b> {
     }
 }
 
+pub struct ConnectionContext<'a> {
+    pub diagram: &'a Diagram,
+    pub registry: &'a DiagramElementRegistry,
+}
+
+pub type ConnectFn = Box<dyn FnMut(&OperationId, DynOutput, &mut Builder, ConnectionContext) -> Result<(), DiagramErrorCode>>;
+
 pub struct DiagramConstruction {
+    input_for_operation: HashMap<OperationId, ConnectFn>,
     outputs_to_operation_target: HashMap<OperationId, Vec<DynOutput>>,
     outputs_to_builtin_target: HashMap<BuiltinTarget, Vec<DynOutput>>,
     buffers: HashMap<OperationId, AnyBuffer>,
 }
 
+pub struct DiagramContext<'a> {
+    pub construction: &'a mut DiagramConstruction,
+    pub diagram: &'a Diagram,
+    pub registry: &'a DiagramElementRegistry,
+}
+
 impl DiagramConstruction {
+    /// Get all the currently known outputs that are aimed at this target operation.
     pub fn get_outputs_into_operation_target(&self, id: &OperationId) -> Option<&Vec<DynOutput>> {
         self.outputs_to_operation_target.get(id)
+    }
+
+    /// Get a single currently known output that is aimed at this target operation.
+    /// This can be used to infer information for building the operation.
+    ///
+    /// The workflow builder will ensure that all outputs targeting this
+    /// operation share the same message type, so getting a single sample is
+    /// usually enough to infer what is needed to build the operation.
+    pub fn get_sample_output_into_target(&self, id: &OperationId) -> Option<&DynOutput> {
+        self.get_outputs_into_operation_target(id).and_then(|outputs| outputs.first())
     }
 
     pub fn add_output_into_target(&mut self, target: NextOperation, output: DynOutput) {
@@ -114,6 +159,129 @@ impl DiagramConstruction {
             }
         }
     }
+
+    /// Set the input slot of an operation. This should not be called more than
+    /// once per operation, because only one input slot can be used for any
+    /// operation.
+    pub fn set_input_for_target(
+        &mut self,
+        operation: &OperationId,
+        input: DynInputSlot,
+    ) -> Result<(), DiagramErrorCode> {
+        self.set_connect_into_target(
+            operation,
+            move |_, output, builder, _| output.connect_to(&input, builder),
+        )
+    }
+
+    /// Set a callback that will allow outputs to connect into this target. This
+    /// is a more general method than [`Self::set_input_for_target`]. This allows
+    /// you to take further action before a target is connected, like serializing.
+    pub fn set_connect_into_target(
+        &mut self,
+        operation: &OperationId,
+        connect: impl FnMut(&OperationId, DynOutput, &mut Builder, ConnectionContext) -> Result<(), DiagramErrorCode> + 'static,
+    ) -> Result<(), DiagramErrorCode> {
+        let f = Box::new(connect);
+        match self.input_for_operation.entry(operation.clone()) {
+            Entry::Occupied(_) => {
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(f);
+            }
+        }
+        Ok(())
+    }
+
+    /// Create a buffer map based on the buffer inputs provided. If one or more
+    /// of the buffers in BufferInputs is not available, get an error including
+    /// the name of the missing buffer.
+    pub fn create_buffer_map(&self, inputs: &BufferInputs) -> Result<BufferMap, String> {
+        let attempt_get_buffer = |name: &String| -> Result<AnyBuffer, String> {
+            self.buffers.get(name).copied().ok_or_else(|| {
+                format!("cannot find buffer named [{name}]")
+            })
+        };
+
+        match inputs {
+            BufferInputs::Single(op_id) => {
+                let mut buffer_map = BufferMap::with_capacity(1);
+                buffer_map.insert(BufferIdentifier::Index(0), attempt_get_buffer(op_id)?);
+                Ok(buffer_map)
+            }
+            BufferInputs::Dict(mapping) => {
+                let mut buffer_map = BufferMap::with_capacity(mapping.len());
+                for (k, op_id) in mapping {
+                    buffer_map.insert(
+                        BufferIdentifier::Name(k.clone().into()),
+                        attempt_get_buffer(op_id)?,
+                    );
+                }
+                Ok(buffer_map)
+            }
+            BufferInputs::Array(arr) => {
+                let mut buffer_map = BufferMap::with_capacity(arr.len());
+                for (i, op_id) in arr.into_iter().enumerate() {
+                    buffer_map.insert(
+                        BufferIdentifier::Index(i),
+                        attempt_get_buffer(op_id)?,
+                    );
+                }
+                Ok(buffer_map)
+            }
+        }
+    }
+}
+
+/// Indicate whether the operation has finished building.
+#[derive(Debug, Clone)]
+pub enum BuildStatus {
+    /// The operation has finished building.
+    Finished,
+    /// The operation needs to make another attempt at building after more
+    /// information becomes available.
+    Defer {
+        /// Progress was made during this run. This can mean the operation has
+        /// added some information into the diagram but might need to provide
+        /// more later. If no operations make any progress within an entire
+        /// iteration of the workflow build then we assume it is impossible to
+        /// build the diagram.
+        progress: bool,
+        reason: Cow<'static, str>,
+    }
+}
+
+impl BuildStatus {
+    /// Indicate that the build of the operation needs to be deferred.
+    pub fn defer(reason: impl Into<Cow<'static, str>>) -> Self {
+        Self::Defer {
+            progress: false,
+            reason: reason.into(),
+        }
+    }
+
+    /// Indicate that the operation made progress, even if it's deferred.
+    pub fn with_progress(mut self) -> Self {
+        match &mut self {
+            Self::Defer { progress, .. }  => {
+                *progress = true;
+            }
+            Self::Finished => {
+                // Do nothing
+            }
+        }
+
+        self
+    }
+
+    /// Did this operation make progress on this round?
+    pub fn made_progress(&self) -> bool {
+        match self {
+            Self::Defer { progress, .. } => *progress,
+            Self::Finished => true,
+        }
+    }
 }
 
 pub trait BuildDiagramOperation {
@@ -121,10 +289,8 @@ pub trait BuildDiagramOperation {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        construction: &mut DiagramConstruction,
-        diagram: &Diagram,
-        registry: &DiagramElementRegistry,
-    ) -> Result<Option<DynInputSlot>, DiagramErrorCode>;
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode>;
 }
 
 pub(super) fn create_workflow<'a, Streams: StreamPack>(
@@ -152,7 +318,6 @@ pub(super) fn create_workflow<'a, Streams: StreamPack>(
 
     let mut input_for_operation: HashMap<&OperationId, DynInputSlot> = HashMap::new();
     let mut outputs_to_target: HashMap<&NextOperation, Vec<DynOutput>> = HashMap::new();
-
 
     // init with some capacity to reduce resizing. HashMap for faster removal.
     // NOTE: There are many `unknown_diagram_errors!()` used when accessing this.
@@ -474,29 +639,4 @@ fn connect_vertex<'a>(
             op.try_connect(builder, target, borrowed_edges, registry, buffers, diagram)
         }
     }
-}
-
-/// Connect a [`DynOutput`] to a [`DynInputSlot`]. Use this only when both the output and input
-/// are type erased. To connect an [`Output`] to a [`DynInputSlot`] or vice versa, prefer converting
-/// the type erased output/input slot to the typed equivalent.
-///
-/// ```text
-/// builder.connect(output.into_output::<i64>()?, dyn_input)?;
-/// ```
-pub(super) fn dyn_connect(
-    builder: &mut Builder,
-    output: DynOutput,
-    input: DynInputSlot,
-) -> Result<(), DiagramErrorCode> {
-    if output.type_info != input.type_info {
-        return Err(DiagramErrorCode::TypeMismatch {
-            source_type: output.type_info,
-            target_type: input.type_info,
-        });
-    }
-    struct TypeErased {}
-    let typed_output = Output::<TypeErased>::new(output.scope(), output.id());
-    let typed_input = InputSlot::<TypeErased>::new(input.scope(), input.id());
-    builder.connect(typed_output, typed_input);
-    Ok(())
 }

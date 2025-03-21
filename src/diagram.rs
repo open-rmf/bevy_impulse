@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 mod buffer_schema;
 mod fork_clone_schema;
 mod fork_result_schema;
@@ -14,7 +31,7 @@ mod workflow_builder;
 
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
-use fork_clone_schema::{ForkCloneSchema, DynForkClone};
+use fork_clone_schema::{ForkCloneSchema, DynForkClone, PerformForkClone};
 use fork_result_schema::{ForkResultSchema, DynForkResult};
 pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
@@ -25,12 +42,17 @@ pub use split_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
-use unzip_schema::UnzipSchema;
-use workflow_builder::{create_workflow, BuildDiagramOperation, DiagramConstruction};
+use unzip_schema::{UnzipSchema, DynUnzip};
+use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
 
 // ----------
 
-use std::{collections::HashMap, fmt::Display, io::Read};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fmt::Display,
+    io::Read,
+};
 
 use crate::{
     Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
@@ -57,6 +79,24 @@ impl Display for NextOperation {
         match self {
             Self::Target(operation_id) => f.write_str(operation_id),
             Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub enum BufferInputs {
+    Single(OperationId),
+    Dict(HashMap<String, OperationId>),
+    Array(Vec<OperationId>),
+}
+
+impl BufferInputs {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Single(_) => false,
+            Self::Dict(d) => d.is_empty(),
+            Self::Array(a) => a.is_empty(),
         }
     }
 }
@@ -864,6 +904,9 @@ pub enum DiagramErrorCode {
         target_type: TypeInfo,
     },
 
+    #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
+    MultipleInputsCreated(OperationId),
+
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
@@ -925,6 +968,12 @@ pub enum DiagramErrorCode {
     /// in the algorithm.
     #[error("an unknown error occurred while building the diagram, {0}")]
     UnknownError(String),
+
+    #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
+    BuildHalted{
+        /// Reasons that operations were unable to make progress building
+        reasons: HashMap<OperationId, Cow<'static, str>>,
+    },
 }
 
 #[macro_export]

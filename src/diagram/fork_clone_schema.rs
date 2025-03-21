@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::any::Any;
 use bevy_ecs::prelude::Entity;
 
@@ -8,7 +25,7 @@ use crate::{Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget, AddBranc
 
 use super::{
     impls::{DefaultImpl, NotSupported},
-    BuildDiagramOperation, Diagram, DiagramConstruction, DiagramElementRegistry, DiagramErrorCode,
+    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, NextOperation, OperationId, DynOutputInfo,
 };
 
@@ -23,29 +40,21 @@ impl BuildDiagramOperation for ForkCloneSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        construction: &mut DiagramConstruction,
-        _: &Diagram,
-        registry: &DiagramElementRegistry,
-    ) -> Result<Option<DynInputSlot>, DiagramErrorCode> {
-        let Some(incoming) = construction.get_outputs_into_operation_target(id) else {
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(sample_input) = ctx.construction.get_sample_output_into_target(id) else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
-            return Ok(None);
+            return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        if incoming.is_empty() {
-            // There are no outputs ready for this target, so we can't do
-            // anything yet. The builder should try again later.
-            return Ok(None);
-        }
-
-        let sample_input = &incoming[0];
-        let fork = registry.messages.fork_clone(builder, sample_input.info().message_info())?;
+        let fork = ctx.registry.messages.fork_clone(builder, sample_input.message_info())?;
+        ctx.construction.set_input_for_target(id, fork.input)?;
         for target in &self.next {
-            construction.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
+            ctx.construction.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
         }
 
-        Ok(Some(fork.input))
+        Ok(BuildStatus::Finished)
     }
 }
 

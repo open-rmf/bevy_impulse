@@ -1,18 +1,31 @@
-use std::collections::HashMap;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
-use schemars::{gen::SchemaGenerator, JsonSchema};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
-use crate::{unknown_diagram_error, Builder};
+use crate::Builder;
 
 use super::{
-    impls::{DefaultImplMarker, NotSupportedMarker},
-    register_serialize,
-    type_info::TypeInfo,
-    workflow_builder::{Edge, EdgeBuilder},
+    impls::DefaultImplMarker,
+    type_info::TypeInfo, OperationId,
+    BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    SerializeMessage,
+    SerializeMessage, PerformForkClone,
 };
 
 pub(super) struct DynForkResult {
@@ -28,76 +41,45 @@ pub struct ForkResultSchema {
     pub(super) err: NextOperation,
 }
 
-impl ForkResultSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.ok, None)?;
-        builder.add_output_edge(&self.err, None)?;
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for ForkResultSchema {
+    fn build_diagram_operation(
         &self,
+        id: &OperationId,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        let (ok, err) = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            Err(DiagramErrorCode::CannotForkResult)
-        } else {
-            registry.fork_result(builder, output)
-        }?;
-        {
-            let ok_edge = out_edges
-                .get_mut(0)
-                .ok_or_else(|| unknown_diagram_error!())?;
-            ok_edge.output = Some(ok);
-        }
-        {
-            let err_edge = out_edges
-                .get_mut(1)
-                .ok_or_else(|| unknown_diagram_error!())?;
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(input_sample) = ctx.construction.get_sample_output_into_target(id) else {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(BuildStatus::defer("waiting for an input"));
+        };
 
-            err_edge.output = Some(err);
-        }
-
-        Ok(())
+        let fork = ctx.registry.messages.fork_result(builder, input_sample.message_info())?;
+        ctx.construction.set_input_for_target(id, fork.input)?;
+        ctx.construction.add_output_into_target(self.ok.clone(), fork.ok);
+        ctx.construction.add_output_into_target(self.err.clone(), fork.err);
+        Ok(BuildStatus::Finished)
     }
 }
 
 pub trait RegisterForkResult {
     fn on_register(
-        self,
-        messages: &mut HashMap<TypeInfo, MessageRegistration>,
-        schema_generator: &mut SchemaGenerator,
+        registry: &mut MessageRegistry,
     ) -> bool;
 }
 
-impl<T> RegisterForkResult for NotSupportedMarker<T> {
-    fn on_register(
-        self,
-        _messages: &mut HashMap<TypeInfo, MessageRegistration>,
-        _schema_generator: &mut SchemaGenerator,
-    ) -> bool {
-        false
-    }
-}
-
-impl<T, E, S> RegisterForkResult for DefaultImplMarker<(Result<T, E>, S)>
+impl<T, E, S, C> RegisterForkResult for DefaultImplMarker<(Result<T, E>, S, C)>
 where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,
-    S: SerializeMessage<T> + 'static,
+    S: SerializeMessage<T> + SerializeMessage<E>,
+    C: PerformForkClone<T> + PerformForkClone<E>,
 {
     fn on_register(
-        self,
-        messages: &mut HashMap<TypeInfo, MessageRegistration>,
-        schema_generator: &mut SchemaGenerator,
+        registry: &mut MessageRegistry,
     ) -> bool {
-        let ops = &mut messages
+        let ops = &mut registry
+            .messages
             .entry(TypeInfo::of::<Result<T, E>>())
             .or_insert(MessageRegistration::new::<T>())
             .operations;
@@ -114,7 +96,12 @@ where
             })
         });
 
-        register_serialize::<T, S>(messages, schema_generator);
+        registry.register_serialize::<T, S>();
+        registry.register_fork_clone::<T, C>();
+
+        registry.register_serialize::<E, S>();
+        registry.register_fork_clone::<E, C>();
+
         true
     }
 }

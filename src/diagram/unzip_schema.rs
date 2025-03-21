@@ -1,16 +1,30 @@
-use std::iter::zip;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
 use bevy_utils::all_tuples_with_size;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::Builder;
 
 use super::{
-    impls::{DefaultImplMarker, NotSupportedMarker},
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation, SerializeMessage,
+    impls::DefaultImplMarker,
+    BuildDiagramOperation, BuildStatus, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistry, NextOperation,
+    SerializeMessage, PerformForkClone, OperationId, DiagramContext,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -19,74 +33,53 @@ pub struct UnzipSchema {
     pub(super) next: Vec<NextOperation>,
 }
 
-impl UnzipSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        for target in &self.next {
-            builder.add_output_edge(target, None)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for UnzipSchema {
+    fn build_diagram_operation(
         &self,
+        id: &OperationId,
         builder: &mut Builder,
-        output: DynOutput,
-        out_edges: Vec<&mut Edge>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        let outputs = registry.unzip(builder, output)?;
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(sample_input) = ctx.construction.get_sample_output_into_target(id) else {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(BuildStatus::defer("waiting for an input"));
+        };
 
-        if outputs.len() < out_edges.len() {
-            return Err(DiagramErrorCode::NotUnzippable);
+        let unzip = ctx.registry.messages.unzip(builder, sample_input.message_info())?;
+        ctx.construction.set_input_for_target(id, unzip.input)?;
+        for (target, output) in self.next.iter().zip(unzip.outputs) {
+            ctx.construction.add_output_into_target(target.clone(), output);
         }
-
-        for (output, out_edge) in zip(outputs, out_edges) {
-            out_edge.output = Some(output);
-        }
-
-        Ok(())
+        Ok(BuildStatus::Finished)
     }
 }
 
-pub trait DynUnzip {
+pub struct DynUnzip {
+    input: DynInputSlot,
+    outputs: Vec<DynOutput>,
+}
+
+pub trait PerformUnzip {
     /// Returns a list of type names that this message unzips to.
     fn output_types(&self) -> Vec<&'static str>;
 
-    fn dyn_unzip(
+    fn perform_unzip(
         &self,
         builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
+    ) -> Result<DynUnzip, DiagramErrorCode>;
 
     /// Called when a node is registered.
     fn on_register(&self, registry: &mut MessageRegistry);
 }
 
-impl<T> DynUnzip for NotSupportedMarker<T> {
-    fn output_types(&self) -> Vec<&'static str> {
-        Vec::new()
-    }
-
-    fn dyn_unzip(
-        &self,
-        _builder: &mut Builder,
-        _output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-        Err(DiagramErrorCode::NotUnzippable)
-    }
-
-    fn on_register(&self, _registry: &mut MessageRegistry) {}
-}
-
 macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*, Serializer> DynUnzip for DefaultImplMarker<(($($P,)*), Serializer)>
+        impl<$($P),*, Serializer, Cloneable> PerformUnzip for DefaultImplMarker<(($($P,)*), Serializer, Cloneable)>
         where
             $($P: Send + Sync + 'static),*,
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
+            Cloneable: $(PerformForkClone<$P> +)* $(PerformForkClone<Vec<$P>> +)*,
         {
             fn output_types(&self) -> Vec<&'static str> {
                 vec![$(
@@ -94,22 +87,21 @@ macro_rules! dyn_unzip_impl {
                 )*]
             }
 
-            fn dyn_unzip(
+            fn perform_unzip(
                 &self,
                 builder: &mut Builder,
-                output: DynOutput
-            ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-                debug!("unzip output: {:?}", output);
-                let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
-                let chain = output.into_output::<($($P,)*)>()?.chain(builder);
-                let ($($o,)*) = chain.unzip();
+            ) -> Result<DynUnzip, DiagramErrorCode> {
+                let (input, ($($o,)*)) = builder.create_unzip::<($($P,)*)>();
 
+                let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
                 $({
                     outputs.push($o.into());
                 })*
 
-                debug!("unzipped outputs: {:?}", outputs);
-                Ok(outputs)
+                Ok(DynUnzip {
+                    input: input.into(),
+                    outputs,
+                })
             }
 
             fn on_register(&self, registry: &mut MessageRegistry)
@@ -118,6 +110,7 @@ macro_rules! dyn_unzip_impl {
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
                 $(
                     registry.register_serialize::<$P, Serializer>();
+                    registry.register_fork_clone::<$P, Cloneable>();
                 )*
             }
         }

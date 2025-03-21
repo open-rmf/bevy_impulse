@@ -30,6 +30,7 @@ use crate::{
     OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
     ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
     Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    Unzippable,
 };
 
 pub(crate) mod connect;
@@ -229,6 +230,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         (
             InputSlot::new(self.scope, source),
             ForkCloneOutput::new(self.scope, source),
+        )
+    }
+
+    /// Create an operation that unzips its inputs and sends each element off to
+    /// a different output.
+    pub fn create_unzip<T>(&mut self) -> (InputSlot<T>, T::Unzipped)
+    where
+        T: Unzippable + 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        (
+            InputSlot::new(self.scope, source),
+            T::unzip_output(Output::<T>::new(self.scope, source), self),
         )
     }
 

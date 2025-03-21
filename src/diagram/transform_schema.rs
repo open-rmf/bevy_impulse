@@ -1,16 +1,32 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::error::Error;
 
 use cel_interpreter::{Context, ExecutionError, ParseError, Program};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::debug;
 
-use crate::{diagram::type_info::TypeInfo, unknown_diagram_error, Builder, Output};
+use crate::{JsonMessage, Builder};
 
 use super::{
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, NextOperation, OperationId, TypeInfo,
 };
 
 #[derive(Error, Debug)]
@@ -30,68 +46,70 @@ pub enum TransformError {
 pub struct TransformSchema {
     pub(super) cel: String,
     pub(super) next: NextOperation,
+    /// Specify what happens if an error occurs during the transformation. By
+    /// default an error will cause the entire workflow to cancel. If you specify
+    /// a target for on_error, then an error message will be sent to that target.
+    /// You can set this to `{ "builtin": "dispose" }` to simply ignore errors.
+    #[serde(default)]
+    pub(super) on_error: Option<NextOperation>,
 }
 
-impl TransformSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        builder.add_output_edge(&self.next, None)?;
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for TransformSchema {
+    fn build_diagram_operation(
         &self,
+        id: &OperationId,
         builder: &mut Builder,
-        output: DynOutput,
-        mut out_edges: Vec<&mut Edge>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        let transformed_output = transform_output(builder, registry, output, self)?;
-        let out_edge = out_edges.get_mut(0).ok_or(unknown_diagram_error!())?;
-        out_edge.output = Some(transformed_output.into());
-        Ok(())
+        ctx: DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let program = Program::compile(&self.cel).map_err(TransformError::Parse)?;
+        let node = builder.create_map_block(
+            move |req: JsonMessage| -> Result<JsonMessage, TransformError> {
+                let mut context = Context::default();
+                context
+                    .add_variable("request", req)
+                    // cannot keep the original error because it is not Send + Sync
+                    .map_err(|err| TransformError::Other(err.to_string().into()))?;
+                program
+                    .execute(&context)?
+                    .json()
+                    // cel_interpreter::json is private so we have to type erase ConvertToJsonError
+                    .map_err(|err| TransformError::Other(err.to_string().into()))
+            }
+        );
+
+        let output = if let Some(on_error) = &self.on_error {
+            let (ok, _) = node.output.chain(builder).fork_result(
+                |ok| ok.output(),
+                |err| {
+                    ctx.construction.add_output_into_target(
+                        on_error.clone(),
+                        err.output().into(),
+                    );
+                }
+            );
+            ok
+        } else {
+            node.output.chain(builder).cancel_on_err().output()
+        };
+
+        let input = node.input;
+        ctx.construction.set_connect_into_target(
+            id,
+            move |_, output, builder, ctx| {
+                let json_output = if output.message_info() == &TypeInfo::of::<JsonMessage>() {
+                    output.into_output()?
+                } else {
+                    ctx.registry.messages.serialize(builder, output)?
+                };
+
+                builder.connect(json_output, input);
+                Ok(())
+            }
+        )?;
+
+        ctx.construction.add_output_into_target(self.next.clone(), output.into());
+        Ok(BuildStatus::Finished)
     }
-}
-
-pub(super) fn transform_output(
-    builder: &mut Builder,
-    registry: &MessageRegistry,
-    output: DynOutput,
-    transform_op: &TransformSchema,
-) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
-    debug!("transform output: {:?}, op: {:?}", output, transform_op);
-
-    let json_output = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-        output.into_output()
-    } else {
-        registry.serialize(builder, output)
-    }?;
-
-    let program = Program::compile(&transform_op.cel).map_err(|err| TransformError::Parse(err))?;
-    let transform_node = builder.create_map_block(
-        move |req: serde_json::Value| -> Result<serde_json::Value, TransformError> {
-            let mut context = Context::default();
-            context
-                .add_variable("request", req)
-                // cannot keep the original error because it is not Send + Sync
-                .map_err(|err| TransformError::Other(err.to_string().into()))?;
-            program
-                .execute(&context)?
-                .json()
-                // cel_interpreter::json is private so we have to type erase ConvertToJsonError
-                .map_err(|err| TransformError::Other(err.to_string().into()))
-        },
-    );
-    builder.connect(json_output, transform_node.input);
-    let transformed_output = transform_node
-        .output
-        .chain(builder)
-        .cancel_on_err()
-        .output();
-    debug!("transformed output: {:?}", transformed_output);
-    Ok(transformed_output)
 }
 
 #[cfg(test)]
