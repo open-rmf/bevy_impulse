@@ -39,15 +39,13 @@ impl BuildDiagramOperation for NodeSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
         let node = node_registration.create_node(builder, self.config.clone())?;
 
-        ctx.construction
-            .set_input_for_target(id, node.input.into())?;
-        ctx.construction
-            .add_output_into_target(self.next.clone(), node.output);
+        ctx.set_input_for_target(id, node.input.into())?;
+        ctx.add_output_into_target(self.next.clone(), node.output);
         Ok(BuildStatus::Finished)
     }
 }

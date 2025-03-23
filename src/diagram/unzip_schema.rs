@@ -38,9 +38,9 @@ impl BuildDiagramOperation for UnzipSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(sample_input) = ctx.construction.get_sample_output_into_target(id) else {
+        let Some(sample_input) = ctx.get_sample_output_into_target(id) else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
@@ -50,10 +50,9 @@ impl BuildDiagramOperation for UnzipSchema {
             .registry
             .messages
             .unzip(builder, sample_input.message_info())?;
-        ctx.construction.set_input_for_target(id, unzip.input)?;
+        ctx.set_input_for_target(id, unzip.input)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
-            ctx.construction
-                .add_output_into_target(target.clone(), output);
+            ctx.add_output_into_target(target.clone(), output);
         }
         Ok(BuildStatus::Finished)
     }

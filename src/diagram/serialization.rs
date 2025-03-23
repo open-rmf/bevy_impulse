@@ -1,8 +1,24 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::collections::HashMap;
 
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
-use tracing::debug;
 
 use super::{type_info::TypeInfo, MessageRegistration};
 use crate::JsonBuffer;
@@ -163,17 +179,10 @@ where
         return false;
     }
 
-    debug!(
-        "register serialize for type: {}, with serializer: {}",
-        std::any::type_name::<T>(),
-        std::any::type_name::<Serializer>()
-    );
     ops.serialize_impl = Some(|builder, output| {
-        debug!("serialize output: {:?}", output);
         let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
         builder.connect(output.into_output()?, n.input);
         let serialized_output = n.output.chain(builder).cancel_on_err().output();
-        debug!("serialized output: {:?}", serialized_output);
         Ok(serialized_output)
     });
 

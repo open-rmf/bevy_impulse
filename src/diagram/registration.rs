@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::{
     any::{type_name, Any, TypeId},
     borrow::Borrow,
@@ -233,11 +250,11 @@ impl NodeRegistration {
 }
 
 type CreateNodeFn =
-    RefCell<Box<dyn FnMut(&mut Builder, serde_json::Value) -> Result<DynNode, DiagramErrorCode>>>;
+    RefCell<Box<dyn FnMut(&mut Builder, JsonMessage) -> Result<DynNode, DiagramErrorCode>>>;
 type DeserializeFn =
-    fn(&mut Builder, Output<serde_json::Value>) -> Result<DynOutput, DiagramErrorCode>;
+    fn(&mut Builder, Output<JsonMessage>) -> Result<DynOutput, DiagramErrorCode>;
 type SerializeFn =
-    fn(&mut Builder, DynOutput) -> Result<Output<serde_json::Value>, DiagramErrorCode>;
+    fn(&mut Builder, DynOutput) -> Result<Output<JsonMessage>, DiagramErrorCode>;
 type ForkCloneFn = fn(&mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 type ForkResultFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type SplitFn = fn(&mut Builder, &SplitSchema) -> Result<DynSplit, DiagramErrorCode>;

@@ -44,9 +44,9 @@ impl BuildDiagramOperation for ForkResultSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(input_sample) = ctx.construction.get_sample_output_into_target(id) else {
+        let Some(input_sample) = ctx.get_sample_output_into_target(id) else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
@@ -56,11 +56,9 @@ impl BuildDiagramOperation for ForkResultSchema {
             .registry
             .messages
             .fork_result(builder, input_sample.message_info())?;
-        ctx.construction.set_input_for_target(id, fork.input)?;
-        ctx.construction
-            .add_output_into_target(self.ok.clone(), fork.ok);
-        ctx.construction
-            .add_output_into_target(self.err.clone(), fork.err);
+        ctx.set_input_for_target(id, fork.input)?;
+        ctx.add_output_into_target(self.ok.clone(), fork.ok);
+        ctx.add_output_into_target(self.err.clone(), fork.err);
         Ok(BuildStatus::Finished)
     }
 }

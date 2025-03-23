@@ -59,7 +59,7 @@ impl BuildDiagramOperation for TransformSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let program = Program::compile(&self.cel).map_err(TransformError::Parse)?;
         let node = builder.create_map_block(
@@ -81,8 +81,7 @@ impl BuildDiagramOperation for TransformSchema {
             let (ok, _) = node.output.chain(builder).fork_result(
                 |ok| ok.output(),
                 |err| {
-                    ctx.construction
-                        .add_output_into_target(on_error.clone(), err.output().into());
+                    ctx.add_output_into_target(on_error.clone(), err.output().into());
                 },
             );
             ok
@@ -91,20 +90,18 @@ impl BuildDiagramOperation for TransformSchema {
         };
 
         let input = node.input;
-        ctx.construction
-            .set_connect_into_target(id, move |_, output, builder, ctx| {
-                let json_output = if output.message_info() == &TypeInfo::of::<JsonMessage>() {
-                    output.into_output()?
-                } else {
-                    ctx.registry.messages.serialize(builder, output)?
-                };
+        ctx.set_connect_into_target_callback(id, move |output, builder, ctx| {
+            let json_output = if output.message_info() == &TypeInfo::of::<JsonMessage>() {
+                output.into_output()?
+            } else {
+                ctx.registry.messages.serialize(builder, output)?
+            };
 
-                builder.connect(json_output, input);
-                Ok(())
-            })?;
+            builder.connect(json_output, input);
+            Ok(())
+        })?;
 
-        ctx.construction
-            .add_output_into_target(self.next.clone(), output.into());
+        ctx.add_output_into_target(self.next.clone(), output.into());
         Ok(BuildStatus::Finished)
     }
 }

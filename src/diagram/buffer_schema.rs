@@ -39,12 +39,12 @@ impl BuildDiagramOperation for BufferSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let message_info = if self.serialize.is_some_and(|v| v) {
             TypeInfo::of::<JsonMessage>()
         } else {
-            let Some(sample_input) = ctx.construction.get_sample_output_into_target(id) else {
+            let Some(sample_input) = ctx.get_sample_output_into_target(id) else {
                 // There are no outputs ready for this target, so we can't do
                 // anything yet. The builder should try again later.
 
@@ -61,7 +61,7 @@ impl BuildDiagramOperation for BufferSchema {
             ctx.registry
                 .messages
                 .create_buffer(builder, &message_info, self.settings.clone())?;
-        ctx.construction.set_buffer_for_operation(id, buffer)?;
+        ctx.set_buffer_for_operation(id, buffer)?;
         Ok(BuildStatus::Finished)
     }
 }
@@ -83,9 +83,9 @@ impl BuildDiagramOperation for BufferAccessSchema {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
@@ -95,9 +95,8 @@ impl BuildDiagramOperation for BufferAccessSchema {
             .registry
             .messages
             .with_buffer_access(builder, &buffer_map, target_type)?;
-        ctx.construction.set_input_for_target(id, node.input)?;
-        ctx.construction
-            .add_output_into_target(self.next.clone(), node.output);
+        ctx.set_input_for_target(id, node.input)?;
+        ctx.add_output_into_target(self.next.clone(), node.output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -133,9 +132,9 @@ impl BuildDiagramOperation for ListenSchema {
         &self,
         _: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
@@ -145,8 +144,7 @@ impl BuildDiagramOperation for ListenSchema {
             .registry
             .messages
             .listen(builder, &buffer_map, target_type)?;
-        ctx.construction
-            .add_output_into_target(self.next.clone(), output);
+        ctx.add_output_into_target(self.next.clone(), output);
         Ok(BuildStatus::Finished)
     }
 }

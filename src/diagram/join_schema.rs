@@ -43,13 +43,13 @@ impl BuildDiagramOperation for JoinSchema {
         &self,
         _: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
@@ -60,8 +60,7 @@ impl BuildDiagramOperation for JoinSchema {
             .registry
             .messages
             .join(builder, &buffer_map, target_type)?;
-        ctx.construction
-            .add_output_into_target(self.next.clone(), output);
+        ctx.add_output_into_target(self.next.clone(), output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -80,20 +79,19 @@ impl BuildDiagramOperation for SerializedJoinSchema {
         &self,
         _: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let buffer_map = match ctx.construction.create_buffer_map(&self.buffers) {
+        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
         let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
-        ctx.construction
-            .add_output_into_target(self.next.clone(), output.into());
+        ctx.add_output_into_target(self.next.clone(), output.into());
 
         Ok(BuildStatus::Finished)
     }

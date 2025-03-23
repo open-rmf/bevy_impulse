@@ -680,7 +680,7 @@ impl BuildDiagramOperation for DiagramOperation {
         &self,
         id: &OperationId,
         builder: &mut Builder,
-        ctx: DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match self {
             Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
@@ -742,9 +742,10 @@ pub struct Diagram {
     #[schemars(schema_with = "schema_with_string")]
     version: semver::Version,
 
-    /// Signifies the start of a workflow.
+    /// Indicates where the workflow should start running.
     start: NextOperation,
 
+    /// Operations that define the workflow
     ops: HashMap<OperationId, DiagramOperation>,
 }
 
@@ -1015,6 +1016,9 @@ pub enum DiagramErrorCode {
         /// Reasons that operations were unable to make progress building
         reasons: HashMap<OperationId, Cow<'static, str>>,
     },
+
+    #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
+    ExcessiveIterations,
 }
 
 impl From<DiagramErrorCode> for DiagramError {
