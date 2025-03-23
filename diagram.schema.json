@@ -8,14 +8,27 @@
     "version"
   ],
   "properties": {
+    "on_implicit_error": {
+      "description": "To simplify diagram definitions, the diagram workflow builder will sometimes insert implicit operations into the workflow, such as implicit serializing and deserializing. These implicit operations may be fallible.\n\nThis field indicates how a failed implicit operation should be handled. If left unspecified, an implicit error will cause the entire workflow to be cancelled.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/NextOperation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ops": {
+      "description": "Operations that define the workflow",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/definitions/DiagramOperation"
       }
     },
     "start": {
-      "description": "Signifies the start of a workflow.",
+      "description": "Indicates where the workflow should start running.",
       "allOf": [
         {
           "$ref": "#/definitions/NextOperation"
@@ -62,7 +75,7 @@
     "BuiltinTarget": {
       "oneOf": [
         {
-          "description": "Use the output to terminate the workflow. This will be the return value of the workflow.",
+          "description": "Use the output to terminate the current scope. The value passed into this operation will be the return value of the scope.",
           "type": "string",
           "enum": [
             "terminate"
@@ -73,6 +86,13 @@
           "type": "string",
           "enum": [
             "dispose"
+          ]
+        },
+        {
+          "description": "When triggered, cancel the current scope. If this is an inner scope of a workflow then the parent scope will see a disposal happen. If this is the root scope of a workflow then the whole workflow will cancel.",
+          "type": "string",
+          "enum": [
+            "cancel"
           ]
         }
       ]
@@ -288,6 +308,18 @@
             },
             "next": {
               "$ref": "#/definitions/NextOperation"
+            },
+            "on_error": {
+              "description": "Specify what happens if an error occurs during the transformation. By default an error will cause the entire workflow to cancel. If you specify a target for on_error, then an error message will be sent to that target. You can set this to `{ \"builtin\": \"dispose\" }` to simply ignore errors.",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/NextOperation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "type": "string",

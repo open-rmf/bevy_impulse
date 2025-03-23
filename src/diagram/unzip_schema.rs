@@ -24,7 +24,7 @@ use crate::Builder;
 use super::{
     impls::DefaultImplMarker, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationId, PerformForkClone,
-    SerializeMessage,
+    SerializeMessage, TypeInfo,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -49,7 +49,18 @@ impl BuildDiagramOperation for UnzipSchema {
         let unzip = ctx
             .registry
             .messages
-            .unzip(builder, sample_input.message_info())?;
+            .unzip(sample_input.message_info())?;
+        let actual_output = unzip.output_types();
+        if actual_output.len() != self.next.len() {
+            return Err(DiagramErrorCode::UnzipMismatch {
+                expected: self.next.len(),
+                actual: unzip.output_types().len(),
+                elements: actual_output,
+            });
+        }
+
+        let unzip = unzip.perform_unzip(builder)?;
+
         ctx.set_input_for_target(id, unzip.input)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
             ctx.add_output_into_target(target.clone(), output);
@@ -65,7 +76,7 @@ pub struct DynUnzip {
 
 pub trait PerformUnzip {
     /// Returns a list of type names that this message unzips to.
-    fn output_types(&self) -> Vec<&'static str>;
+    fn output_types(&self) -> Vec<TypeInfo>;
 
     fn perform_unzip(&self, builder: &mut Builder) -> Result<DynUnzip, DiagramErrorCode>;
 
@@ -81,9 +92,9 @@ macro_rules! dyn_unzip_impl {
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
             Cloneable: $(PerformForkClone<$P> +)* $(PerformForkClone<Vec<$P>> +)*,
         {
-            fn output_types(&self) -> Vec<&'static str> {
+            fn output_types(&self) -> Vec<TypeInfo> {
                 vec![$(
-                    std::any::type_name::<$P>(),
+                    TypeInfo::of::<$P>(),
                 )*]
             }
 
@@ -192,7 +203,7 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err.code, DiagramErrorCode::NotUnzippable));
+        assert!(matches!(err.code, DiagramErrorCode::UnzipMismatch { expected: 3, actual: 2, .. }));
     }
 
     #[test]
@@ -238,7 +249,10 @@ mod tests {
                 },
                 "unzip": {
                     "type": "unzip",
-                    "next": ["op2"],
+                    "next": [
+                        "op2",
+                        { "builtin": "dispose" },
+                    ],
                 },
                 "op2": {
                     "type": "node",

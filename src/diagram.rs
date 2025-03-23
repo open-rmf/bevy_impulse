@@ -42,7 +42,7 @@ pub use split_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
-use unzip_schema::{DynUnzip, UnzipSchema};
+use unzip_schema::UnzipSchema;
 use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
 
 // ----------
@@ -973,6 +973,9 @@ pub enum DiagramErrorCode {
     #[error("The number of unzip slots in response does not match the number of inputs.")]
     NotUnzippable,
 
+    #[error("The number of elements in the unzip expected by the diagram [{expected}] is different from the real number [{actual}]")]
+    UnzipMismatch { expected: usize, actual: usize, elements: Vec<TypeInfo> },
+
     #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
     CannotForkResult,
 
@@ -1100,7 +1103,7 @@ mod tests {
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable(_)),
+            matches!(err.code, DiagramErrorCode::TypeMismatch{ .. }),
             "{:?}",
             err
         );
@@ -1296,7 +1299,10 @@ mod tests {
                 },
                 "unzip": {
                     "type": "unzip",
-                    "next": ["transform"],
+                    "next": [
+                        "transform",
+                        { "builtin": "dispose" },
+                    ],
                 },
                 "transform": {
                     "type": "transform",

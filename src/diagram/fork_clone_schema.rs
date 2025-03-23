@@ -91,7 +91,7 @@ where
     }
 }
 
-pub(super) struct DynForkCloneOutput {
+pub struct DynForkCloneOutput {
     scope: Entity,
     source: Entity,
     message_info: TypeInfo,
@@ -127,9 +127,9 @@ impl<T: 'static + Send + Sync + Any> From<ForkCloneOutput<T>> for DynForkCloneOu
     }
 }
 
-pub(super) struct DynForkClone {
-    pub(super) input: DynInputSlot,
-    pub(super) outputs: DynForkCloneOutput,
+pub struct DynForkClone {
+    pub input: DynInputSlot,
+    pub outputs: DynForkCloneOutput,
 }
 
 #[cfg(test)]

@@ -346,7 +346,7 @@ impl ImplicitStringify {
         if string_input.message_info() != &TypeInfo::of::<String>() {
             return Err(DiagramErrorCode::TypeMismatch {
                 source_type: TypeInfo::of::<String>(),
-                target_type: *string_input.message_info()
+                target_type: *string_input.message_info(),
             });
         }
 

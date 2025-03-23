@@ -36,7 +36,3 @@ impl<T> DefaultImplMarker<T> {
 /// A struct to provide "not supported" implementations for various operations.
 pub struct NotSupported;
 
-/// A struct to provide "not supported" implementations for various operations.
-pub struct NotSupportedMarker<T> {
-    _unused: PhantomData<T>,
-}

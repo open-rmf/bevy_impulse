@@ -16,7 +16,7 @@
 */
 
 use std::{
-    any::{type_name, Any, TypeId},
+    any::{type_name, Any},
     borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
@@ -51,7 +51,7 @@ use super::{
     type_info::TypeInfo,
     unzip_schema::PerformUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
-    DynForkClone, DynForkResult, DynSplit, DynType, DynUnzip, JsonRegistration,
+    DynForkClone, DynForkResult, DynSplit, DynType, JsonRegistration,
     OpaqueMessageDeserializer, OpaqueMessageSerializer, RegisterJson, RegisterSplit,
     SerializeMessage, SplitSchema, TransformError,
 };
@@ -777,14 +777,6 @@ impl MessageOperation {
         f(builder)
     }
 
-    pub(super) fn unzip(&self, builder: &mut Builder) -> Result<DynUnzip, DiagramErrorCode> {
-        let unzip_impl = &self
-            .unzip_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::NotUnzippable)?;
-        unzip_impl.perform_unzip(builder)
-    }
-
     pub(super) fn fork_result(
         &self,
         builder: &mut Builder,
@@ -1049,16 +1041,15 @@ impl MessageRegistry {
         true
     }
 
-    pub(super) fn unzip(
-        &self,
-        builder: &mut Builder,
+    pub(super) fn unzip<'a>(
+        &'a self,
         message_info: &TypeInfo,
-    ) -> Result<DynUnzip, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(message_info) {
-            reg.operations.unzip(builder)
-        } else {
-            Err(DiagramErrorCode::NotUnzippable)
-        }
+    ) -> Result<&'a dyn PerformUnzip, DiagramErrorCode> {
+        self.messages
+            .get(message_info)
+            .and_then(|reg| reg.operations.unzip_impl.as_ref())
+            .map(|unzip| -> &'a (dyn PerformUnzip) { unzip.as_ref() })
+            .ok_or(DiagramErrorCode::NotUnzippable)
     }
 
     /// Register a unzip function if not already registered, returns true if the new
