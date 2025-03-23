@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    impls::DefaultImplMarker, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
+    supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
     DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
     MessageRegistry, NextOperation, OperationId, PerformForkClone, SerializeMessage,
 };
@@ -67,7 +67,7 @@ pub trait RegisterForkResult {
     fn on_register(registry: &mut MessageRegistry) -> bool;
 }
 
-impl<T, E, S, C> RegisterForkResult for DefaultImplMarker<(Result<T, E>, S, C)>
+impl<T, E, S, C> RegisterForkResult for Supported<(Result<T, E>, S, C)>
 where
     T: Send + Sync + 'static,
     E: Send + Sync + 'static,

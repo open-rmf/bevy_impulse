@@ -22,8 +22,8 @@ impl DiagramTestFixture {
         }
     }
 
-    /// Equivalent to `self.spawn_workflow::<()>(diagram)`
-    pub(super) fn spawn_io_workflow(
+    /// Equivalent to `self.spawn_workflow::<JsonMessage, JsonMessage>(diagram)`
+    pub(super) fn spawn_json_io_workflow(
         &mut self,
         diagram: &Diagram,
     ) -> Result<Service<JsonMessage, JsonMessage, ()>, DiagramError> {
@@ -40,7 +40,7 @@ impl DiagramTestFixture {
         diagram: &Diagram,
         request: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn Error>> {
-        let workflow = self.spawn_io_workflow(diagram)?;
+        let workflow = self.spawn_json_io_workflow(diagram)?;
         let mut promise = self
             .context
             .command(|cmds| cmds.request(request, workflow).take_response());

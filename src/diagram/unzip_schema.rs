@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    impls::DefaultImplMarker, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationId, PerformForkClone,
     SerializeMessage, TypeInfo,
 };
@@ -86,7 +86,7 @@ pub trait PerformUnzip {
 
 macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*, Serializer, Cloneable> PerformUnzip for DefaultImplMarker<(($($P,)*), Serializer, Cloneable)>
+        impl<$($P),*, Serializer, Cloneable> PerformUnzip for Supported<(($($P,)*), Serializer, Cloneable)>
         where
             $($P: Send + Sync + 'static),*,
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
@@ -158,7 +158,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::NotUnzippable),
             "{}",
@@ -202,7 +202,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err.code, DiagramErrorCode::UnzipMismatch { expected: 3, actual: 2, .. }));
     }
 

@@ -27,7 +27,7 @@ use crate::{
 };
 
 use super::{
-    impls::DefaultImplMarker, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
+    supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
     DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
     MessageRegistry, NextOperation, OperationId, PerformForkClone, SerializeMessage,
 };
@@ -196,7 +196,7 @@ pub trait RegisterSplit {
     fn on_register(registry: &mut MessageRegistry);
 }
 
-impl<T, Serializer, Cloneable> RegisterSplit for DefaultImplMarker<(T, Serializer, Cloneable)>
+impl<T, Serializer, Cloneable> RegisterSplit for Supported<(T, Serializer, Cloneable)>
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,

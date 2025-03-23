@@ -21,6 +21,7 @@ use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{
+    supported::*,
     type_info::TypeInfo, MessageRegistration, DynInputSlot, DynOutput, DiagramContext,
     DiagramErrorCode, JsonMessage, DynForkResult, MessageRegistry,
 };
@@ -53,10 +54,7 @@ pub trait SerializeMessage<T> {
     );
 }
 
-#[derive(Default)]
-pub struct DefaultSerializer;
-
-impl<T> SerializeMessage<T> for DefaultSerializer
+impl<T> SerializeMessage<T> for Supported
 where
     T: Serialize + DynType + Send + Sync + 'static,
 {
@@ -98,10 +96,7 @@ pub trait DeserializeMessage<T> {
     );
 }
 
-#[derive(Default)]
-pub struct DefaultDeserializer;
-
-impl<T> DeserializeMessage<T> for DefaultDeserializer
+impl<T> DeserializeMessage<T> for Supported
 where
     T: 'static + Send + Sync + DeserializeOwned + DynType,
 {
@@ -136,10 +131,7 @@ where
     }
 }
 
-#[derive(Default)]
-pub struct OpaqueMessageSerializer;
-
-impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
+impl<T> SerializeMessage<T> for NotSupported {
     fn register_serialize(
         _: &mut HashMap<TypeInfo, MessageRegistration>,
         _: &mut SchemaGenerator,
@@ -148,10 +140,7 @@ impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
     }
 }
 
-#[derive(Default)]
-pub struct OpaqueMessageDeserializer;
-
-impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
+impl<T> DeserializeMessage<T> for NotSupported{
     fn register_deserialize(
         _: &mut HashMap<TypeInfo, MessageRegistration>,
         _: &mut SchemaGenerator,
@@ -168,7 +157,7 @@ pub struct JsonRegistration<Serializer, Deserializer> {
     _ignore: std::marker::PhantomData<fn(Serializer, Deserializer)>,
 }
 
-impl<T> RegisterJson<T> for JsonRegistration<DefaultSerializer, DefaultDeserializer>
+impl<T> RegisterJson<T> for JsonRegistration<Supported, Supported>
 where
     T: 'static + Send + Sync + Serialize + DeserializeOwned,
 {
@@ -177,19 +166,19 @@ where
     }
 }
 
-impl<T> RegisterJson<T> for JsonRegistration<DefaultSerializer, OpaqueMessageDeserializer> {
+impl<T> RegisterJson<T> for JsonRegistration<Supported, NotSupported> {
     fn register_json() {
         // Do nothing
     }
 }
 
-impl<T> RegisterJson<T> for JsonRegistration<OpaqueMessageSerializer, DefaultDeserializer> {
+impl<T> RegisterJson<T> for JsonRegistration<NotSupported, Supported> {
     fn register_json() {
         // Do nothing
     }
 }
 
-impl<T> RegisterJson<T> for JsonRegistration<OpaqueMessageSerializer, OpaqueMessageDeserializer> {
+impl<T> RegisterJson<T> for JsonRegistration<NotSupported, NotSupported> {
     fn register_json() {
         // Do nothing
     }

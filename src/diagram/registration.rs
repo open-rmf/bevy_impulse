@@ -46,13 +46,13 @@ use super::{
     buffer_schema::BufferAccessRequest,
     fork_clone_schema::PerformForkClone,
     fork_result_schema::RegisterForkResult,
-    impls::{DefaultImpl, DefaultImplMarker, NotSupported},
+    supported::*,
     register_json,
     type_info::TypeInfo,
     unzip_schema::PerformUnzip,
-    BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
+    BuilderId, DeserializeMessage, DiagramErrorCode,
     DynForkClone, DynForkResult, DynSplit, DynType, JsonRegistration,
-    OpaqueMessageDeserializer, OpaqueMessageSerializer, RegisterJson, RegisterSplit,
+    RegisterJson, RegisterSplit,
     SerializeMessage, SplitSchema, TransformError,
 };
 
@@ -366,7 +366,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     /// both serializing AND deserializing.
     pub fn no_deserializing(
         self,
-    ) -> CommonOperations<'a, OpaqueMessageDeserializer, SerializeImpl, Cloneable> {
+    ) -> CommonOperations<'a, NotSupported, SerializeImpl, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -383,7 +383,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     /// both serializing AND deserializing.
     pub fn no_serializing(
         self,
-    ) -> CommonOperations<'a, DeserializeImpl, OpaqueMessageSerializer, Cloneable> {
+    ) -> CommonOperations<'a, DeserializeImpl, NotSupported, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -423,17 +423,17 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, DefaultSerializer, DefaultImpl)>: PerformUnzip,
+        Supported<(Message, Supported, Supported)>: PerformUnzip,
     {
         self.data
-            .register_unzip::<Message, DefaultSerializer, DefaultImpl>();
+            .register_unzip::<Message, Supported, Supported>();
         self
     }
 
     /// Mark the message as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_minimal(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, NotSupported, NotSupported)>: PerformUnzip,
+        Supported<(Message, NotSupported, NotSupported)>: PerformUnzip,
     {
         self.data
             .register_unzip::<Message, NotSupported, NotSupported>();
@@ -444,10 +444,10 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, DefaultSerializer, DefaultImpl)>: RegisterForkResult,
+        Supported<(Message, Supported, Supported)>: RegisterForkResult,
     {
         self.data
-            .register_fork_result::<DefaultImplMarker<(Message, DefaultSerializer, DefaultImpl)>>();
+            .register_fork_result::<Supported<(Message, Supported, Supported)>>();
         self
     }
 
@@ -455,10 +455,10 @@ where
     /// or cloning for the [`Ok`] or [`Err`] variants of the message.
     pub fn with_fork_result_minimal(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, OpaqueMessageSerializer, NotSupported)>: RegisterForkResult,
+        Supported<(Message, NotSupported, NotSupported)>: RegisterForkResult,
     {
         self.data
-            .register_fork_result::<DefaultImplMarker<(Message, OpaqueMessageSerializer, NotSupported)>>();
+            .register_fork_result::<Supported<(Message, NotSupported, NotSupported)>>();
         self
     }
 
@@ -466,10 +466,10 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, DefaultSerializer, DefaultImpl)>: RegisterSplit,
+        Supported<(Message, Supported, Supported)>: RegisterSplit,
     {
         self.data
-            .register_split::<Message, DefaultSerializer, DefaultImpl>();
+            .register_split::<Message, Supported, Supported>();
         self
     }
 
@@ -477,7 +477,7 @@ where
     /// are unserializable.
     pub fn with_split_minimal(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Message, NotSupported, NotSupported)>: RegisterSplit,
+        Supported<(Message, NotSupported, NotSupported)>: RegisterSplit,
     {
         self.data
             .register_split::<Message, NotSupported, NotSupported>();
@@ -556,7 +556,7 @@ where
     {
         self.registry
             .messages
-            .register_fork_clone::<Request, DefaultImpl>();
+            .register_fork_clone::<Request, Supported>();
         self
     }
 
@@ -568,7 +568,7 @@ where
     {
         self.registry
             .messages
-            .register_deserialize::<Request, DefaultDeserializer>();
+            .register_deserialize::<Request, Supported>();
         self
     }
 
@@ -591,7 +591,7 @@ where
     {
         self.registry
             .messages
-            .register_fork_clone::<Response, DefaultImpl>();
+            .register_fork_clone::<Response, Supported>();
         self
     }
 
@@ -603,7 +603,7 @@ where
     {
         self.registry
             .messages
-            .register_serialize::<Response, DefaultSerializer>();
+            .register_serialize::<Response, Supported>();
         self
     }
 
@@ -611,7 +611,7 @@ where
     /// to be able to be connected to a "Unzip" operation.
     pub fn with_unzip(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, DefaultSerializer, DefaultImpl)>: PerformUnzip,
+        Supported<(Response, Supported, Supported)>: PerformUnzip,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_unzip();
         self
@@ -620,7 +620,7 @@ where
     /// Mark the node as having an unzippable response whose elements are not serializable.
     pub fn with_unzip_unserializable(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, NotSupported, NotSupported)>: PerformUnzip,
+        Supported<(Response, NotSupported, NotSupported)>: PerformUnzip,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_unzip_minimal();
         self
@@ -630,7 +630,7 @@ where
     /// to be able to be connected to a "Fork Result" operation.
     pub fn with_fork_result(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, DefaultSerializer, DefaultImpl)>: RegisterForkResult,
+        Supported<(Response, Supported, Supported)>: RegisterForkResult,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_fork_result();
         self
@@ -640,7 +640,7 @@ where
     /// or cloning for the [`Ok`] or [`Err`] variants of the message.
     pub fn with_fork_result_minimal(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, OpaqueMessageSerializer, NotSupported)>: RegisterForkResult,
+        Supported<(Response, NotSupported, NotSupported)>: RegisterForkResult,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_fork_result_minimal();
         self
@@ -650,7 +650,7 @@ where
     /// for the node to be able to be connected to a "Split" operation.
     pub fn with_split(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, DefaultSerializer, DefaultImpl)>: RegisterSplit,
+        Supported<(Response, Supported, Supported)>: RegisterSplit,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_split();
         self
@@ -660,7 +660,7 @@ where
     /// are unserializable.
     pub fn with_split_unserializable(&mut self) -> &mut Self
     where
-        DefaultImplMarker<(Response, NotSupported, NotSupported)>: RegisterSplit,
+        Supported<(Response, NotSupported, NotSupported)>: RegisterSplit,
     {
         MessageRegistrationBuilder::new(&mut self.registry.messages).with_split_minimal();
         self
@@ -1059,9 +1059,9 @@ impl MessageRegistry {
         T: Send + Sync + 'static + Any,
         Serializer: 'static,
         Cloneable: 'static,
-        DefaultImplMarker<(T, Serializer, Cloneable)>: PerformUnzip,
+        Supported<(T, Serializer, Cloneable)>: PerformUnzip,
     {
-        let unzip_impl = DefaultImplMarker::<(T, Serializer, Cloneable)>::new();
+        let unzip_impl = Supported::<(T, Serializer, Cloneable)>::new();
         unzip_impl.on_register(self);
 
         let ops = &mut self
@@ -1115,9 +1115,9 @@ impl MessageRegistry {
     pub(super) fn register_split<T, S, C>(&mut self)
     where
         T: Send + Sync + 'static + Any,
-        DefaultImplMarker<(T, S, C)>: RegisterSplit,
+        Supported<(T, S, C)>: RegisterSplit,
     {
-        DefaultImplMarker::<(T, S, C)>::on_register(self);
+        Supported::<(T, S, C)>::on_register(self);
     }
 
     pub fn create_buffer(
@@ -1434,7 +1434,7 @@ impl DiagramElementRegistry {
     /// be connected to the workflow termination.
     pub fn opt_out(
         &mut self,
-    ) -> CommonOperations<DefaultDeserializer, DefaultSerializer, DefaultImpl> {
+    ) -> CommonOperations<Supported, Supported, Supported> {
         CommonOperations {
             registry: self,
             _ignore: Default::default(),

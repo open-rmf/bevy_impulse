@@ -15,21 +15,14 @@
  *
 */
 
-use std::marker::PhantomData;
-
 /// A struct to provide the default implementation for various operations.
-pub struct DefaultImpl;
-
-/// A struct to provide the default implementation for various operations.
-pub struct DefaultImplMarker<T> {
-    _unused: PhantomData<T>,
+pub struct Supported<T = ()> {
+    _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-impl<T> DefaultImplMarker<T> {
-    pub(super) fn new() -> Self {
-        Self {
-            _unused: Default::default(),
-        }
+impl<T> Supported<T> {
+    pub fn new() -> Self {
+        Self { _ignore: Default::default() }
     }
 }
 

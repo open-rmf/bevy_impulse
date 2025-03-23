@@ -18,7 +18,7 @@
 mod buffer_schema;
 mod fork_clone_schema;
 mod fork_result_schema;
-mod impls;
+mod supported;
 mod join_schema;
 mod node_schema;
 mod registration;
@@ -1101,7 +1101,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::TypeMismatch{ .. }),
             "{:?}",
@@ -1126,7 +1126,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::NotSerializable(_)),
             "{:?}",
@@ -1156,7 +1156,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(
                 err.code,

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::{AddBranchToForkClone, Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget};
 
 use super::{
-    impls::{DefaultImpl, NotSupported},
+    supported::*,
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput,
     NextOperation, OperationId, TypeInfo,
 };
@@ -75,7 +75,7 @@ impl<T> PerformForkClone<T> for NotSupported {
     }
 }
 
-impl<T> PerformForkClone<T> for DefaultImpl
+impl<T> PerformForkClone<T> for Supported
 where
     T: Send + Sync + 'static + Clone,
 {
@@ -166,7 +166,7 @@ mod tests {
             },
         }))
         .unwrap();
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::NotCloneable),
             "{:?}",

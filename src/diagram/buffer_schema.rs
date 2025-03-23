@@ -352,7 +352,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::IncompatibleBuffers(_)),
             "{:#?}",
