@@ -46,10 +46,13 @@ pub enum TransformError {
 pub struct TransformSchema {
     pub(super) cel: String,
     pub(super) next: NextOperation,
-    /// Specify what happens if an error occurs during the transformation. By
-    /// default an error will cause the entire workflow to cancel. If you specify
-    /// a target for on_error, then an error message will be sent to that target.
-    /// You can set this to `{ "builtin": "dispose" }` to simply ignore errors.
+    /// Specify what happens if an error occurs during the transformation. If
+    /// you specify a target for on_error, then an error message will be sent to
+    /// that target. You can set this to `{ "builtin": "dispose" }` to simply
+    /// ignore errors.
+    ///
+    /// If left unspecified, a failure will be treated like an implicit operation
+    /// failure and behave according to `on_implicit_error`.
     #[serde(default)]
     pub(super) on_error: Option<NextOperation>,
 }

@@ -532,7 +532,7 @@ pub enum DiagramOperation {
     /// property.
     ///
     /// Use the `"serialize": true` option to serialize the messages into
-    /// [`JsonMessage`][3] before they are inserted into the buffer. This
+    /// [`JsonMessage`] before they are inserted into the buffer. This
     /// allows any serializable message type to be pushed into the buffer. If
     /// left unspecified, the buffer will store the specific data type that gets
     /// pushed into it. If the buffer inputs are not being serialized, then all
@@ -540,7 +540,6 @@ pub enum DiagramOperation {
     ///
     /// [1]: crate::Buffer
     /// [2]: crate::BufferSettings
-    /// [3]: crate::JsonMessage
     ///
     /// # Examples
     /// ```
