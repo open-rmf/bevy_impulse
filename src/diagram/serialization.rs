@@ -15,22 +15,16 @@
  *
 */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
-use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
+use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
-use super::{type_info::TypeInfo, MessageRegistration};
-use crate::JsonBuffer;
-
-#[derive(thiserror::Error, Debug)]
-pub enum SerializationError {
-    #[error("not supported")]
-    NotSupported,
-
-    #[error(transparent)]
-    JsonError(#[from] serde_json::Error),
-}
+use super::{
+    type_info::TypeInfo, MessageRegistration, DynInputSlot, DynOutput, DiagramContext,
+    DiagramErrorCode, JsonMessage, DynForkResult, MessageRegistry,
+};
+use crate::{JsonBuffer, Builder};
 
 pub trait DynType {
     /// Returns the type name of the request. Note that the type name must be unique.
@@ -53,13 +47,10 @@ where
 }
 
 pub trait SerializeMessage<T> {
-    fn type_name() -> String;
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema>;
-
-    fn to_json(v: &T) -> Result<serde_json::Value, SerializationError>;
-
-    fn serializable() -> bool;
+    fn register_serialize(
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    );
 }
 
 #[derive(Default)]
@@ -69,32 +60,42 @@ impl<T> SerializeMessage<T> for DefaultSerializer
 where
     T: Serialize + DynType + Send + Sync + 'static,
 {
-    fn type_name() -> String {
-        T::type_name()
-    }
+    fn register_serialize(
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    ) {
+        let reg = &mut messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>());
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema> {
-        Some(T::json_schema(gen))
-    }
+        reg.operations.serialize_impl = Some(|builder| {
+            let serialize = builder.create_map_block(|message: T|
+                serde_json::to_value(message).map_err(|err| err.to_string())
+            );
 
-    fn to_json(v: &T) -> Result<serde_json::Value, SerializationError> {
-        serde_json::to_value(v).map_err(|err| SerializationError::from(err))
-    }
+            let (ok, err) = serialize.output.chain(builder)
+                .fork_result(|ok| ok.output(), |err| err.output());
 
-    fn serializable() -> bool {
-        // Register the ability to cast this message's buffer type
-        true
+            Ok(DynForkResult {
+                input: serialize.input.into(),
+                ok: ok.into(),
+                err: err.into()
+            })
+        });
+
+        // Serialize and deserialize both generate the schema, so check before
+        // generating it.
+        if reg.schema.is_none() {
+            reg.schema = Some(T::json_schema(schema_generator));
+        }
     }
 }
 
 pub trait DeserializeMessage<T> {
-    fn type_name() -> String;
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema>;
-
-    fn from_json(json: serde_json::Value) -> Result<T, SerializationError>;
-
-    fn deserializable() -> bool;
+    fn register_deserialize(
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    );
 }
 
 #[derive(Default)]
@@ -102,22 +103,36 @@ pub struct DefaultDeserializer;
 
 impl<T> DeserializeMessage<T> for DefaultDeserializer
 where
-    T: DeserializeOwned + DynType,
+    T: 'static + Send + Sync + DeserializeOwned + DynType,
 {
-    fn type_name() -> String {
-        T::type_name()
-    }
+    fn register_deserialize(
+        messages: &mut HashMap<TypeInfo, MessageRegistration>,
+        schema_generator: &mut SchemaGenerator,
+    ) {
+        let reg = &mut messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>());
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Option<Schema> {
-        Some(T::json_schema(gen))
-    }
+        reg.operations.deserialize_impl = Some(|builder| {
+            let deserialize = builder.create_map_block(|message: JsonMessage|
+                serde_json::from_value::<T>(message).map_err(|err| err.to_string())
+            );
 
-    fn from_json(json: serde_json::Value) -> Result<T, SerializationError> {
-        serde_json::from_value::<T>(json).map_err(|err| SerializationError::from(err))
-    }
+            let (ok, err) = deserialize.output.chain(builder)
+                .fork_result(|ok| ok.output(), |err| err.output());
 
-    fn deserializable() -> bool {
-        true
+            Ok(DynForkResult {
+                input: deserialize.input.into(),
+                ok: ok.into(),
+                err: err.into()
+            })
+        });
+
+        // Serialize and deserialize both generate the schema, so check before
+        // generating it.
+        if reg.schema.is_none() {
+            reg.schema = Some(T::json_schema(schema_generator));
+        }
     }
 }
 
@@ -125,20 +140,11 @@ where
 pub struct OpaqueMessageSerializer;
 
 impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
-    fn type_name() -> String {
-        std::any::type_name::<T>().to_string()
-    }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Option<Schema> {
-        None
-    }
-
-    fn to_json(_v: &T) -> Result<serde_json::Value, SerializationError> {
-        Err(SerializationError::NotSupported)
-    }
-
-    fn serializable() -> bool {
-        false
+    fn register_serialize(
+        _: &mut HashMap<TypeInfo, MessageRegistration>,
+        _: &mut SchemaGenerator,
+    ) {
+        // Do nothing
     }
 }
 
@@ -146,49 +152,12 @@ impl<T> SerializeMessage<T> for OpaqueMessageSerializer {
 pub struct OpaqueMessageDeserializer;
 
 impl<T> DeserializeMessage<T> for OpaqueMessageDeserializer {
-    fn type_name() -> String {
-        std::any::type_name::<T>().to_string()
+    fn register_deserialize(
+        _: &mut HashMap<TypeInfo, MessageRegistration>,
+        _: &mut SchemaGenerator,
+    ) {
+        // Do nothing
     }
-
-    fn json_schema(_gen: &mut SchemaGenerator) -> Option<Schema> {
-        None
-    }
-
-    fn from_json(_json: serde_json::Value) -> Result<T, SerializationError> {
-        Err(SerializationError::NotSupported)
-    }
-
-    fn deserializable() -> bool {
-        false
-    }
-}
-
-pub(super) fn register_serialize<T, Serializer>(
-    messages: &mut HashMap<TypeInfo, MessageRegistration>,
-    schema_generator: &mut SchemaGenerator,
-) -> bool
-where
-    T: Send + Sync + 'static,
-    Serializer: SerializeMessage<T>,
-{
-    let reg = &mut messages
-        .entry(TypeInfo::of::<T>())
-        .or_insert(MessageRegistration::new::<T>());
-    let ops = &mut reg.operations;
-    if !Serializer::serializable() || ops.serialize_impl.is_some() {
-        return false;
-    }
-
-    ops.serialize_impl = Some(|builder, output| {
-        let n = builder.create_map_block(|resp: T| Serializer::to_json(&resp));
-        builder.connect(output.into_output()?, n.input);
-        let serialized_output = n.output.chain(builder).cancel_on_err().output();
-        Ok(serialized_output)
-    });
-
-    reg.schema = Serializer::json_schema(schema_generator);
-
-    true
 }
 
 pub trait RegisterJson<T> {
@@ -231,4 +200,138 @@ where
     JsonRegistration<Serializer, Deserializer>: RegisterJson<T>,
 {
     JsonRegistration::<Serializer, Deserializer>::register_json();
+}
+
+pub struct ImplicitSerialization {
+    incoming_types: HashMap<TypeInfo, DynInputSlot>,
+    serialized_input: DynInputSlot,
+}
+
+impl ImplicitSerialization {
+    pub fn new(serialized_input: DynInputSlot) -> Result<Self, DiagramErrorCode> {
+        if serialized_input.message_info() != &TypeInfo::of::<JsonMessage>() {
+            return Err(DiagramErrorCode::TypeMismatch {
+                source_type: TypeInfo::of::<JsonMessage>(),
+                target_type: *serialized_input.message_info(),
+            });
+        }
+
+        Ok(Self {
+            serialized_input,
+            incoming_types: Default::default(),
+        })
+    }
+
+    /// Attempt to implicitly serialize an output before passing it into the
+    /// input slot that this implicit serialization targets.
+    ///
+    /// If the incoming type cannot be serialized then it will be returned
+    /// unchanged as the inner [`Err`].
+    pub fn try_implicit_serialize(
+        &mut self,
+        incoming: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<Result<(), DynOutput>, DiagramErrorCode> {
+        if incoming.message_info() == &TypeInfo::of::<JsonMessage>() {
+            incoming.connect_to(&self.serialized_input, builder)?;
+            return Ok(Ok(()));
+        }
+
+        let input = match self.incoming_types.entry(*incoming.message_info()) {
+            Entry::Occupied(input_slot) => input_slot.get().clone(),
+            Entry::Vacant(vacant) => {
+                let Some(serialize) = ctx.registry.messages.try_serialize(incoming.message_info(), builder)? else {
+                    // We are unable to serialize this type.
+                    return Ok(Err(incoming));
+                };
+
+                serialize.ok.connect_to(&self.serialized_input, builder)?;
+
+                let error_target = ctx.get_implicit_error_target();
+                ctx.add_output_into_target(error_target, serialize.err);
+
+                vacant.insert(serialize.input).clone()
+            }
+        };
+
+        incoming.connect_to(&input, builder)?;
+
+        Ok(Ok(()))
+    }
+
+    /// Implicitly serialize an output. If the incoming message cannot be
+    /// serialized then treat it is a diagram error.
+    pub fn implicit_serialize(
+        &mut self,
+        incoming: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        self.try_implicit_serialize(incoming, builder, ctx)?
+            .map_err(|incoming| {
+                DiagramErrorCode::NotSerializable(*incoming.message_info())
+            })
+    }
+}
+
+pub struct ImplicitDeserialization {
+    deserialized_input: DynInputSlot,
+    // The serialized input will only be created if a JsonMessage output
+    // attempts to connect to this operation. Otherwise there is no need to
+    // create it.
+    serialized_input: Option<DynInputSlot>,
+}
+
+impl ImplicitDeserialization {
+    pub fn try_new(deserialized_input: DynInputSlot, registration: &MessageRegistry) -> Result<Option<Self>, DiagramErrorCode> {
+        if registration.messages.get(&deserialized_input.message_info())
+            .and_then(|reg| reg.operations.deserialize_impl.as_ref())
+            .is_some()
+        {
+            return Ok(Some(Self { deserialized_input, serialized_input: None }));
+        }
+
+        return Ok(None);
+    }
+
+    pub fn implicit_deserialize(
+        &mut self,
+        incoming: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        if incoming.message_info() == self.deserialized_input.message_info() {
+            // Connect them directly because they match
+            return incoming.connect_to(&self.deserialized_input, builder);
+        }
+
+        if incoming.message_info() == &TypeInfo::of::<JsonMessage>() {
+            // Connect to the input for serialized messages
+            let serialized_input = match self.serialized_input {
+                Some(serialized_input) => serialized_input,
+                None => {
+                    let deserialize = ctx.registry.messages.deserialize(
+                        self.deserialized_input.message_info(),
+                        builder,
+                    )?;
+
+                    deserialize.ok.connect_to(&self.deserialized_input, builder)?;
+
+                    let error_target = ctx.get_implicit_error_target();
+                    ctx.add_output_into_target(error_target, deserialize.err);
+
+                    self.serialized_input = Some(deserialize.input);
+                    deserialize.input
+                }
+            };
+
+            return incoming.connect_to(&serialized_input, builder);
+        }
+
+        Err(DiagramErrorCode::TypeMismatch {
+            source_type: *incoming.message_info(),
+            target_type: *self.deserialized_input.message_info()
+        })
+    }
 }

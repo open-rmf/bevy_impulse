@@ -113,12 +113,17 @@ impl BufferInputs {
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum BuiltinTarget {
-    /// Use the output to terminate the workflow. This will be the return value
-    /// of the workflow.
+    /// Use the output to terminate the current scope. The value passed into
+    /// this operation will be the return value of the scope.
     Terminate,
 
     /// Dispose of the output.
     Dispose,
+
+    /// When triggered, cancel the current scope. If this is an inner scope of a
+    /// workflow then the parent scope will see a disposal happen. If this is
+    /// the root scope of a workflow then the whole workflow will cancel.
+    Cancel,
 }
 
 #[derive(
@@ -745,6 +750,16 @@ pub struct Diagram {
     /// Indicates where the workflow should start running.
     start: NextOperation,
 
+    /// To simplify diagram definitions, the diagram workflow builder will
+    /// sometimes insert implicit operations into the workflow, such as implicit
+    /// serializing and deserializing. These implicit operations may be fallible.
+    ///
+    /// This field indicates how a failed implicit operation should be handled.
+    /// If left unspecified, an implicit error will cause the entire workflow to
+    /// be cancelled.
+    #[serde(default)]
+    on_implicit_error: Option<NextOperation>,
+
     /// Operations that define the workflow
     ops: HashMap<OperationId, DiagramOperation>,
 }
@@ -947,7 +962,10 @@ pub enum DiagramErrorCode {
     MissingStartOrTerminate,
 
     #[error("Serialization was disabled for the target message type.")]
-    NotSerializable,
+    NotSerializable(TypeInfo),
+
+    #[error("Deserialization was disabled for the target message type.")]
+    NotDeserializable(TypeInfo),
 
     #[error("Cloning was disabled for the target message type.")]
     NotCloneable,
@@ -1002,14 +1020,8 @@ pub enum DiagramErrorCode {
     #[error(transparent)]
     ConnectionError(#[from] SplitConnectionError),
 
-    /// Use this only for errors that *should* never happen because of some preconditions.
-    /// If this error ever comes up, then it likely means that there is some logical flaws
-    /// in the algorithm.
-    #[error("an unknown error occurred while building the diagram, {0}")]
-    UnknownError(String),
-
     #[error("a type being used in the diagram was not registered {0}")]
-    UnregisteredType(&'static str),
+    UnregisteredType(TypeInfo),
 
     #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
     BuildHalted {
@@ -1030,11 +1042,21 @@ impl From<DiagramErrorCode> for DiagramError {
     }
 }
 
-#[macro_export]
-macro_rules! unknown_diagram_error {
-    () => {
-        DiagramErrorCode::UnknownError(format!("{}:{}", file!(), line!()))
-    };
+/// This is used as the message type when an implicit error occurs. You can
+/// serialize this into a [`JsonMessage`] to handle it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImplicitError {
+    /// What kind of operation had an implicit error.
+    pub operation: ImplicitErrorKind,
+    /// What was the message produced by the implicit error.
+    pub message: String,
+}
+
+/// What kinds of implicit operations can produce an error.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ImplicitErrorKind {
+    Serialization,
+    Deserialization,
 }
 
 #[cfg(test)]
@@ -1095,7 +1117,7 @@ mod tests {
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable),
+            matches!(err.code, DiagramErrorCode::NotSerializable(_)),
             "{:?}",
             err
         );
@@ -1120,7 +1142,7 @@ mod tests {
 
         let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable),
+            matches!(err.code, DiagramErrorCode::NotSerializable(_)),
             "{:?}",
             err
         );

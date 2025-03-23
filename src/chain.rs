@@ -30,6 +30,7 @@ use crate::{
     IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate,
     OperateSplit, OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish,
     Service, Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    OperateCancel, OperateQuietCancel,
 };
 
 pub mod fork_clone_builder;
@@ -347,6 +348,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         F::Streams: StreamPack,
     {
         self.then(filter_provider).cancel_on_none()
+    }
+
+    /// When the chain reaches this point, cancel the workflow and include
+    /// information about the value that triggered the cancellation. The input
+    /// type must implement [`ToString`].
+    ///
+    /// If you want to trigger a cancellation with a type that does not
+    /// implement [`ToString`] then use [`Self::trigger`] and then
+    /// [`Self::then_quiet_cancel`].
+    pub fn then_cancel(self)
+    where
+        T: ToString,
+    {
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            self.target,
+            OperateCancel::<T>::new(),
+        ));
     }
 
     /// Same as [`Chain::cancellation_filter`] but the chain will be disposed
@@ -1148,6 +1167,20 @@ where
     /// component from it (the second element of the tuple).
     pub fn value(self) -> Chain<'w, 's, 'a, 'b, V> {
         self.map_block(|(_, value)| value)
+    }
+}
+
+impl<'w, 's, 'a, 'b> Chain<'w, 's, 'a, 'b, ()> {
+    /// When the chain reaches this point, cancel the workflow.
+    ///
+    /// If you want to include information about the value that triggered the
+    /// cancellation, use [`Self::then_cancel`].
+    pub fn then_quiet_cancel(self) {
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            self.target,
+            OperateQuietCancel,
+        ));
     }
 }
 

@@ -26,10 +26,10 @@ use super::{
     MessageRegistry, NextOperation, OperationId, PerformForkClone, SerializeMessage,
 };
 
-pub(super) struct DynForkResult {
-    input: DynInputSlot,
-    ok: DynOutput,
-    err: DynOutput,
+pub struct DynForkResult {
+    pub input: DynInputSlot,
+    pub ok: DynOutput,
+    pub err: DynOutput,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

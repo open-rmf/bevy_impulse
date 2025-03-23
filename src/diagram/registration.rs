@@ -25,7 +25,7 @@ use std::{
 };
 
 use crate::{
-    unknown_diagram_error, Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
     Connect, InputSlot, Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
@@ -47,7 +47,7 @@ use super::{
     fork_clone_schema::PerformForkClone,
     fork_result_schema::RegisterForkResult,
     impls::{DefaultImpl, DefaultImplMarker, NotSupported},
-    register_json, register_serialize,
+    register_json,
     type_info::TypeInfo,
     unzip_schema::PerformUnzip,
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
@@ -251,10 +251,8 @@ impl NodeRegistration {
 
 type CreateNodeFn =
     RefCell<Box<dyn FnMut(&mut Builder, JsonMessage) -> Result<DynNode, DiagramErrorCode>>>;
-type DeserializeFn =
-    fn(&mut Builder, Output<JsonMessage>) -> Result<DynOutput, DiagramErrorCode>;
-type SerializeFn =
-    fn(&mut Builder, DynOutput) -> Result<Output<JsonMessage>, DiagramErrorCode>;
+type DeserializeFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
+type SerializeFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type ForkCloneFn = fn(&mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 type ForkResultFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type SplitFn = fn(&mut Builder, &SplitSchema) -> Result<DynSplit, DiagramErrorCode>;
@@ -262,6 +260,7 @@ type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode
 type BufferAccessFn = fn(&mut Builder, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
 type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 type CreateBufferFn = fn(&mut Builder, BufferSettings) -> AnyBuffer;
+type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 
 #[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
@@ -714,6 +713,7 @@ pub(super) struct MessageOperation {
     pub(super) buffer_access_impl: Option<BufferAccessFn>,
     pub(super) listen_impl: Option<ListenFn>,
     pub(super) create_buffer_impl: CreateBufferFn,
+    pub(super) create_trigger_impl: CreateTriggerFn,
 }
 
 impl MessageOperation {
@@ -734,32 +734,10 @@ impl MessageOperation {
             create_buffer_impl: |builder, settings| {
                 builder.create_buffer::<T>(settings).as_any_buffer()
             },
+            create_trigger_impl: |builder| {
+                builder.create_map_block(|_: T| ()).into()
+            }
         }
-    }
-
-    /// Try to deserialize `output` into `input_type`. If `output` is not `serde_json::Value`, this does nothing.
-    pub(super) fn deserialize(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<DynOutput, DiagramErrorCode> {
-        let f = self
-            .deserialize_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::NotSerializable)?;
-        f(builder, output.into_output()?)
-    }
-
-    pub(super) fn serialize(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
-        let f = self
-            .serialize_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::NotSerializable)?;
-        f(builder, output)
     }
 
     pub(super) fn fork_clone(
@@ -936,87 +914,66 @@ impl MessageRegistry {
         self.messages.get(&TypeInfo::of::<T>())
     }
 
-    pub(super) fn deserialize(
+    pub fn deserialize(
         &self,
         target_type: &TypeInfo,
         builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<DynOutput, DiagramErrorCode> {
-        if output.message_info() != &TypeInfo::of::<serde_json::Value>()
-            || output.message_info() == target_type
-        {
-            Ok(output)
-        } else if let Some(reg) = self.messages.get(target_type) {
-            reg.operations.deserialize(builder, output)
-        } else {
-            Err(DiagramErrorCode::NotSerializable)
-        }
+    ) -> Result<DynForkResult, DiagramErrorCode> {
+        self.try_deserialize(target_type, builder)?
+            .ok_or_else(|| DiagramErrorCode::NotDeserializable(*target_type))
+    }
+
+    pub fn try_deserialize(
+        &self,
+        target_type: &TypeInfo,
+        builder: &mut Builder,
+    ) -> Result<Option<DynForkResult>, DiagramErrorCode> {
+        self.messages
+            .get(target_type)
+            .and_then(|reg| reg.operations.deserialize_impl.as_ref())
+            .map(|deserialize| deserialize(builder))
+            .transpose()
     }
 
     /// Register a deserialize function if not already registered, returns true if the new
     /// function is registered.
-    pub fn register_deserialize<T, Deserializer>(&mut self) -> bool
+    pub fn register_deserialize<T, Deserializer>(&mut self)
     where
         T: Send + Sync + 'static + Any,
         Deserializer: DeserializeMessage<T>,
     {
-        let reg = self
-            .messages
-            .entry(TypeInfo::of::<T>())
-            .or_insert(MessageRegistration::new::<T>());
-        let ops = &mut reg.operations;
-        if !Deserializer::deserializable() || ops.deserialize_impl.is_some() {
-            return false;
-        }
-
-        debug!(
-            "register deserialize for type: {}, with deserializer: {}",
-            std::any::type_name::<T>(),
-            std::any::type_name::<Deserializer>()
-        );
-        ops.deserialize_impl = Some(|builder, output| {
-            debug!("deserialize output: {:?}", output);
-            let receiver =
-                builder.create_map_block(|json: serde_json::Value| Deserializer::from_json(json));
-            builder.connect(output, receiver.input);
-            let deserialized_output = receiver
-                .output
-                .chain(builder)
-                .cancel_on_err()
-                .output()
-                .into();
-            debug!("deserialized output: {:?}", deserialized_output);
-            Ok(deserialized_output)
-        });
-
-        reg.schema = Deserializer::json_schema(&mut self.schema_generator);
-
-        true
+        Deserializer::register_deserialize(&mut self.messages, &mut self.schema_generator);
     }
 
-    pub(super) fn serialize(
+    pub fn serialize(
         &self,
+        incoming_type: &TypeInfo,
         builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Output<serde_json::Value>, DiagramErrorCode> {
-        debug!("serialize {:?}", output);
-        if output.message_info == TypeInfo::of::<serde_json::Value>() {
-            output.into_output()
-        } else if let Some(reg) = self.messages.get(&output.message_info) {
-            reg.operations.serialize(builder, output)
-        } else {
-            Err(DiagramErrorCode::NotSerializable)
-        }
+    ) -> Result<DynForkResult, DiagramErrorCode> {
+        self.try_serialize(incoming_type, builder)?
+            .ok_or_else(|| DiagramErrorCode::NotSerializable(*incoming_type))
+    }
+
+    pub fn try_serialize(
+        &self,
+        incoming_type: &TypeInfo,
+        builder: &mut Builder,
+    ) -> Result<Option<DynForkResult>, DiagramErrorCode> {
+        self.messages
+            .get(incoming_type)
+            .and_then(|reg| reg.operations.serialize_impl.as_ref())
+            .map(|serialize| serialize(builder))
+            .transpose()
     }
 
     /// Register a serialize function if not already registered, returns true if the new
     /// function is registered.
-    pub fn register_serialize<T, Serializer>(&mut self) -> bool
+    pub fn register_serialize<T, Serializer>(&mut self)
     where
         T: Send + Sync + 'static + Any,
         Serializer: SerializeMessage<T>,
     {
-        register_serialize::<T, Serializer>(&mut self.messages, &mut self.schema_generator)
+        Serializer::register_serialize(&mut self.messages, &mut self.schema_generator)
     }
 
     pub(super) fn fork_clone(
@@ -1141,11 +1098,22 @@ impl MessageRegistry {
         let f = self
             .messages
             .get(message_info)
-            .ok_or_else(|| DiagramErrorCode::UnregisteredType(message_info.type_name))?
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*message_info))?
             .operations
             .create_buffer_impl;
 
         Ok(f(builder, settings))
+    }
+
+    pub fn trigger(
+        &self,
+        builder: &mut Builder,
+        message_info: &TypeInfo,
+    ) -> Result<DynNode, DiagramErrorCode> {
+        self.messages
+            .get(message_info)
+            .map(|reg| (reg.operations.create_trigger_impl)(builder))
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*message_info))
     }
 
     pub fn join(
@@ -1191,7 +1159,7 @@ impl MessageRegistry {
         if let Some(reg) = self.messages.get(&target_type) {
             reg.operations.with_buffer_access(builder, buffers)
         } else {
-            Err(DiagramErrorCode::UnregisteredType(target_type.type_name))
+            Err(DiagramErrorCode::UnregisteredType(target_type))
         }
     }
 

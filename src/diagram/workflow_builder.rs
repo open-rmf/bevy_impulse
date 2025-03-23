@@ -25,6 +25,7 @@ use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope,
 use super::{
     BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
+    ImplicitSerialization, ImplicitDeserialization,
 };
 
 #[derive(Default)]
@@ -132,9 +133,20 @@ impl<'a> DiagramContext<'a> {
         operation: &OperationId,
         input: DynInputSlot,
     ) -> Result<(), DiagramErrorCode> {
-        self.set_connect_into_target_callback(operation, move |output, builder, _| {
-            output.connect_to(&input, builder)
-        })
+        match self
+            .construction
+            .connect_into_target
+            .entry(NextOperation::Target(operation.clone()))
+        {
+            Entry::Occupied(_) => {
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(standard_input_connection(input, &self.registry)?);
+            }
+        }
+
+        Ok(())
     }
 
     /// Set a callback that will allow outputs to connect into this target. This
@@ -255,6 +267,7 @@ impl<'a> DiagramContext<'a> {
                 NextOperation::Builtin { builtin } => match builtin {
                     BuiltinTarget::Terminate => return Ok(TypeInfo::of::<JsonMessage>()),
                     BuiltinTarget::Dispose => return Err(DiagramErrorCode::UnknownTarget),
+                    BuiltinTarget::Cancel => return Ok(TypeInfo::of::<JsonMessage>()),
                 },
             }
         };
@@ -267,6 +280,12 @@ impl<'a> DiagramContext<'a> {
             .get_node_registration(&node_op.builder)?
             .request;
         Ok(target_type)
+    }
+
+    pub fn get_implicit_error_target(&self) -> NextOperation {
+        self.diagram.on_implicit_error.clone().unwrap_or(
+            NextOperation::Builtin { builtin: BuiltinTarget::Cancel }
+        )
     }
 }
 
@@ -395,53 +414,15 @@ where
 {
     let mut construction = DiagramConstruction::default();
 
-    {
-        let mut ctx = DiagramContext {
+    initialize_builtin_operations(
+        scope,
+        builder,
+        &mut DiagramContext {
             construction: &mut construction,
             diagram,
             registry,
-        };
-
-        // Put the input message into the diagram
-        ctx.add_output_into_target(diagram.start.clone(), scope.input.into());
-
-        // Put the builtin operations into the diagram
-        let terminate: DynInputSlot = scope.terminate.into();
-        construction.connect_into_target.insert(
-            NextOperation::Builtin {
-                builtin: BuiltinTarget::Terminate,
-            },
-            Box::new(ConnectionCallback(move |output, builder, ctx| {
-                if output.message_info() == terminate.message_info() {
-                    // If the message types match correctly then just connect as normal.
-                    output.connect_to(&terminate, builder)
-                } else if terminate.message_info() == &TypeInfo::of::<JsonMessage>() {
-                    // If the terminate type is JsonMessage then we'll automatically
-                    // try to serialize the terminating message.
-                    //
-                    // TODO(@mxgrey): We should support arbitrary conversions in the
-                    // future and use that here instead.
-                    let output: DynOutput = ctx.registry.messages.serialize(builder, output)?.into();
-                    output.connect_to(&terminate, builder)
-                } else {
-                    Err(DiagramErrorCode::TypeMismatch {
-                        source_type: *output.message_info(),
-                        target_type: *terminate.message_info(),
-                    })
-                }
-            })),
-        );
-
-        construction.connect_into_target.insert(
-            NextOperation::Builtin {
-                builtin: BuiltinTarget::Dispose,
-            },
-            Box::new(ConnectionCallback(move |_, _, _| {
-                // Do nothing since the output is being disposed
-                Ok(())
-            })),
-        );
-    }
+        },
+    )?;
 
     let mut unfinished_operations: Vec<&OperationId> = diagram.ops.keys().collect();
     let mut deferred_operations: Vec<(&OperationId, BuildStatus)> = Vec::new();
@@ -548,4 +529,131 @@ where
     }
 
     Ok(())
+}
+
+fn initialize_builtin_operations<Request, Response, Streams>(
+    scope: Scope<Request, Response, Streams>,
+    builder: &mut Builder,
+    ctx: &mut DiagramContext,
+) -> Result<(), DiagramError>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    // Put the input message into the diagram
+    ctx.add_output_into_target(ctx.diagram.start.clone(), scope.input.into());
+
+    // Add the terminate operation
+    ctx.construction.connect_into_target.insert(
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Terminate,
+        },
+        standard_input_connection(scope.terminate.into(), &ctx.registry)?,
+    );
+
+    // Add the dispose operation
+    ctx.construction.connect_into_target.insert(
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Dispose,
+        },
+        Box::new(ConnectionCallback(move |_, _, _| {
+            // Do nothing since the output is being disposed
+            Ok(())
+        })),
+    );
+
+    // Add the cancel operation
+    let regular_cancel: DynInputSlot = builder.create_cancel::<JsonMessage>().into();
+    let quiet_cancel: DynInputSlot = builder.create_quiet_cancel().into();
+    let mut implicit_serialization = ImplicitSerialization::new(regular_cancel)?;
+    let mut triggers: HashMap<TypeInfo, DynInputSlot> = HashMap::new();
+
+    ctx.construction.connect_into_target.insert(
+        NextOperation::Builtin { builtin: BuiltinTarget::Cancel },
+        Box::new(ConnectionCallback(move |output, builder, ctx| {
+            if output.message_info() == &TypeInfo::of::<JsonMessage>() {
+                // If we're receiving a JsonMessage then we can connect it
+                // directly to regular_cancel.
+                return output.connect_to(&regular_cancel, builder);
+            }
+
+            // Try to implicitly serialize the incoming message if the message
+            // type supports it. That way we can connect it to the regular
+            // cancel operation.
+            if let Err(output) = implicit_serialization.try_implicit_serialize(output, builder, ctx)? {
+                // In this case, the message type cannot be serialized so we'll
+                // change it into a trigger and then connect it to the quiet
+                // cancel instead.
+                let input_slot = match triggers.entry(*output.message_info()) {
+                    Entry::Occupied(occupied) => occupied.get().clone(),
+                    Entry::Vacant(vacant) => {
+                        let trigger = ctx.registry.messages.trigger(builder, output.message_info())?;
+                        trigger.output.connect_to(&quiet_cancel, builder)?;
+                        vacant.insert(trigger.input).clone()
+                    }
+                };
+
+                output.connect_to(&input_slot, builder)?;
+            }
+
+            Ok(())
+        })),
+    );
+
+    Ok(())
+}
+
+fn standard_input_connection(
+    input_slot: DynInputSlot,
+    registry: &DiagramElementRegistry,
+) -> Result<Box<dyn ConnectIntoTarget + 'static>, DiagramErrorCode> {
+    if input_slot.message_info() == &TypeInfo::of::<JsonMessage>() {
+        return Ok(Box::new(ImplicitSerialization::new(input_slot)?));
+    }
+
+    if let Some(deserialization) = ImplicitDeserialization::try_new(input_slot, &registry.messages)? {
+        // The target type is deserializable, so let's apply implicit deserialization
+        // to it.
+        return Ok(Box::new(deserialization));
+    }
+
+    Ok(Box::new(BasicConnect { input_slot }))
+}
+
+impl ConnectIntoTarget for ImplicitSerialization {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        self.implicit_serialize(output, builder, ctx)
+    }
+}
+
+impl ConnectIntoTarget for ImplicitDeserialization {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        self.implicit_deserialize(output, builder, ctx)
+    }
+}
+
+struct BasicConnect {
+    input_slot: DynInputSlot,
+}
+
+impl ConnectIntoTarget for BasicConnect {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        _: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        output.connect_to(&self.input_slot, builder)
+    }
 }

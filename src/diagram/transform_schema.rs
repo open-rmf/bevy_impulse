@@ -26,7 +26,7 @@ use crate::{Builder, JsonMessage};
 
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, NextOperation,
-    OperationId, TypeInfo,
+    OperationId,
 };
 
 #[derive(Error, Debug)]
@@ -77,31 +77,21 @@ impl BuildDiagramOperation for TransformSchema {
             },
         );
 
-        let output = if let Some(on_error) = &self.on_error {
-            let (ok, _) = node.output.chain(builder).fork_result(
-                |ok| ok.output(),
-                |err| {
-                    ctx.add_output_into_target(on_error.clone(), err.output().into());
-                },
-            );
-            ok
-        } else {
-            node.output.chain(builder).cancel_on_err().output()
-        };
+        let error_target = self.on_error.clone().unwrap_or(
+            // If no error target was explicitly given then treat this as an
+            // implicit error.
+            ctx.get_implicit_error_target()
+        );
 
-        let input = node.input;
-        ctx.set_connect_into_target_callback(id, move |output, builder, ctx| {
-            let json_output = if output.message_info() == &TypeInfo::of::<JsonMessage>() {
-                output.into_output()?
-            } else {
-                ctx.registry.messages.serialize(builder, output)?
-            };
+        let (ok, _) = node.output.chain(builder).fork_result(
+            |ok| ok.output(),
+            |err| {
+                ctx.add_output_into_target(error_target.clone(), err.output().into());
+            },
+        );
 
-            builder.connect(json_output, input);
-            Ok(())
-        })?;
-
-        ctx.add_output_into_target(self.next.clone(), output.into());
+        ctx.set_input_for_target(id, node.input.into())?;
+        ctx.add_output_into_target(self.next.clone(), ok.into());
         Ok(BuildStatus::Finished)
     }
 }

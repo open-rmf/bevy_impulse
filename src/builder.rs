@@ -30,7 +30,7 @@ use crate::{
     OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
     ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
     Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
-    Unzippable,
+    Unzippable, OperateCancel, OperateQuietCancel,
 };
 
 pub(crate) mod connect;
@@ -437,6 +437,42 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             InputSlot::new(self.scope, source),
             SplitOutputs::new(self.scope, source),
         )
+    }
+
+    /// Create an input slot that will cancel the current scope when it gets
+    /// triggered. This can be used on types that implement [`ToString`].
+    ///
+    /// If you need to cancel for a type that does not implement [`ToString`]
+    /// then convert it to a trigger `()` and then connect it to
+    /// [`Self::create_quiet_cancel`].
+    pub fn create_cancel<T>(&mut self) -> InputSlot<T>
+    where
+        T: 'static + Send + Sync + ToString,
+    {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateCancel::<T>::new(),
+        ));
+
+        InputSlot::new(self.scope, source)
+    }
+
+    /// Create an input slot that will cancel that current scope when it gets
+    /// triggered.
+    ///
+    /// If you want the cancellation message to include information about the
+    /// input value that triggered it, use [`Self::create_cancel`].
+    pub fn create_quiet_cancel(&mut self) -> InputSlot<()> {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateQuietCancel,
+        ));
+
+        InputSlot::new(self.scope, source)
     }
 
     /// This method allows you to define a cleanup workflow that branches off of
