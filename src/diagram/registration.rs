@@ -249,11 +249,11 @@ type DeserializeFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>
 type SerializeFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type ForkCloneFn = fn(&mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 type ForkResultFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
-type SplitFn = fn(&mut Builder, &SplitSchema) -> Result<DynSplit, DiagramErrorCode>;
-type JoinFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
-type BufferAccessFn = fn(&mut Builder, &BufferMap) -> Result<DynNode, DiagramErrorCode>;
-type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
-type CreateBufferFn = fn(&mut Builder, BufferSettings) -> AnyBuffer;
+type SplitFn = fn(&SplitSchema, &mut Builder) -> Result<DynSplit, DiagramErrorCode>;
+type JoinFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
+type BufferAccessFn = fn(&BufferMap, &mut Builder) -> Result<DynNode, DiagramErrorCode>;
+type ListenFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCode>;
+type CreateBufferFn = fn(BufferSettings, &mut Builder) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;
 
@@ -745,81 +745,11 @@ impl MessageOperation {
             buffer_access_impl: None,
             listen_impl: None,
             to_string_impl: None,
-            create_buffer_impl: |builder, settings| {
+            create_buffer_impl: |settings, builder| {
                 builder.create_buffer::<T>(settings).as_any_buffer()
             },
             create_trigger_impl: |builder| builder.create_map_block(|_: T| ()).into(),
         }
-    }
-
-    pub(super) fn fork_clone(
-        &self,
-        builder: &mut Builder,
-    ) -> Result<DynForkClone, DiagramErrorCode> {
-        let f = self
-            .fork_clone_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::NotCloneable)?;
-        f(builder)
-    }
-
-    pub(super) fn fork_result(
-        &self,
-        builder: &mut Builder,
-    ) -> Result<DynForkResult, DiagramErrorCode> {
-        let f = self
-            .fork_result_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::CannotForkResult)?;
-        f(builder)
-    }
-
-    pub(super) fn split(
-        &self,
-        builder: &mut Builder,
-        split_op: &SplitSchema,
-    ) -> Result<DynSplit, DiagramErrorCode> {
-        let f = self
-            .split_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::NotSplittable)?;
-        f(builder, split_op)
-    }
-
-    pub(super) fn join(
-        &self,
-        builder: &mut Builder,
-        buffers: &BufferMap,
-    ) -> Result<DynOutput, DiagramErrorCode> {
-        let f = self
-            .join_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::NotJoinable)?;
-        f(builder, buffers)
-    }
-
-    pub(super) fn with_buffer_access(
-        &self,
-        builder: &mut Builder,
-        buffers: &BufferMap,
-    ) -> Result<DynNode, DiagramErrorCode> {
-        let f = self
-            .buffer_access_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::CannotBufferAccess)?;
-        f(builder, buffers)
-    }
-
-    pub(super) fn listen(
-        &self,
-        builder: &mut Builder,
-        buffers: &BufferMap,
-    ) -> Result<DynOutput, DiagramErrorCode> {
-        let f = self
-            .listen_impl
-            .as_ref()
-            .ok_or(DiagramErrorCode::CannotBufferAccess)?;
-        f(builder, buffers)
     }
 }
 
@@ -994,16 +924,16 @@ impl MessageRegistry {
         Serializer::register_serialize(&mut self.messages, &mut self.schema_generator)
     }
 
-    pub(super) fn fork_clone(
+    pub fn fork_clone(
         &self,
-        builder: &mut Builder,
         message_info: &TypeInfo,
+        builder: &mut Builder,
     ) -> Result<DynForkClone, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(message_info) {
-            reg.operations.fork_clone(builder)
-        } else {
-            Err(DiagramErrorCode::NotCloneable)
-        }
+        self.messages
+            .get(message_info)
+            .and_then(|reg| reg.operations.fork_clone_impl.as_ref())
+            .ok_or(DiagramErrorCode::NotCloneable)
+            .and_then(|f| f(builder))
     }
 
     /// Register a fork_clone function if not already registered, returns true if the new
@@ -1027,7 +957,7 @@ impl MessageRegistry {
         true
     }
 
-    pub(super) fn unzip<'a>(
+    pub fn unzip<'a>(
         &'a self,
         message_info: &TypeInfo,
     ) -> Result<&'a dyn PerformUnzip, DiagramErrorCode> {
@@ -1063,16 +993,16 @@ impl MessageRegistry {
         true
     }
 
-    pub(super) fn fork_result(
+    pub fn fork_result(
         &self,
-        builder: &mut Builder,
         message_info: &TypeInfo,
+        builder: &mut Builder,
     ) -> Result<DynForkResult, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(message_info) {
-            reg.operations.fork_result(builder)
-        } else {
-            Err(DiagramErrorCode::CannotForkResult)
-        }
+        self.messages
+            .get(message_info)
+            .and_then(|reg| reg.operations.fork_result_impl.as_ref())
+            .ok_or(DiagramErrorCode::CannotForkResult)
+            .and_then(|f| f(builder))
     }
 
     /// Register a fork_result function if not already registered, returns true if the new
@@ -1084,17 +1014,17 @@ impl MessageRegistry {
         R::on_register(self)
     }
 
-    pub(super) fn split(
+    pub fn split(
         &self,
-        builder: &mut Builder,
         message_info: &TypeInfo,
         split_op: &SplitSchema,
+        builder: &mut Builder,
     ) -> Result<DynSplit, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(message_info) {
-            reg.operations.split(builder, split_op)
-        } else {
-            Err(DiagramErrorCode::NotSplittable)
-        }
+        self.messages
+            .get(message_info)
+            .and_then(|reg| reg.operations.split_impl.as_ref())
+            .ok_or(DiagramErrorCode::NotSplittable)
+            .and_then(|f| f(split_op, builder))
     }
 
     /// Register a split function if not already registered.
@@ -1108,9 +1038,9 @@ impl MessageRegistry {
 
     pub fn create_buffer(
         &self,
-        builder: &mut Builder,
         message_info: &TypeInfo,
         settings: BufferSettings,
+        builder: &mut Builder,
     ) -> Result<AnyBuffer, DiagramErrorCode> {
         let f = self
             .messages
@@ -1119,13 +1049,13 @@ impl MessageRegistry {
             .operations
             .create_buffer_impl;
 
-        Ok(f(builder, settings))
+        Ok(f(settings, builder))
     }
 
     pub fn trigger(
         &self,
-        builder: &mut Builder,
         message_info: &TypeInfo,
+        builder: &mut Builder,
     ) -> Result<DynNode, DiagramErrorCode> {
         self.messages
             .get(message_info)
@@ -1135,15 +1065,15 @@ impl MessageRegistry {
 
     pub fn join(
         &self,
-        builder: &mut Builder,
+        joinable: &TypeInfo,
         buffers: &BufferMap,
-        joinable: TypeInfo,
+        builder: &mut Builder,
     ) -> Result<DynOutput, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(&joinable) {
-            reg.operations.join(builder, buffers)
-        } else {
-            Err(DiagramErrorCode::NotJoinable)
-        }
+        self.messages
+            .get(joinable)
+            .and_then(|reg| reg.operations.join_impl.as_ref())
+            .ok_or_else(|| DiagramErrorCode::NotJoinable)
+            .and_then(|f| f(buffers, builder))
     }
 
     /// Register a join function if not already registered, returns true if the new
@@ -1162,22 +1092,22 @@ impl MessageRegistry {
         }
 
         ops.join_impl =
-            Some(|builder, buffers| Ok(builder.try_join::<T>(buffers)?.output().into()));
+            Some(|buffers, builder| Ok(builder.try_join::<T>(buffers)?.output().into()));
 
         true
     }
 
-    pub(super) fn with_buffer_access(
+    pub fn with_buffer_access(
         &self,
-        builder: &mut Builder,
+        target_type: &TypeInfo,
         buffers: &BufferMap,
-        target_type: TypeInfo,
+        builder: &mut Builder,
     ) -> Result<DynNode, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(&target_type) {
-            reg.operations.with_buffer_access(builder, buffers)
-        } else {
-            Err(DiagramErrorCode::UnregisteredType(target_type))
-        }
+        self.messages
+            .get(target_type)
+            .and_then(|reg| reg.operations.buffer_access_impl.as_ref())
+            .ok_or(DiagramErrorCode::CannotBufferAccess)
+            .and_then(|f| f(buffers, builder))
     }
 
     pub(super) fn register_buffer_access<T>(&mut self) -> bool
@@ -1193,7 +1123,7 @@ impl MessageRegistry {
             return false;
         }
 
-        ops.buffer_access_impl = Some(|builder, buffers| {
+        ops.buffer_access_impl = Some(|buffers, builder| {
             let buffer_access =
                 builder.try_create_buffer_access::<T::Message, T::BufferKeys>(buffers)?;
             Ok(buffer_access.into())
@@ -1202,17 +1132,17 @@ impl MessageRegistry {
         true
     }
 
-    pub(super) fn listen(
+    pub fn listen(
         &self,
-        builder: &mut Builder,
+        target_type: &TypeInfo,
         buffers: &BufferMap,
-        target_type: TypeInfo,
+        builder: &mut Builder,
     ) -> Result<DynOutput, DiagramErrorCode> {
-        if let Some(reg) = self.messages.get(&target_type) {
-            reg.operations.listen(builder, buffers)
-        } else {
-            Err(DiagramErrorCode::CannotListen(target_type))
-        }
+        self.messages
+            .get(target_type)
+            .and_then(|reg| reg.operations.listen_impl.as_ref())
+            .ok_or_else(|| DiagramErrorCode::CannotListen(*target_type))
+            .and_then(|f| f(buffers, builder))
     }
 
     pub(super) fn register_listen<T>(&mut self) -> bool
@@ -1229,7 +1159,7 @@ impl MessageRegistry {
         }
 
         ops.listen_impl =
-            Some(|builder, buffers| Ok(builder.try_listen::<T>(buffers)?.output().into()));
+            Some(|buffers, builder| Ok(builder.try_listen::<T>(buffers)?.output().into()));
 
         true
     }

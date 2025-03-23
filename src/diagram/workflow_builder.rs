@@ -695,7 +695,7 @@ impl ConnectIntoTarget for ConnectToCancel {
                 let trigger = ctx
                     .registry
                     .messages
-                    .trigger(builder, output.message_info())?;
+                    .trigger(output.message_info(), builder)?;
                 trigger.output.connect_to(&self.quiet_cancel, builder)?;
                 vacant.insert(trigger.input).clone()
             }

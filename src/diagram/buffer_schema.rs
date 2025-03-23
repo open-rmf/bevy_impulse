@@ -60,7 +60,7 @@ impl BuildDiagramOperation for BufferSchema {
         let buffer =
             ctx.registry
                 .messages
-                .create_buffer(builder, &message_info, self.settings.clone())?;
+                .create_buffer(&message_info, self.settings.clone(), builder)?;
         ctx.set_buffer_for_operation(id, buffer)?;
         Ok(BuildStatus::Finished)
     }
@@ -94,7 +94,7 @@ impl BuildDiagramOperation for BufferAccessSchema {
         let node = ctx
             .registry
             .messages
-            .with_buffer_access(builder, &buffer_map, target_type)?;
+            .with_buffer_access(&target_type, &buffer_map, builder)?;
         ctx.set_input_for_target(id, node.input)?;
         ctx.add_output_into_target(self.next.clone(), node.output);
         Ok(BuildStatus::Finished)
@@ -143,7 +143,7 @@ impl BuildDiagramOperation for ListenSchema {
         let output = ctx
             .registry
             .messages
-            .listen(builder, &buffer_map, target_type)?;
+            .listen(&target_type, &buffer_map, builder)?;
         ctx.add_output_into_target(self.next.clone(), output);
         Ok(BuildStatus::Finished)
     }

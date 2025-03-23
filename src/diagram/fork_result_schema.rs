@@ -55,7 +55,7 @@ impl BuildDiagramOperation for ForkResultSchema {
         let fork = ctx
             .registry
             .messages
-            .fork_result(builder, input_sample.message_info())?;
+            .fork_result(input_sample.message_info(), builder)?;
         ctx.set_input_for_target(id, fork.input)?;
         ctx.add_output_into_target(self.ok.clone(), fork.ok);
         ctx.add_output_into_target(self.err.clone(), fork.err);

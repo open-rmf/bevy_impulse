@@ -50,7 +50,7 @@ impl BuildDiagramOperation for ForkCloneSchema {
         let fork = ctx
             .registry
             .messages
-            .fork_clone(builder, sample_input.message_info())?;
+            .fork_clone(sample_input.message_info(), builder)?;
         ctx.set_input_for_target(id, fork.input)?;
         for target in &self.next {
             ctx.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));

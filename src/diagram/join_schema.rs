@@ -59,7 +59,7 @@ impl BuildDiagramOperation for JoinSchema {
         let output = ctx
             .registry
             .messages
-            .join(builder, &buffer_map, target_type)?;
+            .join(&target_type, &buffer_map, builder)?;
         ctx.add_output_into_target(self.next.clone(), output);
         Ok(BuildStatus::Finished)
     }

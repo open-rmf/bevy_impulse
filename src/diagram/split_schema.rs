@@ -60,7 +60,7 @@ impl BuildDiagramOperation for SplitSchema {
         let split = ctx
             .registry
             .messages
-            .split(builder, sample_input.message_info(), self)?;
+            .split(sample_input.message_info(), self, builder)?;
         ctx.set_input_for_target(id, split.input)?;
         for (target, output) in split.outputs {
             ctx.add_output_into_target(target, output);
@@ -189,8 +189,8 @@ pub struct DynSplit {
 
 pub trait RegisterSplit {
     fn perform_split(
-        builder: &mut Builder,
         split_op: &SplitSchema,
+        builder: &mut Builder,
     ) -> Result<DynSplit, DiagramErrorCode>;
 
     fn on_register(registry: &mut MessageRegistry);
@@ -204,8 +204,8 @@ where
     Cloneable: PerformForkClone<T::Item> + PerformForkClone<Vec<T::Item>>,
 {
     fn perform_split(
-        builder: &mut Builder,
         split_op: &SplitSchema,
+        builder: &mut Builder,
     ) -> Result<DynSplit, DiagramErrorCode> {
         let (input, split) = builder.create_split::<T>();
         let mut outputs = Vec::new();
