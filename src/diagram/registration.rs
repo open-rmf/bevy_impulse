@@ -53,7 +53,7 @@ use super::{
     BuilderId, DefaultDeserializer, DefaultSerializer, DeserializeMessage, DiagramErrorCode,
     DynForkClone, DynForkResult, DynSplit, DynType, DynUnzip, JsonRegistration,
     OpaqueMessageDeserializer, OpaqueMessageSerializer, RegisterJson, RegisterSplit,
-    SerializeMessage, SplitSchema,
+    SerializeMessage, SplitSchema, TransformError,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -189,9 +189,9 @@ where
     }
 }
 /// A type erased [`bevy_impulse::Node`]
-pub(super) struct DynNode {
-    pub(super) input: DynInputSlot,
-    pub(super) output: DynOutput,
+pub struct DynNode {
+    pub input: DynInputSlot,
+    pub output: DynOutput,
 }
 
 impl DynNode {
@@ -261,6 +261,7 @@ type BufferAccessFn = fn(&mut Builder, &BufferMap) -> Result<DynNode, DiagramErr
 type ListenFn = fn(&mut Builder, &BufferMap) -> Result<DynOutput, DiagramErrorCode>;
 type CreateBufferFn = fn(&mut Builder, BufferSettings) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
+type ToStringFn = fn(&mut Builder) -> DynNode;
 
 #[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
@@ -509,6 +510,14 @@ where
         self.data.register_listen::<Message>();
         self
     }
+
+    pub fn with_to_string(&mut self) -> &mut Self
+    where
+        Message: ToString,
+    {
+        self.data.register_to_string::<Message>();
+        self
+    }
 }
 
 pub struct NodeRegistrationBuilder<'a, Request, Response, Streams> {
@@ -662,7 +671,7 @@ where
     where
         Request: Joined,
     {
-        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages).with_join();
+        self.registry.messages.register_join::<Request>();
         self
     }
 
@@ -671,8 +680,7 @@ where
     where
         Request: BufferAccessRequest,
     {
-        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages)
-            .with_buffer_access();
+        self.registry.messages.register_buffer_access::<Request>();
         self
     }
 
@@ -681,7 +689,23 @@ where
     where
         Request: Accessor,
     {
-        MessageRegistrationBuilder::<Request>::new(&mut self.registry.messages).with_listen();
+        self.registry.messages.register_listen::<Request>();
+        self
+    }
+
+    pub fn with_request_to_string(&mut self) -> &mut Self
+    where
+        Request: ToString,
+    {
+        self.registry.messages.register_to_string::<Request>();
+        self
+    }
+
+    pub fn with_response_to_string(&mut self) -> &mut Self
+    where
+        Response: ToString,
+    {
+        self.registry.messages.register_to_string::<Response>();
         self
     }
 }
@@ -712,6 +736,7 @@ pub(super) struct MessageOperation {
     pub(super) join_impl: Option<JoinFn>,
     pub(super) buffer_access_impl: Option<BufferAccessFn>,
     pub(super) listen_impl: Option<ListenFn>,
+    pub(super) to_string_impl: Option<ToStringFn>,
     pub(super) create_buffer_impl: CreateBufferFn,
     pub(super) create_trigger_impl: CreateTriggerFn,
 }
@@ -731,6 +756,7 @@ impl MessageOperation {
             join_impl: None,
             buffer_access_impl: None,
             listen_impl: None,
+            to_string_impl: None,
             create_buffer_impl: |builder, settings| {
                 builder.create_buffer::<T>(settings).as_any_buffer()
             },
@@ -964,6 +990,20 @@ impl MessageRegistry {
             .and_then(|reg| reg.operations.serialize_impl.as_ref())
             .map(|serialize| serialize(builder))
             .transpose()
+    }
+
+    pub fn try_to_string(
+        &self,
+        incoming_type: &TypeInfo,
+        builder: &mut Builder,
+    ) -> Result<Option<DynNode>, DiagramErrorCode> {
+        let ops = &self
+            .messages
+            .get(incoming_type)
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*incoming_type))?
+            .operations;
+
+        Ok(ops.to_string_impl.map(|f| f(builder)))
     }
 
     /// Register a serialize function if not already registered, returns true if the new
@@ -1217,6 +1257,20 @@ impl MessageRegistry {
         true
     }
 
+    pub(super) fn register_to_string<T>(&mut self)
+    where
+        T: 'static + Send + Sync + ToString,
+    {
+        let ops = &mut self
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>())
+            .operations;
+
+        ops.to_string_impl =
+            Some(|builder| builder.create_map_block(|msg: T| msg.to_string()).into());
+    }
+
     fn serialize_messages<S>(
         v: &HashMap<TypeInfo, MessageRegistration>,
         serializer: S,
@@ -1420,6 +1474,13 @@ impl DiagramElementRegistry {
         self.register_message::<JsonMessage>()
             .with_join()
             .with_split();
+
+        self.opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .no_cloning()
+            .register_message::<TransformError>()
+            .with_to_string();
 
         self.register_message::<String>();
         self.register_message::<u8>();

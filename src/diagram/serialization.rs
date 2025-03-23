@@ -335,3 +335,53 @@ impl ImplicitDeserialization {
         })
     }
 }
+
+pub struct ImplicitStringify {
+    incoming_types: HashMap<TypeInfo, DynInputSlot>,
+    string_input: DynInputSlot,
+}
+
+impl ImplicitStringify {
+    pub fn new(string_input: DynInputSlot) -> Result<Self, DiagramErrorCode> {
+        if string_input.message_info() != &TypeInfo::of::<String>() {
+            return Err(DiagramErrorCode::TypeMismatch {
+                source_type: TypeInfo::of::<String>(),
+                target_type: *string_input.message_info()
+            });
+        }
+
+        Ok(Self {
+            string_input,
+            incoming_types: Default::default(),
+        })
+    }
+
+    pub fn try_implicit_stringify(
+        &mut self,
+        incoming: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<Result<(), DynOutput>, DiagramErrorCode> {
+        if incoming.message_info() == &TypeInfo::of::<String>() {
+            incoming.connect_to(&self.string_input, builder)?;
+            return Ok(Ok(()));
+        }
+
+        let input = match self.incoming_types.entry(*incoming.message_info()) {
+            Entry::Occupied(input_slot) => input_slot.get().clone(),
+            Entry::Vacant(vacant) => {
+                let Some(stringify) = ctx.registry.messages.try_to_string(incoming.message_info(), builder)? else {
+                    // We are unable to stringify this type.
+                    return Ok(Err(incoming));
+                };
+
+                stringify.output.connect_to(&self.string_input, builder)?;
+                vacant.insert(stringify.input).clone()
+            }
+        };
+
+        incoming.connect_to(&input, builder)?;
+
+        Ok(Ok(()))
+    }
+}

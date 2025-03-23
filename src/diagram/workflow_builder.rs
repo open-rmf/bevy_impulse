@@ -25,7 +25,7 @@ use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope,
 use super::{
     BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
-    ImplicitSerialization, ImplicitDeserialization,
+    ImplicitSerialization, ImplicitDeserialization, ImplicitStringify,
 };
 
 #[derive(Default)]
@@ -440,6 +440,7 @@ where
                 registry,
             };
 
+            // Attempt to build this operation
             let status = diagram
                 .ops
                 .get(op)
@@ -451,6 +452,8 @@ where
 
             made_progress |= status.made_progress();
             if !status.is_finished() {
+                // The operation did not finish, so pass it into the deferred
+                // operations list.
                 deferred_operations.push((op, status));
             }
         }
@@ -490,6 +493,7 @@ where
             registry,
         };
 
+        // Attempt to connect to all regular operations
         for (op, outputs) in construction.outputs_to_operation_target.drain() {
             let op = NextOperation::Target(op);
             let connect = construction
@@ -502,6 +506,7 @@ where
             }
         }
 
+        // Attempt to connect to all builtin operations
         for (builtin, outputs) in construction.outputs_to_builtin_target.drain() {
             let op = NextOperation::Builtin { builtin };
             let connect = construction
@@ -564,41 +569,9 @@ where
     );
 
     // Add the cancel operation
-    let regular_cancel: DynInputSlot = builder.create_cancel::<JsonMessage>().into();
-    let quiet_cancel: DynInputSlot = builder.create_quiet_cancel().into();
-    let mut implicit_serialization = ImplicitSerialization::new(regular_cancel)?;
-    let mut triggers: HashMap<TypeInfo, DynInputSlot> = HashMap::new();
-
     ctx.construction.connect_into_target.insert(
         NextOperation::Builtin { builtin: BuiltinTarget::Cancel },
-        Box::new(ConnectionCallback(move |output, builder, ctx| {
-            if output.message_info() == &TypeInfo::of::<JsonMessage>() {
-                // If we're receiving a JsonMessage then we can connect it
-                // directly to regular_cancel.
-                return output.connect_to(&regular_cancel, builder);
-            }
-
-            // Try to implicitly serialize the incoming message if the message
-            // type supports it. That way we can connect it to the regular
-            // cancel operation.
-            if let Err(output) = implicit_serialization.try_implicit_serialize(output, builder, ctx)? {
-                // In this case, the message type cannot be serialized so we'll
-                // change it into a trigger and then connect it to the quiet
-                // cancel instead.
-                let input_slot = match triggers.entry(*output.message_info()) {
-                    Entry::Occupied(occupied) => occupied.get().clone(),
-                    Entry::Vacant(vacant) => {
-                        let trigger = ctx.registry.messages.trigger(builder, output.message_info())?;
-                        trigger.output.connect_to(&quiet_cancel, builder)?;
-                        vacant.insert(trigger.input).clone()
-                    }
-                };
-
-                output.connect_to(&input_slot, builder)?;
-            }
-
-            Ok(())
-        })),
+        Box::new(ConnectToCancel::new(builder)?),
     );
 
     Ok(())
@@ -655,5 +628,65 @@ impl ConnectIntoTarget for BasicConnect {
         _: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         output.connect_to(&self.input_slot, builder)
+    }
+}
+
+struct ConnectToCancel {
+    quiet_cancel: DynInputSlot,
+    implicit_serialization: ImplicitSerialization,
+    implicit_stringify: ImplicitStringify,
+    triggers: HashMap<TypeInfo, DynInputSlot>,
+}
+
+impl ConnectToCancel {
+    fn new(builder: &mut Builder) -> Result<Self, DiagramErrorCode> {
+        Ok(Self {
+            quiet_cancel: builder.create_quiet_cancel().into(),
+            implicit_serialization: ImplicitSerialization::new(
+                builder.create_cancel::<JsonMessage>().into()
+            )?,
+            implicit_stringify: ImplicitStringify::new(
+                builder.create_cancel::<String>().into()
+            )?,
+            triggers: Default::default(),
+        })
+    }
+}
+
+impl ConnectIntoTarget for ConnectToCancel {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        let Err(output) = self.implicit_stringify.try_implicit_stringify(output, builder, ctx)? else {
+            // We successfully converted the output into a string, so we are done.
+            return Ok(());
+        };
+
+        // Try to implicitly serialize the incoming message if the message
+        // type supports it. That way we can connect it to the regular
+        // cancel operation.
+        let Err(output) = self.implicit_serialization.try_implicit_serialize(output, builder, ctx)? else {
+            // We successfully converted the output into a json, so we are done.
+            return Ok(());
+        };
+
+        // In this case, the message type cannot be stringified or serialized so
+        // we'll change it into a trigger and then connect it to the quiet
+        // cancel instead.
+        let input_slot = match self.triggers.entry(*output.message_info()) {
+            Entry::Occupied(occupied) => occupied.get().clone(),
+            Entry::Vacant(vacant) => {
+                let trigger = ctx.registry.messages.trigger(builder, output.message_info())?;
+                trigger.output.connect_to(&self.quiet_cancel, builder)?;
+                vacant.insert(trigger.input).clone()
+            }
+        };
+
+        output.connect_to(&input_slot, builder)?;
+
+        Ok(())
     }
 }

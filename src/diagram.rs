@@ -1042,23 +1042,6 @@ impl From<DiagramErrorCode> for DiagramError {
     }
 }
 
-/// This is used as the message type when an implicit error occurs. You can
-/// serialize this into a [`JsonMessage`] to handle it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImplicitError {
-    /// What kind of operation had an implicit error.
-    pub operation: ImplicitErrorKind,
-    /// What was the message produced by the implicit error.
-    pub message: String,
-}
-
-/// What kinds of implicit operations can produce an error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ImplicitErrorKind {
-    Serialization,
-    Deserialization,
-}
-
 #[cfg(test)]
 mod testing;
 
