@@ -16,9 +16,9 @@
 */
 
 use crate::{
-    Cancellation, Input, InputBundle, ManageCancellation, ManageInput,
-    Operation, OperationCleanup, OperationReachability, OperationRequest, OperationResult,
-    OperationSetup, OrBroken, ReachabilityResult, SingleInputStorage,
+    Cancellation, Input, InputBundle, ManageCancellation, ManageInput, Operation, OperationCleanup,
+    OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
+    ReachabilityResult, SingleInputStorage,
 };
 
 /// Create an operation that will cancel a scope. The incoming message will be
@@ -36,7 +36,9 @@ where
     T: 'static + Send + Sync + ToString,
 {
     pub fn new() -> Self {
-        Self { _ignore: Default::default() }
+        Self {
+            _ignore: Default::default(),
+        }
     }
 }
 
@@ -50,7 +52,11 @@ where
     }
 
     fn execute(
-        OperationRequest { source, world, roster }: OperationRequest,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
     ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>().or_broken()?;
@@ -85,7 +91,13 @@ impl Operation for OperateQuietCancel {
         Ok(())
     }
 
-    fn execute(OperationRequest { source, world, roster }: OperationRequest) -> OperationResult {
+    fn execute(
+        OperationRequest {
+            source,
+            world,
+            roster,
+        }: OperationRequest,
+    ) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, .. } = source_mut.take_input::<()>().or_broken()?;
 

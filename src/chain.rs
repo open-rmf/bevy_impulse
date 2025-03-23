@@ -27,10 +27,10 @@ use crate::{
     make_option_branching, make_result_branching, Accessing, AddOperation, AsMap, Buffer,
     BufferKey, BufferKeys, Bufferable, Buffering, Builder, Collect, CreateCancelFilter,
     CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
-    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate,
-    OperateSplit, OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish,
-    Service, Spread, StreamOf, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
-    OperateCancel, OperateQuietCancel,
+    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateCancel,
+    OperateDynamicGate, OperateQuietCancel, OperateSplit, OperateStaticGate, Output, ProvideOnce,
+    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf, StreamPack,
+    StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;

@@ -22,10 +22,11 @@ pub struct Supported<T = ()> {
 
 impl<T> Supported<T> {
     pub fn new() -> Self {
-        Self { _ignore: Default::default() }
+        Self {
+            _ignore: Default::default(),
+        }
     }
 }
 
 /// A struct to provide "not supported" implementations for various operations.
 pub struct NotSupported;
-

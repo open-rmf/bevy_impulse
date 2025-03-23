@@ -15,17 +15,16 @@
  *
 */
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 
 use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{
-    supported::*,
-    type_info::TypeInfo, MessageRegistration, DynInputSlot, DynOutput, DiagramContext,
-    DiagramErrorCode, JsonMessage, DynForkResult, MessageRegistry,
+    supported::*, type_info::TypeInfo, DiagramContext, DiagramErrorCode, DynForkResult,
+    DynInputSlot, DynOutput, JsonMessage, MessageRegistration, MessageRegistry,
 };
-use crate::{JsonBuffer, Builder};
+use crate::{Builder, JsonBuffer};
 
 pub trait DynType {
     /// Returns the type name of the request. Note that the type name must be unique.
@@ -67,17 +66,19 @@ where
             .or_insert(MessageRegistration::new::<T>());
 
         reg.operations.serialize_impl = Some(|builder| {
-            let serialize = builder.create_map_block(|message: T|
+            let serialize = builder.create_map_block(|message: T| {
                 serde_json::to_value(message).map_err(|err| err.to_string())
-            );
+            });
 
-            let (ok, err) = serialize.output.chain(builder)
+            let (ok, err) = serialize
+                .output
+                .chain(builder)
                 .fork_result(|ok| ok.output(), |err| err.output());
 
             Ok(DynForkResult {
                 input: serialize.input.into(),
                 ok: ok.into(),
-                err: err.into()
+                err: err.into(),
             })
         });
 
@@ -109,17 +110,19 @@ where
             .or_insert(MessageRegistration::new::<T>());
 
         reg.operations.deserialize_impl = Some(|builder| {
-            let deserialize = builder.create_map_block(|message: JsonMessage|
+            let deserialize = builder.create_map_block(|message: JsonMessage| {
                 serde_json::from_value::<T>(message).map_err(|err| err.to_string())
-            );
+            });
 
-            let (ok, err) = deserialize.output.chain(builder)
+            let (ok, err) = deserialize
+                .output
+                .chain(builder)
                 .fork_result(|ok| ok.output(), |err| err.output());
 
             Ok(DynForkResult {
                 input: deserialize.input.into(),
                 ok: ok.into(),
-                err: err.into()
+                err: err.into(),
             })
         });
 
@@ -132,15 +135,12 @@ where
 }
 
 impl<T> SerializeMessage<T> for NotSupported {
-    fn register_serialize(
-        _: &mut HashMap<TypeInfo, MessageRegistration>,
-        _: &mut SchemaGenerator,
-    ) {
+    fn register_serialize(_: &mut HashMap<TypeInfo, MessageRegistration>, _: &mut SchemaGenerator) {
         // Do nothing
     }
 }
 
-impl<T> DeserializeMessage<T> for NotSupported{
+impl<T> DeserializeMessage<T> for NotSupported {
     fn register_deserialize(
         _: &mut HashMap<TypeInfo, MessageRegistration>,
         _: &mut SchemaGenerator,
@@ -230,7 +230,11 @@ impl ImplicitSerialization {
         let input = match self.incoming_types.entry(*incoming.message_info()) {
             Entry::Occupied(input_slot) => input_slot.get().clone(),
             Entry::Vacant(vacant) => {
-                let Some(serialize) = ctx.registry.messages.try_serialize(incoming.message_info(), builder)? else {
+                let Some(serialize) = ctx
+                    .registry
+                    .messages
+                    .try_serialize(incoming.message_info(), builder)?
+                else {
                     // We are unable to serialize this type.
                     return Ok(Err(incoming));
                 };
@@ -258,9 +262,7 @@ impl ImplicitSerialization {
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         self.try_implicit_serialize(incoming, builder, ctx)?
-            .map_err(|incoming| {
-                DiagramErrorCode::NotSerializable(*incoming.message_info())
-            })
+            .map_err(|incoming| DiagramErrorCode::NotSerializable(*incoming.message_info()))
     }
 }
 
@@ -273,12 +275,20 @@ pub struct ImplicitDeserialization {
 }
 
 impl ImplicitDeserialization {
-    pub fn try_new(deserialized_input: DynInputSlot, registration: &MessageRegistry) -> Result<Option<Self>, DiagramErrorCode> {
-        if registration.messages.get(&deserialized_input.message_info())
+    pub fn try_new(
+        deserialized_input: DynInputSlot,
+        registration: &MessageRegistry,
+    ) -> Result<Option<Self>, DiagramErrorCode> {
+        if registration
+            .messages
+            .get(&deserialized_input.message_info())
             .and_then(|reg| reg.operations.deserialize_impl.as_ref())
             .is_some()
         {
-            return Ok(Some(Self { deserialized_input, serialized_input: None }));
+            return Ok(Some(Self {
+                deserialized_input,
+                serialized_input: None,
+            }));
         }
 
         return Ok(None);
@@ -300,12 +310,14 @@ impl ImplicitDeserialization {
             let serialized_input = match self.serialized_input {
                 Some(serialized_input) => serialized_input,
                 None => {
-                    let deserialize = ctx.registry.messages.deserialize(
-                        self.deserialized_input.message_info(),
-                        builder,
-                    )?;
+                    let deserialize = ctx
+                        .registry
+                        .messages
+                        .deserialize(self.deserialized_input.message_info(), builder)?;
 
-                    deserialize.ok.connect_to(&self.deserialized_input, builder)?;
+                    deserialize
+                        .ok
+                        .connect_to(&self.deserialized_input, builder)?;
 
                     let error_target = ctx.get_implicit_error_target();
                     ctx.add_output_into_target(error_target, deserialize.err);
@@ -320,7 +332,7 @@ impl ImplicitDeserialization {
 
         Err(DiagramErrorCode::TypeMismatch {
             source_type: *incoming.message_info(),
-            target_type: *self.deserialized_input.message_info()
+            target_type: *self.deserialized_input.message_info(),
         })
     }
 }
@@ -359,7 +371,11 @@ impl ImplicitStringify {
         let input = match self.incoming_types.entry(*incoming.message_info()) {
             Entry::Occupied(input_slot) => input_slot.get().clone(),
             Entry::Vacant(vacant) => {
-                let Some(stringify) = ctx.registry.messages.try_to_string(incoming.message_info(), builder)? else {
+                let Some(stringify) = ctx
+                    .registry
+                    .messages
+                    .try_to_string(incoming.message_info(), builder)?
+                else {
                     // We are unable to stringify this type.
                     return Ok(Err(incoming));
                 };

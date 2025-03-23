@@ -27,9 +27,9 @@ use crate::{
 };
 
 use super::{
-    supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus,
-    DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
-    MessageRegistry, NextOperation, OperationId, PerformForkClone, SerializeMessage,
+    supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
+    OperationId, PerformForkClone, SerializeMessage,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

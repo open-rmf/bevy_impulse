@@ -26,11 +26,11 @@ use crate::{
     AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings, Bufferable, Buffering,
     Chain, Collect, ForkClone, ForkCloneOutput, ForkOptionOutput, ForkResultOutput,
     ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
-    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
-    OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
-    ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
-    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
-    Unzippable, OperateCancel, OperateQuietCancel,
+    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateCancel, OperateDynamicGate,
+    OperateQuietCancel, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
+    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
+    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
+    TrimBranch, UnusedTarget, Unzippable,
 };
 
 pub(crate) mod connect;

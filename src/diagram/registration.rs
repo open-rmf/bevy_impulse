@@ -25,8 +25,8 @@ use std::{
 };
 
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
-    Connect, InputSlot, Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Connect, InputSlot,
+    Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
 };
 use bevy_ecs::entity::Entity;
 use schemars::{
@@ -43,16 +43,10 @@ use serde_json::json;
 use tracing::debug;
 
 use super::{
-    buffer_schema::BufferAccessRequest,
-    fork_clone_schema::PerformForkClone,
-    fork_result_schema::RegisterForkResult,
-    supported::*,
-    register_json,
-    type_info::TypeInfo,
-    unzip_schema::PerformUnzip,
-    BuilderId, DeserializeMessage, DiagramErrorCode,
-    DynForkClone, DynForkResult, DynSplit, DynType, JsonRegistration,
-    RegisterJson, RegisterSplit,
+    buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
+    fork_result_schema::RegisterForkResult, register_json, supported::*, type_info::TypeInfo,
+    unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
+    DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit,
     SerializeMessage, SplitSchema, TransformError,
 };
 
@@ -364,9 +358,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     ///
     /// Note that [`JsonBuffer`] is only enabled for message types that enable
     /// both serializing AND deserializing.
-    pub fn no_deserializing(
-        self,
-    ) -> CommonOperations<'a, NotSupported, SerializeImpl, Cloneable> {
+    pub fn no_deserializing(self) -> CommonOperations<'a, NotSupported, SerializeImpl, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -381,9 +373,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     ///
     /// Note that [`JsonBuffer`] is only enabled for message types that enable
     /// both serializing AND deserializing.
-    pub fn no_serializing(
-        self,
-    ) -> CommonOperations<'a, DeserializeImpl, NotSupported, Cloneable> {
+    pub fn no_serializing(self) -> CommonOperations<'a, DeserializeImpl, NotSupported, Cloneable> {
         CommonOperations {
             registry: self.registry,
             _ignore: Default::default(),
@@ -425,8 +415,7 @@ where
     where
         Supported<(Message, Supported, Supported)>: PerformUnzip,
     {
-        self.data
-            .register_unzip::<Message, Supported, Supported>();
+        self.data.register_unzip::<Message, Supported, Supported>();
         self
     }
 
@@ -468,8 +457,7 @@ where
     where
         Supported<(Message, Supported, Supported)>: RegisterSplit,
     {
-        self.data
-            .register_split::<Message, Supported, Supported>();
+        self.data.register_split::<Message, Supported, Supported>();
         self
     }
 
@@ -760,9 +748,7 @@ impl MessageOperation {
             create_buffer_impl: |builder, settings| {
                 builder.create_buffer::<T>(settings).as_any_buffer()
             },
-            create_trigger_impl: |builder| {
-                builder.create_map_block(|_: T| ()).into()
-            }
+            create_trigger_impl: |builder| builder.create_map_block(|_: T| ()).into(),
         }
     }
 
@@ -1432,9 +1418,7 @@ impl DiagramElementRegistry {
     /// Note that nodes registered without deserialization cannot be connected
     /// to the workflow start, and nodes registered without serialization cannot
     /// be connected to the workflow termination.
-    pub fn opt_out(
-        &mut self,
-    ) -> CommonOperations<Supported, Supported, Supported> {
+    pub fn opt_out(&mut self) -> CommonOperations<Supported, Supported, Supported> {
         CommonOperations {
             registry: self,
             _ignore: Default::default(),

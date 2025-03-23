@@ -24,8 +24,8 @@ use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope,
 
 use super::{
     BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
-    DiagramOperation, DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
-    ImplicitSerialization, ImplicitDeserialization, ImplicitStringify,
+    DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization, ImplicitSerialization,
+    ImplicitStringify, NextOperation, OperationId, TypeInfo,
 };
 
 #[derive(Default)]
@@ -104,13 +104,15 @@ impl<'a> DiagramContext<'a> {
     pub fn add_output_into_target(&mut self, target: NextOperation, output: DynOutput) {
         match target {
             NextOperation::Target(id) => {
-                self.construction.outputs_to_operation_target
+                self.construction
+                    .outputs_to_operation_target
                     .entry(id)
                     .or_default()
                     .push(output);
             }
             NextOperation::Builtin { builtin } => {
-                self.construction.outputs_to_builtin_target
+                self.construction
+                    .outputs_to_builtin_target
                     .entry(builtin)
                     .or_default()
                     .push(output);
@@ -183,7 +185,8 @@ impl<'a> DiagramContext<'a> {
         connect: F,
     ) -> Result<(), DiagramErrorCode>
     where
-        F: FnMut(DynOutput, &mut Builder, &mut DiagramContext) -> Result<(), DiagramErrorCode> + 'static,
+        F: FnMut(DynOutput, &mut Builder, &mut DiagramContext) -> Result<(), DiagramErrorCode>
+            + 'static,
     {
         self.set_connect_into_target(operation, ConnectionCallback(connect))
     }
@@ -283,9 +286,12 @@ impl<'a> DiagramContext<'a> {
     }
 
     pub fn get_implicit_error_target(&self) -> NextOperation {
-        self.diagram.on_implicit_error.clone().unwrap_or(
-            NextOperation::Builtin { builtin: BuiltinTarget::Cancel }
-        )
+        self.diagram
+            .on_implicit_error
+            .clone()
+            .unwrap_or(NextOperation::Builtin {
+                builtin: BuiltinTarget::Cancel,
+            })
     }
 }
 
@@ -519,13 +525,13 @@ where
             }
         }
 
-        construction.outputs_to_builtin_target.extend(
-            new_construction.outputs_to_builtin_target.drain()
-        );
+        construction
+            .outputs_to_builtin_target
+            .extend(new_construction.outputs_to_builtin_target.drain());
 
-        construction.outputs_to_operation_target.extend(
-            new_construction.outputs_to_operation_target.drain()
-        );
+        construction
+            .outputs_to_operation_target
+            .extend(new_construction.outputs_to_operation_target.drain());
 
         iterations += 1;
         if iterations > MAX_ITERATIONS {
@@ -570,7 +576,9 @@ where
 
     // Add the cancel operation
     ctx.construction.connect_into_target.insert(
-        NextOperation::Builtin { builtin: BuiltinTarget::Cancel },
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Cancel,
+        },
         Box::new(ConnectToCancel::new(builder)?),
     );
 
@@ -585,7 +593,8 @@ fn standard_input_connection(
         return Ok(Box::new(ImplicitSerialization::new(input_slot)?));
     }
 
-    if let Some(deserialization) = ImplicitDeserialization::try_new(input_slot, &registry.messages)? {
+    if let Some(deserialization) = ImplicitDeserialization::try_new(input_slot, &registry.messages)?
+    {
         // The target type is deserializable, so let's apply implicit deserialization
         // to it.
         return Ok(Box::new(deserialization));
@@ -643,11 +652,9 @@ impl ConnectToCancel {
         Ok(Self {
             quiet_cancel: builder.create_quiet_cancel().into(),
             implicit_serialization: ImplicitSerialization::new(
-                builder.create_cancel::<JsonMessage>().into()
+                builder.create_cancel::<JsonMessage>().into(),
             )?,
-            implicit_stringify: ImplicitStringify::new(
-                builder.create_cancel::<String>().into()
-            )?,
+            implicit_stringify: ImplicitStringify::new(builder.create_cancel::<String>().into())?,
             triggers: Default::default(),
         })
     }
@@ -660,7 +667,10 @@ impl ConnectIntoTarget for ConnectToCancel {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        let Err(output) = self.implicit_stringify.try_implicit_stringify(output, builder, ctx)? else {
+        let Err(output) = self
+            .implicit_stringify
+            .try_implicit_stringify(output, builder, ctx)?
+        else {
             // We successfully converted the output into a string, so we are done.
             return Ok(());
         };
@@ -668,7 +678,10 @@ impl ConnectIntoTarget for ConnectToCancel {
         // Try to implicitly serialize the incoming message if the message
         // type supports it. That way we can connect it to the regular
         // cancel operation.
-        let Err(output) = self.implicit_serialization.try_implicit_serialize(output, builder, ctx)? else {
+        let Err(output) = self
+            .implicit_serialization
+            .try_implicit_serialize(output, builder, ctx)?
+        else {
             // We successfully converted the output into a json, so we are done.
             return Ok(());
         };
@@ -679,7 +692,10 @@ impl ConnectIntoTarget for ConnectToCancel {
         let input_slot = match self.triggers.entry(*output.message_info()) {
             Entry::Occupied(occupied) => occupied.get().clone(),
             Entry::Vacant(vacant) => {
-                let trigger = ctx.registry.messages.trigger(builder, output.message_info())?;
+                let trigger = ctx
+                    .registry
+                    .messages
+                    .trigger(builder, output.message_info())?;
                 trigger.output.connect_to(&self.quiet_cancel, builder)?;
                 vacant.insert(trigger.input).clone()
             }

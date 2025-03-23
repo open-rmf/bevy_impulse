@@ -46,10 +46,7 @@ impl BuildDiagramOperation for UnzipSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let unzip = ctx
-            .registry
-            .messages
-            .unzip(sample_input.message_info())?;
+        let unzip = ctx.registry.messages.unzip(sample_input.message_info())?;
         let actual_output = unzip.output_types();
         if actual_output.len() != self.next.len() {
             return Err(DiagramErrorCode::UnzipMismatch {
@@ -203,7 +200,14 @@ mod tests {
         .unwrap();
 
         let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err.code, DiagramErrorCode::UnzipMismatch { expected: 3, actual: 2, .. }));
+        assert!(matches!(
+            err.code,
+            DiagramErrorCode::UnzipMismatch {
+                expected: 3,
+                actual: 2,
+                ..
+            }
+        ));
     }
 
     #[test]

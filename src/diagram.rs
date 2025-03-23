@@ -18,12 +18,12 @@
 mod buffer_schema;
 mod fork_clone_schema;
 mod fork_result_schema;
-mod supported;
 mod join_schema;
 mod node_schema;
 mod registration;
 mod serialization;
 mod split_schema;
+mod supported;
 mod transform_schema;
 mod type_info;
 mod unzip_schema;
@@ -974,7 +974,11 @@ pub enum DiagramErrorCode {
     NotUnzippable,
 
     #[error("The number of elements in the unzip expected by the diagram [{expected}] is different from the real number [{actual}]")]
-    UnzipMismatch { expected: usize, actual: usize, elements: Vec<TypeInfo> },
+    UnzipMismatch {
+        expected: usize,
+        actual: usize,
+        elements: Vec<TypeInfo>,
+    },
 
     #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
     CannotForkResult,
@@ -1103,7 +1107,7 @@ mod tests {
 
         let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::TypeMismatch{ .. }),
+            matches!(err.code, DiagramErrorCode::TypeMismatch { .. }),
             "{:?}",
             err
         );

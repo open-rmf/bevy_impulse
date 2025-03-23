@@ -24,9 +24,8 @@ use serde::{Deserialize, Serialize};
 use crate::{AddBranchToForkClone, Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget};
 
 use super::{
-    supported::*,
-    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput,
-    NextOperation, OperationId, TypeInfo,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
