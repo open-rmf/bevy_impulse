@@ -15,17 +15,14 @@
  *
 */
 
-use bevy_ecs::prelude::Entity;
-use std::any::Any;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AddBranchToForkClone, Builder, ForkCloneOutput, SingleInputStorage, UnusedTarget};
+use crate::{Builder, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationId, TypeInfo,
+    DynInputSlot, DynOutput, NextOperation, OperationId,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -82,50 +79,40 @@ where
 
         Ok(DynForkClone {
             input: input.into(),
-            outputs: outputs.into(),
+            outputs: DynForkCloneOutput::new(outputs),
         })
-    }
-}
-
-pub struct DynForkCloneOutput {
-    scope: Entity,
-    source: Entity,
-    message_info: TypeInfo,
-}
-
-impl DynForkCloneOutput {
-    pub fn clone_output(&self, builder: &mut Builder) -> DynOutput {
-        assert_eq!(self.scope, builder.scope);
-        let target = builder
-            .commands
-            .spawn((SingleInputStorage::new(self.id()), UnusedTarget))
-            .id();
-        builder.commands.add(AddBranchToForkClone {
-            source: self.id(),
-            target,
-        });
-
-        DynOutput::new(self.scope, target, self.message_info)
-    }
-
-    pub fn id(&self) -> Entity {
-        self.source
-    }
-}
-
-impl<T: 'static + Send + Sync + Any> From<ForkCloneOutput<T>> for DynForkCloneOutput {
-    fn from(value: ForkCloneOutput<T>) -> Self {
-        DynForkCloneOutput {
-            scope: value.scope(),
-            source: value.id(),
-            message_info: TypeInfo::of::<T>(),
-        }
     }
 }
 
 pub struct DynForkClone {
     pub input: DynInputSlot,
     pub outputs: DynForkCloneOutput,
+}
+
+pub struct DynForkCloneOutput {
+    inner: Box<dyn DynamicClone>,
+}
+
+impl DynForkCloneOutput {
+    pub fn new(inner: impl DynamicClone + 'static) -> Self {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+
+    pub fn clone_output(&self, builder: &mut Builder) -> DynOutput {
+        self.inner.dyn_clone_output(builder)
+    }
+}
+
+pub trait DynamicClone {
+    fn dyn_clone_output(&self, builder: &mut Builder) -> DynOutput;
+}
+
+impl<T: 'static + Send + Sync + Clone> DynamicClone for ForkCloneOutput<T> {
+    fn dyn_clone_output(&self, builder: &mut Builder) -> DynOutput {
+        self.clone_output(builder).into()
+    }
 }
 
 #[cfg(test)]
