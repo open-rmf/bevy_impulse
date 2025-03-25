@@ -185,6 +185,9 @@ impl<'a> DiagramContext<'a> {
     }
 
     /// Same as [`Self::set_connect_into_target`] but you can pass in a closure.
+    ///
+    /// This is equivalent to doing
+    /// `set_connect_into_target(operation, ConnectionCallback(connect))`.
     pub fn set_connect_into_target_callback<F>(
         &mut self,
         operation: &OperationId,
