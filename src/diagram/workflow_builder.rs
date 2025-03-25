@@ -388,7 +388,13 @@ pub trait BuildDiagramOperation {
 /// This trait is used to connect outputs to their target operations. This trait
 /// will be called for each output produced by [`BuildDiagramOperation`].
 ///
-/// It is possible
+/// You are allowed to generate new outputs during the [`ConnectIntoTarget`]
+/// phase by calling [`DiagramContext::add_outputs_into_target`].
+///
+/// However you cannot add new [`ConnectIntoTarget`] instances for operations.
+/// Any use of [`DiagramContext::set_input_for_target`],
+/// [`DiagramContext::set_connect_into_target`], or
+/// [`DiagramContext::set_connect_into_target_callback`] will be discarded.
 pub trait ConnectIntoTarget {
     fn connect_into_target(
         &mut self,
