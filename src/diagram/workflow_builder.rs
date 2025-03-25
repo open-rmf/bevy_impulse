@@ -614,7 +614,10 @@ where
     Ok(())
 }
 
-fn standard_input_connection(
+/// This returns an opaque [`ConnectIntoTarget`] implementation that provides
+/// the standard behavior of an input slot that other operations are connecting
+/// into.
+pub fn standard_input_connection(
     input_slot: DynInputSlot,
     registry: &DiagramElementRegistry,
 ) -> Result<Box<dyn ConnectIntoTarget + 'static>, DiagramErrorCode> {
