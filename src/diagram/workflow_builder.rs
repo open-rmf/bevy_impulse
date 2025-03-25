@@ -131,11 +131,19 @@ impl<'a> DiagramContext<'a> {
     /// operation.
     ///
     /// This should be used during the [`BuildDiagramOperation`] phase to set
-    /// the input slots for each operation. If you need non-standard connection
-    /// behavior then you can use [`Self::set_connect_into_target`].
+    /// the input slot of each operation with standard connection behavior.
+    /// Standard connection behavior means that implicit serialization or
+    /// deserialization will be applied to its inputs as needed to match the
+    /// [`DynInputSlot`] that you provide.
     ///
-    /// This should never be necessary to use this during the [`ConnectIntoTarget`]
-    /// phase because all connection behaviors should already be set by then.
+    /// If you need non-standard connection behavior then you can use
+    /// [`Self::set_connect_into_target`] to set the exact connection behavior.
+    /// No implicit behaviors will be provided for [`Self::set_connect_into_target`],
+    /// but you can enable those behaviors using [`ImplicitSerialization`] and
+    /// [`ImplicitDeserialization`].
+    ///
+    /// This should never be used during the [`ConnectIntoTarget`] phase because
+    /// all connection behaviors must already be set by then.
     pub fn set_input_for_target(
         &mut self,
         operation: &OperationId,
@@ -157,9 +165,15 @@ impl<'a> DiagramContext<'a> {
         Ok(())
     }
 
-    /// Set a callback that will allow outputs to connect into this target. This
-    /// is a more general method than [`Self::set_input_for_target`]. This allows
-    /// you to take further action before a target is connected, like serializing.
+    /// Set the implementation for how outputs connect into this target. This is
+    /// a more general method than [`Self::set_input_for_target`].
+    ///
+    /// There will be no additional connection behavior beyond what you specify
+    /// with the object passed in for `connect`. That means we will not
+    /// automatically add implicit serialization or deserialization when you use
+    /// this method. If you want your connection behavior to have those implicit
+    /// operations you can use [`ImplicitSerialization`] and
+    /// [`ImplicitDeserialization`] inside your `connect` implementation.
     ///
     /// This should never be necessary to use this during the [`ConnectIntoTarget`]
     /// phase because all connection behaviors should already be set by then.
