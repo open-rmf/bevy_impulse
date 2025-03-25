@@ -44,7 +44,7 @@ impl BuildDiagramOperation for BufferSchema {
         let message_info = if self.serialize.is_some_and(|v| v) {
             TypeInfo::of::<JsonMessage>()
         } else {
-            let Some(sample_input) = ctx.get_sample_output_into_target(id) else {
+            let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
                 // There are no outputs ready for this target, so we can't do
                 // anything yet. The builder should try again later.
 
@@ -54,7 +54,7 @@ impl BuildDiagramOperation for BufferSchema {
                 return Ok(BuildStatus::defer("waiting for an input"));
             };
 
-            *sample_input.message_info()
+            *inferred_type
         };
 
         let buffer =

@@ -77,19 +77,25 @@ impl<'a> DiagramContext<'a> {
         self.construction.outputs_to_operation_target.get(id)
     }
 
-    /// Get a single currently known output that is aimed at this target operation.
-    /// This can be used to infer information for building the operation.
+    /// Infer the [`TypeInfo`] for the input messages into the specified operation.
+    ///
+    /// If this returns [`None`] then not enough of the diagram has been built
+    /// yet to infer the input type. In that case you can return something like
+    /// `Ok(BuildStatus::defer("waiting for an input"))`.
     ///
     /// The workflow builder will ensure that all outputs targeting this
-    /// operation share the same message type, so getting a single sample is
-    /// usually enough to infer what is needed to build the operation.
+    /// operation are compatible with this message type.
     ///
-    /// During the [`ConnectIntoTarget`] phase this will not return any output
-    /// except for any new output added during the current call to [`ConnectIntoTarget`],
-    /// so this function is generally not useful during that phase.
-    pub fn get_sample_output_into_target(&self, id: &OperationId) -> Option<&DynOutput> {
+    /// During the [`ConnectIntoTarget`] phase all information about outputs
+    /// going into this target will be drained, so this function is generally
+    /// not useful during that phase. If you need to retain this information
+    /// during the [`ConnectIntoTarget`] phase then you should capture the
+    /// [`TypeInfo`] that you receive from this function during the
+    /// [`BuildDiagramOperation`] phase.
+    pub fn infer_input_type_into_target(&self, id: &OperationId) -> Option<&TypeInfo> {
         self.get_outputs_into_operation_target(id)
             .and_then(|outputs| outputs.first())
+            .map(|o| o.message_info())
     }
 
     /// Add an output to connect into a target.

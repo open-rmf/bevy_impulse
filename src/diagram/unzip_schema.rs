@@ -40,13 +40,13 @@ impl BuildDiagramOperation for UnzipSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(sample_input) = ctx.get_sample_output_into_target(id) else {
+        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let unzip = ctx.registry.messages.unzip(sample_input.message_info())?;
+        let unzip = ctx.registry.messages.unzip(inferred_type)?;
         let actual_output = unzip.output_types();
         if actual_output.len() != self.next.len() {
             return Err(DiagramErrorCode::UnzipMismatch {
