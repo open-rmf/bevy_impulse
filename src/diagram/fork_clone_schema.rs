@@ -1,15 +1,28 @@
-use std::iter::zip;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
-use crate::{diagram::type_info::TypeInfo, Builder};
+use crate::{Builder, ForkCloneOutput};
 
 use super::{
-    impls::{DefaultImpl, NotSupported},
-    workflow_builder::{Edge, EdgeBuilder},
-    DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, NextOperation, OperationId,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -18,84 +31,87 @@ pub struct ForkCloneSchema {
     pub(super) next: Vec<NextOperation>,
 }
 
-impl ForkCloneSchema {
-    pub(super) fn build_edges<'a>(
-        &'a self,
-        mut builder: EdgeBuilder<'a, '_>,
-    ) -> Result<(), DiagramErrorCode> {
-        for target in &self.next {
-            builder.add_output_edge(target, None)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn try_connect<'b>(
+impl BuildDiagramOperation for ForkCloneSchema {
+    fn build_diagram_operation(
         &self,
+        id: &OperationId,
         builder: &mut Builder,
-        output: DynOutput,
-        out_edges: Vec<&mut Edge>,
-        registry: &MessageRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        let outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            <DefaultImpl as DynForkClone<serde_json::Value>>::dyn_fork_clone(
-                builder,
-                output,
-                out_edges.len(),
-            )
-        } else {
-            registry.fork_clone(builder, output, out_edges.len())
-        }?;
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(BuildStatus::defer("waiting for an input"));
+        };
 
-        for (output, out_edge) in zip(outputs, out_edges) {
-            out_edge.output = Some(output);
+        let fork = ctx.registry.messages.fork_clone(inferred_type, builder)?;
+        ctx.set_input_for_target(id, fork.input)?;
+        for target in &self.next {
+            ctx.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
         }
 
-        Ok(())
+        Ok(BuildStatus::Finished)
     }
 }
 
-pub trait DynForkClone<T> {
+pub trait PerformForkClone<T> {
     const CLONEABLE: bool;
 
-    fn dyn_fork_clone(
-        builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
+    fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 }
 
-impl<T> DynForkClone<T> for NotSupported {
+impl<T> PerformForkClone<T> for NotSupported {
     const CLONEABLE: bool = false;
 
-    fn dyn_fork_clone(
-        _builder: &mut Builder,
-        _output: DynOutput,
-        _amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
+    fn perform_fork_clone(_builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
         Err(DiagramErrorCode::NotCloneable)
     }
 }
 
-impl<T> DynForkClone<T> for DefaultImpl
+impl<T> PerformForkClone<T> for Supported
 where
     T: Send + Sync + 'static + Clone,
 {
     const CLONEABLE: bool = true;
 
-    fn dyn_fork_clone(
-        builder: &mut Builder,
-        output: DynOutput,
-        amount: usize,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-        debug!("fork clone: {:?}", output);
-        assert_eq!(output.type_info, TypeInfo::of::<T>());
+    fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
+        let (input, outputs) = builder.create_fork_clone::<T>();
 
-        let fork_clone = output.into_output::<T>()?.fork_clone(builder);
-        let outputs = (0..amount)
-            .map(|_| fork_clone.clone_output(builder).into())
-            .collect();
-        debug!("forked outputs: {:?}", outputs);
-        Ok(outputs)
+        Ok(DynForkClone {
+            input: input.into(),
+            outputs: DynForkCloneOutput::new(outputs),
+        })
+    }
+}
+
+pub struct DynForkClone {
+    pub input: DynInputSlot,
+    pub outputs: DynForkCloneOutput,
+}
+
+pub struct DynForkCloneOutput {
+    inner: Box<dyn DynamicClone>,
+}
+
+impl DynForkCloneOutput {
+    pub fn new(inner: impl DynamicClone + 'static) -> Self {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+
+    pub fn clone_output(&self, builder: &mut Builder) -> DynOutput {
+        self.inner.dyn_clone_output(builder)
+    }
+}
+
+pub trait DynamicClone {
+    fn dyn_clone_output(&self, builder: &mut Builder) -> DynOutput;
+}
+
+impl<T: 'static + Send + Sync + Clone> DynamicClone for ForkCloneOutput<T> {
+    fn dyn_clone_output(&self, builder: &mut Builder) -> DynOutput {
+        self.clone_output(builder).into()
     }
 }
 
@@ -133,7 +149,7 @@ mod tests {
             },
         }))
         .unwrap();
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::NotCloneable),
             "{:?}",

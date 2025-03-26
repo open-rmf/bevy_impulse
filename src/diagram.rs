@@ -1,12 +1,29 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 mod buffer_schema;
 mod fork_clone_schema;
 mod fork_result_schema;
-mod impls;
 mod join_schema;
 mod node_schema;
 mod registration;
 mod serialization;
 mod split_schema;
+mod supported;
 mod transform_schema;
 mod type_info;
 mod unzip_schema;
@@ -14,8 +31,8 @@ mod workflow_builder;
 
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
-use fork_clone_schema::ForkCloneSchema;
-use fork_result_schema::ForkResultSchema;
+use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
+use fork_result_schema::{DynForkResult, ForkResultSchema};
 pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
@@ -26,14 +43,15 @@ use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
-use workflow_builder::create_workflow;
+use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
 
 // ----------
 
-use std::{collections::HashMap, fmt::Display, io::Read};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read};
 
 use crate::{
-    Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
+    Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
+    SplitConnectionError, StreamPack,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -61,6 +79,24 @@ impl Display for NextOperation {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub enum BufferInputs {
+    Single(OperationId),
+    Dict(HashMap<String, OperationId>),
+    Array(Vec<OperationId>),
+}
+
+impl BufferInputs {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Single(_) => false,
+            Self::Dict(d) => d.is_empty(),
+            Self::Array(a) => a.is_empty(),
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -77,12 +113,17 @@ impl Display for NextOperation {
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum BuiltinTarget {
-    /// Use the output to terminate the workflow. This will be the return value
-    /// of the workflow.
+    /// Use the output to terminate the current scope. The value passed into
+    /// this operation will be the return value of the scope.
     Terminate,
 
     /// Dispose of the output.
     Dispose,
+
+    /// When triggered, cancel the current scope. If this is an inner scope of a
+    /// workflow then the parent scope will see a disposal happen. If this is
+    /// the root scope of a workflow then the whole workflow will cancel.
+    Cancel,
 }
 
 #[derive(
@@ -491,7 +532,7 @@ pub enum DiagramOperation {
     /// property.
     ///
     /// Use the `"serialize": true` option to serialize the messages into
-    /// [`JsonMessage`][3] before they are inserted into the buffer. This
+    /// [`JsonMessage`] before they are inserted into the buffer. This
     /// allows any serializable message type to be pushed into the buffer. If
     /// left unspecified, the buffer will store the specific data type that gets
     /// pushed into it. If the buffer inputs are not being serialized, then all
@@ -499,7 +540,6 @@ pub enum DiagramOperation {
     ///
     /// [1]: crate::Buffer
     /// [2]: crate::BufferSettings
-    /// [3]: crate::JsonMessage
     ///
     /// # Examples
     /// ```
@@ -639,9 +679,28 @@ pub enum DiagramOperation {
     Listen(ListenSchema),
 }
 
-type DiagramStart = serde_json::Value;
-type DiagramTerminate = serde_json::Value;
-type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>;
+impl BuildDiagramOperation for DiagramOperation {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationId,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        match self {
+            Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::BufferAccess(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::ForkClone(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::ForkResult(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
+        }
+    }
+}
 
 /// Returns the schema for [`String`]
 fn schema_with_string(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -687,9 +746,20 @@ pub struct Diagram {
     #[schemars(schema_with = "schema_with_string")]
     version: semver::Version,
 
-    /// Signifies the start of a workflow.
+    /// Indicates where the workflow should start running.
     start: NextOperation,
 
+    /// To simplify diagram definitions, the diagram workflow builder will
+    /// sometimes insert implicit operations into the workflow, such as implicit
+    /// serializing and deserializing. These implicit operations may be fallible.
+    ///
+    /// This field indicates how a failed implicit operation should be handled.
+    /// If left unspecified, an implicit error will cause the entire workflow to
+    /// be cancelled.
+    #[serde(default)]
+    on_implicit_error: Option<NextOperation>,
+
+    /// Operations that define the workflow
     ops: HashMap<OperationId, DiagramOperation>,
 }
 
@@ -699,7 +769,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::*;
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
@@ -722,17 +792,19 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     // TODO(koonpeng): Support streams other than `()` #43.
     /* pub */
-    fn spawn_workflow<Streams>(
+    fn spawn_workflow<Request, Response, Streams>(
         &self,
         cmds: &mut Commands,
         registry: &DiagramElementRegistry,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
+    ) -> Result<Service<Request, Response, Streams>, DiagramError>
     where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
         let mut err: Option<DiagramError> = None;
@@ -749,15 +821,17 @@ impl Diagram {
             };
         }
 
-        let w = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
-            debug!(
-                "spawn workflow, scope input: {:?}, terminate: {:?}",
-                scope.input.id(),
-                scope.terminate.id()
-            );
+        let w = cmds.spawn_workflow(
+            |scope: Scope<Request, Response, Streams>, builder: &mut Builder| {
+                debug!(
+                    "spawn workflow, scope input: {:?}, terminate: {:?}",
+                    scope.input.id(),
+                    scope.terminate.id()
+                );
 
-            unwrap_or_return!(create_workflow(scope, builder, registry, self));
-        });
+                unwrap_or_return!(create_workflow(scope, builder, registry, self));
+            },
+        );
 
         if let Some(err) = err {
             return Err(err);
@@ -771,7 +845,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::*;
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
@@ -794,15 +868,19 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn spawn_io_workflow(
+    pub fn spawn_io_workflow<Request, Response>(
         &self,
         cmds: &mut Commands,
         registry: &DiagramElementRegistry,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
-        self.spawn_workflow::<()>(cmds, registry)
+    ) -> Result<Service<Request, Response, ()>, DiagramError>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
+        self.spawn_workflow::<Request, Response, ()>(cmds, registry)
     }
 
     pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
@@ -827,6 +905,24 @@ impl Diagram {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("{context} {code}")]
+pub struct DiagramError {
+    pub context: DiagramErrorContext,
+
+    #[source]
+    pub code: DiagramErrorCode,
+}
+
+impl DiagramError {
+    pub fn in_operation(op_id: OperationId, code: DiagramErrorCode) -> Self {
+        Self {
+            context: DiagramErrorContext { op_id: Some(op_id) },
+            code,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DiagramErrorContext {
     op_id: Option<OperationId>,
@@ -839,15 +935,6 @@ impl Display for DiagramErrorContext {
         }
         Ok(())
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("{context} {code}")]
-pub struct DiagramError {
-    pub context: DiagramErrorContext,
-
-    #[source]
-    pub code: DiagramErrorCode,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -864,17 +951,33 @@ pub enum DiagramErrorCode {
         target_type: TypeInfo,
     },
 
+    #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
+    MultipleInputsCreated(OperationId),
+
+    #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
+    MultipleBuffersCreated(OperationId),
+
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
     #[error("Serialization was disabled for the target message type.")]
-    NotSerializable,
+    NotSerializable(TypeInfo),
+
+    #[error("Deserialization was disabled for the target message type.")]
+    NotDeserializable(TypeInfo),
 
     #[error("Cloning was disabled for the target message type.")]
     NotCloneable,
 
     #[error("The number of unzip slots in response does not match the number of inputs.")]
     NotUnzippable,
+
+    #[error("The number of elements in the unzip expected by the diagram [{expected}] is different from the real number [{actual}]")]
+    UnzipMismatch {
+        expected: usize,
+        actual: usize,
+        elements: Vec<TypeInfo>,
+    },
 
     #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
     CannotForkResult,
@@ -892,6 +995,9 @@ pub enum DiagramErrorCode {
 
     #[error("Target type cannot be determined from [next] and [target_node] is not provided.")]
     UnknownTarget,
+
+    #[error("There was an attempt to access an unknown operation: [{0}]")]
+    UnknownOperation(NextOperation),
 
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
@@ -920,18 +1026,26 @@ pub enum DiagramErrorCode {
     #[error(transparent)]
     ConnectionError(#[from] SplitConnectionError),
 
-    /// Use this only for errors that *should* never happen because of some preconditions.
-    /// If this error ever comes up, then it likely means that there is some logical flaws
-    /// in the algorithm.
-    #[error("an unknown error occurred while building the diagram, {0}")]
-    UnknownError(String),
+    #[error("a type being used in the diagram was not registered {0}")]
+    UnregisteredType(TypeInfo),
+
+    #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
+    BuildHalted {
+        /// Reasons that operations were unable to make progress building
+        reasons: HashMap<OperationId, Cow<'static, str>>,
+    },
+
+    #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
+    ExcessiveIterations,
 }
 
-#[macro_export]
-macro_rules! unknown_diagram_error {
-    () => {
-        DiagramErrorCode::UnknownError(format!("{}:{}", file!(), line!()))
-    };
+impl From<DiagramErrorCode> for DiagramError {
+    fn from(code: DiagramErrorCode) -> Self {
+        DiagramError {
+            context: DiagramErrorContext { op_id: None },
+            code,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -990,9 +1104,9 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable),
+            matches!(err.code, DiagramErrorCode::TypeMismatch { .. }),
             "{:?}",
             err
         );
@@ -1015,9 +1129,9 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable),
+            matches!(err.code, DiagramErrorCode::NotSerializable(_)),
             "{:?}",
             err
         );
@@ -1045,7 +1159,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(
                 err.code,
@@ -1188,7 +1302,10 @@ mod tests {
                 },
                 "unzip": {
                     "type": "unzip",
-                    "next": ["transform"],
+                    "next": [
+                        "transform",
+                        { "builtin": "dispose" },
+                    ],
                 },
                 "transform": {
                     "type": "transform",

@@ -8,14 +8,27 @@
     "version"
   ],
   "properties": {
+    "on_implicit_error": {
+      "description": "To simplify diagram definitions, the diagram workflow builder will sometimes insert implicit operations into the workflow, such as implicit serializing and deserializing. These implicit operations may be fallible.\n\nThis field indicates how a failed implicit operation should be handled. If left unspecified, an implicit error will cause the entire workflow to be cancelled.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/NextOperation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ops": {
+      "description": "Operations that define the workflow",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/definitions/DiagramOperation"
       }
     },
     "start": {
-      "description": "Signifies the start of a workflow.",
+      "description": "Indicates where the workflow should start running.",
       "allOf": [
         {
           "$ref": "#/definitions/NextOperation"
@@ -62,7 +75,7 @@
     "BuiltinTarget": {
       "oneOf": [
         {
-          "description": "Use the output to terminate the workflow. This will be the return value of the workflow.",
+          "description": "Use the output to terminate the current scope. The value passed into this operation will be the return value of the scope.",
           "type": "string",
           "enum": [
             "terminate"
@@ -73,6 +86,13 @@
           "type": "string",
           "enum": [
             "dispose"
+          ]
+        },
+        {
+          "description": "When triggered, cancel the current scope. If this is an inner scope of a workflow then the parent scope will see a disposal happen. If this is the root scope of a workflow then the whole workflow will cancel.",
+          "type": "string",
+          "enum": [
+            "cancel"
           ]
         }
       ]
@@ -289,6 +309,18 @@
             "next": {
               "$ref": "#/definitions/NextOperation"
             },
+            "on_error": {
+              "description": "Specify what happens if an error occurs during the transformation. If you specify a target for on_error, then an error message will be sent to that target. You can set this to `{ \"builtin\": \"dispose\" }` to simply ignore errors.\n\nIf left unspecified, a failure will be treated like an implicit operation failure and behave according to `on_implicit_error`.",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/NextOperation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "type": {
               "type": "string",
               "enum": [
@@ -298,7 +330,7 @@
           }
         },
         {
-          "description": "Create a [`Buffer`][1] which can be used to store and pull data within a scope.\n\nBy default the [`BufferSettings`][2] will keep the single last message pushed to the buffer. You can change that with the optional `settings` property.\n\nUse the `\"serialize\": true` option to serialize the messages into [`JsonMessage`][3] before they are inserted into the buffer. This allows any serializable message type to be pushed into the buffer. If left unspecified, the buffer will store the specific data type that gets pushed into it. If the buffer inputs are not being serialized, then all incoming messages being pushed into the buffer must have the same type.\n\n[1]: crate::Buffer [2]: crate::BufferSettings [3]: crate::JsonMessage\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"fork_clone\", \"ops\": { \"fork_clone\": { \"type\": \"fork_clone\", \"next\": [\"num_output\", \"string_output\", \"all_num_buffer\", \"serialized_num_buffer\"] }, \"num_output\": { \"type\": \"node\", \"builder\": \"num_output\", \"next\": \"buffer_access\" }, \"string_output\": { \"type\": \"node\", \"builder\": \"string_output\", \"next\": \"string_buffer\" }, \"string_buffer\": { \"type\": \"buffer\", \"settings\": { \"retention\": { \"keep_last\": 10 } } }, \"all_num_buffer\": { \"type\": \"buffer\", \"settings\": { \"retention\": \"keep_all\" } }, \"serialized_num_buffer\": { \"type\": \"buffer\", \"serialize\": true }, \"buffer_access\": { \"type\": \"buffer_access\", \"buffers\": [\"string_buffer\"], \"target_node\": \"with_buffer_access\", \"next\": \"with_buffer_access\" }, \"with_buffer_access\": { \"type\": \"node\", \"builder\": \"with_buffer_access\", \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "description": "Create a [`Buffer`][1] which can be used to store and pull data within a scope.\n\nBy default the [`BufferSettings`][2] will keep the single last message pushed to the buffer. You can change that with the optional `settings` property.\n\nUse the `\"serialize\": true` option to serialize the messages into [`JsonMessage`] before they are inserted into the buffer. This allows any serializable message type to be pushed into the buffer. If left unspecified, the buffer will store the specific data type that gets pushed into it. If the buffer inputs are not being serialized, then all incoming messages being pushed into the buffer must have the same type.\n\n[1]: crate::Buffer [2]: crate::BufferSettings\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"fork_clone\", \"ops\": { \"fork_clone\": { \"type\": \"fork_clone\", \"next\": [\"num_output\", \"string_output\", \"all_num_buffer\", \"serialized_num_buffer\"] }, \"num_output\": { \"type\": \"node\", \"builder\": \"num_output\", \"next\": \"buffer_access\" }, \"string_output\": { \"type\": \"node\", \"builder\": \"string_output\", \"next\": \"string_buffer\" }, \"string_buffer\": { \"type\": \"buffer\", \"settings\": { \"retention\": { \"keep_last\": 10 } } }, \"all_num_buffer\": { \"type\": \"buffer\", \"settings\": { \"retention\": \"keep_all\" } }, \"serialized_num_buffer\": { \"type\": \"buffer\", \"serialize\": true }, \"buffer_access\": { \"type\": \"buffer_access\", \"buffers\": [\"string_buffer\"], \"target_node\": \"with_buffer_access\", \"next\": \"with_buffer_access\" }, \"with_buffer_access\": { \"type\": \"node\", \"builder\": \"with_buffer_access\", \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
           "type": "object",
           "required": [
             "type"

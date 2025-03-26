@@ -4,13 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    testing::TestingContext, Builder, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
+    testing::TestingContext, Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service,
 };
 
-use super::{
-    Diagram, DiagramElementRegistry, DiagramError, DiagramStart, DiagramTerminate,
-    NodeBuilderOptions,
-};
+use super::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions};
 
 pub(super) struct DiagramTestFixture {
     pub(super) context: TestingContext,
@@ -25,22 +22,15 @@ impl DiagramTestFixture {
         }
     }
 
-    pub(super) fn spawn_workflow<Streams: StreamPack>(
+    /// Equivalent to `self.spawn_workflow::<JsonMessage, JsonMessage>(diagram)`
+    pub(super) fn spawn_json_io_workflow(
         &mut self,
         diagram: &Diagram,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError> {
+    ) -> Result<Service<JsonMessage, JsonMessage, ()>, DiagramError> {
         self.context
             .app
             .world
             .command(|cmds| diagram.spawn_workflow(cmds, &self.registry))
-    }
-
-    /// Equivalent to `self.spawn_workflow::<()>(diagram)`
-    pub(super) fn spawn_io_workflow(
-        &mut self,
-        diagram: &Diagram,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
-        self.spawn_workflow::<()>(diagram)
     }
 
     /// Spawns a workflow from a diagram then run the workflow until completion.
@@ -50,7 +40,7 @@ impl DiagramTestFixture {
         diagram: &Diagram,
         request: serde_json::Value,
     ) -> Result<serde_json::Value, Box<dyn Error>> {
-        let workflow = self.spawn_workflow::<()>(diagram)?;
+        let workflow = self.spawn_json_io_workflow(diagram)?;
         let mut promise = self
             .context
             .command(|cmds| cmds.request(request, workflow).take_response());
