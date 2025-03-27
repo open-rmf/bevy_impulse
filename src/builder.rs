@@ -22,13 +22,15 @@ use std::future::Future;
 use smallvec::SmallVec;
 
 use crate::{
-    Accessible, Accessing, Accessor, AddOperation, AsMap, Buffer, BufferKeys, BufferLocation,
-    BufferMap, BufferSettings, Bufferable, Buffering, Chain, Collect, ForkClone, ForkCloneOutput,
+    make_option_branching, make_result_branching, Accessible, Accessing, Accessor, AddOperation,
+    AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings, Bufferable, Buffering,
+    Chain, Collect, ForkClone, ForkCloneOutput, ForkOptionOutput, ForkResultOutput,
     ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
-    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateDynamicGate, OperateScope,
-    OperateSplit, OperateStaticGate, Output, Provider, RequestOfMap, ResponseOfMap, Scope,
-    ScopeEndpoints, ScopeSettings, ScopeSettingsStorage, Sendish, Service, SplitOutputs,
-    Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateCancel, OperateDynamicGate,
+    OperateQuietCancel, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
+    RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
+    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
+    TrimBranch, UnusedTarget, Unzippable,
 };
 
 pub(crate) mod connect;
@@ -213,8 +215,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.create_scope::<Request, Response, (), Settings>(build)
     }
 
-    /// Create a node that clones its inputs and sends them off to any number of
-    /// targets.
+    /// Create an operation that clones its inputs and sends them off to any
+    /// number of targets.
     pub fn create_fork_clone<T>(&mut self) -> (InputSlot<T>, ForkCloneOutput<T>)
     where
         T: Clone + 'static + Send + Sync,
@@ -228,6 +230,75 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         (
             InputSlot::new(self.scope, source),
             ForkCloneOutput::new(self.scope, source),
+        )
+    }
+
+    /// Create an operation that unzips its inputs and sends each element off to
+    /// a different output.
+    pub fn create_unzip<T>(&mut self) -> (InputSlot<T>, T::Unzipped)
+    where
+        T: Unzippable + 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        (
+            InputSlot::new(self.scope, source),
+            T::unzip_output(Output::<T>::new(self.scope, source), self),
+        )
+    }
+
+    /// Create an operation that creates a fork for a [`Result`] input. The value
+    /// inside the [`Result`] will be unpacked and sent down a different branch
+    /// depending on whether it was in the [`Ok`] or [`Err`] variant.
+    pub fn create_fork_result<T, E>(&mut self) -> (InputSlot<Result<T, E>>, ForkResultOutput<T, E>)
+    where
+        T: 'static + Send + Sync,
+        E: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        let target_ok = self.commands.spawn(UnusedTarget).id();
+        let target_err = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            ForkResultOutput {
+                ok: Output::new(self.scope, target_ok),
+                err: Output::new(self.scope, target_err),
+            },
+        )
+    }
+
+    /// Create an operation that creates a fork for an [`Option`] input. The value
+    /// inside the [`Option`] will be unpacked and sent down a different branch
+    /// depending on whether it was in the [`Some`] or [`None`] variant.
+    ///
+    /// For the [`None`] variant a unit `()` output will be sent, also called
+    /// a trigger.
+    pub fn create_fork_option<T>(&mut self) -> (InputSlot<Option<T>>, ForkOptionOutput<T>)
+    where
+        T: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        let target_some = self.commands.spawn(UnusedTarget).id();
+        let target_none = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            ForkOptionOutput {
+                some: Output::new(self.scope, target_some),
+                none: Output::new(self.scope, target_none),
+            },
         )
     }
 
@@ -366,6 +437,42 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             InputSlot::new(self.scope, source),
             SplitOutputs::new(self.scope, source),
         )
+    }
+
+    /// Create an input slot that will cancel the current scope when it gets
+    /// triggered. This can be used on types that implement [`ToString`].
+    ///
+    /// If you need to cancel for a type that does not implement [`ToString`]
+    /// then convert it to a trigger `()` and then connect it to
+    /// [`Self::create_quiet_cancel`].
+    pub fn create_cancel<T>(&mut self) -> InputSlot<T>
+    where
+        T: 'static + Send + Sync + ToString,
+    {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateCancel::<T>::new(),
+        ));
+
+        InputSlot::new(self.scope, source)
+    }
+
+    /// Create an input slot that will cancel that current scope when it gets
+    /// triggered.
+    ///
+    /// If you want the cancellation message to include information about the
+    /// input value that triggered it, use [`Self::create_cancel`].
+    pub fn create_quiet_cancel(&mut self) -> InputSlot<()> {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateQuietCancel,
+        ));
+
+        InputSlot::new(self.scope, source)
     }
 
     /// This method allows you to define a cleanup workflow that branches off of

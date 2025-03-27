@@ -31,6 +31,8 @@ use crate::{
 
 pub use bevy_impulse_derive::{Accessor, Joined};
 
+use super::BufferKey;
+
 /// Uniquely identify a buffer within a buffer map, either by name or by an
 /// index value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -424,6 +426,20 @@ pub trait Accessor: 'static + Send + Sync + Sized + Clone {
     }
 }
 
+impl<T> Accessor for BufferKey<T>
+where
+    T: Send + Sync + 'static,
+{
+    type Buffers = Buffer<T>;
+}
+
+impl<T> Accessor for Vec<BufferKey<T>>
+where
+    T: Send + Sync + 'static,
+{
+    type Buffers = Vec<Buffer<T>>;
+}
+
 impl BufferMapLayout for BufferMap {
     fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
         Ok(buffers.clone())
@@ -496,6 +512,20 @@ impl Accessing for BufferMap {
 
 impl<T: 'static + Send + Sync> Joined for Vec<T> {
     type Buffers = Vec<Buffer<T>>;
+}
+
+impl<T: 'static + Send + Sync> BufferMapLayout for Buffer<T> {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut compatibility = IncompatibleLayout::default();
+
+        if let Ok(downcast_buffer) =
+            compatibility.require_buffer_for_identifier::<Buffer<T>>(0, buffers)
+        {
+            return Ok(downcast_buffer);
+        }
+
+        Err(compatibility)
+    }
 }
 
 impl<B: 'static + Send + Sync + AsAnyBuffer + Clone> BufferMapLayout for Vec<B> {
