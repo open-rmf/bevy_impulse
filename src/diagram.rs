@@ -62,6 +62,7 @@ use schemars::{
 use serde::{Deserialize, Serialize, Serializer, Deserializer, ser::SerializeMap, de::{Visitor, Error}};
 
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
+const RESERVED_OPERATION_NAMES: [&'static str; 2] = ["", "builtin"];
 
 pub type BuilderId = String;
 pub type OperationName = String;
@@ -71,7 +72,7 @@ pub type OperationName = String;
 )]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum NextOperation {
-    Target(OperationName),
+    Name(OperationName),
     Builtin { builtin: BuiltinTarget },
     /// Refer to an "inner" operation of one of the sibling operations in a
     /// diagram. This can be used to target section inputs.
@@ -81,7 +82,7 @@ pub enum NextOperation {
 impl<'a> Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Target(operation_id) => f.write_str(operation_id),
+            Self::Name(operation_id) => f.write_str(operation_id),
             Self::Namespace(NamespacedOperation { namespace, operation }) => write!(f, "{}:{}", namespace, operation),
             Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
         }
@@ -1044,6 +1045,34 @@ impl Diagram {
             .get(template_id)
             .ok_or_else(|| DiagramErrorCode::TemplateNotFound(template_id.clone()))
     }
+
+    pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
+        validate_operation_names(&self.ops)?;
+        for (name, template) in &self.templates {
+            validate_operation_name(name)?;
+            validate_operation_names(&template.ops)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn validate_operation_names(ops: &HashMap<OperationName, DiagramOperation>) -> Result<(), DiagramErrorCode> {
+    for name in ops.keys() {
+        validate_operation_name(name)?;
+    }
+
+    Ok(())
+}
+
+fn validate_operation_name(name: &str) -> Result<(), DiagramErrorCode> {
+    for reserved in &RESERVED_OPERATION_NAMES {
+        if name == *reserved {
+            return Err(DiagramErrorCode::InvalidUseOfReservedName(*reserved))
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1184,6 +1213,12 @@ pub enum DiagramErrorCode {
 
     #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
     ExcessiveIterations,
+
+    #[error("An operation was given a reserved name [{0}]")]
+    InvalidUseOfReservedName(&'static str),
+
+    #[error("an error happened while building a nested diagram: {0}")]
+    NestedError(Box<DiagramError>),
 }
 
 impl From<DiagramErrorCode> for DiagramError {
@@ -1197,7 +1232,7 @@ impl From<DiagramErrorCode> for DiagramError {
 
 impl DiagramErrorCode {
     pub fn operation_name_not_found(name: OperationName) -> Self {
-        DiagramErrorCode::OperationNotFound(NextOperation::Target(name))
+        DiagramErrorCode::OperationNotFound(NextOperation::Name(name))
     }
 }
 

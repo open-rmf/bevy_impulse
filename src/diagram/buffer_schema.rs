@@ -54,7 +54,7 @@ impl BuildDiagramOperation for BufferSchema {
                 return Ok(BuildStatus::defer("waiting for an input"));
             };
 
-            *inferred_type
+            inferred_type
         };
 
         let buffer =

@@ -57,7 +57,7 @@ impl BuildDiagramOperation for SplitSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let split = ctx.registry.messages.split(sample_input, self, builder)?;
+        let split = ctx.registry.messages.split(&sample_input, self, builder)?;
         ctx.set_input_for_target(id, split.input)?;
         for (target, output) in split.outputs {
             ctx.add_output_into_target(target, output);

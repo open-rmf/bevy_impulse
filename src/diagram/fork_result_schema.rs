@@ -52,7 +52,7 @@ impl BuildDiagramOperation for ForkResultSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_result(inferred_type, builder)?;
+        let fork = ctx.registry.messages.fork_result(&inferred_type, builder)?;
         ctx.set_input_for_target(id, fork.input)?;
         ctx.add_output_into_target(self.ok.clone(), fork.ok);
         ctx.add_output_into_target(self.err.clone(), fork.err);

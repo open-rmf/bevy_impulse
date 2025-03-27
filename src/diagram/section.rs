@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{AnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
-    type_info::TypeInfo, BuilderId, Diagram,
+    type_info::TypeInfo, BuilderId,
     DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
     NextOperation, OperationName, BuildDiagramOperation, DiagramContext,
     BuildStatus,
@@ -170,26 +170,34 @@ pub struct SectionBuffer {
     pub(super) item_type: TypeInfo,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub(super) struct SectionTemplate {
-    /// These are the inputs that the section is exposing
+    /// These are the inputs that the section is exposing for its sibling
+    /// operations to send outputs into.
     #[serde(default)]
-    inputs: Vec<String>,
+    pub inputs: Vec<InputRemapping>,
+    /// These are the outputs that the section is exposing so you can connect
+    /// them into siblings of the section.
     #[serde(default)]
-    outputs: Vec<String>,
+    pub outputs: Vec<String>,
+    /// These are the buffers that the section is exposing for you to read,
+    /// write, join, or listen to.
     #[serde(default)]
-    buffers: Vec<String>,
-    ops: HashMap<OperationName, DiagramOperation>,
+    pub buffers: Vec<InputRemapping>,
+    /// Operations that define the behavior of the section.
+    pub ops: HashMap<OperationName, DiagramOperation>,
 }
 
 /// This defines how sections remap their inner operations (inputs and buffers)
 /// to expose them to operations that are siblings to the section.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum InputRemapping {
     /// Do a simple 1:1 forwarding of the names listed in the array
     Forward(Vec<OperationName>),
     /// Rename an operation inside the section to expose it externally. The key
     /// of the map is what siblings of the section can connect to, and the value
-    /// is the input inside the section that will be connected to.
+    /// of the entry is the identifier of the input inside the section that is
+    /// being exposed.
     ///
     /// This allows a section to expose inputs and buffers that are provided
     /// by inner sections.

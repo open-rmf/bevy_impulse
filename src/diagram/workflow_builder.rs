@@ -28,25 +28,67 @@ use super::{
     ImplicitStringify, NextOperation, OperationName, TypeInfo, NamespacedOperation,
 };
 
+/// This key is used so we can do a clone-free .get(&NextOperation) of a hashmap
+/// that uses this as a key.
+//
+// TODO(@mxgrey): With this struct we could apply a lifetime to
+// DiagramConstruction and then borrow all the names used in this struct instead
+// of using Cow.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+enum NextOperationRef<'a> {
+    Name(Cow<'a, str>),
+    Builtin { builtin: BuiltinTarget },
+    Namespace(NamespacedOperationRef<'a>),
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct NamespacedOperationRef<'a> {
+    namespace: Cow<'a, str>,
+    operation: Cow<'a, str>,
+}
+
+impl<'a> From<NextOperation> for NextOperationRef<'a> {
+    fn from(value: NextOperation) -> Self {
+        match value {
+            NextOperation::Name(name) => NextOperationRef::Name(Cow::Owned(name)),
+            NextOperation::Builtin { builtin } => NextOperationRef::Builtin { builtin },
+            NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
+                NextOperationRef::Namespace(NamespacedOperationRef {
+                    namespace: Cow::Owned(namespace),
+                    operation: Cow::Owned(operation),
+                })
+            }
+        }
+    }
+}
+
+impl<'a> From<NextOperationRef<'a>> for NextOperation {
+    fn from(value: NextOperationRef<'a>) -> Self {
+        match value {
+            NextOperationRef::Name(name) => NextOperation::Name(name.into_owned()),
+            NextOperationRef::Builtin { builtin } => NextOperation::Builtin { builtin },
+            NextOperationRef::Namespace(NamespacedOperationRef { namespace, operation }) => {
+                NextOperation::Namespace(NamespacedOperation {
+                    namespace: namespace.into_owned(),
+                    operation: operation.into_owned(),
+                })
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct DiagramConstruction {
-    connect_into_target: HashMap<NextOperation, Box<dyn ConnectIntoTarget>>,
+    connect_into_target: HashMap<NextOperationRef<'static>, Box<dyn ConnectIntoTarget>>,
     // We use a separate hashmap for OperationId vs BuiltinTarget so we can
     // efficiently fetch with an &OperationId
-    outputs_to_operation_target: HashMap<OperationName, Vec<DynOutput>>,
-    outputs_to_builtin_target: HashMap<BuiltinTarget, Vec<DynOutput>>,
+    outputs_into_target: HashMap<NextOperationRef<'static>, Vec<DynOutput>>,
     buffers: HashMap<OperationName, AnyBuffer>,
 }
 
 impl DiagramConstruction {
     fn is_finished(&self) -> bool {
-        for outputs in self.outputs_to_builtin_target.values() {
-            if !outputs.is_empty() {
-                return false;
-            }
-        }
-
-        for outputs in self.outputs_to_operation_target.values() {
+        for outputs in self.outputs_into_target.values() {
             if !outputs.is_empty() {
                 return false;
             }
@@ -63,20 +105,6 @@ pub struct DiagramContext<'a> {
 }
 
 impl<'a> DiagramContext<'a> {
-    /// Get all the currently known outputs that are aimed at this target operation.
-    ///
-    /// During the [`BuildDiagramOperation`] phase this will eventually contain
-    /// all outputs targeting this operation that are explicitly listed in the
-    /// diagram. It will never contain outputs that implicitly target this
-    /// operation.
-    ///
-    /// During the [`ConnectIntoTarget`] phase this will not contain any outputs
-    /// except new outputs added during the current call to [`ConnectIntoTarget`],
-    /// so this function is generally not useful during that phase.
-    pub fn get_outputs_into_operation_target(&self, id: &OperationName) -> Option<&Vec<DynOutput>> {
-        self.construction.outputs_to_operation_target.get(id)
-    }
-
     /// Infer the [`TypeInfo`] for the input messages into the specified operation.
     ///
     /// If this returns [`None`] then not enough of the diagram has been built
@@ -92,10 +120,12 @@ impl<'a> DiagramContext<'a> {
     /// during the [`ConnectIntoTarget`] phase then you should capture the
     /// [`TypeInfo`] that you receive from this function during the
     /// [`BuildDiagramOperation`] phase.
-    pub fn infer_input_type_into_target(&self, id: &OperationName) -> Option<&TypeInfo> {
-        self.get_outputs_into_operation_target(id)
+    pub fn infer_input_type_into_target(&self, id: &OperationName) -> Option<TypeInfo> {
+        self.construction
+            .outputs_into_target
+            .get(&NextOperationRef::Name(Cow::Borrowed(id)))
             .and_then(|outputs| outputs.first())
-            .map(|o| o.message_info())
+            .map(|o| *o.message_info())
     }
 
     /// Add an output to connect into a target.
@@ -108,25 +138,7 @@ impl<'a> DiagramContext<'a> {
     /// * target - The operation that needs to receive the output
     /// * output - The output channel that needs to be connected into the target.
     pub fn add_output_into_target(&mut self, target: NextOperation, output: DynOutput) {
-        match target {
-            NextOperation::Target(id) => {
-                self.construction
-                    .outputs_to_operation_target
-                    .entry(id)
-                    .or_default()
-                    .push(output);
-            }
-            NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
-                panic!("not yet implemented")
-            }
-            NextOperation::Builtin { builtin } => {
-                self.construction
-                    .outputs_to_builtin_target
-                    .entry(builtin)
-                    .or_default()
-                    .push(output);
-            }
-        }
+        self.construction.outputs_into_target.entry(target.into()).or_default().push(output);
     }
 
     /// Set the input slot of an operation. This should not be called more than
@@ -155,7 +167,7 @@ impl<'a> DiagramContext<'a> {
         match self
             .construction
             .connect_into_target
-            .entry(NextOperation::Target(operation.clone()))
+            .entry(NextOperationRef::Name(Cow::Owned(operation.clone())))
         {
             Entry::Occupied(_) => {
                 return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
@@ -189,7 +201,7 @@ impl<'a> DiagramContext<'a> {
         match self
             .construction
             .connect_into_target
-            .entry(NextOperation::Target(operation.clone()))
+            .entry(NextOperationRef::Name(Cow::Owned(operation.clone())))
         {
             Entry::Occupied(_) => {
                 return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
@@ -292,7 +304,7 @@ impl<'a> DiagramContext<'a> {
             self.diagram.get_op(target)?
         } else {
             match next {
-                NextOperation::Target(op_id) => self.diagram.get_op(op_id)?,
+                NextOperation::Name(op_id) => self.diagram.get_op(op_id)?,
                 NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
                     panic!("Not yet implemented")
                 }
@@ -453,6 +465,8 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
+    diagram.validate_operation_names()?;
+
     let mut construction = DiagramConstruction::default();
 
     initialize_builtin_operations(
@@ -486,7 +500,7 @@ where
                 .ops
                 .get(op)
                 .ok_or_else(|| {
-                    DiagramErrorCode::UnknownOperation(NextOperation::Target(op.clone()))
+                    DiagramErrorCode::UnknownOperation(NextOperation::Name(op.clone()))
                 })?
                 .build_diagram_operation(op, builder, &mut ctx)
                 .map_err(|code| DiagramError::in_operation(op.clone(), code))?;
@@ -534,26 +548,11 @@ where
             registry,
         };
 
-        // Attempt to connect to all regular operations
-        for (op, outputs) in construction.outputs_to_operation_target.drain() {
-            let op = NextOperation::Target(op);
+        for (id, outputs) in construction.outputs_into_target.drain() {
             let connect = construction
                 .connect_into_target
-                .get_mut(&op)
-                .ok_or_else(|| DiagramErrorCode::UnknownOperation(op.clone()))?;
-
-            for output in outputs {
-                connect.connect_into_target(output, builder, &mut ctx)?;
-            }
-        }
-
-        // Attempt to connect to all builtin operations
-        for (builtin, outputs) in construction.outputs_to_builtin_target.drain() {
-            let op = NextOperation::Builtin { builtin };
-            let connect = construction
-                .connect_into_target
-                .get_mut(&op)
-                .ok_or_else(|| DiagramErrorCode::UnknownOperation(op.clone()))?;
+                .get_mut(&id)
+                .ok_or_else(|| DiagramErrorCode::UnknownOperation(id.into()))?;
 
             for output in outputs {
                 connect.connect_into_target(output, builder, &mut ctx)?;
@@ -561,12 +560,8 @@ where
         }
 
         construction
-            .outputs_to_builtin_target
-            .extend(new_construction.outputs_to_builtin_target.drain());
-
-        construction
-            .outputs_to_operation_target
-            .extend(new_construction.outputs_to_operation_target.drain());
+            .outputs_into_target
+            .extend(new_construction.outputs_into_target.drain());
 
         iterations += 1;
         if iterations > MAX_ITERATIONS {
@@ -592,7 +587,7 @@ where
 
     // Add the terminate operation
     ctx.construction.connect_into_target.insert(
-        NextOperation::Builtin {
+        NextOperationRef::Builtin {
             builtin: BuiltinTarget::Terminate,
         },
         standard_input_connection(scope.terminate.into(), &ctx.registry)?,
@@ -600,7 +595,7 @@ where
 
     // Add the dispose operation
     ctx.construction.connect_into_target.insert(
-        NextOperation::Builtin {
+        NextOperationRef::Builtin {
             builtin: BuiltinTarget::Dispose,
         },
         Box::new(ConnectionCallback(move |_, _, _| {
@@ -611,7 +606,7 @@ where
 
     // Add the cancel operation
     ctx.construction.connect_into_target.insert(
-        NextOperation::Builtin {
+        NextOperationRef::Builtin {
             builtin: BuiltinTarget::Cancel,
         },
         Box::new(ConnectToCancel::new(builder)?),

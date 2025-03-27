@@ -46,7 +46,7 @@ impl BuildDiagramOperation for UnzipSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let unzip = ctx.registry.messages.unzip(inferred_type)?;
+        let unzip = ctx.registry.messages.unzip(&inferred_type)?;
         let actual_output = unzip.output_types();
         if actual_output.len() != self.next.len() {
             return Err(DiagramErrorCode::UnzipMismatch {
