@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::{AnyBuffer, Buffer, Builder, InputSlot, Output};
 
 use super::{
-    dyn_connect, type_info::TypeInfo, validate_single_input, BuilderId, Diagram,
+    type_info::TypeInfo, BuilderId, Diagram,
     DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
-    IntoOperationId, NextOperation, OperationId, WorkflowBuilder,
+    NextOperation, OperationName, BuildDiagramOperation, DiagramContext,
+    BuildStatus,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -22,82 +23,22 @@ pub enum SectionProvider {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SectionOp {
+pub struct SectionSchema {
     #[serde(flatten)]
     pub(super) provider: SectionProvider,
     #[serde(default)]
     pub(super) config: serde_json::Value,
-    #[serde(default)]
-    pub(super) buffers: HashMap<String, OperationId>,
     pub(super) connect: HashMap<String, NextOperation>,
 }
 
-impl SectionOp {
-    fn scoped_op_id(section_op_id: &OperationId, inner_op_id: &OperationId) -> OperationId {
-        format!("{}/{}", section_op_id, inner_op_id)
-    }
-
-    pub(super) fn add_vertices<'a>(
-        &'a self,
-        op_id: OperationId,
-        wf_builder: &mut WorkflowBuilder<'a>,
+impl BuildDiagramOperation for SectionSchema {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationName,
         builder: &mut Builder,
-        diagram: &'a Diagram,
-        registry: &'a DiagramElementRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        match &self.provider {
-            SectionProvider::Builder(builder_id) => {
-                let reg = registry.get_section_registration(builder_id)?;
-                let section = reg.create_section(builder, self.config.clone())?;
-                let slots = section.into_slots();
-
-                // check for extra outputs
-                for k in self.connect.keys() {
-                    if !slots.outputs.contains_key(k) {
-                        return Err(SectionError::ExtraOutput(k.clone()).into());
-                    }
-                }
-
-                for (k, input) in slots.inputs {
-                    wf_builder.add_vertex(
-                        Self::scoped_op_id(&op_id, &k),
-                        move |vertex, builder, _, _| {
-                            let output = validate_single_input(vertex)?;
-                            dyn_connect(builder, output, input, &registry.messages)?;
-                            Ok(true)
-                        },
-                    );
-                }
-
-                for (k, output) in slots.outputs {
-                    let target = self
-                        .connect
-                        .get(&k)
-                        .ok_or_else(|| SectionError::MissingOutput(k.clone()))?;
-
-                    wf_builder
-                        .add_vertex(Self::scoped_op_id(&op_id, &k), move |_, _, _, _| {
-                            // already connected when section is created
-                            Ok(true)
-                        })
-                        .add_output_edge(target.clone(), Some(output));
-                }
-
-                for (k, buffer) in slots.buffers {
-                    let scoped_id = Self::scoped_op_id(&op_id, &k);
-                    wf_builder.add_vertex(scoped_id.clone(), move |_, _, _, buffers| {
-                        buffers.insert(scoped_id.clone(), buffer);
-                        Ok(true)
-                    });
-                }
-
-                Ok(())
-            }
-            SectionProvider::Template(template_id) => {
-                let template = diagram.get_template(template_id)?;
-                template.add_vertices(&op_id, self, wf_builder, builder, diagram, registry)
-            }
-        }
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        panic!("Not yet implemented")
     }
 }
 
@@ -231,37 +172,28 @@ pub struct SectionBuffer {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub(super) struct SectionTemplate {
+    /// These are the inputs that the section is exposing
+    #[serde(default)]
     inputs: Vec<String>,
+    #[serde(default)]
     outputs: Vec<String>,
+    #[serde(default)]
     buffers: Vec<String>,
-    ops: HashMap<OperationId, DiagramOperation>,
+    ops: HashMap<OperationName, DiagramOperation>,
 }
 
-impl SectionTemplate {
-    fn add_vertices<'a>(
-        &'a self,
-        section_op_id: &OperationId,
-        section_op: &SectionOp,
-        wf_builder: &mut WorkflowBuilder<'a>,
-        builder: &mut Builder,
-        diagram: &'a Diagram,
-        registry: &'a DiagramElementRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        for (op_id, op) in &self.ops {
-            let op_id = SectionOp::scoped_op_id(section_op_id, op_id);
-            let mut target_aliases = HashMap::new();
-            for k in &self.outputs {
-                let target = section_op
-                    .connect
-                    .get(k)
-                    .ok_or_else(|| SectionError::MissingOutput(k.clone()))?;
-                target_aliases.insert(k.clone(), target.clone().into_operation_id());
-            }
-            wf_builder.set_target_aliases(target_aliases);
-            wf_builder.add_vertices_from_op(op_id, op, builder, diagram, registry)?;
-        }
-        Ok(())
-    }
+/// This defines how sections remap their inner operations (inputs and buffers)
+/// to expose them to operations that are siblings to the section.
+pub enum InputRemapping {
+    /// Do a simple 1:1 forwarding of the names listed in the array
+    Forward(Vec<OperationName>),
+    /// Rename an operation inside the section to expose it externally. The key
+    /// of the map is what siblings of the section can connect to, and the value
+    /// is the input inside the section that will be connected to.
+    ///
+    /// This allows a section to expose inputs and buffers that are provided
+    /// by inner sections.
+    Remap(HashMap<OperationName, NextOperation>),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -281,7 +213,7 @@ mod tests {
     use crate::{
         diagram::testing::DiagramTestFixture, testing::TestingContext, BufferAccess, BufferKey,
         BufferSettings, Diagram, IntoBlockingCallback, Node, NodeBuilderOptions, RequestExt,
-        RunCommandsOnWorldExt, SectionBuilderOptions,
+        RunCommandsOnWorldExt, SectionBuilderOptions, JsonMessage,
     };
 
     use super::*;
@@ -505,7 +437,7 @@ mod tests {
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
-            "start": { "section": "add_one", "input": "test_input" },
+            "start": { "add_one": "test_input" },
             "ops": {
                 "add_one": {
                     "type": "section",
@@ -520,7 +452,7 @@ mod tests {
 
         let mut context = TestingContext::minimal_plugins();
         let mut promise = context.app.world.command(|cmds| {
-            let workflow = diagram.spawn_io_workflow(cmds, &registry).unwrap();
+            let workflow = diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry).unwrap();
             cmds.request(serde_json::to_value(1).unwrap(), workflow)
                 .take_response()
         });
@@ -536,7 +468,7 @@ mod tests {
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
-            "start": { "section": "add_one", "input": "test_input" },
+            "start": { "add_one": "test_input" },
             "ops": {
                 "add_one": {
                     "type": "section",
@@ -551,7 +483,7 @@ mod tests {
         let err = context
             .app
             .world
-            .command(|cmds| diagram.spawn_io_workflow(cmds, &registry))
+            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))
             .unwrap_err();
         let section_err = match err.code {
             DiagramErrorCode::SectionError(section_err) => section_err,
@@ -567,7 +499,7 @@ mod tests {
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
-            "start": { "section": "add_one", "input": "test_input" },
+            "start": { "add_one": "test_input" },
             "ops": {
                 "add_one": {
                     "type": "section",
@@ -585,7 +517,7 @@ mod tests {
         let err = context
             .app
             .world
-            .command(|cmds| diagram.spawn_io_workflow(cmds, &registry))
+            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))
             .unwrap_err();
         let section_err = match err.code {
             DiagramErrorCode::SectionError(section_err) => section_err,
@@ -618,7 +550,7 @@ mod tests {
         let err = context
             .app
             .world
-            .command(|cmds| diagram.spawn_io_workflow(cmds, &registry))
+            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))
             .unwrap_err();
         assert!(matches!(err.code, DiagramErrorCode::OnlySingleInput));
     }
@@ -640,8 +572,8 @@ mod tests {
                 "fork_clone": {
                     "type": "fork_clone",
                     "next": [
-                        { "section": "add_one", "input": "test_input" },
-                        { "section": "add_one", "input": "extra_input" },
+                        { "add_one": "test_input" },
+                        { "add_one": "extra_input" },
                     ]
                 },
                 "add_one": {
@@ -659,7 +591,7 @@ mod tests {
         let err = context
             .app
             .world
-            .command(|cmds| diagram.spawn_io_workflow(cmds, &fixture.registry))
+            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &fixture.registry))
             .unwrap_err();
         assert!(matches!(err.code, DiagramErrorCode::OperationNotFound(_)));
     }
@@ -687,7 +619,8 @@ mod tests {
         );
         registry
             .opt_out()
-            .no_request_deserializing()
+            .no_serializing()
+            .no_deserializing()
             .register_node_builder(
                 NodeBuilderOptions::new("buffer_length"),
                 |builder: &mut Builder, _config: ()| -> Node<Vec<BufferKey<i64>>, usize, ()> {
@@ -701,11 +634,12 @@ mod tests {
                     }
                 },
             )
-            .with_listen();
+            .with_listen()
+            .with_common_response();
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
-            "start": { "section": "add_one_to_buffer", "input": "test_input" },
+            "start": { "add_one_to_buffer": "test_input" },
             "ops": {
                 "add_one_to_buffer": {
                     "type": "section",
@@ -728,7 +662,7 @@ mod tests {
 
         let mut context = TestingContext::minimal_plugins();
         let mut promise = context.app.world.command(|cmds| {
-            let workflow = diagram.spawn_io_workflow(cmds, &registry).unwrap();
+            let workflow = diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry).unwrap();
             cmds.request(serde_json::to_value(1).unwrap(), workflow)
                 .take_response()
         });
@@ -747,7 +681,6 @@ mod tests {
                 "test_template": {
                     "inputs": ["input1", "input2"],
                     "outputs": ["output1", "output2"],
-                    "buffers": [],
                     "ops": {
                         "input1": {
                             "type": "node",
@@ -767,8 +700,8 @@ mod tests {
                 "fork_clone": {
                     "type": "fork_clone",
                     "next": [
-                        { "section": "test_tmpl", "input": "input1" },
-                        { "section": "test_tmpl", "input": "input2" },
+                        { "test_tmpl": "input1" },
+                        { "test_tmpl": "input2" },
                     ],
                 },
                 "test_tmpl": {

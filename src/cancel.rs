@@ -67,6 +67,14 @@ impl Cancellation {
         .into()
     }
 
+    pub fn triggered(cancelled_at_node: Entity, value: Option<String>) -> Self {
+        TriggeredCancellation {
+            cancelled_at_node,
+            value,
+        }
+        .into()
+    }
+
     pub fn supplanted(
         supplanted_at_node: Entity,
         supplanted_by_node: Entity,
@@ -119,6 +127,9 @@ pub enum CancellationCause {
     /// A filtering node has triggered a cancellation.
     Filtered(Filtered),
 
+    /// The workflow triggered its own cancellation.
+    Triggered(TriggeredCancellation),
+
     /// Some workflows will queue up requests to deliver them one at a time.
     /// Depending on the label of the incoming requests, a new request might
     /// supplant an earlier one, causing the earlier request to be cancelled.
@@ -161,6 +172,21 @@ pub enum CancellationCause {
     /// The entity provided in [`Broken`] is the link where the breakage was
     /// detected.
     Broken(Broken),
+}
+
+/// A variant of [`CancellationCause`]
+#[derive(Debug)]
+pub struct TriggeredCancellation {
+    /// The cancellation node that was triggered.
+    pub cancelled_at_node: Entity,
+    /// The value that triggered the cancellation, if one was provided.
+    pub value: Option<String>,
+}
+
+impl From<TriggeredCancellation> for CancellationCause {
+    fn from(value: TriggeredCancellation) -> Self {
+        CancellationCause::Triggered(value)
+    }
 }
 
 impl From<Filtered> for CancellationCause {

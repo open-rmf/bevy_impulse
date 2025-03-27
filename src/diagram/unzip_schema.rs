@@ -1,115 +1,115 @@
-use std::iter::zip;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
 use bevy_utils::all_tuples_with_size;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::Builder;
 
 use super::{
-    impls::{DefaultImplMarker, NotSupportedMarker},
-    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
-    SerializeMessage, Vertex, WorkflowBuilder,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationName, PerformForkClone,
+    SerializeMessage, TypeInfo,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct UnzipOp {
+pub struct UnzipSchema {
     pub(super) next: Vec<NextOperation>,
 }
 
-impl UnzipOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
-        let mut edge_builder =
-            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
-                self.try_connect(vertex, builder, &registry.messages)
-            });
-        for target in &self.next {
-            edge_builder.add_output_edge(target.clone(), None);
-        }
-    }
-
-    pub(super) fn try_connect(
+impl BuildDiagramOperation for UnzipSchema {
+    fn build_diagram_operation(
         &self,
-        vertex: &Vertex,
+        id: &OperationName,
         builder: &mut Builder,
-        registry: &MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
-        let output = validate_single_input(vertex)?;
-        let outputs = registry.unzip(builder, output)?;
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(BuildStatus::defer("waiting for an input"));
+        };
 
-        if outputs.len() < vertex.out_edges.len() {
-            return Err(DiagramErrorCode::NotUnzippable);
+        let unzip = ctx.registry.messages.unzip(inferred_type)?;
+        let actual_output = unzip.output_types();
+        if actual_output.len() != self.next.len() {
+            return Err(DiagramErrorCode::UnzipMismatch {
+                expected: self.next.len(),
+                actual: unzip.output_types().len(),
+                elements: actual_output,
+            });
         }
 
-        for (output, out_edge) in zip(outputs, &vertex.out_edges) {
-            out_edge.set_output(output);
-        }
+        let unzip = unzip.perform_unzip(builder)?;
 
-        Ok(true)
+        ctx.set_input_for_target(id, unzip.input)?;
+        for (target, output) in self.next.iter().zip(unzip.outputs) {
+            ctx.add_output_into_target(target.clone(), output);
+        }
+        Ok(BuildStatus::Finished)
     }
 }
 
-pub trait DynUnzip {
-    /// Returns a list of type names that this message unzips to.
-    fn output_types(&self) -> Vec<&'static str>;
+pub struct DynUnzip {
+    input: DynInputSlot,
+    outputs: Vec<DynOutput>,
+}
 
-    fn dyn_unzip(
-        &self,
-        builder: &mut Builder,
-        output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode>;
+pub trait PerformUnzip {
+    /// Returns a list of type names that this message unzips to.
+    fn output_types(&self) -> Vec<TypeInfo>;
+
+    fn perform_unzip(&self, builder: &mut Builder) -> Result<DynUnzip, DiagramErrorCode>;
 
     /// Called when a node is registered.
     fn on_register(&self, registry: &mut MessageRegistry);
 }
 
-impl<T> DynUnzip for NotSupportedMarker<T> {
-    fn output_types(&self) -> Vec<&'static str> {
-        Vec::new()
-    }
-
-    fn dyn_unzip(
-        &self,
-        _builder: &mut Builder,
-        _output: DynOutput,
-    ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-        Err(DiagramErrorCode::NotUnzippable)
-    }
-
-    fn on_register(&self, _registry: &mut MessageRegistry) {}
-}
-
 macro_rules! dyn_unzip_impl {
     ($len:literal, $(($P:ident, $o:ident)),*) => {
-        impl<$($P),*, Serializer> DynUnzip for DefaultImplMarker<(($($P,)*), Serializer)>
+        impl<$($P),*, Serializer, Cloneable> PerformUnzip for Supported<(($($P,)*), Serializer, Cloneable)>
         where
             $($P: Send + Sync + 'static),*,
             Serializer: $(SerializeMessage<$P> +)* $(SerializeMessage<Vec<$P>> +)*,
+            Cloneable: $(PerformForkClone<$P> +)* $(PerformForkClone<Vec<$P>> +)*,
         {
-            fn output_types(&self) -> Vec<&'static str> {
+            fn output_types(&self) -> Vec<TypeInfo> {
                 vec![$(
-                    std::any::type_name::<$P>(),
+                    TypeInfo::of::<$P>(),
                 )*]
             }
 
-            fn dyn_unzip(
+            fn perform_unzip(
                 &self,
                 builder: &mut Builder,
-                output: DynOutput
-            ) -> Result<Vec<DynOutput>, DiagramErrorCode> {
-                debug!("unzip output: {:?}", output);
-                let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
-                let chain = output.into_output::<($($P,)*)>()?.chain(builder);
-                let ($($o,)*) = chain.unzip();
+            ) -> Result<DynUnzip, DiagramErrorCode> {
+                let (input, ($($o,)*)) = builder.create_unzip::<($($P,)*)>();
 
+                let mut outputs: Vec<DynOutput> = Vec::with_capacity($len);
                 $({
                     outputs.push($o.into());
                 })*
 
-                debug!("unzipped outputs: {:?}", outputs);
-                Ok(outputs)
+                Ok(DynUnzip {
+                    input: input.into(),
+                    outputs,
+                })
             }
 
             fn on_register(&self, registry: &mut MessageRegistry)
@@ -118,6 +118,7 @@ macro_rules! dyn_unzip_impl {
                 // For a tuple of (T1, T2, T3), registers serialize for T1, T2 and T3.
                 $(
                     registry.register_serialize::<$P, Serializer>();
+                    registry.register_fork_clone::<$P, Cloneable>();
                 )*
             }
         }
@@ -154,7 +155,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(err.code, DiagramErrorCode::NotUnzippable),
             "{}",
@@ -198,8 +199,15 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
-        assert!(matches!(err.code, DiagramErrorCode::NotUnzippable));
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
+        assert!(matches!(
+            err.code,
+            DiagramErrorCode::UnzipMismatch {
+                expected: 3,
+                actual: 2,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -226,6 +234,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 20);
     }
 
@@ -244,7 +253,10 @@ mod tests {
                 },
                 "unzip": {
                     "type": "unzip",
-                    "next": ["op2"],
+                    "next": [
+                        "op2",
+                        { "builtin": "dispose" },
+                    ],
                 },
                 "op2": {
                     "type": "node",
@@ -258,6 +270,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);
     }
 
@@ -290,6 +303,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 60);
     }
 }

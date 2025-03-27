@@ -1,86 +1,194 @@
-mod buffer;
-mod fork_clone;
-mod fork_result;
-mod impls;
-mod join;
-mod node;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
+mod buffer_schema;
+mod fork_clone_schema;
+mod fork_result_schema;
+mod join_schema;
+mod node_schema;
 mod registration;
 mod section;
 mod serialization;
-mod split_serialized;
-mod transform;
+mod split_schema;
+mod supported;
+mod transform_schema;
 mod type_info;
-mod unzip;
+mod unzip_schema;
 mod workflow_builder;
 
 use bevy_ecs::system::Commands;
-use buffer::{BufferAccessOp, BufferOp, ListenOp};
-use fork_clone::ForkCloneOp;
-use fork_result::ForkResultOp;
-pub use join::JoinOutput;
-use join::{JoinOp, SerializedJoinOp};
-pub use node::NodeOp;
+use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
+use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
+use fork_result_schema::{DynForkResult, ForkResultSchema};
+pub use join_schema::JoinOutput;
+use join_schema::{JoinSchema, SerializedJoinSchema};
+pub use node_schema::NodeSchema;
 pub use registration::*;
 pub use section::*;
 pub use serialization::*;
-pub use split_serialized::*;
+pub use split_schema::*;
 use tracing::debug;
-use transform::{TransformError, TransformOp};
+use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
-use unzip::UnzipOp;
-pub use workflow_builder::*;
+use unzip_schema::UnzipSchema;
+use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
 
 // ----------
 
-use std::{collections::HashMap, fmt::Display, io::Read};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read};
 
 use crate::{
-    Builder, IncompatibleLayout, Scope, Service, SpawnWorkflowExt, SplitConnectionError, StreamPack,
+    Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
+    SplitConnectionError, StreamPack,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{
+    JsonSchema, r#gen::SchemaGenerator,
+    schema::{Schema, SchemaObject, InstanceType, ObjectValidation, SingleOrVec, Metadata},
+};
+use serde::{Deserialize, Serialize, Serializer, Deserializer, ser::SerializeMap, de::{Visitor, Error}};
 
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
 
 pub type BuilderId = String;
-pub type OperationId = String;
-
-pub trait IntoOperationId {
-    fn into_operation_id(self) -> OperationId;
-}
-
-impl IntoOperationId for String {
-    fn into_operation_id(self) -> OperationId {
-        self
-    }
-}
+pub type OperationName = String;
 
 #[derive(
     Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum NextOperation {
-    Target(OperationId),
-    Section { section: OperationId, input: String },
+    Target(OperationName),
     Builtin { builtin: BuiltinTarget },
+    /// Refer to an "inner" operation of one of the sibling operations in a
+    /// diagram. This can be used to target section inputs.
+    Namespace(NamespacedOperation),
 }
 
-impl IntoOperationId for NextOperation {
-    fn into_operation_id(self) -> OperationId {
+impl<'a> Display for NextOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Target(operation_id) => operation_id,
-            Self::Section { section, input } => format!("{}/{}", section, input),
-            Self::Builtin { builtin } => format!("builtin:{}", builtin),
+            Self::Target(operation_id) => f.write_str(operation_id),
+            Self::Namespace(NamespacedOperation { namespace, operation }) => write!(f, "{}:{}", namespace, operation),
+            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
         }
     }
 }
 
-impl Display for NextOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+/// This describes an operation that exists inside of some namespace, such as a
+/// [`Section`]. This will serialize as a map with a single entry of
+/// `{ "<namespace>": "<operation>" }`.
+pub struct NamespacedOperation {
+    pub namespace: OperationName,
+    pub operation: OperationName,
+}
+
+impl Serialize for NamespacedOperation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry(&self.namespace, &self.operation)?;
+        map.end()
+    }
+}
+
+struct NamespacedOperationVisitor;
+
+impl<'de> Visitor<'de> for NamespacedOperationVisitor {
+    type Value = NamespacedOperation;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str(
+            "a map with exactly one entry of { \"<namespace>\" : \"<operation>\" } \
+            whose key is the namespace string and whose value is the operation string"
+        )
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let (key, value) = map.next_entry::<String, String>()?.ok_or_else(
+            || A::Error::custom("namespaced operation must be a map from the namespace to the operation name")
+        )?;
+
+        if !map.next_key::<String>()?.is_none() {
+            return Err(A::Error::custom("namespaced operation must contain exactly one entry"));
+        }
+
+        Ok(NamespacedOperation {
+            namespace: key.into(),
+            operation: value.into(),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for NamespacedOperation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
+    {
+        deserializer.deserialize_map(NamespacedOperationVisitor)
+    }
+}
+
+impl JsonSchema for NamespacedOperation {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = SchemaObject::new_ref(Self::schema_name());
+        schema.instance_type = Some(SingleOrVec::Single(Box::new(InstanceType::Object)));
+        schema.object = Some(Box::new(ObjectValidation {
+            max_properties: Some(1),
+            min_properties: Some(1),
+            required: Default::default(),
+            properties: Default::default(),
+            pattern_properties: Default::default(),
+            property_names: Default::default(),
+            additional_properties: Some(Box::new(generator.subschema_for::<String>())),
+        }));
+        schema.metadata = Some(Box::new(Metadata {
+            title: Some("NamespacedOperation".to_string()),
+            description: Some("Refer to an operation inside of a namespace, e.g. { \"<namespace>\": \"<operation>\"".to_string()),
+            ..Default::default()
+        }));
+
+        Schema::Object(schema)
+    }
+
+    fn schema_name() -> String {
+        "NamespacedOperation".to_string()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub enum BufferInputs {
+    Single(OperationName),
+    Dict(HashMap<String, OperationName>),
+    Array(Vec<OperationName>),
+}
+
+impl BufferInputs {
+    pub fn is_empty(&self) -> bool {
         match self {
-            Self::Target(operation_id) => f.write_str(operation_id),
-            Self::Section { section, input } => write!(f, "section:{}({})", section, input),
-            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+            Self::Single(_) => false,
+            Self::Dict(d) => d.is_empty(),
+            Self::Array(a) => a.is_empty(),
         }
     }
 }
@@ -101,42 +209,17 @@ impl Display for NextOperation {
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum BuiltinTarget {
-    /// Use the output to terminate the workflow. This will be the return value
-    /// of the workflow.
+    /// Use the output to terminate the current scope. The value passed into
+    /// this operation will be the return value of the scope.
     Terminate,
 
     /// Dispose of the output.
     Dispose,
-}
 
-#[derive(
-    Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
-)]
-#[serde(untagged, rename_all = "snake_case")]
-pub enum SourceOperation {
-    Source(OperationId),
-    Builtin { builtin: BuiltinSource },
-}
-
-impl IntoOperationId for SourceOperation {
-    fn into_operation_id(self) -> OperationId {
-        self.to_string()
-    }
-}
-
-impl From<OperationId> for SourceOperation {
-    fn from(value: OperationId) -> Self {
-        SourceOperation::Source(value)
-    }
-}
-
-impl Display for SourceOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Source(operation_id) => f.write_str(operation_id),
-            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
-        }
-    }
+    /// When triggered, cancel the current scope. If this is an inner scope of a
+    /// workflow then the parent scope will see a disposal happen. If this is
+    /// the root scope of a workflow then the whole workflow will cancel.
+    Cancel,
 }
 
 #[derive(
@@ -160,31 +243,55 @@ pub enum BuiltinSource {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct TerminateOp {}
+pub struct TerminateSchema {}
 
 #[derive(Clone, strum::Display, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 #[strum(serialize_all = "snake_case")]
 pub enum DiagramOperation {
-    /// Connect the request to a registered node.
+    /// Create an operation that that takes an input message and produces an
+    /// output message.
     ///
+    /// The behavior is determined by the choice of node `builder` and
+    /// optioanlly the `config` that you provide. Each type of node builder has
+    /// its own schema for the config.
+    ///
+    /// The output message will be sent to the operation specified by `next`.
+    ///
+    /// TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)
+    ///
+    /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "node_op",
+    ///     "start": "cutting_board",
     ///     "ops": {
-    ///         "node_op": {
+    ///         "cutting_board": {
     ///             "type": "node",
-    ///             "builder": "my_node_builder",
+    ///             "builder": "chop",
+    ///             "config": "diced",
+    ///             "next": "bowl"
+    ///         },
+    ///         "bowl": {
+    ///             "type": "node",
+    ///             "builder": "stir",
+    ///             "next": "oven"
+    ///         },
+    ///         "oven": {
+    ///             "type": "node",
+    ///             "builder": "bake",
+    ///             "config": {
+    ///                 "temperature": 200,
+    ///                 "duration": 120
+    ///             },
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    /// ```
-    Node(NodeOp),
+    Node(NodeSchema),
 
     /// Connect the request to a registered section.
     ///
@@ -240,50 +347,115 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Section(SectionOp),
+    Section(SectionSchema),
 
-    /// If the request is cloneable, clone it into multiple responses.
+    /// If the request is cloneable, clone it into multiple responses that can
+    /// each be sent to a different operation. The `next` property is an array.
+    ///
+    /// This creates multiple simultaneous branches of execution within the
+    /// workflow. Usually when you have multiple branches you will either
+    /// * race - connect all branches to `terminate` and the first branch to
+    ///   finish "wins" the race and gets to the be output
+    /// * join - connect each branch into a buffer and then use the `join`
+    ///   operation to reunite them
+    /// * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
+    ///     "start": "begin_race",
     ///     "ops": {
-    ///         "fork_clone": {
+    ///         "begin_race": {
     ///             "type": "fork_clone",
-    ///             "next": ["terminate"]
+    ///             "next": [
+    ///                 "ferrari",
+    ///                 "mustang"
+    ///             ]
+    ///         },
+    ///         "ferrari": {
+    ///             "type": "node",
+    ///             "builder": "drive",
+    ///             "config": "ferrari",
+    ///             "next": { "builtin": "terminate" }
+    ///         },
+    ///         "mustang": {
+    ///             "type": "node",
+    ///             "builder": "drive",
+    ///             "config": "mustang",
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    /// ```
-    ForkClone(ForkCloneOp),
+    ForkClone(ForkCloneSchema),
 
-    /// If the request is a tuple of (T1, T2, T3, ...), unzip it into multiple responses
-    /// of T1, T2, T3, ...
+    /// If the input message is a tuple of (T1, T2, T3, ...), unzip it into
+    /// multiple output messages of T1, T2, T3, ...
+    ///
+    /// Each output message may have a different type and can be sent to a
+    /// different operation. This creates multiple simultaneous branches of
+    /// execution within the workflow. See [`DiagramOperation::ForkClone`] for
+    /// more information on parallel branches.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "unzip",
+    ///     "start": "name_phone_address",
     ///     "ops": {
-    ///         "unzip": {
+    ///         "name_phone_address": {
     ///             "type": "unzip",
-    ///             "next": [{ "builtin": "terminate" }]
+    ///             "next": [
+    ///                 "process_name",
+    ///                 "process_phone_number",
+    ///                 "process_address"
+    ///             ]
+    ///         },
+    ///         "process_name": {
+    ///             "type": "node",
+    ///             "builder": "process_name",
+    ///             "next": "name_processed"
+    ///         },
+    ///         "process_phone_number": {
+    ///             "type": "node",
+    ///             "builder": "process_phone_number",
+    ///             "next": "phone_number_processed"
+    ///         },
+    ///         "process_address": {
+    ///             "type": "node",
+    ///             "builder": "process_address",
+    ///             "next": "address_processed"
+    ///         },
+    ///         "name_processed": { "type": "buffer" },
+    ///         "phone_number_processed": { "type": "buffer" },
+    ///         "address_processed": { "type": "buffer" },
+    ///         "finished": {
+    ///             "type": "join",
+    ///             "buffers": [
+    ///                 "name_processed",
+    ///                 "phone_number_processed",
+    ///                 "address_processed"
+    ///             ],
+    ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Unzip(UnzipOp),
+    Unzip(UnzipSchema),
 
-    /// If the request is a `Result<_, _>`, branch it to `Ok` and `Err`.
+    /// If the request is a [`Result<T, E>`], send the output message down an
+    /// `ok` branch or down an `err` branch depending on whether the result has
+    /// an [`Ok`] or [`Err`] value. The `ok` branch will receive a `T` while the
+    /// `err` branch will receive an `E`.
+    ///
+    /// Only one branch will be activated by each input message that enters the
+    /// operation.
     ///
     /// # Examples
     /// ```
@@ -302,72 +474,122 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    ForkResult(ForkResultOp),
+    ForkResult(ForkResultSchema),
 
-    /// If the request is a list-like or map-like object, split it into multiple responses.
-    /// Note that the split output is a tuple of `(KeyOrIndex, Value)`, nodes receiving a split
-    /// output should have request of that type instead of just the value type.
+    /// If the input message is a list-like or map-like object, split it into
+    /// multiple output messages.
+    ///
+    /// Note that the type of output message from the split depends on how the
+    /// input message implements the [`Splittable`][1] trait. In many cases this
+    /// will be a tuple of `(key, value)`.
+    ///
+    /// There are three ways to specify where the split output messages should
+    /// go, and all can be used at the same time:
+    /// * `sequential` - For array-like collections, send the "first" element of
+    ///   the collection to the first operation listed in the `sequential` array.
+    ///   The "second" element of the collection goes to the second operation
+    ///   listed in the `sequential` array. And so on for all elements in the
+    ///   collection. If one of the elements in the collection is mentioned in
+    ///   the `keyed` set, then the sequence will pass over it as if the element
+    ///   does not exist at all.
+    /// * `keyed` - For map-like collections, send the split element associated
+    ///   with the specified key to its associated output.
+    /// * `remaining` - Any elements that are were not captured by `sequential`
+    ///   or by `keyed` will be sent to this.
+    ///
+    /// [1]: crate::Splittable
     ///
     /// # Examples
+    ///
+    /// Suppose I am an animal rescuer sorting through a new collection of
+    /// animals that need recuing. My home has space for three exotic animals
+    /// plus any number of dogs and cats.
+    ///
+    /// I have a custom `SpeciesCollection` data structure that implements
+    /// [`Splittable`][1] by allowing you to key on the type of animal.
+    ///
+    /// In the workflow below, we send all cats and dogs to `home`, and we also
+    /// send the first three non-dog and non-cat species to `home`. All
+    /// remaining animals go to the zoo.
+    ///
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "split",
+    ///     "start": "select_animals",
     ///     "ops": {
-    ///         "split": {
+    ///         "select_animals": {
     ///             "type": "split",
-    ///             "index": [{ "builtin": "terminate" }]
+    ///             "sequential": [
+    ///                 "home",
+    ///                 "home",
+    ///                 "home"
+    ///             ],
+    ///             "keyed": {
+    ///                 "cat": "home",
+    ///                 "dog": "home"
+    ///             },
+    ///             "remaining": "zoo"
     ///         }
     ///     }
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Split(SplitOp),
+    ///
+    /// If we input `["frog", "cat", "bear", "beaver", "dog", "rabbit", "dog", "monkey"]`
+    /// then `frog`, `bear`, and `beaver` will be sent to `home` since those are
+    /// the first three animals that are not `dog` or `cat`, and we will also
+    /// send one `cat` and two `dog` home. `rabbit` and `monkey` will be sent to the zoo.
+    Split(SplitSchema),
 
-    /// Wait for an item to be emitted from each of the inputs, then combine the
-    /// oldest of each into an array.
+    /// Wait for exactly one item to be available in each buffer listed in
+    /// `buffers`, then join each of those items into a single output message
+    /// that gets sent to `next`.
+    ///
+    /// If the `next` operation is not a `node` type (e.g. `fork_clone`) then
+    /// you must specify a `target_node` so that the diagram knows what data
+    /// structure to join the values into.
+    ///
+    /// The output message type must be registered as joinable at compile time.
+    /// If you want to join into a dynamic data structure then you should use
+    /// [`DiagramOperation::SerializedJoin`] instead.
     ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
+    ///     "start": "begin_measuring",
     ///     "ops": {
-    ///         "fork_clone": {
+    ///         "begin_measuring": {
     ///             "type": "fork_clone",
-    ///             "next": ["foo", "bar"]
+    ///             "next": ["localize", "imu"]
     ///         },
-    ///         "foo": {
+    ///         "localize": {
     ///             "type": "node",
-    ///             "builder": "foo",
-    ///             "next": "foo_buffer"
+    ///             "builder": "localize",
+    ///             "next": "estimated_position"
     ///         },
-    ///         "foo_buffer": {
-    ///             "type": "buffer"
-    ///         },
-    ///         "bar": {
+    ///         "imu": {
     ///             "type": "node",
-    ///             "builder": "bar",
-    ///             "next": "bar_buffer"
+    ///             "builder": "imu",
+    ///             "config": "velocity",
+    ///             "next": "estimated_velocity"
     ///         },
-    ///         "bar_buffer": {
-    ///             "type": "buffer"
-    ///         },
-    ///         "join": {
+    ///         "estimated_position": { "type": "buffer" },
+    ///         "estimated_velocity": { "type": "buffer" },
+    ///         "gather_state": {
     ///             "type": "join",
     ///             "buffers": {
-    ///                 "foo": "foo_buffer",
-    ///                 "bar": "bar_buffer"
+    ///                 "position": "estimate_position",
+    ///                 "velocity": "estimate_velocity"
     ///             },
-    ///             "target_node": "foobar",
-    ///             "next": "foobar"
+    ///             "next": "report_state"
     ///         },
-    ///         "foobar": {
+    ///         "report_state": {
     ///             "type": "node",
-    ///             "builder": "foobar",
+    ///             "builder": "publish_state",
     ///             "next": { "builtin": "terminate" }
     ///         }
     ///     }
@@ -375,57 +597,21 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Join(JoinOp),
+    Join(JoinSchema),
 
-    /// Wait for an item to be emitted from each of the inputs, then combine the
-    /// oldest of each into an array. Unlike `join`, this only works with serialized buffers.
+    /// Same as [`DiagramOperation::Join`] but all input messages must be
+    /// serializable, and the output message will always be [`serde_json::Value`].
     ///
-    /// # Examples
-    /// ```
-    /// # bevy_impulse::Diagram::from_json_str(r#"
-    /// {
-    ///     "version": "0.1.0",
-    ///     "start": "fork_clone",
-    ///     "ops": {
-    ///         "fork_clone": {
-    ///             "type": "fork_clone",
-    ///             "next": ["foo", "bar"]
-    ///         },
-    ///         "foo": {
-    ///             "type": "node",
-    ///             "builder": "foo",
-    ///             "next": "foo_buffer"
-    ///         },
-    ///         "foo_buffer": {
-    ///             "type": "buffer",
-    ///             "serialize": true
-    ///         },
-    ///         "bar": {
-    ///             "type": "node",
-    ///             "builder": "bar",
-    ///             "next": "bar_buffer"
-    ///         },
-    ///         "bar_buffer": {
-    ///             "type": "buffer",
-    ///             "serialize": true
-    ///         },
-    ///         "serialized_join": {
-    ///             "type": "serialized_join",
-    ///             "buffers": {
-    ///                 "foo": "foo_buffer",
-    ///                 "bar": "bar_buffer"
-    ///             },
-    ///             "next": { "builtin": "terminate" }
-    ///         }
-    ///     }
-    /// }
-    /// # "#)?;
-    /// # Ok::<_, serde_json::Error>(())
-    /// ```
-    SerializedJoin(SerializedJoinOp),
+    /// If you use an array for `buffers` then the output message will be a
+    /// [`serde_json::Value::Array`]. If you use a map for `buffers` then the
+    /// output message will be a [`serde_json::Value::Object`].
+    ///
+    /// Unlike [`DiagramOperation::Join`], the `target_node` property does not
+    /// exist for this schema.
+    SerializedJoin(SerializedJoinSchema),
 
     /// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
-    /// The context includes a "request" variable which contains the request.
+    /// The context includes a "request" variable which contains the input message.
     ///
     /// # Examples
     /// ```
@@ -466,11 +652,25 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Transform(TransformOp),
+    Transform(TransformSchema),
 
-    /// Create a [`crate::Buffer`] which can be used to store and pull data within
+    /// Create a [`Buffer`][1] which can be used to store and pull data within
     /// a scope.
     ///
+    /// By default the [`BufferSettings`][2] will keep the single last message
+    /// pushed to the buffer. You can change that with the optional `settings`
+    /// property.
+    ///
+    /// Use the `"serialize": true` option to serialize the messages into
+    /// [`JsonMessage`] before they are inserted into the buffer. This
+    /// allows any serializable message type to be pushed into the buffer. If
+    /// left unspecified, the buffer will store the specific data type that gets
+    /// pushed into it. If the buffer inputs are not being serialized, then all
+    /// incoming messages being pushed into the buffer must have the same type.
+    ///
+    /// [1]: crate::Buffer
+    /// [2]: crate::BufferSettings
+    ///
     /// # Examples
     /// ```
     /// # bevy_impulse::Diagram::from_json_str(r#"
@@ -480,7 +680,7 @@ pub enum DiagramOperation {
     ///     "ops": {
     ///         "fork_clone": {
     ///             "type": "fork_clone",
-    ///             "next": ["num_output", "string_output"]
+    ///             "next": ["num_output", "string_output", "all_num_buffer", "serialized_num_buffer"]
     ///         },
     ///         "num_output": {
     ///             "type": "node",
@@ -493,7 +693,20 @@ pub enum DiagramOperation {
     ///             "next": "string_buffer"
     ///         },
     ///         "string_buffer": {
-    ///             "type": "buffer"
+    ///             "type": "buffer",
+    ///             "settings": {
+    ///                 "retention": { "keep_last": 10 }
+    ///             }
+    ///         },
+    ///         "all_num_buffer": {
+    ///             "type": "buffer",
+    ///             "settings": {
+    ///                 "retention": "keep_all"
+    ///             }
+    ///         },
+    ///         "serialized_num_buffer": {
+    ///             "type": "buffer",
+    ///             "serialize": true
     ///         },
     ///         "buffer_access": {
     ///             "type": "buffer_access",
@@ -511,9 +724,14 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    Buffer(BufferOp),
+    Buffer(BufferSchema),
 
-    /// Zip a response with a buffer access.
+    /// Zip a message together with access to one or more buffers.
+    ///
+    /// The receiving node must have an input type of `(Message, Keys)`
+    /// where `Keys` implements the [`Accessor`][1] trait.
+    ///
+    /// [1]: crate::Accessor
     ///
     /// # Examples
     /// ```
@@ -555,7 +773,7 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     /// ```
-    BufferAccess(BufferAccessOp),
+    BufferAccess(BufferAccessSchema),
 
     /// Listen on a buffer.
     ///
@@ -589,13 +807,32 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
-    /// ```
-    Listen(ListenOp),
+    Listen(ListenSchema),
 }
 
-type DiagramStart = serde_json::Value;
-type DiagramTerminate = serde_json::Value;
-type DiagramScope<Streams = ()> = Scope<DiagramStart, DiagramTerminate, Streams>;
+impl BuildDiagramOperation for DiagramOperation {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationName,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        match self {
+            Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::BufferAccess(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::ForkClone(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::ForkResult(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
+        }
+    }
+}
 
 /// Returns the schema for [`String`]
 fn schema_with_string(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -642,12 +879,23 @@ pub struct Diagram {
     version: semver::Version,
 
     #[serde(default)]
-    templates: HashMap<String, SectionTemplate>,
+    templates: HashMap<OperationName, SectionTemplate>,
 
-    /// Signifies the start of a workflow.
+    /// Indicates where the workflow should start running.
     start: NextOperation,
 
-    ops: HashMap<OperationId, DiagramOperation>,
+    /// To simplify diagram definitions, the diagram workflow builder will
+    /// sometimes insert implicit operations into the workflow, such as implicit
+    /// serializing and deserializing. These implicit operations may be fallible.
+    ///
+    /// This field indicates how a failed implicit operation should be handled.
+    /// If left unspecified, an implicit error will cause the entire workflow to
+    /// be cancelled.
+    #[serde(default)]
+    on_implicit_error: Option<NextOperation>,
+
+    /// Operations that define the workflow
+    ops: HashMap<OperationName, DiagramOperation>,
 }
 
 impl Diagram {
@@ -656,7 +904,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::*;
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
@@ -679,83 +927,52 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     // TODO(koonpeng): Support streams other than `()` #43.
     /* pub */
-    fn spawn_workflow<Streams>(
+    fn spawn_workflow<Request, Response, Streams>(
         &self,
         cmds: &mut Commands,
         registry: &DiagramElementRegistry,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, Streams>, DiagramError>
+    ) -> Result<Service<Request, Response, Streams>, DiagramError>
     where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
         Streams: StreamPack,
     {
-        let build = |scope: DiagramScope<Streams>, builder: &mut Builder| {
-            debug!(
-                "spawn workflow, scope input: {:?}, terminate: {:?}",
-                scope.input.id(),
-                scope.terminate.id()
-            );
-
-            let mut workflow_builder = WorkflowBuilder::new();
-
-            // add start vertex
-            let start = SourceOperation::Builtin {
-                builtin: BuiltinSource::Start,
-            };
-            workflow_builder
-                .add_vertex(start.clone(), move |_, _, _, _| Ok(true))
-                .add_output_edge(self.start.clone(), Some(scope.input.into()));
-
-            // add terminate vertex
-            let terminate = NextOperation::Builtin {
-                builtin: BuiltinTarget::Terminate,
-            };
-            workflow_builder.add_vertex(terminate, move |vertex, builder, registry, _| {
-                for edge in &vertex.in_edges {
-                    let output = edge.take_output();
-                    let serialized_output = registry.messages.serialize(builder, output)?;
-                    builder.connect(serialized_output, scope.terminate.into());
-                }
-                Ok(true)
-            });
-
-            let dispose = NextOperation::Builtin {
-                builtin: BuiltinTarget::Dispose,
-            };
-            workflow_builder.add_vertex(dispose, move |_, _, _, _| Ok(true));
-
-            // add other vertices
-            for (op_id, op) in &self.ops {
-                workflow_builder
-                    .add_vertices_from_op(op_id.clone(), op, builder, self, registry)
-                    .map_err(|code| DiagramError {
-                        code,
-                        context: DiagramErrorContext {
-                            op_id: Some(op_id.clone()),
-                        },
-                    })?;
-            }
-
-            workflow_builder.create_workflow(builder, registry)
-        };
-
         let mut err: Option<DiagramError> = None;
-        let wf = cmds.spawn_workflow(|scope: DiagramScope<Streams>, builder: &mut Builder| {
-            match build(scope, builder) {
-                Ok(_) => {}
-                Err(e) => {
-                    err = Some(e);
+
+        macro_rules! unwrap_or_return {
+            ($v:expr) => {
+                match $v {
+                    Ok(v) => v,
+                    Err(e) => {
+                        err = Some(e);
+                        return;
+                    }
                 }
             };
-        });
-        if let Some(e) = err {
-            return Err(e);
         }
 
-        Ok(wf)
+        let w = cmds.spawn_workflow(
+            |scope: Scope<Request, Response, Streams>, builder: &mut Builder| {
+                debug!(
+                    "spawn workflow, scope input: {:?}, terminate: {:?}",
+                    scope.input.id(),
+                    scope.terminate.id()
+                );
+
+                unwrap_or_return!(create_workflow(scope, builder, registry, self));
+            },
+        );
+
+        if let Some(err) = err {
+            return Err(err);
+        }
+
+        Ok(w)
     }
 
     /// Spawns a workflow from this diagram.
@@ -763,7 +980,7 @@ impl Diagram {
     /// # Examples
     ///
     /// ```
-    /// use bevy_impulse::{Diagram, DiagramError, NodeBuilderOptions, DiagramElementRegistry, RunCommandsOnWorldExt};
+    /// use bevy_impulse::*;
     ///
     /// let mut app = bevy_app::App::new();
     /// let mut registry = DiagramElementRegistry::new();
@@ -786,15 +1003,19 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow(cmds, &registry))?;
+    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn spawn_io_workflow(
+    pub fn spawn_io_workflow<Request, Response>(
         &self,
         cmds: &mut Commands,
         registry: &DiagramElementRegistry,
-    ) -> Result<Service<DiagramStart, DiagramTerminate, ()>, DiagramError> {
-        self.spawn_workflow::<()>(cmds, registry)
+    ) -> Result<Service<Request, Response, ()>, DiagramError>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
+        self.spawn_workflow::<Request, Response, ()>(cmds, registry)
     }
 
     pub fn from_json(value: serde_json::Value) -> Result<Self, serde_json::Error> {
@@ -812,30 +1033,16 @@ impl Diagram {
         serde_json::from_reader(r)
     }
 
-    fn get_op(&self, op_id: &OperationId) -> Result<&DiagramOperation, DiagramErrorCode> {
+    fn get_op(&self, op_id: &OperationName) -> Result<&DiagramOperation, DiagramErrorCode> {
         self.ops
             .get(op_id)
-            .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))
+            .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
     }
 
-    fn get_template(&self, template_id: &String) -> Result<&SectionTemplate, DiagramErrorCode> {
+    fn get_template<'b>(&'b self, template_id: &'b OperationName) -> Result<&'b SectionTemplate, DiagramErrorCode> {
         self.templates
             .get(template_id)
-            .ok_or_else(|| DiagramErrorCode::OperationNotFound(template_id.clone()))
-    }
-}
-
-#[derive(Debug)]
-pub struct DiagramErrorContext {
-    op_id: Option<OperationId>,
-}
-
-impl Display for DiagramErrorContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(op_id) = &self.op_id {
-            write!(f, "in operation [{}],", op_id)?;
-        }
-        Ok(())
+            .ok_or_else(|| DiagramErrorCode::TemplateNotFound(template_id.clone()))
     }
 }
 
@@ -848,16 +1055,39 @@ pub struct DiagramError {
     pub code: DiagramErrorCode,
 }
 
+impl DiagramError {
+    pub fn in_operation(op_id: OperationName, code: DiagramErrorCode) -> Self {
+        Self {
+            context: DiagramErrorContext { op_id: Some(op_id) },
+            code,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DiagramErrorContext {
+    op_id: Option<OperationName>,
+}
+
+impl Display for DiagramErrorContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(op_id) = &self.op_id {
+            write!(f, "in operation [{}],", op_id)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
 
     #[error("operation [{0}] not found")]
-    OperationNotFound(OperationId),
+    OperationNotFound(NextOperation),
 
     #[error("section template [{0}] does not exist")]
-    TemplateNotFound(OperationId),
+    TemplateNotFound(OperationName),
 
     #[error("type mismatch, source {source_type}, target {target_type}")]
     TypeMismatch {
@@ -865,37 +1095,53 @@ pub enum DiagramErrorCode {
         target_type: TypeInfo,
     },
 
-    #[error("missing start or terminate")]
+    #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
+    MultipleInputsCreated(OperationName),
+
+    #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
+    MultipleBuffersCreated(OperationName),
+
+    #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
 
-    #[error("cannot connect to start")]
-    CannotConnectStart,
+    #[error("Serialization was disabled for the target message type.")]
+    NotSerializable(TypeInfo),
 
-    #[error("request or response cannot be serialized or deserialized")]
-    NotSerializable,
+    #[error("Deserialization was disabled for the target message type.")]
+    NotDeserializable(TypeInfo),
 
-    #[error("response cannot be cloned")]
+    #[error("Cloning was disabled for the target message type.")]
     NotCloneable,
 
-    #[error("the number of unzip slots in response does not match the number of inputs")]
+    #[error("The target message type does not support unzipping.")]
     NotUnzippable,
 
-    #[error(
-        "node must be registered with \"with_fork_result()\" to be able to perform fork result"
-    )]
+    #[error("The number of elements in the unzip expected by the diagram [{expected}] is different from the real number [{actual}]")]
+    UnzipMismatch {
+        expected: usize,
+        actual: usize,
+        elements: Vec<TypeInfo>,
+    },
+
+    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
     CannotForkResult,
 
-    #[error("response cannot be split")]
+    #[error("Response cannot be split. Make sure to use .with_split() when building the node.")]
     NotSplittable,
 
-    #[error("message cannot be joined from the input buffers")]
+    #[error(
+        "Message cannot be joined. Make sure to use .with_join() when building the target node."
+    )]
     NotJoinable,
 
-    #[error("empty join is not allowed")]
+    #[error("Empty join is not allowed.")]
     EmptyJoin,
 
-    #[error("join target type cannot be determined from [next] and [target_node] is not provided")]
+    #[error("Target type cannot be determined from [next] and [target_node] is not provided.")]
     UnknownTarget,
+
+    #[error("There was an attempt to access an unknown operation: [{0}]")]
+    UnknownOperation(NextOperation),
 
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
@@ -903,11 +1149,11 @@ pub enum DiagramErrorCode {
     #[error("box/unbox operation for the message is not registered")]
     CannotBoxOrUnbox,
 
-    #[error("cannot access buffer")]
+    #[error("Buffer access was not enabled for a node connected to a buffer access operation. Make sure to use .with_buffer_access() when building the node.")]
     CannotBufferAccess,
 
-    #[error("cannot listen")]
-    CannotListen,
+    #[error("cannot listen on these buffers to produce a request of [{0}]")]
+    CannotListen(TypeInfo),
 
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),
@@ -927,18 +1173,32 @@ pub enum DiagramErrorCode {
     #[error(transparent)]
     ConnectionError(#[from] SplitConnectionError),
 
-    /// Use this only for errors that *should* never happen because of some preconditions.
-    /// If this error ever comes up, then it likely means that there is some logical flaws
-    /// in the algorithm.
-    #[error("an unknown error occurred while building the diagram, {0}")]
-    UnknownError(String),
+    #[error("a type being used in the diagram was not registered {0}")]
+    UnregisteredType(TypeInfo),
+
+    #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
+    BuildHalted {
+        /// Reasons that operations were unable to make progress building
+        reasons: HashMap<OperationName, Cow<'static, str>>,
+    },
+
+    #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
+    ExcessiveIterations,
 }
 
-#[macro_export]
-macro_rules! unknown_diagram_error {
-    () => {
-        DiagramErrorCode::UnknownError(format!("{}:{}", file!(), line!()))
-    };
+impl From<DiagramErrorCode> for DiagramError {
+    fn from(code: DiagramErrorCode) -> Self {
+        DiagramError {
+            context: DiagramErrorContext { op_id: None },
+            code,
+        }
+    }
+}
+
+impl DiagramErrorCode {
+    pub fn operation_name_not_found(name: OperationName) -> Self {
+        DiagramErrorCode::OperationNotFound(NextOperation::Target(name))
+    }
 }
 
 #[cfg(test)]
@@ -973,6 +1233,7 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
+        assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
             CancellationCause::Unreachable(_)
@@ -996,9 +1257,9 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable),
+            matches!(err.code, DiagramErrorCode::TypeMismatch { .. }),
             "{:?}",
             err
         );
@@ -1021,9 +1282,9 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotSerializable),
+            matches!(err.code, DiagramErrorCode::NotSerializable(_)),
             "{:?}",
             err
         );
@@ -1051,7 +1312,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
             matches!(
                 err.code,
@@ -1090,6 +1351,7 @@ mod tests {
         let err = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap_err();
+        assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
             CancellationCause::Unreachable(_),
@@ -1125,6 +1387,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);
     }
 
@@ -1142,6 +1405,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 4);
     }
 
@@ -1170,6 +1434,7 @@ mod tests {
                 serde_json::Value::from(4),
             )
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 28);
     }
 
@@ -1190,7 +1455,10 @@ mod tests {
                 },
                 "unzip": {
                     "type": "unzip",
-                    "next": ["transform"],
+                    "next": [
+                        "transform",
+                        { "builtin": "dispose" },
+                    ],
                 },
                 "transform": {
                     "type": "transform",
@@ -1204,6 +1472,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
     }
 }

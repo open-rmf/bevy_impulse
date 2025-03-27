@@ -1,307 +1,746 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::{
-    cell::RefCell,
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, Mutex},
 };
 
-use crate::{
-    diagram::{type_info::TypeInfo, DiagramErrorContext},
-    AnyBuffer, Builder, InputSlot, Output,
-};
+use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope, StreamPack};
 
 use super::{
-    Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DiagramOperation,
-    DynInputSlot, DynOutput, IntoOperationId, MessageRegistry, NextOperation, OperationId,
+    BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
+    DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization, ImplicitSerialization,
+    ImplicitStringify, NextOperation, OperationName, TypeInfo, NamespacedOperation,
 };
 
-pub(super) struct Edge {
-    target: OperationId,
-    output: Arc<Mutex<Option<DynOutput>>>,
+#[derive(Default)]
+struct DiagramConstruction {
+    connect_into_target: HashMap<NextOperation, Box<dyn ConnectIntoTarget>>,
+    // We use a separate hashmap for OperationId vs BuiltinTarget so we can
+    // efficiently fetch with an &OperationId
+    outputs_to_operation_target: HashMap<OperationName, Vec<DynOutput>>,
+    outputs_to_builtin_target: HashMap<BuiltinTarget, Vec<DynOutput>>,
+    buffers: HashMap<OperationName, AnyBuffer>,
 }
 
-impl Edge {
-    pub(super) fn target(&self) -> &OperationId {
-        &self.target
-    }
+impl DiagramConstruction {
+    fn is_finished(&self) -> bool {
+        for outputs in self.outputs_to_builtin_target.values() {
+            if !outputs.is_empty() {
+                return false;
+            }
+        }
 
-    /// Take the output of an edge, this will panic if the edge does not have an output.
+        for outputs in self.outputs_to_operation_target.values() {
+            if !outputs.is_empty() {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+pub struct DiagramContext<'a> {
+    construction: &'a mut DiagramConstruction,
+    pub diagram: &'a Diagram,
+    pub registry: &'a DiagramElementRegistry,
+}
+
+impl<'a> DiagramContext<'a> {
+    /// Get all the currently known outputs that are aimed at this target operation.
     ///
-    /// Calling this for an input edge from the connect handler of a vertex should never panic
-    /// because the workflow builder ensures that all input edges are ready before calling the handler.
-    pub(super) fn take_output(&self) -> DynOutput {
-        self.output.try_lock().unwrap().take().unwrap()
+    /// During the [`BuildDiagramOperation`] phase this will eventually contain
+    /// all outputs targeting this operation that are explicitly listed in the
+    /// diagram. It will never contain outputs that implicitly target this
+    /// operation.
+    ///
+    /// During the [`ConnectIntoTarget`] phase this will not contain any outputs
+    /// except new outputs added during the current call to [`ConnectIntoTarget`],
+    /// so this function is generally not useful during that phase.
+    pub fn get_outputs_into_operation_target(&self, id: &OperationName) -> Option<&Vec<DynOutput>> {
+        self.construction.outputs_to_operation_target.get(id)
     }
 
-    pub(super) fn set_output(&self, output: DynOutput) {
-        *self.output.try_lock().unwrap() = Some(output);
+    /// Infer the [`TypeInfo`] for the input messages into the specified operation.
+    ///
+    /// If this returns [`None`] then not enough of the diagram has been built
+    /// yet to infer the input type. In that case you can return something like
+    /// `Ok(BuildStatus::defer("waiting for an input"))`.
+    ///
+    /// The workflow builder will ensure that all outputs targeting this
+    /// operation are compatible with this message type.
+    ///
+    /// During the [`ConnectIntoTarget`] phase all information about outputs
+    /// going into this target will be drained, so this function is generally
+    /// not useful during that phase. If you need to retain this information
+    /// during the [`ConnectIntoTarget`] phase then you should capture the
+    /// [`TypeInfo`] that you receive from this function during the
+    /// [`BuildDiagramOperation`] phase.
+    pub fn infer_input_type_into_target(&self, id: &OperationName) -> Option<&TypeInfo> {
+        self.get_outputs_into_operation_target(id)
+            .and_then(|outputs| outputs.first())
+            .map(|o| o.message_info())
     }
 
-    pub(super) fn has_output(&self) -> bool {
-        self.output.try_lock().unwrap().is_some()
+    /// Add an output to connect into a target.
+    ///
+    /// This can be used during both the [`BuildDiagramOperation`] phase and the
+    /// [`ConnectIntoTarget`] phase.
+    ///
+    /// # Arguments
+    ///
+    /// * target - The operation that needs to receive the output
+    /// * output - The output channel that needs to be connected into the target.
+    pub fn add_output_into_target(&mut self, target: NextOperation, output: DynOutput) {
+        match target {
+            NextOperation::Target(id) => {
+                self.construction
+                    .outputs_to_operation_target
+                    .entry(id)
+                    .or_default()
+                    .push(output);
+            }
+            NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
+                panic!("not yet implemented")
+            }
+            NextOperation::Builtin { builtin } => {
+                self.construction
+                    .outputs_to_builtin_target
+                    .entry(builtin)
+                    .or_default()
+                    .push(output);
+            }
+        }
     }
-}
 
-pub(super) type ConnectVisitor<'a> = dyn Fn(
-        &Vertex,
-        &mut Builder,
-        &DiagramElementRegistry,
-        &mut HashMap<OperationId, AnyBuffer>,
-    ) -> Result<bool, DiagramErrorCode>
-    + 'a;
+    /// Set the input slot of an operation. This should not be called more than
+    /// once per operation, because only one input slot can be used for any
+    /// operation.
+    ///
+    /// This should be used during the [`BuildDiagramOperation`] phase to set
+    /// the input slot of each operation with standard connection behavior.
+    /// Standard connection behavior means that implicit serialization or
+    /// deserialization will be applied to its inputs as needed to match the
+    /// [`DynInputSlot`] that you provide.
+    ///
+    /// If you need non-standard connection behavior then you can use
+    /// [`Self::set_connect_into_target`] to set the exact connection behavior.
+    /// No implicit behaviors will be provided for [`Self::set_connect_into_target`],
+    /// but you can enable those behaviors using [`ImplicitSerialization`] and
+    /// [`ImplicitDeserialization`].
+    ///
+    /// This should never be used during the [`ConnectIntoTarget`] phase because
+    /// all connection behaviors must already be set by then.
+    pub fn set_input_for_target(
+        &mut self,
+        operation: &OperationName,
+        input: DynInputSlot,
+    ) -> Result<(), DiagramErrorCode> {
+        match self
+            .construction
+            .connect_into_target
+            .entry(NextOperation::Target(operation.clone()))
+        {
+            Entry::Occupied(_) => {
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(standard_input_connection(input, &self.registry)?);
+            }
+        }
 
-pub(super) struct Vertex {
-    pub(super) in_edges: Vec<Edge>,
-    pub(super) out_edges: Vec<Edge>,
-}
+        Ok(())
+    }
 
-struct VertexOperations<'a> {
-    connect_visitor: Box<ConnectVisitor<'a>>,
-}
+    /// Set the implementation for how outputs connect into this target. This is
+    /// a more general method than [`Self::set_input_for_target`].
+    ///
+    /// There will be no additional connection behavior beyond what you specify
+    /// with the object passed in for `connect`. That means we will not
+    /// automatically add implicit serialization or deserialization when you use
+    /// this method. If you want your connection behavior to have those implicit
+    /// operations you can use [`ImplicitSerialization`] and
+    /// [`ImplicitDeserialization`] inside your `connect` implementation.
+    ///
+    /// This should never be necessary to use this during the [`ConnectIntoTarget`]
+    /// phase because all connection behaviors should already be set by then.
+    pub fn set_connect_into_target<C: ConnectIntoTarget + 'static>(
+        &mut self,
+        operation: &OperationName,
+        connect: C,
+    ) -> Result<(), DiagramErrorCode> {
+        let connect = Box::new(connect);
+        match self
+            .construction
+            .connect_into_target
+            .entry(NextOperation::Target(operation.clone()))
+        {
+            Entry::Occupied(_) => {
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(connect);
+            }
+        }
+        Ok(())
+    }
 
-pub(super) struct EdgeBuilder<'a> {
-    vertex: &'a mut Vertex,
-    target_aliases: &'a HashMap<OperationId, OperationId>,
-}
+    /// Same as [`Self::set_connect_into_target`] but you can pass in a closure.
+    ///
+    /// This is equivalent to doing
+    /// `set_connect_into_target(operation, ConnectionCallback(connect))`.
+    pub fn set_connect_into_target_callback<F>(
+        &mut self,
+        operation: &OperationName,
+        connect: F,
+    ) -> Result<(), DiagramErrorCode>
+    where
+        F: FnMut(DynOutput, &mut Builder, &mut DiagramContext) -> Result<(), DiagramErrorCode>
+            + 'static,
+    {
+        self.set_connect_into_target(operation, ConnectionCallback(connect))
+    }
 
-impl<'a> EdgeBuilder<'a> {
-    pub(super) fn add_output_edge(&mut self, target: NextOperation, output: Option<DynOutput>) {
-        let target_op_id = target.into_operation_id();
-        let target = if let Some(op_id) = self.target_aliases.get(&target_op_id) {
-            op_id
-        } else {
-            &target_op_id
+    /// Set the buffer that should be used for a certain operation. This will
+    /// also set its connection callback.
+    pub fn set_buffer_for_operation(
+        &mut self,
+        operation: &OperationName,
+        buffer: AnyBuffer,
+    ) -> Result<(), DiagramErrorCode> {
+        match self.construction.buffers.entry(operation.clone()) {
+            Entry::Occupied(_) => {
+                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.clone()));
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(buffer);
+            }
+        }
+
+        let input: DynInputSlot = buffer.into();
+        self.set_input_for_target(operation, input)
+    }
+
+    /// Create a buffer map based on the buffer inputs provided. If one or more
+    /// of the buffers in BufferInputs is not available, get an error including
+    /// the name of the missing buffer.
+    pub fn create_buffer_map(&self, inputs: &BufferInputs) -> Result<BufferMap, String> {
+        let attempt_get_buffer = |name: &String| -> Result<AnyBuffer, String> {
+            self.construction
+                .buffers
+                .get(name)
+                .copied()
+                .ok_or_else(|| format!("cannot find buffer named [{name}]"))
         };
 
-        self.vertex.out_edges.push(Edge {
-            target: target.clone(),
-            output: Arc::new(Mutex::new(output)),
-        });
-    }
-}
-
-pub(super) struct WorkflowBuilder<'a> {
-    vertices: HashMap<OperationId, (RefCell<Vertex>, VertexOperations<'a>)>,
-    target_aliases: HashMap<OperationId, OperationId>,
-}
-
-impl<'a> WorkflowBuilder<'a> {
-    pub(super) fn new() -> Self {
-        Self {
-            vertices: HashMap::new(),
-            target_aliases: HashMap::new(),
-        }
-    }
-
-    pub(super) fn add_vertex<AsId, F>(&mut self, op_id: AsId, connect_visitor: F) -> EdgeBuilder
-    where
-        AsId: IntoOperationId,
-        F: Fn(
-                &Vertex,
-                &mut Builder,
-                &DiagramElementRegistry,
-                &mut HashMap<OperationId, AnyBuffer>,
-            ) -> Result<bool, DiagramErrorCode>
-            + 'a,
-    {
-        let op_id = op_id.into_operation_id();
-        let value = (
-            RefCell::new(Vertex {
-                in_edges: Vec::new(),
-                out_edges: Vec::new(),
-            }),
-            VertexOperations {
-                connect_visitor: Box::new(connect_visitor),
-            },
-        );
-        let vertex = match self.vertices.entry(op_id.clone()) {
-            Entry::Occupied(mut entry) => {
-                entry.insert(value);
-                entry.into_mut()
+        match inputs {
+            BufferInputs::Single(op_id) => {
+                let mut buffer_map = BufferMap::with_capacity(1);
+                buffer_map.insert(BufferIdentifier::Index(0), attempt_get_buffer(op_id)?);
+                Ok(buffer_map)
             }
-            Entry::Vacant(entry) => entry.insert(value),
-        }
-        .0
-        .get_mut();
-
-        EdgeBuilder {
-            vertex,
-            target_aliases: &self.target_aliases,
-        }
-    }
-
-    pub(super) fn add_vertices_from_op(
-        &mut self,
-        op_id: OperationId,
-        op: &'a DiagramOperation,
-        builder: &mut Builder,
-        diagram: &'a Diagram,
-        registry: &'a DiagramElementRegistry,
-    ) -> Result<(), DiagramErrorCode> {
-        match op {
-            DiagramOperation::Node(op) => op.add_vertices(builder, self, op_id, registry),
-            DiagramOperation::Section(op) => {
-                op.add_vertices(op_id, self, builder, diagram, registry)
-            }
-            DiagramOperation::ForkClone(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::Unzip(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::ForkResult(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::Split(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::Join(op) => {
-                op.add_vertices(self, op_id, diagram);
-                Ok(())
-            }
-            DiagramOperation::SerializedJoin(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::Transform(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::Buffer(op) => {
-                op.add_vertices(self, op_id);
-                Ok(())
-            }
-            DiagramOperation::BufferAccess(op) => {
-                op.add_vertices(self, op_id, diagram);
-                Ok(())
-            }
-            DiagramOperation::Listen(op) => {
-                op.add_vertices(self, op_id, diagram);
-                Ok(())
-            }
-        }
-    }
-
-    /// Set aliases to redirect the edge target when adding edges.
-    pub(super) fn set_target_aliases(&mut self, aliases: HashMap<OperationId, OperationId>) {
-        self.target_aliases = aliases;
-    }
-
-    fn connect_edges(&mut self) -> Result<(), DiagramError> {
-        for (op_id, (vertex, _)) in &self.vertices {
-            for edge in &vertex.borrow().out_edges {
-                let target = &self
-                    .vertices
-                    .get(&edge.target)
-                    .ok_or_else(|| DiagramError {
-                        code: DiagramErrorCode::OperationNotFound(edge.target.clone()),
-                        context: DiagramErrorContext {
-                            op_id: Some(op_id.clone()),
-                        },
-                    })?
-                    .0;
-                target.borrow_mut().in_edges.push(Edge {
-                    target: edge.target.clone(),
-                    output: Arc::clone(&edge.output),
-                })
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn create_workflow(
-        mut self,
-        builder: &mut Builder,
-        registry: &DiagramElementRegistry,
-    ) -> Result<(), DiagramError> {
-        self.connect_edges()?;
-        let mut buffers = HashMap::new();
-
-        // iteratively connect the vertices
-        while !self.vertices.is_empty() {
-            let before_len = self.vertices.len();
-            let mut unconnected_vertices = HashMap::new();
-
-            for (op_id, (mut v, mut ops)) in self.vertices.drain() {
-                let vertex = v.get_mut();
-
-                // skip if one or more edges is not ready yet
-                if vertex.in_edges.iter().any(|edge| !edge.has_output()) {
-                    unconnected_vertices.insert(op_id, (v, ops));
-                    continue;
+            BufferInputs::Dict(mapping) => {
+                let mut buffer_map = BufferMap::with_capacity(mapping.len());
+                for (k, op_id) in mapping {
+                    buffer_map.insert(
+                        BufferIdentifier::Name(k.clone().into()),
+                        attempt_get_buffer(op_id)?,
+                    );
                 }
-
-                // need to take ownership to avoid multiple mutable borrows, it is always
-                // put back so the unwrap should never fail.
-                let connect_visitor = &mut ops.connect_visitor;
-                let connected =
-                    connect_visitor(vertex, builder, registry, &mut buffers).map_err(|code| {
-                        DiagramError {
-                            code,
-                            context: DiagramErrorContext {
-                                op_id: Some(op_id.clone()),
-                            },
-                        }
-                    })?;
-
-                if !connected {
-                    unconnected_vertices.insert(op_id, (v, ops));
-                }
+                Ok(buffer_map)
             }
-            self.vertices.extend(unconnected_vertices);
-
-            // no progress is made and diagram is not fully connected
-            if !self.vertices.is_empty() && self.vertices.len() == before_len {
-                return Err(DiagramError {
-                    code: DiagramErrorCode::IncompleteDiagram,
-                    context: DiagramErrorContext { op_id: None },
-                });
+            BufferInputs::Array(arr) => {
+                let mut buffer_map = BufferMap::with_capacity(arr.len());
+                for (i, op_id) in arr.into_iter().enumerate() {
+                    buffer_map.insert(BufferIdentifier::Index(i), attempt_get_buffer(op_id)?);
+                }
+                Ok(buffer_map)
             }
         }
-
-        Ok(())
     }
-}
 
-/// Connect a [`DynOutput`] to a [`DynInputSlot`]. If the output is a [`serde_json::Value`], then
-/// this will attempt to deserialize it into the input type.
-///
-/// ```text
-/// builder.connect(output.into_output::<i64>()?, dyn_input)?;
-/// ```
-pub fn dyn_connect(
-    builder: &mut Builder,
-    output: DynOutput,
-    input: DynInputSlot,
-    registry: &MessageRegistry,
-) -> Result<(), DiagramErrorCode> {
-    let output = if output.type_info != input.type_info {
-        if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            registry.deserialize(&input.type_info, builder, output)?
+    /// Get the type information for the request message that goes into a node.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Optionally indicate a specific node in the diagram to treat
+    ///   as the target node, even if it is not the actual target. Using [`Some`]
+    ///   for this will override whatever is used for `next`.
+    /// * `next` - Indicate the next operation, i.e. the true target.
+    pub fn get_node_request_type(
+        &self,
+        target: Option<&OperationName>,
+        next: &NextOperation,
+    ) -> Result<TypeInfo, DiagramErrorCode> {
+        let target_node = if let Some(target) = target {
+            self.diagram.get_op(target)?
         } else {
-            return Err(DiagramErrorCode::TypeMismatch {
-                source_type: output.type_info,
-                target_type: input.type_info,
-            });
-        }
-    } else {
-        output
-    };
+            match next {
+                NextOperation::Target(op_id) => self.diagram.get_op(op_id)?,
+                NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
+                    panic!("Not yet implemented")
+                }
+                NextOperation::Builtin { builtin } => match builtin {
+                    BuiltinTarget::Terminate => return Ok(TypeInfo::of::<JsonMessage>()),
+                    BuiltinTarget::Dispose => return Err(DiagramErrorCode::UnknownTarget),
+                    BuiltinTarget::Cancel => return Ok(TypeInfo::of::<JsonMessage>()),
+                }
+            }
+        };
+        let node_op = match target_node {
+            DiagramOperation::Node(op) => op,
+            _ => return Err(DiagramErrorCode::UnknownTarget),
+        };
+        let target_type = self
+            .registry
+            .get_node_registration(&node_op.builder)?
+            .request;
+        Ok(target_type)
+    }
 
-    struct TypeErased {}
-    let typed_output = Output::<TypeErased>::new(output.scope(), output.id());
-    let typed_input = InputSlot::<TypeErased>::new(input.scope(), input.id());
-    builder.connect(typed_output, typed_input);
+    pub fn get_implicit_error_target(&self) -> NextOperation {
+        self.diagram
+            .on_implicit_error
+            .clone()
+            .unwrap_or(NextOperation::Builtin {
+                builtin: BuiltinTarget::Cancel,
+            })
+    }
+}
+
+/// Indicate whether the operation has finished building.
+#[derive(Debug, Clone)]
+pub enum BuildStatus {
+    /// The operation has finished building.
+    Finished,
+    /// The operation needs to make another attempt at building after more
+    /// information becomes available.
+    Defer {
+        /// Progress was made during this run. This can mean the operation has
+        /// added some information into the diagram but might need to provide
+        /// more later. If no operations make any progress within an entire
+        /// iteration of the workflow build then we assume it is impossible to
+        /// build the diagram.
+        progress: bool,
+        reason: Cow<'static, str>,
+    },
+}
+
+impl BuildStatus {
+    /// Indicate that the build of the operation needs to be deferred.
+    pub fn defer(reason: impl Into<Cow<'static, str>>) -> Self {
+        Self::Defer {
+            progress: false,
+            reason: reason.into(),
+        }
+    }
+
+    /// Indicate that the operation made progress, even if it's deferred.
+    #[allow(unused)]
+    pub fn with_progress(mut self) -> Self {
+        match &mut self {
+            Self::Defer { progress, .. } => {
+                *progress = true;
+            }
+            Self::Finished => {
+                // Do nothing
+            }
+        }
+
+        self
+    }
+
+    /// Did this operation make progress on this round?
+    pub fn made_progress(&self) -> bool {
+        match self {
+            Self::Defer { progress, .. } => *progress,
+            Self::Finished => true,
+        }
+    }
+
+    /// Change this build status into its reason for deferral, if it is a
+    /// deferral.
+    pub fn into_deferral_reason(self) -> Option<Cow<'static, str>> {
+        match self {
+            Self::Defer { reason, .. } => Some(reason),
+            Self::Finished => None,
+        }
+    }
+
+    /// Check if the build finished.
+    pub fn is_finished(&self) -> bool {
+        matches!(self, BuildStatus::Finished)
+    }
+}
+
+/// This trait is used to instantiate operations in the workflow. This trait
+/// will be called on each operation in the diagram until it finishes building.
+/// Each operation should use this to provide a [`ConnectOutput`] handle for
+/// itself (if relevant) and deposit [`DynOutput`]s into [`DiagramContext`].
+///
+/// After all operations are fully built, [`ConnectIntoTarget`] will be used to
+/// connect outputs into their target operations.
+pub trait BuildDiagramOperation {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationName,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode>;
+}
+
+/// This trait is used to connect outputs to their target operations. This trait
+/// will be called for each output produced by [`BuildDiagramOperation`].
+///
+/// You are allowed to generate new outputs during the [`ConnectIntoTarget`]
+/// phase by calling [`DiagramContext::add_outputs_into_target`].
+///
+/// However you cannot add new [`ConnectIntoTarget`] instances for operations.
+/// Any use of [`DiagramContext::set_input_for_target`],
+/// [`DiagramContext::set_connect_into_target`], or
+/// [`DiagramContext::set_connect_into_target_callback`] will be discarded.
+pub trait ConnectIntoTarget {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode>;
+}
+
+pub struct ConnectionCallback<F>(pub F)
+where
+    F: FnMut(DynOutput, &mut Builder, &mut DiagramContext) -> Result<(), DiagramErrorCode>;
+
+impl<F> ConnectIntoTarget for ConnectionCallback<F>
+where
+    F: FnMut(DynOutput, &mut Builder, &mut DiagramContext) -> Result<(), DiagramErrorCode>,
+{
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        (self.0)(output, builder, ctx)
+    }
+}
+
+pub(super) fn create_workflow<Request, Response, Streams>(
+    scope: Scope<Request, Response, Streams>,
+    builder: &mut Builder,
+    registry: &DiagramElementRegistry,
+    diagram: &Diagram,
+) -> Result<(), DiagramError>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    let mut construction = DiagramConstruction::default();
+
+    initialize_builtin_operations(
+        scope,
+        builder,
+        &mut DiagramContext {
+            construction: &mut construction,
+            diagram,
+            registry,
+        },
+    )?;
+
+    let mut unfinished_operations: Vec<&OperationName> = diagram.ops.keys().collect();
+    let mut deferred_operations: Vec<(&OperationName, BuildStatus)> = Vec::new();
+
+    let mut iterations = 0;
+    const MAX_ITERATIONS: usize = 10_000;
+
+    // Iteratively build all the operations in the diagram
+    while !unfinished_operations.is_empty() {
+        let mut made_progress = false;
+        for op in unfinished_operations.drain(..) {
+            let mut ctx = DiagramContext {
+                construction: &mut construction,
+                diagram,
+                registry,
+            };
+
+            // Attempt to build this operation
+            let status = diagram
+                .ops
+                .get(op)
+                .ok_or_else(|| {
+                    DiagramErrorCode::UnknownOperation(NextOperation::Target(op.clone()))
+                })?
+                .build_diagram_operation(op, builder, &mut ctx)
+                .map_err(|code| DiagramError::in_operation(op.clone(), code))?;
+
+            made_progress |= status.made_progress();
+            if !status.is_finished() {
+                // The operation did not finish, so pass it into the deferred
+                // operations list.
+                deferred_operations.push((op, status));
+            }
+        }
+
+        if made_progress {
+            // Try another iteration if needed since we made progress last time
+            unfinished_operations = deferred_operations.drain(..).map(|(op, _)| op).collect();
+        } else {
+            // No progress can be made any longer so return an error
+            return Err(DiagramErrorCode::BuildHalted {
+                reasons: deferred_operations
+                    .drain(..)
+                    .filter_map(|(op, status)| {
+                        status
+                            .into_deferral_reason()
+                            .map(|reason| (op.clone(), reason))
+                    })
+                    .collect(),
+            }
+            .into());
+        }
+
+        iterations += 1;
+        if iterations > MAX_ITERATIONS {
+            return Err(DiagramErrorCode::ExcessiveIterations.into());
+        }
+    }
+
+    let mut new_construction = DiagramConstruction::default();
+    new_construction.buffers = construction.buffers.clone();
+
+    iterations = 0;
+    while !construction.is_finished() {
+        let mut ctx = DiagramContext {
+            construction: &mut new_construction,
+            diagram,
+            registry,
+        };
+
+        // Attempt to connect to all regular operations
+        for (op, outputs) in construction.outputs_to_operation_target.drain() {
+            let op = NextOperation::Target(op);
+            let connect = construction
+                .connect_into_target
+                .get_mut(&op)
+                .ok_or_else(|| DiagramErrorCode::UnknownOperation(op.clone()))?;
+
+            for output in outputs {
+                connect.connect_into_target(output, builder, &mut ctx)?;
+            }
+        }
+
+        // Attempt to connect to all builtin operations
+        for (builtin, outputs) in construction.outputs_to_builtin_target.drain() {
+            let op = NextOperation::Builtin { builtin };
+            let connect = construction
+                .connect_into_target
+                .get_mut(&op)
+                .ok_or_else(|| DiagramErrorCode::UnknownOperation(op.clone()))?;
+
+            for output in outputs {
+                connect.connect_into_target(output, builder, &mut ctx)?;
+            }
+        }
+
+        construction
+            .outputs_to_builtin_target
+            .extend(new_construction.outputs_to_builtin_target.drain());
+
+        construction
+            .outputs_to_operation_target
+            .extend(new_construction.outputs_to_operation_target.drain());
+
+        iterations += 1;
+        if iterations > MAX_ITERATIONS {
+            return Err(DiagramErrorCode::ExcessiveIterations.into());
+        }
+    }
+
     Ok(())
 }
 
-pub(super) fn validate_single_input(vertex: &Vertex) -> Result<DynOutput, DiagramErrorCode> {
-    if vertex.in_edges.len() != 1 {
-        return Err(DiagramErrorCode::OnlySingleInput);
-    } else {
-        Ok(vertex.in_edges[0].take_output())
+fn initialize_builtin_operations<Request, Response, Streams>(
+    scope: Scope<Request, Response, Streams>,
+    builder: &mut Builder,
+    ctx: &mut DiagramContext,
+) -> Result<(), DiagramError>
+where
+    Request: 'static + Send + Sync,
+    Response: 'static + Send + Sync,
+    Streams: StreamPack,
+{
+    // Put the input message into the diagram
+    ctx.add_output_into_target(ctx.diagram.start.clone(), scope.input.into());
+
+    // Add the terminate operation
+    ctx.construction.connect_into_target.insert(
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Terminate,
+        },
+        standard_input_connection(scope.terminate.into(), &ctx.registry)?,
+    );
+
+    // Add the dispose operation
+    ctx.construction.connect_into_target.insert(
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Dispose,
+        },
+        Box::new(ConnectionCallback(move |_, _, _| {
+            // Do nothing since the output is being disposed
+            Ok(())
+        })),
+    );
+
+    // Add the cancel operation
+    ctx.construction.connect_into_target.insert(
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Cancel,
+        },
+        Box::new(ConnectToCancel::new(builder)?),
+    );
+
+    Ok(())
+}
+
+/// This returns an opaque [`ConnectIntoTarget`] implementation that provides
+/// the standard behavior of an input slot that other operations are connecting
+/// into.
+pub fn standard_input_connection(
+    input_slot: DynInputSlot,
+    registry: &DiagramElementRegistry,
+) -> Result<Box<dyn ConnectIntoTarget + 'static>, DiagramErrorCode> {
+    if input_slot.message_info() == &TypeInfo::of::<JsonMessage>() {
+        return Ok(Box::new(ImplicitSerialization::new(input_slot)?));
+    }
+
+    if let Some(deserialization) = ImplicitDeserialization::try_new(input_slot, &registry.messages)?
+    {
+        // The target type is deserializable, so let's apply implicit deserialization
+        // to it.
+        return Ok(Box::new(deserialization));
+    }
+
+    Ok(Box::new(BasicConnect { input_slot }))
+}
+
+impl ConnectIntoTarget for ImplicitSerialization {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        self.implicit_serialize(output, builder, ctx)
+    }
+}
+
+impl ConnectIntoTarget for ImplicitDeserialization {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        self.implicit_deserialize(output, builder, ctx)
+    }
+}
+
+struct BasicConnect {
+    input_slot: DynInputSlot,
+}
+
+impl ConnectIntoTarget for BasicConnect {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        _: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        output.connect_to(&self.input_slot, builder)
+    }
+}
+
+struct ConnectToCancel {
+    quiet_cancel: DynInputSlot,
+    implicit_serialization: ImplicitSerialization,
+    implicit_stringify: ImplicitStringify,
+    triggers: HashMap<TypeInfo, DynInputSlot>,
+}
+
+impl ConnectToCancel {
+    fn new(builder: &mut Builder) -> Result<Self, DiagramErrorCode> {
+        Ok(Self {
+            quiet_cancel: builder.create_quiet_cancel().into(),
+            implicit_serialization: ImplicitSerialization::new(
+                builder.create_cancel::<JsonMessage>().into(),
+            )?,
+            implicit_stringify: ImplicitStringify::new(builder.create_cancel::<String>().into())?,
+            triggers: Default::default(),
+        })
+    }
+}
+
+impl ConnectIntoTarget for ConnectToCancel {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        let Err(output) = self
+            .implicit_stringify
+            .try_implicit_stringify(output, builder, ctx)?
+        else {
+            // We successfully converted the output into a string, so we are done.
+            return Ok(());
+        };
+
+        // Try to implicitly serialize the incoming message if the message
+        // type supports it. That way we can connect it to the regular
+        // cancel operation.
+        let Err(output) = self
+            .implicit_serialization
+            .try_implicit_serialize(output, builder, ctx)?
+        else {
+            // We successfully converted the output into a json, so we are done.
+            return Ok(());
+        };
+
+        // In this case, the message type cannot be stringified or serialized so
+        // we'll change it into a trigger and then connect it to the quiet
+        // cancel instead.
+        let input_slot = match self.triggers.entry(*output.message_info()) {
+            Entry::Occupied(occupied) => occupied.get().clone(),
+            Entry::Vacant(vacant) => {
+                let trigger = ctx
+                    .registry
+                    .messages
+                    .trigger(output.message_info(), builder)?;
+                trigger.output.connect_to(&self.quiet_cancel, builder)?;
+                vacant.insert(trigger.input).clone()
+            }
+        };
+
+        output.connect_to(&input_slot, builder)?;
+
+        Ok(())
     }
 }

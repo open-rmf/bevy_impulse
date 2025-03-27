@@ -15,28 +15,26 @@
  *
 */
 
-use std::{any::TypeId, collections::HashMap, usize};
+use std::{collections::HashMap, usize};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::debug;
 
 use crate::{
-    unknown_diagram_error, Builder, Chain, ForRemaining, FromSequential, FromSpecific,
-    IntoOperationId, ListSplitKey, MapSplitKey, OperationResult, SplitDispatcher, Splittable,
+    Builder, ForRemaining, FromSequential, FromSpecific, ListSplitKey, MapSplitKey,
+    OperationResult, SplitDispatcher, Splittable,
 };
 
 use super::{
-    impls::{DefaultImpl, NotSupported},
-    type_info::TypeInfo,
-    validate_single_input, DiagramErrorCode, DynOutput, MessageRegistry, NextOperation,
-    OperationId, SerializeMessage, Vertex, WorkflowBuilder,
+    supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
+    OperationName, PerformForkClone, SerializeMessage,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SplitOp {
+pub struct SplitSchema {
     #[serde(default)]
     pub(super) sequential: Vec<NextOperation>,
 
@@ -46,58 +44,25 @@ pub struct SplitOp {
     pub(super) remaining: Option<NextOperation>,
 }
 
-impl SplitOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
-        let mut edge_builder =
-            wf_builder.add_vertex(op_id.clone(), move |vertex, builder, registry, _| {
-                self.try_connect(vertex, builder, &registry.messages)
-            });
-        let next_op_ids: Vec<&NextOperation> =
-            self.sequential.iter().chain(self.keyed.values()).collect();
-        for next_op_id in next_op_ids {
-            edge_builder.add_output_edge(next_op_id.clone(), None);
-        }
-        if let Some(remaining) = &self.remaining {
-            edge_builder.add_output_edge(remaining.clone(), None);
-        }
-    }
-
-    pub(super) fn try_connect(
+impl BuildDiagramOperation for SplitSchema {
+    fn build_diagram_operation(
         &self,
-        vertex: &Vertex,
+        id: &OperationName,
         builder: &mut Builder,
-        registry: &MessageRegistry,
-    ) -> Result<bool, DiagramErrorCode> {
-        let output = validate_single_input(vertex)?;
-        let mut outputs = if output.type_info == TypeInfo::of::<serde_json::Value>() {
-            let chain = output.into_output::<serde_json::Value>()?.chain(builder);
-            split_chain(chain, self)
-        } else {
-            registry.split(builder, output, self)
-        }?;
-
-        // Because of how we build `out_edges`, if the split op uses the `remaining` slot,
-        // then the last item will always be the remaining edge.
-        if self.remaining.is_some() {
-            let out_edge = vertex.out_edges.last().ok_or(unknown_diagram_error!())?;
-            out_edge.set_output(outputs.remaining);
-        }
-
-        let other_edges = if self.remaining.is_some() {
-            let out_edges_len = vertex.out_edges.len();
-            &vertex.out_edges[..(out_edges_len - 1)]
-        } else {
-            &vertex.out_edges[..]
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(sample_input) = ctx.infer_input_type_into_target(id) else {
+            // There are no outputs ready for this target, so we can't do
+            // anything yet. The builder should try again later.
+            return Ok(BuildStatus::defer("waiting for an input"));
         };
-        for out_edge in other_edges {
-            let output = outputs
-                .outputs
-                .remove(out_edge.target())
-                .ok_or(unknown_diagram_error!())?;
-            out_edge.set_output(output);
-        }
 
-        Ok(true)
+        let split = ctx.registry.messages.split(sample_input, self, builder)?;
+        ctx.set_input_for_target(id, split.input)?;
+        for (target, output) in split.outputs {
+            ctx.add_output_into_target(target, output);
+        }
+        Ok(BuildStatus::Finished)
     }
 }
 
@@ -214,111 +179,65 @@ impl FromSpecific for ListSplitKey {
 }
 
 #[derive(Debug)]
-pub struct DynSplitOutputs {
-    pub(super) outputs: HashMap<OperationId, DynOutput>,
-    pub(super) remaining: DynOutput,
+pub struct DynSplit {
+    pub(super) input: DynInputSlot,
+    pub(super) outputs: Vec<(NextOperation, DynOutput)>,
 }
 
-pub(super) fn split_chain<'a, T>(
-    chain: Chain<T>,
-    split_op: &'a SplitOp,
-) -> Result<DynSplitOutputs, DiagramErrorCode>
-where
-    T: Send + Sync + 'static + Splittable,
-    T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
-{
-    debug!(
-        "split chain of type: {:?}, op: {:?}",
-        TypeId::of::<T>(),
-        split_op
-    );
-
-    enum SeqOrKey<'inner> {
-        Seq(usize),
-        Key(&'inner String),
-    }
-
-    chain.split(|mut sb| -> Result<DynSplitOutputs, DiagramErrorCode> {
-        let outputs: HashMap<OperationId, DynOutput> = split_op
-            .sequential
-            .iter()
-            .enumerate()
-            .map(|(i, op_id)| (SeqOrKey::Seq(i), op_id))
-            .chain(
-                split_op
-                    .keyed
-                    .iter()
-                    .map(|(k, op_id)| (SeqOrKey::Key(k), op_id)),
-            )
-            .map(
-                |(ki, op_id)| -> Result<(OperationId, DynOutput), DiagramErrorCode> {
-                    match ki {
-                        SeqOrKey::Seq(i) => Ok((
-                            op_id.clone().into_operation_id(),
-                            sb.sequential_output(i)?.into(),
-                        )),
-                        SeqOrKey::Key(k) => Ok((
-                            op_id.clone().into_operation_id(),
-                            sb.specific_output(k.clone())?.into(),
-                        )),
-                    }
-                },
-            )
-            .collect::<Result<HashMap<_, _>, _>>()?;
-        let split_outputs = DynSplitOutputs {
-            outputs,
-            remaining: sb.remaining_output()?.into(),
-        };
-        debug!("splitted outputs: {:?}", split_outputs);
-        Ok(split_outputs)
-    })
-}
-
-pub trait DynSplit<T, Serializer> {
-    const SUPPORTED: bool;
-
-    fn dyn_split<'a>(
+pub trait RegisterSplit {
+    fn perform_split(
+        split_op: &SplitSchema,
         builder: &mut Builder,
-        output: DynOutput,
-        split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs, DiagramErrorCode>;
+    ) -> Result<DynSplit, DiagramErrorCode>;
 
     fn on_register(registry: &mut MessageRegistry);
 }
 
-impl<T, Serializer> DynSplit<T, Serializer> for NotSupported {
-    const SUPPORTED: bool = false;
-
-    fn dyn_split<'a>(
-        _builder: &mut Builder,
-        _output: DynOutput,
-        _split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs, DiagramErrorCode> {
-        Err(DiagramErrorCode::NotSplittable)
-    }
-
-    fn on_register(_registry: &mut MessageRegistry) {}
-}
-
-impl<T, Serializer> DynSplit<T, Serializer> for DefaultImpl
+impl<T, Serializer, Cloneable> RegisterSplit for Supported<(T, Serializer, Cloneable)>
 where
     T: Send + Sync + 'static + Splittable,
     T::Key: FromSequential + FromSpecific<SpecificKey = String> + ForRemaining,
     Serializer: SerializeMessage<T::Item> + SerializeMessage<Vec<T::Item>>,
+    Cloneable: PerformForkClone<T::Item> + PerformForkClone<Vec<T::Item>>,
 {
-    const SUPPORTED: bool = true;
-
-    fn dyn_split<'a>(
+    fn perform_split(
+        split_op: &SplitSchema,
         builder: &mut Builder,
-        output: DynOutput,
-        split_op: &'a SplitOp,
-    ) -> Result<DynSplitOutputs, DiagramErrorCode> {
-        let chain = output.into_output::<T>()?.chain(builder);
-        split_chain(chain, split_op)
+    ) -> Result<DynSplit, DiagramErrorCode> {
+        let (input, split) = builder.create_split::<T>();
+        let mut outputs = Vec::new();
+        let mut split = split.build(builder);
+        for (key, target) in &split_op.keyed {
+            outputs.push((target.clone(), split.specific_output(key.clone())?.into()));
+        }
+
+        for (i, target) in split_op.sequential.iter().enumerate() {
+            outputs.push((target.clone(), split.sequential_output(i)?.into()))
+        }
+
+        if let Some(remaining_target) = &split_op.remaining {
+            outputs.push((remaining_target.clone(), split.remaining_output()?.into()));
+        }
+
+        Ok(DynSplit {
+            input: input.into(),
+            outputs,
+        })
     }
 
     fn on_register(registry: &mut MessageRegistry) {
+        let ops = &mut registry
+            .messages
+            .entry(TypeInfo::of::<T>())
+            .or_insert(MessageRegistration::new::<T>())
+            .operations;
+
+        ops.split_impl = Some(Self::perform_split);
+
         registry.register_serialize::<T::Item, Serializer>();
+        registry.register_fork_clone::<T::Item, Cloneable>();
+        registry.register_serialize::<Vec<T::Item>, Serializer>();
+        registry.register_fork_clone::<Vec<T::Item>, Cloneable>();
     }
 }
 
@@ -476,6 +395,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 1);
     }
 
@@ -515,6 +435,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 2);
     }
 
@@ -558,6 +479,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 2);
     }
 
@@ -598,6 +520,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         // "a" is "eaten" up by the keyed path, so we should be the result of "b".
         assert_eq!(result[1], 2);
     }
@@ -639,6 +562,7 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::from(4))
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 2);
     }
 
@@ -678,6 +602,7 @@ mod tests {
                 serde_json::to_value(HashMap::from([("test".to_string(), 1)])).unwrap(),
             )
             .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
 }

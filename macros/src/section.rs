@@ -164,7 +164,7 @@ fn gen_register_deserialize(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStrea
         .map(|(config, span)| {
             if config.no_deserialize {
                 quote_spanned! {*span=>
-                    let _opt_out = _opt_out.no_request_deserializing();
+                    let _opt_out = _opt_out.no_deserializing();
                 }
             } else {
                 TokenStream::new()
@@ -179,7 +179,7 @@ fn gen_register_serialize(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream>
         .map(|(config, span)| {
             if config.no_serialize {
                 parse_quote_spanned! {*span=>
-                    let _opt_out = _opt_out.no_response_serializing();
+                    let _opt_out = _opt_out.no_serializing();
                 }
             } else {
                 TokenStream::new()
@@ -194,7 +194,7 @@ fn gen_register_fork_clone(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream
         .map(|(config, span)| {
             if config.no_clone {
                 quote_spanned! {*span=>
-                    let _opt_out = _opt_out.no_response_cloning();
+                    let _opt_out = _opt_out.no_cloning();
                 }
             } else {
                 TokenStream::new()
