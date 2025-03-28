@@ -37,10 +37,7 @@ use super::{
 // of using Cow.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OperationRef<'a> {
-    Named {
-        namespaces: Vec<Cow<'a, str>>,
-        name: Cow<'a, str>,
-    },
+    Named(NamedOperationRef<'a>),
     Builtin { builtin: BuiltinTarget },
 }
 
@@ -48,18 +45,13 @@ impl<'a> OperationRef<'a> {
     fn in_namespaces(self, parent_namespaces: &[Cow<'a, str>]) -> Self {
         match self {
             Self::Builtin { builtin } => Self::Builtin { builtin },
-            Self::Named { namespaces: child_namespaces, name } => {
-                let mut namespaces = Vec::from_iter(parent_namespaces.into_iter().cloned());
-                namespaces.extend(child_namespaces.into_iter());
-
-                Self::Named { namespaces, name }
-            }
+            Self::Named(named) => Self::Named(named.in_namespace(parent_namespaces)),
         }
     }
 
     fn get_namespaces(&'a self) -> Cow<'a, Vec<Cow<'a, str>>> {
         match self {
-            Self::Named { namespaces, .. } => Cow::Borrowed(namespaces),
+            Self::Named(named) => Cow::Borrowed(&named.namespaces),
             Self::Builtin { .. } => Cow::Owned(Vec::new()),
         }
     }
@@ -67,15 +59,7 @@ impl<'a> OperationRef<'a> {
     pub fn as_static(&self) -> OperationRef<'static> {
         match self {
             Self::Builtin { builtin } => OperationRef::Builtin { builtin: builtin.clone() },
-            Self::Named { namespaces, name } => {
-                OperationRef::Named {
-                    namespaces: namespaces
-                        .iter()
-                        .map(|n| Cow::Owned(n.clone().into_owned()))
-                        .collect(),
-                    name: Cow::Owned(name.clone().into_owned()),
-                }
-            }
+            Self::Named(named) => OperationRef::Named(named.as_static()),
         }
     }
 }
@@ -83,17 +67,9 @@ impl<'a> OperationRef<'a> {
 impl<'a> From<NextOperation> for OperationRef<'a> {
     fn from(value: NextOperation) -> Self {
         match value {
-            NextOperation::Name(name) => OperationRef::Named {
-                namespaces: Vec::new(),
-                name: Cow::Owned(name)
-            },
+            NextOperation::Name(name) => OperationRef::Named(name.into()),
+            NextOperation::Namespace(id) => OperationRef::Named(id.into()),
             NextOperation::Builtin { builtin } => OperationRef::Builtin { builtin },
-            NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
-                OperationRef::Named {
-                    namespaces: Vec::from_iter([Cow::Owned(namespace)]),
-                    name: Cow::Owned(operation),
-                }
-            }
         }
     }
 }
@@ -101,41 +77,118 @@ impl<'a> From<NextOperation> for OperationRef<'a> {
 impl<'a> From<&'a NextOperation> for OperationRef<'a> {
     fn from(value: &'a NextOperation) -> Self {
         match value {
-            NextOperation::Name(name) => OperationRef::Named {
-                namespaces: Vec::new(),
-                name: Cow::Borrowed(name),
-            },
+            NextOperation::Name(name) => OperationRef::Named(name.into()),
+            NextOperation::Namespace(id) => OperationRef::Named(id.into()),
             NextOperation::Builtin { builtin } => OperationRef::Builtin { builtin: builtin.clone() },
-            NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
-                OperationRef::Named {
-                    namespaces: Vec::from_iter([Cow::Borrowed(namespace.as_str())]),
-                    name: Cow::Borrowed(operation),
-                }
-            }
         }
     }
 }
 
-impl From<&OperationName> for OperationRef<'static> {
-    fn from(value: &OperationName) -> Self {
-        OperationRef::Named {
-            namespaces: Vec::new(),
-            name: Cow::Owned(value.clone()),
-        }
+impl<'a> From<&'a OperationName> for OperationRef<'a> {
+    fn from(value: &'a OperationName) -> Self {
+        OperationRef::Named(value.into())
     }
 }
 
 impl<'a> std::fmt::Display for OperationRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Named { namespaces, name } => {
-                for namespace in namespaces {
-                    write!(f, "{namespace}:")?;
-                }
-                f.write_str(name)
-            },
+            Self::Named(named) => write!(f, "{named}"),
             Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NamedOperationRef<'a> {
+    pub namespaces: Vec<Cow<'a, str>>,
+    pub name: Cow<'a, str>,
+    /// The exposed field indicated whether this is referring to an operation
+    /// within a section which is exposed to a parent workflow. This flag
+    /// prevents outputs in a parent workflow from accidentally or intentionally
+    /// connecting to operations in a section that were not supposed to be
+    /// exposed.
+    pub exposed: bool,
+}
+
+impl<'a> NamedOperationRef<'a> {
+    fn in_namespace(mut self, parent_namespaces: &[Cow<'a, str>]) -> Self {
+        let mut namespaces = Vec::from_iter(parent_namespaces.into_iter().cloned());
+        namespaces.extend(self.namespaces.into_iter());
+        self.namespaces = namespaces;
+        self
+    }
+
+    fn as_static(&self) -> NamedOperationRef<'static> {
+        NamedOperationRef {
+            namespaces: self
+                .namespaces
+                .iter()
+                .map(|n| Cow::Owned(n.clone().into_owned()))
+                .collect(),
+            name: Cow::Owned(self.name.clone().into_owned()),
+            exposed: self.exposed,
+        }
+    }
+}
+
+impl<'a> From<&'a OperationName> for NamedOperationRef<'a> {
+    fn from(name: &'a OperationName) -> Self {
+        NamedOperationRef {
+            namespaces: Vec::new(),
+            name: Cow::Borrowed(name),
+            // This is a same-scope access, so it does not need to be exposed
+            exposed: false,
+        }
+    }
+}
+
+impl<'a> From<OperationName> for NamedOperationRef<'a> {
+    fn from(name: OperationName) -> Self {
+        NamedOperationRef {
+            namespaces: Vec::new(),
+            name: Cow::Owned(name),
+            // This is a same-scope access, so it does not need to be exposed
+            exposed: false,
+        }
+    }
+}
+
+impl<'a> From<&'a NamespacedOperation> for NamedOperationRef<'a> {
+    fn from(id: &'a NamespacedOperation) -> Self {
+        NamedOperationRef {
+            namespaces: Vec::from_iter([Cow::Borrowed(id.namespace.as_str())]),
+            name: Cow::Borrowed(id.operation.as_str()),
+            // This is an access happening from the parent scope, so it does
+            // need to be exposed
+            exposed: true,
+        }
+    }
+}
+
+impl<'a> From<NamespacedOperation> for NamedOperationRef<'static> {
+    fn from(id: NamespacedOperation) -> Self {
+        NamedOperationRef {
+            namespaces: Vec::from_iter([Cow::Owned(id.namespace.clone())]),
+            name: Cow::Owned(id.operation.clone()),
+            // This is an access happening from the parent scope, so it does
+            // need to be exposed
+            exposed: true
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for NamedOperationRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for namespace in &self.namespaces {
+            write!(f, "{namespace}:")?;
+        }
+
+        if !self.namespaces.is_empty() && self.exposed {
+            write!(f, "(exposed):")?;
+        }
+
+        f.write_str(&self.name)
     }
 }
 
@@ -163,8 +216,8 @@ impl<'a> DiagramConstruction<'a> {
     }
 }
 
-pub struct DiagramContext<'a> {
-    construction: &'a mut DiagramConstruction<'a>,
+pub struct DiagramContext<'c, 'a: 'c> {
+    construction: &'c mut DiagramConstruction<'c>,
     pub registry: &'a DiagramElementRegistry,
     pub operations: &'a Operations,
     pub templates: &'a Templates,
@@ -172,7 +225,7 @@ pub struct DiagramContext<'a> {
     namespaces: Cow<'a, Vec<Cow<'a, str>>>,
 }
 
-impl<'a> DiagramContext<'a> {
+impl<'c, 'a: 'c> DiagramContext<'c, 'a> {
     /// Infer the [`TypeInfo`] for the input messages into the specified operation.
     ///
     /// If this returns [`None`] then not enough of the diagram has been built
@@ -232,7 +285,7 @@ impl<'a> DiagramContext<'a> {
     /// all connection behaviors must already be set by then.
     pub fn set_input_for_target(
         &mut self,
-        operation: impl Into<OperationRef<'static>> + Clone,
+        operation: impl Into<OperationRef<'a>> + Clone,
         input: DynInputSlot,
     ) -> Result<(), DiagramErrorCode> {
         match self
@@ -241,7 +294,7 @@ impl<'a> DiagramContext<'a> {
             .entry(operation.clone().into())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into()));
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into().as_static()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(standard_input_connection(input, &self.registry)?);
@@ -265,7 +318,7 @@ impl<'a> DiagramContext<'a> {
     /// phase because all connection behaviors should already be set by then.
     pub fn set_connect_into_target<C: ConnectIntoTarget + 'static>(
         &mut self,
-        operation: impl Into<OperationRef<'static>> + Clone,
+        operation: impl Into<OperationRef<'a>> + Clone,
         connect: C,
     ) -> Result<(), DiagramErrorCode> {
         let connect = Box::new(connect);
@@ -275,7 +328,7 @@ impl<'a> DiagramContext<'a> {
             .entry(operation.clone().into())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into()));
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into().as_static()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(connect);
@@ -290,7 +343,7 @@ impl<'a> DiagramContext<'a> {
     /// `set_connect_into_target(operation, ConnectionCallback(connect))`.
     pub fn set_connect_into_target_callback<F>(
         &mut self,
-        operation: &OperationName,
+        operation: &'a OperationName,
         connect: F,
     ) -> Result<(), DiagramErrorCode>
     where
@@ -304,12 +357,12 @@ impl<'a> DiagramContext<'a> {
     /// also set its connection callback.
     pub fn set_buffer_for_operation(
         &mut self,
-        operation: impl Into<OperationRef<'static>> + Clone,
+        operation: impl Into<OperationRef<'a>> + Clone,
         buffer: AnyBuffer,
     ) -> Result<(), DiagramErrorCode> {
         match self.construction.buffers.entry(operation.clone().into()) {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.into().into()));
+                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.into().as_static()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(buffer);
@@ -491,11 +544,11 @@ impl BuildStatus {
 /// After all operations are fully built, [`ConnectIntoTarget`] will be used to
 /// connect outputs into their target operations.
 pub trait BuildDiagramOperation {
-    fn build_diagram_operation<'a>(
+    fn build_diagram_operation<'a, 'c>(
         &self,
         id: &OperationRef<'a>,
         builder: &mut Builder,
-        ctx: &mut DiagramContext<'a>,
+        ctx: &mut DiagramContext<'a, 'c>,
     ) -> Result<BuildStatus, DiagramErrorCode>;
 }
 
@@ -642,13 +695,16 @@ where
 
     iterations = 0;
     while !construction.is_finished() {
-        let mut ctx = DiagramContext {
-            construction: &mut new_construction,
-            diagram,
-            registry,
-        };
-
         for (id, outputs) in construction.outputs_into_target.drain() {
+            let mut ctx = DiagramContext {
+                construction: &mut new_construction,
+                registry,
+                operations: &diagram.ops,
+                templates: &diagram.templates,
+                on_implicit_error,
+                namespaces: id.get_namespaces(),
+            };
+
             let connect = construction
                 .connect_into_target
                 .get_mut(&id)
