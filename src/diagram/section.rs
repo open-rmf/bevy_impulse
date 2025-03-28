@@ -77,7 +77,7 @@ impl BuildDiagramOperation for SectionSchema {
             }
             SectionProvider::Template(section_template) => {
                 let section = ctx
-                    .diagram
+                    .templates
                     .get_template(section_template)?;
 
 

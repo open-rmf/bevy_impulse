@@ -26,6 +26,7 @@ use super::{
     BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization, ImplicitSerialization,
     ImplicitStringify, NextOperation, OperationName, TypeInfo, NamespacedOperation,
+    Operations, Templates,
 };
 
 /// This key is used so we can do a clone-free .get(&NextOperation) of a hashmap
@@ -35,79 +36,122 @@ use super::{
 // DiagramConstruction and then borrow all the names used in this struct instead
 // of using Cow.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NextOperationRef<'a> {
-    Name(Cow<'a, str>),
+pub enum OperationRef<'a> {
+    Named {
+        namespaces: Vec<Cow<'a, str>>,
+        name: Cow<'a, str>,
+    },
     Builtin { builtin: BuiltinTarget },
-    Namespace(NamespacedOperationRef<'a>),
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NamespacedOperationRef<'a> {
-    pub namespace: Cow<'a, str>,
-    pub operation: Cow<'a, str>,
+impl<'a> OperationRef<'a> {
+    fn in_namespaces(self, parent_namespaces: &[Cow<'a, str>]) -> Self {
+        match self {
+            Self::Builtin { builtin } => Self::Builtin { builtin },
+            Self::Named { namespaces: child_namespaces, name } => {
+                let mut namespaces = Vec::from_iter(parent_namespaces.into_iter().cloned());
+                namespaces.extend(child_namespaces.into_iter());
+
+                Self::Named { namespaces, name }
+            }
+        }
+    }
+
+    fn get_namespaces(&'a self) -> Cow<'a, Vec<Cow<'a, str>>> {
+        match self {
+            Self::Named { namespaces, .. } => Cow::Borrowed(namespaces),
+            Self::Builtin { .. } => Cow::Owned(Vec::new()),
+        }
+    }
+
+    pub fn as_static(&self) -> OperationRef<'static> {
+        match self {
+            Self::Builtin { builtin } => OperationRef::Builtin { builtin: builtin.clone() },
+            Self::Named { namespaces, name } => {
+                OperationRef::Named {
+                    namespaces: namespaces
+                        .iter()
+                        .map(|n| Cow::Owned(n.clone().into_owned()))
+                        .collect(),
+                    name: Cow::Owned(name.clone().into_owned()),
+                }
+            }
+        }
+    }
 }
 
-impl<'a> From<NextOperation> for NextOperationRef<'a> {
+impl<'a> From<NextOperation> for OperationRef<'a> {
     fn from(value: NextOperation) -> Self {
         match value {
-            NextOperation::Name(name) => NextOperationRef::Name(Cow::Owned(name)),
-            NextOperation::Builtin { builtin } => NextOperationRef::Builtin { builtin },
+            NextOperation::Name(name) => OperationRef::Named {
+                namespaces: Vec::new(),
+                name: Cow::Owned(name)
+            },
+            NextOperation::Builtin { builtin } => OperationRef::Builtin { builtin },
             NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
-                NextOperationRef::Namespace(NamespacedOperationRef {
-                    namespace: Cow::Owned(namespace),
-                    operation: Cow::Owned(operation),
-                })
+                OperationRef::Named {
+                    namespaces: Vec::from_iter([Cow::Owned(namespace)]),
+                    name: Cow::Owned(operation),
+                }
             }
         }
     }
 }
 
-impl<'a> From<NextOperationRef<'a>> for NextOperation {
-    fn from(value: NextOperationRef<'a>) -> Self {
-        match value {
-            NextOperationRef::Name(name) => NextOperation::Name(name.into_owned()),
-            NextOperationRef::Builtin { builtin } => NextOperation::Builtin { builtin },
-            NextOperationRef::Namespace(NamespacedOperationRef { namespace, operation }) => {
-                NextOperation::Namespace(NamespacedOperation {
-                    namespace: namespace.into_owned(),
-                    operation: operation.into_owned(),
-                })
-            }
-        }
-    }
-}
-
-impl<'a> From<&'a NextOperation> for NextOperationRef<'a> {
+impl<'a> From<&'a NextOperation> for OperationRef<'a> {
     fn from(value: &'a NextOperation) -> Self {
         match value {
-            NextOperation::Name(name) => NextOperationRef::Name(Cow::Borrowed(name)),
-            NextOperation::Builtin { builtin } => NextOperationRef::Builtin { builtin: builtin.clone() },
+            NextOperation::Name(name) => OperationRef::Named {
+                namespaces: Vec::new(),
+                name: Cow::Borrowed(name),
+            },
+            NextOperation::Builtin { builtin } => OperationRef::Builtin { builtin: builtin.clone() },
             NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
-                NextOperationRef::Namespace(NamespacedOperationRef {
-                    namespace: Cow::Borrowed(namespace),
-                    operation: Cow::Borrowed(operation),
-                })
+                OperationRef::Named {
+                    namespaces: Vec::from_iter([Cow::Borrowed(namespace.as_str())]),
+                    name: Cow::Borrowed(operation),
+                }
             }
         }
     }
 }
 
-impl From<&OperationName> for NextOperationRef<'static> {
+impl From<&OperationName> for OperationRef<'static> {
     fn from(value: &OperationName) -> Self {
-        NextOperationRef::Name(Cow::Owned(value.clone()))
+        OperationRef::Named {
+            namespaces: Vec::new(),
+            name: Cow::Owned(value.clone()),
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for OperationRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Named { namespaces, name } => {
+                for namespace in namespaces {
+                    write!(f, "{namespace}:")?;
+                }
+                f.write_str(name)
+            },
+            Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
+        }
     }
 }
 
 #[derive(Default)]
-struct DiagramConstruction {
-    connect_into_target: HashMap<NextOperationRef<'static>, Box<dyn ConnectIntoTarget>>,
-    // We use a separate hashmap for OperationId vs BuiltinTarget so we can
-    // efficiently fetch with an &OperationId
-    outputs_into_target: HashMap<NextOperationRef<'static>, Vec<DynOutput>>,
-    buffers: HashMap<NextOperationRef<'static>, AnyBuffer>,
+struct DiagramConstruction<'a> {
+    /// Implementations that define how outputs can connect to their target operations
+    connect_into_target: HashMap<OperationRef<'a>, Box<dyn ConnectIntoTarget>>,
+    /// A map of what outputs are going into each target operation
+    outputs_into_target: HashMap<OperationRef<'a>, Vec<DynOutput>>,
+    /// A map of what buffers exist in the diagram
+    buffers: HashMap<OperationRef<'a>, AnyBuffer>,
+    /// Operations that were spawned by another operation.
+    child_operations: Vec<(OperationRef<'a>, DiagramOperation)>,
 }
 
-impl DiagramConstruction {
+impl<'a> DiagramConstruction<'a> {
     fn is_finished(&self) -> bool {
         for outputs in self.outputs_into_target.values() {
             if !outputs.is_empty() {
@@ -120,9 +164,12 @@ impl DiagramConstruction {
 }
 
 pub struct DiagramContext<'a> {
-    construction: &'a mut DiagramConstruction,
-    pub diagram: &'a Diagram,
+    construction: &'a mut DiagramConstruction<'a>,
     pub registry: &'a DiagramElementRegistry,
+    pub operations: &'a Operations,
+    pub templates: &'a Templates,
+    pub on_implicit_error: &'a OperationRef<'a>,
+    namespaces: Cow<'a, Vec<Cow<'a, str>>>,
 }
 
 impl<'a> DiagramContext<'a> {
@@ -141,10 +188,13 @@ impl<'a> DiagramContext<'a> {
     /// during the [`ConnectIntoTarget`] phase then you should capture the
     /// [`TypeInfo`] that you receive from this function during the
     /// [`BuildDiagramOperation`] phase.
-    pub fn infer_input_type_into_target(&self, id: &OperationName) -> Option<TypeInfo> {
+    pub fn infer_input_type_into_target(
+        &self,
+        id: &OperationRef,
+    ) -> Option<TypeInfo> {
         self.construction
             .outputs_into_target
-            .get(&NextOperationRef::Name(Cow::Borrowed(id)))
+            .get(id)
             .and_then(|outputs| outputs.first())
             .map(|o| *o.message_info())
     }
@@ -182,7 +232,7 @@ impl<'a> DiagramContext<'a> {
     /// all connection behaviors must already be set by then.
     pub fn set_input_for_target(
         &mut self,
-        operation: impl Into<NextOperationRef<'static>> + Clone,
+        operation: impl Into<OperationRef<'static>> + Clone,
         input: DynInputSlot,
     ) -> Result<(), DiagramErrorCode> {
         match self
@@ -191,7 +241,7 @@ impl<'a> DiagramContext<'a> {
             .entry(operation.clone().into())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into().into()));
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(standard_input_connection(input, &self.registry)?);
@@ -215,7 +265,7 @@ impl<'a> DiagramContext<'a> {
     /// phase because all connection behaviors should already be set by then.
     pub fn set_connect_into_target<C: ConnectIntoTarget + 'static>(
         &mut self,
-        operation: impl Into<NextOperationRef<'static>> + Clone,
+        operation: impl Into<OperationRef<'static>> + Clone,
         connect: C,
     ) -> Result<(), DiagramErrorCode> {
         let connect = Box::new(connect);
@@ -225,7 +275,7 @@ impl<'a> DiagramContext<'a> {
             .entry(operation.clone().into())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into().into()));
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(connect);
@@ -254,7 +304,7 @@ impl<'a> DiagramContext<'a> {
     /// also set its connection callback.
     pub fn set_buffer_for_operation(
         &mut self,
-        operation: impl Into<NextOperationRef<'static>> + Clone,
+        operation: impl Into<OperationRef<'static>> + Clone,
         buffer: AnyBuffer,
     ) -> Result<(), DiagramErrorCode> {
         match self.construction.buffers.entry(operation.clone().into()) {
@@ -275,7 +325,7 @@ impl<'a> DiagramContext<'a> {
     /// the name of the missing buffer.
     pub fn create_buffer_map(&self, inputs: &BufferInputs) -> Result<BufferMap, String> {
         let attempt_get_buffer = |buffer: &NextOperation| -> Result<AnyBuffer, String> {
-            let buffer_ref: NextOperationRef = buffer.into();
+            let buffer_ref: OperationRef = buffer.into();
             self.construction
                 .buffers
                 .get(&buffer_ref)
@@ -323,10 +373,10 @@ impl<'a> DiagramContext<'a> {
         next: &NextOperation,
     ) -> Result<TypeInfo, DiagramErrorCode> {
         let target_node = if let Some(target) = target {
-            self.diagram.get_op(target)?
+            self.operations.get_op(target)?
         } else {
             match next {
-                NextOperation::Name(op_id) => self.diagram.get_op(op_id)?,
+                NextOperation::Name(op_id) => self.operations.get_op(op_id)?,
                 NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
                     let section = &self
                         .registry
@@ -363,13 +413,8 @@ impl<'a> DiagramContext<'a> {
         Ok(target_type)
     }
 
-    pub fn get_implicit_error_target(&self) -> NextOperation {
-        self.diagram
-            .on_implicit_error
-            .clone()
-            .unwrap_or(NextOperation::Builtin {
-                builtin: BuiltinTarget::Cancel,
-            })
+    pub fn get_implicit_error_target(&self) -> OperationRef<'a> {
+        self.on_implicit_error.clone()
     }
 }
 
@@ -446,11 +491,11 @@ impl BuildStatus {
 /// After all operations are fully built, [`ConnectIntoTarget`] will be used to
 /// connect outputs into their target operations.
 pub trait BuildDiagramOperation {
-    fn build_diagram_operation(
+    fn build_diagram_operation<'a>(
         &self,
-        id: &OperationName,
+        id: &OperationRef<'a>,
         builder: &mut Builder,
-        ctx: &mut DiagramContext,
+        ctx: &mut DiagramContext<'a>,
     ) -> Result<BuildStatus, DiagramErrorCode>;
 }
 
@@ -506,18 +551,34 @@ where
 
     let mut construction = DiagramConstruction::default();
 
+    let default_on_implicit_error = OperationRef::Builtin { builtin: BuiltinTarget::Cancel };
+    let opt_on_implicit_error: Option<OperationRef> = diagram
+        .on_implicit_error
+        .as_ref()
+        .map(Into::into);
+
+    let on_implicit_error = opt_on_implicit_error.as_ref().unwrap_or(&default_on_implicit_error);
+
     initialize_builtin_operations(
+        diagram.start.clone(),
         scope,
         builder,
         &mut DiagramContext {
             construction: &mut construction,
-            diagram,
             registry,
+            operations: &diagram.ops,
+            templates: &diagram.templates,
+            on_implicit_error,
+            namespaces: Cow::Owned(Vec::new()),
         },
     )?;
 
-    let mut unfinished_operations: Vec<&OperationName> = diagram.ops.keys().collect();
-    let mut deferred_operations: Vec<(&OperationName, BuildStatus)> = Vec::new();
+    let mut unfinished_operations: Vec<(OperationRef, &DiagramOperation)> = diagram
+        .ops
+        .iter()
+        .map(|(id, op)| (id.into(), op))
+        .collect();
+    let mut deferred_operations: Vec<DeferredOperation> = Vec::new();
 
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 10_000;
@@ -525,43 +586,45 @@ where
     // Iteratively build all the operations in the diagram
     while !unfinished_operations.is_empty() {
         let mut made_progress = false;
-        for op in unfinished_operations.drain(..) {
+        for (id, op) in unfinished_operations.drain(..) {
             let mut ctx = DiagramContext {
                 construction: &mut construction,
-                diagram,
                 registry,
+                operations: &diagram.ops,
+                templates: &diagram.templates,
+                on_implicit_error,
+                namespaces: id.get_namespaces(),
             };
 
             // Attempt to build this operation
-            let status = diagram
-                .ops
-                .get(op)
-                .ok_or_else(|| {
-                    DiagramErrorCode::UnknownOperation(NextOperation::Name(op.clone()))
-                })?
-                .build_diagram_operation(op, builder, &mut ctx)
-                .map_err(|code| DiagramError::in_operation(op.clone(), code))?;
+            let status = op
+                .build_diagram_operation(&id, builder, &mut ctx)
+                .map_err(|code| DiagramError::in_operation(id.as_static(), code))?;
 
             made_progress |= status.made_progress();
             if !status.is_finished() {
                 // The operation did not finish, so pass it into the deferred
                 // operations list.
-                deferred_operations.push((op, status));
+                deferred_operations.push(DeferredOperation { id, op, status });
             }
         }
 
         if made_progress {
             // Try another iteration if needed since we made progress last time
-            unfinished_operations = deferred_operations.drain(..).map(|(op, _)| op).collect();
+            unfinished_operations = deferred_operations
+                .drain(..)
+                .map(|deferred| (deferred.id, deferred.op))
+                .collect();
         } else {
             // No progress can be made any longer so return an error
             return Err(DiagramErrorCode::BuildHalted {
                 reasons: deferred_operations
                     .drain(..)
-                    .filter_map(|(op, status)| {
-                        status
+                    .filter_map(|deferred| {
+                        deferred
+                            .status
                             .into_deferral_reason()
-                            .map(|reason| (op.clone(), reason))
+                            .map(|reason| (deferred.id.as_static(), reason))
                     })
                     .collect(),
             }
@@ -609,7 +672,14 @@ where
     Ok(())
 }
 
+struct DeferredOperation<'a> {
+    id: OperationRef<'a>,
+    op: &'a DiagramOperation,
+    status: BuildStatus,
+}
+
 fn initialize_builtin_operations<Request, Response, Streams>(
+    start: NextOperation,
     scope: Scope<Request, Response, Streams>,
     builder: &mut Builder,
     ctx: &mut DiagramContext,
@@ -620,11 +690,11 @@ where
     Streams: StreamPack,
 {
     // Put the input message into the diagram
-    ctx.add_output_into_target(ctx.diagram.start.clone(), scope.input.into());
+    ctx.add_output_into_target(start.clone(), scope.input.into());
 
     // Add the terminate operation
     ctx.construction.connect_into_target.insert(
-        NextOperationRef::Builtin {
+        OperationRef::Builtin {
             builtin: BuiltinTarget::Terminate,
         },
         standard_input_connection(scope.terminate.into(), &ctx.registry)?,
@@ -632,7 +702,7 @@ where
 
     // Add the dispose operation
     ctx.construction.connect_into_target.insert(
-        NextOperationRef::Builtin {
+        OperationRef::Builtin {
             builtin: BuiltinTarget::Dispose,
         },
         Box::new(ConnectionCallback(move |_, _, _| {
@@ -643,7 +713,7 @@ where
 
     // Add the cancel operation
     ctx.construction.connect_into_target.insert(
-        NextOperationRef::Builtin {
+        OperationRef::Builtin {
             builtin: BuiltinTarget::Cancel,
         },
         Box::new(ConnectToCancel::new(builder)?),

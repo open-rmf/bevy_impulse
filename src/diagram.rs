@@ -30,6 +30,7 @@ mod type_info;
 mod unzip_schema;
 mod workflow_builder;
 
+use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
 use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
@@ -46,7 +47,7 @@ use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
 use workflow_builder::{
-    create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext,
+    create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext, OperationRef,
 };
 
 // ----------
@@ -82,12 +83,12 @@ pub enum NextOperation {
     Namespace(NamespacedOperation),
 }
 
-impl<'a> Display for NextOperation {
+impl Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Name(operation_id) => f.write_str(operation_id),
-            Self::Namespace(NamespacedOperation { namespace, operation }) => write!(f, "{}:{}", namespace, operation),
-            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+            Self::Namespace(NamespacedOperation { namespace, operation }) => write!(f, "{namespace}:{operation}"),
+            Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
         }
     }
 }
@@ -815,11 +816,11 @@ pub enum DiagramOperation {
 }
 
 impl BuildDiagramOperation for DiagramOperation {
-    fn build_diagram_operation(
+    fn build_diagram_operation<'a>(
         &self,
-        id: &OperationName,
+        id: &OperationRef<'a>,
         builder: &mut Builder,
-        ctx: &mut DiagramContext,
+        ctx: &mut DiagramContext<'a>,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match self {
             Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
@@ -871,7 +872,7 @@ where
     o.to_string().serialize(ser)
 }
 
-#[derive(JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Diagram {
     /// Version of the diagram, should always be `0.1.0`.
@@ -883,7 +884,7 @@ pub struct Diagram {
     version: semver::Version,
 
     #[serde(default)]
-    pub templates: HashMap<OperationName, SectionTemplate>,
+    pub templates: Templates,
 
     /// Indicates where the workflow should start running.
     pub start: NextOperation,
@@ -899,7 +900,7 @@ pub struct Diagram {
     pub on_implicit_error: Option<NextOperation>,
 
     /// Operations that define the workflow
-    pub ops: HashMap<OperationName, DiagramOperation>,
+    pub ops: Operations,
 }
 
 impl Diagram {
@@ -1048,23 +1049,47 @@ impl Diagram {
         serde_json::from_reader(r)
     }
 
-    fn get_op(&self, op_id: &OperationName) -> Result<&DiagramOperation, DiagramErrorCode> {
-        self.ops
-            .get(op_id)
+
+    pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
+        self.ops.validate_operation_names()?;
+        self.templates.validate_operation_names()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
+#[serde(transparent, rename_all = "snake_case")]
+pub struct Operations(HashMap<OperationName, DiagramOperation>);
+
+impl Operations {
+    /// Get an operation from this map, or a diagram error code if the operation
+    /// is not available.
+    pub fn get_op(&self, op_id: &OperationName) -> Result<&DiagramOperation, DiagramErrorCode> {
+        self.get(op_id)
             .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
     }
 
-    fn get_template<'b>(&'b self, template_id: &'b OperationName) -> Result<&'b SectionTemplate, DiagramErrorCode> {
-        self.templates
-            .get(template_id)
+    pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
+        validate_operation_names(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
+pub struct Templates(HashMap<OperationName, SectionTemplate>);
+
+impl Templates {
+    /// Get a template from this map, or a diagram error code if the template is
+    /// not available.
+    pub fn get_template(&self, template_id: &OperationName) -> Result<&SectionTemplate, DiagramErrorCode> {
+        self.get(template_id)
             .ok_or_else(|| DiagramErrorCode::TemplateNotFound(template_id.clone()))
     }
 
     pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
-        validate_operation_names(&self.ops)?;
-        for (name, template) in &self.templates {
+        for (name, template) in &self.0 {
             validate_operation_name(name)?;
             validate_operation_names(&template.ops)?;
+            // TODO(@mxgrey): Validate correctness of input, output, and buffer mapping
         }
 
         Ok(())
@@ -1099,7 +1124,7 @@ pub struct DiagramError {
 }
 
 impl DiagramError {
-    pub fn in_operation(op_id: OperationName, code: DiagramErrorCode) -> Self {
+    pub fn in_operation(op_id: OperationRef<'static>, code: DiagramErrorCode) -> Self {
         Self {
             context: DiagramErrorContext { op_id: Some(op_id) },
             code,
@@ -1109,7 +1134,7 @@ impl DiagramError {
 
 #[derive(Debug)]
 pub struct DiagramErrorContext {
-    op_id: Option<OperationName>,
+    op_id: Option<OperationRef<'static>>,
 }
 
 impl Display for DiagramErrorContext {
@@ -1139,10 +1164,10 @@ pub enum DiagramErrorCode {
     },
 
     #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
-    MultipleInputsCreated(NextOperation),
+    MultipleInputsCreated(OperationRef<'static>),
 
     #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
-    MultipleBuffersCreated(NextOperation),
+    MultipleBuffersCreated(OperationRef<'static>),
 
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
@@ -1184,7 +1209,7 @@ pub enum DiagramErrorCode {
     UnknownTarget,
 
     #[error("There was an attempt to access an unknown operation: [{0}]")]
-    UnknownOperation(NextOperation),
+    UnknownOperation(OperationRef<'static>),
 
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
@@ -1222,7 +1247,7 @@ pub enum DiagramErrorCode {
     #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
     BuildHalted {
         /// Reasons that operations were unable to make progress building
-        reasons: HashMap<OperationName, Cow<'static, str>>,
+        reasons: HashMap<OperationRef<'static>, Cow<'static, str>>,
     },
 
     #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
