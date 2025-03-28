@@ -45,7 +45,9 @@ use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
-use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
+use workflow_builder::{
+    create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext,
+};
 
 // ----------
 
@@ -61,6 +63,7 @@ use schemars::{
 };
 use serde::{Deserialize, Serialize, Serializer, Deserializer, ser::SerializeMap, de::{Visitor, Error}};
 
+const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
 const RESERVED_OPERATION_NAMES: [&'static str; 2] = ["", "builtin"];
 
@@ -179,9 +182,9 @@ impl JsonSchema for NamespacedOperation {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub enum BufferInputs {
-    Single(OperationName),
-    Dict(HashMap<String, OperationName>),
-    Array(Vec<OperationName>),
+    Single(NextOperation),
+    Dict(HashMap<String, NextOperation>),
+    Array(Vec<NextOperation>),
 }
 
 impl BufferInputs {
@@ -880,10 +883,10 @@ pub struct Diagram {
     version: semver::Version,
 
     #[serde(default)]
-    templates: HashMap<OperationName, SectionTemplate>,
+    pub templates: HashMap<OperationName, SectionTemplate>,
 
     /// Indicates where the workflow should start running.
-    start: NextOperation,
+    pub start: NextOperation,
 
     /// To simplify diagram definitions, the diagram workflow builder will
     /// sometimes insert implicit operations into the workflow, such as implicit
@@ -893,13 +896,24 @@ pub struct Diagram {
     /// If left unspecified, an implicit error will cause the entire workflow to
     /// be cancelled.
     #[serde(default)]
-    on_implicit_error: Option<NextOperation>,
+    pub on_implicit_error: Option<NextOperation>,
 
     /// Operations that define the workflow
-    ops: HashMap<OperationName, DiagramOperation>,
+    pub ops: HashMap<OperationName, DiagramOperation>,
 }
 
 impl Diagram {
+    /// Begin creating a new diagram
+    pub fn new(start: NextOperation) -> Self {
+        Self {
+            version: semver::Version::parse(CURRENT_DIAGRAM_VERSION).unwrap(),
+            start,
+            templates: Default::default(),
+            on_implicit_error: Default::default(),
+            ops: Default::default(),
+        }
+    }
+
     /// Spawns a workflow from this diagram.
     ///
     /// # Examples
@@ -1125,10 +1139,10 @@ pub enum DiagramErrorCode {
     },
 
     #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
-    MultipleInputsCreated(OperationName),
+    MultipleInputsCreated(NextOperation),
 
     #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
-    MultipleBuffersCreated(OperationName),
+    MultipleBuffersCreated(NextOperation),
 
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
@@ -1166,7 +1180,7 @@ pub enum DiagramErrorCode {
     #[error("Empty join is not allowed.")]
     EmptyJoin,
 
-    #[error("Target type cannot be determined from [next] and [target_node] is not provided.")]
+    #[error("Target type cannot be determined from [next] and [target_node] is not provided or cannot be inferred from.")]
     UnknownTarget,
 
     #[error("There was an attempt to access an unknown operation: [{0}]")]

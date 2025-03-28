@@ -1,15 +1,18 @@
-use std::collections::HashMap;
+use std::{
+    borrow::Cow,
+    collections::HashMap
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnyBuffer, Buffer, Builder, InputSlot, Output};
+use crate::{AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output};
 
 use super::{
     type_info::TypeInfo, BuilderId,
     DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
     NextOperation, OperationName, BuildDiagramOperation, DiagramContext,
-    BuildStatus,
+    BuildStatus, NamespacedOperation,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -38,7 +41,50 @@ impl BuildDiagramOperation for SectionSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        panic!("Not yet implemented")
+        match &self.provider {
+            SectionProvider::Builder(section_builder) => {
+                let section = ctx
+                    .registry
+                    .get_section_registration(section_builder)?
+                    .create_section(builder, self.config.clone())?
+                    .into_slots();
+
+                for (op, input) in section.inputs {
+                    ctx.set_input_for_target(
+                        NextOperation::Namespace(NamespacedOperation {
+                            namespace: id.clone(),
+                            operation: op.clone(),
+                        }),
+                        input
+                    )?;
+                }
+
+                for (target, output) in section.outputs {
+                    if let Some(target) = self.connect.get(&target) {
+                        ctx.add_output_into_target(target.clone(), output);
+                    }
+                }
+
+                for (op, buffer) in section.buffers {
+                    ctx.set_buffer_for_operation(
+                        NextOperation::Namespace(NamespacedOperation {
+                            namespace: id.clone(),
+                            operation: op.clone()
+                        }),
+                        buffer,
+                    )?;
+                }
+            }
+            SectionProvider::Template(section_template) => {
+                let section = ctx
+                    .diagram
+                    .get_template(section_template)?;
+
+
+            }
+        }
+
+        Ok(BuildStatus::Finished)
     }
 }
 
@@ -145,8 +191,38 @@ where
         metadata.buffers.insert(
             key.to_string(),
             SectionBuffer {
-                item_type: TypeInfo::of::<T>(),
+                item_type: Some(TypeInfo::of::<T>()),
             },
+        );
+    }
+
+    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
+        slots.buffers.insert(key, self.into());
+    }
+}
+
+impl SectionItem for AnyBuffer {
+    type MessageType = AnyMessageBox;
+
+    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+        metadata.buffers.insert(
+            key.to_string(),
+            SectionBuffer { item_type: None },
+        );
+    }
+
+    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
+        slots.buffers.insert(key, self);
+    }
+}
+
+impl SectionItem for JsonBuffer {
+    type MessageType = JsonMessage;
+
+    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+        metadata.buffers.insert(
+            key.to_string(),
+            SectionBuffer { item_type: None },
         );
     }
 
@@ -167,11 +243,11 @@ pub struct SectionOutput {
 
 #[derive(Serialize, Clone)]
 pub struct SectionBuffer {
-    pub(super) item_type: TypeInfo,
+    pub(super) item_type: Option<TypeInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub(super) struct SectionTemplate {
+pub struct SectionTemplate {
     /// These are the inputs that the section is exposing for its sibling
     /// operations to send outputs into.
     #[serde(default)]
@@ -257,7 +333,7 @@ mod tests {
         assert_eq!(metadata.outputs.len(), 1);
         assert_eq!(metadata.outputs["bar"].message_type, TypeInfo::of::<f64>());
         assert_eq!(metadata.buffers.len(), 1);
-        assert_eq!(metadata.buffers["baz"].item_type, TypeInfo::of::<String>());
+        assert_eq!(metadata.buffers["baz"].item_type, Some(TypeInfo::of::<String>()));
     }
 
     struct OpaqueMessage;

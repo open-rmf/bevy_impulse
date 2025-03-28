@@ -35,16 +35,16 @@ use super::{
 // DiagramConstruction and then borrow all the names used in this struct instead
 // of using Cow.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-enum NextOperationRef<'a> {
+pub enum NextOperationRef<'a> {
     Name(Cow<'a, str>),
     Builtin { builtin: BuiltinTarget },
     Namespace(NamespacedOperationRef<'a>),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct NamespacedOperationRef<'a> {
-    namespace: Cow<'a, str>,
-    operation: Cow<'a, str>,
+pub struct NamespacedOperationRef<'a> {
+    pub namespace: Cow<'a, str>,
+    pub operation: Cow<'a, str>,
 }
 
 impl<'a> From<NextOperation> for NextOperationRef<'a> {
@@ -77,13 +77,34 @@ impl<'a> From<NextOperationRef<'a>> for NextOperation {
     }
 }
 
+impl<'a> From<&'a NextOperation> for NextOperationRef<'a> {
+    fn from(value: &'a NextOperation) -> Self {
+        match value {
+            NextOperation::Name(name) => NextOperationRef::Name(Cow::Borrowed(name)),
+            NextOperation::Builtin { builtin } => NextOperationRef::Builtin { builtin: builtin.clone() },
+            NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
+                NextOperationRef::Namespace(NamespacedOperationRef {
+                    namespace: Cow::Borrowed(namespace),
+                    operation: Cow::Borrowed(operation),
+                })
+            }
+        }
+    }
+}
+
+impl From<&OperationName> for NextOperationRef<'static> {
+    fn from(value: &OperationName) -> Self {
+        NextOperationRef::Name(Cow::Owned(value.clone()))
+    }
+}
+
 #[derive(Default)]
 struct DiagramConstruction {
     connect_into_target: HashMap<NextOperationRef<'static>, Box<dyn ConnectIntoTarget>>,
     // We use a separate hashmap for OperationId vs BuiltinTarget so we can
     // efficiently fetch with an &OperationId
     outputs_into_target: HashMap<NextOperationRef<'static>, Vec<DynOutput>>,
-    buffers: HashMap<OperationName, AnyBuffer>,
+    buffers: HashMap<NextOperationRef<'static>, AnyBuffer>,
 }
 
 impl DiagramConstruction {
@@ -161,16 +182,16 @@ impl<'a> DiagramContext<'a> {
     /// all connection behaviors must already be set by then.
     pub fn set_input_for_target(
         &mut self,
-        operation: &OperationName,
+        operation: impl Into<NextOperationRef<'static>> + Clone,
         input: DynInputSlot,
     ) -> Result<(), DiagramErrorCode> {
         match self
             .construction
             .connect_into_target
-            .entry(NextOperationRef::Name(Cow::Owned(operation.clone())))
+            .entry(operation.clone().into())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into().into()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(standard_input_connection(input, &self.registry)?);
@@ -194,17 +215,17 @@ impl<'a> DiagramContext<'a> {
     /// phase because all connection behaviors should already be set by then.
     pub fn set_connect_into_target<C: ConnectIntoTarget + 'static>(
         &mut self,
-        operation: &OperationName,
+        operation: impl Into<NextOperationRef<'static>> + Clone,
         connect: C,
     ) -> Result<(), DiagramErrorCode> {
         let connect = Box::new(connect);
         match self
             .construction
             .connect_into_target
-            .entry(NextOperationRef::Name(Cow::Owned(operation.clone())))
+            .entry(operation.clone().into())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleInputsCreated(operation.clone()));
+                return Err(DiagramErrorCode::MultipleInputsCreated(operation.into().into()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(connect);
@@ -233,12 +254,12 @@ impl<'a> DiagramContext<'a> {
     /// also set its connection callback.
     pub fn set_buffer_for_operation(
         &mut self,
-        operation: &OperationName,
+        operation: impl Into<NextOperationRef<'static>> + Clone,
         buffer: AnyBuffer,
     ) -> Result<(), DiagramErrorCode> {
-        match self.construction.buffers.entry(operation.clone()) {
+        match self.construction.buffers.entry(operation.clone().into()) {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.clone()));
+                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.into().into()));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(buffer);
@@ -253,12 +274,13 @@ impl<'a> DiagramContext<'a> {
     /// of the buffers in BufferInputs is not available, get an error including
     /// the name of the missing buffer.
     pub fn create_buffer_map(&self, inputs: &BufferInputs) -> Result<BufferMap, String> {
-        let attempt_get_buffer = |name: &String| -> Result<AnyBuffer, String> {
+        let attempt_get_buffer = |buffer: &NextOperation| -> Result<AnyBuffer, String> {
+            let buffer_ref: NextOperationRef = buffer.into();
             self.construction
                 .buffers
-                .get(name)
+                .get(&buffer_ref)
                 .copied()
-                .ok_or_else(|| format!("cannot find buffer named [{name}]"))
+                .ok_or_else(|| format!("cannot find buffer named [{buffer}]"))
         };
 
         match inputs {
@@ -306,7 +328,22 @@ impl<'a> DiagramContext<'a> {
             match next {
                 NextOperation::Name(op_id) => self.diagram.get_op(op_id)?,
                 NextOperation::Namespace(NamespacedOperation { namespace, operation }) => {
-                    panic!("Not yet implemented")
+                    let section = &self
+                        .registry
+                        .get_section_registration(namespace)?
+                        .metadata;
+
+                    if let Some(input) = section.inputs.get(operation) {
+                        return Ok(input.message_type);
+                    }
+
+                    if let Some(buffer) = section.buffers.get(operation) {
+                        if let Some(message_type) = buffer.item_type {
+                            return Ok(message_type);
+                        }
+                    }
+
+                    return Err(DiagramErrorCode::UnknownTarget);
                 }
                 NextOperation::Builtin { builtin } => match builtin {
                     BuiltinTarget::Terminate => return Ok(TypeInfo::of::<JsonMessage>()),
