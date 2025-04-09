@@ -43,7 +43,9 @@ impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
             .get_resource_or_insert_with(ImpulseLifecycleChannel::default)
             .sender
             .clone();
+
         self.sender.on_promise_drop(move || {
+            dbg!(source);
             lifecycle_sender.send(source).ok();
         });
 
