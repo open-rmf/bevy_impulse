@@ -60,7 +60,7 @@ impl BuildDiagramOperation for UnzipSchema {
 
         ctx.set_input_for_target(id, unzip.input)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
-            ctx.add_output_into_target(target.clone(), output);
+            ctx.add_output_into_target(target, output);
         }
         Ok(BuildStatus::Finished)
     }

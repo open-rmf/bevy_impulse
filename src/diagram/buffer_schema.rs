@@ -73,9 +73,6 @@ pub struct BufferAccessSchema {
 
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferInputs,
-
-    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationName>,
 }
 
 impl BuildDiagramOperation for BufferAccessSchema {
@@ -85,18 +82,21 @@ impl BuildDiagramOperation for BufferAccessSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next) else {
+            return Ok(BuildStatus::defer("waiting to find out target message type"));
+        };
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
         let node = ctx
             .registry
             .messages
             .with_buffer_access(&target_type, &buffer_map, builder)?;
         ctx.set_input_for_target(id, node.input)?;
-        ctx.add_output_into_target(self.next.clone(), node.output);
+        ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -124,7 +124,7 @@ pub struct ListenSchema {
     pub(super) buffers: BufferInputs,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationName>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl BuildDiagramOperation for ListenSchema {
@@ -134,17 +134,20 @@ impl BuildDiagramOperation for ListenSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next) else {
+            return Ok(BuildStatus::defer("waiting to find out target message type"));
+        };
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
         let output = ctx
             .registry
             .messages
             .listen(&target_type, &buffer_map, builder)?;
-        ctx.add_output_into_target(self.next.clone(), output);
+        ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }
 }

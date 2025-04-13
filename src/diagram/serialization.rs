@@ -264,6 +264,10 @@ impl ImplicitSerialization {
         self.try_implicit_serialize(incoming, builder, ctx)?
             .map_err(|incoming| DiagramErrorCode::NotSerializable(*incoming.message_info()))
     }
+
+    pub fn serialized_input_slot(&self) -> &DynInputSlot {
+        &self.serialized_input
+    }
 }
 
 pub struct ImplicitDeserialization {
@@ -334,6 +338,10 @@ impl ImplicitDeserialization {
             source_type: *incoming.message_info(),
             target_type: *self.deserialized_input.message_info(),
         })
+    }
+
+    pub fn deserialized_input_slot(&self) -> &DynInputSlot {
+        &self.deserialized_input
     }
 }
 

@@ -22,6 +22,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
+    sync::Arc,
 };
 
 use crate::{
@@ -221,7 +222,7 @@ where
 pub struct NodeRegistration {
     #[serde(rename = "$key$")]
     pub(super) id: BuilderId,
-    pub(super) name: String,
+    pub(super) name: Arc<str>,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
     pub(super) config_schema: Schema,
@@ -714,7 +715,7 @@ type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Sec
 
 #[derive(Serialize)]
 pub struct SectionRegistration {
-    pub(super) name: String,
+    pub(super) name: BuilderId,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
 
@@ -739,7 +740,7 @@ where
 {
     fn into_section_registration(
         self,
-        name: String,
+        name: BuilderId,
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration;
 }
@@ -752,7 +753,7 @@ where
 {
     fn into_section_registration(
         mut self,
-        name: String,
+        name: BuilderId,
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration {
         SectionRegistration {
@@ -1449,7 +1450,7 @@ impl DiagramElementRegistry {
         let k = id.borrow();
         self.nodes
             .get(k)
-            .ok_or(DiagramErrorCode::BuilderNotFound(k.to_string()))
+            .ok_or(DiagramErrorCode::BuilderNotFound(k.to_string().into()))
     }
 
     pub fn get_section_registration<Q>(
@@ -1461,7 +1462,7 @@ impl DiagramElementRegistry {
     {
         self.sections
             .get(id.borrow())
-            .ok_or_else(|| DiagramErrorCode::BuilderNotFound(id.borrow().to_string()))
+            .ok_or_else(|| DiagramErrorCode::BuilderNotFound(id.borrow().to_string().into()))
     }
 
     pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration>
@@ -1508,19 +1509,19 @@ impl DiagramElementRegistry {
 #[non_exhaustive]
 pub struct NodeBuilderOptions {
     pub id: BuilderId,
-    pub name: Option<String>,
+    pub name: Option<BuilderId>,
 }
 
 impl NodeBuilderOptions {
     pub fn new(id: impl ToString) -> Self {
         Self {
-            id: id.to_string(),
+            id: id.to_string().into(),
             name: None,
         }
     }
 
     pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string());
+        self.name = Some(name.to_string().into());
         self
     }
 }
@@ -1528,19 +1529,19 @@ impl NodeBuilderOptions {
 #[non_exhaustive]
 pub struct SectionBuilderOptions {
     pub id: BuilderId,
-    pub name: Option<String>,
+    pub name: Option<BuilderId>,
 }
 
 impl SectionBuilderOptions {
     pub fn new(id: impl ToString) -> Self {
         Self {
-            id: id.to_string(),
+            id: id.to_string().into(),
             name: None,
         }
     }
 
     pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string());
+        self.name = Some(name.to_string().into());
         self
     }
 }

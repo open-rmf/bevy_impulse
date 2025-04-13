@@ -1,6 +1,24 @@
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
+
 use std::{
     borrow::Cow,
-    collections::HashMap
+    collections::HashMap,
+     sync::Arc,
 };
 
 use schemars::JsonSchema;
@@ -12,7 +30,7 @@ use super::{
     type_info::TypeInfo, BuilderId,
     DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
     NextOperation, OperationName, BuildDiagramOperation, DiagramContext,
-    BuildStatus, NamespacedOperation,
+    BuildStatus, NamespacedOperation, Operations,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -21,7 +39,7 @@ pub use bevy_impulse_derive::Section;
 #[serde(rename_all = "snake_case")]
 pub enum SectionProvider {
     Builder(BuilderId),
-    Template(String),
+    Template(OperationName),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -31,7 +49,7 @@ pub struct SectionSchema {
     pub(super) provider: SectionProvider,
     #[serde(default)]
     pub(super) config: serde_json::Value,
-    pub(super) connect: HashMap<String, NextOperation>,
+    pub(super) connect: HashMap<Arc<str>, NextOperation>,
 }
 
 impl BuildDiagramOperation for SectionSchema {
@@ -51,7 +69,7 @@ impl BuildDiagramOperation for SectionSchema {
 
                 for (op, input) in section.inputs {
                     ctx.set_input_for_target(
-                        NextOperation::Namespace(NamespacedOperation {
+                        &NextOperation::Namespace(NamespacedOperation {
                             namespace: id.clone(),
                             operation: op.clone(),
                         }),
@@ -61,13 +79,13 @@ impl BuildDiagramOperation for SectionSchema {
 
                 for (target, output) in section.outputs {
                     if let Some(target) = self.connect.get(&target) {
-                        ctx.add_output_into_target(target.clone(), output);
+                        ctx.add_output_into_target(target, output);
                     }
                 }
 
                 for (op, buffer) in section.buffers {
                     ctx.set_buffer_for_operation(
-                        NextOperation::Namespace(NamespacedOperation {
+                        &NextOperation::Namespace(NamespacedOperation {
                             namespace: id.clone(),
                             operation: op.clone()
                         }),
@@ -90,9 +108,9 @@ impl BuildDiagramOperation for SectionSchema {
 
 #[derive(Serialize, Clone)]
 pub struct SectionMetadata {
-    pub(super) inputs: HashMap<String, SectionInput>,
-    pub(super) outputs: HashMap<String, SectionOutput>,
-    pub(super) buffers: HashMap<String, SectionBuffer>,
+    pub(super) inputs: HashMap<OperationName, SectionInput>,
+    pub(super) outputs: HashMap<OperationName, SectionOutput>,
+    pub(super) buffers: HashMap<OperationName, SectionBuffer>,
 }
 
 impl SectionMetadata {
@@ -110,9 +128,9 @@ pub trait SectionMetadataProvider {
 }
 
 pub struct SectionSlots {
-    inputs: HashMap<String, DynInputSlot>,
-    outputs: HashMap<String, DynOutput>,
-    buffers: HashMap<String, AnyBuffer>,
+    inputs: HashMap<Arc<str>, DynInputSlot>,
+    outputs: HashMap<Arc<str>, DynOutput>,
+    buffers: HashMap<Arc<str>, AnyBuffer>,
 }
 
 impl SectionSlots {
@@ -251,17 +269,17 @@ pub struct SectionTemplate {
     /// These are the inputs that the section is exposing for its sibling
     /// operations to send outputs into.
     #[serde(default)]
-    pub inputs: Vec<InputRemapping>,
+    pub inputs: InputRemapping,
     /// These are the outputs that the section is exposing so you can connect
     /// them into siblings of the section.
     #[serde(default)]
-    pub outputs: Vec<String>,
+    pub outputs: Vec<OperationName>,
     /// These are the buffers that the section is exposing for you to read,
     /// write, join, or listen to.
     #[serde(default)]
-    pub buffers: Vec<InputRemapping>,
+    pub buffers: InputRemapping,
     /// Operations that define the behavior of the section.
-    pub ops: HashMap<OperationName, DiagramOperation>,
+    pub ops: Operations,
 }
 
 /// This defines how sections remap their inner operations (inputs and buffers)
@@ -278,6 +296,31 @@ pub enum InputRemapping {
     /// This allows a section to expose inputs and buffers that are provided
     /// by inner sections.
     Remap(HashMap<OperationName, NextOperation>),
+}
+
+impl Default for InputRemapping {
+    fn default() -> Self {
+        Self::Forward(Vec::new())
+    }
+}
+
+impl InputRemapping {
+    pub fn get_inner(&self, op: &OperationName) -> Option<NextOperation> {
+        match self {
+            Self::Forward(forward) => {
+                if forward.contains(op) {
+                    return Some(NextOperation::Name(Arc::clone(op)));
+                }
+            }
+            Self::Remap(remap) => {
+                if let Some(next) = remap.get(op) {
+                    return Some(next.clone());
+                }
+            }
+        }
+
+        None
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

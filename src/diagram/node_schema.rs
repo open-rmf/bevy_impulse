@@ -45,7 +45,7 @@ impl BuildDiagramOperation for NodeSchema {
         let node = node_registration.create_node(builder, self.config.clone())?;
 
         ctx.set_input_for_target(id, node.input.into())?;
-        ctx.add_output_into_target(self.next.clone(), node.output);
+        ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)
     }
 }

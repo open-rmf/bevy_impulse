@@ -47,6 +47,10 @@ impl BuildDiagramOperation for ForkResultSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+            // TODO(@mxgrey): For each result type we can register a tuple of
+            // (T, E) for the Ok and Err types as a key so we could infer the
+            // operation type using the expected types for ok and err.
+
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
@@ -54,8 +58,8 @@ impl BuildDiagramOperation for ForkResultSchema {
 
         let fork = ctx.registry.messages.fork_result(&inferred_type, builder)?;
         ctx.set_input_for_target(id, fork.input)?;
-        ctx.add_output_into_target(self.ok.clone(), fork.ok);
-        ctx.add_output_into_target(self.err.clone(), fork.err);
+        ctx.add_output_into_target(&self.ok, fork.ok);
+        ctx.add_output_into_target(&self.err, fork.err);
         Ok(BuildStatus::Finished)
     }
 }

@@ -52,7 +52,13 @@ use workflow_builder::{
 
 // ----------
 
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fmt::Display,
+    io::Read,
+    sync::Arc,
+};
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
@@ -68,8 +74,8 @@ const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
 const RESERVED_OPERATION_NAMES: [&'static str; 2] = ["", "builtin"];
 
-pub type BuilderId = String;
-pub type OperationName = String;
+pub type BuilderId = Arc<str>;
+pub type OperationName = Arc<str>;
 
 #[derive(
     Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
@@ -816,11 +822,11 @@ pub enum DiagramOperation {
 }
 
 impl BuildDiagramOperation for DiagramOperation {
-    fn build_diagram_operation<'a>(
+    fn build_diagram_operation(
         &self,
-        id: &OperationRef<'a>,
+        id: &OperationName,
         builder: &mut Builder,
-        ctx: &mut DiagramContext<'a>,
+        ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match self {
             Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
@@ -1064,7 +1070,7 @@ pub struct Operations(HashMap<OperationName, DiagramOperation>);
 impl Operations {
     /// Get an operation from this map, or a diagram error code if the operation
     /// is not available.
-    pub fn get_op(&self, op_id: &OperationName) -> Result<&DiagramOperation, DiagramErrorCode> {
+    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&DiagramOperation, DiagramErrorCode> {
         self.get(op_id)
             .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
     }
@@ -1209,7 +1215,10 @@ pub enum DiagramErrorCode {
     UnknownTarget,
 
     #[error("There was an attempt to access an unknown operation: [{0}]")]
-    UnknownOperation(OperationRef<'static>),
+    UnknownOperation(OperationRef),
+
+    #[error("There was an attempt to use an operation in an invalid way: [{0}]")]
+    InvalidOperation(OperationRef),
 
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
@@ -1247,7 +1256,7 @@ pub enum DiagramErrorCode {
     #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
     BuildHalted {
         /// Reasons that operations were unable to make progress building
-        reasons: HashMap<OperationRef<'static>, Cow<'static, str>>,
+        reasons: HashMap<OperationRef, Cow<'static, str>>,
     },
 
     #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]

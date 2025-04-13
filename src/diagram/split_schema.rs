@@ -60,7 +60,7 @@ impl BuildDiagramOperation for SplitSchema {
         let split = ctx.registry.messages.split(&sample_input, self, builder)?;
         ctx.set_input_for_target(id, split.input)?;
         for (target, output) in split.outputs {
-            ctx.add_output_into_target(target, output);
+            ctx.add_output_into_target(&target, output);
         }
         Ok(BuildStatus::Finished)
     }

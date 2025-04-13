@@ -33,9 +33,6 @@ pub struct JoinSchema {
 
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferInputs,
-
-    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationName>,
 }
 
 impl BuildDiagramOperation for JoinSchema {
@@ -49,18 +46,20 @@ impl BuildDiagramOperation for JoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next) else {
+            return Ok(BuildStatus::defer("waiting to find out target message type"));
+        };
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
-
         let output = ctx
             .registry
             .messages
             .join(&target_type, &buffer_map, builder)?;
-        ctx.add_output_into_target(self.next.clone(), output);
+        ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -91,7 +90,7 @@ impl BuildDiagramOperation for SerializedJoinSchema {
         };
 
         let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
-        ctx.add_output_into_target(self.next.clone(), output.into());
+        ctx.add_output_into_target(&self.next, output.into());
 
         Ok(BuildStatus::Finished)
     }
