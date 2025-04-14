@@ -27,7 +27,7 @@ use super::{
     BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization, ImplicitSerialization,
     ImplicitStringify, NextOperation, OperationName, TypeInfo, NamespacedOperation,
-    Operations, Templates, SectionProvider,
+    Operations, Templates,
 };
 
 use smallvec::SmallVec;
@@ -54,10 +54,10 @@ impl OperationRef {
         }
     }
 
-    fn get_namespaces<'a>(&'a self) -> Cow<'a, NamespaceList> {
+    fn get_namespaces(&self) -> NamespaceList {
         match self {
-            Self::Named(named) => Cow::Borrowed(&named.namespaces),
-            Self::Builtin { .. } => Cow::Owned(SmallVec::new()),
+            Self::Named(named) => named.namespaces.clone(),
+            Self::Builtin { .. } => SmallVec::new(),
         }
     }
 }
@@ -75,6 +75,12 @@ impl<'a> From<&'a NextOperation> for OperationRef {
 impl<'a> From<&'a OperationName> for OperationRef {
     fn from(value: &'a OperationName) -> Self {
         OperationRef::Named(value.into())
+    }
+}
+
+impl From<NamedOperationRef> for OperationRef {
+    fn from(value: NamedOperationRef) -> Self {
+        OperationRef::Named(value)
     }
 }
 
@@ -175,7 +181,7 @@ impl std::fmt::Display for NamedOperationRef {
         }
 
         if let Some(exposed) = &self.exposed_namespace {
-            write!(f, "{exposed}:(exposed):");
+            write!(f, "{exposed}:(exposed):")?;
         }
 
         f.write_str(&self.name)
@@ -350,7 +356,7 @@ impl<'a> DiagramContext<'a> {
         let operation: OperationRef = operation.into();
         match self.construction.buffers.entry(operation.clone()) {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::MultipleBuffersCreated(operation.into().as_static()));
+                return Err(DiagramErrorCode::MultipleBuffersCreated(operation));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(buffer);
@@ -562,14 +568,14 @@ where
             operations: &diagram.ops,
             templates: &diagram.templates,
             on_implicit_error,
-            namespaces: Cow::Owned(Vec::new()),
+            namespaces: NamespaceList::new(),
         },
     )?;
 
-    let mut unfinished_operations: Vec<(OperationRef, &DiagramOperation)> = diagram
+    let mut unfinished_operations: Vec<UnfinishedOperation> = diagram
         .ops
         .iter()
-        .map(|(id, op)| (id.into(), op))
+        .map(|(id, op)| UnfinishedOperation::new(Arc::clone(id), op, &diagram.ops))
         .collect();
     let mut deferred_operations: Vec<DeferredOperation> = Vec::new();
 
@@ -579,26 +585,30 @@ where
     // Iteratively build all the operations in the diagram
     while !unfinished_operations.is_empty() {
         let mut made_progress = false;
-        for (id, op) in unfinished_operations.drain(..) {
+        for unfinished in unfinished_operations.drain(..) {
             let mut ctx = DiagramContext {
                 construction: &mut construction,
                 registry,
-                operations: &diagram.ops,
+                operations: &unfinished.sibling_ops,
                 templates: &diagram.templates,
                 on_implicit_error,
-                namespaces: id.get_namespaces(),
+                namespaces: unfinished.namespaces.clone(),
             };
 
             // Attempt to build this operation
-            let status = op
-                .build_diagram_operation(&id, builder, &mut ctx)
-                .map_err(|code| DiagramError::in_operation(id.as_static(), code))?;
+            let status = unfinished
+                .op
+                .build_diagram_operation(&unfinished.id, builder, &mut ctx)
+                .map_err(|code| DiagramError::in_operation(
+                    unfinished.as_operation_ref(),
+                    code,
+                ))?;
 
             made_progress |= status.made_progress();
             if !status.is_finished() {
                 // The operation did not finish, so pass it into the deferred
                 // operations list.
-                deferred_operations.push(DeferredOperation { id, op, status });
+                deferred_operations.push(DeferredOperation { unfinished, status });
             }
         }
 
@@ -606,7 +616,7 @@ where
             // Try another iteration if needed since we made progress last time
             unfinished_operations = deferred_operations
                 .drain(..)
-                .map(|deferred| (deferred.id, deferred.op))
+                .map(|deferred| deferred.unfinished)
                 .collect();
         } else {
             // No progress can be made any longer so return an error
@@ -617,7 +627,7 @@ where
                         deferred
                             .status
                             .into_deferral_reason()
-                            .map(|reason| (deferred.id.as_static(), reason))
+                            .map(|reason| (deferred.unfinished.as_operation_ref(), reason))
                     })
                     .collect(),
             }
@@ -668,9 +678,37 @@ where
     Ok(())
 }
 
+pub struct UnfinishedOperation<'a> {
+    /// Name of the operation within its scope
+    pub id: OperationName,
+    /// The namespaces that this operation takes place inside
+    pub namespaces: NamespaceList,
+    /// Description of the operation
+    pub op: &'a DiagramOperation,
+    /// The sibling operations of the one that is being built
+    pub sibling_ops: &'a Operations,
+}
+
+impl<'a> UnfinishedOperation<'a> {
+    pub fn new(
+        id: OperationName,
+        op: &'a DiagramOperation,
+        sibling_ops: &'a Operations,
+    ) -> Self {
+        Self { id, op, sibling_ops, namespaces: Default::default() }
+    }
+
+    pub fn as_operation_ref(&self) -> OperationRef {
+        NamedOperationRef {
+            namespaces: self.namespaces.clone(),
+            exposed_namespace: None,
+            name: self.id.clone(),
+        }.into()
+    }
+}
+
 struct DeferredOperation<'a> {
-    id: OperationRef,
-    op: &'a DiagramOperation,
+    unfinished: UnfinishedOperation<'a>,
     status: BuildStatus,
 }
 
@@ -686,7 +724,7 @@ where
     Streams: StreamPack,
 {
     // Put the input message into the diagram
-    ctx.add_output_into_target(start.clone(), scope.input.into());
+    ctx.add_output_into_target(&start, scope.input.into());
 
     // Add the terminate operation
     ctx.construction.connect_into_target.insert(
@@ -720,9 +758,9 @@ struct ConnectToDispose;
 impl ConnectIntoTarget for ConnectToDispose {
     fn connect_into_target(
         &mut self,
-        output: DynOutput,
-        builder: &mut Builder,
-        ctx: &mut DiagramContext,
+        _output: DynOutput,
+        _builder: &mut Builder,
+        _ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         Ok(())
     }

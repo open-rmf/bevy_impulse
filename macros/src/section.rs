@@ -50,7 +50,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
             ) -> SectionSlots {
                 let mut slots = SectionSlots::new();
                 #(
-                    self.#field_ident.insert_into_slots(#field_name_str.to_string(), &mut slots);
+                    self.#field_ident.insert_into_slots(&#field_name_str, &mut slots);
                 )*
                 slots
             }
@@ -85,7 +85,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
                     #(
                         <#field_type as ::bevy_impulse::SectionItem>::build_metadata(
                             &mut metadata,
-                            #field_name_str,
+                            &#field_name_str,
                         );
                     )*
                     metadata

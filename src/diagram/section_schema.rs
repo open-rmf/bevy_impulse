@@ -16,7 +16,6 @@
 */
 
 use std::{
-    borrow::Cow,
     collections::HashMap,
      sync::Arc,
 };
@@ -28,7 +27,7 @@ use crate::{AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, Js
 
 use super::{
     type_info::TypeInfo, BuilderId,
-    DiagramElementRegistry, DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput,
+    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput,
     NextOperation, OperationName, BuildDiagramOperation, DiagramContext,
     BuildStatus, NamespacedOperation, Operations,
 };
@@ -75,6 +74,12 @@ impl BuildDiagramOperation for SectionSchema {
                         }),
                         input
                     )?;
+                }
+
+                for expected_output in self.connect.keys() {
+                    if !section.outputs.contains_key(expected_output) {
+                        return Err(SectionError::UnknownOutput(Arc::clone(expected_output)).into());
+                    }
                 }
 
                 for (target, output) in section.outputs {
@@ -128,9 +133,9 @@ pub trait SectionMetadataProvider {
 }
 
 pub struct SectionSlots {
-    inputs: HashMap<Arc<str>, DynInputSlot>,
-    outputs: HashMap<Arc<str>, DynOutput>,
-    buffers: HashMap<Arc<str>, AnyBuffer>,
+    inputs: HashMap<OperationName, DynInputSlot>,
+    outputs: HashMap<OperationName, DynOutput>,
+    buffers: HashMap<OperationName, AnyBuffer>,
 }
 
 impl SectionSlots {
@@ -154,9 +159,9 @@ pub trait Section {
 pub trait SectionItem {
     type MessageType;
 
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str);
+    fn build_metadata(metadata: &mut SectionMetadata, key: &str);
 
-    fn insert_into_slots(self, key: String, slots: &mut SectionSlots);
+    fn insert_into_slots(self, key: &str, slots: &mut SectionSlots);
 }
 
 impl<T> SectionItem for InputSlot<T>
@@ -165,17 +170,17 @@ where
 {
     type MessageType = T;
 
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+    fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
         metadata.inputs.insert(
-            key.to_string(),
+            key.into(),
             SectionInput {
                 message_type: TypeInfo::of::<T>(),
             },
         );
     }
 
-    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
-        slots.inputs.insert(key, self.into());
+    fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
+        slots.inputs.insert(key.into(), self.into());
     }
 }
 
@@ -185,17 +190,17 @@ where
 {
     type MessageType = T;
 
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+    fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
         metadata.outputs.insert(
-            key.to_string(),
+            key.into(),
             SectionOutput {
                 message_type: TypeInfo::of::<T>(),
             },
         );
     }
 
-    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
-        slots.outputs.insert(key, self.into());
+    fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
+        slots.outputs.insert(key.into(), self.into());
     }
 }
 
@@ -205,47 +210,47 @@ where
 {
     type MessageType = T;
 
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+    fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
         metadata.buffers.insert(
-            key.to_string(),
+            key.into(),
             SectionBuffer {
                 item_type: Some(TypeInfo::of::<T>()),
             },
         );
     }
 
-    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
-        slots.buffers.insert(key, self.into());
+    fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
+        slots.buffers.insert(key.into(), self.into());
     }
 }
 
 impl SectionItem for AnyBuffer {
     type MessageType = AnyMessageBox;
 
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+    fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
         metadata.buffers.insert(
-            key.to_string(),
+            key.into(),
             SectionBuffer { item_type: None },
         );
     }
 
-    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
-        slots.buffers.insert(key, self);
+    fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
+        slots.buffers.insert(key.into(), self);
     }
 }
 
 impl SectionItem for JsonBuffer {
     type MessageType = JsonMessage;
 
-    fn build_metadata(metadata: &mut SectionMetadata, key: &'static str) {
+    fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
         metadata.buffers.insert(
-            key.to_string(),
+            key.into(),
             SectionBuffer { item_type: None },
         );
     }
 
-    fn insert_into_slots(self, key: String, slots: &mut SectionSlots) {
-        slots.buffers.insert(key, self.into());
+    fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
+        slots.buffers.insert(key.into(), self.into());
     }
 }
 
@@ -285,6 +290,7 @@ pub struct SectionTemplate {
 /// This defines how sections remap their inner operations (inputs and buffers)
 /// to expose them to operations that are siblings to the section.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged, rename_all = "snake_case")]
 pub enum InputRemapping {
     /// Do a simple 1:1 forwarding of the names listed in the array
     Forward(Vec<OperationName>),
@@ -325,11 +331,8 @@ impl InputRemapping {
 
 #[derive(thiserror::Error, Debug)]
 pub enum SectionError {
-    #[error("section does not have output [{0}]")]
-    MissingOutput(String),
-
     #[error("operation has extra output [{0}] that is not in the section")]
-    ExtraOutput(String),
+    UnknownOutput(OperationName),
 }
 
 #[cfg(test)]
@@ -369,7 +372,7 @@ mod tests {
         );
 
         let reg = registry.get_section_registration("test_section").unwrap();
-        assert_eq!(reg.name, "TestSection");
+        assert_eq!(reg.name.as_ref(), "TestSection");
         let metadata = &reg.metadata;
         assert_eq!(metadata.inputs.len(), 1);
         assert_eq!(metadata.inputs["foo"].message_type, TypeInfo::of::<i64>());
@@ -589,37 +592,6 @@ mod tests {
     }
 
     #[test]
-    fn test_section_workflow_missing_output() {
-        let mut registry = DiagramElementRegistry::new();
-        register_add_one(&mut registry);
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": { "add_one": "test_input" },
-            "ops": {
-                "add_one": {
-                    "type": "section",
-                    "builder": "add_one",
-                    "connect": {},
-                },
-            },
-        }))
-        .unwrap();
-
-        let mut context = TestingContext::minimal_plugins();
-        let err = context
-            .app
-            .world
-            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))
-            .unwrap_err();
-        let section_err = match err.code {
-            DiagramErrorCode::SectionError(section_err) => section_err,
-            _ => panic!("expected SectionError"),
-        };
-        assert!(matches!(section_err, SectionError::MissingOutput(_)));
-    }
-
-    #[test]
     fn test_section_workflow_extra_output() {
         let mut registry = DiagramElementRegistry::new();
         register_add_one(&mut registry);
@@ -650,36 +622,7 @@ mod tests {
             DiagramErrorCode::SectionError(section_err) => section_err,
             _ => panic!("expected SectionError"),
         };
-        assert!(matches!(section_err, SectionError::ExtraOutput(_)));
-    }
-
-    #[test]
-    fn test_section_workflow_missing_input() {
-        let mut registry = DiagramElementRegistry::new();
-        register_add_one(&mut registry);
-
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": { "builtin": "terminate" },
-            "ops": {
-                "add_one": {
-                    "type": "section",
-                    "builder": "add_one",
-                    "connect": {
-                        "test_output": { "builtin": "terminate" },
-                    },
-                },
-            },
-        }))
-        .unwrap();
-
-        let mut context = TestingContext::minimal_plugins();
-        let err = context
-            .app
-            .world
-            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))
-            .unwrap_err();
-        assert!(matches!(err.code, DiagramErrorCode::OnlySingleInput));
+        assert!(matches!(section_err, SectionError::UnknownOutput(_)));
     }
 
     #[test]
@@ -720,7 +663,7 @@ mod tests {
             .world
             .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &fixture.registry))
             .unwrap_err();
-        assert!(matches!(err.code, DiagramErrorCode::OperationNotFound(_)));
+        assert!(matches!(err.code, DiagramErrorCode::UnknownOperation(_)));
     }
 
     #[derive(Section)]
@@ -775,7 +718,7 @@ mod tests {
                 },
                 "listen": {
                     "type": "listen",
-                    "buffers": ["add_one_to_buffer/test_buffer"],
+                    "buffers": [{"add_one_to_buffer" : "test_buffer"}],
                     "next": "buffer_length",
                 },
                 "buffer_length": {

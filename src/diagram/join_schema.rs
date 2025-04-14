@@ -109,7 +109,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry, DiagramError,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry,
         DiagramErrorCode, NodeBuilderOptions,
     };
 
@@ -284,8 +284,8 @@ mod tests {
     }
 
     #[test]
-    /// when `target_node` is not given and next is not a node
-    fn test_join_infer_type_fail() {
+    /// join should be able to infer its output type when connected to terminate
+    fn test_join_infer_from_terminate() {
         let mut fixture = DiagramTestFixture::new();
         register_join_nodes(&mut fixture.registry);
 
@@ -331,10 +331,14 @@ mod tests {
 
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap_err();
-        assert!(fixture.context.no_unhandled_errors());
-        let err_code = &result.downcast_ref::<DiagramError>().unwrap().code;
-        assert!(matches!(err_code, DiagramErrorCode::UnknownTarget,));
+            .unwrap();
+        let expectation = serde_json::Value::Object(
+            serde_json::Map::from_iter([
+                ("bar".to_string(), serde_json::Value::String("bar".to_string())),
+                ("foo".to_string(), serde_json::Value::String("foo".to_string())),
+            ])
+        );
+        assert_eq!(result, expectation);
     }
 
     #[test]

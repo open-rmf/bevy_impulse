@@ -21,7 +21,7 @@ mod fork_result_schema;
 mod join_schema;
 mod node_schema;
 mod registration;
-mod section;
+mod section_schema;
 mod serialization;
 mod split_schema;
 mod supported;
@@ -39,7 +39,7 @@ pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
 pub use registration::*;
-pub use section::*;
+pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
 use tracing::debug;
@@ -1130,9 +1130,9 @@ pub struct DiagramError {
 }
 
 impl DiagramError {
-    pub fn in_operation(op_id: OperationRef<'static>, code: DiagramErrorCode) -> Self {
+    pub fn in_operation(op_id: impl Into<OperationRef>, code: DiagramErrorCode) -> Self {
         Self {
-            context: DiagramErrorContext { op_id: Some(op_id) },
+            context: DiagramErrorContext { op_id: Some(op_id.into()) },
             code,
         }
     }
@@ -1140,7 +1140,7 @@ impl DiagramError {
 
 #[derive(Debug)]
 pub struct DiagramErrorContext {
-    op_id: Option<OperationRef<'static>>,
+    op_id: Option<OperationRef>,
 }
 
 impl Display for DiagramErrorContext {
@@ -1170,10 +1170,10 @@ pub enum DiagramErrorCode {
     },
 
     #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
-    MultipleInputsCreated(OperationRef<'static>),
+    MultipleInputsCreated(OperationRef),
 
     #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
-    MultipleBuffersCreated(OperationRef<'static>),
+    MultipleBuffersCreated(OperationRef),
 
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
@@ -1214,7 +1214,7 @@ pub enum DiagramErrorCode {
     #[error("Target type cannot be determined from [next] and [target_node] is not provided or cannot be inferred from.")]
     UnknownTarget,
 
-    #[error("There was an attempt to access an unknown operation: [{0}]")]
+    #[error("There was an attempt to connect to an unknown operation: [{0}]")]
     UnknownOperation(OperationRef),
 
     #[error("There was an attempt to use an operation in an invalid way: [{0}]")]
@@ -1240,9 +1240,6 @@ pub enum DiagramErrorCode {
 
     #[error("one or more operation is missing inputs")]
     IncompleteDiagram,
-
-    #[error("operation type only accept single input")]
-    OnlySingleInput,
 
     #[error(transparent)]
     JsonError(#[from] serde_json::Error),
