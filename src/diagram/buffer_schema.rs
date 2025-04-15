@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    type_info::TypeInfo, BufferInputs, BuildDiagramOperation, BuildStatus, DiagramContext,
+    type_info::TypeInfo, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, NextOperation, OperationName,
 };
 
@@ -72,7 +72,7 @@ pub struct BufferAccessSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 }
 
 impl BuildDiagramOperation for BufferAccessSchema {
@@ -121,7 +121,7 @@ pub struct ListenSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
     pub(super) target_node: Option<NextOperation>,

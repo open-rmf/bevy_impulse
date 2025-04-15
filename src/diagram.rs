@@ -194,13 +194,13 @@ impl JsonSchema for NamespacedOperation {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
-pub enum BufferInputs {
+pub enum BufferSelection {
     Single(NextOperation),
     Dict(HashMap<String, NextOperation>),
     Array(Vec<NextOperation>),
 }
 
-impl BufferInputs {
+impl BufferSelection {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Single(_) => false,
@@ -1087,6 +1087,7 @@ impl Operations {
 }
 
 #[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
+#[serde(transparent, rename_all = "snake_case")]
 pub struct Templates(HashMap<OperationName, SectionTemplate>);
 
 impl Templates {

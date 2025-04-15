@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 use crate::{Builder, JsonMessage};
 
 use super::{
-    BufferInputs, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     NextOperation, OperationName,
 };
 
@@ -32,7 +32,7 @@ pub struct JoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 }
 
 impl BuildDiagramOperation for JoinSchema {
@@ -70,7 +70,7 @@ pub struct SerializedJoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 }
 
 impl BuildDiagramOperation for SerializedJoinSchema {

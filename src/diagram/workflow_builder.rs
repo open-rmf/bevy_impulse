@@ -24,7 +24,7 @@ use std::{
 use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope, StreamPack};
 
 use super::{
-    BufferInputs, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
+    BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
     DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization, ImplicitSerialization,
     ImplicitStringify, NextOperation, OperationName, TypeInfo, NamespacedOperation,
     Operations, Templates,
@@ -391,7 +391,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     /// Create a buffer map based on the buffer inputs provided. If one or more
     /// of the buffers in BufferInputs is not available, get an error including
     /// the name of the missing buffer.
-    pub fn create_buffer_map(&self, inputs: &BufferInputs) -> Result<BufferMap, String> {
+    pub fn create_buffer_map(&self, inputs: &BufferSelection) -> Result<BufferMap, String> {
         let attempt_get_buffer = |buffer: &NextOperation| -> Result<AnyBuffer, String> {
             let mut buffer_ref: OperationRef = buffer.into();
             let mut visited = HashSet::new();
@@ -414,12 +414,12 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         };
 
         match inputs {
-            BufferInputs::Single(op_id) => {
+            BufferSelection::Single(op_id) => {
                 let mut buffer_map = BufferMap::with_capacity(1);
                 buffer_map.insert(BufferIdentifier::Index(0), attempt_get_buffer(op_id)?);
                 Ok(buffer_map)
             }
-            BufferInputs::Dict(mapping) => {
+            BufferSelection::Dict(mapping) => {
                 let mut buffer_map = BufferMap::with_capacity(mapping.len());
                 for (k, op_id) in mapping {
                     buffer_map.insert(
@@ -429,7 +429,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 }
                 Ok(buffer_map)
             }
-            BufferInputs::Array(arr) => {
+            BufferSelection::Array(arr) => {
                 let mut buffer_map = BufferMap::with_capacity(arr.len());
                 for (i, op_id) in arr.into_iter().enumerate() {
                     buffer_map.insert(BufferIdentifier::Index(i), attempt_get_buffer(op_id)?);
