@@ -52,23 +52,22 @@ use workflow_builder::{
 
 // ----------
 
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    fmt::Display,
-    io::Read,
-    sync::Arc,
-};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read, sync::Arc};
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
     SplitConnectionError, StreamPack,
 };
 use schemars::{
-    JsonSchema, r#gen::SchemaGenerator,
-    schema::{Schema, SchemaObject, InstanceType, ObjectValidation, SingleOrVec, Metadata},
+    r#gen::SchemaGenerator,
+    schema::{InstanceType, Metadata, ObjectValidation, Schema, SchemaObject, SingleOrVec},
+    JsonSchema,
 };
-use serde::{Deserialize, Serialize, Serializer, Deserializer, ser::SerializeMap, de::{Visitor, Error}};
+use serde::{
+    de::{Error, Visitor},
+    ser::SerializeMap,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
 const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
@@ -83,7 +82,9 @@ pub type OperationName = Arc<str>;
 #[serde(untagged, rename_all = "snake_case")]
 pub enum NextOperation {
     Name(OperationName),
-    Builtin { builtin: BuiltinTarget },
+    Builtin {
+        builtin: BuiltinTarget,
+    },
     /// Refer to an "inner" operation of one of the sibling operations in a
     /// diagram. This can be used to target section inputs.
     Namespace(NamespacedOperation),
@@ -91,7 +92,9 @@ pub enum NextOperation {
 
 impl NextOperation {
     pub fn dispose() -> Self {
-        NextOperation::Builtin { builtin: BuiltinTarget::Dispose }
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Dispose,
+        }
     }
 }
 
@@ -99,7 +102,10 @@ impl Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Name(operation_id) => f.write_str(operation_id),
-            Self::Namespace(NamespacedOperation { namespace, operation }) => write!(f, "{namespace}:{operation}"),
+            Self::Namespace(NamespacedOperation {
+                namespace,
+                operation,
+            }) => write!(f, "{namespace}:{operation}"),
             Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
         }
     }
@@ -133,7 +139,7 @@ impl<'de> Visitor<'de> for NamespacedOperationVisitor {
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str(
             "a map with exactly one entry of { \"<namespace>\" : \"<operation>\" } \
-            whose key is the namespace string and whose value is the operation string"
+            whose key is the namespace string and whose value is the operation string",
         )
     }
 
@@ -141,12 +147,16 @@ impl<'de> Visitor<'de> for NamespacedOperationVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let (key, value) = map.next_entry::<String, String>()?.ok_or_else(
-            || A::Error::custom("namespaced operation must be a map from the namespace to the operation name")
-        )?;
+        let (key, value) = map.next_entry::<String, String>()?.ok_or_else(|| {
+            A::Error::custom(
+                "namespaced operation must be a map from the namespace to the operation name",
+            )
+        })?;
 
         if !map.next_key::<String>()?.is_none() {
-            return Err(A::Error::custom("namespaced operation must contain exactly one entry"));
+            return Err(A::Error::custom(
+                "namespaced operation must contain exactly one entry",
+            ));
         }
 
         Ok(NamespacedOperation {
@@ -159,7 +169,7 @@ impl<'de> Visitor<'de> for NamespacedOperationVisitor {
 impl<'de> Deserialize<'de> for NamespacedOperation {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_map(NamespacedOperationVisitor)
     }
@@ -1061,7 +1071,6 @@ impl Diagram {
         serde_json::from_reader(r)
     }
 
-
     pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
         self.ops.validate_operation_names()?;
         self.templates.validate_operation_names()?;
@@ -1093,7 +1102,10 @@ pub struct Templates(HashMap<OperationName, SectionTemplate>);
 impl Templates {
     /// Get a template from this map, or a diagram error code if the template is
     /// not available.
-    pub fn get_template(&self, template_id: &OperationName) -> Result<&SectionTemplate, DiagramErrorCode> {
+    pub fn get_template(
+        &self,
+        template_id: &OperationName,
+    ) -> Result<&SectionTemplate, DiagramErrorCode> {
         self.get(template_id)
             .ok_or_else(|| DiagramErrorCode::TemplateNotFound(template_id.clone()))
     }
@@ -1109,7 +1121,9 @@ impl Templates {
     }
 }
 
-fn validate_operation_names(ops: &HashMap<OperationName, DiagramOperation>) -> Result<(), DiagramErrorCode> {
+fn validate_operation_names(
+    ops: &HashMap<OperationName, DiagramOperation>,
+) -> Result<(), DiagramErrorCode> {
     for name in ops.keys() {
         validate_operation_name(name)?;
     }
@@ -1120,7 +1134,7 @@ fn validate_operation_names(ops: &HashMap<OperationName, DiagramOperation>) -> R
 fn validate_operation_name(name: &str) -> Result<(), DiagramErrorCode> {
     for reserved in &RESERVED_OPERATION_NAMES {
         if name == *reserved {
-            return Err(DiagramErrorCode::InvalidUseOfReservedName(*reserved))
+            return Err(DiagramErrorCode::InvalidUseOfReservedName(*reserved));
         }
     }
 
@@ -1139,7 +1153,9 @@ pub struct DiagramError {
 impl DiagramError {
     pub fn in_operation(op_id: impl Into<OperationRef>, code: DiagramErrorCode) -> Self {
         Self {
-            context: DiagramErrorContext { op_id: Some(op_id.into()) },
+            context: DiagramErrorContext {
+                op_id: Some(op_id.into()),
+            },
             code,
         }
     }

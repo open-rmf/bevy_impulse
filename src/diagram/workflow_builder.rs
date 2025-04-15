@@ -24,10 +24,10 @@ use std::{
 use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope, StreamPack};
 
 use super::{
-    BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode,
-    DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization, ImplicitSerialization,
-    ImplicitStringify, NextOperation, OperationName, TypeInfo, NamespacedOperation,
-    Operations, Templates,
+    BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
+    DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization,
+    ImplicitSerialization, ImplicitStringify, NamespacedOperation, NextOperation, OperationName,
+    Operations, Templates, TypeInfo,
 };
 
 use smallvec::SmallVec;
@@ -67,7 +67,9 @@ impl<'a> From<&'a NextOperation> for OperationRef {
         match value {
             NextOperation::Name(name) => OperationRef::Named(name.into()),
             NextOperation::Namespace(id) => OperationRef::Named(id.into()),
-            NextOperation::Builtin { builtin } => OperationRef::Builtin { builtin: builtin.clone() },
+            NextOperation::Builtin { builtin } => OperationRef::Builtin {
+                builtin: builtin.clone(),
+            },
         }
     }
 }
@@ -268,7 +270,8 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
             }
         }
 
-        let infer = self.construction
+        let infer = self
+            .construction
             .outputs_into_target
             .get(&id)
             .and_then(|outputs| outputs.first())
@@ -285,13 +288,13 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     ///
     /// * `target` - The operation that needs to receive the output
     /// * `output` - The output channel that needs to be connected into the target.
-    pub fn add_output_into_target(
-        &mut self,
-        target: impl Into<OperationRef>,
-        output: DynOutput,
-    ) {
+    pub fn add_output_into_target(&mut self, target: impl Into<OperationRef>, output: DynOutput) {
         let target = self.into_operation_ref(target);
-        self.construction.outputs_into_target.entry(target).or_default().push(output);
+        self.construction
+            .outputs_into_target
+            .entry(target)
+            .or_default()
+            .push(output);
     }
 
     /// Set the input slot of an operation. This should not be called more than
@@ -466,12 +469,14 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         let mut namespaces = self.namespaces.clone();
         namespaces.push(Arc::clone(id));
 
-        self.construction.generated_operations.push(UnfinishedOperation {
-            id: Arc::clone(child_id),
-            namespaces,
-            op,
-            sibling_ops,
-        });
+        self.construction
+            .generated_operations
+            .push(UnfinishedOperation {
+                id: Arc::clone(child_id),
+                namespaces,
+                op,
+                sibling_ops,
+            });
     }
 
     /// Create a connection for an exposed input that allows it to redirect any
@@ -495,14 +500,10 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         exposed_id: &OperationName,
         child_id: &NextOperation,
     ) -> Result<(), DiagramErrorCode> {
-        let (exposed, redirect_to) = self.get_exposed_and_inner_ids(
-            section_id, exposed_id, child_id,
-        );
+        let (exposed, redirect_to) =
+            self.get_exposed_and_inner_ids(section_id, exposed_id, child_id);
 
-        self.set_connect_into_target(
-            exposed,
-            RedirectConnection { redirect_to },
-        )
+        self.set_connect_into_target(exposed, RedirectConnection { redirect_to })
     }
 
     /// Same as [`Self::redirecto_to_child_input`], but meant for buffers.
@@ -512,13 +513,14 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         exposed_id: &OperationName,
         child_id: &NextOperation,
     ) -> Result<(), DiagramErrorCode> {
-        let (exposed, redirect_to) = self.get_exposed_and_inner_ids(
-            section_id, exposed_id, child_id,
-        );
+        let (exposed, redirect_to) =
+            self.get_exposed_and_inner_ids(section_id, exposed_id, child_id);
 
         self.set_connect_into_target(
             exposed.clone(),
-            RedirectConnection { redirect_to: redirect_to.clone() },
+            RedirectConnection {
+                redirect_to: redirect_to.clone(),
+            },
         )?;
 
         match self.construction.buffers.entry(exposed.clone()) {
@@ -557,14 +559,13 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
             namespaces: SmallVec::from_iter([Arc::clone(section_id)]),
             exposed_namespace: None,
             name: Arc::clone(output_id),
-        }.in_namespaces(&self.namespaces).into();
+        }
+        .in_namespaces(&self.namespaces)
+        .into();
 
         let redirect_to = self.into_operation_ref(sibling_id);
 
-        self.set_connect_into_target(
-            internal,
-            RedirectConnection { redirect_to },
-        )
+        self.set_connect_into_target(internal, RedirectConnection { redirect_to })
     }
 
     fn get_exposed_and_inner_ids(
@@ -575,14 +576,14 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     ) -> (OperationRef, OperationRef) {
         let mut child_namespaces = self.namespaces.clone();
         child_namespaces.push(Arc::clone(section_id));
-        let inner = Into::<OperationRef>::into(child_id)
-            .in_namespaces(&child_namespaces);
+        let inner = Into::<OperationRef>::into(child_id).in_namespaces(&child_namespaces);
 
         let exposed: OperationRef = NamedOperationRef {
             namespaces: self.namespaces.clone(),
             exposed_namespace: Some(section_id.clone()),
             name: exposed_id.clone(),
-        }.into();
+        }
+        .into();
 
         (exposed, inner)
     }
@@ -720,13 +721,15 @@ where
 
     let mut construction = DiagramConstruction::default();
 
-    let default_on_implicit_error = OperationRef::Builtin { builtin: BuiltinTarget::Cancel };
-    let opt_on_implicit_error: Option<OperationRef> = diagram
-        .on_implicit_error
-        .as_ref()
-        .map(Into::into);
+    let default_on_implicit_error = OperationRef::Builtin {
+        builtin: BuiltinTarget::Cancel,
+    };
+    let opt_on_implicit_error: Option<OperationRef> =
+        diagram.on_implicit_error.as_ref().map(Into::into);
 
-    let on_implicit_error = opt_on_implicit_error.as_ref().unwrap_or(&default_on_implicit_error);
+    let on_implicit_error = opt_on_implicit_error
+        .as_ref()
+        .unwrap_or(&default_on_implicit_error);
 
     initialize_builtin_operations(
         diagram.start.clone(),
@@ -769,27 +772,20 @@ where
             let status = unfinished
                 .op
                 .build_diagram_operation(&unfinished.id, builder, &mut ctx)
-                .map_err(|code| DiagramError::in_operation(
-                    unfinished.as_operation_ref(),
-                    code,
-                ))?;
+                .map_err(|code| DiagramError::in_operation(unfinished.as_operation_ref(), code))?;
 
-            deferred_operations.extend(
-                ctx
-                .construction
-                .generated_operations
-                .drain(..)
-                .map(|unfinished| {
+            deferred_operations.extend(ctx.construction.generated_operations.drain(..).map(
+                |unfinished| {
                     made_progress = true;
                     DeferredOperation {
                         unfinished,
                         status: BuildStatus::Defer {
                             progress: true,
                             reason: Cow::Borrowed("generated operation"),
-                        }
+                        },
                     }
-                })
-            );
+                },
+            ));
 
             made_progress |= status.made_progress();
             if !status.is_finished() {
@@ -878,8 +874,7 @@ pub struct UnfinishedOperation<'a> {
 
 impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("UnfinishedOperation")
+        f.debug_struct("UnfinishedOperation")
             .field("id", &self.id)
             .field("namespaces", &self.namespaces)
             .finish()
@@ -887,12 +882,13 @@ impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
 }
 
 impl<'a> UnfinishedOperation<'a> {
-    pub fn new(
-        id: OperationName,
-        op: &'a DiagramOperation,
-        sibling_ops: &'a Operations,
-    ) -> Self {
-        Self { id, op, sibling_ops, namespaces: Default::default() }
+    pub fn new(id: OperationName, op: &'a DiagramOperation, sibling_ops: &'a Operations) -> Self {
+        Self {
+            id,
+            op,
+            sibling_ops,
+            namespaces: Default::default(),
+        }
     }
 
     pub fn as_operation_ref(&self) -> OperationRef {
@@ -900,7 +896,8 @@ impl<'a> UnfinishedOperation<'a> {
             namespaces: self.namespaces.clone(),
             exposed_namespace: None,
             name: self.id.clone(),
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -995,7 +992,9 @@ pub fn standard_input_connection(
         return Ok(Box::new(deserialization));
     }
 
-    Ok(Box::new(BasicConnect { input_slot: Arc::new(input_slot) }))
+    Ok(Box::new(BasicConnect {
+        input_slot: Arc::new(input_slot),
+    }))
 }
 
 impl ConnectIntoTarget for ImplicitSerialization {
@@ -1171,7 +1170,9 @@ impl ConnectIntoTarget for RedirectConnection {
                 return Ok(None);
             }
         } else {
-            return Err(DiagramErrorCode::CircularDependency(visited.drain().collect()));
+            return Err(DiagramErrorCode::CircularDependency(
+                visited.drain().collect(),
+            ));
         }
     }
 }

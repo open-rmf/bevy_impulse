@@ -80,13 +80,14 @@ impl BuildDiagramOperation for TransformSchema {
             },
         );
 
-        let error_target = self.on_error
+        let error_target = self
+            .on_error
             .as_ref()
             .map(|on_error| ctx.into_operation_ref(on_error))
             .unwrap_or(
                 // If no error target was explicitly given then treat this as an
                 // implicit error.
-                ctx.get_implicit_error_target()
+                ctx.get_implicit_error_target(),
             );
 
         let (ok, _) = node.output.chain(builder).fork_result(

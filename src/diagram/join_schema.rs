@@ -47,7 +47,9 @@ impl BuildDiagramOperation for JoinSchema {
         }
 
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
-            return Ok(BuildStatus::defer("waiting to find out target message type"));
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
         };
 
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
@@ -109,8 +111,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry,
-        DiagramErrorCode, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry, DiagramErrorCode,
+        NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -332,12 +334,16 @@ mod tests {
         let result = fixture
             .spawn_and_run(&diagram, serde_json::Value::Null)
             .unwrap();
-        let expectation = serde_json::Value::Object(
-            serde_json::Map::from_iter([
-                ("bar".to_string(), serde_json::Value::String("bar".to_string())),
-                ("foo".to_string(), serde_json::Value::String("foo".to_string())),
-            ])
-        );
+        let expectation = serde_json::Value::Object(serde_json::Map::from_iter([
+            (
+                "bar".to_string(),
+                serde_json::Value::String("bar".to_string()),
+            ),
+            (
+                "foo".to_string(),
+                serde_json::Value::String("foo".to_string()),
+            ),
+        ]));
         assert_eq!(result, expectation);
     }
 

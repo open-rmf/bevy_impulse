@@ -15,21 +15,19 @@
  *
 */
 
-use std::{
-    collections::HashMap,
-     sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output};
+use crate::{
+    AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output,
+};
 
 use super::{
-    type_info::TypeInfo, BuilderId,
-    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput,
-    NextOperation, OperationName, BuildDiagramOperation, DiagramContext,
-    BuildStatus, NamespacedOperation, Operations,
+    type_info::TypeInfo, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext,
+    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
+    NextOperation, OperationName, Operations,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -72,7 +70,7 @@ impl BuildDiagramOperation for SectionSchema {
                             namespace: id.clone(),
                             operation: op.clone(),
                         }),
-                        input
+                        input,
                     )?;
                 }
 
@@ -92,28 +90,26 @@ impl BuildDiagramOperation for SectionSchema {
                     ctx.set_buffer_for_operation(
                         &NextOperation::Namespace(NamespacedOperation {
                             namespace: id.clone(),
-                            operation: op.clone()
+                            operation: op.clone(),
                         }),
                         buffer,
                     )?;
                 }
             }
             SectionProvider::Template(section_template) => {
-                let section = ctx
-                    .templates
-                    .get_template(section_template)?;
+                let section = ctx.templates.get_template(section_template)?;
 
                 for (child_id, op) in section.ops.iter() {
                     ctx.add_child_operation(id, child_id, op, &section.ops);
                 }
 
-                section.inputs.redirect(
-                    |op, next| ctx.redirect_to_child_input(id, op, next)
-                )?;
+                section
+                    .inputs
+                    .redirect(|op, next| ctx.redirect_to_child_input(id, op, next))?;
 
-                section.buffers.redirect(
-                    |op, next| ctx.redirect_to_child_buffer(id, op, next)
-                )?;
+                section
+                    .buffers
+                    .redirect(|op, next| ctx.redirect_to_child_buffer(id, op, next))?;
 
                 for expected_output in self.connect.keys() {
                     if !section.outputs.contains(expected_output) {
@@ -125,7 +121,11 @@ impl BuildDiagramOperation for SectionSchema {
                     if let Some(target) = self.connect.get(output) {
                         ctx.redirect_exposed_output_to_sibling(id, output, target)?;
                     } else {
-                        ctx.redirect_exposed_output_to_sibling(id, output, &NextOperation::dispose())?;
+                        ctx.redirect_exposed_output_to_sibling(
+                            id,
+                            output,
+                            &NextOperation::dispose(),
+                        )?;
                     }
                 }
             }
@@ -252,10 +252,9 @@ impl SectionItem for AnyBuffer {
     type MessageType = AnyMessageBox;
 
     fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
-        metadata.buffers.insert(
-            key.into(),
-            SectionBuffer { item_type: None },
-        );
+        metadata
+            .buffers
+            .insert(key.into(), SectionBuffer { item_type: None });
     }
 
     fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
@@ -267,10 +266,9 @@ impl SectionItem for JsonBuffer {
     type MessageType = JsonMessage;
 
     fn build_metadata(metadata: &mut SectionMetadata, key: &str) {
-        metadata.buffers.insert(
-            key.into(),
-            SectionBuffer { item_type: None },
-        );
+        metadata
+            .buffers
+            .insert(key.into(), SectionBuffer { item_type: None });
     }
 
     fn insert_into_slots(self, key: &str, slots: &mut SectionSlots) {
@@ -385,8 +383,8 @@ mod tests {
 
     use crate::{
         diagram::testing::DiagramTestFixture, testing::TestingContext, BufferAccess, BufferKey,
-        BufferSettings, Diagram, IntoBlockingCallback, Node, NodeBuilderOptions, RequestExt,
-        RunCommandsOnWorldExt, SectionBuilderOptions, JsonMessage,
+        BufferSettings, Diagram, IntoBlockingCallback, JsonMessage, Node, NodeBuilderOptions,
+        RequestExt, RunCommandsOnWorldExt, SectionBuilderOptions,
     };
 
     use super::*;
@@ -422,7 +420,10 @@ mod tests {
         assert_eq!(metadata.outputs.len(), 1);
         assert_eq!(metadata.outputs["bar"].message_type, TypeInfo::of::<f64>());
         assert_eq!(metadata.buffers.len(), 1);
-        assert_eq!(metadata.buffers["baz"].item_type, Some(TypeInfo::of::<String>()));
+        assert_eq!(
+            metadata.buffers["baz"].item_type,
+            Some(TypeInfo::of::<String>())
+        );
     }
 
     struct OpaqueMessage;
@@ -625,7 +626,9 @@ mod tests {
 
         let mut context = TestingContext::minimal_plugins();
         let mut promise = context.app.world.command(|cmds| {
-            let workflow = diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry).unwrap();
+            let workflow = diagram
+                .spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry)
+                .unwrap();
             cmds.request(serde_json::to_value(1).unwrap(), workflow)
                 .take_response()
         });
@@ -704,7 +707,9 @@ mod tests {
         let err = context
             .app
             .world
-            .command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &fixture.registry))
+            .command(|cmds| {
+                diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &fixture.registry)
+            })
             .unwrap_err();
         assert!(matches!(err.code, DiagramErrorCode::UnknownOperation(_)));
     }
@@ -775,7 +780,9 @@ mod tests {
 
         let mut context = TestingContext::minimal_plugins();
         let mut promise = context.app.world.command(|cmds| {
-            let workflow = diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry).unwrap();
+            let workflow = diagram
+                .spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry)
+                .unwrap();
             cmds.request(serde_json::to_value(1).unwrap(), workflow)
                 .take_response()
         });

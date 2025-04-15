@@ -83,7 +83,9 @@ impl BuildDiagramOperation for BufferAccessSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
-            return Ok(BuildStatus::defer("waiting to find out target message type"));
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
         };
 
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
@@ -135,7 +137,9 @@ impl BuildDiagramOperation for ListenSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
-            return Ok(BuildStatus::defer("waiting to find out target message type"));
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
         };
 
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
