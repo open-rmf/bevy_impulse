@@ -104,11 +104,14 @@ pub struct NamedOperationRef {
     /// there are two values of `NamedOperationRef` to consider:
     ///
     /// ```
-    /// NamedOperationRef {
-    ///     namespaces: vec!["sec".into()],
+    /// # use bevy_impulse::diagram::NamedOperationRef;
+    /// # use smallvec::smallvec;
+    ///
+    /// let op_id = NamedOperationRef {
+    ///     namespaces: smallvec!["sec".into()],
     ///     exposed_namespace: None,
     ///     name: "out".into(),
-    /// }
+    /// };
     /// ```
     ///
     /// is the internal reference to `sec:out` that will be used by other
@@ -116,11 +119,14 @@ pub struct NamedOperationRef {
     /// siblings of `sec` would instead connect to
     ///
     /// ```
-    /// NamedOperationRef {
-    ///     namespaces: vec![],
+    /// # use bevy_impulse::diagram::NamedOperationRef;
+    /// # use smallvec::smallvec;
+    ///
+    /// let op_id = NamedOperationRef {
+    ///     namespaces: smallvec![],
     ///     exposed_namespace: Some("sec".into()),
     ///     name: "out".into(),
-    /// }
+    /// };
     /// ```
     ///
     /// We need to make this distinction because operations inside `sec` do not

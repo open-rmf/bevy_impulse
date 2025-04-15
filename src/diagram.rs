@@ -46,9 +46,7 @@ use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
-use workflow_builder::{
-    create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext, OperationRef,
-};
+pub use workflow_builder::*;
 
 // ----------
 
