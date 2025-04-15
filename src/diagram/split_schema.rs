@@ -51,7 +51,7 @@ impl BuildDiagramOperation for SplitSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(sample_input) = ctx.infer_input_type_into_target(id) else {
+        let Some(sample_input) = ctx.infer_input_type_into_target(id)? else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));

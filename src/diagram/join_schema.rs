@@ -46,7 +46,7 @@ impl BuildDiagramOperation for JoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let Some(target_type) = ctx.infer_input_type_into_target(&self.next) else {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
             return Ok(BuildStatus::defer("waiting to find out target message type"));
         };
 

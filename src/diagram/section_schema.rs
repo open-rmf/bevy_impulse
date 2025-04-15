@@ -103,7 +103,17 @@ impl BuildDiagramOperation for SectionSchema {
                     .templates
                     .get_template(section_template)?;
 
+                for (child_id, op) in section.ops.iter() {
+                    ctx.add_child_operation(id, child_id, op, &section.ops);
+                }
 
+                section.inputs.redirect(
+                    |op, next| ctx.redirect_to_child_input(id, op, next)
+                )?;
+
+                section.buffers.redirect(
+                    |op, next| ctx.redirect_to_child_buffer(id, op, next)
+                )?;
             }
         }
 
@@ -326,6 +336,25 @@ impl InputRemapping {
         }
 
         None
+    }
+
+    pub fn redirect(
+        &self,
+        mut f: impl FnMut(&OperationName, &NextOperation) -> Result<(), DiagramErrorCode>,
+    ) -> Result<(), DiagramErrorCode> {
+        match self {
+            Self::Forward(operations) => {
+                for op in operations {
+                    f(op, &NextOperation::Name(Arc::clone(op)))?;
+                }
+            }
+            Self::Remap(remap) => {
+                for (op, next) in remap {
+                    f(op, next)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

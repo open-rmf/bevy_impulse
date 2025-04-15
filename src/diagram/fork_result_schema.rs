@@ -46,7 +46,7 @@ impl BuildDiagramOperation for ForkResultSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+        let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
             // TODO(@mxgrey): For each result type we can register a tuple of
             // (T, E) for the Ok and Err types as a key so we could infer the
             // operation type using the expected types for ok and err.

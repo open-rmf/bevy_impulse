@@ -1169,11 +1169,11 @@ pub enum DiagramErrorCode {
         target_type: TypeInfo,
     },
 
-    #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
-    MultipleInputsCreated(OperationRef),
+    #[error("Operation [{0}] attempted to instantiate a duplicate of itself.")]
+    DuplicateInputsCreated(OperationRef),
 
-    #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
-    MultipleBuffersCreated(OperationRef),
+    #[error("Operation [{0}] attempted to instantiate a duplicate buffer.")]
+    DuplicateBuffersCreated(OperationRef),
 
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
@@ -1264,6 +1264,18 @@ pub enum DiagramErrorCode {
 
     #[error("an error happened while building a nested diagram: {0}")]
     NestedError(Box<DiagramError>),
+
+    #[error("A circular dependency exists between operations: {}", format_operation_list(&.0))]
+    CircularDependency(Vec<OperationRef>),
+}
+
+fn format_operation_list(list: &[OperationRef]) -> String {
+    let mut output = String::new();
+    for op in list {
+        output += &format!("[{op}]");
+    }
+
+    output
 }
 
 impl From<DiagramErrorCode> for DiagramError {

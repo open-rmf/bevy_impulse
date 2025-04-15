@@ -39,11 +39,11 @@ impl BuildDiagramOperation for ForkCloneSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let inferred_type = 'inferred: {
-            match ctx.infer_input_type_into_target(id) {
+            match ctx.infer_input_type_into_target(id)? {
                 Some(inferred_type) => break 'inferred inferred_type,
                 None => {
                     for target in &self.next {
-                        if let Some(inferred_type) = ctx.infer_input_type_into_target(target) {
+                        if let Some(inferred_type) = ctx.infer_input_type_into_target(target)? {
                             break 'inferred inferred_type;
                         }
                     }

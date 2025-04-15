@@ -44,7 +44,7 @@ impl BuildDiagramOperation for BufferSchema {
         let message_info = if self.serialize.is_some_and(|v| v) {
             TypeInfo::of::<JsonMessage>()
         } else {
-            let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+            let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
                 // There are no outputs ready for this target, so we can't do
                 // anything yet. The builder should try again later.
 
@@ -82,7 +82,7 @@ impl BuildDiagramOperation for BufferAccessSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(target_type) = ctx.infer_input_type_into_target(&self.next) else {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
             return Ok(BuildStatus::defer("waiting to find out target message type"));
         };
 
@@ -134,7 +134,7 @@ impl BuildDiagramOperation for ListenSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(target_type) = ctx.infer_input_type_into_target(&self.next) else {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
             return Ok(BuildStatus::defer("waiting to find out target message type"));
         };
 
