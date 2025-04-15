@@ -114,6 +114,20 @@ impl BuildDiagramOperation for SectionSchema {
                 section.buffers.redirect(
                     |op, next| ctx.redirect_to_child_buffer(id, op, next)
                 )?;
+
+                for expected_output in self.connect.keys() {
+                    if !section.outputs.contains(expected_output) {
+                        return Err(SectionError::UnknownOutput(Arc::clone(expected_output)).into());
+                    }
+                }
+
+                for output in &section.outputs {
+                    if let Some(target) = self.connect.get(output) {
+                        ctx.redirect_exposed_output_to_sibling(id, output, target)?;
+                    } else {
+                        ctx.redirect_exposed_output_to_sibling(id, output, &NextOperation::dispose())?;
+                    }
+                }
             }
         }
 

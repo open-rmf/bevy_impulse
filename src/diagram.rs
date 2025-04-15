@@ -89,6 +89,12 @@ pub enum NextOperation {
     Namespace(NamespacedOperation),
 }
 
+impl NextOperation {
+    pub fn dispose() -> Self {
+        NextOperation::Builtin { builtin: BuiltinTarget::Dispose }
+    }
+}
+
 impl Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

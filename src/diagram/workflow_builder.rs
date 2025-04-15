@@ -131,7 +131,15 @@ pub struct NamedOperationRef {
 
 impl NamedOperationRef {
     fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
-        self.namespaces = parent_namespaces.iter().cloned().collect();
+        // Put the parent namespaces at the front and append the operation's
+        // existing namespaces at the back.
+        let new_namespaces = parent_namespaces
+            .iter()
+            .cloned()
+            .chain(self.namespaces.drain(..))
+            .collect();
+
+        self.namespaces = new_namespaces;
         self
     }
 }
@@ -275,8 +283,8 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     ///
     /// # Arguments
     ///
-    /// * target - The operation that needs to receive the output
-    /// * output - The output channel that needs to be connected into the target.
+    /// * `target` - The operation that needs to receive the output
+    /// * `output` - The output channel that needs to be connected into the target.
     pub fn add_output_into_target(
         &mut self,
         target: impl Into<OperationRef>,
@@ -469,45 +477,48 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     /// Create a connection for an exposed input that allows it to redirect any
     /// connections to an internal (child) input.
     ///
-    /// * `parent_id` - The ID of the parent operation (e.g. ID of the section)
+    /// # Arguments
+    ///
+    /// * `section_id` - The ID of the parent operation (e.g. ID of the section)
     ///   that is exposing an operation to its siblings.
     /// * `exposed_id` - The ID of the exposed operation that is being provided
-    ///   by the parent. E.g. siblings of the parent will refer to the redirected
-    ///   operation by `{ parent_id: exposed_id }`
-    /// * `child_id` - The ID of the operation inside the parent which the exposed
+    ///   by the section. E.g. siblings of the section will refer to the redirected
+    ///   input by `{ section_id: exposed_id }`
+    /// * `child_id` - The ID of the operation inside the section which the exposed
     ///   operation ID is being redirected to.
     ///
     /// This should not be used to expose a buffer. For that, use
     /// [`Self::redirect_to_child_buffer`].
     pub fn redirect_to_child_input(
         &mut self,
-        parent_id: &OperationName,
+        section_id: &OperationName,
         exposed_id: &OperationName,
         child_id: &NextOperation,
     ) -> Result<(), DiagramErrorCode> {
-        let (exposed, inner) = self.get_exposed_and_inner_ids(
-            parent_id, exposed_id, child_id,
+        let (exposed, redirect_to) = self.get_exposed_and_inner_ids(
+            section_id, exposed_id, child_id,
         );
 
         self.set_connect_into_target(
             exposed,
-            RedirectConnection { inner },
+            RedirectConnection { redirect_to },
         )
     }
 
+    /// Same as [`Self::redirecto_to_child_input`], but meant for buffers.
     pub fn redirect_to_child_buffer(
         &mut self,
-        parent_id: &OperationName,
+        section_id: &OperationName,
         exposed_id: &OperationName,
         child_id: &NextOperation,
     ) -> Result<(), DiagramErrorCode> {
-        let (exposed, inner) = self.get_exposed_and_inner_ids(
-            parent_id, exposed_id, child_id,
+        let (exposed, redirect_to) = self.get_exposed_and_inner_ids(
+            section_id, exposed_id, child_id,
         );
 
         self.set_connect_into_target(
             exposed.clone(),
-            RedirectConnection { inner: inner.clone() },
+            RedirectConnection { redirect_to: redirect_to.clone() },
         )?;
 
         match self.construction.buffers.entry(exposed.clone()) {
@@ -515,27 +526,61 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 return Err(DiagramErrorCode::DuplicateBuffersCreated(exposed));
             }
             Entry::Vacant(vacant) => {
-                vacant.insert(BufferRef::Ref(inner));
+                vacant.insert(BufferRef::Ref(redirect_to));
             }
         }
 
         Ok(())
     }
 
+    /// Create a connection for an exposed output that allows it to redirect
+    /// any connections to an external (sibling) input. This is used to implement
+    /// the `"connect":` schema for section templates.
+    ///
+    /// # Arguments
+    ///
+    /// * `section_id` - The ID of the parent operation (e.g. ID of the section)
+    ///   that is exposing an output to its siblings.
+    /// * `output_id` - The ID of the exposed output that is being provided by
+    ///   the section. E.g. siblings of the section will refer to the redirected
+    ///   output by `{ section_id: output_id }`.
+    /// * `sibling_id` - The sibling of the section that should receive the output.
+    pub fn redirect_exposed_output_to_sibling(
+        &mut self,
+        section_id: &OperationName,
+        output_id: &OperationName,
+        sibling_id: &NextOperation,
+    ) -> Result<(), DiagramErrorCode> {
+        // This is the slot that operations inside of the section will direct
+        // their outputs to. It will receive the outputs and then redirect them.
+        let internal: OperationRef = NamedOperationRef {
+            namespaces: SmallVec::from_iter([Arc::clone(section_id)]),
+            exposed_namespace: None,
+            name: Arc::clone(output_id),
+        }.in_namespaces(&self.namespaces).into();
+
+        let redirect_to = self.into_operation_ref(sibling_id);
+
+        self.set_connect_into_target(
+            internal,
+            RedirectConnection { redirect_to },
+        )
+    }
+
     fn get_exposed_and_inner_ids(
         &self,
-        parent_id: &OperationName,
+        section_id: &OperationName,
         exposed_id: &OperationName,
         child_id: &NextOperation,
     ) -> (OperationRef, OperationRef) {
         let mut child_namespaces = self.namespaces.clone();
-        child_namespaces.push(Arc::clone(parent_id));
+        child_namespaces.push(Arc::clone(section_id));
         let inner = Into::<OperationRef>::into(child_id)
             .in_namespaces(&child_namespaces);
 
         let exposed: OperationRef = NamedOperationRef {
             namespaces: self.namespaces.clone(),
-            exposed_namespace: Some(parent_id.clone()),
+            exposed_namespace: Some(section_id.clone()),
             name: exposed_id.clone(),
         }.into();
 
@@ -729,6 +774,23 @@ where
                     code,
                 ))?;
 
+            deferred_operations.extend(
+                ctx
+                .construction
+                .generated_operations
+                .drain(..)
+                .map(|unfinished| {
+                    made_progress = true;
+                    DeferredOperation {
+                        unfinished,
+                        status: BuildStatus::Defer {
+                            progress: true,
+                            reason: Cow::Borrowed("generated operation"),
+                        }
+                    }
+                })
+            );
+
             made_progress |= status.made_progress();
             if !status.is_finished() {
                 // The operation did not finish, so pass it into the deferred
@@ -812,6 +874,16 @@ pub struct UnfinishedOperation<'a> {
     pub op: &'a DiagramOperation,
     /// The sibling operations of the one that is being built
     pub sibling_ops: &'a Operations,
+}
+
+impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("UnfinishedOperation")
+            .field("id", &self.id)
+            .field("namespaces", &self.namespaces)
+            .finish()
+    }
 }
 
 impl<'a> UnfinishedOperation<'a> {
@@ -1071,8 +1143,9 @@ impl InferMessageType for DynInputSlot {
     }
 }
 
+#[derive(Debug)]
 struct RedirectConnection {
-    inner: OperationRef,
+    redirect_to: OperationRef,
 }
 
 impl ConnectIntoTarget for RedirectConnection {
@@ -1082,7 +1155,7 @@ impl ConnectIntoTarget for RedirectConnection {
         _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        ctx.add_output_into_target(self.inner.clone(), output);
+        ctx.add_output_into_target(self.redirect_to.clone(), output);
         Ok(())
     }
 
@@ -1091,8 +1164,8 @@ impl ConnectIntoTarget for RedirectConnection {
         ctx: &DiagramContext,
         visited: &mut HashSet<OperationRef>,
     ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
-        if visited.insert(self.inner.clone()) {
-            if let Some(connect) = ctx.construction.connect_into_target.get(&self.inner) {
+        if visited.insert(self.redirect_to.clone()) {
+            if let Some(connect) = ctx.construction.connect_into_target.get(&self.redirect_to) {
                 return connect.infer_input_type(ctx, visited);
             } else {
                 return Ok(None);
