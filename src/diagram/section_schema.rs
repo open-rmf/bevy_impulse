@@ -836,9 +836,94 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert_eq!(result, 12);
+    }
+
+    #[test]
+    fn test_template_input_remap() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "test_template": {
+                    "inputs": {
+                        "multiply": "multiply",
+                        "terminate": { "builtin": "terminate" },
+                    },
+                    "outputs": ["output"],
+                    "ops": {
+                        "multiply": {
+                            "type": "node",
+                            "builder": "multiply3",
+                            "next": "output",
+                        }
+                    }
+                }
+            },
+            "start": { "section": "multiply" },
+            "ops": {
+                "section": {
+                    "type": "section",
+                    "template": "multiply",
+                    "connect": {
+                        "output": { "section": "terminate" },
+                    },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result: i32 = fixture
+            .spawn_and_run(&diagram, 4_i32)
+            .unwrap();
+
+        assert_eq!(result, 12);
+    }
+
+    #[test]
+    fn test_detect_circular_redirect() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "test_template": {
+                    "inputs": {
+                        "input": "output"
+                    },
+                    "outputs": ["output"],
+                    "ops": {
+                    }
+                }
+            },
+            "start": "fork",
+            "ops": {
+                "fork": {
+                    "type": "fork_clone",
+                    "next": [
+                        { "section": "input" },
+                        { "builtin": "terminate" },
+                    ]
+                },
+                "section": {
+                    "type": "section",
+                    "template": "test_template",
+                    "connect": {
+                        "output": { "section": "input" },
+                    },
+                }
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_and_run::<_, JsonMessage>(&diagram, JsonMessage::from(4))
+            .unwrap_err();
+
+        dbg!(result);
     }
 }

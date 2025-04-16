@@ -224,8 +224,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::Null)
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
@@ -278,8 +278,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::Null)
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
@@ -331,8 +331,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::Null)
             .unwrap();
         let expectation = serde_json::Value::Object(serde_json::Map::from_iter([
             (
@@ -391,8 +391,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::Null)
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
@@ -474,8 +474,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::Null)
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result["foo"], "foo");
@@ -531,8 +531,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::Null)
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         let object = result.as_object().unwrap();

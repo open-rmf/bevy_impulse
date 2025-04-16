@@ -109,7 +109,7 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram, NodeBuilderOptions};
+    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram, NodeBuilderOptions, JsonMessage};
 
     #[test]
     fn test_fork_result() {
@@ -168,14 +168,14 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "even");
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(3))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(3))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "odd");

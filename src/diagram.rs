@@ -1344,7 +1344,7 @@ mod tests {
         .unwrap();
 
         let err = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .spawn_and_run::<_, JsonMessage>(&diagram, JsonMessage::from(4))
             .unwrap_err();
         assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
@@ -1462,7 +1462,7 @@ mod tests {
         .unwrap();
 
         let err = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .spawn_and_run::<_, JsonMessage>(&diagram, JsonMessage::from(4))
             .unwrap_err();
         assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
@@ -1497,8 +1497,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);
@@ -1515,8 +1515,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 4);
@@ -1541,10 +1541,10 @@ mod tests {
         }
         "#;
 
-        let result = fixture
+        let result: JsonMessage = fixture
             .spawn_and_run(
                 &Diagram::from_json_str(json_str).unwrap(),
-                serde_json::Value::from(4),
+                JsonMessage::from(4),
             )
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
@@ -1582,8 +1582,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);

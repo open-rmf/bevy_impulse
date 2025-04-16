@@ -30,6 +30,8 @@ use super::{
     Operations, Templates, TypeInfo,
 };
 
+use bevy_ecs::prelude::Entity;
+
 use smallvec::SmallVec;
 
 type NamespaceList = SmallVec<[OperationName; 4]>;
@@ -509,7 +511,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         let (exposed, redirect_to) =
             self.get_exposed_and_inner_ids(section_id, exposed_id, child_id);
 
-        self.set_connect_into_target(exposed, RedirectConnection { redirect_to })
+        self.set_connect_into_target(exposed, RedirectConnection::new(redirect_to))
     }
 
     /// Same as [`Self::redirecto_to_child_input`], but meant for buffers.
@@ -524,9 +526,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
 
         self.set_connect_into_target(
             exposed.clone(),
-            RedirectConnection {
-                redirect_to: redirect_to.clone(),
-            },
+            RedirectConnection::new(redirect_to.clone()),
         )?;
 
         match self.construction.buffers.entry(exposed.clone()) {
@@ -571,7 +571,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
 
         let redirect_to = self.into_operation_ref(sibling_id);
 
-        self.set_connect_into_target(internal, RedirectConnection { redirect_to })
+        self.set_connect_into_target(internal, RedirectConnection::new(redirect_to))
     }
 
     fn get_exposed_and_inner_ids(
@@ -708,6 +708,9 @@ pub trait ConnectIntoTarget {
 /// preferred message type, but in the future we should add support for
 /// building a constraint graph to support inference in cases where an input
 /// can accept multiple different message types.
+///
+/// NOTE(@mxgrey): We may expand on this trait in the future to enable message
+/// type negotiation for operations that can accept a range of message types.
 pub trait InferMessageType {
     fn preferred_input_type(&self) -> Option<TypeInfo>;
 }
@@ -1151,6 +1154,18 @@ impl InferMessageType for DynInputSlot {
 #[derive(Debug)]
 struct RedirectConnection {
     redirect_to: OperationRef,
+    /// Keep track of which DynOutputs have been redirected in the past so we
+    /// can identify when a circular redirection is happening.
+    redirected: HashSet<Entity>,
+}
+
+impl RedirectConnection {
+    fn new(redirect_to: OperationRef) -> Self {
+        Self {
+            redirect_to,
+            redirected: Default::default(),
+        }
+    }
 }
 
 impl ConnectIntoTarget for RedirectConnection {
@@ -1160,7 +1175,18 @@ impl ConnectIntoTarget for RedirectConnection {
         _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        ctx.add_output_into_target(self.redirect_to.clone(), output);
+        if self.redirected.insert(output.id()) {
+            // This DynOutput has not been redirected by this connector yet, so
+            // we should go ahead and redirect it.
+            ctx.add_output_into_target(self.redirect_to.clone(), output);
+        } else {
+            // This DynOutput has been redirected by this connector before, so
+            // we have a circular connection, making it impossible for the
+            // output to ever really be connected to anything.
+            return Err(DiagramErrorCode::CircularDependency(
+                vec![self.redirect_to.clone()]
+            ));
+        }
         Ok(())
     }
 
