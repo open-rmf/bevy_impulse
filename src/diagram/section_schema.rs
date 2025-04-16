@@ -846,6 +846,8 @@ mod tests {
     fn test_template_input_remap() {
         let mut fixture = DiagramTestFixture::new();
 
+        // Testing that we can remap inputs to both internal operations within
+        // the template and also to builtin operations.
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
             "templates": {
@@ -868,7 +870,7 @@ mod tests {
             "ops": {
                 "section": {
                     "type": "section",
-                    "template": "multiply",
+                    "template": "test_template",
                     "connect": {
                         "output": { "section": "terminate" },
                     },
@@ -877,8 +879,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result: i32 = fixture
-            .spawn_and_run(&diagram, 4_i32)
+        let result: i64 = fixture
+            .spawn_and_run(&diagram, 4_i64)
             .unwrap();
 
         assert_eq!(result, 12);
@@ -921,9 +923,9 @@ mod tests {
         .unwrap();
 
         let result = fixture
-            .spawn_and_run::<_, JsonMessage>(&diagram, JsonMessage::from(4))
+            .spawn_json_io_workflow(&diagram)
             .unwrap_err();
 
-        dbg!(result);
+        assert!(matches!(result.code, DiagramErrorCode::CircularDependency(_)));
     }
 }

@@ -55,13 +55,6 @@ impl OperationRef {
             Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
         }
     }
-
-    fn get_namespaces(&self) -> NamespaceList {
-        match self {
-            Self::Named(named) => named.namespaces.clone(),
-            Self::Builtin { .. } => SmallVec::new(),
-        }
-    }
 }
 
 impl<'a> From<&'a NextOperation> for OperationRef {
@@ -570,7 +563,6 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         .into();
 
         let redirect_to = self.into_operation_ref(sibling_id);
-
         self.set_connect_into_target(internal, RedirectConnection::new(redirect_to))
     }
 
@@ -844,7 +836,7 @@ where
                 operations: &diagram.ops,
                 templates: &diagram.templates,
                 on_implicit_error,
-                namespaces: id.get_namespaces(),
+                namespaces: Default::default(),
             };
 
             let connect = construction
