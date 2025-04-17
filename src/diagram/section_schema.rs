@@ -884,6 +884,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(result, 12);
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "multiply_then_add": {
+                    "inputs": {
+                        "input": "multiply",
+                    },
+                    "outputs": ["output"],
+                    "ops": {
+                        "multiply": {
+                            "type": "node",
+                            "builder": "multiply_by",
+                            "config": 10,
+                            "next": { "add": "input" },
+                        },
+                        "add": {
+                            "type": "section",
+                            "template": "adding_template",
+                            "connect": {
+                                "added": "output",
+                            }
+                        }
+                    }
+                },
+                "adding_template": {
+                    "inputs": ["input"],
+                    "outputs": ["added"],
+                    "ops": {
+                        "input": {
+                            "type": "node",
+                            "builder": "add_to",
+                            "config": 1,
+                            "next": "added",
+                        }
+                    }
+                }
+            },
+            "start": { "multiply": "input" },
+            "ops": {
+                "multiply": {
+                    "type": "section",
+                    "template": "multiply_then_add",
+                    "connect": {
+                        "output": { "builtin": "terminate" },
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let result: i64 = fixture
+            .spawn_and_run(&diagram, 5_i64)
+            .unwrap();
+
+        assert_eq!(result, 51);
     }
 
     #[test]
