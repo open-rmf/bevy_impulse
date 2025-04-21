@@ -999,11 +999,11 @@ mod tests {
                         "input": {
                             "type": "fork_clone",
                             "next": [
-                                { "child_section": "input" },
+                                { "recursive_self": "input" },
                                 "output",
                             ]
                         },
-                        "child_section": {
+                        "recursive_self": {
                             "type": "section",
                             "template": "recursive_template",
                             "connect": {
@@ -1023,6 +1023,83 @@ mod tests {
                     }
                 }
             }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_json_io_workflow(&diagram)
+            .unwrap_err();
+
+        assert!(matches!(
+            result.code,
+            DiagramErrorCode::CircularTemplateDependency(_),
+        ));
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "parent_template": {
+                    "inputs": ["input"],
+                    "outputs": ["output"],
+                    "ops": {
+                        "input": {
+                            "type": "fork_clone",
+                            "next": [
+                                { "child": "input" },
+                                "output",
+                            ]
+                        },
+                        "child": {
+                            "type": "section",
+                            "template": "child_template",
+                            "connect": {
+                                "output": "output",
+                            }
+                        }
+                    },
+                },
+                "child_template": {
+                    "inputs": ["input"],
+                    "outputs": ["output"],
+                    "ops": {
+                        "input": {
+                            "type": "node",
+                            "builder": "multiply3",
+                            "next": "grandchild",
+                        },
+                        "grandchild": {
+                            "type": "section",
+                            "template": "grandchild_template",
+                            "connect": {
+                                "output": "output",
+                            }
+                        }
+                    }
+                },
+                "grandchild_template": {
+                    "inputs": ["input"],
+                    "outputs": ["output"],
+                    "ops": {
+                        "input": {
+                            "type": "section",
+                            "template": "parent_template",
+                            "connect": {
+                                "output": "output",
+                            },
+                        },
+                    },
+                },
+            },
+            "start": { "start": "input" },
+            "ops": {
+                "start": {
+                    "type": "section",
+                    "template": "parent_template",
+                    "connect": {
+                        "output": { "builtin": "terminate" },
+                    },
+                },
+            },
         }))
         .unwrap();
 
