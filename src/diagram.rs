@@ -1683,4 +1683,38 @@ mod tests {
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
     }
+
+    #[test]
+    fn test_unknown_operation_detection() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
+            "ops": {
+                "op1": {
+                    "type": "node",
+                    "builder": "multiply3_5",
+                    "next": "clone",
+                },
+                "clone": {
+                    "type": "fork_clone",
+                    "next": [
+                        "unknown",
+                        { "builtin": "terminate" },
+                    ],
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_json_io_workflow(&diagram)
+            .unwrap_err();
+
+        assert!(matches!(
+            result.code,
+            DiagramErrorCode::UnknownOperation(_),
+        ));
+    }
 }
