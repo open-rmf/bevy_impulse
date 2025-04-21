@@ -335,20 +335,8 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         input: DynInputSlot,
     ) -> Result<(), DiagramErrorCode> {
         let operation = self.into_operation_ref(operation);
-        match self
-            .construction
-            .connect_into_target
-            .entry(operation.clone())
-        {
-            Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::DuplicateInputsCreated(operation));
-            }
-            Entry::Vacant(vacant) => {
-                vacant.insert(standard_input_connection(input, &self.registry)?);
-            }
-        }
-
-        Ok(())
+        let connect = standard_input_connection(input, &self.registry)?;
+        self.impl_connect_into_target(operation, connect)
     }
 
     /// Set the implementation for how outputs connect into this target. This is
@@ -365,17 +353,27 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     /// phase because all connection behaviors should already be set by then.
     pub fn set_connect_into_target<C: ConnectIntoTarget + 'static>(
         &mut self,
-        operation: impl Into<OperationRef> + Clone,
+        operation: impl Into<OperationRef>,
         connect: C,
     ) -> Result<(), DiagramErrorCode> {
+        let operation = self.into_operation_ref(operation);
         let connect = Box::new(connect);
+        self.impl_connect_into_target(operation, connect)
+    }
+
+    /// Internal implementation of adding a connection into a target
+    fn impl_connect_into_target(
+        &mut self,
+        operation: OperationRef,
+        connect: Box<dyn ConnectIntoTarget + 'static>,
+    ) -> Result<(), DiagramErrorCode> {
         match self
             .construction
             .connect_into_target
-            .entry(operation.clone().into())
+            .entry(operation.clone())
         {
             Entry::Occupied(_) => {
-                return Err(DiagramErrorCode::DuplicateInputsCreated(operation.into()));
+                return Err(DiagramErrorCode::DuplicateInputsCreated(operation));
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(connect);
@@ -388,10 +386,13 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     /// also set its connection callback.
     pub fn set_buffer_for_operation(
         &mut self,
-        operation: impl Into<OperationRef>,
+        operation: impl Into<OperationRef> + Clone,
         buffer: AnyBuffer,
     ) -> Result<(), DiagramErrorCode> {
-        let operation: OperationRef = operation.into();
+        let input: DynInputSlot = buffer.into();
+        self.set_input_for_target(operation.clone(), input)?;
+
+        let operation = self.into_operation_ref(operation);
         match self.construction.buffers.entry(operation.clone()) {
             Entry::Occupied(_) => {
                 return Err(DiagramErrorCode::DuplicateBuffersCreated(operation));
@@ -401,8 +402,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
             }
         }
 
-        let input: DynInputSlot = buffer.into();
-        self.set_input_for_target(operation, input)
+        Ok(())
     }
 
     /// Create a buffer map based on the buffer inputs provided. If one or more
@@ -410,7 +410,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     /// the name of the missing buffer.
     pub fn create_buffer_map(&self, inputs: &BufferSelection) -> Result<BufferMap, String> {
         let attempt_get_buffer = |buffer: &NextOperation| -> Result<AnyBuffer, String> {
-            let mut buffer_ref: OperationRef = buffer.into();
+            let mut buffer_ref: OperationRef = self.into_operation_ref(buffer);
             let mut visited = HashSet::new();
             loop {
                 if !visited.insert(buffer_ref.clone()) {
@@ -517,7 +517,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         let (exposed, redirect_to) =
             self.get_exposed_and_inner_ids(section_id, exposed_id, child_id);
 
-        self.set_connect_into_target(exposed, RedirectConnection::new(redirect_to))
+        self.impl_connect_into_target(exposed, Box::new(RedirectConnection::new(redirect_to)))
     }
 
     /// Same as [`Self::redirecto_to_child_input`], but meant for buffers.
@@ -530,9 +530,9 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         let (exposed, redirect_to) =
             self.get_exposed_and_inner_ids(section_id, exposed_id, child_id);
 
-        self.set_connect_into_target(
+        self.impl_connect_into_target(
             exposed.clone(),
-            RedirectConnection::new(redirect_to.clone()),
+            Box::new(RedirectConnection::new(redirect_to.clone())),
         )?;
 
         match self.construction.buffers.entry(exposed.clone()) {
@@ -576,7 +576,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         .into();
 
         let redirect_to = self.into_operation_ref(sibling_id);
-        self.set_connect_into_target(internal, RedirectConnection::new(redirect_to))
+        self.impl_connect_into_target(internal, Box::new(RedirectConnection::new(redirect_to)))
     }
 
     fn get_exposed_and_inner_ids(
@@ -791,7 +791,7 @@ where
             let status = unfinished
                 .op
                 .build_diagram_operation(&unfinished.id, builder, &mut ctx)
-                .map_err(|code| DiagramError::in_operation(unfinished.as_operation_ref(), code))?;
+                .map_err(|code| code.in_operation(unfinished.as_operation_ref()))?;
 
             ctx.construction
                 .transfer_generated_operations(&mut deferred_operations, &mut made_progress);
@@ -834,7 +834,9 @@ where
 
                 for output in outputs {
                     made_progress = true;
-                    connect.connect_into_target(output, builder, &mut ctx)?;
+                    connect
+                        .connect_into_target(output, builder, &mut ctx)
+                        .map_err(|code| code.in_operation(id.clone()))?;
                 }
             }
 

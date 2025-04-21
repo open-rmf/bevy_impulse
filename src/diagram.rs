@@ -1408,6 +1408,10 @@ impl DiagramErrorCode {
     pub fn operation_name_not_found(name: OperationName) -> Self {
         DiagramErrorCode::OperationNotFound(NextOperation::Name(name))
     }
+
+    pub fn in_operation(self, op_id: OperationRef) -> DiagramError {
+        DiagramError::in_operation(op_id, self)
+    }
 }
 
 #[cfg(test)]

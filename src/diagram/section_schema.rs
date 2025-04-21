@@ -382,9 +382,9 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        diagram::testing::DiagramTestFixture, testing::TestingContext, BufferAccess, BufferKey,
-        BufferSettings, Diagram, IntoBlockingCallback, JsonMessage, Node, NodeBuilderOptions,
-        RequestExt, RunCommandsOnWorldExt, SectionBuilderOptions,
+        diagram::testing::DiagramTestFixture, testing::TestingContext, BufferAccess,
+        BufferAccessMut, BufferKey, BufferSettings, Diagram, IntoBlockingCallback, JsonMessage,
+        Node, NodeBuilderOptions, RequestExt, RunCommandsOnWorldExt, SectionBuilderOptions,
     };
 
     use super::*;
@@ -722,8 +722,9 @@ mod tests {
 
     #[test]
     fn test_section_workflow_buffer() {
-        let mut registry = DiagramElementRegistry::new();
-        registry.register_section_builder(
+        let mut fixture = DiagramTestFixture::new();
+
+        fixture.registry.register_section_builder(
             SectionBuilderOptions::new("add_one_to_buffer"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|i: i64| i + 1);
@@ -735,7 +736,8 @@ mod tests {
                 }
             },
         );
-        registry
+        fixture
+            .registry
             .opt_out()
             .no_serializing()
             .no_deserializing()
@@ -778,17 +780,65 @@ mod tests {
         }))
         .unwrap();
 
-        let mut context = TestingContext::minimal_plugins();
-        let mut promise = context.app.world.command(|cmds| {
-            let workflow = diagram
-                .spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry)
-                .unwrap();
-            cmds.request(serde_json::to_value(1).unwrap(), workflow)
-                .take_response()
-        });
-        context.run_while_pending(&mut promise);
-        let result = promise.take().available().unwrap();
-        assert_eq!(result, 1);
+        let count: usize = fixture.spawn_and_run(&diagram, 1_i64).unwrap();
+        assert_eq!(count, 1);
+
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(NodeBuilderOptions::new("pull"), |builder, _: ()| {
+                builder.create_node(pull_from_buffer.into_blocking_callback())
+            })
+            .with_listen();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "multiply_10_to_buffer": {
+                    "inputs": ["input"],
+                    "buffers": ["buffer"],
+                    "ops": {
+                        "input": {
+                            "type": "node",
+                            "builder": "multiply_by",
+                            "config": 10,
+                            "next": "buffer",
+                        },
+                        "buffer": { "type": "buffer" },
+                    }
+                }
+            },
+            "start": { "multiply": "input" },
+            "ops": {
+                "multiply": {
+                    "type": "section",
+                    "template": "multiply_10_to_buffer",
+                    "connect": {
+
+                    }
+                },
+                "listen": {
+                    "type": "listen",
+                    "buffers": { "multiply": "buffer" },
+                    "next": "pull",
+                },
+                "pull": {
+                    "type": "node",
+                    "builder": "pull",
+                    "next": { "builtin": "terminate" },
+                }
+            }
+        }))
+        .unwrap();
+
+        let result: i64 = fixture.spawn_and_run(&diagram, 2_i64).unwrap();
+        assert_eq!(result, 20);
+    }
+
+    fn pull_from_buffer(In(key): In<BufferKey<i64>>, mut access: BufferAccessMut<i64>) -> i64 {
+        access.get_mut(&key).unwrap().pull().unwrap()
     }
 
     #[test]
