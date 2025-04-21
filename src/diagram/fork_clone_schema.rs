@@ -22,7 +22,7 @@ use crate::{Builder, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationName, TypeInfo
+    DynInputSlot, DynOutput, NextOperation, OperationName, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

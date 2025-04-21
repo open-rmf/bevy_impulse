@@ -50,7 +50,13 @@ pub use workflow_builder::*;
 
 // ----------
 
-use std::{borrow::Cow, collections::{HashMap, HashSet}, fmt::Display, io::Read, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    io::Read,
+    sync::Arc,
+};
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
@@ -1083,14 +1089,12 @@ impl Diagram {
     pub fn validate_template_usage(&self) -> Result<(), DiagramErrorCode> {
         for op in self.ops.values() {
             match op {
-                DiagramOperation::Section(section) => {
-                    match &section.provider {
-                        SectionProvider::Template(template) => {
-                            self.templates.validate_template(template)?;
-                        },
-                        _ => continue,
+                DiagramOperation::Section(section) => match &section.provider {
+                    SectionProvider::Template(template) => {
+                        self.templates.validate_template(template)?;
                     }
-                }
+                    _ => continue,
+                },
                 _ => continue,
             }
         }
@@ -1143,10 +1147,7 @@ impl Templates {
 
     /// Check for potential issues in one of the templates, e.g. a circular
     /// dependency with other templates.
-    pub fn validate_template(
-        &self,
-        template_id: &OperationName,
-    ) -> Result<(), DiagramErrorCode> {
+    pub fn validate_template(&self, template_id: &OperationName) -> Result<(), DiagramErrorCode> {
         check_circular_template_dependency(template_id, &self.0)?;
         Ok(())
     }
@@ -1186,14 +1187,12 @@ fn check_circular_template_dependency(
 
         for op in template.ops.0.values() {
             match op {
-                DiagramOperation::Section(section) => {
-                    match &section.provider {
-                        SectionProvider::Template(template) => {
-                            queue.push(top.child(template)?);
-                        }
-                        _ => continue,
+                DiagramOperation::Section(section) => match &section.provider {
+                    SectionProvider::Template(template) => {
+                        queue.push(top.child(template)?);
                     }
-                }
+                    _ => continue,
+                },
                 _ => continue,
             }
         }
@@ -1218,7 +1217,9 @@ impl TemplateStack {
     fn child(&self, next: &OperationName) -> Result<Self, DiagramErrorCode> {
         let mut used = self.used.clone();
         if !used.insert(Arc::clone(next)) {
-            return Err(DiagramErrorCode::CircularTemplateDependency(used.into_iter().collect()));
+            return Err(DiagramErrorCode::CircularTemplateDependency(
+                used.into_iter().collect(),
+            ));
         }
 
         Ok(Self {
@@ -1708,13 +1709,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_json_io_workflow(&diagram)
-            .unwrap_err();
+        let result = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
 
-        assert!(matches!(
-            result.code,
-            DiagramErrorCode::UnknownOperation(_),
-        ));
+        assert!(matches!(result.code, DiagramErrorCode::UnknownOperation(_),));
     }
 }

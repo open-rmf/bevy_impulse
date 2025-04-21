@@ -109,7 +109,9 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram, NodeBuilderOptions, JsonMessage};
+    use crate::{
+        diagram::testing::DiagramTestFixture, Builder, Diagram, JsonMessage, NodeBuilderOptions,
+    };
 
     #[test]
     fn test_fork_result() {

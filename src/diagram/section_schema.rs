@@ -879,9 +879,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: i64 = fixture
-            .spawn_and_run(&diagram, 4_i64)
-            .unwrap();
+        let result: i64 = fixture.spawn_and_run(&diagram, 4_i64).unwrap();
 
         assert_eq!(result, 12);
 
@@ -935,9 +933,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: i64 = fixture
-            .spawn_and_run(&diagram, 5_i64)
-            .unwrap();
+        let result: i64 = fixture.spawn_and_run(&diagram, 5_i64).unwrap();
 
         assert_eq!(result, 51);
 
@@ -991,9 +987,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: Vec<i64> = fixture
-            .spawn_and_run(&diagram, 2_i64)
-            .unwrap();
+        let result: Vec<i64> = fixture.spawn_and_run(&diagram, 2_i64).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], 12);
@@ -1036,9 +1030,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_json_io_workflow(&diagram)
-            .unwrap_err();
+        let result = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
 
         assert!(matches!(result.code, DiagramErrorCode::CircularRedirect(_)));
     }
@@ -1084,9 +1076,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_json_io_workflow(&diagram)
-            .unwrap_err();
+        let result = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
 
         assert!(matches!(
             result.code,
@@ -1161,9 +1151,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_json_io_workflow(&diagram)
-            .unwrap_err();
+        let result = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
 
         assert!(matches!(
             result.code,

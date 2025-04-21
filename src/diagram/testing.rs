@@ -123,10 +123,9 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
         |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
     );
 
-    registry.register_node_builder(
-        NodeBuilderOptions::new("add_to"),
-        |builder, config: i64| builder.create_map_block(move |a: i64| a + config),
-    );
+    registry.register_node_builder(NodeBuilderOptions::new("add_to"), |builder, config: i64| {
+        builder.create_map_block(move |a: i64| a + config)
+    });
 
     registry
         .opt_out()

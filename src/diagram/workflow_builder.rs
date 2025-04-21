@@ -217,12 +217,10 @@ impl<'a> DiagramConstruction<'a> {
         deferred_operations: &mut Vec<UnfinishedOperation<'a>>,
         made_progress: &mut bool,
     ) {
-        deferred_operations.extend(self.generated_operations.drain(..).map(
-            |unfinished| {
-                *made_progress = true;
-                unfinished
-            },
-        ));
+        deferred_operations.extend(self.generated_operations.drain(..).map(|unfinished| {
+            *made_progress = true;
+            unfinished
+        }));
     }
 }
 
@@ -778,7 +776,6 @@ where
 
     // Iteratively build all the operations in the diagram
     while !unfinished_operations.is_empty() || construction.has_outputs() {
-
         let mut made_progress = false;
         for unfinished in unfinished_operations.drain(..) {
             let mut ctx = DiagramContext {
@@ -796,7 +793,8 @@ where
                 .build_diagram_operation(&unfinished.id, builder, &mut ctx)
                 .map_err(|code| DiagramError::in_operation(unfinished.as_operation_ref(), code))?;
 
-            ctx.construction.transfer_generated_operations(&mut deferred_operations, &mut made_progress);
+            ctx.construction
+                .transfer_generated_operations(&mut deferred_operations, &mut made_progress);
 
             made_progress |= status.made_progress();
             if !status.is_finished() {
@@ -869,9 +867,7 @@ where
                 reasons: deferred_statuses
                     .drain(..)
                     .filter_map(|(id, status)| {
-                        status
-                        .into_deferral_reason()
-                        .map(|reason| (id, reason))
+                        status.into_deferral_reason().map(|reason| (id, reason))
                     })
                     .collect(),
             }
@@ -1195,9 +1191,9 @@ impl ConnectIntoTarget for RedirectConnection {
             // This DynOutput has been redirected by this connector before, so
             // we have a circular connection, making it impossible for the
             // output to ever really be connected to anything.
-            return Err(DiagramErrorCode::CircularRedirect(
-                vec![self.redirect_to.clone()]
-            ));
+            return Err(DiagramErrorCode::CircularRedirect(vec![self
+                .redirect_to
+                .clone()]));
         }
         Ok(())
     }
@@ -1223,8 +1219,7 @@ impl ConnectIntoTarget for RedirectConnection {
 
 impl<'a, 'c> std::fmt::Debug for DiagramContext<'a, 'c> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("DiagramContext")
+        f.debug_struct("DiagramContext")
             .field("construction", &DebugDiagramConstruction(self))
             .finish()
     }
@@ -1234,12 +1229,17 @@ struct DebugDiagramConstruction<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
 
 impl<'a, 'c, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f
-            .debug_struct("DiagramConstruction")
+        f.debug_struct("DiagramConstruction")
             .field("connect_into_target", &DebugConnections(self.0))
-            .field("outputs_into_target", &self.0.construction.outputs_into_target)
+            .field(
+                "outputs_into_target",
+                &self.0.construction.outputs_into_target,
+            )
             .field("buffers", &self.0.construction.buffers)
-            .field("generated_operations", &self.0.construction.generated_operations)
+            .field(
+                "generated_operations",
+                &self.0.construction.generated_operations,
+            )
             .finish()
     }
 }
@@ -1250,7 +1250,13 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_map();
         for (op, connect) in &self.0.construction.connect_into_target {
-            debug.entry(op, &DebugConnection { connect, context: self.0 });
+            debug.entry(
+                op,
+                &DebugConnection {
+                    connect,
+                    context: self.0,
+                },
+            );
         }
 
         debug.finish()

@@ -437,9 +437,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, JsonMessage::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "hello world");
     }
@@ -497,9 +495,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, JsonMessage::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
