@@ -50,7 +50,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
             ) -> SectionSlots {
                 let mut slots = SectionSlots::new();
                 #(
-                    self.#field_ident.insert_into_slots(#field_name_str.to_string(), &mut slots);
+                    self.#field_ident.insert_into_slots(&#field_name_str, &mut slots);
                 )*
                 slots
             }
@@ -85,7 +85,7 @@ pub(crate) fn impl_section(input_struct: &ItemStruct) -> Result<TokenStream> {
                     #(
                         <#field_type as ::bevy_impulse::SectionItem>::build_metadata(
                             &mut metadata,
-                            #field_name_str,
+                            &#field_name_str,
                         );
                     )*
                     metadata
@@ -164,7 +164,7 @@ fn gen_register_deserialize(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStrea
         .map(|(config, span)| {
             if config.no_deserialize {
                 quote_spanned! {*span=>
-                    let _opt_out = _opt_out.no_request_deserializing();
+                    let _opt_out = _opt_out.no_deserializing();
                 }
             } else {
                 TokenStream::new()
@@ -179,7 +179,7 @@ fn gen_register_serialize(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream>
         .map(|(config, span)| {
             if config.no_serialize {
                 parse_quote_spanned! {*span=>
-                    let _opt_out = _opt_out.no_response_serializing();
+                    let _opt_out = _opt_out.no_serializing();
                 }
             } else {
                 TokenStream::new()
@@ -194,7 +194,7 @@ fn gen_register_fork_clone(fields: &Vec<(FieldConfig, Span)>) -> Vec<TokenStream
         .map(|(config, span)| {
             if config.no_clone {
                 quote_spanned! {*span=>
-                    let _opt_out = _opt_out.no_response_cloning();
+                    let _opt_out = _opt_out.no_cloning();
                 }
             } else {
                 TokenStream::new()

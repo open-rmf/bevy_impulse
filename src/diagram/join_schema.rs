@@ -1,149 +1,100 @@
-use std::collections::HashMap;
+/*
+ * Copyright (C) 2025 Open Source Robotics Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+*/
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{AnyBuffer, AnyMessageBox, BufferIdentifier, Builder};
+use crate::{Builder, JsonMessage};
 
 use super::{
-    buffer::{get_node_request_type, BufferInputs},
-    Diagram, DiagramElementRegistry, DiagramErrorCode, NextOperation, OperationId, Vertex,
-    WorkflowBuilder,
+    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    NextOperation, OperationName,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct JoinOp {
+pub struct JoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
-
-    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<NextOperation>,
+    pub(super) buffers: BufferSelection,
 }
 
-impl JoinOp {
-    pub(super) fn add_vertices<'a>(
-        &'a self,
-        wf_builder: &mut WorkflowBuilder<'a>,
-        op_id: String,
-        diagram: &'a Diagram,
-    ) {
-        wf_builder
-            .add_vertex(op_id.clone(), move |vertex, builder, registry, buffers| {
-                self.try_connect(vertex, builder, registry, buffers, diagram)
-            })
-            .add_output_edge(self.next.clone(), None);
-    }
-
-    pub(super) fn try_connect(
+impl BuildDiagramOperation for JoinSchema {
+    fn build_diagram_operation(
         &self,
-        vertex: &Vertex,
+        _: &OperationName,
         builder: &mut Builder,
-        registry: &DiagramElementRegistry,
-        buffers: &HashMap<OperationId, AnyBuffer>,
-        diagram: &Diagram,
-    ) -> Result<bool, DiagramErrorCode> {
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
-            buffers
-        } else {
-            return Ok(false);
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
         };
-        let target_type = get_node_request_type(&self.target_node, &self.next, diagram, registry)?;
-        let output = registry.messages.join(builder, &buffers, target_type)?;
 
-        vertex.out_edges[0].set_output(output);
-        Ok(true)
+        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
+            Ok(buffer_map) => buffer_map,
+            Err(reason) => return Ok(BuildStatus::defer(reason)),
+        };
+
+        let output = ctx
+            .registry
+            .messages
+            .join(&target_type, &buffer_map, builder)?;
+        ctx.add_output_into_target(&self.next, output);
+        Ok(BuildStatus::Finished)
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SerializedJoinOp {
+pub struct SerializedJoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 }
 
-impl SerializedJoinOp {
-    pub(super) fn add_vertices<'a>(&'a self, wf_builder: &mut WorkflowBuilder<'a>, op_id: String) {
-        wf_builder
-            .add_vertex(op_id.clone(), move |vertex, builder, _, buffers| {
-                self.try_connect(vertex, builder, buffers)
-            })
-            .add_output_edge(self.next.clone(), None);
-    }
-
-    pub(super) fn try_connect(
+impl BuildDiagramOperation for SerializedJoinSchema {
+    fn build_diagram_operation(
         &self,
-        vertex: &Vertex,
+        _: &OperationName,
         builder: &mut Builder,
-        buffers: &HashMap<OperationId, AnyBuffer>,
-    ) -> Result<bool, DiagramErrorCode> {
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
-        let buffers = if let Some(buffers) = self.buffers.as_buffer_map(buffers) {
-            buffers
-        } else {
-            return Ok(false);
+        let buffer_map = match ctx.create_buffer_map(&self.buffers) {
+            Ok(buffer_map) => buffer_map,
+            Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
-        let buffer_inputs = self.buffers.clone();
-        let output = builder
-            .try_join::<HashMap<BufferIdentifier<'static>, AnyMessageBox>>(&buffers)?
-            .map_block(
-                move |joined| -> Result<serde_json::Value, DiagramErrorCode> {
-                    if joined.is_empty() {
-                        return Ok(serde_json::Value::Null);
-                    }
 
-                    match &buffer_inputs {
-                        BufferInputs::Dict(_) => {
-                            let values = joined
-                                .iter()
-                                .filter_map(|(k, any_msg)| match k {
-                                    BufferIdentifier::Name(k) => {
-                                        match any_msg
-                                            .downcast_ref::<serde_json::Value>()
-                                            .ok_or(DiagramErrorCode::NotSerializable)
-                                        {
-                                            Ok(value) => Some(Ok((k, value))),
-                                            Err(err) => Some(Err(err)),
-                                        }
-                                    }
-                                    _ => None,
-                                })
-                                .collect::<Result<HashMap<_, _>, DiagramErrorCode>>()?;
-                            Ok(serde_json::to_value(values).unwrap())
-                        }
-                        BufferInputs::Array(arr) => {
-                            let values = (0..arr.len())
-                                .map(|i| {
-                                    let value = joined.get(&BufferIdentifier::Index(i)).unwrap();
-                                    value
-                                        .downcast_ref::<serde_json::Value>()
-                                        .ok_or(DiagramErrorCode::NotSerializable)
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-                            Ok(serde_json::to_value(values).unwrap())
-                        }
-                    }
-                },
-            )
-            .cancel_on_err()
-            .output()
-            .into();
+        let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
+        ctx.add_output_into_target(&self.next, output.into());
 
-        vertex.out_edges[0].set_output(output);
-        Ok(true)
+        Ok(BuildStatus::Finished)
     }
 }
 
@@ -154,16 +105,14 @@ pub type JoinOutput<T> = SmallVec<[T; 4]>;
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
     use bevy_impulse_derive::Joined;
     use serde_json::json;
     use test_log::test;
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Cancellation, CancellationCause, Diagram,
-        DiagramError, DiagramErrorCode, FilteredErr, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry, DiagramErrorCode,
+        NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -178,6 +127,15 @@ mod tests {
     struct FooBar {
         foo: String,
         bar: String,
+    }
+
+    impl Default for FooBar {
+        fn default() -> Self {
+            FooBar {
+                foo: "foo".to_owned(),
+                bar: "bar".to_owned(),
+            }
+        }
     }
 
     fn foobar(foobar: FooBar) -> String {
@@ -196,6 +154,8 @@ mod tests {
             builder.create_map_block(bar)
         });
         registry
+            .opt_out()
+            .no_cloning()
             .register_node_builder(NodeBuilderOptions::new("foobar"), |builder, _config: ()| {
                 builder.create_map_block(foobar)
             })
@@ -206,6 +166,15 @@ mod tests {
                 |builder, _config: ()| builder.create_map_block(foobar_array),
             )
             .with_join();
+        registry.opt_out().no_cloning().register_node_builder(
+            NodeBuilderOptions::new("create_foobar"),
+            |builder, config: FooBar| {
+                builder.create_map_block(move |_: JsonMessage| FooBar {
+                    foo: config.foo.clone(),
+                    bar: config.bar.clone(),
+                })
+            },
+        );
     }
 
     #[test]
@@ -255,9 +224,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
@@ -308,15 +276,14 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
     #[test]
-    /// when `target_node` is not given and next is not a node
-    fn test_join_infer_type_fail() {
+    /// join should be able to infer its output type when connected to terminate
+    fn test_join_infer_from_terminate() {
         let mut fixture = DiagramTestFixture::new();
         register_join_nodes(&mut fixture.registry);
 
@@ -360,11 +327,18 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap_err();
-        let err_code = &result.downcast_ref::<DiagramError>().unwrap().code;
-        assert!(matches!(err_code, DiagramErrorCode::UnknownTarget,));
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        let expectation = serde_json::Value::Object(serde_json::Map::from_iter([
+            (
+                "bar".to_string(),
+                serde_json::Value::String("bar".to_string()),
+            ),
+            (
+                "foo".to_string(),
+                serde_json::Value::String("foo".to_string()),
+            ),
+        ]));
+        assert_eq!(result, expectation);
     }
 
     #[test]
@@ -411,9 +385,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
@@ -446,7 +419,7 @@ mod tests {
         }))
         .unwrap();
 
-        let err = fixture.spawn_io_workflow(&diagram).unwrap_err();
+        let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(matches!(err.code, DiagramErrorCode::EmptyJoin));
     }
 
@@ -493,9 +466,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result["foo"], "foo");
         assert_eq!(result["bar"], "bar");
     }
@@ -511,29 +483,37 @@ mod tests {
             "ops": {
                 "fork_clone": {
                     "type": "fork_clone",
-                    "next": ["foo", "bar"],
+                    "next": ["create_foobar_1", "create_foobar_2"],
                 },
-                "foo": {
+                "create_foobar_1": {
                     "type": "node",
-                    "builder": "foo",
-                    "next": "foo_buffer",
+                    "builder": "create_foobar",
+                    "config": {
+                        "foo": "foo_1",
+                        "bar": "bar_1",
+                    },
+                    "next": "foobar_buffer_1",
                 },
-                "foo_buffer": {
+                "create_foobar_2": {
+                    "type": "node",
+                    "builder": "create_foobar",
+                    "config": {
+                        "foo": "foo_2",
+                        "bar": "bar_2",
+                    },
+                    "next": "foobar_buffer_2",
+                },
+                "foobar_buffer_1": {
                     "type": "buffer",
                 },
-                "bar": {
-                    "type": "node",
-                    "builder": "bar",
-                    "next": "bar_buffer",
-                },
-                "bar_buffer": {
+                "foobar_buffer_2": {
                     "type": "buffer",
                 },
                 "serialized_join": {
                     "type": "serialized_join",
                     "buffers": {
-                        "foo": "foo_buffer",
-                        "bar": "bar_buffer",
+                        "foobar_1": "foobar_buffer_1",
+                        "foobar_2": "foobar_buffer_2",
                     },
                     "next": { "builtin": "terminate" },
                 },
@@ -541,26 +521,12 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap_err();
-        let cause = result.downcast::<Cancellation>().unwrap().cause;
-        let filtered = match cause.as_ref() {
-            CancellationCause::Filtered(filtered) => filtered,
-            _ => panic!("expected filtered"),
-        };
-        assert!(matches!(
-            filtered
-                .reason
-                .as_ref()
-                .unwrap()
-                .downcast_ref::<FilteredErr<DiagramErrorCode>>()
-                .unwrap()
-                .source()
-                .unwrap()
-                .downcast_ref::<DiagramErrorCode>()
-                .unwrap(),
-            DiagramErrorCode::NotSerializable
-        ));
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        let object = result.as_object().unwrap();
+        assert_eq!(object["foobar_1"].as_object().unwrap()["foo"], "foo_1");
+        assert_eq!(object["foobar_1"].as_object().unwrap()["bar"], "bar_1");
+        assert_eq!(object["foobar_2"].as_object().unwrap()["foo"], "foo_2");
+        assert_eq!(object["foobar_2"].as_object().unwrap()["bar"], "bar_2");
     }
 }

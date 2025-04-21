@@ -20,6 +20,7 @@ use crate::{
     UnhandledErrors,
 };
 
+use bevy_derive::Deref;
 use bevy_ecs::{
     prelude::{Component, Entity, World},
     system::Command,
@@ -70,6 +71,9 @@ pub use operate_buffer_access::*;
 
 mod operate_callback;
 pub(crate) use operate_callback::*;
+
+mod operate_cancel;
+pub(crate) use operate_cancel::*;
 
 mod operate_gate;
 pub(crate) use operate_gate::*;
@@ -610,6 +614,9 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
             OperationExecuteStorage(perform_operation::<Op>),
             OperationCleanupStorage(Op::cleanup),
             OperationReachabilityStorage(Op::is_reachable),
+            OperationType {
+                name: std::any::type_name::<Op>(),
+            },
         ));
         if let Some(scope) = self.scope {
             source_mut
@@ -638,6 +645,11 @@ pub(crate) struct OperationExecuteStorage(pub(crate) fn(OperationRequest));
 
 #[derive(Component)]
 pub(crate) struct OperationReachabilityStorage(fn(OperationReachability) -> ReachabilityResult);
+
+#[derive(Component, Deref, Debug)]
+pub(crate) struct OperationType {
+    name: &'static str,
+}
 
 pub fn execute_operation(request: OperationRequest) {
     let Some(operator) = request.world.get::<OperationExecuteStorage>(request.source) else {
