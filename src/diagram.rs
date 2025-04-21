@@ -50,7 +50,7 @@ pub use workflow_builder::*;
 
 // ----------
 
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read, sync::Arc};
+use std::{borrow::Cow, collections::{HashMap, HashSet}, fmt::Display, io::Read, sync::Arc};
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
@@ -1069,9 +1069,32 @@ impl Diagram {
         serde_json::from_reader(r)
     }
 
+    /// Make sure all operation names are valid, e.g. no reserved words such as
+    /// `builtin` are being used.
     pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
         self.ops.validate_operation_names()?;
         self.templates.validate_operation_names()?;
+        Ok(())
+    }
+
+    /// Validate the templates that are being used within the `ops` section, or
+    /// recursively within any templates used by the `ops` section. Any unused
+    /// templates will not be validated.
+    pub fn validate_template_usage(&self) -> Result<(), DiagramErrorCode> {
+        for op in self.ops.values() {
+            match op {
+                DiagramOperation::Section(section) => {
+                    match &section.provider {
+                        SectionProvider::Template(template) => {
+                            self.templates.validate_template(template)?;
+                        },
+                        _ => continue,
+                    }
+                }
+                _ => continue,
+            }
+        }
+
         Ok(())
     }
 }
@@ -1117,6 +1140,16 @@ impl Templates {
 
         Ok(())
     }
+
+    /// Check for potential issues in one of the templates, e.g. a circular
+    /// dependency with other templates.
+    pub fn validate_template(
+        &self,
+        template_id: &OperationName,
+    ) -> Result<(), DiagramErrorCode> {
+        check_circular_template_dependency(template_id, &self.0)?;
+        Ok(())
+    }
 }
 
 fn validate_operation_names(
@@ -1137,6 +1170,62 @@ fn validate_operation_name(name: &str) -> Result<(), DiagramErrorCode> {
     }
 
     Ok(())
+}
+
+fn check_circular_template_dependency(
+    start_from: &OperationName,
+    templates: &HashMap<OperationName, SectionTemplate>,
+) -> Result<(), DiagramErrorCode> {
+    let mut queue = Vec::new();
+    queue.push(TemplateStack::new(start_from));
+
+    while let Some(top) = queue.pop() {
+        let Some(template) = templates.get(&top.next) else {
+            return Err(DiagramErrorCode::UnknownTemplate(top.next));
+        };
+
+        for op in template.ops.0.values() {
+            match op {
+                DiagramOperation::Section(section) => {
+                    match &section.provider {
+                        SectionProvider::Template(template) => {
+                            queue.push(top.child(template)?);
+                        }
+                        _ => continue,
+                    }
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    Ok(())
+}
+
+struct TemplateStack {
+    used: HashSet<OperationName>,
+    next: OperationName,
+}
+
+impl TemplateStack {
+    fn new(op: &OperationName) -> Self {
+        TemplateStack {
+            used: HashSet::from_iter([Arc::clone(op)]),
+            next: Arc::clone(op),
+        }
+    }
+
+    fn child(&self, next: &OperationName) -> Result<Self, DiagramErrorCode> {
+        let mut used = self.used.clone();
+        if !used.insert(Arc::clone(next)) {
+            return Err(DiagramErrorCode::CircularTemplateDependency(used.into_iter().collect()));
+        }
+
+        Ok(Self {
+            used,
+            next: Arc::clone(next),
+        })
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1238,6 +1327,9 @@ pub enum DiagramErrorCode {
     #[error("There was an attempt to connect to an unknown operation: [{0}]")]
     UnknownOperation(OperationRef),
 
+    #[error("There was an attempt to use an unknown section template: [{0}]")]
+    UnknownTemplate(OperationName),
+
     #[error("There was an attempt to use an operation in an invalid way: [{0}]")]
     InvalidOperation(OperationRef),
 
@@ -1286,11 +1378,14 @@ pub enum DiagramErrorCode {
     #[error("an error happened while building a nested diagram: {0}")]
     NestedError(Box<DiagramError>),
 
-    #[error("A circular dependency exists between operations: {}", format_operation_list(&.0))]
-    CircularDependency(Vec<OperationRef>),
+    #[error("A circular redirection exists between operations: {}", format_list(&.0))]
+    CircularRedirect(Vec<OperationRef>),
+
+    #[error("A circular dependency exists between templates: {}", format_list(&.0))]
+    CircularTemplateDependency(Vec<OperationName>),
 }
 
-fn format_operation_list(list: &[OperationRef]) -> String {
+fn format_list<T: std::fmt::Display>(list: &[T]) -> String {
     let mut output = String::new();
     for op in list {
         output += &format!("[{op}]");

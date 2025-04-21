@@ -719,6 +719,7 @@ where
     Streams: StreamPack,
 {
     diagram.validate_operation_names()?;
+    diagram.validate_template_usage()?;
 
     let mut construction = DiagramConstruction::default();
 
@@ -1175,7 +1176,7 @@ impl ConnectIntoTarget for RedirectConnection {
             // This DynOutput has been redirected by this connector before, so
             // we have a circular connection, making it impossible for the
             // output to ever really be connected to anything.
-            return Err(DiagramErrorCode::CircularDependency(
+            return Err(DiagramErrorCode::CircularRedirect(
                 vec![self.redirect_to.clone()]
             ));
         }
@@ -1194,7 +1195,7 @@ impl ConnectIntoTarget for RedirectConnection {
                 return Ok(None);
             }
         } else {
-            return Err(DiagramErrorCode::CircularDependency(
+            return Err(DiagramErrorCode::CircularRedirect(
                 visited.drain().collect(),
             ));
         }

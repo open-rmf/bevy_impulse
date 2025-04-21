@@ -982,6 +982,57 @@ mod tests {
             .spawn_json_io_workflow(&diagram)
             .unwrap_err();
 
-        assert!(matches!(result.code, DiagramErrorCode::CircularDependency(_)));
+        assert!(matches!(result.code, DiagramErrorCode::CircularRedirect(_)));
+    }
+
+    #[test]
+    fn test_circular_template_dependency() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "recursive_template": {
+                    "inputs": ["input"],
+                    "outputs": ["output"],
+                    "ops": {
+                        "input": {
+                            "type": "fork_clone",
+                            "next": [
+                                { "child_section": "input" },
+                                "output",
+                            ]
+                        },
+                        "child_section": {
+                            "type": "section",
+                            "template": "recursive_template",
+                            "connect": {
+                                "output": "output",
+                            }
+                        }
+                    }
+                }
+            },
+            "start": { "start": "input" },
+            "ops": {
+                "start": {
+                    "type": "section",
+                    "template": "recursive_template",
+                    "connect": {
+                        "output": { "builtin": "terminate" },
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let result = fixture
+            .spawn_json_io_workflow(&diagram)
+            .unwrap_err();
+
+        assert!(matches!(
+            result.code,
+            DiagramErrorCode::CircularTemplateDependency(_),
+        ));
     }
 }
