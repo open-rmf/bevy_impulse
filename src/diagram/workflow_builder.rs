@@ -214,19 +214,13 @@ struct DiagramConstruction<'a> {
 impl<'a> DiagramConstruction<'a> {
     fn transfer_generated_operations(
         &mut self,
-        deferred_operations: &mut Vec<DeferredOperation<'a>>,
+        deferred_operations: &mut Vec<UnfinishedOperation<'a>>,
         made_progress: &mut bool,
     ) {
         deferred_operations.extend(self.generated_operations.drain(..).map(
             |unfinished| {
                 *made_progress = true;
-                DeferredOperation {
-                    unfinished,
-                    status: BuildStatus::Defer {
-                        progress: true,
-                        reason: Cow::Borrowed("generated operation"),
-                    },
-                }
+                unfinished
             },
         ));
     }
@@ -773,7 +767,8 @@ where
         .iter()
         .map(|(id, op)| UnfinishedOperation::new(Arc::clone(id), op, &diagram.ops))
         .collect();
-    let mut deferred_operations: Vec<DeferredOperation> = Vec::new();
+    let mut deferred_operations: Vec<UnfinishedOperation> = Vec::new();
+    let mut deferred_statuses: Vec<(OperationRef, BuildStatus)> = Vec::new();
 
     let mut deferred_connections = HashMap::new();
     let mut connector_construction = DiagramConstruction::default();
@@ -807,15 +802,12 @@ where
             if !status.is_finished() {
                 // The operation did not finish, so pass it into the deferred
                 // operations list.
-                deferred_operations.push(DeferredOperation { unfinished, status });
+                deferred_statuses.push((unfinished.as_operation_ref(), status));
+                deferred_operations.push(unfinished);
             }
         }
 
-        unfinished_operations.extend(
-            deferred_operations
-            .drain(..)
-            .map(|deferred| deferred.unfinished)
-        );
+        unfinished_operations.extend(deferred_operations.drain(..));
 
         // Transfer outputs into their connections. Sometimes this needs to be
         // done before other operations can be built, e.g. a connection may need
@@ -859,13 +851,7 @@ where
                 .extend(deferred_connections.drain());
 
             connector_construction
-                .transfer_generated_operations(&mut deferred_operations, &mut made_progress);
-
-            unfinished_operations.extend(
-                deferred_operations
-                .drain(..)
-                .map(|deferred| deferred.unfinished)
-            );
+                .transfer_generated_operations(&mut unfinished_operations, &mut made_progress);
 
             iterations += 1;
             if iterations > MAX_ITERATIONS {
@@ -880,13 +866,12 @@ where
         if !made_progress {
             // No progress can be made any longer so return an error
             return Err(DiagramErrorCode::BuildHalted {
-                reasons: deferred_operations
+                reasons: deferred_statuses
                     .drain(..)
-                    .filter_map(|deferred| {
-                        deferred
-                            .status
-                            .into_deferral_reason()
-                            .map(|reason| (deferred.unfinished.as_operation_ref(), reason))
+                    .filter_map(|(id, status)| {
+                        status
+                        .into_deferral_reason()
+                        .map(|reason| (id, reason))
                     })
                     .collect(),
             }
@@ -940,11 +925,6 @@ impl<'a> UnfinishedOperation<'a> {
         }
         .into()
     }
-}
-
-struct DeferredOperation<'a> {
-    unfinished: UnfinishedOperation<'a>,
-    status: BuildStatus,
 }
 
 fn initialize_builtin_operations<Request, Response, Streams>(
