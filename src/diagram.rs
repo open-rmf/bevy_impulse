@@ -44,7 +44,7 @@ pub use serialization::*;
 pub use split_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
-use type_info::TypeInfo;
+pub use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
 

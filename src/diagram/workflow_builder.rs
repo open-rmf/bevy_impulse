@@ -520,7 +520,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         self.impl_connect_into_target(exposed, Box::new(RedirectConnection::new(redirect_to)))
     }
 
-    /// Same as [`Self::redirecto_to_child_input`], but meant for buffers.
+    /// Same as [`Self::redirect_to_child_input`], but meant for buffers.
     pub fn redirect_to_child_buffer(
         &mut self,
         section_id: &OperationName,
@@ -667,11 +667,8 @@ impl BuildStatus {
 
 /// This trait is used to instantiate operations in the workflow. This trait
 /// will be called on each operation in the diagram until it finishes building.
-/// Each operation should use this to provide a [`ConnectOutput`] handle for
+/// Each operation should use this to provide a [`ConnectIntoTarget`] handle for
 /// itself (if relevant) and deposit [`DynOutput`]s into [`DiagramContext`].
-///
-/// After all operations are fully built, [`ConnectIntoTarget`] will be used to
-/// connect outputs into their target operations.
 pub trait BuildDiagramOperation {
     fn build_diagram_operation(
         &self,
@@ -685,12 +682,7 @@ pub trait BuildDiagramOperation {
 /// will be called for each output produced by [`BuildDiagramOperation`].
 ///
 /// You are allowed to generate new outputs during the [`ConnectIntoTarget`]
-/// phase by calling [`DiagramContext::add_outputs_into_target`].
-///
-/// However you cannot add new [`ConnectIntoTarget`] instances for operations.
-/// Any use of [`DiagramContext::set_input_for_target`],
-/// [`DiagramContext::set_connect_into_target`], or
-/// [`DiagramContext::set_connect_into_target_callback`] will be discarded.
+/// phase by calling [`DiagramContext::add_output_into_target`].
 pub trait ConnectIntoTarget {
     fn connect_into_target(
         &mut self,
@@ -852,6 +844,9 @@ where
 
             connector_construction
                 .transfer_generated_operations(&mut unfinished_operations, &mut made_progress);
+
+            // TODO(@mxgrey): Consider draining new connect_into_target entries
+            // out of connector_construction.
 
             iterations += 1;
             if iterations > MAX_ITERATIONS {
