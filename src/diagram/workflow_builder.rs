@@ -211,21 +211,42 @@ struct DiagramConstruction<'a> {
     generated_operations: Vec<UnfinishedOperation<'a>>,
 }
 
-#[derive(Clone)]
+impl<'a> DiagramConstruction<'a> {
+    fn transfer_generated_operations(
+        &mut self,
+        deferred_operations: &mut Vec<DeferredOperation<'a>>,
+        made_progress: &mut bool,
+    ) {
+        deferred_operations.extend(self.generated_operations.drain(..).map(
+            |unfinished| {
+                *made_progress = true;
+                DeferredOperation {
+                    unfinished,
+                    status: BuildStatus::Defer {
+                        progress: true,
+                        reason: Cow::Borrowed("generated operation"),
+                    },
+                }
+            },
+        ));
+    }
+}
+
+#[derive(Clone, Debug)]
 enum BufferRef {
     Ref(OperationRef),
     Value(AnyBuffer),
 }
 
 impl<'a> DiagramConstruction<'a> {
-    fn is_finished(&self) -> bool {
+    fn has_outputs(&self) -> bool {
         for outputs in self.outputs_into_target.values() {
             if !outputs.is_empty() {
-                return false;
+                return true;
             }
         }
 
-        return true;
+        return false;
     }
 }
 
@@ -754,11 +775,15 @@ where
         .collect();
     let mut deferred_operations: Vec<DeferredOperation> = Vec::new();
 
+    let mut deferred_connections = HashMap::new();
+    let mut connector_construction = DiagramConstruction::default();
+
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 10_000;
 
     // Iteratively build all the operations in the diagram
-    while !unfinished_operations.is_empty() {
+    while !unfinished_operations.is_empty() || construction.has_outputs() {
+
         let mut made_progress = false;
         for unfinished in unfinished_operations.drain(..) {
             let mut ctx = DiagramContext {
@@ -776,18 +801,7 @@ where
                 .build_diagram_operation(&unfinished.id, builder, &mut ctx)
                 .map_err(|code| DiagramError::in_operation(unfinished.as_operation_ref(), code))?;
 
-            deferred_operations.extend(ctx.construction.generated_operations.drain(..).map(
-                |unfinished| {
-                    made_progress = true;
-                    DeferredOperation {
-                        unfinished,
-                        status: BuildStatus::Defer {
-                            progress: true,
-                            reason: Cow::Borrowed("generated operation"),
-                        },
-                    }
-                },
-            ));
+            ctx.construction.transfer_generated_operations(&mut deferred_operations, &mut made_progress);
 
             made_progress |= status.made_progress();
             if !status.is_finished() {
@@ -797,13 +811,73 @@ where
             }
         }
 
-        if made_progress {
-            // Try another iteration if needed since we made progress last time
-            unfinished_operations = deferred_operations
+        unfinished_operations.extend(
+            deferred_operations
+            .drain(..)
+            .map(|deferred| deferred.unfinished)
+        );
+
+        // Transfer outputs into their connections. Sometimes this needs to be
+        // done before other operations can be built, e.g. a connection may need
+        // to be redirected before its target operation knows how to infer its
+        // message type.
+        connector_construction.buffers = construction.buffers.clone();
+        loop {
+            for (id, outputs) in construction.outputs_into_target.drain() {
+                let mut ctx = DiagramContext {
+                    construction: &mut connector_construction,
+                    registry,
+                    operations: &diagram.ops,
+                    templates: &diagram.templates,
+                    on_implicit_error,
+                    namespaces: Default::default(),
+                };
+
+                let Some(connect) = construction.connect_into_target.get_mut(&id) else {
+                    if unfinished_operations.is_empty() {
+                        return Err(DiagramErrorCode::UnknownOperation(id.into()).into());
+                    } else {
+                        deferred_connections.insert(id, outputs);
+                        continue;
+                    }
+                };
+
+                for output in outputs {
+                    made_progress = true;
+                    connect.connect_into_target(output, builder, &mut ctx)?;
+                }
+            }
+
+            let new_connections = !connector_construction.outputs_into_target.is_empty();
+
+            construction
+                .outputs_into_target
+                .extend(connector_construction.outputs_into_target.drain());
+
+            construction
+                .outputs_into_target
+                .extend(deferred_connections.drain());
+
+            connector_construction
+                .transfer_generated_operations(&mut deferred_operations, &mut made_progress);
+
+            unfinished_operations.extend(
+                deferred_operations
                 .drain(..)
                 .map(|deferred| deferred.unfinished)
-                .collect();
-        } else {
+            );
+
+            iterations += 1;
+            if iterations > MAX_ITERATIONS {
+                return Err(DiagramErrorCode::ExcessiveIterations.into());
+            }
+
+            if !new_connections {
+                break;
+            }
+        }
+
+        if !made_progress {
             // No progress can be made any longer so return an error
             return Err(DiagramErrorCode::BuildHalted {
                 reasons: deferred_operations
@@ -818,41 +892,6 @@ where
             }
             .into());
         }
-
-        iterations += 1;
-        if iterations > MAX_ITERATIONS {
-            return Err(DiagramErrorCode::ExcessiveIterations.into());
-        }
-    }
-
-    let mut new_construction = DiagramConstruction::default();
-    new_construction.buffers = construction.buffers.clone();
-
-    iterations = 0;
-    while !construction.is_finished() {
-        for (id, outputs) in construction.outputs_into_target.drain() {
-            let mut ctx = DiagramContext {
-                construction: &mut new_construction,
-                registry,
-                operations: &diagram.ops,
-                templates: &diagram.templates,
-                on_implicit_error,
-                namespaces: Default::default(),
-            };
-
-            let connect = construction
-                .connect_into_target
-                .get_mut(&id)
-                .ok_or_else(|| DiagramErrorCode::UnknownOperation(id.into()))?;
-
-            for output in outputs {
-                connect.connect_into_target(output, builder, &mut ctx)?;
-            }
-        }
-
-        construction
-            .outputs_into_target
-            .extend(new_construction.outputs_into_target.drain());
 
         iterations += 1;
         if iterations > MAX_ITERATIONS {
@@ -1199,5 +1238,64 @@ impl ConnectIntoTarget for RedirectConnection {
                 visited.drain().collect(),
             ));
         }
+    }
+}
+
+impl<'a, 'c> std::fmt::Debug for DiagramContext<'a, 'c> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("DiagramContext")
+            .field("construction", &DebugDiagramConstruction(self))
+            .finish()
+    }
+}
+
+struct DebugDiagramConstruction<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
+
+impl<'a, 'c, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'd> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f
+            .debug_struct("DiagramConstruction")
+            .field("connect_into_target", &DebugConnections(self.0))
+            .field("outputs_into_target", &self.0.construction.outputs_into_target)
+            .field("buffers", &self.0.construction.buffers)
+            .field("generated_operations", &self.0.construction.generated_operations)
+            .finish()
+    }
+}
+
+struct DebugConnections<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
+
+impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_map();
+        for (op, connect) in &self.0.construction.connect_into_target {
+            debug.entry(op, &DebugConnection { connect, context: self.0 });
+        }
+
+        debug.finish()
+    }
+}
+
+struct DebugConnection<'a, 'c, 'd> {
+    connect: &'d Box<dyn ConnectIntoTarget>,
+    context: &'d DiagramContext<'a, 'c>,
+}
+
+impl<'a, 'c, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'd> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut visited = HashSet::new();
+        let mut debug = f.debug_struct("ConnectIntoTarget");
+        match self.connect.infer_input_type(self.context, &mut visited) {
+            Ok(ok) => {
+                let inferred = ok.map(|infer| infer.preferred_input_type()).flatten();
+                debug.field("inferred type", &inferred);
+            }
+            Err(err) => {
+                debug.field("infered type error", &err);
+            }
+        }
+
+        debug.finish()
     }
 }

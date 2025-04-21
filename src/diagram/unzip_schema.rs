@@ -157,7 +157,7 @@ mod tests {
 
         let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotUnzippable),
+            matches!(err.code, DiagramErrorCode::NotUnzippable(_)),
             "{}",
             err
         );

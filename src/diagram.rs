@@ -1294,11 +1294,11 @@ pub enum DiagramErrorCode {
     #[error("Deserialization was disabled for the target message type.")]
     NotDeserializable(TypeInfo),
 
-    #[error("Cloning was disabled for the target message type.")]
-    NotCloneable,
+    #[error("Cloning was disabled for the target message type. Type: {0}")]
+    NotCloneable(TypeInfo),
 
-    #[error("The target message type does not support unzipping.")]
-    NotUnzippable,
+    #[error("The target message type does not support unzipping. Type: {0}")]
+    NotUnzippable(TypeInfo),
 
     #[error("The number of elements in the unzip expected by the diagram [{expected}] is different from the real number [{actual}]")]
     UnzipMismatch {
@@ -1307,16 +1307,16 @@ pub enum DiagramErrorCode {
         elements: Vec<TypeInfo>,
     },
 
-    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
-    CannotForkResult,
+    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output. Type: {0}")]
+    CannotForkResult(TypeInfo),
 
-    #[error("Response cannot be split. Make sure to use .with_split() when building the node.")]
-    NotSplittable,
+    #[error("Response cannot be split. Make sure to use .with_split() when building the node. Type: {0}")]
+    NotSplittable(TypeInfo),
 
     #[error(
-        "Message cannot be joined. Make sure to use .with_join() when building the target node."
+        "Message cannot be joined. Make sure to use .with_join() when building the target node. Type: {0}"
     )]
-    NotJoinable,
+    NotJoinable(TypeInfo),
 
     #[error("Empty join is not allowed.")]
     EmptyJoin,

@@ -22,7 +22,7 @@ use crate::{Builder, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationName,
+    DynInputSlot, DynOutput, NextOperation, OperationName, TypeInfo
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -71,11 +71,11 @@ pub trait PerformForkClone<T> {
     fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 }
 
-impl<T> PerformForkClone<T> for NotSupported {
+impl<T: 'static> PerformForkClone<T> for NotSupported {
     const CLONEABLE: bool = false;
 
     fn perform_fork_clone(_builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
-        Err(DiagramErrorCode::NotCloneable)
+        Err(DiagramErrorCode::NotCloneable(TypeInfo::of::<T>()))
     }
 }
 
@@ -162,7 +162,7 @@ mod tests {
         .unwrap();
         let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotCloneable),
+            matches!(err.code, DiagramErrorCode::NotCloneable(_)),
             "{:?}",
             err
         );

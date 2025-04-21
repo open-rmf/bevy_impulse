@@ -98,6 +98,7 @@ impl From<AnyBuffer> for DynInputSlot {
 }
 
 /// A type erased [`crate::Output`]
+#[derive(Debug)]
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
@@ -158,16 +159,6 @@ impl DynOutput {
         });
 
         Ok(())
-    }
-}
-
-impl Debug for DynOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynOutput")
-            .field("scope", &self.scope)
-            .field("target", &self.target)
-            .field("type_info", &self.message_info)
-            .finish()
     }
 }
 
@@ -406,6 +397,9 @@ where
     Message: Send + Sync + 'static + Any,
 {
     pub fn new(registry: &'a mut MessageRegistry) -> Self {
+        // Any message type can be joined into a Vec
+        registry.register_join::<Vec<Message>>();
+
         Self {
             data: registry,
             _ignore: Default::default(),
@@ -994,7 +988,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.fork_clone_impl.as_ref())
-            .ok_or(DiagramErrorCode::NotCloneable)
+            .ok_or(DiagramErrorCode::NotCloneable(*message_info))
             .and_then(|f| f(builder))
     }
 
@@ -1027,7 +1021,7 @@ impl MessageRegistry {
             .get(message_info)
             .and_then(|reg| reg.operations.unzip_impl.as_ref())
             .map(|unzip| -> &'a (dyn PerformUnzip) { unzip.as_ref() })
-            .ok_or(DiagramErrorCode::NotUnzippable)
+            .ok_or(DiagramErrorCode::NotUnzippable(*message_info))
     }
 
     /// Register a unzip function if not already registered, returns true if the new
@@ -1063,7 +1057,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.fork_result_impl.as_ref())
-            .ok_or(DiagramErrorCode::CannotForkResult)
+            .ok_or(DiagramErrorCode::CannotForkResult(*message_info))
             .and_then(|f| f(builder))
     }
 
@@ -1085,7 +1079,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.split_impl.as_ref())
-            .ok_or(DiagramErrorCode::NotSplittable)
+            .ok_or(DiagramErrorCode::NotSplittable(*message_info))
             .and_then(|f| f(split_op, builder))
     }
 
@@ -1134,7 +1128,7 @@ impl MessageRegistry {
         self.messages
             .get(joinable)
             .and_then(|reg| reg.operations.join_impl.as_ref())
-            .ok_or_else(|| DiagramErrorCode::NotJoinable)
+            .ok_or_else(|| DiagramErrorCode::NotJoinable(*joinable))
             .and_then(|f| f(buffers, builder))
     }
 

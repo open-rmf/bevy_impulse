@@ -940,6 +940,64 @@ mod tests {
             .unwrap();
 
         assert_eq!(result, 51);
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "calculate": {
+                    "inputs": ["add", "multiply"],
+                    "outputs": ["added", "multiplied"],
+                    "ops": {
+                        "multiply": {
+                            "type": "node",
+                            "builder": "multiply_by",
+                            "config": 10,
+                            "next": "multiplied",
+                        },
+                        "add": {
+                            "type": "node",
+                            "builder": "add_to",
+                            "config": 10,
+                            "next": "added",
+                        }
+                    }
+                }
+            },
+            "start": "start",
+            "ops": {
+                "start": {
+                    "type": "fork_clone",
+                    "next": [
+                        { "calc": "add" },
+                        { "calc": "multiply" },
+                    ],
+                },
+                "calc": {
+                    "type": "section",
+                    "template": "calculate",
+                    "connect": {
+                        "added": "added",
+                        "multiplied": "multiplied",
+                    },
+                },
+                "added": { "type": "buffer" },
+                "multiplied": { "type": "buffer" },
+                "join": {
+                    "type": "join",
+                    "buffers": ["added", "multiplied"],
+                    "next": { "builtin": "terminate" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result: Vec<i64> = fixture
+            .spawn_and_run(&diagram, 2_i64)
+            .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], 12);
+        assert_eq!(result[1], 20);
     }
 
     #[test]
