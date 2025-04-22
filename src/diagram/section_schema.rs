@@ -432,14 +432,14 @@ mod tests {
     /// A test compile that opaque messages can be used in sections.
     #[derive(Section)]
     struct TestSectionNoDeserialize {
-        #[section(no_deserialize, no_serialize, no_clone)]
+        #[message(no_deserialize, no_serialize, no_clone)]
         msg: InputSlot<OpaqueMessage>,
     }
 
     #[derive(Section)]
     struct TestSectionUnzip {
         input: InputSlot<()>,
-        #[section(unzip)]
+        #[message(unzip)]
         output: Output<(i64, i64)>,
     }
 
@@ -463,7 +463,7 @@ mod tests {
     #[derive(Section)]
     struct TestSectionForkResult {
         input: InputSlot<()>,
-        #[section(fork_result)]
+        #[message(result)]
         output: Output<Result<i64, String>>,
     }
 
@@ -489,7 +489,7 @@ mod tests {
     #[derive(Section)]
     struct TestSectionSplit {
         input: InputSlot<()>,
-        #[section(split)]
+        #[message(split)]
         output: Output<Vec<i64>>,
     }
 
@@ -512,7 +512,7 @@ mod tests {
 
     #[derive(Section)]
     struct TestSectionJoin {
-        #[section(join)]
+        #[message(join)]
         input: InputSlot<Vec<i64>>,
         output: Output<()>,
     }
@@ -536,7 +536,7 @@ mod tests {
 
     #[derive(Section)]
     struct TestSectionBufferAccess {
-        #[section(buffer_access, no_deserialize, no_serialize)]
+        #[message(buffer_access, no_deserialize, no_serialize)]
         input: InputSlot<(i64, Vec<BufferKey<i64>>)>,
         output: Output<()>,
     }
@@ -562,7 +562,7 @@ mod tests {
 
     #[derive(Section)]
     struct TestSectionListen {
-        #[section(listen, no_deserialize, no_serialize)]
+        #[message(listen, no_deserialize, no_serialize)]
         input: InputSlot<Vec<BufferKey<i64>>>,
         output: Output<()>,
     }

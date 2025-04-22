@@ -126,7 +126,7 @@ impl FieldConfig {
         for attr in field
             .attrs
             .iter()
-            .filter(|attr| attr.path().is_ident("section"))
+            .filter(|attr| attr.path().is_ident("message"))
         {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("no_deserialize") {
@@ -137,7 +137,7 @@ impl FieldConfig {
                     config.no_clone = true;
                 } else if meta.path.is_ident("unzip") {
                     config.unzip = true;
-                } else if meta.path.is_ident("fork_result") {
+                } else if meta.path.is_ident("result") {
                     config.fork_result = true;
                 } else if meta.path.is_ident("split") {
                     config.split = true;
