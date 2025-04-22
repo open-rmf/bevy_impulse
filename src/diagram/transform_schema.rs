@@ -26,7 +26,7 @@ use crate::{Builder, JsonMessage};
 
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, NextOperation,
-    OperationId,
+    OperationName,
 };
 
 #[derive(Error, Debug)]
@@ -60,7 +60,7 @@ pub struct TransformSchema {
 impl BuildDiagramOperation for TransformSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
@@ -80,11 +80,15 @@ impl BuildDiagramOperation for TransformSchema {
             },
         );
 
-        let error_target = self.on_error.clone().unwrap_or(
-            // If no error target was explicitly given then treat this as an
-            // implicit error.
-            ctx.get_implicit_error_target(),
-        );
+        let error_target = self
+            .on_error
+            .as_ref()
+            .map(|on_error| ctx.into_operation_ref(on_error))
+            .unwrap_or(
+                // If no error target was explicitly given then treat this as an
+                // implicit error.
+                ctx.get_implicit_error_target(),
+            );
 
         let (ok, _) = node.output.chain(builder).fork_result(
             |ok| ok.output(),
@@ -94,7 +98,7 @@ impl BuildDiagramOperation for TransformSchema {
         );
 
         ctx.set_input_for_target(id, node.input.into())?;
-        ctx.add_output_into_target(self.next.clone(), ok.into());
+        ctx.add_output_into_target(&self.next, ok.into());
         Ok(BuildStatus::Finished)
     }
 }
@@ -104,7 +108,7 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Diagram};
+    use crate::{diagram::testing::DiagramTestFixture, Diagram, JsonMessage};
 
     #[test]
     fn test_transform_node_response() {
@@ -128,8 +132,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
@@ -152,8 +156,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
@@ -176,8 +180,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 12);
@@ -200,8 +204,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result["request"], 4);
@@ -230,7 +234,7 @@ mod tests {
             "age": 40,
         });
 
-        let result = fixture.spawn_and_run(&diagram, request).unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, request).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 40);
     }

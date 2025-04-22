@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    type_info::TypeInfo, BufferInputs, BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, NextOperation, OperationId,
+    type_info::TypeInfo, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, NextOperation, OperationName,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -37,14 +37,14 @@ pub struct BufferSchema {
 impl BuildDiagramOperation for BufferSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let message_info = if self.serialize.is_some_and(|v| v) {
             TypeInfo::of::<JsonMessage>()
         } else {
-            let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+            let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
                 // There are no outputs ready for this target, so we can't do
                 // anything yet. The builder should try again later.
 
@@ -54,7 +54,7 @@ impl BuildDiagramOperation for BufferSchema {
                 return Ok(BuildStatus::defer("waiting for an input"));
             };
 
-            *inferred_type
+            inferred_type
         };
 
         let buffer =
@@ -72,31 +72,33 @@ pub struct BufferAccessSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
-
-    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) buffers: BufferSelection,
 }
 
 impl BuildDiagramOperation for BufferAccessSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
+        };
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
         let node = ctx
             .registry
             .messages
             .with_buffer_access(&target_type, &buffer_map, builder)?;
         ctx.set_input_for_target(id, node.input)?;
-        ctx.add_output_into_target(self.next.clone(), node.output);
+        ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -121,30 +123,35 @@ pub struct ListenSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 
     /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) target_node: Option<NextOperation>,
 }
 
 impl BuildDiagramOperation for ListenSchema {
     fn build_diagram_operation(
         &self,
-        _: &OperationId,
+        _: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
+        };
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
         let output = ctx
             .registry
             .messages
             .listen(&target_type, &buffer_map, builder)?;
-        ctx.add_output_into_target(self.next.clone(), output);
+        ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -430,9 +437,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "hello world");
     }
@@ -490,9 +495,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
@@ -541,8 +544,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::String("hello".to_owned()))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::String("hello".to_owned()))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 11);
@@ -592,8 +595,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::String("hello".to_owned()))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::String("hello".to_owned()))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 11);
@@ -648,7 +651,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
+        let result: JsonMessage = fixture
             .spawn_and_run(&diagram, JsonMessage::Number(5_i64.into()))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
@@ -704,7 +707,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
@@ -732,7 +735,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
@@ -760,7 +763,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 1);
     }
@@ -875,7 +878,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture.spawn_and_run(&diagram, input).unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, input).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, JsonMessage::Null);
     }
@@ -969,7 +972,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture.spawn_and_run(&diagram, input).unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, input).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, JsonMessage::Null);
     }

@@ -22,11 +22,22 @@ impl DiagramTestFixture {
         }
     }
 
-    /// Equivalent to `self.spawn_workflow::<JsonMessage, JsonMessage>(diagram)`
     pub(super) fn spawn_json_io_workflow(
         &mut self,
         diagram: &Diagram,
-    ) -> Result<Service<JsonMessage, JsonMessage, ()>, DiagramError> {
+    ) -> Result<Service<JsonMessage, JsonMessage>, DiagramError> {
+        self.spawn_io_workflow::<JsonMessage, JsonMessage>(diagram)
+    }
+
+    /// Equivalent to `self.spawn_workflow::<JsonMessage, JsonMessage>(diagram)`
+    pub(super) fn spawn_io_workflow<Request, Response>(
+        &mut self,
+        diagram: &Diagram,
+    ) -> Result<Service<Request, Response, ()>, DiagramError>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
         self.context
             .app
             .world
@@ -35,12 +46,16 @@ impl DiagramTestFixture {
 
     /// Spawns a workflow from a diagram then run the workflow until completion.
     /// Returns the result of the workflow.
-    pub(super) fn spawn_and_run(
+    pub(super) fn spawn_and_run<Request, Response>(
         &mut self,
         diagram: &Diagram,
-        request: serde_json::Value,
-    ) -> Result<serde_json::Value, Box<dyn Error>> {
-        let workflow = self.spawn_json_io_workflow(diagram)?;
+        request: Request,
+    ) -> Result<Response, Box<dyn Error>>
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
+        let workflow = self.spawn_io_workflow(diagram)?;
         let mut promise = self
             .context
             .command(|cmds| cmds.request(request, workflow).take_response());
@@ -58,14 +73,15 @@ impl DiagramTestFixture {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
 struct Uncloneable<T>(T);
 
 fn multiply3(i: i64) -> i64 {
     i * 3
 }
 
-fn multiply3_uncloneable(i: i64) -> Uncloneable<i64> {
-    Uncloneable(i * 3)
+fn multiply3_uncloneable(i: Uncloneable<i64>) -> Uncloneable<i64> {
+    Uncloneable(i.0 * 3)
 }
 
 fn multiply3_5(x: i64) -> (i64, i64) {
@@ -106,6 +122,10 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
         NodeBuilderOptions::new("multiply_by"),
         |builder: &mut Builder, config: i64| builder.create_map_block(move |a: i64| a * config),
     );
+
+    registry.register_node_builder(NodeBuilderOptions::new("add_to"), |builder, config: i64| {
+        builder.create_map_block(move |a: i64| a + config)
+    });
 
     registry
         .opt_out()

@@ -21,6 +21,7 @@ mod fork_result_schema;
 mod join_schema;
 mod node_schema;
 mod registration;
+mod section_schema;
 mod serialization;
 mod split_schema;
 mod supported;
@@ -29,6 +30,7 @@ mod type_info;
 mod unzip_schema;
 mod workflow_builder;
 
+use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
 use fork_clone_schema::{DynForkClone, ForkCloneSchema, PerformForkClone};
@@ -37,57 +39,182 @@ pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
 pub use registration::*;
+pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
-use type_info::TypeInfo;
+pub use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
-use workflow_builder::{create_workflow, BuildDiagramOperation, BuildStatus, DiagramContext};
+pub use workflow_builder::*;
 
 // ----------
 
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Read};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    io::Read,
+    sync::Arc,
+};
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
     SplitConnectionError, StreamPack,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use schemars::{
+    r#gen::SchemaGenerator,
+    schema::{InstanceType, Metadata, ObjectValidation, Schema, SchemaObject, SingleOrVec},
+    JsonSchema,
+};
+use serde::{
+    de::{Error, Visitor},
+    ser::SerializeMap,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
+const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
+const RESERVED_OPERATION_NAMES: [&'static str; 2] = ["", "builtin"];
 
-pub type BuilderId = String;
-pub type OperationId = String;
+pub type BuilderId = Arc<str>;
+pub type OperationName = Arc<str>;
 
 #[derive(
     Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
 )]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum NextOperation {
-    Target(OperationId),
-    Builtin { builtin: BuiltinTarget },
+    Name(OperationName),
+    Builtin {
+        builtin: BuiltinTarget,
+    },
+    /// Refer to an "inner" operation of one of the sibling operations in a
+    /// diagram. This can be used to target section inputs.
+    Namespace(NamespacedOperation),
+}
+
+impl NextOperation {
+    pub fn dispose() -> Self {
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Dispose,
+        }
+    }
 }
 
 impl Display for NextOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Target(operation_id) => f.write_str(operation_id),
-            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
+            Self::Name(operation_id) => f.write_str(operation_id),
+            Self::Namespace(NamespacedOperation {
+                namespace,
+                operation,
+            }) => write!(f, "{namespace}:{operation}"),
+            Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+/// This describes an operation that exists inside of some namespace, such as a
+/// [`Section`]. This will serialize as a map with a single entry of
+/// `{ "<namespace>": "<operation>" }`.
+pub struct NamespacedOperation {
+    pub namespace: OperationName,
+    pub operation: OperationName,
+}
+
+impl Serialize for NamespacedOperation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry(&self.namespace, &self.operation)?;
+        map.end()
+    }
+}
+
+struct NamespacedOperationVisitor;
+
+impl<'de> Visitor<'de> for NamespacedOperationVisitor {
+    type Value = NamespacedOperation;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str(
+            "a map with exactly one entry of { \"<namespace>\" : \"<operation>\" } \
+            whose key is the namespace string and whose value is the operation string",
+        )
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let (key, value) = map.next_entry::<String, String>()?.ok_or_else(|| {
+            A::Error::custom(
+                "namespaced operation must be a map from the namespace to the operation name",
+            )
+        })?;
+
+        if !map.next_key::<String>()?.is_none() {
+            return Err(A::Error::custom(
+                "namespaced operation must contain exactly one entry",
+            ));
+        }
+
+        Ok(NamespacedOperation {
+            namespace: key.into(),
+            operation: value.into(),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for NamespacedOperation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(NamespacedOperationVisitor)
+    }
+}
+
+impl JsonSchema for NamespacedOperation {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = SchemaObject::new_ref(Self::schema_name());
+        schema.instance_type = Some(SingleOrVec::Single(Box::new(InstanceType::Object)));
+        schema.object = Some(Box::new(ObjectValidation {
+            max_properties: Some(1),
+            min_properties: Some(1),
+            required: Default::default(),
+            properties: Default::default(),
+            pattern_properties: Default::default(),
+            property_names: Default::default(),
+            additional_properties: Some(Box::new(generator.subschema_for::<String>())),
+        }));
+        schema.metadata = Some(Box::new(Metadata {
+            title: Some("NamespacedOperation".to_string()),
+            description: Some("Refer to an operation inside of a namespace, e.g. { \"<namespace>\": \"<operation>\"".to_string()),
+            ..Default::default()
+        }));
+
+        Schema::Object(schema)
+    }
+
+    fn schema_name() -> String {
+        "NamespacedOperation".to_string()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
-pub enum BufferInputs {
-    Single(OperationId),
-    Dict(HashMap<String, OperationId>),
-    Array(Vec<OperationId>),
+pub enum BufferSelection {
+    Single(NextOperation),
+    Dict(HashMap<String, NextOperation>),
+    Array(Vec<NextOperation>),
 }
 
-impl BufferInputs {
+impl BufferSelection {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Single(_) => false,
@@ -124,30 +251,6 @@ pub enum BuiltinTarget {
     /// workflow then the parent scope will see a disposal happen. If this is
     /// the root scope of a workflow then the whole workflow will cancel.
     Cancel,
-}
-
-#[derive(
-    Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
-)]
-#[serde(untagged, rename_all = "snake_case")]
-pub enum SourceOperation {
-    Source(OperationId),
-    Builtin { builtin: BuiltinSource },
-}
-
-impl From<OperationId> for SourceOperation {
-    fn from(value: OperationId) -> Self {
-        SourceOperation::Source(value)
-    }
-}
-
-impl Display for SourceOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Source(operation_id) => f.write_str(operation_id),
-            Self::Builtin { builtin } => write!(f, "builtin:{}", builtin),
-        }
-    }
 }
 
 #[derive(
@@ -220,6 +323,62 @@ pub enum DiagramOperation {
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
     Node(NodeSchema),
+
+    /// Connect the request to a registered section.
+    ///
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "section_op",
+    ///     "ops": {
+    ///         "section_op": {
+    ///             "type": "section",
+    ///             "builder": "my_section_builder",
+    ///             "connect": {
+    ///                 "my_section_output": { "builtin": "terminate" }
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    ///
+    /// Custom sections can also be created via templates
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "templates": {
+    ///         "my_template": {
+    ///             "inputs": ["section_input"],
+    ///             "outputs": ["section_output"],
+    ///             "buffers": [],
+    ///             "ops": {
+    ///                 "section_input": {
+    ///                     "type": "node",
+    ///                     "builder": "my_node",
+    ///                     "next": "section_output"
+    ///                 }
+    ///             }
+    ///         }
+    ///     },
+    ///     "start": "section_op",
+    ///     "ops": {
+    ///         "section_op": {
+    ///             "type": "section",
+    ///             "template": "my_template",
+    ///             "connect": {
+    ///                 "section_output": { "builtin": "terminate" }
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    Section(SectionSchema),
 
     /// If the request is cloneable, clone it into multiple responses that can
     /// each be sent to a different operation. The `next` property is an array.
@@ -318,6 +477,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     Unzip(UnzipSchema),
 
     /// If the request is a [`Result<T, E>`], send the output message down an
@@ -344,6 +504,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     ForkResult(ForkResultSchema),
 
     /// If the input message is a list-like or map-like object, split it into
@@ -430,9 +591,9 @@ pub enum DiagramOperation {
     /// # bevy_impulse::Diagram::from_json_str(r#"
     /// {
     ///     "version": "0.1.0",
-    ///     "start": "fork_measuring",
+    ///     "start": "begin_measuring",
     ///     "ops": {
-    ///         "fork_measuring": {
+    ///         "begin_measuring": {
     ///             "type": "fork_clone",
     ///             "next": ["localize", "imu"]
     ///         },
@@ -642,6 +803,7 @@ pub enum DiagramOperation {
     /// }
     /// # "#)?;
     /// # Ok::<_, serde_json::Error>(())
+    /// ```
     BufferAccess(BufferAccessSchema),
 
     /// Listen on a buffer.
@@ -682,7 +844,7 @@ pub enum DiagramOperation {
 impl BuildDiagramOperation for DiagramOperation {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
@@ -694,6 +856,7 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
             Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
@@ -735,7 +898,7 @@ where
     o.to_string().serialize(ser)
 }
 
-#[derive(JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Diagram {
     /// Version of the diagram, should always be `0.1.0`.
@@ -746,8 +909,11 @@ pub struct Diagram {
     #[schemars(schema_with = "schema_with_string")]
     version: semver::Version,
 
+    #[serde(default)]
+    pub templates: Templates,
+
     /// Indicates where the workflow should start running.
-    start: NextOperation,
+    pub start: NextOperation,
 
     /// To simplify diagram definitions, the diagram workflow builder will
     /// sometimes insert implicit operations into the workflow, such as implicit
@@ -757,13 +923,24 @@ pub struct Diagram {
     /// If left unspecified, an implicit error will cause the entire workflow to
     /// be cancelled.
     #[serde(default)]
-    on_implicit_error: Option<NextOperation>,
+    pub on_implicit_error: Option<NextOperation>,
 
     /// Operations that define the workflow
-    ops: HashMap<OperationId, DiagramOperation>,
+    pub ops: Operations,
 }
 
 impl Diagram {
+    /// Begin creating a new diagram
+    pub fn new(start: NextOperation) -> Self {
+        Self {
+            version: semver::Version::parse(CURRENT_DIAGRAM_VERSION).unwrap(),
+            start,
+            templates: Default::default(),
+            on_implicit_error: Default::default(),
+            ops: Default::default(),
+        }
+    }
+
     /// Spawns a workflow from this diagram.
     ///
     /// # Examples
@@ -898,10 +1075,157 @@ impl Diagram {
         serde_json::from_reader(r)
     }
 
-    fn get_op(&self, op_id: &OperationId) -> Result<&DiagramOperation, DiagramErrorCode> {
-        self.ops
-            .get(op_id)
-            .ok_or_else(|| DiagramErrorCode::OperationNotFound(op_id.clone()))
+    /// Make sure all operation names are valid, e.g. no reserved words such as
+    /// `builtin` are being used.
+    pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
+        self.ops.validate_operation_names()?;
+        self.templates.validate_operation_names()?;
+        Ok(())
+    }
+
+    /// Validate the templates that are being used within the `ops` section, or
+    /// recursively within any templates used by the `ops` section. Any unused
+    /// templates will not be validated.
+    pub fn validate_template_usage(&self) -> Result<(), DiagramErrorCode> {
+        for op in self.ops.values() {
+            match op {
+                DiagramOperation::Section(section) => match &section.provider {
+                    SectionProvider::Template(template) => {
+                        self.templates.validate_template(template)?;
+                    }
+                    _ => continue,
+                },
+                _ => continue,
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
+#[serde(transparent, rename_all = "snake_case")]
+pub struct Operations(HashMap<OperationName, DiagramOperation>);
+
+impl Operations {
+    /// Get an operation from this map, or a diagram error code if the operation
+    /// is not available.
+    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&DiagramOperation, DiagramErrorCode> {
+        self.get(op_id)
+            .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
+    }
+
+    pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
+        validate_operation_names(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
+#[serde(transparent, rename_all = "snake_case")]
+pub struct Templates(HashMap<OperationName, SectionTemplate>);
+
+impl Templates {
+    /// Get a template from this map, or a diagram error code if the template is
+    /// not available.
+    pub fn get_template(
+        &self,
+        template_id: &OperationName,
+    ) -> Result<&SectionTemplate, DiagramErrorCode> {
+        self.get(template_id)
+            .ok_or_else(|| DiagramErrorCode::TemplateNotFound(template_id.clone()))
+    }
+
+    pub fn validate_operation_names(&self) -> Result<(), DiagramErrorCode> {
+        for (name, template) in &self.0 {
+            validate_operation_name(name)?;
+            validate_operation_names(&template.ops)?;
+            // TODO(@mxgrey): Validate correctness of input, output, and buffer mapping
+        }
+
+        Ok(())
+    }
+
+    /// Check for potential issues in one of the templates, e.g. a circular
+    /// dependency with other templates.
+    pub fn validate_template(&self, template_id: &OperationName) -> Result<(), DiagramErrorCode> {
+        check_circular_template_dependency(template_id, &self.0)?;
+        Ok(())
+    }
+}
+
+fn validate_operation_names(
+    ops: &HashMap<OperationName, DiagramOperation>,
+) -> Result<(), DiagramErrorCode> {
+    for name in ops.keys() {
+        validate_operation_name(name)?;
+    }
+
+    Ok(())
+}
+
+fn validate_operation_name(name: &str) -> Result<(), DiagramErrorCode> {
+    for reserved in &RESERVED_OPERATION_NAMES {
+        if name == *reserved {
+            return Err(DiagramErrorCode::InvalidUseOfReservedName(*reserved));
+        }
+    }
+
+    Ok(())
+}
+
+fn check_circular_template_dependency(
+    start_from: &OperationName,
+    templates: &HashMap<OperationName, SectionTemplate>,
+) -> Result<(), DiagramErrorCode> {
+    let mut queue = Vec::new();
+    queue.push(TemplateStack::new(start_from));
+
+    while let Some(top) = queue.pop() {
+        let Some(template) = templates.get(&top.next) else {
+            return Err(DiagramErrorCode::UnknownTemplate(top.next));
+        };
+
+        for op in template.ops.0.values() {
+            match op {
+                DiagramOperation::Section(section) => match &section.provider {
+                    SectionProvider::Template(template) => {
+                        queue.push(top.child(template)?);
+                    }
+                    _ => continue,
+                },
+                _ => continue,
+            }
+        }
+    }
+
+    Ok(())
+}
+
+struct TemplateStack {
+    used: HashSet<OperationName>,
+    next: OperationName,
+}
+
+impl TemplateStack {
+    fn new(op: &OperationName) -> Self {
+        TemplateStack {
+            used: HashSet::from_iter([Arc::clone(op)]),
+            next: Arc::clone(op),
+        }
+    }
+
+    fn child(&self, next: &OperationName) -> Result<Self, DiagramErrorCode> {
+        let mut used = self.used.clone();
+        if !used.insert(Arc::clone(next)) {
+            return Err(DiagramErrorCode::CircularTemplateDependency(
+                used.into_iter().collect(),
+            ));
+        }
+
+        Ok(Self {
+            used,
+            next: Arc::clone(next),
+        })
     }
 }
 
@@ -915,9 +1239,11 @@ pub struct DiagramError {
 }
 
 impl DiagramError {
-    pub fn in_operation(op_id: OperationId, code: DiagramErrorCode) -> Self {
+    pub fn in_operation(op_id: impl Into<OperationRef>, code: DiagramErrorCode) -> Self {
         Self {
-            context: DiagramErrorContext { op_id: Some(op_id) },
+            context: DiagramErrorContext {
+                op_id: Some(op_id.into()),
+            },
             code,
         }
     }
@@ -925,7 +1251,7 @@ impl DiagramError {
 
 #[derive(Debug)]
 pub struct DiagramErrorContext {
-    op_id: Option<OperationId>,
+    op_id: Option<OperationRef>,
 }
 
 impl Display for DiagramErrorContext {
@@ -943,7 +1269,10 @@ pub enum DiagramErrorCode {
     BuilderNotFound(BuilderId),
 
     #[error("operation [{0}] not found")]
-    OperationNotFound(OperationId),
+    OperationNotFound(NextOperation),
+
+    #[error("section template [{0}] does not exist")]
+    TemplateNotFound(OperationName),
 
     #[error("type mismatch, source {source_type}, target {target_type}")]
     TypeMismatch {
@@ -951,11 +1280,11 @@ pub enum DiagramErrorCode {
         target_type: TypeInfo,
     },
 
-    #[error("Operation [{0}] attempted to instantiate multiple inputs.")]
-    MultipleInputsCreated(OperationId),
+    #[error("Operation [{0}] attempted to instantiate a duplicate of itself.")]
+    DuplicateInputsCreated(OperationRef),
 
-    #[error("Operation [{0}] attempted to instantiate multiple buffers.")]
-    MultipleBuffersCreated(OperationId),
+    #[error("Operation [{0}] attempted to instantiate a duplicate buffer.")]
+    DuplicateBuffersCreated(OperationRef),
 
     #[error("Missing a connection to start or terminate. A workflow cannot run with a valid connection to each.")]
     MissingStartOrTerminate,
@@ -966,11 +1295,11 @@ pub enum DiagramErrorCode {
     #[error("Deserialization was disabled for the target message type.")]
     NotDeserializable(TypeInfo),
 
-    #[error("Cloning was disabled for the target message type.")]
-    NotCloneable,
+    #[error("Cloning was disabled for the target message type. Type: {0}")]
+    NotCloneable(TypeInfo),
 
-    #[error("The number of unzip slots in response does not match the number of inputs.")]
-    NotUnzippable,
+    #[error("The target message type does not support unzipping. Type: {0}")]
+    NotUnzippable(TypeInfo),
 
     #[error("The number of elements in the unzip expected by the diagram [{expected}] is different from the real number [{actual}]")]
     UnzipMismatch {
@@ -979,25 +1308,31 @@ pub enum DiagramErrorCode {
         elements: Vec<TypeInfo>,
     },
 
-    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output.")]
-    CannotForkResult,
+    #[error("Call .with_fork_result() on your node to be able to fork its Result-type output. Type: {0}")]
+    CannotForkResult(TypeInfo),
 
-    #[error("Response cannot be split. Make sure to use .with_split() when building the node.")]
-    NotSplittable,
+    #[error("Response cannot be split. Make sure to use .with_split() when building the node. Type: {0}")]
+    NotSplittable(TypeInfo),
 
     #[error(
-        "Message cannot be joined. Make sure to use .with_join() when building the target node."
+        "Message cannot be joined. Make sure to use .with_join() when building the target node. Type: {0}"
     )]
-    NotJoinable,
+    NotJoinable(TypeInfo),
 
     #[error("Empty join is not allowed.")]
     EmptyJoin,
 
-    #[error("Target type cannot be determined from [next] and [target_node] is not provided.")]
+    #[error("Target type cannot be determined from [next] and [target_node] is not provided or cannot be inferred from.")]
     UnknownTarget,
 
-    #[error("There was an attempt to access an unknown operation: [{0}]")]
-    UnknownOperation(NextOperation),
+    #[error("There was an attempt to connect to an unknown operation: [{0}]")]
+    UnknownOperation(OperationRef),
+
+    #[error("There was an attempt to use an unknown section template: [{0}]")]
+    UnknownTemplate(OperationName),
+
+    #[error("There was an attempt to use an operation in an invalid way: [{0}]")]
+    InvalidOperation(OperationRef),
 
     #[error(transparent)]
     CannotTransform(#[from] TransformError),
@@ -1014,11 +1349,11 @@ pub enum DiagramErrorCode {
     #[error(transparent)]
     IncompatibleBuffers(#[from] IncompatibleLayout),
 
+    #[error(transparent)]
+    SectionError(#[from] SectionError),
+
     #[error("one or more operation is missing inputs")]
     IncompleteDiagram,
-
-    #[error("operation type only accept single input")]
-    OnlySingleInput,
 
     #[error(transparent)]
     JsonError(#[from] serde_json::Error),
@@ -1032,11 +1367,32 @@ pub enum DiagramErrorCode {
     #[error("The build of the workflow came to a halt, reasons:\n{reasons:?}")]
     BuildHalted {
         /// Reasons that operations were unable to make progress building
-        reasons: HashMap<OperationId, Cow<'static, str>>,
+        reasons: HashMap<OperationRef, Cow<'static, str>>,
     },
 
     #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
     ExcessiveIterations,
+
+    #[error("An operation was given a reserved name [{0}]")]
+    InvalidUseOfReservedName(&'static str),
+
+    #[error("an error happened while building a nested diagram: {0}")]
+    NestedError(Box<DiagramError>),
+
+    #[error("A circular redirection exists between operations: {}", format_list(&.0))]
+    CircularRedirect(Vec<OperationRef>),
+
+    #[error("A circular dependency exists between templates: {}", format_list(&.0))]
+    CircularTemplateDependency(Vec<OperationName>),
+}
+
+fn format_list<T: std::fmt::Display>(list: &[T]) -> String {
+    let mut output = String::new();
+    for op in list {
+        output += &format!("[{op}]");
+    }
+
+    output
 }
 
 impl From<DiagramErrorCode> for DiagramError {
@@ -1045,6 +1401,16 @@ impl From<DiagramErrorCode> for DiagramError {
             context: DiagramErrorContext { op_id: None },
             code,
         }
+    }
+}
+
+impl DiagramErrorCode {
+    pub fn operation_name_not_found(name: OperationName) -> Self {
+        DiagramErrorCode::OperationNotFound(NextOperation::Name(name))
+    }
+
+    pub fn in_operation(self, op_id: OperationRef) -> DiagramError {
+        DiagramError::in_operation(op_id, self)
     }
 }
 
@@ -1078,7 +1444,7 @@ mod tests {
         .unwrap();
 
         let err = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .spawn_and_run::<_, JsonMessage>(&diagram, JsonMessage::from(4))
             .unwrap_err();
         assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
@@ -1196,12 +1562,12 @@ mod tests {
         .unwrap();
 
         let err = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+            .spawn_and_run::<_, JsonMessage>(&diagram, JsonMessage::from(4))
             .unwrap_err();
         assert!(fixture.context.no_unhandled_errors());
         assert!(matches!(
             *err.downcast_ref::<Cancellation>().unwrap().cause,
-            CancellationCause::Unreachable(_)
+            CancellationCause::Unreachable(_),
         ));
     }
 
@@ -1231,8 +1597,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);
@@ -1249,8 +1615,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 4);
@@ -1275,10 +1641,10 @@ mod tests {
         }
         "#;
 
-        let result = fixture
+        let result: JsonMessage = fixture
             .spawn_and_run(
                 &Diagram::from_json_str(json_str).unwrap(),
-                serde_json::Value::from(4),
+                JsonMessage::from(4),
             )
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
@@ -1316,10 +1682,39 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 777);
+    }
+
+    #[test]
+    fn test_unknown_operation_detection() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "op1",
+            "ops": {
+                "op1": {
+                    "type": "node",
+                    "builder": "multiply3_5",
+                    "next": "clone",
+                },
+                "clone": {
+                    "type": "fork_clone",
+                    "next": [
+                        "unknown",
+                        { "builtin": "terminate" },
+                    ],
+                },
+            },
+        }))
+        .unwrap();
+
+        let result = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
+
+        assert!(matches!(result.code, DiagramErrorCode::UnknownOperation(_),));
     }
 }

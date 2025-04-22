@@ -22,8 +22,8 @@ use smallvec::SmallVec;
 use crate::{Builder, JsonMessage};
 
 use super::{
-    BufferInputs, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    NextOperation, OperationId,
+    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    NextOperation, OperationName,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -32,16 +32,13 @@ pub struct JoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
-
-    /// The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-    pub(super) target_node: Option<OperationId>,
+    pub(super) buffers: BufferSelection,
 }
 
 impl BuildDiagramOperation for JoinSchema {
     fn build_diagram_operation(
         &self,
-        _: &OperationId,
+        _: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
@@ -49,18 +46,22 @@ impl BuildDiagramOperation for JoinSchema {
             return Err(DiagramErrorCode::EmptyJoin);
         }
 
+        let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
+            return Ok(BuildStatus::defer(
+                "waiting to find out target message type",
+            ));
+        };
+
         let buffer_map = match ctx.create_buffer_map(&self.buffers) {
             Ok(buffer_map) => buffer_map,
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let target_type = ctx.get_node_request_type(self.target_node.as_ref(), &self.next)?;
-
         let output = ctx
             .registry
             .messages
             .join(&target_type, &buffer_map, builder)?;
-        ctx.add_output_into_target(self.next.clone(), output);
+        ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }
 }
@@ -71,13 +72,13 @@ pub struct SerializedJoinSchema {
     pub(super) next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferInputs,
+    pub(super) buffers: BufferSelection,
 }
 
 impl BuildDiagramOperation for SerializedJoinSchema {
     fn build_diagram_operation(
         &self,
-        _: &OperationId,
+        _: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
@@ -91,7 +92,7 @@ impl BuildDiagramOperation for SerializedJoinSchema {
         };
 
         let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
-        ctx.add_output_into_target(self.next.clone(), output.into());
+        ctx.add_output_into_target(&self.next, output.into());
 
         Ok(BuildStatus::Finished)
     }
@@ -110,8 +111,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry, DiagramError,
-        DiagramErrorCode, NodeBuilderOptions,
+        diagram::testing::DiagramTestFixture, Diagram, DiagramElementRegistry, DiagramErrorCode,
+        NodeBuilderOptions,
     };
 
     fn foo(_: serde_json::Value) -> String {
@@ -223,9 +224,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
@@ -277,16 +276,14 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
 
     #[test]
-    /// when `target_node` is not given and next is not a node
-    fn test_join_infer_type_fail() {
+    /// join should be able to infer its output type when connected to terminate
+    fn test_join_infer_from_terminate() {
         let mut fixture = DiagramTestFixture::new();
         register_join_nodes(&mut fixture.registry);
 
@@ -330,12 +327,18 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap_err();
-        assert!(fixture.context.no_unhandled_errors());
-        let err_code = &result.downcast_ref::<DiagramError>().unwrap().code;
-        assert!(matches!(err_code, DiagramErrorCode::UnknownTarget,));
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
+        let expectation = serde_json::Value::Object(serde_json::Map::from_iter([
+            (
+                "bar".to_string(),
+                serde_json::Value::String("bar".to_string()),
+            ),
+            (
+                "foo".to_string(),
+                serde_json::Value::String("foo".to_string()),
+            ),
+        ]));
+        assert_eq!(result, expectation);
     }
 
     #[test]
@@ -382,9 +385,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "foobar");
     }
@@ -465,9 +466,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result["foo"], "foo");
         assert_eq!(result["bar"], "bar");
@@ -522,9 +521,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::Null)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, JsonMessage::Null).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         let object = result.as_object().unwrap();
         assert_eq!(object["foobar_1"].as_object().unwrap()["foo"], "foo_1");

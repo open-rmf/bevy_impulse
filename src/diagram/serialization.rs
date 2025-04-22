@@ -15,7 +15,10 @@
  *
 */
 
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
 
 use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
@@ -193,7 +196,7 @@ where
 
 pub struct ImplicitSerialization {
     incoming_types: HashMap<TypeInfo, DynInputSlot>,
-    serialized_input: DynInputSlot,
+    serialized_input: Arc<DynInputSlot>,
 }
 
 impl ImplicitSerialization {
@@ -206,7 +209,7 @@ impl ImplicitSerialization {
         }
 
         Ok(Self {
-            serialized_input,
+            serialized_input: Arc::new(serialized_input),
             incoming_types: Default::default(),
         })
     }
@@ -264,10 +267,14 @@ impl ImplicitSerialization {
         self.try_implicit_serialize(incoming, builder, ctx)?
             .map_err(|incoming| DiagramErrorCode::NotSerializable(*incoming.message_info()))
     }
+
+    pub fn serialized_input_slot(&self) -> &Arc<DynInputSlot> {
+        &self.serialized_input
+    }
 }
 
 pub struct ImplicitDeserialization {
-    deserialized_input: DynInputSlot,
+    deserialized_input: Arc<DynInputSlot>,
     // The serialized input will only be created if a JsonMessage output
     // attempts to connect to this operation. Otherwise there is no need to
     // create it.
@@ -286,7 +293,7 @@ impl ImplicitDeserialization {
             .is_some()
         {
             return Ok(Some(Self {
-                deserialized_input,
+                deserialized_input: Arc::new(deserialized_input),
                 serialized_input: None,
             }));
         }
@@ -334,6 +341,10 @@ impl ImplicitDeserialization {
             source_type: *incoming.message_info(),
             target_type: *self.deserialized_input.message_info(),
         })
+    }
+
+    pub fn deserialized_input_slot(&self) -> &Arc<DynInputSlot> {
+        &self.deserialized_input
     }
 }
 

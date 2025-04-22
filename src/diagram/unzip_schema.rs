@@ -23,7 +23,7 @@ use crate::Builder;
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationId, PerformForkClone,
+    DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationName, PerformForkClone,
     SerializeMessage, TypeInfo,
 };
 
@@ -36,17 +36,17 @@ pub struct UnzipSchema {
 impl BuildDiagramOperation for UnzipSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+        let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let unzip = ctx.registry.messages.unzip(inferred_type)?;
+        let unzip = ctx.registry.messages.unzip(&inferred_type)?;
         let actual_output = unzip.output_types();
         if actual_output.len() != self.next.len() {
             return Err(DiagramErrorCode::UnzipMismatch {
@@ -60,7 +60,7 @@ impl BuildDiagramOperation for UnzipSchema {
 
         ctx.set_input_for_target(id, unzip.input)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
-            ctx.add_output_into_target(target.clone(), output);
+            ctx.add_output_into_target(target, output);
         }
         Ok(BuildStatus::Finished)
     }
@@ -132,7 +132,7 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramErrorCode};
+    use crate::{diagram::testing::DiagramTestFixture, Diagram, DiagramErrorCode, JsonMessage};
 
     #[test]
     fn test_unzip_not_unzippable() {
@@ -157,7 +157,7 @@ mod tests {
 
         let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotUnzippable),
+            matches!(err.code, DiagramErrorCode::NotUnzippable(_)),
             "{}",
             err
         );
@@ -231,8 +231,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 20);
@@ -267,8 +267,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);
@@ -300,8 +300,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 60);

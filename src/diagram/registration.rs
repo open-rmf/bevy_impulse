@@ -22,6 +22,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
+    sync::Arc,
 };
 
 use crate::{
@@ -46,8 +47,8 @@ use super::{
     buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
     fork_result_schema::RegisterForkResult, register_json, supported::*, type_info::TypeInfo,
     unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
-    DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit,
-    SerializeMessage, SplitSchema, TransformError,
+    DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
+    SectionMetadata, SectionMetadataProvider, SerializeMessage, SplitSchema, TransformError,
 };
 
 /// A type erased [`crate::InputSlot`]
@@ -97,6 +98,7 @@ impl From<AnyBuffer> for DynInputSlot {
 }
 
 /// A type erased [`crate::Output`]
+#[derive(Debug)]
 pub struct DynOutput {
     scope: Entity,
     target: Entity,
@@ -160,16 +162,6 @@ impl DynOutput {
     }
 }
 
-impl Debug for DynOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynOutput")
-            .field("scope", &self.scope)
-            .field("target", &self.target)
-            .field("type_info", &self.message_info)
-            .finish()
-    }
-}
-
 impl<T> From<Output<T>> for DynOutput
 where
     T: Send + Sync + 'static + Any,
@@ -182,6 +174,7 @@ where
         }
     }
 }
+
 /// A type erased [`bevy_impulse::Node`]
 pub struct DynNode {
     pub input: DynInputSlot,
@@ -217,8 +210,9 @@ where
 
 #[derive(Serialize)]
 pub struct NodeRegistration {
+    #[serde(rename = "$key$")]
     pub(super) id: BuilderId,
-    pub(super) name: String,
+    pub(super) name: Arc<str>,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
     pub(super) config_schema: Schema,
@@ -402,7 +396,10 @@ impl<'a, Message> MessageRegistrationBuilder<'a, Message>
 where
     Message: Send + Sync + 'static + Any,
 {
-    fn new(registry: &'a mut MessageRegistry) -> Self {
+    pub fn new(registry: &'a mut MessageRegistry) -> Self {
+        // Any message type can be joined into a Vec
+        registry.register_join::<Vec<Message>>();
+
         Self {
             data: registry,
             _ignore: Default::default(),
@@ -707,9 +704,68 @@ pub trait IntoNodeRegistration {
     ) -> NodeRegistration;
 }
 
+type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section>;
+
+#[derive(Serialize)]
+pub struct SectionRegistration {
+    pub(super) name: BuilderId,
+    pub(super) metadata: SectionMetadata,
+    pub(super) config_schema: Schema,
+
+    #[serde(skip)]
+    create_section_impl: RefCell<Box<CreateSectionFn>>,
+}
+
+impl SectionRegistration {
+    pub(super) fn create_section(
+        &self,
+        builder: &mut Builder,
+        config: serde_json::Value,
+    ) -> Result<Box<dyn Section>, DiagramErrorCode> {
+        let section = (self.create_section_impl.borrow_mut())(builder, config);
+        Ok(section)
+    }
+}
+
+pub trait IntoSectionRegistration<SectionT, Config>
+where
+    SectionT: Section,
+{
+    fn into_section_registration(
+        self,
+        name: BuilderId,
+        schema_generator: &mut SchemaGenerator,
+    ) -> SectionRegistration;
+}
+
+impl<F, SectionT, Config> IntoSectionRegistration<SectionT, Config> for F
+where
+    F: 'static + FnMut(&mut Builder, Config) -> SectionT,
+    SectionT: 'static + Section + SectionMetadataProvider,
+    Config: DeserializeOwned + JsonSchema,
+{
+    fn into_section_registration(
+        mut self,
+        name: BuilderId,
+        schema_generator: &mut SchemaGenerator,
+    ) -> SectionRegistration {
+        SectionRegistration {
+            name,
+            metadata: SectionT::metadata().clone(),
+            config_schema: schema_generator.subschema_for::<()>(),
+            create_section_impl: RefCell::new(Box::new(move |builder, config| {
+                let section = self(builder, serde_json::from_value::<Config>(config).unwrap());
+                Box::new(section)
+            })),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct DiagramElementRegistry {
     pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
+    pub(super) sections: HashMap<BuilderId, SectionRegistration>,
+
     #[serde(flatten)]
     pub(super) messages: MessageRegistry,
 }
@@ -871,7 +927,7 @@ impl MessageRegistry {
 
     /// Register a deserialize function if not already registered, returns true if the new
     /// function is registered.
-    pub fn register_deserialize<T, Deserializer>(&mut self)
+    pub(super) fn register_deserialize<T, Deserializer>(&mut self)
     where
         T: Send + Sync + 'static + Any,
         Deserializer: DeserializeMessage<T>,
@@ -916,7 +972,7 @@ impl MessageRegistry {
 
     /// Register a serialize function if not already registered, returns true if the new
     /// function is registered.
-    pub fn register_serialize<T, Serializer>(&mut self)
+    pub(super) fn register_serialize<T, Serializer>(&mut self)
     where
         T: Send + Sync + 'static + Any,
         Serializer: SerializeMessage<T>,
@@ -932,13 +988,13 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.fork_clone_impl.as_ref())
-            .ok_or(DiagramErrorCode::NotCloneable)
+            .ok_or(DiagramErrorCode::NotCloneable(*message_info))
             .and_then(|f| f(builder))
     }
 
     /// Register a fork_clone function if not already registered, returns true if the new
     /// function is registered.
-    pub fn register_fork_clone<T, F>(&mut self) -> bool
+    pub(super) fn register_fork_clone<T, F>(&mut self) -> bool
     where
         T: Send + Sync + 'static + Any,
         F: PerformForkClone<T>,
@@ -965,7 +1021,7 @@ impl MessageRegistry {
             .get(message_info)
             .and_then(|reg| reg.operations.unzip_impl.as_ref())
             .map(|unzip| -> &'a (dyn PerformUnzip) { unzip.as_ref() })
-            .ok_or(DiagramErrorCode::NotUnzippable)
+            .ok_or(DiagramErrorCode::NotUnzippable(*message_info))
     }
 
     /// Register a unzip function if not already registered, returns true if the new
@@ -1001,7 +1057,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.fork_result_impl.as_ref())
-            .ok_or(DiagramErrorCode::CannotForkResult)
+            .ok_or(DiagramErrorCode::CannotForkResult(*message_info))
             .and_then(|f| f(builder))
     }
 
@@ -1023,7 +1079,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.split_impl.as_ref())
-            .ok_or(DiagramErrorCode::NotSplittable)
+            .ok_or(DiagramErrorCode::NotSplittable(*message_info))
             .and_then(|f| f(split_op, builder))
     }
 
@@ -1072,7 +1128,7 @@ impl MessageRegistry {
         self.messages
             .get(joinable)
             .and_then(|reg| reg.operations.join_impl.as_ref())
-            .ok_or_else(|| DiagramErrorCode::NotJoinable)
+            .ok_or_else(|| DiagramErrorCode::NotJoinable(*joinable))
             .and_then(|f| f(buffers, builder))
     }
 
@@ -1222,6 +1278,7 @@ impl Default for DiagramElementRegistry {
 
         let mut registry = DiagramElementRegistry {
             nodes: Default::default(),
+            sections: Default::default(),
             messages: MessageRegistry::new(),
         };
 
@@ -1242,6 +1299,7 @@ impl DiagramElementRegistry {
         JsonBuffer::register_for::<()>();
         DiagramElementRegistry {
             nodes: Default::default(),
+            sections: Default::default(),
             messages: MessageRegistry::new(),
         }
     }
@@ -1300,6 +1358,29 @@ impl DiagramElementRegistry {
         Message: Send + Sync + 'static + DynType + DeserializeOwned + Serialize + Clone,
     {
         self.opt_out().register_message()
+    }
+
+    /// Register a section builder with the specified common operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Id of the builder, this must be unique.
+    /// * `name` - Friendly name for the builder, this is only used for display purposes.
+    /// * `f` - The section builder to register.
+    pub fn register_section_builder<SectionBuilder, SectionT, Config>(
+        &mut self,
+        options: SectionBuilderOptions,
+        section_builder: SectionBuilder,
+    ) where
+        SectionBuilder: IntoSectionRegistration<SectionT, Config>,
+        SectionT: Section,
+    {
+        let reg = section_builder.into_section_registration(
+            options.name.unwrap_or_else(|| options.id.clone()),
+            &mut self.messages.schema_generator,
+        );
+        self.sections.insert(options.id, reg);
+        SectionT::on_register(self);
     }
 
     /// In some cases the common operations of deserialization, serialization,
@@ -1362,7 +1443,19 @@ impl DiagramElementRegistry {
         let k = id.borrow();
         self.nodes
             .get(k)
-            .ok_or(DiagramErrorCode::BuilderNotFound(k.to_string()))
+            .ok_or(DiagramErrorCode::BuilderNotFound(k.to_string().into()))
+    }
+
+    pub fn get_section_registration<Q>(
+        &self,
+        id: &Q,
+    ) -> Result<&SectionRegistration, DiagramErrorCode>
+    where
+        Q: Borrow<str> + ?Sized,
+    {
+        self.sections
+            .get(id.borrow())
+            .ok_or_else(|| DiagramErrorCode::BuilderNotFound(id.borrow().to_string().into()))
     }
 
     pub fn get_message_registration<T>(&self) -> Option<&MessageRegistration>
@@ -1409,19 +1502,39 @@ impl DiagramElementRegistry {
 #[non_exhaustive]
 pub struct NodeBuilderOptions {
     pub id: BuilderId,
-    pub name: Option<String>,
+    pub name: Option<BuilderId>,
 }
 
 impl NodeBuilderOptions {
     pub fn new(id: impl ToString) -> Self {
         Self {
-            id: id.to_string(),
+            id: id.to_string().into(),
             name: None,
         }
     }
 
     pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string());
+        self.name = Some(name.to_string().into());
+        self
+    }
+}
+
+#[non_exhaustive]
+pub struct SectionBuilderOptions {
+    pub id: BuilderId,
+    pub name: Option<BuilderId>,
+}
+
+impl SectionBuilderOptions {
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: id.to_string().into(),
+            name: None,
+        }
+    }
+
+    pub fn with_name(mut self, name: impl ToString) -> Self {
+        self.name = Some(name.to_string().into());
         self
     }
 }

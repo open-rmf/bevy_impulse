@@ -22,7 +22,7 @@ use crate::{Builder, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationId,
+    DynInputSlot, DynOutput, NextOperation, OperationName, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -34,20 +34,31 @@ pub struct ForkCloneSchema {
 impl BuildDiagramOperation for ForkCloneSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
-            // There are no outputs ready for this target, so we can't do
-            // anything yet. The builder should try again later.
-            return Ok(BuildStatus::defer("waiting for an input"));
+        let inferred_type = 'inferred: {
+            match ctx.infer_input_type_into_target(id)? {
+                Some(inferred_type) => break 'inferred inferred_type,
+                None => {
+                    for target in &self.next {
+                        if let Some(inferred_type) = ctx.infer_input_type_into_target(target)? {
+                            break 'inferred inferred_type;
+                        }
+                    }
+
+                    // There are no outputs or input slots ready for this target,
+                    // so we can't do anything yet. The builder should try again later.
+                    return Ok(BuildStatus::defer("waiting for an input"));
+                }
+            }
         };
 
-        let fork = ctx.registry.messages.fork_clone(inferred_type, builder)?;
+        let fork = ctx.registry.messages.fork_clone(&inferred_type, builder)?;
         ctx.set_input_for_target(id, fork.input)?;
         for target in &self.next {
-            ctx.add_output_into_target(target.clone(), fork.outputs.clone_output(builder));
+            ctx.add_output_into_target(target, fork.outputs.clone_output(builder));
         }
 
         Ok(BuildStatus::Finished)
@@ -60,11 +71,11 @@ pub trait PerformForkClone<T> {
     fn perform_fork_clone(builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
 }
 
-impl<T> PerformForkClone<T> for NotSupported {
+impl<T: 'static> PerformForkClone<T> for NotSupported {
     const CLONEABLE: bool = false;
 
     fn perform_fork_clone(_builder: &mut Builder) -> Result<DynForkClone, DiagramErrorCode> {
-        Err(DiagramErrorCode::NotCloneable)
+        Err(DiagramErrorCode::NotCloneable(TypeInfo::of::<T>()))
     }
 }
 
@@ -120,7 +131,7 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Diagram};
+    use crate::{diagram::testing::DiagramTestFixture, Diagram, JsonMessage};
 
     use super::*;
 
@@ -151,7 +162,7 @@ mod tests {
         .unwrap();
         let err = fixture.spawn_json_io_workflow(&diagram).unwrap_err();
         assert!(
-            matches!(err.code, DiagramErrorCode::NotCloneable),
+            matches!(err.code, DiagramErrorCode::NotCloneable(_)),
             "{:?}",
             err
         );
@@ -183,8 +194,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, 36);

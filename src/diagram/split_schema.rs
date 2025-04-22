@@ -29,7 +29,7 @@ use crate::{
 use super::{
     supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    OperationId, PerformForkClone, SerializeMessage,
+    OperationName, PerformForkClone, SerializeMessage,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -47,20 +47,20 @@ pub struct SplitSchema {
 impl BuildDiagramOperation for SplitSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(sample_input) = ctx.infer_input_type_into_target(id) else {
+        let Some(sample_input) = ctx.infer_input_type_into_target(id)? else {
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let split = ctx.registry.messages.split(sample_input, self, builder)?;
+        let split = ctx.registry.messages.split(&sample_input, self, builder)?;
         ctx.set_input_for_target(id, split.input)?;
         for (target, output) in split.outputs {
-            ctx.add_output_into_target(target, output);
+            ctx.add_output_into_target(&target, output);
         }
         Ok(BuildStatus::Finished)
     }
@@ -392,8 +392,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 1);
@@ -432,8 +432,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 2);
@@ -476,8 +476,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 2);
@@ -517,8 +517,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         // "a" is "eaten" up by the keyed path, so we should be the result of "b".
@@ -559,8 +559,8 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result[1], 2);
@@ -596,7 +596,7 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
+        let result: JsonMessage = fixture
             .spawn_and_run(
                 &diagram,
                 serde_json::to_value(HashMap::from([("test".to_string(), 1)])).unwrap(),

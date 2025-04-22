@@ -23,7 +23,7 @@ use crate::Builder;
 use super::{
     supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    OperationId, PerformForkClone, SerializeMessage,
+    OperationName, PerformForkClone, SerializeMessage,
 };
 
 pub struct DynForkResult {
@@ -42,20 +42,24 @@ pub struct ForkResultSchema {
 impl BuildDiagramOperation for ForkResultSchema {
     fn build_diagram_operation(
         &self,
-        id: &OperationId,
+        id: &OperationName,
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let Some(inferred_type) = ctx.infer_input_type_into_target(id) else {
+        let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
+            // TODO(@mxgrey): For each result type we can register a tuple of
+            // (T, E) for the Ok and Err types as a key so we could infer the
+            // operation type using the expected types for ok and err.
+
             // There are no outputs ready for this target, so we can't do
             // anything yet. The builder should try again later.
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_result(inferred_type, builder)?;
+        let fork = ctx.registry.messages.fork_result(&inferred_type, builder)?;
         ctx.set_input_for_target(id, fork.input)?;
-        ctx.add_output_into_target(self.ok.clone(), fork.ok);
-        ctx.add_output_into_target(self.err.clone(), fork.err);
+        ctx.add_output_into_target(&self.ok, fork.ok);
+        ctx.add_output_into_target(&self.err, fork.err);
         Ok(BuildStatus::Finished)
     }
 }
@@ -105,7 +109,9 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{diagram::testing::DiagramTestFixture, Builder, Diagram, NodeBuilderOptions};
+    use crate::{
+        diagram::testing::DiagramTestFixture, Builder, Diagram, JsonMessage, NodeBuilderOptions,
+    };
 
     #[test]
     fn test_fork_result() {
@@ -164,14 +170,14 @@ mod tests {
         }))
         .unwrap();
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(4))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(4))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "even");
 
-        let result = fixture
-            .spawn_and_run(&diagram, serde_json::Value::from(3))
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, JsonMessage::from(3))
             .unwrap();
         assert!(fixture.context.no_unhandled_errors());
         assert_eq!(result, "odd");
