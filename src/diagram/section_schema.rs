@@ -46,6 +46,7 @@ pub struct SectionSchema {
     pub(super) provider: SectionProvider,
     #[serde(default)]
     pub(super) config: serde_json::Value,
+    #[serde(default)]
     pub(super) connect: HashMap<Arc<str>, NextOperation>,
 }
 
@@ -1042,6 +1043,73 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], 12);
         assert_eq!(result[1], 20);
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "templates": {
+                "redirect_buffers": {
+                    "buffers": {
+                        "added": { "inner": "added" },
+                        "multiplied": { "inner": "multiplied" },
+                    },
+                    "ops": {
+                        "inner": {
+                            "type": "section",
+                            "template": "calculate",
+                        }
+                    }
+                },
+                "calculate": {
+                    "inputs": ["add", "multiply"],
+                    "buffers": ["added", "multiplied"],
+                    "ops": {
+                        "multiply": {
+                            "type": "node",
+                            "builder": "multiply_by",
+                            "config": 10,
+                            "next": "multiplied",
+                        },
+                        "multiplied": { "type": "buffer" },
+                        "add": {
+                            "type": "node",
+                            "builder": "add_to",
+                            "config": 10,
+                            "next": "added",
+                        },
+                        "added": { "type": "buffer" },
+                    },
+                }
+            },
+            "start": "start",
+            "ops": {
+                "start": {
+                    "type": "fork_clone",
+                    "next": [
+                        { "calc": "add" },
+                        { "calc": "multiply" },
+                    ],
+                },
+                "calc": {
+                    "type": "section",
+                    "template": "calculate",
+                },
+                "join": {
+                    "type": "join",
+                    "buffers": [
+                        { "calc": "added" },
+                        { "calc": "multiplied" },
+                    ],
+                    "next": { "builtin": "terminate" },
+                },
+            },
+        }))
+        .unwrap();
+
+        let result: Vec<i64> = fixture.spawn_and_run(&diagram, 3_i64).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], 13);
+        assert_eq!(result[1], 30);
     }
 
     #[test]

@@ -162,7 +162,6 @@
             }
           ],
           "required": [
-            "connect",
             "type"
           ],
           "properties": {
@@ -170,6 +169,7 @@
               "default": null
             },
             "connect": {
+              "default": {},
               "type": "object",
               "additionalProperties": {
                 "$ref": "#/definitions/NextOperation"
