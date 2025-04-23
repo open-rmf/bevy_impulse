@@ -19,7 +19,7 @@ use bevy_ecs::prelude::Entity;
 
 use std::sync::Arc;
 
-use crate::{BufferAccessLifecycle, BufferKey, ChannelSender};
+use crate::{BufferAccessLifecycle, BufferKeyTag, ChannelSender};
 
 pub struct BufferKeyBuilder {
     scope: Entity,
@@ -29,8 +29,9 @@ pub struct BufferKeyBuilder {
 }
 
 impl BufferKeyBuilder {
-    pub(crate) fn build<T>(&self, buffer: Entity) -> BufferKey<T> {
-        BufferKey {
+    /// Make a [`BufferKeyTag`] that can be given to a [`crate::BufferKey`]-like struct.
+    pub fn make_tag(&self, buffer: Entity) -> BufferKeyTag {
+        BufferKeyTag {
             buffer,
             session: self.session,
             accessor: self.accessor,
@@ -44,7 +45,6 @@ impl BufferKeyBuilder {
                     tracker.clone(),
                 ))
             }),
-            _ignore: Default::default(),
         }
     }
 

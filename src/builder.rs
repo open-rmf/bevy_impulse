@@ -16,19 +16,21 @@
 */
 
 use bevy_ecs::prelude::{Commands, Entity};
-use bevy_hierarchy::prelude::BuildChildren;
 
 use std::future::Future;
 
 use smallvec::SmallVec;
 
 use crate::{
-    AddOperation, AsMap, BeginCleanupWorkflow, Buffer, BufferItem, BufferKeys, BufferSettings,
-    Bufferable, Buffered, Chain, Collect, ForkClone, ForkCloneOutput, ForkTargetStorage, Gate,
-    GateRequest, Injection, InputSlot, IntoAsyncMap, IntoBlockingMap, Node, OperateBuffer,
-    OperateBufferAccess, OperateDynamicGate, OperateScope, OperateStaticGate, Output, Provider,
+    make_option_branching, make_result_branching, Accessible, Accessing, Accessor, AddOperation,
+    AsMap, Buffer, BufferKeys, BufferLocation, BufferMap, BufferSettings, Bufferable, Buffering,
+    Chain, Collect, ForkClone, ForkCloneOutput, ForkOptionOutput, ForkResultOutput,
+    ForkTargetStorage, Gate, GateRequest, IncompatibleLayout, Injection, InputSlot, IntoAsyncMap,
+    IntoBlockingMap, Joinable, Joined, Node, OperateBuffer, OperateCancel, OperateDynamicGate,
+    OperateQuietCancel, OperateScope, OperateSplit, OperateStaticGate, Output, Provider,
     RequestOfMap, ResponseOfMap, Scope, ScopeEndpoints, ScopeSettings, ScopeSettingsStorage,
-    Sendish, Service, StreamPack, StreamTargetMap, StreamsOfMap, Trim, TrimBranch, UnusedTarget,
+    Sendish, Service, SplitOutputs, Splittable, StreamPack, StreamTargetMap, StreamsOfMap, Trim,
+    TrimBranch, UnusedTarget, Unzippable,
 };
 
 pub(crate) mod connect;
@@ -164,8 +166,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         ));
 
         Buffer {
-            scope: self.scope,
-            source,
+            location: BufferLocation {
+                scope: self.scope(),
+                source,
+            },
             _ignore: Default::default(),
         }
     }
@@ -211,8 +215,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.create_scope::<Request, Response, (), Settings>(build)
     }
 
-    /// Create a node that clones its inputs and sends them off to any number of
-    /// targets.
+    /// Create an operation that clones its inputs and sends them off to any
+    /// number of targets.
     pub fn create_fork_clone<T>(&mut self) -> (InputSlot<T>, ForkCloneOutput<T>)
     where
         T: Clone + 'static + Send + Sync,
@@ -229,25 +233,99 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         )
     }
 
-    /// Alternative way of calling [`Bufferable::join`]
-    pub fn join<'b, B: Bufferable>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferItem<B>>
+    /// Create an operation that unzips its inputs and sends each element off to
+    /// a different output.
+    pub fn create_unzip<T>(&mut self) -> (InputSlot<T>, T::Unzipped)
     where
-        B::BufferType: 'static + Send + Sync,
-        BufferItem<B>: 'static + Send + Sync,
+        T: Unzippable + 'static + Send + Sync,
     {
+        let source = self.commands.spawn(()).id();
+        (
+            InputSlot::new(self.scope, source),
+            T::unzip_output(Output::<T>::new(self.scope, source), self),
+        )
+    }
+
+    /// Create an operation that creates a fork for a [`Result`] input. The value
+    /// inside the [`Result`] will be unpacked and sent down a different branch
+    /// depending on whether it was in the [`Ok`] or [`Err`] variant.
+    pub fn create_fork_result<T, E>(&mut self) -> (InputSlot<Result<T, E>>, ForkResultOutput<T, E>)
+    where
+        T: 'static + Send + Sync,
+        E: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        let target_ok = self.commands.spawn(UnusedTarget).id();
+        let target_err = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            ForkResultOutput {
+                ok: Output::new(self.scope, target_ok),
+                err: Output::new(self.scope, target_err),
+            },
+        )
+    }
+
+    /// Create an operation that creates a fork for an [`Option`] input. The value
+    /// inside the [`Option`] will be unpacked and sent down a different branch
+    /// depending on whether it was in the [`Some`] or [`None`] variant.
+    ///
+    /// For the [`None`] variant a unit `()` output will be sent, also called
+    /// a trigger.
+    pub fn create_fork_option<T>(&mut self) -> (InputSlot<Option<T>>, ForkOptionOutput<T>)
+    where
+        T: 'static + Send + Sync,
+    {
+        let source = self.commands.spawn(()).id();
+        let target_some = self.commands.spawn(UnusedTarget).id();
+        let target_none = self.commands.spawn(UnusedTarget).id();
+
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            ForkOptionOutput {
+                some: Output::new(self.scope, target_some),
+                none: Output::new(self.scope, target_none),
+            },
+        )
+    }
+
+    /// Alternative way of calling [`Joinable::join`]
+    pub fn join<'b, B: Joinable>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, B::Item> {
         buffers.join(self)
     }
 
-    /// Alternative way of calling [`Bufferable::listen`].
-    pub fn listen<'b, B: Bufferable>(
+    /// Try joining a map of buffers into a single value.
+    pub fn try_join<'b, J: Joined>(
         &'b mut self,
-        buffers: B,
-    ) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
-    where
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
-    {
+        buffers: &BufferMap,
+    ) -> Result<Chain<'w, 's, 'a, 'b, J>, IncompatibleLayout> {
+        J::try_join_from(buffers, self)
+    }
+
+    /// Alternative way of calling [`Accessible::listen`].
+    pub fn listen<'b, B: Accessible>(&'b mut self, buffers: B) -> Chain<'w, 's, 'a, 'b, B::Keys> {
         buffers.listen(self)
+    }
+
+    /// Try listening to a map of buffers.
+    pub fn try_listen<'b, Keys: Accessor>(
+        &'b mut self,
+        buffers: &BufferMap,
+    ) -> Result<Chain<'w, 's, 'a, 'b, Keys>, IncompatibleLayout> {
+        Keys::try_listen_from(buffers, self)
     }
 
     /// Create a node that combines its inputs with access to some buffers. You
@@ -257,27 +335,29 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ///
     /// Other [outputs](Output) can also be passed in as buffers. These outputs
     /// will be transformed into a buffer with default buffer settings.
-    pub fn create_buffer_access<T, B>(&mut self, buffers: B) -> Node<T, (T, BufferKeys<B>)>
+    pub fn create_buffer_access<T, B: Bufferable>(
+        &mut self,
+        buffers: B,
+    ) -> Node<T, (T, BufferKeys<B>)>
     where
+        B::BufferType: Accessing,
         T: 'static + Send + Sync,
-        B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
-        let source = self.commands.spawn(()).id();
-        let target = self.commands.spawn(UnusedTarget).id();
-        self.commands.add(AddOperation::new(
-            Some(self.scope),
-            source,
-            OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
-        ));
+        buffers.access(self)
+    }
 
-        Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
-            streams: (),
-        }
+    /// Try to create access to some buffers. Same as [`Self::create_buffer_access`]
+    /// except it will return an error if the buffers in the [`BufferMap`] are not
+    /// compatible with the keys that are being asked for.
+    pub fn try_create_buffer_access<T, Keys: Accessor>(
+        &mut self,
+        buffers: &BufferMap,
+    ) -> Result<Node<T, (T, Keys)>, IncompatibleLayout>
+    where
+        T: 'static + Send + Sync,
+    {
+        Keys::try_buffer_access(buffers, self)
     }
 
     /// Collect incoming workflow threads into a container.
@@ -339,6 +419,62 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         self.create_collect(n, Some(n))
     }
 
+    /// Create a new split operation in the workflow. The [`InputSlot`] can take
+    /// in values that you want to split, and [`SplitOutputs::build`] will let
+    /// you build connections to the split value.
+    pub fn create_split<T>(&mut self) -> (InputSlot<T>, SplitOutputs<T>)
+    where
+        T: 'static + Send + Sync + Splittable,
+    {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateSplit::<T>::default(),
+        ));
+
+        (
+            InputSlot::new(self.scope, source),
+            SplitOutputs::new(self.scope, source),
+        )
+    }
+
+    /// Create an input slot that will cancel the current scope when it gets
+    /// triggered. This can be used on types that implement [`ToString`].
+    ///
+    /// If you need to cancel for a type that does not implement [`ToString`]
+    /// then convert it to a trigger `()` and then connect it to
+    /// [`Self::create_quiet_cancel`].
+    pub fn create_cancel<T>(&mut self) -> InputSlot<T>
+    where
+        T: 'static + Send + Sync + ToString,
+    {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateCancel::<T>::new(),
+        ));
+
+        InputSlot::new(self.scope, source)
+    }
+
+    /// Create an input slot that will cancel that current scope when it gets
+    /// triggered.
+    ///
+    /// If you want the cancellation message to include information about the
+    /// input value that triggered it, use [`Self::create_cancel`].
+    pub fn create_quiet_cancel(&mut self) -> InputSlot<()> {
+        let source = self.commands.spawn(()).id();
+        self.commands.add(AddOperation::new(
+            Some(self.scope),
+            source,
+            OperateQuietCancel,
+        ));
+
+        InputSlot::new(self.scope, source)
+    }
+
     /// This method allows you to define a cleanup workflow that branches off of
     /// this scope that will activate during the scope's cleanup phase. The
     /// input to the cleanup workflow will be a key to access to one or more
@@ -364,15 +500,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
-        self.on_cleanup_if(
-            CleanupWorkflowConditions::always_if(true, true),
-            from_buffers,
-            build,
-        )
+        from_buffers.into_buffer(self).on_cleanup(self, build);
     }
 
     /// Define a cleanup workflow that only gets run if the scope was cancelled.
@@ -394,15 +525,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
-        self.on_cleanup_if(
-            CleanupWorkflowConditions::always_if(false, true),
-            from_buffers,
-            build,
-        )
+        from_buffers.into_buffer(self).on_cancel(self, build);
     }
 
     /// Define a cleanup workflow that only gets run if the scope was successfully
@@ -418,15 +544,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
-        self.on_cleanup_if(
-            CleanupWorkflowConditions::always_if(true, false),
-            from_buffers,
-            build,
-        )
+        from_buffers.into_buffer(self).on_terminate(self, build);
     }
 
     /// Define a sub-workflow that will be run when this workflow is being cleaned
@@ -439,31 +560,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         build: impl FnOnce(Scope<BufferKeys<B>, (), ()>, &mut Builder) -> Settings,
     ) where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
         Settings: Into<ScopeSettings>,
     {
-        let cancelling_scope_id = self.commands.spawn(()).id();
-        let _ = self.create_scope_impl::<BufferKeys<B>, (), (), Settings>(
-            cancelling_scope_id,
-            self.finish_scope_cancel,
-            build,
-        );
-
-        let begin_cancel = self.commands.spawn(()).set_parent(self.scope).id();
-        let buffers = from_buffers.into_buffer(self);
-        buffers.verify_scope(self.scope);
-        self.commands.add(AddOperation::new(
-            None,
-            begin_cancel,
-            BeginCleanupWorkflow::<B::BufferType>::new(
-                self.scope,
-                buffers,
-                cancelling_scope_id,
-                conditions.run_on_terminate,
-                conditions.run_on_cancel,
-            ),
-        ));
+        from_buffers
+            .into_buffer(self)
+            .on_cleanup_if(self, conditions, build);
     }
 
     /// Create a node that trims (cancels) other nodes in the workflow when it
@@ -504,7 +606,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_gate<T, B>(&mut self, buffers: B) -> Node<GateRequest<T>, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
@@ -534,7 +635,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_gate_action<T, B>(&mut self, action: Gate, buffers: B) -> Node<T, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
@@ -561,7 +661,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_gate_open<B, T>(&mut self, buffers: B) -> Node<T, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
         self.create_gate_action(Gate::Open, buffers)
@@ -573,7 +672,6 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_gate_close<T, B>(&mut self, buffers: B) -> Node<T, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
         T: 'static + Send + Sync,
     {
         self.create_gate_action(Gate::Closed, buffers)
@@ -675,8 +773,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 /// later without breaking API.
 #[derive(Clone)]
 pub struct CleanupWorkflowConditions {
-    run_on_terminate: bool,
-    run_on_cancel: bool,
+    pub(crate) run_on_terminate: bool,
+    pub(crate) run_on_cancel: bool,
 }
 
 impl CleanupWorkflowConditions {
@@ -938,11 +1036,15 @@ mod tests {
         let mut promise = context.command(|commands| commands.request(5, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors(),
+        );
         assert!(promise.peek().is_cancelled());
         let channel_output = receiver.try_recv().unwrap();
         assert_eq!(channel_output, 5);
         assert!(receiver.try_recv().is_err());
-        assert!(context.no_unhandled_errors());
         assert!(context.confirm_buffers_empty().is_ok());
 
         let (cancel_sender, mut cancel_receiver) = unbounded_channel();
@@ -1173,7 +1275,9 @@ mod tests {
             context.command(|commands| commands.request(input, workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(2));
-        assert!(promise.take().available().is_some_and(|v| v == expectation));
+        assert!(Promise::take(&mut promise)
+            .available()
+            .is_some_and(|v| v == expectation));
         assert!(context.no_unhandled_errors());
     }
 }

@@ -72,6 +72,8 @@ pub use async_execution::Sendish;
 pub mod buffer;
 pub use buffer::*;
 
+pub mod re_exports;
+
 pub mod builder;
 pub use builder::*;
 
@@ -86,6 +88,11 @@ pub use chain::*;
 
 pub mod channel;
 pub use channel::*;
+
+#[cfg(feature = "diagram")]
+pub mod diagram;
+#[cfg(feature = "diagram")]
+pub use diagram::*;
 
 pub mod disposal;
 pub use disposal::*;
@@ -142,6 +149,8 @@ pub use trim::*;
 
 use bevy_app::prelude::{App, Plugin, Update};
 use bevy_ecs::prelude::{Entity, In};
+
+extern crate self as bevy_impulse;
 
 /// Use `BlockingService` to indicate that your system is a blocking [`Service`].
 ///
@@ -331,8 +340,10 @@ impl Plugin for ImpulsePlugin {
 pub mod prelude {
     pub use crate::{
         buffer::{
-            Buffer, BufferAccess, BufferAccessMut, BufferKey, BufferSettings, Bufferable, Buffered,
-            IterBufferable, RetentionPolicy,
+            Accessible, Accessor, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess,
+            AnyMessageBox, AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey,
+            BufferMap, BufferMapLayout, BufferSettings, BufferWorldAccess, Bufferable, Buffering,
+            IncompatibleLayout, IterBufferable, Joinable, Joined, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
@@ -356,5 +367,10 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
+    };
+
+    #[cfg(feature = "diagram")]
+    pub use crate::buffer::{
+        JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage,
     };
 }

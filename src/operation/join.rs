@@ -18,7 +18,7 @@
 use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    Buffered, FunnelInputStorage, Input, InputBundle, ManageInput, Operation, OperationCleanup,
+    FunnelInputStorage, Input, InputBundle, Joining, ManageInput, Operation, OperationCleanup,
     OperationError, OperationReachability, OperationRequest, OperationResult, OperationSetup,
     OrBroken, ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
@@ -37,7 +37,7 @@ impl<Buffers> Join<Buffers> {
 #[derive(Component)]
 struct BufferStorage<Buffers>(Buffers);
 
-impl<Buffers: Buffered + 'static + Send + Sync> Operation for Join<Buffers>
+impl<Buffers: Joining + 'static + Send + Sync> Operation for Join<Buffers>
 where
     Buffers::Item: 'static + Send + Sync,
 {
