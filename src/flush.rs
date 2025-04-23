@@ -22,7 +22,7 @@ use bevy_ecs::{
     system::SystemState,
     world::Command,
 };
-use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
+use bevy_hierarchy::{BuildChildren, Children, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 

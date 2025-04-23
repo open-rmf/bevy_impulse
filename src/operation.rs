@@ -25,7 +25,7 @@ use bevy_ecs::{
     prelude::{Component, Entity, World},
     world::Command,
 };
-use bevy_hierarchy::prelude::BuildWorldChildren;
+use bevy_hierarchy::prelude::BuildChildren;
 
 use backtrace::Backtrace;
 

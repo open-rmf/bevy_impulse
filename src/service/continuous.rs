@@ -21,7 +21,7 @@ use bevy_ecs::{
     system::{IntoSystem, SystemParam},
     world::{Command, EntityWorldMut},
 };
-use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
+use bevy_hierarchy::prelude::{BuildChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 

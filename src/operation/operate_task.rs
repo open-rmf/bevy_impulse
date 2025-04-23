@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Component, Entity, Resource, World},
     world::Command,
 };
-use bevy_hierarchy::{BuildWorldChildren, DespawnRecursiveExt};
+use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 
 use std::{future::Future, pin::Pin, sync::Arc, task::Context, task::Poll};
 
