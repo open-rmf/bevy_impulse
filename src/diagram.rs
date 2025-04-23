@@ -969,7 +969,7 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
+    /// let workflow = app.world_mut().command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     // TODO(koonpeng): Support streams other than `()` #43.
@@ -1045,7 +1045,7 @@ impl Diagram {
     /// "#;
     ///
     /// let diagram = Diagram::from_json_str(json_str)?;
-    /// let workflow = app.world.command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
+    /// let workflow = app.world_mut().command(|cmds| diagram.spawn_io_workflow::<JsonMessage, JsonMessage>(cmds, &registry))?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn spawn_io_workflow<Request, Response>(
