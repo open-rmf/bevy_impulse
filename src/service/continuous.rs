@@ -942,7 +942,7 @@ fn serve_next_continuous_request<Request, Response, Streams>(
 impl<Request, Response, Streams, M, Sys> IntoContinuousService<(Request, Response, Streams, M)>
     for Sys
 where
-    Sys: IntoSystem<ContinuousService<Request, Response, Streams>, (), M>,
+    Sys: IntoSystem<In<ContinuousService<Request, Response, Streams>>, (), M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,

@@ -39,17 +39,17 @@ pub trait IsAsyncService<M> {}
 
 #[derive(Component)]
 struct AsyncServiceStorage<Request, Streams: StreamPack, Task>(
-    Option<BoxedSystem<AsyncService<Request, Streams>, Task>>,
+    Option<BoxedSystem<In<AsyncService<Request, Streams>>, Task>>,
 );
 
 #[derive(Component)]
 struct UninitAsyncServiceStorage<Request, Streams: StreamPack, Task>(
-    BoxedSystem<AsyncService<Request, Streams>, Task>,
+    BoxedSystem<In<AsyncService<Request, Streams>>, Task>,
 );
 
 impl<Request, Streams, Task, M, Sys> IntoService<(Request, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
+    Sys: IntoSystem<In<AsyncService<Request, Streams>>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -77,7 +77,7 @@ where
 
 impl<Request, Streams, Task, M, Sys> IsAsyncService<(Request, Streams, Task, M)> for Sys
 where
-    Sys: IntoSystem<AsyncService<Request, Streams>, Task, M>,
+    Sys: IntoSystem<In<AsyncService<Request, Streams>>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -406,7 +406,7 @@ pub trait IntoAsyncService<M> {
 
 impl<Request, Response, M, Sys> IntoAsyncService<AsAsyncService<(Request, Response, M)>> for Sys
 where
-    Sys: IntoSystem<Request, Response, M>,
+    Sys: IntoSystem<In<Request>, Response, M>,
     Request: 'static + Send,
     Response: 'static + Send,
 {
@@ -418,7 +418,7 @@ where
 
 impl<Request, Task, M, Sys> IntoService<(Request, Task, M)> for AsAsyncService<Sys>
 where
-    Sys: IntoSystem<Request, Task, M>,
+    Sys: IntoSystem<In<Request>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -441,7 +441,7 @@ where
 
 impl<Request, Task, M, Sys> IsAsyncService<(Request, Task, M)> for AsAsyncService<Sys>
 where
-    Sys: IntoSystem<Request, Task, M>,
+    Sys: IntoSystem<In<Request>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
