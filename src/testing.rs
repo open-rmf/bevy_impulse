@@ -19,7 +19,7 @@ use bevy_app::ScheduleRunnerPlugin;
 pub use bevy_app::{App, Update};
 use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
 pub use bevy_ecs::{
-    prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource},
+    prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource, World},
     system::IntoSystem,
     world::CommandQueue,
 };
@@ -33,10 +33,12 @@ pub use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use crate::{
-    flush_impulses, AddContinuousServicesExt, AsyncServiceInput, BlockingMap, BlockingServiceInput,
-    Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt,
-    StreamOf, StreamPack, UnhandledErrors, WorkflowSettings,
+    flush_impulses, Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput,
+    BlockingMap, BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable,
+    Buffering, Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
+    GetBufferedSessionsFn, Joining, OperationError, OperationResult, OperationRoster, Promise,
+    RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf, StreamPack, UnhandledErrors,
+    WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -160,7 +162,10 @@ impl TestingContext {
 
     // Check that all buffers in the world are empty
     pub fn confirm_buffers_empty(&mut self) -> Result<(), Vec<Entity>> {
-        let mut query = self.app.world_mut().query::<(Entity, &GetBufferedSessionsFn)>();
+        let mut query = self
+            .app
+            .world_mut()
+            .query::<(Entity, &GetBufferedSessionsFn)>();
         let buffers: Vec<_> = query
             .iter(self.app.world())
             .map(|(e, get_sessions)| (e, get_sessions.0))
@@ -478,4 +483,105 @@ pub struct TestComponent;
 #[derive(Component, Resource)]
 pub struct Integer {
     pub value: i32,
+}
+
+/// This is an ordinary buffer newtype whose only purpose is to test the
+/// #[joined(noncopy_buffer)] feature. We intentionally do not implement
+/// the Copy trait for it.
+pub struct NonCopyBuffer<T> {
+    inner: Buffer<T>,
+}
+
+impl<T: 'static + Send + Sync> NonCopyBuffer<T> {
+    pub fn register_downcast() {
+        let any_interface = AnyBuffer::interface_for::<T>();
+        any_interface.register_buffer_downcast(
+            std::any::TypeId::of::<NonCopyBuffer<T>>(),
+            Box::new(|location| {
+                Box::new(NonCopyBuffer::<T> {
+                    inner: Buffer {
+                        location,
+                        _ignore: Default::default(),
+                    },
+                })
+            }),
+        );
+    }
+}
+
+impl<T> Clone for NonCopyBuffer<T> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner }
+    }
+}
+
+impl<T: 'static + Send + Sync> AsAnyBuffer for NonCopyBuffer<T> {
+    fn as_any_buffer(&self) -> AnyBuffer {
+        self.inner.as_any_buffer()
+    }
+}
+
+impl<T: 'static + Send + Sync> Bufferable for NonCopyBuffer<T> {
+    type BufferType = Self;
+    fn into_buffer(self, _builder: &mut Builder) -> Self::BufferType {
+        self
+    }
+}
+
+impl<T: 'static + Send + Sync> Buffering for NonCopyBuffer<T> {
+    fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
+        self.inner.add_listener(listener, world)
+    }
+
+    fn as_input(&self) -> smallvec::SmallVec<[Entity; 8]> {
+        self.inner.as_input()
+    }
+
+    fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
+        self.inner.buffered_count(session, world)
+    }
+
+    fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
+        self.inner.ensure_active_session(session, world)
+    }
+
+    fn gate_action(
+        &self,
+        session: Entity,
+        action: crate::Gate,
+        world: &mut World,
+        roster: &mut OperationRoster,
+    ) -> OperationResult {
+        self.inner.gate_action(session, action, world, roster)
+    }
+
+    fn verify_scope(&self, scope: Entity) {
+        self.inner.verify_scope(scope);
+    }
+}
+
+impl<T: 'static + Send + Sync> Joining for NonCopyBuffer<T> {
+    type Item = T;
+    fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
+        self.inner.pull(session, world)
+    }
+}
+
+impl<T: 'static + Send + Sync> Accessing for NonCopyBuffer<T> {
+    type Key = BufferKey<T>;
+    fn add_accessor(&self, accessor: Entity, world: &mut World) -> OperationResult {
+        self.inner.add_accessor(accessor, world)
+    }
+
+    fn create_key(&self, builder: &crate::BufferKeyBuilder) -> Self::Key {
+        self.inner.create_key(builder)
+    }
+
+    fn deep_clone_key(key: &Self::Key) -> Self::Key {
+        key.deep_clone()
+    }
+
+    fn is_key_in_use(key: &Self::Key) -> bool {
+        key.is_in_use()
+    }
 }
