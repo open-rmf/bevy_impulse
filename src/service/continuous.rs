@@ -648,7 +648,7 @@ where
                     }
                 }
 
-                if let Some(task_mut) = world.get_entity_mut(task_id) {
+                if let Ok(task_mut) = world.get_entity_mut(task_id) {
                     task_mut.despawn_recursive();
                 }
             }
@@ -778,7 +778,7 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                    if let Ok(task_mut) = world.get_entity_mut(cancelled.task_id) {
                         task_mut.despawn_recursive();
                     }
                 }
@@ -815,7 +815,7 @@ where
 
                     let disposal = Disposal::supplanted(stop.source, source, session);
                     emit_disposal(stop.source, stop.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(stop.task_id) {
+                    if let Ok(task_mut) = world.get_entity_mut(stop.task_id) {
                         task_mut.despawn_recursive();
                     }
                 }

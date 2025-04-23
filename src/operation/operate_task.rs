@@ -382,7 +382,7 @@ fn cleanup_task(
         roster.unblock(unblock);
     }
 
-    if let Some(mut node_mut) = world.get_entity_mut(node) {
+    if let Ok(mut node_mut) = world.get_entity_mut(node) {
         if let Some(mut active_tasks) = node_mut.get_mut::<ActiveTasksStorage>() {
             let mut cleanup_ready = true;
             active_tasks.list.retain(
@@ -420,7 +420,7 @@ fn cleanup_task(
         };
     };
 
-    if let Some(source_mut) = world.get_entity_mut(source) {
+    if let Ok(source_mut) = world.get_entity_mut(source) {
         source_mut.despawn_recursive();
     }
 

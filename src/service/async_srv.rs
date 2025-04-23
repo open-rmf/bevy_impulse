@@ -151,7 +151,7 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                    if let Ok(task_mut) = world.get_entity_mut(cancelled.task_id) {
                         task_mut.despawn_recursive();
                     }
                 }
@@ -244,7 +244,7 @@ where
                 roster,
             },
     } = cmd;
-    let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+    let mut service = if let Ok(mut provider_mut) = world.get_entity_mut(provider) {
         if let Some(mut storage) =
             provider_mut.get_mut::<AsyncServiceStorage<Request, Streams, Task>>()
         {

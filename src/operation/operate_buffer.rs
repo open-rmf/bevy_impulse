@@ -229,7 +229,7 @@ impl Command for OnNewBufferValue {
 
         buffer_targets.0.push(self.buffer);
 
-        let Some(mut target_mut) = world.get_entity_mut(self.target) else {
+        let Ok(mut target_mut) = world.get_entity_mut(self.target) else {
             self.on_failure(world);
             return;
         };

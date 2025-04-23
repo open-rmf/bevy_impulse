@@ -97,7 +97,7 @@ where
             .or_broken()?
             .take_input::<Request>()?;
 
-        let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+        let mut service = if let Ok(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) =
                 provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>()
             {
@@ -146,7 +146,7 @@ where
         let mut unused_streams = UnusedStreams::new(source);
         Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
 
-        if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+        if let Ok(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) =
                 provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>()
             {

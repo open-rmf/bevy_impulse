@@ -79,7 +79,7 @@ macro_rules! impl_unzippable_for_tuple {
                 let ($($D,)*) = world.get::<ForkTargetStorage>(source).or_broken()?.0.iter().copied().next_tuple().or_broken()?;
                 let ($($T,)*) = inputs;
                 $(
-                    if let Some(mut t_mut) = world.get_entity_mut($D) {
+                    if let Ok(mut t_mut) = world.get_entity_mut($D) {
                         t_mut.give_input(session, $T, roster)?;
                     }
                 )*

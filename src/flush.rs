@@ -19,8 +19,8 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Added, Entity, Query, QueryState, Resource, With, World},
     schedule::{IntoSystemConfigs, SystemConfigs},
-    world::Command,
     system::SystemState,
+    world::Command,
 };
 use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
 
@@ -89,7 +89,7 @@ fn flush_impulses_impl(
     let mut loop_count = 0;
     while !roster.is_empty() {
         for e in roster.deferred_despawn.drain(..) {
-            if let Some(e_mut) = world.get_entity_mut(e) {
+            if let Ok(e_mut) = world.get_entity_mut(e) {
                 e_mut.despawn_recursive();
             }
         }
@@ -330,12 +330,12 @@ fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, 
     }
 
     if let Some(detached_impulse) = detached_impulse {
-        if let Some(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
+        if let Ok(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
             detached_impulse_mut.remove_parent();
         }
     }
 
-    if let Some(unused_target_mut) = world.get_entity_mut(target) {
+    if let Ok(unused_target_mut) = world.get_entity_mut(target) {
         unused_target_mut.despawn_recursive();
     }
 
