@@ -922,7 +922,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
     ) -> Result<JsonBufferView<'a>, BufferError> {
         let buffer_ref = world
             .get_entity(key.tag.buffer)
-            .ok_or(BufferError::BufferMissing)?;
+            .map_err(|_| BufferError::BufferMissing)?;
         let storage = buffer_ref
             .get::<BufferStorage<T>>()
             .ok_or(BufferError::BufferMissing)?;
