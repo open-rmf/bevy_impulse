@@ -78,7 +78,7 @@ impl<T> Buffer<T> {
         let target = builder.commands.spawn(UnusedTarget).id();
         builder
             .commands
-            .add(OnNewBufferValue::new(self.id(), target));
+            .queue(OnNewBufferValue::new(self.id(), target));
         Chain::new(target, builder)
     }
 
@@ -734,7 +734,7 @@ where
 {
     fn drop(&mut self) {
         if self.modified {
-            self.commands.add(NotifyBufferUpdate::new(
+            self.commands.queue(NotifyBufferUpdate::new(
                 self.buffer,
                 self.session,
                 self.accessor,

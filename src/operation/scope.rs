@@ -537,9 +537,9 @@ where
         // Note: We need to make sure the scope object gets set up before any of
         // its endpoints, otherwise the ScopeContents component will be missing
         // during setup.
-        commands.add(AddOperation::new(parent_scope, scope_id, scope));
+        commands.queue(AddOperation::new(parent_scope, scope_id, scope));
 
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             // We do not consider the terminal node to be "inside" the scope,
             // otherwise it will get cleaned up prematurely
             None,
@@ -547,7 +547,7 @@ where
             Terminate::<Response>::new(scope_id),
         ));
 
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             // We do not consider the finish cancel node to be "inside" the
             // scope, otherwise it will get cleaned up prematurely
             None,

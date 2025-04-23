@@ -458,7 +458,7 @@ impl<'w, 's, 'a> JsonBufferMut<'w, 's, 'a> {
 impl<'w, 's, 'a> Drop for JsonBufferMut<'w, 's, 'a> {
     fn drop(&mut self) {
         if self.modified {
-            self.commands.add(NotifyBufferUpdate::new(
+            self.commands.queue(NotifyBufferUpdate::new(
                 self.buffer,
                 self.session,
                 self.accessor,

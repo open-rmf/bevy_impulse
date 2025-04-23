@@ -61,7 +61,7 @@ macro_rules! impl_unzippable_for_tuple {
                         )*
                     );
 
-                builder.commands.add(AddOperation::new(
+                builder.commands.queue(AddOperation::new(
                     Some(output.scope()),
                     output.id(),
                     ForkUnzip::<Self>::new(ForkTargetStorage(targets)),

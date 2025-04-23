@@ -602,7 +602,7 @@ where
         target: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             scope,
             source,
             OperateCallback::new(self, target),

@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Commands, Component, Entity, Event, EventReader, In, Local, Query, World},
     schedule::IntoSystemConfigs,
     system::{IntoSystem, SystemParam},
-    world::{EntityWorldMut, Command},
+    world::{Command, EntityWorldMut},
 };
 use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
 
@@ -476,7 +476,7 @@ where
 
         if !responses.is_empty() {
             self.commands
-                .add(DeliverResponses::<Request, Response, Streams> {
+                .queue(DeliverResponses::<Request, Response, Streams> {
                     responses,
                     _ignore: Default::default(),
                 });
