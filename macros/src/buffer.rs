@@ -401,7 +401,7 @@ fn impl_buffer_map_layout(
         }
 
         impl #impl_generics ::bevy_impulse::BufferMapStruct for #struct_ident #ty_generics #where_clause {
-            fn buffer_list(&self) -> ::smallvec::SmallVec<[AnyBuffer; 8]> {
+            fn buffer_list(&self) -> ::smallvec::SmallVec<[::bevy_impulse::AnyBuffer; 8]> {
                 use smallvec::smallvec;
                 smallvec![#(
                     ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.#field_ident),

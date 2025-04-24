@@ -27,9 +27,10 @@ use crate::{
     make_option_branching, make_result_branching, Accessing, AddOperation, AsMap, Buffer,
     BufferKey, BufferKeys, Bufferable, Buffering, Builder, Collect, CreateCancelFilter,
     CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
-    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate,
-    OperateSplit, OperateStaticGate, Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish,
-    Service, Spread, StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateCancel,
+    OperateDynamicGate, OperateQuietCancel, OperateSplit, OperateStaticGate, Output, ProvideOnce,
+    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf, StreamPack,
+    StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -347,6 +348,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         F::Streams: StreamPack,
     {
         self.then(filter_provider).cancel_on_none()
+    }
+
+    /// When the chain reaches this point, cancel the workflow and include
+    /// information about the value that triggered the cancellation. The input
+    /// type must implement [`ToString`].
+    ///
+    /// If you want to trigger a cancellation with a type that does not
+    /// implement [`ToString`] then use [`Self::trigger`] and then
+    /// [`Self::then_quiet_cancel`].
+    pub fn then_cancel(self)
+    where
+        T: ToString,
+    {
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            self.target,
+            OperateCancel::<T>::new(),
+        ));
     }
 
     /// Same as [`Chain::cancellation_filter`] but the chain will be disposed
@@ -1139,6 +1158,20 @@ where
     }
 }
 
+impl<'w, 's, 'a, 'b> Chain<'w, 's, 'a, 'b, ()> {
+    /// When the chain reaches this point, cancel the workflow.
+    ///
+    /// If you want to include information about the value that triggered the
+    /// cancellation, use [`Self::then_cancel`].
+    pub fn then_quiet_cancel(self) {
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            self.target,
+            OperateQuietCancel,
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{prelude::*, testing::*};
@@ -1570,5 +1603,27 @@ mod tests {
             }));
         }
         assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_unused_branch() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow =
+            context.spawn_io_workflow(|scope: Scope<Vec<Result<i64, ()>>, i64>, builder| {
+                scope
+                    .input
+                    .chain(builder)
+                    .spread()
+                    .fork_result(|ok| ok.connect(scope.terminate), |err| err.unused());
+            });
+
+        let test_set = vec![Err(()), Err(()), Ok(5), Err(()), Ok(10)];
+        let mut promise =
+            context.command(|commands| commands.request(test_set, workflow).take_response());
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(context.no_unhandled_errors());
+        assert_eq!(promise.take().available().unwrap(), 5);
     }
 }

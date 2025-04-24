@@ -34,10 +34,11 @@ use thiserror::Error as ThisError;
 use smallvec::SmallVec;
 
 use crate::{
-    add_listener_to_source, Accessing, Buffer, BufferAccessMut, BufferAccessors, BufferError,
-    BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation, BufferStorage,
-    Bufferable, Buffering, Builder, DrainBuffer, Gate, GateState, InspectBuffer, Joining,
-    ManageBuffer, NotifyBufferUpdate, OperationError, OperationResult, OperationRoster, OrBroken,
+    add_listener_to_source, Accessing, Accessor, Buffer, BufferAccessMut, BufferAccessors,
+    BufferError, BufferKey, BufferKeyBuilder, BufferKeyLifecycle, BufferKeyTag, BufferLocation,
+    BufferMap, BufferMapLayout, BufferStorage, Bufferable, Buffering, Builder, DrainBuffer, Gate,
+    GateState, IncompatibleLayout, InspectBuffer, Joining, ManageBuffer, NotifyBufferUpdate,
+    OperationError, OperationResult, OperationRoster, OrBroken,
 };
 
 /// A [`Buffer`] whose message type has been anonymized. Joining with this buffer
@@ -240,6 +241,23 @@ impl<T: 'static + Send + Sync + Any> From<BufferKey<T>> for AnyBufferKey {
             tag: value.tag,
             interface,
         }
+    }
+}
+
+impl Accessor for AnyBufferKey {
+    type Buffers = AnyBuffer;
+}
+
+impl BufferMapLayout for AnyBuffer {
+    fn try_from_buffer_map(buffers: &BufferMap) -> Result<Self, IncompatibleLayout> {
+        let mut compatibility = IncompatibleLayout::default();
+
+        if let Ok(any_buffer) = compatibility.require_buffer_for_identifier::<AnyBuffer>(0, buffers)
+        {
+            return Ok(any_buffer);
+        }
+
+        Err(compatibility)
     }
 }
 

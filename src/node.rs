@@ -201,3 +201,21 @@ impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
         }
     }
 }
+
+/// The output of a fork result operation. Each output can be connected to one
+/// input slot.
+pub struct ForkResultOutput<T, E> {
+    /// This output will be sent if an [`Ok`] is sent into the fork.
+    pub ok: Output<T>,
+    /// This output will be sent if an [`Err`] is sent into the fork.
+    pub err: Output<E>,
+}
+
+/// The output of a fork option operation. Each output can be connected to one
+/// input slot.
+pub struct ForkOptionOutput<T> {
+    /// This output will be sent if a [`Some`] is sent into the fork.
+    pub some: Output<T>,
+    /// This output will be sent if a [`None`] is sent into the fork.
+    pub none: Output<()>,
+}
