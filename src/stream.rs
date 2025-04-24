@@ -44,6 +44,9 @@ use crate::{
     ReportUnhandled, SingleInputStorage, TakenStream, UnhandledErrors, UnusedStreams, UnusedTarget,
 };
 
+mod dynamically_named_stream;
+pub use dynamically_named_stream::*;
+
 mod named_stream;
 pub use named_stream::*;
 
@@ -1072,7 +1075,7 @@ all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*};
+    use crate::{prelude::*, testing::*, StreamBuffer};
 
     #[test]
     fn test_single_stream() {
@@ -1415,18 +1418,56 @@ mod tests {
         stream_string: StreamOf<String>,
     }
 
-    // impl StreamPack for TestStreamMap {
-    //     type StreamAvailableBundle = (NamedStreamAvailable<u32>, NamedStreamAvailable<i32>, NamedStreamAvailable<String>);
-    //     type StreamFilter = (
-    //         ::bevy_impulse::re_exports::With<NamedStreamAvailable<u32>>,
-    //         ::bevy_impulse::re_exports::With<NamedStreamAvailable<i32>>,
-    //         ::bevy_impulse::re_exports::With<NamedStreamAvailable<String>>,
-    //     );
-    //     type StreamStorageBundle = (NamedStreamTargetStorage<u32>, NamedStreamTargetStorage<i32>, NamedStreamTargetStorage<String>);
-    //     type StreamInputPack = TestStreamMapInputs;
-    //     type StreamOutputPack = TestStreamMapOutputs;
-    //     type Receiver = TestStreamMapReceiver;
-    // }
+    impl StreamPack for TestStreamMap {
+        type StreamInputPack = TestStreamMapInputs;
+        type StreamOutputPack = TestStreamMapOutputs;
+        type StreamReceivers = TestStreamMapReceivers;
+        type StreamChannels = TestStreamMapChannels;
+        type StreamBuffers = TestStreamMapBuffers;
+
+        fn spawn_scope_streams(
+            in_scope: bevy_impulse::re_exports::Entity,
+            out_scope: bevy_impulse::re_exports::Entity,
+            commands: &mut bevy_impulse::re_exports::Commands,
+        ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
+            let (input_stream_u32, output_stream_u32) = StreamOf::<u32>::spawn_scope_stream(in_scope, out_scope, commands);
+            let (input_stream_i32, output_stream_i32) = StreamOf::<i32>::spawn_scope_stream(in_scope, out_scope, commands);
+            let (input_stream_string, output_stream_string) = StreamOf::<String>::spawn_scope_stream(in_scope, out_scope, commands);
+
+            (
+                TestStreamMapInputs {
+                    stream_u32: input_stream_u32,
+                    stream_i32: input_stream_i32,
+                    stream_string: input_stream_string,
+                },
+                TestStreamMapOutputs {
+                    stream_u32: output_stream_u32,
+                    stream_i32: output_stream_i32,
+                    stream_string: output_stream_string,
+                }
+            )
+        }
+
+        fn spawn_workflow_streams(builder: &mut bevy_impulse::Builder) -> Self::StreamInputPack {
+            TestStreamMapInputs {
+                stream_u32: StreamOf::<u32>::spawn_workflow_streams(builder),
+                stream_i32: StreamOf::<i32>::spawn_workflow_streams(builder),
+                stream_string: StreamOf::<String>::spawn_workflow_streams(builder),
+            }
+        }
+
+        fn spawn_node_streams(
+            source: bevy_impulse::re_exports::Entity,
+            map: &mut bevy_impulse::StreamTargetMap,
+            builder: &mut bevy_impulse::Builder,
+        ) -> Self::StreamOutputPack {
+            TestStreamMapOutputs {
+                stream_u32: StreamOf::<u32>::spawn_node_stream(source, map, builder),
+                stream_i32: StreamOf::<i32>::spawn_node_stream(source, map, builder),
+                stream_string: StreamOf::<String>::spawn_node_stream(source, map, builder),
+            }
+        }
+    }
 
     struct TestStreamMapInputs {
         stream_u32: InputSlot<u32>,
@@ -1440,15 +1481,22 @@ mod tests {
         stream_string: Output<String>,
     }
 
-    struct TestStreamMapChannel {
+    struct TestStreamMapChannels {
         stream_u32: StreamChannel<StreamOf<u32>>,
         stream_i32: StreamChannel<StreamOf<i32>>,
         stream_string: StreamChannel<StreamOf<String>>,
     }
 
-    struct TestStreamMapReceiver {
+    struct TestStreamMapReceivers {
         stream_u32: Receiver<u32>,
         stream_i32: Receiver<i32>,
         stream_string: Receiver<String>,
     }
+
+    #[derive(Clone)]
+     struct TestStreamMapBuffers {
+        stream_u32: StreamBuffer<u32>,
+        stream_i32: StreamBuffer<i32>,
+        stream_string: StreamBuffer<String>,
+     }
 }
