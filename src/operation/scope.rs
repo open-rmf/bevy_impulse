@@ -1628,12 +1628,12 @@ pub(crate) struct ExitTarget {
     pub(crate) blocker: Option<Blocker>,
 }
 
-pub(crate) struct RedirectScopeStream<T: Stream> {
+pub(crate) struct RedirectScopeStream<T: StreamEffect> {
     target: Entity,
     _ignore: std::marker::PhantomData<fn(T)>,
 }
 
-impl<T: Stream> RedirectScopeStream<T> {
+impl<T: StreamEffect> RedirectScopeStream<T> {
     pub(crate) fn new(target: Entity) -> Self {
         Self {
             target,
@@ -1642,7 +1642,7 @@ impl<T: Stream> RedirectScopeStream<T> {
     }
 }
 
-impl<S: Stream> Operation for RedirectScopeStream<S> {
+impl<S: StreamEffect> Operation for RedirectScopeStream<S> {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world
             .get_entity_mut(self.target)

@@ -17,7 +17,7 @@
 
 use crate::{
     AddOperation, OperateService, ProvideOnce, Provider, RunCommandsOnWorldExt, StreamOf,
-    StreamPack,
+    StreamPack, StreamAvailability,
 };
 
 use bevy_app::prelude::App;
@@ -28,7 +28,12 @@ use bevy_ecs::{
 };
 pub use bevy_impulse_derive::DeliveryLabel;
 use bevy_utils::{define_label, intern::Interned};
-use std::{any::TypeId, collections::HashSet, sync::OnceLock};
+use std::{
+    any::TypeId,
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    sync::OnceLock,
+};
 use thiserror::Error as ThisError;
 
 mod async_srv;
@@ -110,11 +115,22 @@ impl<Req, Res, S> Clone for Service<Req, Res, S> {
 
 impl<Req, Res, S> Copy for Service<Req, Res, S> {}
 
-#[derive(ThisError, Debug, Clone)]
+#[derive(ThisError, Debug, Clone, Default)]
 #[error("The original service is missing streams that are needed by the target service")]
 pub struct MissingStreamsError {
     /// These stream types were missing from the original service
-    types: HashSet<TypeId>,
+    pub anonymous: HashSet<TypeId>,
+    pub named: HashMap<Cow<'static, str>, TypeId>,
+}
+
+impl MissingStreamsError {
+    pub fn into_result(self) -> Result<(), Self> {
+        if !self.anonymous.is_empty() || !self.named.is_empty() {
+            return Err(self);
+        }
+
+        Ok(())
+    }
 }
 
 impl<Request, Response, Streams> Service<Request, Response, Streams> {
@@ -152,19 +168,12 @@ impl<Request, Response, Streams> Service<Request, Response, Streams> {
         Streams: StreamPack,
         TargetStreams: StreamPack,
     {
-        let mut original = HashSet::new();
-        Streams::insert_types(&mut original);
-        let mut target = HashSet::new();
-        Streams::insert_types(&mut target);
-        for t in original {
-            target.remove(&t);
-        }
+        let mut source_availability = StreamAvailability::default();
+        Streams::set_stream_availability(&mut source_availability);
+        let mut target_availability = StreamAvailability::default();
+        TargetStreams::set_stream_availability(&mut target_availability);
 
-        if !target.is_empty() {
-            // Some of the target streams were not available in the original,
-            // so this is not a valid cast
-            return Err(MissingStreamsError { types: target });
-        }
+        source_availability.can_cast_to(&target_availability)?;
 
         Ok(Service {
             provider: self.provider,

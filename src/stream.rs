@@ -42,6 +42,7 @@ use crate::{
     DuplicateStream, InnerChannel, InputSlot, ManageInput, OperationError, OperationResult,
     OperationRoster, OrBroken, Output, Push, RedirectScopeStream, RedirectWorkflowStream,
     ReportUnhandled, SingleInputStorage, TakenStream, UnhandledErrors, UnusedStreams, UnusedTarget,
+    MissingStreamsError,
 };
 
 mod dynamically_named_stream;
@@ -122,7 +123,7 @@ pub trait Stream: StreamEffect {
         commands: &mut Commands,
     ) {
         let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
+        commands.add(AddImpulse::new(redirect, Push::<Self::Output>::new(target, true)));
         map.add_anonymous::<Self::Output>(redirect, commands);
     }
 
@@ -409,7 +410,7 @@ impl<'a> StreamRequest<'a> {
 #[derive(Component, Default)]
 pub struct StreamAvailability {
     anonymous: HashSet<TypeId>,
-    named: HashMap<Cow<'static, str>, TypeId>,
+    named: HashMap<Cow<'static, str>, NamedAvailability>,
 }
 
 impl StreamAvailability {
@@ -423,10 +424,10 @@ impl StreamAvailability {
     ) -> Result<(), TypeId> {
         match self.named.entry(name) {
             Entry::Vacant(vacant) => {
-                vacant.insert(TypeId::of::<T>());
+                vacant.insert(NamedAvailability::new::<T>());
                 Ok(())
             }
-            Entry::Occupied(occupied) => Err(*occupied.get()),
+            Entry::Occupied(occupied) => Err(occupied.get().value),
         }
     }
 
@@ -443,7 +444,43 @@ impl StreamAvailability {
     }
 
     pub fn dyn_has_named(&self, name: &str, target_type: &TypeId) -> bool {
-        self.named.get(name).is_some_and(|ty| *ty == *target_type)
+        self.named.get(name).is_some_and(|ty| ty.value == *target_type)
+    }
+
+    pub fn can_cast_to(&self, target: &Self) -> Result<(), MissingStreamsError> {
+        let mut missing = MissingStreamsError::default();
+        for anon in &self.anonymous {
+            if !target.anonymous.contains(anon) {
+                missing.anonymous.insert(*anon);
+            }
+        }
+
+        for (name, avail) in &self.named {
+            if let Some(target_avail) = target.named.get(name) {
+                if avail.value != target_avail.value {
+                    missing.named.insert(name.clone(), avail.value);
+                }
+            } else if !target.anonymous.contains(&avail.named_value) {
+                missing.named.insert(name.clone(), avail.value);
+            }
+        }
+
+        missing.into_result()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NamedAvailability {
+    value: TypeId,
+    named_value: TypeId,
+}
+
+impl NamedAvailability {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self {
+            value: TypeId::of::<T>(),
+            named_value: TypeId::of::<NamedValue<T>>(),
+        }
     }
 }
 
@@ -602,8 +639,6 @@ pub trait StreamPack: 'static + Send + Sync {
 
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
-
-    fn insert_types(types: &mut HashSet<TypeId>);
 }
 
 impl<T: Stream + Unpin> StreamPack for T {
@@ -689,10 +724,6 @@ impl<T: Stream + Unpin> StreamPack for T {
     fn has_streams() -> bool {
         true
     }
-
-    fn insert_types(types: &mut HashSet<TypeId>) {
-        types.insert(TypeId::of::<T>());
-    }
 }
 
 impl StreamPack for () {
@@ -761,10 +792,6 @@ impl StreamPack for () {
 
     fn has_streams() -> bool {
         false
-    }
-
-    fn insert_types(_: &mut HashSet<TypeId>) {
-        // Do nothing
     }
 }
 
@@ -912,12 +939,6 @@ macro_rules! impl_streampack_for_tuple {
                     has_streams = has_streams || $T::has_streams();
                 )*
                 has_streams
-            }
-
-            fn insert_types(types: &mut HashSet<TypeId>) {
-                $(
-                    $T::insert_types(types);
-                )*
             }
         }
     }
@@ -1075,7 +1096,7 @@ all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, StreamBuffer};
+    use crate::{prelude::*, testing::*};
 
     #[test]
     fn test_single_stream() {
@@ -1430,9 +1451,15 @@ mod tests {
             out_scope: ::bevy_impulse::re_exports::Entity,
             commands: &mut ::bevy_impulse::re_exports::Commands,
         ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
-            let (input_stream_u32, output_stream_u32) = StreamOf::<u32>::spawn_scope_stream(in_scope, out_scope, commands);
-            let (input_stream_i32, output_stream_i32) = StreamOf::<i32>::spawn_scope_stream(in_scope, out_scope, commands);
-            let (input_stream_string, output_stream_string) = StreamOf::<String>::spawn_scope_stream(in_scope, out_scope, commands);
+            let (input_stream_u32, output_stream_u32) = ::bevy_impulse::NamedStream::<StreamOf::<u32>>::spawn_scope_stream(
+                in_scope, out_scope, commands,
+            );
+            let (input_stream_i32, output_stream_i32) = ::bevy_impulse::NamedStream::<StreamOf::<i32>>::spawn_scope_stream(
+                in_scope, out_scope, commands,
+            );
+            let (input_stream_string, output_stream_string) = ::bevy_impulse::NamedStream::<StreamOf::<String>>::spawn_scope_stream(
+                in_scope, out_scope, commands,
+            );
 
             (
                 TestStreamMapInputs {
@@ -1456,53 +1483,181 @@ mod tests {
                 stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::spawn_workflow_stream(
                     ::std::borrow::Cow::Borrowed("stream_i32"), builder,
                 ),
-                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::spawn_workflow_streams(
+                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::spawn_workflow_stream(
                     ::std::borrow::Cow::Borrowed("stream_string"), builder,
                 ),
             }
         }
 
         fn spawn_node_streams(
-            source: bevy_impulse::re_exports::Entity,
-            map: &mut bevy_impulse::StreamTargetMap,
-            builder: &mut bevy_impulse::Builder,
+            source: ::bevy_impulse::re_exports::Entity,
+            map: &mut ::bevy_impulse::StreamTargetMap,
+            builder: &mut ::bevy_impulse::Builder,
         ) -> Self::StreamOutputPack {
             TestStreamMapOutputs {
-                stream_u32: StreamOf::<u32>::spawn_node_stream(source, map, builder),
-                stream_i32: StreamOf::<i32>::spawn_node_stream(source, map, builder),
-                stream_string: StreamOf::<String>::spawn_node_stream(source, map, builder),
+                stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::spawn_node_stream(
+                    ::std::borrow::Cow::Borrowed("stream_u32"), source, map, builder,
+                ),
+                stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::spawn_node_stream(
+                    ::std::borrow::Cow::Borrowed("stream_i32"), source, map, builder,
+                ),
+                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::spawn_node_stream(
+                    ::std::borrow::Cow::Borrowed("stream_string"), source, map, builder,
+                ),
             }
+        }
+
+        fn take_streams(
+            source: ::bevy_impulse::re_exports::Entity,
+            map: &mut ::bevy_impulse::StreamTargetMap,
+            commands: &mut ::bevy_impulse::re_exports::Commands,
+        ) -> Self::StreamReceivers {
+            TestStreamMapReceivers {
+                stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::take_stream(
+                    ::std::borrow::Cow::Borrowed("stream_u32"), source, map, commands,
+                ),
+                stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::take_stream(
+                    ::std::borrow::Cow::Borrowed("stream_i32"), source, map, commands,
+                ),
+                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::take_stream(
+                    ::std::borrow::Cow::Borrowed("stream_string"), source, map, commands,
+                ),
+            }
+        }
+
+        fn collect_streams(
+            source: ::bevy_impulse::re_exports::Entity,
+            target: ::bevy_impulse::re_exports::Entity,
+            map: &mut ::bevy_impulse::StreamTargetMap,
+            commands: &mut ::bevy_impulse::re_exports::Commands,
+        ) {
+            ::bevy_impulse::NamedStream::<StreamOf::<u32>>::collect_stream(
+                ::std::borrow::Cow::Borrowed("stream_u32"), source, target, map, commands,
+            );
+            ::bevy_impulse::NamedStream::<StreamOf::<i32>>::collect_stream(
+                ::std::borrow::Cow::Borrowed("stream_i32"), source, target, map, commands,
+            );
+            ::bevy_impulse::NamedStream::<StreamOf::<String>>::collect_stream(
+                ::std::borrow::Cow::Borrowed("stream_string"), source, target ,map, commands,
+            );
+        }
+
+        fn make_stream_channels(
+            inner: &::std::sync::Arc<::bevy_impulse::InnerChannel>,
+            world: &::bevy_impulse::re_exports::World,
+        ) -> Self::StreamChannels {
+            TestStreamMapChannels {
+                stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::make_stream_channel(
+                    ::std::borrow::Cow::Borrowed("stream_u32"), inner, world,
+                ),
+                stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::make_stream_channel(
+                    ::std::borrow::Cow::Borrowed("stream_i32"), inner, world,
+                ),
+                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::make_stream_channel(
+                    ::std::borrow::Cow::Borrowed("stream_string"), inner, world,
+                ),
+            }
+        }
+
+        fn make_stream_buffers(
+            target_map: Option<&::bevy_impulse::StreamTargetMap>,
+        ) -> Self::StreamBuffers {
+            TestStreamMapBuffers {
+                stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::make_stream_buffer(target_map),
+                stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::make_stream_buffer(target_map),
+                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::make_stream_buffer(target_map),
+            }
+        }
+
+        fn process_stream_buffers(
+            buffer: Self::StreamBuffers,
+            source: ::bevy_impulse::re_exports::Entity,
+            session: ::bevy_impulse::re_exports::Entity,
+            unused: &mut ::bevy_impulse::UnusedStreams,
+            world: &mut ::bevy_impulse::re_exports::World,
+            roster: &mut ::bevy_impulse::OperationRoster,
+        ) -> ::bevy_impulse::OperationResult {
+            ::bevy_impulse::NamedStream::<StreamOf::<u32>>::process_stream_buffer(
+                &::std::borrow::Cow::Borrowed("stream_u32"), buffer.stream_u32, source, session, unused, world, roster,
+            )?;
+            ::bevy_impulse::NamedStream::<StreamOf::<i32>>::process_stream_buffer(
+                &::std::borrow::Cow::Borrowed("stream_i32"), buffer.stream_i32, source, session, unused, world, roster,
+            )?;
+            ::bevy_impulse::NamedStream::<StreamOf<String>>::process_stream_buffer(
+                &::std::borrow::Cow::Borrowed("stream_string"), buffer.stream_string, source, session, unused, world, roster,
+            )?;
+            Ok(())
+        }
+
+        fn defer_buffers(
+            buffer: Self::StreamBuffers,
+            source: ::bevy_impulse::re_exports::Entity,
+            session: ::bevy_impulse::re_exports::Entity,
+            commands: &mut ::bevy_impulse::re_exports::Commands,
+        ) {
+            ::bevy_impulse::NamedStream::<StreamOf::<u32>>::defer_buffer(
+                &::std::borrow::Cow::Borrowed("stream_u32"), buffer.stream_u32, source, session, commands,
+            );
+            ::bevy_impulse::NamedStream::<StreamOf::<i32>>::defer_buffer(
+                &::std::borrow::Cow::Borrowed("stream_i32"), buffer.stream_i32, source, session, commands,
+            );
+            ::bevy_impulse::NamedStream::<StreamOf::<String>>::defer_buffer(
+                &::std::borrow::Cow::Borrowed("stream_string"), buffer.stream_string, source, session, commands,
+            );
+        }
+
+        fn set_stream_availability(availability: &mut StreamAvailability) {
+            let _ = availability.add_named::<<StreamOf::<u32> as ::bevy_impulse::StreamEffect>::Output>(
+                ::std::borrow::Cow::Borrowed("stream_u32"),
+            );
+            let _ = availability.add_named::<<StreamOf::<i32> as ::bevy_impulse::StreamEffect>::Output>(
+                ::std::borrow::Cow::Borrowed("stream_i32"),
+            );
+            let _ = availability.add_named::<<StreamOf::<String> as ::bevy_impulse::StreamEffect>::Output>(
+                ::std::borrow::Cow::Borrowed("stream_string"),
+            );
+        }
+
+        fn are_streams_available(availability: &StreamAvailability) -> bool {
+            availability.has_named::<<StreamOf::<u32> as ::bevy_impulse::StreamEffect>::Output>("stream_u32")
+            && availability.has_named::<<StreamOf::<i32> as ::bevy_impulse::StreamEffect>::Output>("stream_i32")
+            && availability.has_named::<<StreamOf::<String> as ::bevy_impulse::StreamEffect>::Output>("stream_string")
+        }
+
+        fn has_streams() -> bool {
+            // If fields > 0
+            true
         }
     }
 
     struct TestStreamMapInputs {
-        stream_u32: InputSlot<u32>,
-        stream_i32: InputSlot<i32>,
-        stream_string: InputSlot<String>,
+        stream_u32: ::bevy_impulse::InputSlot<u32>,
+        stream_i32: ::bevy_impulse::InputSlot<i32>,
+        stream_string: ::bevy_impulse::InputSlot<String>,
     }
 
     struct TestStreamMapOutputs {
-        stream_u32: Output<u32>,
-        stream_i32: Output<i32>,
-        stream_string: Output<String>,
+        stream_u32: ::bevy_impulse::Output<u32>,
+        stream_i32: ::bevy_impulse::Output<i32>,
+        stream_string: ::bevy_impulse::Output<String>,
     }
 
     struct TestStreamMapChannels {
-        stream_u32: StreamChannel<StreamOf<u32>>,
-        stream_i32: StreamChannel<StreamOf<i32>>,
-        stream_string: StreamChannel<StreamOf<String>>,
+        stream_u32: ::bevy_impulse::NamedStreamChannel<StreamOf<u32>>,
+        stream_i32: ::bevy_impulse::NamedStreamChannel<StreamOf<i32>>,
+        stream_string: ::bevy_impulse::NamedStreamChannel<StreamOf<String>>,
     }
 
     struct TestStreamMapReceivers {
-        stream_u32: Receiver<u32>,
-        stream_i32: Receiver<i32>,
-        stream_string: Receiver<String>,
+        stream_u32: ::bevy_impulse::Receiver<u32>,
+        stream_i32: ::bevy_impulse::Receiver<i32>,
+        stream_string: ::bevy_impulse::Receiver<String>,
     }
 
     #[derive(Clone)]
      struct TestStreamMapBuffers {
-        stream_u32: StreamBuffer<u32>,
-        stream_i32: StreamBuffer<i32>,
-        stream_string: StreamBuffer<String>,
+        stream_u32: ::bevy_impulse::NamedStreamBuffer<u32>,
+        stream_i32: ::bevy_impulse::NamedStreamBuffer<i32>,
+        stream_string: ::bevy_impulse::NamedStreamBuffer<String>,
      }
 }

@@ -19,21 +19,43 @@ use bevy_ecs::{
     prelude::{Commands, Entity, World, Component},
     system::Command,
 };
+use bevy_hierarchy::BuildChildren;
 
 use std::{borrow::Cow, cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     AddOperation, Builder, DefaultStreamContainer, DeferredRoster, ExitTargetStorage, InnerChannel,
     Input, InputBundle, InputSlot, ManageInput, OperationRequest, OperationResult, OperationRoster,
-    OperationSetup, OrBroken, Output, RedirectWorkflowStream, ReportUnhandled, ScopeStorage,
+    OperationSetup, OrBroken, Output, RedirectScopeStream, RedirectWorkflowStream, ReportUnhandled, ScopeStorage,
     SingleInputStorage, StreamEffect, StreamRedirect, StreamRequest, StreamTargetMap,
-    UnusedStreams, UnusedTarget,
+    UnusedStreams, UnusedTarget, Receiver, AddImpulse, TakenStream, Push,
 };
 
 
 pub struct NamedStream<S: StreamEffect>(std::marker::PhantomData<fn(S)>);
 
 impl<S: StreamEffect> NamedStream<S> {
+    pub fn spawn_scope_stream(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (InputSlot<S::Input>, Output<S::Output>) {
+        let source = commands.spawn(()).id();
+        let target = commands.spawn(UnusedTarget).id();
+        commands.add(AddOperation::new(
+            Some(in_scope),
+            source,
+            RedirectScopeStream::<S>::new(target),
+        ));
+
+        (
+            InputSlot::new(in_scope, source),
+            Output::new(out_scope, target),
+        )
+    }
+
     pub fn spawn_workflow_stream(name: Cow<'static, str>, builder: &mut Builder) -> InputSlot<S::Input> {
         let source = builder.commands.spawn(()).id();
         builder.commands.add(AddOperation::new(
@@ -57,6 +79,36 @@ impl<S: StreamEffect> NamedStream<S> {
 
         map.add_named::<S::Output>(name, target, builder.commands());
         Output::new(builder.scope, target)
+    }
+
+    pub fn take_stream(
+        name: Cow<'static, str>,
+        source: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) -> Receiver<S::Output> {
+        let (sender, receiver) = unbounded_channel::<S::Output>();
+        let target = commands
+            .spawn(())
+            .set_parent(source)
+            .id();
+
+        map.add_named::<S::Output>(name, target, commands);
+        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
+
+        receiver
+    }
+
+    pub fn collect_stream(
+        name: Cow<'static, str>,
+        source: Entity,
+        target: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) {
+        let redirect = commands.spawn(()).set_parent(source).id();
+        commands.add(AddImpulse::new(redirect, Push::<S::Output>::new(target, true).with_name(name.clone())));
+        map.add_named::<S::Output>(name, redirect, commands);
     }
 
     pub fn make_stream_channel(
