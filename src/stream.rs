@@ -1426,9 +1426,9 @@ mod tests {
         type StreamBuffers = TestStreamMapBuffers;
 
         fn spawn_scope_streams(
-            in_scope: bevy_impulse::re_exports::Entity,
-            out_scope: bevy_impulse::re_exports::Entity,
-            commands: &mut bevy_impulse::re_exports::Commands,
+            in_scope: ::bevy_impulse::re_exports::Entity,
+            out_scope: ::bevy_impulse::re_exports::Entity,
+            commands: &mut ::bevy_impulse::re_exports::Commands,
         ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
             let (input_stream_u32, output_stream_u32) = StreamOf::<u32>::spawn_scope_stream(in_scope, out_scope, commands);
             let (input_stream_i32, output_stream_i32) = StreamOf::<i32>::spawn_scope_stream(in_scope, out_scope, commands);
@@ -1448,11 +1448,17 @@ mod tests {
             )
         }
 
-        fn spawn_workflow_streams(builder: &mut bevy_impulse::Builder) -> Self::StreamInputPack {
+        fn spawn_workflow_streams(builder: &mut ::bevy_impulse::Builder) -> Self::StreamInputPack {
             TestStreamMapInputs {
-                stream_u32: StreamOf::<u32>::spawn_workflow_streams(builder),
-                stream_i32: StreamOf::<i32>::spawn_workflow_streams(builder),
-                stream_string: StreamOf::<String>::spawn_workflow_streams(builder),
+                stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::spawn_workflow_stream(
+                    ::std::borrow::Cow::Borrowed("stream_u32"), builder,
+                ),
+                stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::spawn_workflow_stream(
+                    ::std::borrow::Cow::Borrowed("stream_i32"), builder,
+                ),
+                stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::spawn_workflow_streams(
+                    ::std::borrow::Cow::Borrowed("stream_string"), builder,
+                ),
             }
         }
 
