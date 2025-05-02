@@ -99,7 +99,7 @@ impl SingleThreadedExecution {
     where
         T: Send + 'static,
     {
-        TaskPool::new().spawn(future)
+        TaskPool::new().spawn_local(future)
     }
 
     pub(crate) fn cancel_sender(&self) -> SingleThreadedExecutionSender {
