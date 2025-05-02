@@ -19,8 +19,8 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Added, Entity, Query, QueryState, Resource, With, World},
     schedule::{IntoSystemConfigs, SystemConfigs},
-    world::Command,
     system::SystemState,
+    world::Command,
 };
 use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
 
@@ -88,6 +88,12 @@ fn flush_impulses_impl(
 
     let mut loop_count = 0;
     while !roster.is_empty() {
+        for e in roster.deferred_despawn.drain(..) {
+            if let Some(e_mut) = world.get_entity_mut(e) {
+                e_mut.despawn_recursive();
+            }
+        }
+
         let parameters = world.get_resource_or_insert_with(FlushParameters::default);
         let flush_loop_limit = parameters.flush_loop_limit;
         let single_threaded_poll_limit = parameters.single_threaded_poll_limit;

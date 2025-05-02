@@ -18,7 +18,7 @@
 use bevy_ecs::prelude::{Component, Entity};
 
 use crate::{
-    emit_disposal, Buffered, Disposal, Gate, GateRequest, Input, InputBundle, ManageInput,
+    emit_disposal, Buffering, Disposal, Gate, GateRequest, Input, InputBundle, ManageInput,
     Operation, OperationCleanup, OperationReachability, OperationRequest, OperationResult,
     OperationSetup, OrBroken, ReachabilityResult, SingleInputStorage, SingleTargetStorage,
 };
@@ -48,7 +48,7 @@ impl<B, T> OperateDynamicGate<T, B> {
 impl<T, B> Operation for OperateDynamicGate<T, B>
 where
     T: 'static + Send + Sync,
-    B: Buffered + 'static + Send + Sync,
+    B: Buffering + 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         world
@@ -144,7 +144,7 @@ impl<T, B> OperateStaticGate<T, B> {
 
 impl<T, B> Operation for OperateStaticGate<T, B>
 where
-    B: Buffered + 'static + Send + Sync,
+    B: Buffering + 'static + Send + Sync,
     T: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {

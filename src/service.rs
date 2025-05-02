@@ -23,11 +23,13 @@ use crate::{
 use bevy_app::prelude::App;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
+    define_label,
+    intern::Interned,
     prelude::{Commands, Component, Entity, Event, World},
     schedule::ScheduleLabel,
-    define_label, intern::Interned
 };
-use std::{any::TypeId, collections::HashSet};
+pub use bevy_impulse_derive::DeliveryLabel;
+use std::{any::TypeId, collections::HashSet, sync::OnceLock};
 use thiserror::Error as ThisError;
 
 mod async_srv;
@@ -75,11 +77,30 @@ pub(crate) use workflow::*;
 /// [App]: bevy_app::prelude::App
 /// [Commands]: bevy_ecs::prelude::Commands
 /// [World]: bevy_ecs::prelude::World
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct Service<Request, Response, Streams = ()> {
     provider: Entity,
     instructions: Option<DeliveryInstructions>,
     _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
+}
+
+impl<Req, Res, S> std::fmt::Debug for Service<Req, Res, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        static NAME: OnceLock<String> = OnceLock::new();
+        let name = NAME.get_or_init(|| {
+            format!(
+                "Service<{}, {}, {}>",
+                std::any::type_name::<Req>(),
+                std::any::type_name::<Res>(),
+                std::any::type_name::<S>(),
+            )
+        });
+
+        f.debug_struct(name.as_str())
+            .field("provider", &self.provider)
+            .field("instructions", &self.instructions)
+            .finish()
+    }
 }
 
 impl<Req, Res, S> Clone for Service<Req, Res, S> {
@@ -195,6 +216,11 @@ define_label!(
     DeliveryLabel,
     DELIVERY_LABEL_INTERNER
 );
+
+pub mod utils {
+    /// Used by the procedural macro for DeliveryLabel
+    pub use bevy_ecs::label::DynEq;
+}
 
 /// When using a service, you can bundle in delivery instructions that affect
 /// how multiple requests to the same service may interact with each other.

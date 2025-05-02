@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Commands, Component, Entity, Event, EventReader, In, Local, Query, World},
     schedule::IntoSystemConfigs,
     system::{IntoSystem, SystemParam},
-    world::{EntityWorldMut, Command},
+    world::{Command, EntityWorldMut},
 };
 use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
 

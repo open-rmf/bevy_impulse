@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Bundle, Component, Entity},
-    world::{EntityRef, EntityWorldMut, World, Command},
+    world::{Command, EntityRef, EntityWorldMut, World},
 };
 
 use smallvec::SmallVec;
@@ -25,8 +25,9 @@ use smallvec::SmallVec;
 use backtrace::Backtrace;
 
 use crate::{
-    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, OperationError,
-    OperationRoster, OrBroken, SessionStatus, UnusedTarget,
+    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, Detached,
+    MiscellaneousFailure, OperationError, OperationRoster, OrBroken, SessionStatus,
+    UnhandledErrors, UnusedTarget,
 };
 
 /// This contains data that has been provided as input into an operation, along
@@ -68,15 +69,31 @@ impl<T> Default for InputStorage<T> {
     }
 }
 
+/// Used to keep track of the expected input type for an operation
+#[derive(Component)]
+pub(crate) struct InputTypeIndicator {
+    pub(crate) name: &'static str,
+}
+
+impl InputTypeIndicator {
+    fn new<T>() -> Self {
+        Self {
+            name: std::any::type_name::<T>(),
+        }
+    }
+}
+
 #[derive(Bundle)]
 pub struct InputBundle<T: 'static + Send + Sync> {
     storage: InputStorage<T>,
+    indicator: InputTypeIndicator,
 }
 
 impl<T: 'static + Send + Sync> InputBundle<T> {
     pub fn new() -> Self {
         Self {
             storage: Default::default(),
+            indicator: InputTypeIndicator::new::<T>(),
         }
     }
 }
@@ -124,6 +141,7 @@ pub trait ManageInput {
         session: Entity,
         data: T,
         only_if_active: bool,
+        roster: &mut OperationRoster,
     ) -> Result<bool, OperationError>;
 
     /// Get an input that is ready to be taken, or else produce an error.
@@ -149,7 +167,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        if unsafe { self.sneak_input(session, data, true)? } {
+        if unsafe { self.sneak_input(session, data, true, roster)? } {
             roster.queue(self.id());
         }
         Ok(())
@@ -161,7 +179,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         data: T,
         roster: &mut OperationRoster,
     ) -> Result<(), OperationError> {
-        if unsafe { self.sneak_input(session, data, true)? } {
+        if unsafe { self.sneak_input(session, data, true, roster)? } {
             roster.defer(self.id());
         }
         Ok(())
@@ -172,6 +190,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         session: Entity,
         data: T,
         only_if_active: bool,
+        roster: &mut OperationRoster,
     ) -> Result<bool, OperationError> {
         if only_if_active {
             let active_session =
@@ -192,6 +211,21 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
+            let id = self.id();
+            if let Some(detached) = self.get::<Detached>() {
+                if detached.is_detached() {
+                    // The input is going to a detached impulse that will not
+                    // react any further. We need to tell that detached impulse
+                    // to despawn since it is no longer needed.
+                    roster.defer_despawn(id);
+
+                    // No error occurred, but the caller should not queue the
+                    // operation into the roster because it is being despawned.
+                    return Ok(false);
+                }
+            }
+
+            let expected = self.get::<InputTypeIndicator>().map(|i| i.name);
             // If the input is being fed to an unused target then we can
             // generally ignore it, although it may indicate a bug in the user's
             // workflow because workflow branches that end in an unused target
@@ -199,6 +233,18 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
 
             // However in this case, the target is not unused but also does not
             // have the correct input storage type. This indicates
+            self.world_mut()
+                .get_resource_or_insert_with(|| UnhandledErrors::default())
+                .miscellaneous
+                .push(MiscellaneousFailure {
+                    error: std::sync::Arc::new(anyhow::anyhow!(
+                        "Incorrect input type for operation [{:?}]: received [{}], expected [{}]",
+                        id,
+                        std::any::type_name::<T>(),
+                        expected.unwrap_or("<null>"),
+                    )),
+                    backtrace: None,
+                });
             None.or_broken()?;
         }
         Ok(true)

@@ -24,12 +24,13 @@ use smallvec::SmallVec;
 use std::error::Error;
 
 use crate::{
-    make_option_branching, make_result_branching, AddOperation, AsMap, Buffer, BufferKey,
-    BufferKeys, Bufferable, Buffered, Builder, Collect, CreateCancelFilter, CreateDisposalFilter,
-    ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap, IntoBlockingCallback,
-    IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateDynamicGate, OperateStaticGate,
-    Output, ProvideOnce, Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf,
-    StreamPack, StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    make_option_branching, make_result_branching, Accessing, AddOperation, AsMap, Buffer,
+    BufferKey, BufferKeys, Bufferable, Buffering, Builder, Collect, CreateCancelFilter,
+    CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
+    IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateCancel,
+    OperateDynamicGate, OperateQuietCancel, OperateSplit, OperateStaticGate, Output, ProvideOnce,
+    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf, StreamPack,
+    StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -37,6 +38,9 @@ pub use fork_clone_builder::*;
 
 pub(crate) mod premade;
 use premade::*;
+
+pub mod split;
+pub use split::*;
 
 pub mod unzip;
 pub use unzip::*;
@@ -295,12 +299,11 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// will be transformed into a buffer with default buffer settings.
     ///
     /// To obtain a set of buffer keys each time a buffer is modified, use
-    /// [`listen`](crate::Bufferable::listen).
+    /// [`listen`](crate::Accessible::listen).
     pub fn with_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, (T, BufferKeys<B>)>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -321,8 +324,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_access<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, BufferKeys<B>>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
-        BufferKeys<B>: 'static + Send + Sync,
+        B::BufferType: Accessing,
     {
         self.with_access(buffers).map_block(|(_, key)| key)
     }
@@ -346,6 +348,24 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         F::Streams: StreamPack,
     {
         self.then(filter_provider).cancel_on_none()
+    }
+
+    /// When the chain reaches this point, cancel the workflow and include
+    /// information about the value that triggered the cancellation. The input
+    /// type must implement [`ToString`].
+    ///
+    /// If you want to trigger a cancellation with a type that does not
+    /// implement [`ToString`] then use [`Self::trigger`] and then
+    /// [`Self::then_quiet_cancel`].
+    pub fn then_cancel(self)
+    where
+        T: ToString,
+    {
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            self.target,
+            OperateCancel::<T>::new(),
+        ));
     }
 
     /// Same as [`Chain::cancellation_filter`] but the chain will be disposed
@@ -390,7 +410,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// The return values of the individual chain builders will be zipped into
     /// one tuple return value by this function. If all of the builders return
     /// [`Output`] then you can easily continue chaining more operations using
-    /// [`join`](crate::Bufferable::join), or destructure them into individual
+    /// [`join`](crate::Joinable::join), or destructure them into individual
     /// outputs that you can continue to build with.
     pub fn fork_clone<Build: ForkCloneBuilder<T>>(self, build: Build) -> Build::Outputs
     where
@@ -543,7 +563,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// If the buffer is broken (e.g. its operation has been despawned) the
     /// workflow will be cancelled.
     pub fn then_push(self, buffer: Buffer<T>) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope(), buffer.scope);
+        assert_eq!(self.scope(), buffer.scope());
         self.with_access(buffer)
             .then(push_into_buffer.into_blocking_callback())
             .cancel_on_err()
@@ -554,7 +574,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_action<B>(self, action: Gate, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self.builder);
         buffers.verify_scope(self.builder.scope);
@@ -575,7 +594,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_open<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         self.then_gate_action(Gate::Open, buffers)
     }
@@ -585,7 +603,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     pub fn then_gate_close<B>(self, buffers: B) -> Chain<'w, 's, 'a, 'b, T>
     where
         B: Bufferable,
-        B::BufferType: 'static + Send + Sync,
     {
         self.then_gate_action(Gate::Closed, buffers)
     }
@@ -599,6 +616,74 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         T::Output: 'static + Send + Sync,
     {
         self.map_async(|r| r)
+    }
+
+    /// If the chain's response implements the [`Splittable`] trait, then this
+    /// will insert a split operation and provide your `build` function with the
+    /// [`SplitBuilder`] for it. This returns the return value of your build
+    /// function.
+    pub fn split<U>(self, build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, T>) -> U) -> U
+    where
+        T: Splittable,
+    {
+        let source = self.target;
+        self.builder.commands.add(AddOperation::new(
+            Some(self.builder.scope),
+            source,
+            OperateSplit::<T>::default(),
+        ));
+
+        build(SplitBuilder::new(source, self.builder))
+    }
+
+    /// If the chain's response implements the [`Splittable`] trait, then this
+    /// will insert a split and provide a container for its available outputs.
+    /// To build connections to these outputs later, use [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split(|split| split.outputs())
+    /// ```
+    pub fn split_outputs(self) -> SplitOutputs<T>
+    where
+        T: Splittable,
+    {
+        self.split(|b| b.outputs())
+    }
+
+    /// If the chain's response can be turned into an iterator with an appropriate
+    /// item type, this will allow it to be split in a list-like way.
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .map_block(SplitAsList::new).split(build)
+    /// ```
+    pub fn split_as_list<U>(
+        self,
+        build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, SplitAsList<T>>) -> U,
+    ) -> U
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        self.map_block(SplitAsList::new).split(build)
+    }
+
+    /// If the chain's response can be turned into an iterator with an appropriate
+    /// item type, this will insert a split and provide a container for its
+    /// available outputs. To build connections to these outputs later, use
+    /// [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split_as_list(|split| split.outputs())
+    /// ```
+    pub fn split_as_list_outputs(self) -> SplitOutputs<SplitAsList<T>>
+    where
+        T: IntoIterator,
+        T::Item: 'static + Send + Sync,
+    {
+        self.split_as_list(|b| b.outputs())
     }
 
     /// Add a [no-op][1] to the current end of the chain.
@@ -633,10 +718,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         }
     }
 
+    /// The scope that the chain is building inside of.
     pub fn scope(&self) -> Entity {
         self.builder.scope
     }
 
+    /// The target where the chain will be sending its latest output.
     pub fn target(&self) -> Entity {
         self.target
     }
@@ -942,6 +1029,41 @@ where
     }
 }
 
+impl<'w, 's, 'a, 'b, K, V, T> Chain<'w, 's, 'a, 'b, T>
+where
+    K: 'static + Send + Sync + Eq + std::hash::Hash + Clone + std::fmt::Debug,
+    V: 'static + Send + Sync,
+    T: 'static + Send + Sync + IntoIterator<Item = (K, V)>,
+{
+    /// If the chain's response type can be turned into an iterator that returns
+    /// `(key, value)` pairs, then this will split it in a map-like way, whether
+    /// or not it is a conventional map data structure.
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .map_block(SplitAsMap::new).split(build)
+    /// ```
+    pub fn split_as_map<U>(
+        self,
+        build: impl FnOnce(SplitBuilder<'w, 's, 'a, 'b, SplitAsMap<K, V, T>>) -> U,
+    ) -> U {
+        self.map_block(SplitAsMap::new).split(build)
+    }
+
+    /// If the chain's response type can be turned into an iterator that returns
+    /// `(key, value)` pairs, then this will split it in a map-like way and
+    /// provide a container for its available outputs. To build connections to
+    /// these outputs later, use [`SplitOutputs::build`].
+    ///
+    /// This is equivalent to
+    /// ```text
+    /// .split_as_map(|split| split.outputs())
+    /// ```
+    pub fn split_as_map_outputs(self) -> SplitOutputs<SplitAsMap<K, V, T>> {
+        self.split_as_map(|b| b.outputs())
+    }
+}
+
 impl<'w, 's, 'a, 'b, Request, Response, Streams>
     Chain<'w, 's, 'a, 'b, (Request, Service<Request, Response, Streams>)>
 where
@@ -1027,6 +1149,38 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
             builder,
             _ignore: Default::default(),
         }
+    }
+}
+
+impl<'w, 's, 'a, 'b, K, V> Chain<'w, 's, 'a, 'b, (K, V)>
+where
+    K: 'static + Send + Sync,
+    V: 'static + Send + Sync,
+{
+    /// If the chain's response contains a `(key, value)` pair, get the `key`
+    /// component from it (the first element of the tuple).
+    pub fn key(self) -> Chain<'w, 's, 'a, 'b, K> {
+        self.map_block(|(key, _)| key)
+    }
+
+    /// If the chain's response contains a `(key, value)` pair, get the `value`
+    /// component from it (the second element of the tuple).
+    pub fn value(self) -> Chain<'w, 's, 'a, 'b, V> {
+        self.map_block(|(_, value)| value)
+    }
+}
+
+impl<'w, 's, 'a, 'b> Chain<'w, 's, 'a, 'b, ()> {
+    /// When the chain reaches this point, cancel the workflow.
+    ///
+    /// If you want to include information about the value that triggered the
+    /// cancellation, use [`Self::then_cancel`].
+    pub fn then_quiet_cancel(self) {
+        self.builder.commands.add(AddOperation::new(
+            Some(self.scope()),
+            self.target,
+            OperateQuietCancel,
+        ));
     }
 }
 
@@ -1463,5 +1617,27 @@ mod tests {
             }));
         }
         assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn test_unused_branch() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow =
+            context.spawn_io_workflow(|scope: Scope<Vec<Result<i64, ()>>, i64>, builder| {
+                scope
+                    .input
+                    .chain(builder)
+                    .spread()
+                    .fork_result(|ok| ok.connect(scope.terminate), |err| err.unused());
+            });
+
+        let test_set = vec![Err(()), Err(()), Ok(5), Err(()), Ok(10)];
+        let mut promise =
+            context.command(|commands| commands.request(test_set, workflow).take_response());
+
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(context.no_unhandled_errors());
+        assert_eq!(promise.take().available().unwrap(), 5);
     }
 }

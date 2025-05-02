@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Entity, Query, With},
-    query::{QueryEntityError, QueryIter, QueryFilter},
+    query::{QueryEntityError, QueryFilter, QueryIter},
     system::SystemParam,
 };
 
