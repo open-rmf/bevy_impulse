@@ -18,7 +18,7 @@
 use bevy_ecs::prelude::World;
 
 use async_task::Runnable;
-pub(crate) use bevy_tasks::Task as TaskHandle;
+pub(crate) use bevy_tasks::{Task as TaskHandle, TaskPool};
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender,
 };
@@ -99,12 +99,7 @@ impl SingleThreadedExecution {
     where
         T: Send + 'static,
     {
-        let sender = self.runnable_sender.clone();
-        let (runnable, task) = async_task::spawn_local(future, move |runnable| {
-            sender.send(runnable).ok();
-        });
-        let _ = self.runnable_sender.send(runnable);
-        TaskHandle::new(task)
+        TaskPool::new().spawn(future)
     }
 
     pub(crate) fn cancel_sender(&self) -> SingleThreadedExecutionSender {
