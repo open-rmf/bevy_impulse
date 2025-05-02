@@ -18,7 +18,7 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::{
-    buffer_key_usage, get_access_keys, BufferAccessStorage, BufferKeyUsage, Buffered,
+    buffer_key_usage, get_access_keys, Accessing, BufferAccessStorage, BufferKeyUsage,
     FunnelInputStorage, Input, InputBundle, ManageInput, Operation, OperationCleanup,
     OperationReachability, OperationRequest, OperationResult, OperationSetup, OrBroken,
     ReachabilityResult, SingleInputStorage, SingleTargetStorage,
@@ -37,7 +37,7 @@ impl<B> Listen<B> {
 
 impl<B> Operation for Listen<B>
 where
-    B: Buffered + 'static + Send + Sync,
+    B: Accessing + 'static + Send + Sync,
     B::Key: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {

@@ -120,10 +120,16 @@ where
         // roster to register the task as an operation. In fact it does not
         // implement Operation at all. It is just a temporary container for the
         // input and the stream targets.
-        unsafe {
+        let execute = unsafe {
             world
                 .entity_mut(task)
-                .sneak_input(session, request, false)?;
+                .sneak_input(session, request, false, roster)?
+        };
+
+        if !execute {
+            // If giving the input failed then this workflow will not be able to
+            // proceed. Therefore we should report that this is broken.
+            None.or_broken()?;
         }
 
         let mut storage = world.get_mut::<InjectionStorage>(source).or_broken()?;
