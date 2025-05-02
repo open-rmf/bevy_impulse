@@ -18,10 +18,10 @@
 use bevy_ecs::{
     prelude::{Commands, Component, Entity, Event, EventReader, In, Local, Query, World},
     schedule::IntoSystemConfigs,
-    system::{Command, IntoSystem, SystemParam},
-    world::EntityWorldMut,
+    system::{IntoSystem, SystemParam},
+    world::{Command, EntityWorldMut},
 };
-use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
+use bevy_hierarchy::prelude::{BuildChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -476,7 +476,7 @@ where
 
         if !responses.is_empty() {
             self.commands
-                .add(DeliverResponses::<Request, Response, Streams> {
+                .queue(DeliverResponses::<Request, Response, Streams> {
                     responses,
                     _ignore: Default::default(),
                 });
@@ -648,7 +648,7 @@ where
                     }
                 }
 
-                if let Some(task_mut) = world.get_entity_mut(task_id) {
+                if let Ok(task_mut) = world.get_entity_mut(task_id) {
                     task_mut.despawn_recursive();
                 }
             }
@@ -778,7 +778,7 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                    if let Ok(task_mut) = world.get_entity_mut(cancelled.task_id) {
                         task_mut.despawn_recursive();
                     }
                 }
@@ -815,7 +815,7 @@ where
 
                     let disposal = Disposal::supplanted(stop.source, source, session);
                     emit_disposal(stop.source, stop.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(stop.task_id) {
+                    if let Ok(task_mut) = world.get_entity_mut(stop.task_id) {
                         task_mut.despawn_recursive();
                     }
                 }
@@ -942,7 +942,7 @@ fn serve_next_continuous_request<Request, Response, Streams>(
 impl<Request, Response, Streams, M, Sys> IntoContinuousService<(Request, Response, Streams, M)>
     for Sys
 where
-    Sys: IntoSystem<ContinuousService<Request, Response, Streams>, (), M>,
+    Sys: IntoSystem<In<ContinuousService<Request, Response, Streams>>, (), M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,

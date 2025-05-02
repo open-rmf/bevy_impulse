@@ -78,7 +78,7 @@ impl<T> Buffer<T> {
         let target = builder.commands.spawn(UnusedTarget).id();
         builder
             .commands
-            .add(OnNewBufferValue::new(self.id(), target));
+            .queue(OnNewBufferValue::new(self.id(), target));
         Chain::new(target, builder)
     }
 
@@ -359,7 +359,10 @@ where
 }
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
-    pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
+    pub fn get<'a>(
+        &'a self,
+        key: &BufferKey<T>,
+    ) -> Result<BufferView<'a, T>, QueryEntityError<'a>> {
         let session = key.session();
         self.query
             .get(key.buffer())
@@ -388,7 +391,10 @@ impl<'w, 's, T> BufferAccessMut<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
+    pub fn get<'a>(
+        &'a self,
+        key: &BufferKey<T>,
+    ) -> Result<BufferView<'a, T>, QueryEntityError<'a>> {
         let session = key.session();
         self.query
             .get(key.buffer())
@@ -402,7 +408,7 @@ where
     pub fn get_mut<'a>(
         &'a mut self,
         key: &BufferKey<T>,
-    ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
+    ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError<'a>> {
         let buffer = key.buffer();
         let session = key.session();
         let accessor = key.tag.accessor;
@@ -442,7 +448,7 @@ impl BufferWorldAccess for World {
     {
         let buffer_ref = self
             .get_entity(key.tag.buffer)
-            .ok_or(BufferError::BufferMissing)?;
+            .map_err(|_| BufferError::BufferMissing)?;
         let storage = buffer_ref
             .get::<BufferStorage<T>>()
             .ok_or(BufferError::BufferMissing)?;
@@ -734,7 +740,7 @@ where
 {
     fn drop(&mut self) {
         if self.modified {
-            self.commands.add(NotifyBufferUpdate::new(
+            self.commands.queue(NotifyBufferUpdate::new(
                 self.buffer,
                 self.session,
                 self.accessor,

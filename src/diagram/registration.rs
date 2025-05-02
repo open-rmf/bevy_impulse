@@ -153,7 +153,7 @@ impl DynOutput {
             });
         }
 
-        builder.commands().add(Connect {
+        builder.commands().queue(Connect {
             original_target: self.id(),
             new_target: input.id(),
         });

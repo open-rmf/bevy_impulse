@@ -26,7 +26,7 @@ use crate::{
 
 use bevy_ecs::{
     prelude::{Component, Entity},
-    system::Command,
+    world::Command,
 };
 use bevy_hierarchy::prelude::DespawnRecursiveExt;
 

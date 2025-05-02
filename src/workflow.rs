@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Commands, World},
-    system::CommandQueue,
+    world::CommandQueue,
 };
 use bevy_hierarchy::BuildChildren;
 

@@ -137,7 +137,7 @@ where
         target: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             scope,
             source,
             OperateBlockingMap::new(target, self.def),
@@ -280,7 +280,7 @@ where
         target: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             scope,
             source,
             OperateAsyncMap::new(target, self.def),

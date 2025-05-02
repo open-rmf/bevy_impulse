@@ -545,7 +545,7 @@ pub fn emit_disposal(
     world: &mut World,
     roster: &mut OperationRoster,
 ) {
-    if let Some(mut source_mut) = world.get_entity_mut(source) {
+    if let Ok(mut source_mut) = world.get_entity_mut(source) {
         source_mut.emit_disposal(session, disposal, roster);
     } else {
         world

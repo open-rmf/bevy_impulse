@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Commands, World},
-    system::CommandQueue,
+    world::CommandQueue,
 };
 use bevy_hierarchy::BuildChildren;
 
@@ -110,7 +110,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             .id();
 
         provider.connect(None, source, target, self);
-        self.add(InputCommand {
+        self.queue(InputCommand {
             session: source,
             target: source,
             data: request,
