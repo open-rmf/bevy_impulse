@@ -17,14 +17,13 @@
 
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
-    prelude::{Bundle, Commands, Component, Entity, With, World},
-    query::{QueryFilter, ReadOnlyQueryData, WorldQuery},
-    world::Command,
+    hierarchy::ChildOf,
+    prelude::{Bundle, Command, Commands, Component, Entity, With, World},
+    query::{QueryData, QueryFilter, ReadOnlyQueryData},
 };
-use bevy_hierarchy::BuildChildren;
 pub use bevy_impulse_derive::Stream;
-use bevy_utils::all_tuples;
 use futures::{future::BoxFuture, join};
+use variadics_please::all_tuples;
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver as Receiver};
 
@@ -137,7 +136,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
             .spawn(())
             // Set the parent of this stream to be the session so it can be
             // recursively despawned together.
-            .set_parent(source)
+            .insert(ChildOf(source))
             .id();
 
         let index = map.add(target);
@@ -153,7 +152,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) -> StreamTargetStorage<Self> {
-        let redirect = commands.spawn(()).set_parent(source).id();
+        let redirect = commands.spawn(()).insert(ChildOf(source)).id();
         commands.queue(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
         let index = map.add(redirect);
         StreamTargetStorage::new(index)
@@ -391,7 +390,7 @@ pub trait StreamPack: 'static + Send + Sync {
     fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
 
     fn make_buffer(
-        target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
+        target_index: <Self::TargetIndexQuery as QueryData>::Item<'_>,
         target_map: Option<&StreamTargetMap>,
     ) -> Self::Buffer;
 
@@ -782,7 +781,7 @@ macro_rules! impl_streampack_for_tuple {
             }
 
             fn make_buffer(
-                target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
+                target_index: <Self::TargetIndexQuery as QueryData>::Item<'_>,
                 target_map: Option<&StreamTargetMap>,
             ) -> Self::Buffer {
                 let ($($T,)*) = target_index;

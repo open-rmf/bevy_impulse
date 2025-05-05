@@ -15,11 +15,7 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Component, Entity, Resource, World},
-    world::Command,
-};
-use bevy_hierarchy::DespawnRecursiveExt;
+use bevy_ecs::prelude::{Command, Component, Entity, Resource, World};
 
 use backtrace::Backtrace;
 
@@ -166,7 +162,7 @@ pub(crate) fn cancel_impulse(
     }
 
     if let Ok(terminal_mut) = world.get_entity_mut(terminal) {
-        terminal_mut.despawn_recursive();
+        terminal_mut.despawn();
     }
 
     Ok(())

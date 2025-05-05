@@ -22,10 +22,9 @@ use crate::{
 
 use bevy_derive::Deref;
 use bevy_ecs::{
-    prelude::{Component, Entity, World},
-    world::Command,
+    hierarchy::ChildOf,
+    prelude::{Command, Component, Entity, World},
 };
-use bevy_hierarchy::prelude::BuildChildren;
 
 use backtrace::Backtrace;
 
@@ -621,7 +620,7 @@ impl<Op: Operation + 'static + Sync + Send> Command for AddOperation<Op> {
         if let Some(scope) = self.scope {
             source_mut
                 .insert(ScopeStorage::new(scope))
-                .set_parent(scope);
+                .insert(ChildOf(scope));
             match world.get_mut::<ScopeContents>(scope).or_broken() {
                 Ok(mut contents) => {
                     contents.add_node(self.source);

@@ -1,6 +1,6 @@
 [package]
 name = "bevy_impulse"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Grey <mxgrey@intrinsic.ai>"]
 license = "Apache-2.0"
@@ -17,18 +17,18 @@ categories = [
 
 [dependencies]
 bevy_impulse_derive = { path = "macros", version = "0.0.2" }
-bevy_ecs = "0.15"
-bevy_utils = "0.15"
+bevy_ecs = "0.16"
+bevy_utils = "0.16"
 bevy_hierarchy = "0.15"
-bevy_derive = "0.15"
-bevy_app = "0.15"
+bevy_derive = "0.16"
+bevy_app = "0.16"
 
 async-task = { version = "4.7.1", optional = true }
 
 # TODO(@mxgrey) We could probably remove bevy_tasks when the single_threaded_async
 # feature is active, but we'd have to refactor some internal usage of
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
-bevy_tasks = { version = "0.15", features = ["multi_threaded"] }
+bevy_tasks = { version = "0.16", features = ["multi_threaded"] }
 
 itertools = "0.13"
 smallvec = "1.13"
@@ -37,6 +37,7 @@ futures = "0.3"
 backtrace = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"
+variadics_please = "1.1"
 
 # These dependencies are only used by the testing module.
 # We may want to consider feature-gating them, but we use
@@ -44,7 +45,7 @@ thiserror = "1.0"
 # make use of default features, so we're a bit stuck with
 # these for now.
 bevy_core = "0.15"
-bevy_time = "0.15"
+bevy_time = "0.16"
 
 schemars = { version = "0.8.21", optional = true }
 serde = { version = "1.0.210", features = ["derive", "rc"], optional = true }

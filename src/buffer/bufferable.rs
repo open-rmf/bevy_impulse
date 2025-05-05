@@ -15,8 +15,8 @@
  *
 */
 
-use bevy_utils::all_tuples;
 use smallvec::SmallVec;
+use variadics_please::all_tuples;
 
 use crate::{
     Accessing, AddOperation, Buffer, BufferSettings, Buffering, Builder, Chain, CloneFromBuffer,

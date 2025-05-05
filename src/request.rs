@@ -16,10 +16,10 @@
 */
 
 use bevy_ecs::{
+    hierarchy::ChildOf,
     prelude::{Commands, World},
     world::CommandQueue,
 };
-use bevy_hierarchy::BuildChildren;
 
 use std::future::Future;
 
@@ -106,7 +106,7 @@ impl<'w, 's> RequestExt<'w, 's> for Commands<'w, 's> {
             ))
             // We set the parent of this source to the target so that when the
             // target gets despawned, this will also be despawned.
-            .set_parent(target)
+            .insert(ChildOf(target))
             .id();
 
         provider.connect(None, source, target, self);

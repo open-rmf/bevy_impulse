@@ -359,10 +359,7 @@ where
 }
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
-    pub fn get<'a>(
-        &'a self,
-        key: &BufferKey<T>,
-    ) -> Result<BufferView<'a, T>, QueryEntityError<'a>> {
+    pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
         let session = key.session();
         self.query
             .get(key.buffer())
@@ -391,10 +388,7 @@ impl<'w, 's, T> BufferAccessMut<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    pub fn get<'a>(
-        &'a self,
-        key: &BufferKey<T>,
-    ) -> Result<BufferView<'a, T>, QueryEntityError<'a>> {
+    pub fn get<'a>(&'a self, key: &BufferKey<T>) -> Result<BufferView<'a, T>, QueryEntityError> {
         let session = key.session();
         self.query
             .get(key.buffer())
@@ -408,7 +402,7 @@ where
     pub fn get_mut<'a>(
         &'a mut self,
         key: &BufferKey<T>,
-    ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError<'a>> {
+    ) -> Result<BufferMut<'w, 's, 'a, T>, QueryEntityError> {
         let buffer = key.buffer();
         let session = key.session();
         let accessor = key.tag.accessor;

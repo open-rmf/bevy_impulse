@@ -28,8 +28,10 @@ use crate::{
 
 use backtrace::Backtrace;
 
-use bevy_ecs::prelude::{Commands, Component, Entity, World};
-use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
+use bevy_ecs::{
+    hierarchy::ChildOf,
+    prelude::{Commands, Component, Entity, World},
+};
 
 use smallvec::SmallVec;
 
@@ -371,7 +373,7 @@ where
         // We won't be executing this scope after all, so despawn the scoped
         // session that we created.
         if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-            scoped_session_mut.despawn_recursive();
+            scoped_session_mut.despawn();
         }
         return result;
     }
@@ -520,10 +522,10 @@ where
     ) -> ScopeEndpoints {
         let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
 
-        let terminal = commands.spawn(()).set_parent(scope_id).id();
+        let terminal = commands.spawn(()).insert(ChildOf(scope_id)).id();
         let finish_scope_cancel = commands
             .spawn(FinishCleanupForScope(scope_id))
-            .set_parent(scope_id)
+            .insert(ChildOf(scope_id))
             .id();
 
         let scope = OperateScope::<Request, Response, Streams> {
@@ -1545,7 +1547,7 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
 
         if world.get_entity(scoped_session).is_ok() {
             if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-                scoped_session_mut.despawn_recursive();
+                scoped_session_mut.despawn();
             }
         }
 

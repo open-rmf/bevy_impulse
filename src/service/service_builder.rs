@@ -19,8 +19,8 @@ use crate::{stream::*, Delivery, IntoContinuousService, IntoService, Service};
 
 use bevy_app::prelude::App;
 use bevy_ecs::{
-    schedule::{ScheduleLabel, SystemConfigs},
-    system::{Commands, EntityCommands},
+    schedule::{ScheduleConfigs, ScheduleLabel},
+    system::{Commands, EntityCommands, ScheduleSystem},
     world::EntityWorldMut,
 };
 
@@ -393,15 +393,15 @@ impl<Request, Response, Streams> AlsoAdd<Request, Response, Streams> for () {
 
 impl<T> ConfigureContinuousService for T
 where
-    T: FnOnce(SystemConfigs) -> SystemConfigs,
+    T: FnOnce(ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem>,
 {
-    fn apply(self, config: SystemConfigs) -> SystemConfigs {
+    fn apply(self, config: ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem> {
         (self)(config)
     }
 }
 
 impl ConfigureContinuousService for () {
-    fn apply(self, config: SystemConfigs) -> SystemConfigs {
+    fn apply(self, config: ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem> {
         config
     }
 }

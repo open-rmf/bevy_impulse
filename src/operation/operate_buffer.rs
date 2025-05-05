@@ -15,10 +15,7 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Bundle, Component, Entity, World},
-    world::Command,
-};
+use bevy_ecs::prelude::{Bundle, Command, Component, Entity, World};
 
 use std::{collections::HashMap, sync::Arc};
 

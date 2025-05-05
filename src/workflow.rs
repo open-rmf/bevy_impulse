@@ -16,10 +16,10 @@
 */
 
 use bevy_ecs::{
+    hierarchy::ChildOf,
     prelude::{Commands, World},
     world::CommandQueue,
 };
-use bevy_hierarchy::BuildChildren;
 
 use crate::{
     Builder, DeliveryChoice, InputSlot, OperateScope, Output, ScopeEndpoints, ScopeSettingsStorage,
@@ -262,7 +262,7 @@ impl<'w, 's> SpawnWorkflowExt for Commands<'w, 's> {
         let service = service.id();
         self.entity(scope_id)
             .insert(ScopeSettingsStorage(settings.scope))
-            .set_parent(service);
+            .insert(ChildOf(service));
 
         WorkflowService::<Request, Response, Streams>::cast(service)
     }

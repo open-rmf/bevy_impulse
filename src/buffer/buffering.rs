@@ -15,9 +15,11 @@
  *
 */
 
-use bevy_ecs::prelude::{Entity, World};
-use bevy_hierarchy::BuildChildren;
-use bevy_utils::all_tuples;
+use bevy_ecs::{
+    hierarchy::ChildOf,
+    prelude::{Entity, World},
+};
+use variadics_please::all_tuples;
 
 use smallvec::SmallVec;
 
@@ -187,7 +189,11 @@ pub trait Accessing: Buffering {
             build,
         );
 
-        let begin_cancel = builder.commands.spawn(()).set_parent(builder.scope).id();
+        let begin_cancel = builder
+            .commands
+            .spawn(())
+            .insert(ChildOf(builder.scope))
+            .id();
         self.verify_scope(builder.scope);
         builder.commands.queue(AddOperation::new(
             None,

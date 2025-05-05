@@ -15,8 +15,10 @@
  *
 */
 
-use bevy_ecs::prelude::{Bundle, Commands, Component, Entity, Event};
-use bevy_hierarchy::BuildChildren;
+use bevy_ecs::{
+    hierarchy::ChildOf,
+    prelude::{Bundle, Commands, Component, Entity, Event},
+};
 
 use std::future::Future;
 
@@ -133,7 +135,7 @@ where
             .entity(source)
             .insert((Cancellable::new(cancel_impulse), ImpulseMarker))
             .remove::<UnusedTarget>()
-            .set_parent(target);
+            .insert(ChildOf(target));
         provider.connect(None, source, target, self.commands);
         Impulse {
             source,

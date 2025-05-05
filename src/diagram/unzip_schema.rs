@@ -15,9 +15,9 @@
  *
 */
 
-use bevy_utils::all_tuples_with_size;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use variadics_please::all_tuples_with_size;
 
 use crate::Builder;
 

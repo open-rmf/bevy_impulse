@@ -30,7 +30,7 @@ pub enum BufferAccessError {
     #[error("The query does not match the entity {0}")]
     QueryDoesNotMatch(Entity),
     #[error("The entity {0} does not exist")]
-    NoSuchEntity(Entity),
+    EntityDoesNotExist(Entity),
     #[error("The entity {0} was requested mutably more than once")]
     AliasedMutability(Entity),
 }
@@ -57,7 +57,9 @@ pub fn push_into_buffer<T: 'static + Send + Sync>(
         .get_mut(&key)
         .map_err(|err| match err {
             QueryEntityError::QueryDoesNotMatch(e, _) => BufferAccessError::QueryDoesNotMatch(e),
-            QueryEntityError::NoSuchEntity(e) => BufferAccessError::NoSuchEntity(e),
+            QueryEntityError::EntityDoesNotExist(e) => {
+                BufferAccessError::EntityDoesNotExist(e.entity)
+            }
             QueryEntityError::AliasedMutability(e) => BufferAccessError::AliasedMutability(e),
         })?
         .push(input);
