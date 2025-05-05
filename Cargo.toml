@@ -44,7 +44,7 @@ variadics_please = "1.1"
 # the testing module for doctests, and doctests can only
 # make use of default features, so we're a bit stuck with
 # these for now.
-bevy_core = "0.15"
+bevy_diagnostic = "0.16"
 bevy_time = "0.16"
 
 schemars = { version = "0.8.21", optional = true }

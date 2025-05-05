@@ -16,8 +16,8 @@
 */
 
 use bevy_app::ScheduleRunnerPlugin;
-pub use bevy_app::{App, Update};
-use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
+pub use bevy_app::{App, TaskPoolPlugin, Update};
+use bevy_diagnostic::FrameCountPlugin;
 pub use bevy_ecs::{
     prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource, World},
     system::IntoSystem,
@@ -52,7 +52,6 @@ impl TestingContext {
         let mut app = App::new();
         app.add_plugins((
             TaskPoolPlugin::default(),
-            TypeRegistrationPlugin,
             FrameCountPlugin,
             TimePlugin,
             ScheduleRunnerPlugin::default(),
