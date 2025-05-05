@@ -19,7 +19,6 @@ categories = [
 bevy_impulse_derive = { path = "macros", version = "0.0.2" }
 bevy_ecs = "0.16"
 bevy_utils = "0.16"
-bevy_hierarchy = "0.15"
 bevy_derive = "0.16"
 bevy_app = "0.16"
 
