@@ -15,10 +15,7 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Component, Entity, World},
-    system::Command,
-};
+use bevy_ecs::prelude::{Command, Component, Entity, World};
 use smallvec::SmallVec;
 use std::{collections::HashMap, sync::Arc};
 

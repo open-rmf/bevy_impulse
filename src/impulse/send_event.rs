@@ -15,13 +15,11 @@
  *
 */
 
-use bevy_ecs::prelude::Event;
-use bevy_hierarchy::DespawnRecursiveExt;
-
 use crate::{
     Impulsive, Input, InputBundle, ManageInput, OperationRequest, OperationResult, OperationSetup,
     OrBroken,
 };
+use bevy_ecs::prelude::Event;
 
 pub(crate) struct SendEvent<T> {
     _ignore: std::marker::PhantomData<fn(T)>,
@@ -44,7 +42,7 @@ impl<T: 'static + Send + Sync + Event> Impulsive for SendEvent<T> {
     fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
-        source_mut.despawn_recursive();
+        source_mut.despawn();
         world.send_event(data);
         Ok(())
     }

@@ -15,11 +15,7 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Entity, World},
-    system::Command,
-};
-use bevy_hierarchy::prelude::DespawnRecursiveExt;
+use bevy_ecs::prelude::{Command, Entity, World};
 
 use backtrace::Backtrace;
 
@@ -74,7 +70,7 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         world
             .get_entity_mut(connect.original_target)
             .or_broken()?
-            .despawn_recursive();
+            .despawn();
         return Ok(());
     }
 
@@ -140,7 +136,7 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
     world
         .get_entity_mut(connect.original_target)
         .or_broken()?
-        .despawn_recursive();
+        .despawn();
 
     Ok(())
 }

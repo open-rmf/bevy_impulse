@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Entity, Query, With},
-    query::{QueryEntityError, QueryIter, ReadOnlyWorldQuery},
+    query::{QueryEntityError, QueryFilter, QueryIter},
     system::SystemParam,
 };
 
@@ -36,7 +36,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamFilter + 'static,
-    Filter: ReadOnlyWorldQuery + 'static,
+    Filter: QueryFilter + 'static,
 {
     query: Query<
         'w,
@@ -56,7 +56,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamFilter,
-    Filter: ReadOnlyWorldQuery + 'static,
+    Filter: QueryFilter + 'static,
 {
     pub fn iter(&self) -> IterServiceDiscovery<'_, 's, Request, Response, Streams, Filter> {
         IterServiceDiscovery {
@@ -78,7 +78,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamFilter,
-    Filter: ReadOnlyWorldQuery + 'static,
+    Filter: QueryFilter + 'static,
 {
     inner: QueryIter<
         'w,
@@ -98,7 +98,7 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamFilter,
-    Filter: ReadOnlyWorldQuery + 'static,
+    Filter: QueryFilter + 'static,
 {
     type Item = Service<Request, Response, Streams::Pack>;
 

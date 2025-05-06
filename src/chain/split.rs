@@ -168,7 +168,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
         }
 
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(ConnectToSplit::<T> {
+        self.builder.commands.queue(ConnectToSplit::<T> {
             source: self.outputs.source,
             target,
             key,

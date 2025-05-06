@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let request = serde_json::Value::from_str(&args.request)?;
     let mut promise =
-        app.world
+        app.world_mut()
             .command(|cmds| -> Result<Promise<serde_json::Value>, DiagramError> {
                 let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
                 Ok(cmds.request(request, workflow).take_response())
