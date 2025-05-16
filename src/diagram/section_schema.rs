@@ -17,7 +17,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use schemars::JsonSchema;
+use schemars::{schema::Schema, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -39,10 +39,89 @@ pub enum SectionProvider {
     Template(OperationName),
 }
 
+/// schemars generates schemas with `additionalProperties: false` for enums.
+/// When the enum is flatten, that `additionalProperties: false` is inherited by the parent
+/// struct, which leads to schemas that can never be valid.
+///
+/// Example:
+///
+/// ```json
+/// {
+///   "description": "Connect the request to a registered section.\n\n``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"section_op\", \"ops\": { \"section_op\": { \"type\": \"section\", \"builder\": \"my_section_builder\", \"connect\": { \"my_section_output\": { \"builtin\": \"terminate\" } } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```\n\nCustom sections can also be created via templates ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"templates\": { \"my_template\": { \"inputs\": [\"section_input\"], \"outputs\": [\"section_output\"], \"buffers\": [], \"ops\": { \"section_input\": { \"type\": \"node\", \"builder\": \"my_node\", \"next\": \"section_output\" } } } }, \"start\": \"section_op\", \"ops\": { \"section_op\": { \"type\": \"section\", \"template\": \"my_template\", \"connect\": { \"section_output\": { \"builtin\": \"terminate\" } } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+///   "type": "object",
+///   "oneOf": [
+///     {
+///       "type": "object",
+///       "required": [
+///         "builder"
+///       ],
+///       "properties": {
+///         "builder": {
+///           "type": "string"
+///         }
+///       },
+///       "additionalProperties": false
+///     },
+///     {
+///       "type": "object",
+///       "required": [
+///         "template"
+///       ],
+///       "properties": {
+///         "template": {
+///           "type": "string"
+///         }
+///       },
+///       "additionalProperties": false
+///     }
+///   ],
+///   "required": [
+///     "type"
+///   ],
+///   "properties": {
+///     "config": {
+///       "default": null
+///     },
+///     "connect": {
+///       "default": {},
+///       "type": "object",
+///       "additionalProperties": {
+///         "$ref": "#/definitions/NextOperation"
+///       }
+///     },
+///     "type": {
+///       "type": "string",
+///       "enum": [
+///         "section"
+///       ]
+///     }
+///   }
+/// },
+/// ```
+///
+/// Here the section schema needs to have a `builder` or `template` with no additional properties.
+/// Which includes other properties like `type`, `config` etc, but `type` is also required which
+/// breaks the schema.
+fn fix_additional_properties(generator: &mut schemars::SchemaGenerator) -> Schema {
+    let mut schema = generator.root_schema_for::<SectionProvider>().schema;
+    schema.metadata.as_mut().unwrap().title = None;
+    let one_ofs = schema.subschemas.as_mut().unwrap().one_of.as_mut().unwrap();
+    for subschema in one_ofs {
+        match subschema {
+            Schema::Object(schema) => schema.object.as_mut().unwrap().additional_properties = None,
+            _ => {
+                panic!("expected object schema")
+            }
+        }
+    }
+    Schema::Object(schema)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SectionSchema {
     #[serde(flatten)]
+    #[schemars(schema_with = "fix_additional_properties")]
     pub(super) provider: SectionProvider,
     #[serde(default)]
     pub(super) config: serde_json::Value,
