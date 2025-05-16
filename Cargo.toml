@@ -8,10 +8,15 @@ description = "Reactive programming and workflow execution for bevy"
 readme = "README.md"
 repository = "https://github.com/open-rmf/bevy_impulse"
 keywords = ["reactive", "workflow", "behavior", "agent", "bevy"]
-categories = ["science::robotics", "asynchronous", "concurrency", "game-development"]
+categories = [
+  "science::robotics",
+  "asynchronous",
+  "concurrency",
+  "game-development",
+]
 
 [dependencies]
-bevy_impulse_derive = { path = "macros", version = "0.0.1" }
+bevy_impulse_derive = { path = "macros", version = "0.0.2" }
 bevy_ecs = "0.13"
 bevy_utils = "0.13"
 bevy_hierarchy = "0.13"
@@ -25,10 +30,9 @@ async-task = { version = "4.7.1", optional = true }
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
 bevy_tasks = { version = "0.13", features = ["multi-threaded"] }
 
-arrayvec = "0.7"
 itertools = "0.13"
 smallvec = "1.13"
-tokio = { version = "1.39", features = ["sync"]}
+tokio = { version = "1.39", features = ["sync"] }
 futures = "0.3"
 backtrace = "0.3"
 anyhow = "1.0"
@@ -42,8 +46,40 @@ thiserror = "1.0"
 bevy_core = "0.13"
 bevy_time = "0.13"
 
+schemars = { version = "0.8.21", optional = true }
+serde = { version = "1.0.210", features = ["derive", "rc"], optional = true }
+serde_json = { version = "1.0.128", optional = true }
+cel-interpreter = { version = "0.9.0", features = ["json"], optional = true }
+tracing = "0.1.41"
+strum = { version = "0.26.3", optional = true, features = ["derive"] }
+semver = { version = "1.0.24", optional = true }
+
+[target.wasm32-unknown-unknown.dependencies]
+uuid = { version = "1.13.1", default-features = false, features = ["js"] }
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
+
 [features]
 single_threaded_async = ["dep:async-task"]
+diagram = [
+  "dep:cel-interpreter",
+  "dep:schemars",
+  "dep:semver",
+  "dep:serde",
+  "dep:serde_json",
+  "dep:strum",
+]
 
 [dev-dependencies]
 async-std = { version = "1.12" }
+test-log = { version = "0.2.16", features = [
+  "trace",
+], default-features = false }
+
+[workspace]
+members = ["examples/diagram/calculator"]
+
+[[bin]]
+name = "generate_schema"
+path = "src/diagram/generate_schema.rs"
+required-features = ["diagram"]
+doc = false

@@ -30,7 +30,7 @@ use thiserror::Error as ThisError;
 
 use crate::{
     operation::ScopeStorage, Cancel, Cancellation, DisposalFailure, ImpulseMarker, OperationResult,
-    OperationRoster, OrBroken, UnhandledErrors,
+    OperationRoster, OrBroken, UnhandledErrors, UnusedTarget,
 };
 
 #[derive(ThisError, Debug, Clone)]
@@ -122,6 +122,17 @@ impl Disposal {
         }
         .into()
     }
+
+    pub fn incomplete_split(
+        split_node: Entity,
+        missing_keys: SmallVec<[Option<Arc<str>>; 16]>,
+    ) -> Self {
+        IncompleteSplit {
+            split_node,
+            missing_keys,
+        }
+        .into()
+    }
 }
 
 #[derive(Debug)]
@@ -176,6 +187,10 @@ pub enum DisposalCause {
     /// been sent out to indicate that the workflow is blocked up on the
     /// collection.
     DeficientCollection(DeficientCollection),
+
+    /// A split operation took place, but not all connections to the split
+    /// received a value.
+    IncompleteSplit(IncompleteSplit),
 }
 
 /// A variant of [`DisposalCause`]
@@ -387,6 +402,21 @@ impl From<DeficientCollection> for DisposalCause {
     }
 }
 
+/// A variant of [`DisposalCause`]
+#[derive(Debug)]
+pub struct IncompleteSplit {
+    /// The node that does the splitting
+    pub split_node: Entity,
+    /// The debug text of each key that was missing in the split
+    pub missing_keys: SmallVec<[Option<Arc<str>>; 16]>,
+}
+
+impl From<IncompleteSplit> for DisposalCause {
+    fn from(value: IncompleteSplit) -> Self {
+        Self::IncompleteSplit(value)
+    }
+}
+
 pub trait ManageDisposal {
     fn emit_disposal(&mut self, session: Entity, disposal: Disposal, roster: &mut OperationRoster);
 
@@ -422,9 +452,13 @@ impl<'w> ManageDisposal for EntityWorldMut<'w> {
                 // TODO(@mxgrey): Consider whether there is a more sound way to
                 // decide whether a disposal should be converted into a
                 // cancellation for impulses.
-            } else {
-                // If the emitting node does not have a scope as not part of an
-                // impulse chain, then something is broken.
+            } else if !self.contains::<UnusedTarget>() {
+                // If the emitting node does not have a scope, is not part of
+                // an impulse chain, and is not an unused target, then something
+                // is broken.
+                //
+                // We can safely ignore disposals for unused targets because
+                // unused targets cannot affect the reachability of a workflow.
                 let broken_node = self.id();
                 self.world_scope(|world| {
                     world
