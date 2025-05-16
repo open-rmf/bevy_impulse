@@ -1,0 +1,10 @@
+/* reactflow overrides */
+.react-flow.dark {
+  --xy-background-color: #121212;
+}
+.react-flow__pane.draggable {
+  cursor: default;
+}
+.react-flow__pane.dragging {
+  cursor: default;
+}
