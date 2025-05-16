@@ -89,6 +89,8 @@ pub trait ManageBuffer {
     ) -> Result<SmallVec<[T; 16]>, OperationError>;
 
     fn clear_buffer<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
+
+    fn ensure_session<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult;
 }
 
 impl<'w> ManageBuffer for EntityWorldMut<'w> {
@@ -112,6 +114,13 @@ impl<'w> ManageBuffer for EntityWorldMut<'w> {
         self.get_mut::<BufferStorage<T>>()
             .or_broken()?
             .clear_session(session);
+        Ok(())
+    }
+
+    fn ensure_session<T: 'static + Send + Sync>(&mut self, session: Entity) -> OperationResult {
+        self.get_mut::<BufferStorage<T>>()
+            .or_broken()?
+            .ensure_session(session);
         Ok(())
     }
 }

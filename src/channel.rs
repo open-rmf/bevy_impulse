@@ -17,8 +17,8 @@
 
 use bevy_ecs::{
     prelude::{Entity, Resource, World},
-    world::CommandQueue,
     system::Commands,
+    world::CommandQueue,
 };
 
 use tokio::sync::mpsc::{
