@@ -1,0 +1,23 @@
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+import diagramSchema from '../../../diagram.schema.json';
+import type { DiagramEditorNode } from '../nodes';
+import type { Diagram } from '../types/diagram';
+
+const ajv = new Ajv();
+addFormats(ajv);
+ajv.addFormat('uint', /^[0-9]+$/);
+const validate = ajv.compile<Diagram>(diagramSchema);
+
+export function loadDiagramJson(jsonStr: string): DiagramEditorNode[] {
+  const diagram = JSON.parse(jsonStr);
+  const valid = validate(diagram);
+  if (!valid) {
+    throw validate.errors;
+  }
+
+  // for (const [opId, op] of Object.entries(diagram.ops)) {
+  //   switch (op.type)
+  // }
+  return [];
+}
