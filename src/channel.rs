@@ -17,7 +17,8 @@
 
 use bevy_ecs::{
     prelude::{Entity, Resource, World},
-    system::{CommandQueue, Commands},
+    system::Commands,
+    world::CommandQueue,
 };
 
 use tokio::sync::mpsc::{
@@ -223,7 +224,7 @@ mod tests {
 
         let count = context
             .app
-            .world
+            .world()
             .get::<RunCount>(hello.provider())
             .unwrap()
             .0;
@@ -231,7 +232,7 @@ mod tests {
 
         let count = context
             .app
-            .world
+            .world()
             .get::<RunCount>(repeat.provider())
             .unwrap()
             .0;

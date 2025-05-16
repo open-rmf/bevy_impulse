@@ -68,7 +68,7 @@ pub trait Joining: Buffering {
 
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(scope),
             join,
             Join::new(self, target),
@@ -101,7 +101,7 @@ pub trait Accessing: Buffering {
 
         let listen = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(scope),
             listen,
             Listen::new(self, target),
@@ -113,7 +113,7 @@ pub trait Accessing: Buffering {
     fn access<T: 'static + Send + Sync>(self, builder: &mut Builder) -> Node<T, (T, Self::Key)> {
         let source = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope),
             source,
             OperateBufferAccess::<T, Self>::new(self, target),
@@ -189,7 +189,7 @@ pub trait Accessing: Buffering {
 
         let begin_cancel = builder.commands.spawn(()).set_parent(builder.scope).id();
         self.verify_scope(builder.scope);
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             None,
             begin_cancel,
             BeginCleanupWorkflow::<Self>::new(

@@ -51,7 +51,7 @@ impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let target = source_mut.get::<Insert<T>>().or_broken()?.target;
-        if let Some(mut target_mut) = world.get_entity_mut(target) {
+        if let Ok(mut target_mut) = world.get_entity_mut(target) {
             target_mut.insert(data);
         }
 

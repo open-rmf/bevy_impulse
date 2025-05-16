@@ -18,8 +18,8 @@
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     prelude::{Bundle, Commands, Component, Entity, With, World},
-    query::{ReadOnlyWorldQuery, WorldQuery},
-    system::Command,
+    query::{QueryFilter, ReadOnlyQueryData, WorldQuery},
+    world::Command,
 };
 use bevy_hierarchy::BuildChildren;
 pub use bevy_impulse_derive::Stream;
@@ -78,7 +78,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
     ) -> (InputSlot<Self>, Output<Self>) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             Some(in_scope),
             source,
             RedirectScopeStream::<Self>::new(target),
@@ -92,7 +92,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
 
     fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self> {
         let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             source,
             RedirectWorkflowStream::<Self>::new(),
@@ -142,7 +142,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
 
         let index = map.add(target);
 
-        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
+        commands.queue(AddImpulse::new(target, TakenStream::new(sender)));
 
         (StreamTargetStorage::new(index), receiver)
     }
@@ -154,7 +154,7 @@ pub trait Stream: 'static + Send + Sync + Sized {
         commands: &mut Commands,
     ) -> StreamTargetStorage<Self> {
         let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
+        commands.queue(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
         let index = map.add(redirect);
         StreamTargetStorage::new(index)
     }
@@ -346,7 +346,7 @@ impl StreamTargetMap {
 /// streams to be packed together as one generic argument.
 pub trait StreamPack: 'static + Send + Sync {
     type StreamAvailableBundle: Bundle + Default;
-    type StreamFilter: ReadOnlyWorldQuery;
+    type StreamFilter: QueryFilter;
     type StreamStorageBundle: Bundle + Clone;
     type StreamInputPack;
     type StreamOutputPack;
@@ -354,7 +354,7 @@ pub trait StreamPack: 'static + Send + Sync {
     type Channel: Send;
     type Forward: Future<Output = ()> + Send;
     type Buffer: Clone;
-    type TargetIndexQuery: ReadOnlyWorldQuery;
+    type TargetIndexQuery: ReadOnlyQueryData;
 
     fn spawn_scope_streams(
         in_scope: Entity,
@@ -535,7 +535,7 @@ impl<T: Stream + Unpin> StreamPack for T {
         session: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(SendStreams::<Self> {
+        commands.queue(SendStreams::<Self> {
             source,
             session,
             container: buffer.container.take(),
@@ -936,7 +936,7 @@ impl<S: Stream> Command for SendStreams<S> {
 /// }
 /// ```
 pub trait StreamFilter {
-    type Filter: ReadOnlyWorldQuery;
+    type Filter: QueryFilter;
     type Pack: StreamPack;
 }
 

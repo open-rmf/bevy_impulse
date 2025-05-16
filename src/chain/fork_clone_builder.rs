@@ -50,7 +50,7 @@ macro_rules! impl_forkclonebuilder_for_tuple {
                     )*
                 ];
 
-                builder.commands.add(AddOperation::new(
+                builder.commands.queue(AddOperation::new(
                     Some(source.scope()),
                     source.id(),
                     ForkClone::<R>::new(

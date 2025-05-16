@@ -186,7 +186,7 @@ pub trait IterBufferable {
         let buffers = self.into_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             join,
             Join::new(buffers, target),

@@ -520,7 +520,7 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
 impl<'w, 's, 'a> Drop for AnyBufferMut<'w, 's, 'a> {
     fn drop(&mut self) {
         if self.modified {
-            self.commands.add(NotifyBufferUpdate::new(
+            self.commands.queue(NotifyBufferUpdate::new(
                 self.buffer,
                 self.session,
                 self.accessor,
@@ -1003,7 +1003,7 @@ impl<T: 'static + Send + Sync + Any> AnyBufferAccessInterface for AnyBufferAcces
     ) -> Result<AnyBufferView<'a>, BufferError> {
         let buffer_ref = world
             .get_entity(key.tag.buffer)
-            .ok_or(BufferError::BufferMissing)?;
+            .map_err(|_| BufferError::BufferMissing)?;
         let storage = buffer_ref
             .get::<BufferStorage<T>>()
             .ok_or(BufferError::BufferMissing)?;

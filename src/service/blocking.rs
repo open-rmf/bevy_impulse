@@ -32,18 +32,18 @@ pub struct Blocking<M>(std::marker::PhantomData<fn(M)>);
 
 #[derive(Component)]
 struct BlockingServiceStorage<Request, Response, Streams: StreamPack>(
-    Option<BoxedSystem<BlockingService<Request, Streams>, Response>>,
+    Option<BoxedSystem<In<BlockingService<Request, Streams>>, Response>>,
 );
 
 #[derive(Component)]
 struct UninitBlockingServiceStorage<Request, Response, Streams: StreamPack>(
-    BoxedSystem<BlockingService<Request, Streams>, Response>,
+    BoxedSystem<In<BlockingService<Request, Streams>>, Response>,
 );
 
 impl<Request, Response, Streams, M, Sys> IntoService<Blocking<(Request, Response, Streams, M)>>
     for Sys
 where
-    Sys: IntoSystem<BlockingService<Request, Streams>, Response, M>,
+    Sys: IntoSystem<In<BlockingService<Request, Streams>>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
@@ -97,7 +97,7 @@ where
             .or_broken()?
             .take_input::<Request>()?;
 
-        let mut service = if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+        let mut service = if let Ok(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) =
                 provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>()
             {
@@ -146,7 +146,7 @@ where
         let mut unused_streams = UnusedStreams::new(source);
         Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
 
-        if let Some(mut provider_mut) = world.get_entity_mut(provider) {
+        if let Ok(mut provider_mut) = world.get_entity_mut(provider) {
             if let Some(mut storage) =
                 provider_mut.get_mut::<BlockingServiceStorage<Request, Response, Streams>>()
             {
@@ -191,7 +191,7 @@ pub trait IntoBlockingService<M> {
 impl<Request, Response, M, Sys> IntoBlockingService<AsBlockingService<(Request, Response, M)>>
     for Sys
 where
-    Sys: IntoSystem<Request, Response, M>,
+    Sys: IntoSystem<In<Request>, Response, M>,
     Request: 'static,
     Response: 'static,
 {
@@ -204,7 +204,7 @@ where
 impl<Request, Response, M, Sys> IntoService<AsBlockingService<(Request, Response, M)>>
     for AsBlockingService<Sys>
 where
-    Sys: IntoSystem<Request, Response, M>,
+    Sys: IntoSystem<In<Request>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {

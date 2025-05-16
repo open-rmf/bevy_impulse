@@ -51,7 +51,7 @@ impl<T: 'static + Send + Sync> Impulsive for Store<T> {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
         let target = source_mut.get::<Store<T>>().or_broken()?.target;
-        if let Some(mut target_mut) = world.get_entity_mut(target) {
+        if let Ok(mut target_mut) = world.get_entity_mut(target) {
             target_mut.insert(Storage { data, session });
         }
         world.entity_mut(source).despawn_recursive();

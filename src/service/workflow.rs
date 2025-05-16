@@ -139,7 +139,7 @@ where
         );
 
         if result.is_err() {
-            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+            if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
                 scoped_session_mut.despawn_recursive();
             }
         }
@@ -336,7 +336,7 @@ fn serve_next_workflow_request<Request, Response, Streams>(
         .is_err()
         {
             // The workflow will not run, so we should despawn the scoped session
-            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+            if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
                 scoped_session_mut.despawn_recursive();
             }
 

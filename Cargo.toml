@@ -1,6 +1,6 @@
 [package]
 name = "bevy_impulse"
-version = "0.0.2"
+version = "0.3.0"
 edition = "2021"
 authors = ["Grey <mxgrey@intrinsic.ai>"]
 license = "Apache-2.0"
@@ -17,18 +17,18 @@ categories = [
 
 [dependencies]
 bevy_impulse_derive = { path = "macros", version = "0.0.2" }
-bevy_ecs = "0.12"
-bevy_utils = "0.12"
-bevy_hierarchy = "0.12"
-bevy_derive = "0.12"
-bevy_app = "0.12"
+bevy_ecs = "0.15"
+bevy_utils = "0.15"
+bevy_hierarchy = "0.15"
+bevy_derive = "0.15"
+bevy_app = "0.15"
 
 async-task = { version = "4.7.1", optional = true }
 
 # TODO(@mxgrey) We could probably remove bevy_tasks when the single_threaded_async
 # feature is active, but we'd have to refactor some internal usage of
 # bevy_tasks::Task, so we're leaving it as a mandatory dependency for now.
-bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
+bevy_tasks = { version = "0.15", features = ["multi_threaded"] }
 
 itertools = "0.13"
 smallvec = "1.13"
@@ -43,8 +43,8 @@ thiserror = "1.0"
 # the testing module for doctests, and doctests can only
 # make use of default features, so we're a bit stuck with
 # these for now.
-bevy_core = "0.12"
-bevy_time = "0.12"
+bevy_core = "0.15"
+bevy_time = "0.15"
 
 schemars = { version = "0.8.21", optional = true }
 serde = { version = "1.0.210", features = ["derive", "rc"], optional = true }
@@ -54,8 +54,9 @@ tracing = "0.1.41"
 strum = { version = "0.26.3", optional = true, features = ["derive"] }
 semver = { version = "1.0.24", optional = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.wasm32-unknown-unknown.dependencies]
 uuid = { version = "1.13.1", default-features = false, features = ["js"] }
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
 
 [features]
 single_threaded_async = ["dep:async-task"]

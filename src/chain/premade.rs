@@ -15,11 +15,25 @@
  *
 */
 
-use bevy_ecs::{prelude::In, query::QueryEntityError};
+use bevy_ecs::{
+    prelude::{Entity, In},
+    query::QueryEntityError,
+};
 
 use smallvec::SmallVec;
+use thiserror::Error;
 
 use crate::{BufferAccessMut, BufferKey};
+
+#[derive(Debug, Error)]
+pub enum BufferAccessError {
+    #[error("The query does not match the entity {0}")]
+    QueryDoesNotMatch(Entity),
+    #[error("The entity {0} does not exist")]
+    NoSuchEntity(Entity),
+    #[error("The entity {0} was requested mutably more than once")]
+    AliasedMutability(Entity),
+}
 
 pub(super) fn consume_buffer<const N: usize, T>(
     In(key): In<BufferKey<T>>,
@@ -38,7 +52,14 @@ where
 pub fn push_into_buffer<T: 'static + Send + Sync>(
     In((input, key)): In<(T, BufferKey<T>)>,
     mut access: BufferAccessMut<T>,
-) -> Result<(), QueryEntityError> {
-    access.get_mut(&key)?.push(input);
+) -> Result<(), BufferAccessError> {
+    access
+        .get_mut(&key)
+        .map_err(|err| match err {
+            QueryEntityError::QueryDoesNotMatch(e, _) => BufferAccessError::QueryDoesNotMatch(e),
+            QueryEntityError::NoSuchEntity(e) => BufferAccessError::NoSuchEntity(e),
+            QueryEntityError::AliasedMutability(e) => BufferAccessError::AliasedMutability(e),
+        })?
+        .push(input);
     Ok(())
 }

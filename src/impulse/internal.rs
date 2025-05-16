@@ -17,7 +17,7 @@
 
 use bevy_ecs::{
     prelude::{Component, Entity, Resource, World},
-    system::Command,
+    world::Command,
 };
 use bevy_hierarchy::DespawnRecursiveExt;
 
@@ -102,7 +102,7 @@ fn perform_impulse<I: Impulsive>(
             // Do nothing
         }
         Err(OperationError::Broken(backtrace)) => {
-            if let Some(mut source_mut) = world.get_entity_mut(source) {
+            if let Ok(mut source_mut) = world.get_entity_mut(source) {
                 source_mut.emit_broken(backtrace, roster);
             } else {
                 world
@@ -165,7 +165,7 @@ pub(crate) fn cancel_impulse(
         }
     }
 
-    if let Some(terminal_mut) = world.get_entity_mut(terminal) {
+    if let Ok(terminal_mut) = world.get_entity_mut(terminal) {
         terminal_mut.despawn_recursive();
     }
 
@@ -230,7 +230,7 @@ pub(crate) fn add_lifecycle_dependency(source: Entity, target: Entity, world: &m
 
     if let Some(mut lifecycle) = world.get_mut::<ImpulseLifecycle>(target) {
         lifecycle.sources.push(source);
-    } else if let Some(mut target_mut) = world.get_entity_mut(target) {
+    } else if let Ok(mut target_mut) = world.get_entity_mut(target) {
         target_mut.insert(ImpulseLifecycle::new(source, sender));
     } else {
         // The target is already despawned

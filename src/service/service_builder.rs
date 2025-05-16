@@ -130,7 +130,7 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
         Srv::Response: 'static + Send + Sync,
         Srv::Streams: StreamPack,
     {
-        let mut entity_mut = app.world.spawn(());
+        let mut entity_mut = app.world_mut().spawn(());
         self.service.insert_service_mut(&mut entity_mut);
         let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         entity_mut.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
@@ -161,7 +161,7 @@ where
         Srv::Response: 'static + Send + Sync,
         Srv::Streams: StreamPack,
     {
-        let mut entity_mut = app.world.spawn(());
+        let mut entity_mut = app.world_mut().spawn(());
         let provider = entity_mut.id();
         let config = self.service.into_system_config(&mut entity_mut);
         let config = self.configure.apply(config);
