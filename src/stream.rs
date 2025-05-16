@@ -1431,6 +1431,27 @@ mod tests {
         }
     }
 
+    fn test_stream_map() {
+
+    }
+
+    fn impl_stream_map_test_blocking(
+        request: Vec<String>,
+        streams: <TestStreamMap as StreamPack>::StreamBuffers,
+    ) {
+        for r in request {
+            if let Ok(value) = r.parse::<u32>() {
+                streams.stream_u32.send(value);
+            }
+
+            if let Ok(value) = r.parse::<i32>() {
+                streams.stream_i32.send(value);
+            }
+
+            streams.stream_string.send(r);
+        }
+    }
+
     use crate::{Receiver, StreamAvailability, StreamChannel};
 
     struct TestStreamMap {
