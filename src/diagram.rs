@@ -181,7 +181,7 @@ impl<'de> Deserialize<'de> for NamespacedOperation {
 
 impl JsonSchema for NamespacedOperation {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let mut schema = SchemaObject::new_ref(Self::schema_name());
+        let mut schema = SchemaObject::default();
         schema.instance_type = Some(SingleOrVec::Single(Box::new(InstanceType::Object)));
         schema.object = Some(Box::new(ObjectValidation {
             max_properties: Some(1),
