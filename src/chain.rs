@@ -310,7 +310,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
@@ -361,7 +361,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     where
         T: ToString,
     {
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             self.target,
             OperateCancel::<T>::new(),
@@ -460,7 +460,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             Spread::<T>::new(target),
@@ -496,7 +496,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             Collect::<T, N>::new(target, min, max),
@@ -533,7 +533,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             Trim::<T>::new(branches, target),
@@ -580,7 +580,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             OperateStaticGate::<T, _>::new(buffers, target, action),
@@ -627,7 +627,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         T: Splittable,
     {
         let source = self.target;
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             OperateSplit::<T>::default(),
@@ -698,7 +698,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             Noop::<T>::new(target),
@@ -773,7 +773,7 @@ where
         let target_ok = self.builder.commands.spawn(UnusedTarget).id();
         let target_err = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
@@ -837,7 +837,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateCancelFilter::on_err::<T, E>(target),
@@ -854,7 +854,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateCancelFilter::on_quiet_err::<T, E>(target),
@@ -876,7 +876,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_err::<T, E>(target),
@@ -893,7 +893,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_quiet_err::<T, E>(target),
@@ -909,7 +909,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_ok::<T, E>(target),
@@ -951,7 +951,7 @@ where
         let target_some = self.builder.commands.spawn(UnusedTarget).id();
         let target_none = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
@@ -983,7 +983,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateCancelFilter::on_none::<T>(target),
@@ -1002,7 +1002,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_none::<T>(target),
@@ -1019,7 +1019,7 @@ where
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
 
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             source,
             CreateDisposalFilter::on_some::<T>(target),
@@ -1121,7 +1121,7 @@ where
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.builder.scope),
             source,
             OperateDynamicGate::<T, _>::new(buffers, target),
@@ -1176,7 +1176,7 @@ impl<'w, 's, 'a, 'b> Chain<'w, 's, 'a, 'b, ()> {
     /// If you want to include information about the value that triggered the
     /// cancellation, use [`Self::then_cancel`].
     pub fn then_quiet_cancel(self) {
-        self.builder.commands.add(AddOperation::new(
+        self.builder.commands.queue(AddOperation::new(
             Some(self.scope()),
             self.target,
             OperateQuietCancel,

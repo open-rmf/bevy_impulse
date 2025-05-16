@@ -40,7 +40,7 @@ impl DiagramTestFixture {
     {
         self.context
             .app
-            .world
+            .world_mut()
             .command(|cmds| diagram.spawn_workflow(cmds, &self.registry))
     }
 

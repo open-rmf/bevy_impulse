@@ -267,7 +267,7 @@ pub trait CallbackTrait<Request, Response, Streams> {
 pub struct BlockingCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 
 struct BlockingCallbackSystem<Request, Response, Streams: StreamPack> {
-    system: BoxedSystem<BlockingCallback<Request, Streams>, Response>,
+    system: BoxedSystem<In<BlockingCallback<Request, Streams>>, Response>,
     initialized: bool,
 }
 
@@ -319,7 +319,7 @@ where
 pub struct AsyncCallbackMarker<M>(std::marker::PhantomData<fn(M)>);
 
 struct AsyncCallbackSystem<Request, Task, Streams: StreamPack> {
-    system: BoxedSystem<AsyncCallback<Request, Streams>, Task>,
+    system: BoxedSystem<In<AsyncCallback<Request, Streams>>, Task>,
     initialized: bool,
 }
 
@@ -389,7 +389,7 @@ pub trait AsCallback<M> {
 impl<Request, Response, Streams, M, Sys>
     AsCallback<BlockingCallbackMarker<(Request, Response, Streams, M)>> for Sys
 where
-    Sys: IntoSystem<BlockingCallback<Request, Streams>, Response, M>,
+    Sys: IntoSystem<In<BlockingCallback<Request, Streams>>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
@@ -409,7 +409,7 @@ where
 impl<Request, Task, Streams, M, Sys> AsCallback<AsyncCallbackMarker<(Request, Task, Streams, M)>>
     for Sys
 where
-    Sys: IntoSystem<AsyncCallback<Request, Streams>, Task, M>,
+    Sys: IntoSystem<In<AsyncCallback<Request, Streams>>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -510,7 +510,7 @@ pub trait IntoBlockingCallback<M> {
 impl<Request, Response, M, Sys> IntoBlockingCallback<BlockingCallbackMarker<(Request, Response, M)>>
     for Sys
 where
-    Sys: IntoSystem<Request, Response, M>,
+    Sys: IntoSystem<In<Request>, Response, M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
 {
@@ -551,7 +551,7 @@ pub trait IntoAsyncCallback<M> {
 
 impl<Request, Task, M, Sys> IntoAsyncCallback<AsyncCallbackMarker<(Request, Task, (), M)>> for Sys
 where
-    Sys: IntoSystem<Request, Task, M>,
+    Sys: IntoSystem<In<Request>, Task, M>,
     Task: Future + 'static + Sendish,
     Request: 'static + Send + Sync,
     Task::Output: 'static + Send + Sync,
@@ -602,7 +602,7 @@ where
         target: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             scope,
             source,
             OperateCallback::new(self, target),

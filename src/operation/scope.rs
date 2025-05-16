@@ -28,8 +28,10 @@ use crate::{
 
 use backtrace::Backtrace;
 
-use bevy_ecs::prelude::{Commands, Component, Entity, World};
-use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
+use bevy_ecs::{
+    hierarchy::ChildOf,
+    prelude::{Commands, Component, Entity, World},
+};
 
 use smallvec::SmallVec;
 
@@ -370,8 +372,8 @@ where
     if result.is_err() {
         // We won't be executing this scope after all, so despawn the scoped
         // session that we created.
-        if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-            scoped_session_mut.despawn_recursive();
+        if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+            scoped_session_mut.despawn();
         }
         return result;
     }
@@ -520,10 +522,10 @@ where
     ) -> ScopeEndpoints {
         let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
 
-        let terminal = commands.spawn(()).set_parent(scope_id).id();
+        let terminal = commands.spawn(()).insert(ChildOf(scope_id)).id();
         let finish_scope_cancel = commands
             .spawn(FinishCleanupForScope(scope_id))
-            .set_parent(scope_id)
+            .insert(ChildOf(scope_id))
             .id();
 
         let scope = OperateScope::<Request, Response, Streams> {
@@ -537,9 +539,9 @@ where
         // Note: We need to make sure the scope object gets set up before any of
         // its endpoints, otherwise the ScopeContents component will be missing
         // during setup.
-        commands.add(AddOperation::new(parent_scope, scope_id, scope));
+        commands.queue(AddOperation::new(parent_scope, scope_id, scope));
 
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             // We do not consider the terminal node to be "inside" the scope,
             // otherwise it will get cleaned up prematurely
             None,
@@ -547,7 +549,7 @@ where
             Terminate::<Response>::new(scope_id),
         ));
 
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             // We do not consider the finish cancel node to be "inside" the
             // scope, otherwise it will get cleaned up prematurely
             None,
@@ -1543,9 +1545,9 @@ impl<T: 'static + Send + Sync> FinishCleanup<T> {
 
         clear_scope_buffers(scope, scoped_session, world)?;
 
-        if world.get_entity(scoped_session).is_some() {
-            if let Some(scoped_session_mut) = world.get_entity_mut(scoped_session) {
-                scoped_session_mut.despawn_recursive();
+        if world.get_entity(scoped_session).is_ok() {
+            if let Ok(scoped_session_mut) = world.get_entity_mut(scoped_session) {
+                scoped_session_mut.despawn();
             }
         }
 

@@ -15,7 +15,7 @@
  *
 */
 
-use bevy_utils::all_tuples;
+use variadics_please::all_tuples;
 
 use crate::{AddOperation, Builder, Chain, ForkClone, ForkTargetStorage, Output, UnusedTarget};
 
@@ -50,7 +50,7 @@ macro_rules! impl_forkclonebuilder_for_tuple {
                     )*
                 ];
 
-                builder.commands.add(AddOperation::new(
+                builder.commands.queue(AddOperation::new(
                     Some(source.scope()),
                     source.id(),
                     ForkClone::<R>::new(

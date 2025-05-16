@@ -16,7 +16,6 @@
 */
 
 use bevy_ecs::prelude::{Component, Entity};
-use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
     add_lifecycle_dependency, Collection, Impulsive, Input, InputBundle, ManageInput,
@@ -63,7 +62,7 @@ impl<T: 'static + Send + Sync> Impulsive for Push<T> {
             collection.items.push(Storage { session, data });
             target_mut.insert(collection);
         }
-        world.entity_mut(source).despawn_recursive();
+        world.entity_mut(source).despawn();
         Ok(())
     }
 }
