@@ -145,8 +145,7 @@
                 "builder": {
                   "type": "string"
                 }
-              },
-              "additionalProperties": false
+              }
             },
             {
               "type": "object",
@@ -157,8 +156,7 @@
                 "template": {
                   "type": "string"
                 }
-              },
-              "additionalProperties": false
+              }
             }
           ],
           "required": [

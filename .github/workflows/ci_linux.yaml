@@ -18,7 +18,7 @@ jobs:
   build:
     strategy:
       matrix:
-        rust-version: stable
+        rust-version: [stable]
 
     runs-on: ubuntu-latest
 
