@@ -16,7 +16,6 @@
 */
 
 use bevy_ecs::prelude::{Bundle, Component, Entity};
-use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
     add_lifecycle_dependency, Impulsive, Input, InputBundle, ManageInput, OperationRequest,
@@ -51,11 +50,11 @@ impl<T: 'static + Send + Sync + Bundle> Impulsive for Insert<T> {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let target = source_mut.get::<Insert<T>>().or_broken()?.target;
-        if let Some(mut target_mut) = world.get_entity_mut(target) {
+        if let Ok(mut target_mut) = world.get_entity_mut(target) {
             target_mut.insert(data);
         }
 
-        world.entity_mut(source).despawn_recursive();
+        world.entity_mut(source).despawn();
         Ok(())
     }
 }

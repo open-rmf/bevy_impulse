@@ -16,12 +16,12 @@
 */
 
 use bevy_ecs::{
-    prelude::{Commands, Component, Entity, Event, EventReader, In, Local, Query, World},
-    schedule::IntoSystemConfigs,
-    system::{Command, IntoSystem, SystemParam},
+    hierarchy::ChildOf,
+    prelude::{Command, Commands, Component, Entity, Event, EventReader, In, Local, Query, World},
+    schedule::IntoScheduleConfigs,
+    system::{IntoSystem, ScheduleSystem, SystemParam},
     world::EntityWorldMut,
 };
-use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -37,7 +37,7 @@ use crate::{
     StreamPack, StreamTargetMap, UnhandledErrors,
 };
 
-pub use bevy_ecs::schedule::SystemConfigs;
+pub use bevy_ecs::schedule::ScheduleConfigs;
 
 pub struct ContinuousServiceKey<Request, Response, Streams> {
     provider: Entity,
@@ -476,7 +476,7 @@ where
 
         if !responses.is_empty() {
             self.commands
-                .add(DeliverResponses::<Request, Response, Streams> {
+                .queue(DeliverResponses::<Request, Response, Streams> {
                     responses,
                     _ignore: Default::default(),
                 });
@@ -648,8 +648,8 @@ where
                     }
                 }
 
-                if let Some(task_mut) = world.get_entity_mut(task_id) {
-                    task_mut.despawn_recursive();
+                if let Ok(task_mut) = world.get_entity_mut(task_id) {
+                    task_mut.despawn();
                 }
             }
 
@@ -740,7 +740,7 @@ where
             session,
             data: request,
         } = source_mut.take_input::<Request>()?;
-        let task_id = world.spawn(()).set_parent(source).id();
+        let task_id = world.spawn(()).insert(ChildOf(source)).id();
 
         let Some(mut delivery) = world.get_mut::<Delivery<Request>>(provider) else {
             dispose_for_despawned_service(provider, world, roster);
@@ -778,8 +778,8 @@ where
                 for cancelled in cancelled {
                     let disposal = Disposal::supplanted(cancelled.source, source, session);
                     emit_disposal(cancelled.source, cancelled.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(cancelled.task_id) {
-                        task_mut.despawn_recursive();
+                    if let Ok(task_mut) = world.get_entity_mut(cancelled.task_id) {
+                        task_mut.despawn();
                     }
                 }
                 if let Some(stop) = stop {
@@ -815,8 +815,8 @@ where
 
                     let disposal = Disposal::supplanted(stop.source, source, session);
                     emit_disposal(stop.source, stop.session, disposal, world, roster);
-                    if let Some(task_mut) = world.get_entity_mut(stop.task_id) {
-                        task_mut.despawn_recursive();
+                    if let Ok(task_mut) = world.get_entity_mut(stop.task_id) {
+                        task_mut.despawn();
                     }
                 }
 
@@ -942,7 +942,7 @@ fn serve_next_continuous_request<Request, Response, Streams>(
 impl<Request, Response, Streams, M, Sys> IntoContinuousService<(Request, Response, Streams, M)>
     for Sys
 where
-    Sys: IntoSystem<ContinuousService<Request, Response, Streams>, (), M>,
+    Sys: IntoSystem<In<ContinuousService<Request, Response, Streams>>, (), M>,
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
     Streams: StreamPack,
@@ -951,7 +951,10 @@ where
     type Response = Response;
     type Streams = Streams;
 
-    fn into_system_config(self, entity_mut: &mut EntityWorldMut) -> SystemConfigs {
+    fn into_system_config(
+        self,
+        entity_mut: &mut EntityWorldMut,
+    ) -> ScheduleConfigs<ScheduleSystem> {
         let provider = entity_mut
             .insert((
                 ContinuousQueueStorage::<Request>::new(),

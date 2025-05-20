@@ -23,11 +23,12 @@ use crate::{
 use bevy_app::prelude::App;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
+    define_label,
+    intern::Interned,
     prelude::{Commands, Component, Entity, Event, World},
     schedule::ScheduleLabel,
 };
 pub use bevy_impulse_derive::DeliveryLabel;
-use bevy_utils::{define_label, intern::Interned};
 use std::{any::TypeId, collections::HashSet, sync::OnceLock};
 use thiserror::Error as ThisError;
 
@@ -218,7 +219,7 @@ define_label!(
 
 pub mod utils {
     /// Used by the procedural macro for DeliveryLabel
-    pub use bevy_utils::label::DynEq;
+    pub use bevy_ecs::label::DynEq;
 }
 
 /// When using a service, you can bundle in delivery instructions that affect
@@ -586,7 +587,7 @@ where
         target: Entity,
         commands: &mut Commands,
     ) {
-        commands.add(AddOperation::new(
+        commands.queue(AddOperation::new(
             scope,
             source,
             OperateService::new(self, target),
@@ -637,7 +638,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -648,7 +649,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -659,7 +660,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -672,7 +673,7 @@ mod tests {
             .add_systems(Update, sys_use_my_service_provider);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -683,7 +684,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -694,7 +695,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     #[test]
@@ -707,7 +708,7 @@ mod tests {
             .add_systems(Update, sys_find_service);
 
         app.update();
-        assert!(app.world.resource::<TestSystemRan>().0);
+        assert!(app.world().resource::<TestSystemRan>().0);
     }
 
     fn sys_async_service(
@@ -807,9 +808,9 @@ mod tests {
 
         let mut recipient = context.command(|commands| commands.request((), event_streamer).take());
 
-        context.app.world.send_event(CustomEvent(0));
-        context.app.world.send_event(CustomEvent(1));
-        context.app.world.send_event(CustomEvent(2));
+        context.app.world_mut().send_event(CustomEvent(0));
+        context.app.world_mut().send_event(CustomEvent(1));
+        context.app.world_mut().send_event(CustomEvent(2));
 
         context.run_with_conditions(&mut recipient.response, 1);
 

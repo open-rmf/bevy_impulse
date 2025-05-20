@@ -15,8 +15,8 @@
  *
 */
 
-use bevy_utils::all_tuples;
 use smallvec::SmallVec;
+use variadics_please::all_tuples;
 
 use crate::{
     Accessing, AddOperation, Buffer, BufferSettings, Buffering, Builder, Chain, CloneFromBuffer,
@@ -186,7 +186,7 @@ pub trait IterBufferable {
         let buffers = self.into_buffer_vec::<N>(builder);
         let join = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
-        builder.commands.add(AddOperation::new(
+        builder.commands.queue(AddOperation::new(
             Some(builder.scope()),
             join,
             Join::new(buffers, target),

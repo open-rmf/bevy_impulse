@@ -74,7 +74,7 @@ where
     type Streams = ();
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddImpulse::new(
+        commands.queue(AddImpulse::new(
             source,
             ImpulseBlockingMap::new(target, self.def),
         ));
@@ -183,7 +183,7 @@ where
     type Streams = Streams;
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
-        commands.add(AddImpulse::new(
+        commands.queue(AddImpulse::new(
             source,
             ImpulseAsyncMap::new(target, self.def),
         ));

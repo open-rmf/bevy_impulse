@@ -16,8 +16,7 @@
 */
 
 use bevy_ecs::{
-    prelude::{Bundle, Component, Entity},
-    system::Command,
+    prelude::{Bundle, Command, Component, Entity},
     world::{EntityRef, EntityWorldMut, World},
 };
 

@@ -24,11 +24,7 @@ use crate::{
     SingleTargetStorage, StreamPack, StreamTargetMap,
 };
 
-use bevy_ecs::{
-    prelude::{Component, Entity},
-    system::Command,
-};
-use bevy_hierarchy::prelude::DespawnRecursiveExt;
+use bevy_ecs::prelude::{Command, Component, Entity};
 
 use smallvec::SmallVec;
 
@@ -338,7 +334,7 @@ where
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<Response>()?;
         let injector = source_mut.get::<InjectionSource>().or_broken()?.0;
-        source_mut.despawn_recursive();
+        source_mut.despawn();
         let mut injector_mut = world.get_entity_mut(injector).or_broken()?;
         let target = injector_mut.get::<SingleTargetStorage>().or_broken()?.get();
         let mut storage = injector_mut.get_mut::<InjectionStorage>().or_broken()?;
@@ -350,7 +346,7 @@ where
         storage.list.retain(|injected| injected.finish != source);
         let mut task_mut = world.get_entity_mut(injected.task).or_broken()?;
         task_mut.transfer_disposals(injector)?;
-        task_mut.despawn_recursive();
+        task_mut.despawn();
 
         world
             .get_entity_mut(target)

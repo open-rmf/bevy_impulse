@@ -16,7 +16,6 @@
 */
 
 use bevy_ecs::prelude::Component;
-use bevy_hierarchy::DespawnRecursiveExt;
 
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
@@ -60,7 +59,7 @@ impl<T: 'static + Send + Sync> Impulsive for TakenResponse<T> {
         let Input { data, .. } = source_mut.take_input::<T>()?;
         let sender = source_mut.take::<TakenResponse<T>>().or_broken()?.sender;
         sender.send(data).ok();
-        source_mut.despawn_recursive();
+        source_mut.despawn();
 
         Ok(())
     }
@@ -101,7 +100,7 @@ where
     let mut target_mut = world.get_entity_mut(cancel.target).or_broken()?;
     let taken = target_mut.take::<TakenResponse<T>>().or_broken()?;
     taken.sender.cancel(cancel.cancellation).ok();
-    target_mut.despawn_recursive();
+    target_mut.despawn();
 
     Ok(())
 }

@@ -19,8 +19,8 @@ use crate::{stream::*, Delivery, IntoContinuousService, IntoService, Service};
 
 use bevy_app::prelude::App;
 use bevy_ecs::{
-    schedule::{ScheduleLabel, SystemConfigs},
-    system::{Commands, EntityCommands},
+    schedule::{ScheduleConfigs, ScheduleLabel},
+    system::{Commands, EntityCommands, ScheduleSystem},
     world::EntityWorldMut,
 };
 
@@ -130,7 +130,7 @@ impl<Srv, Deliver, With, Also> ServiceBuilder<Srv, Deliver, With, Also, ()> {
         Srv::Response: 'static + Send + Sync,
         Srv::Streams: StreamPack,
     {
-        let mut entity_mut = app.world.spawn(());
+        let mut entity_mut = app.world_mut().spawn(());
         self.service.insert_service_mut(&mut entity_mut);
         let service = Service::<Srv::Request, Srv::Response, Srv::Streams>::new(entity_mut.id());
         entity_mut.insert(<Srv::Streams as StreamPack>::StreamAvailableBundle::default());
@@ -161,7 +161,7 @@ where
         Srv::Response: 'static + Send + Sync,
         Srv::Streams: StreamPack,
     {
-        let mut entity_mut = app.world.spawn(());
+        let mut entity_mut = app.world_mut().spawn(());
         let provider = entity_mut.id();
         let config = self.service.into_system_config(&mut entity_mut);
         let config = self.configure.apply(config);
@@ -393,15 +393,15 @@ impl<Request, Response, Streams> AlsoAdd<Request, Response, Streams> for () {
 
 impl<T> ConfigureContinuousService for T
 where
-    T: FnOnce(SystemConfigs) -> SystemConfigs,
+    T: FnOnce(ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem>,
 {
-    fn apply(self, config: SystemConfigs) -> SystemConfigs {
+    fn apply(self, config: ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem> {
         (self)(config)
     }
 }
 
 impl ConfigureContinuousService for () {
-    fn apply(self, config: SystemConfigs) -> SystemConfigs {
+    fn apply(self, config: ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem> {
         config
     }
 }

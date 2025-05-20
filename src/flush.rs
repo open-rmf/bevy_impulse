@@ -17,11 +17,10 @@
 
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
-    prelude::{Added, Entity, Query, QueryState, Resource, With, World},
-    schedule::{IntoSystemConfigs, SystemConfigs},
-    system::{Command, SystemState},
+    prelude::*,
+    schedule::{IntoScheduleConfigs, ScheduleConfigs},
+    system::{ScheduleSystem, SystemState},
 };
-use bevy_hierarchy::{BuildWorldChildren, Children, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -67,7 +66,7 @@ pub struct FlushParameters {
     pub single_threaded_poll_limit: Option<usize>,
 }
 
-pub fn flush_impulses() -> SystemConfigs {
+pub fn flush_impulses() -> ScheduleConfigs<ScheduleSystem> {
     flush_impulses_impl.into_configs()
 }
 
@@ -88,8 +87,8 @@ fn flush_impulses_impl(
     let mut loop_count = 0;
     while !roster.is_empty() {
         for e in roster.deferred_despawn.drain(..) {
-            if let Some(e_mut) = world.get_entity_mut(e) {
-                e_mut.despawn_recursive();
+            if let Ok(e_mut) = world.get_entity_mut(e) {
+                e_mut.despawn();
             }
         }
 
@@ -329,13 +328,13 @@ fn drop_target(target: Entity, world: &mut World, roster: &mut OperationRoster, 
     }
 
     if let Some(detached_impulse) = detached_impulse {
-        if let Some(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
-            detached_impulse_mut.remove_parent();
+        if let Ok(mut detached_impulse_mut) = world.get_entity_mut(detached_impulse) {
+            detached_impulse_mut.remove::<ChildOf>();
         }
     }
 
-    if let Some(unused_target_mut) = world.get_entity_mut(target) {
-        unused_target_mut.despawn_recursive();
+    if let Ok(unused_target_mut) = world.get_entity_mut(target) {
+        unused_target_mut.despawn();
     }
 
     if unused {
