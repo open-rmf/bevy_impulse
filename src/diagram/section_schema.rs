@@ -102,7 +102,7 @@ pub enum SectionProvider {
 /// Here the section schema needs to have a `builder` or `template` with no additional properties.
 /// Which includes other properties like `type`, `config` etc, but `type` is also required which
 /// breaks the schema.
-fn fix_additional_properties(generator: &mut schemars::SchemaGenerator) -> Schema {
+fn fix_additional_properties(generator: &mut schemars::gen::SchemaGenerator) -> Schema {
     let mut schema = generator.root_schema_for::<SectionProvider>().schema;
     schema.metadata.as_mut().unwrap().title = None;
     let one_ofs = schema.subschemas.as_mut().unwrap().one_of.as_mut().unwrap();
