@@ -24,7 +24,7 @@ export type DiagramOperation =
       type: 'node';
       [k: string]: unknown;
     }
-  | (
+  | ((
       | {
           builder: string;
           [k: string]: unknown;
@@ -33,7 +33,16 @@ export type DiagramOperation =
           template: string;
           [k: string]: unknown;
         }
-    )
+    ) & {
+      config?: {
+        [k: string]: unknown;
+      };
+      connect?: {
+        [k: string]: NextOperation;
+      };
+      type: 'section';
+      [k: string]: unknown;
+    })
   | {
       next: NextOperation[];
       type: 'fork_clone';

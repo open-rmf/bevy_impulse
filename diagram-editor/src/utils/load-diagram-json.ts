@@ -1,6 +1,6 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import diagramSchema from '../../../diagram.schema.json';
+import diagramSchema from '../diagram.schema.json';
 import type { DiagramEditorNode } from '../nodes';
 import type { Diagram } from '../types/diagram';
 
@@ -16,8 +16,12 @@ export function loadDiagramJson(jsonStr: string): DiagramEditorNode[] {
     throw validate.errors;
   }
 
-  // for (const [opId, op] of Object.entries(diagram.ops)) {
-  //   switch (op.type)
-  // }
-  return [];
+  return Object.entries(diagram.ops).map(
+    ([id, data]) =>
+      ({
+        id,
+        position: { x: 0, y: 0 },
+        data,
+      }) satisfies DiagramEditorNode,
+  );
 }
