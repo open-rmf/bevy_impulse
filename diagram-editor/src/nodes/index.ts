@@ -3,16 +3,26 @@ import { TerminateNode } from './terminate-node';
 
 import type { Node } from '@xyflow/react';
 import type { DiagramOperation } from '../types/diagram';
-
-export type DiagramEditorNode = Node<
-  | DiagramOperation
-  // TODO: this is a placeholder for reactflow default nodes, it should be removed when all
-  // diagram operations have custom nodes implemented.
-  | { type: never; label: string }
-  | Record<string, never>
->;
+import { InputOutputNode } from './input-output-node';
+import { OutputNode } from './output-node';
 
 export const NODE_TYPES = {
   start: StartNode,
   terminate: TerminateNode,
+  inputOutput: InputOutputNode,
+  output: OutputNode,
 };
+
+export type NodeTypes = keyof typeof NODE_TYPES;
+
+export type DiagramEditorNode = Node<
+  DiagramOperation | Record<string, never>,
+  NodeTypes
+>;
+
+type JoinOperation = Extract<
+  DiagramOperation,
+  { type: 'join' } | { type: 'serialized_join' }
+>;
+
+export type JoinNode = Node<JoinOperation, NodeTypes>;

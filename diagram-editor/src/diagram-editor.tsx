@@ -12,7 +12,7 @@ import React from 'react';
 
 import { Button, ButtonGroup, styled } from '@mui/material';
 import { type DiagramEditorNode, NODE_TYPES } from './nodes';
-import { loadDiagramJson } from './utils/load-diagram-json';
+import { loadDiagramJson } from './utils/load-diagram';
 
 const VisuallyHiddenInput = styled('input')({
   clip: 'rect(0 0 0 0)',

@@ -1,10 +1,10 @@
-import { loadDiagramJson } from './load-diagram-json';
+import { loadDiagramJson } from './load-diagram';
 import testDiagram from './test-data/test-diagram.json';
 
 test('load diagram json', () => {
   const { nodes, edges } = loadDiagramJson(JSON.stringify(testDiagram));
-  expect(nodes.length).toBe(5);
-  expect(edges.length).toBe(5);
+  expect(nodes.length).toBe(8);
+  expect(edges.length).toBe(8);
   const map = new Map(nodes.map((node) => [node.id, node]));
 
   const start = map.get('builtin:start');
@@ -21,14 +21,29 @@ test('load diagram json', () => {
   expect(mul3!.position.x).toBeLessThan(forkClone!.position.x);
   expect(mul3!.position.y).toBeGreaterThan(forkClone!.position.y);
 
+  const mul3Buffer = map.get('mul3_buffer');
+  expect(mul3Buffer!.data).toMatchObject(testDiagram.ops.mul3_buffer);
+  expect(mul3Buffer!.position.x).toBe(mul3!.position.x);
+  expect(mul3Buffer!.position.y).toBeGreaterThan(mul3!.position.y);
+
   const mul4 = map.get('mul4');
   expect(mul4!.data).toMatchObject(testDiagram.ops.mul4);
   expect(mul4!.position.x).toBeGreaterThan(forkClone!.position.x);
   expect(mul4!.position.y).toBeGreaterThan(forkClone!.position.y);
 
+  const mul4Buffer = map.get('mul4_buffer');
+  expect(mul4Buffer!.data).toMatchObject(testDiagram.ops.mul4_buffer);
+  expect(mul4Buffer!.position.x).toBe(mul4!.position.x);
+  expect(mul4Buffer!.position.y).toBeGreaterThan(mul4!.position.y);
+
+  const join = map.get('join');
+  expect(join!.data).toMatchObject(testDiagram.ops.join);
+  expect(join!.position.x).toBeGreaterThan(mul3Buffer!.position.x);
+  expect(join!.position.x).toBeLessThan(mul4Buffer!.position.x);
+  expect(join!.position.y).toBeGreaterThan(mul4Buffer!.position.y);
+
   const terminate = map.get('builtin:terminate');
   expect(terminate).toBeDefined();
-  expect(terminate!.position.x).toBeGreaterThan(mul3!.position.x);
-  expect(terminate!.position.x).toBeLessThan(mul4!.position.x);
-  expect(terminate!.position.y).toBeGreaterThan(mul4!.position.y);
+  expect(terminate!.position.x).toBe(join!.position.x);
+  expect(terminate!.position.y).toBeGreaterThan(join!.position.y);
 });

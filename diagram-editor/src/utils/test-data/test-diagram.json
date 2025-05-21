@@ -11,12 +11,23 @@
       "type": "node",
       "builder": "mul",
       "config": 3,
-      "next": { "builtin": "terminate" }
+      "next": "mul3_buffer"
+    },
+    "mul3_buffer": {
+      "type": "buffer"
     },
     "mul4": {
       "type": "node",
       "builder": "mul",
       "config": 4,
+      "next": "mul4_buffer"
+    },
+    "mul4_buffer": {
+      "type": "buffer"
+    },
+    "join": {
+      "type": "join",
+      "buffers": ["mul3_buffer", "mul4_buffer"],
       "next": { "builtin": "terminate" }
     }
   }
