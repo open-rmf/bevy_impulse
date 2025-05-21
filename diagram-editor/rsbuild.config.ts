@@ -8,11 +8,4 @@ export default defineConfig({
     },
   },
   plugins: [pluginReact()],
-  environments: {
-    test: {
-      output: {
-        target: 'node',
-      },
-    },
-  },
 });

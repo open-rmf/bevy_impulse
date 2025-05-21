@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "start": "fork_clone",
+  "ops": {
+    "fork_clone": {
+      "type": "fork_clone",
+      "next": ["mul3", "mul4"]
+    },
+    "mul3": {
+      "type": "node",
+      "builder": "mul",
+      "config": 3,
+      "next": { "builtin": "terminate" }
+    },
+    "mul4": {
+      "type": "node",
+      "builder": "mul",
+      "config": 4,
+      "next": { "builtin": "terminate" }
+    }
+  }
+}
