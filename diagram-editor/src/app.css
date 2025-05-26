@@ -6,5 +6,5 @@
   cursor: default;
 }
 .react-flow__pane.dragging {
-  cursor: default;
+  cursor: grabbing;
 }
