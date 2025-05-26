@@ -233,7 +233,9 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
             // will be spuriously dropped when the scope terminates.
 
             // However in this case, the target is not unused but also does not
-            // have the correct input storage type. This indicates
+            // have the correct input storage type. This indicates a bug in
+            // bevy_impulse itself, since the API should ensure that connection
+            // mismatches are impossible.
             self.world_mut()
                 .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .miscellaneous
@@ -244,7 +246,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                         std::any::type_name::<T>(),
                         expected.unwrap_or("<null>"),
                     )),
-                    backtrace: None,
+                    backtrace: Some(Backtrace::new()),
                 });
             None.or_broken()?;
         }

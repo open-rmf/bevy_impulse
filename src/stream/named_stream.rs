@@ -372,12 +372,19 @@ impl<S: StreamEffect> StreamRedirect for NamedStreamRedirect<S> {
     type Input = NamedValue<S::Input>;
 
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
-        world
-            .entity_mut(source)
-            .insert((
-                InputBundle::<NamedValue<S::Input>>::new(),
-                StaticStreamName(self.static_name),
-            ));
+        let mut entity_mut = world.entity_mut(source);
+        if self.static_name.is_some() {
+            // We have a static name for this redirect then we expect to receive
+            // a plain S::Input
+            entity_mut.insert(InputBundle::<S::Input>::new());
+        } else {
+            // If there is no static name then this is meant to receive any
+            // named input.
+            entity_mut.insert(InputBundle::<NamedValue<S::Input>>::new());
+        }
+
+        entity_mut.insert(StaticStreamName(self.static_name));
+
         Ok(())
     }
 

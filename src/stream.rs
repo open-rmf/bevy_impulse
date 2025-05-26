@@ -1200,7 +1200,7 @@ mod tests {
             })
         });
 
-        test_formatting_stream(parse_blocking_srv, &mut context);
+        validate_formatting_stream(parse_blocking_srv, &mut context);
 
         let parse_async_srv = context.command(|commands| {
             commands.spawn_service(
@@ -1210,13 +1210,13 @@ mod tests {
             )
         });
 
-        test_formatting_stream(parse_async_srv, &mut context);
+        validate_formatting_stream(parse_async_srv, &mut context);
 
         let parse_continuous_srv = context
             .app
             .spawn_continuous_service(Update, impl_formatting_streams_continuous);
 
-        test_formatting_stream(parse_continuous_srv, &mut context);
+        validate_formatting_stream(parse_continuous_srv, &mut context);
 
         let parse_blocking_callback =
             (|In(input): BlockingCallbackInput<String, FormatStreams>| {
@@ -1224,7 +1224,7 @@ mod tests {
             })
             .as_callback();
 
-        test_formatting_stream(parse_blocking_callback, &mut context);
+        validate_formatting_stream(parse_blocking_callback, &mut context);
 
         let parse_async_callback =
             (|In(input): AsyncCallbackInput<String, FormatStreams>| async move {
@@ -1232,21 +1232,21 @@ mod tests {
             })
             .as_callback();
 
-        test_formatting_stream(parse_async_callback, &mut context);
+        validate_formatting_stream(parse_async_callback, &mut context);
 
         let parse_blocking_map = (|input: BlockingMap<String, FormatStreams>| {
             impl_formatting_streams_blocking(input.request, input.streams);
         })
         .as_map();
 
-        test_formatting_stream(parse_blocking_map, &mut context);
+        validate_formatting_stream(parse_blocking_map, &mut context);
 
         let parse_async_map = (|input: AsyncMap<String, FormatStreams>| async move {
             impl_formatting_streams_async(input.request, input.streams);
         })
         .as_map();
 
-        test_formatting_stream(parse_async_map, &mut context);
+        validate_formatting_stream(parse_async_map, &mut context);
 
         let make_workflow = |service: Service<String, (), FormatStreams>| {
             move |scope: Scope<String, (), FormatStreams>, builder: &mut Builder| {
@@ -1260,38 +1260,38 @@ mod tests {
                 builder.connect(node.streams.1, scope.streams.1);
                 builder.connect(node.streams.2, scope.streams.2);
 
-                node.output.chain(builder).connect(scope.terminate);
+                builder.connect(node.output, scope.terminate);
             }
         };
 
         let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
-        test_formatting_stream(blocking_injection_workflow, &mut context);
+        validate_formatting_stream(blocking_injection_workflow, &mut context);
 
         let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
-        test_formatting_stream(async_injection_workflow, &mut context);
+        validate_formatting_stream(async_injection_workflow, &mut context);
 
         let continuous_injection_workflow =
             context.spawn_workflow(make_workflow(parse_continuous_srv));
-        test_formatting_stream(continuous_injection_workflow, &mut context);
+        validate_formatting_stream(continuous_injection_workflow, &mut context);
 
         let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
-            let inner_node = scope.input.chain(builder).then_node(parse_continuous_srv);
+            let inner_node = scope.input.chain(builder).then_node(continuous_injection_workflow);
             builder.connect(inner_node.streams.0, scope.streams.0);
             builder.connect(inner_node.streams.1, scope.streams.1);
             builder.connect(inner_node.streams.2, scope.streams.2);
             builder.connect(inner_node.output, scope.terminate);
         });
-        test_formatting_stream(nested_workflow, &mut context);
+        validate_formatting_stream(nested_workflow, &mut context);
 
-        let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
-            let inner_node = builder.create_node(parse_continuous_srv);
+        let double_nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
+            let inner_node = builder.create_node(nested_workflow);
             builder.connect(scope.input, inner_node.input);
             builder.connect(inner_node.streams.0, scope.streams.0);
             builder.connect(inner_node.streams.1, scope.streams.1);
             builder.connect(inner_node.streams.2, scope.streams.2);
             builder.connect(inner_node.output, scope.terminate);
         });
-        test_formatting_stream(nested_workflow, &mut context);
+        validate_formatting_stream(double_nested_workflow, &mut context);
     }
 
     fn impl_formatting_streams_blocking(
@@ -1349,7 +1349,7 @@ mod tests {
         });
     }
 
-    fn test_formatting_stream(
+    fn validate_formatting_stream(
         provider: impl Provider<Request = String, Response = (), Streams = FormatStreams> + Clone,
         context: &mut TestingContext,
     ) {
@@ -1431,8 +1431,191 @@ mod tests {
         }
     }
 
+    #[test]
     fn test_stream_map() {
+        let mut context = TestingContext::minimal_plugins();
 
+        let parse_blocking_srv = context.command(|commands| {
+            commands.spawn_service(|In(input): BlockingServiceInput<Vec<String>, TestStreamMap>| {
+                impl_stream_map_test_blocking(input.request, input.streams);
+            })
+        });
+
+        validate_stream_map(parse_blocking_srv, &mut context);
+
+        let parse_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<Vec<String>, TestStreamMap>| async move {
+                    impl_stream_map_test_async(input.request, input.streams);
+                },
+            )
+        });
+
+        validate_stream_map(parse_async_srv, &mut context);
+
+        let parse_continuous_srv = context
+            .app
+            .spawn_continuous_service(Update, impl_stream_map_test_continuous);
+
+        validate_stream_map(parse_continuous_srv, &mut context);
+
+        let parse_blocking_callback =
+            (|In(input): BlockingCallbackInput<Vec<String>, TestStreamMap>| {
+                impl_stream_map_test_blocking(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_stream_map(parse_blocking_callback, &mut context);
+
+        let parse_async_callback =
+            (|In(input): AsyncCallbackInput<Vec<String>, TestStreamMap>| async move {
+                impl_stream_map_test_async(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_stream_map(parse_async_callback, &mut context);
+
+        let parse_blocking_map = (|input: BlockingMap<Vec<String>, TestStreamMap>| {
+            impl_stream_map_test_blocking(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_stream_map(parse_blocking_map, &mut context);
+
+        let parse_async_map = (|input: AsyncMap<Vec<String>, TestStreamMap>| async move {
+            impl_stream_map_test_async(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_stream_map(parse_async_map, &mut context);
+
+        let make_workflow = |service: Service<Vec<String>, (), TestStreamMap>| {
+            move |scope: Scope<Vec<String>, (), TestStreamMap>, builder: &mut Builder| {
+                let node = scope
+                    .input
+                    .chain(builder)
+                    .map_block(move |value| (value, service))
+                    .then_injection_node();
+
+                builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                builder.connect(node.output, scope.terminate);
+            }
+        };
+
+        let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
+        validate_stream_map(blocking_injection_workflow, &mut context);
+
+        let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
+        validate_stream_map(async_injection_workflow, &mut context);
+
+        let continuous_injection_workflow =
+            context.spawn_workflow(make_workflow(parse_continuous_srv));
+        validate_stream_map(continuous_injection_workflow, &mut context);
+
+        let nested_workflow = context.spawn_workflow::<_, _, TestStreamMap, _>(|scope, builder| {
+            let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+            builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+            builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+            builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+            builder.connect(node.output, scope.terminate);
+        });
+        validate_stream_map(nested_workflow, &mut context);
+
+        let double_nested_workflow = context.spawn_workflow::<_, _, TestStreamMap, _>(|scope, builder| {
+            let node = scope.input.chain(builder).then_node(nested_workflow);
+
+            builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+            builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+            builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+            builder.connect(node.output, scope.terminate);
+        });
+        validate_stream_map(double_nested_workflow, &mut context);
+
+        let scoped_workflow = context.spawn_workflow::<_, _, TestStreamMap, _>(|scope, builder| {
+            let inner_scope = builder.create_scope::<_, _, TestStreamMap, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                builder.connect(node.output, scope.terminate);
+            });
+
+            builder.connect(scope.input, inner_scope.input);
+
+            builder.connect(inner_scope.streams.stream_u32, scope.streams.stream_u32);
+            builder.connect(inner_scope.streams.stream_i32, scope.streams.stream_i32);
+            builder.connect(inner_scope.streams.stream_string, scope.streams.stream_string);
+
+            builder.connect(inner_scope.output, scope.terminate);
+        });
+        validate_stream_map(scoped_workflow, &mut context);
+
+        // TODO(@mxgrey): Add tests for dynamically named streams
+    }
+
+    fn validate_stream_map(
+        provider: impl Provider<Request = Vec<String>, Response = (), Streams = TestStreamMap> + Clone,
+        context: &mut TestingContext,
+    ) {
+        let request = vec![
+            "5".to_owned(),
+            "10".to_owned(),
+            "-3".to_owned(),
+            "-27".to_owned(),
+            "hello".to_owned(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+
+        let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, [5, 10]);
+        assert_eq!(outcome.stream_i32, [5, 10, -3, -27]);
+        assert_eq!(outcome.stream_string, ["5", "10", "-3", "-27", "hello"]);
+
+        let request = vec![];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+
+        let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, Vec::<i32>::new());
+        assert_eq!(outcome.stream_string, Vec::<String>::new());
+
+        let request = vec![
+            "foo".to_string(),
+            "bar".to_string(),
+            "1.32".to_string(),
+            "-8".to_string(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+
+        let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, [-8]);
+        assert_eq!(outcome.stream_string, ["foo", "bar", "1.32", "-8"]);
     }
 
     fn impl_stream_map_test_blocking(
@@ -1449,6 +1632,70 @@ mod tests {
             }
 
             streams.stream_string.send(r);
+        }
+    }
+
+    fn impl_stream_map_test_async(
+        request: Vec<String>,
+        streams: <TestStreamMap as StreamPack>::StreamChannels,
+    ) {
+        for r in request {
+            if let Ok(value) = r.parse::<u32>() {
+                streams.stream_u32.send(value);
+            }
+
+            if let Ok(value) = r.parse::<i32>() {
+                streams.stream_i32.send(value);
+            }
+
+            streams.stream_string.send(r);
+        }
+    }
+
+    fn impl_stream_map_test_continuous(
+        In(ContinuousService { key }): In<ContinuousService<Vec<String>, (), TestStreamMap>>,
+        mut param: ContinuousQuery<Vec<String>, (), TestStreamMap>,
+    ) {
+        param.get_mut(&key).unwrap().for_each(|order| {
+            for r in order.request().clone() {
+                if let Ok(value) = r.parse::<u32>() {
+                    order.streams().stream_u32.send(value);
+                }
+
+                if let Ok(value) = r.parse::<i32>() {
+                    order.streams().stream_i32.send(value);
+                }
+
+                order.streams().stream_string.send(r);
+            }
+
+            order.respond(());
+        });
+    }
+
+    #[derive(Default)]
+    struct StreamMapOutcome {
+        stream_u32: Vec<u32>,
+        stream_i32: Vec<i32>,
+        stream_string: Vec<String>,
+    }
+
+    impl From<Recipient<(), TestStreamMap>> for StreamMapOutcome {
+        fn from(mut recipient: Recipient<(), TestStreamMap>) -> Self {
+            let mut result = Self::default();
+            while let Ok(r) = recipient.streams.stream_u32.try_recv() {
+                result.stream_u32.push(r);
+            }
+
+            while let Ok(r) = recipient.streams.stream_i32.try_recv() {
+                result.stream_i32.push(r);
+            }
+
+            while let Ok(r) = recipient.streams.stream_string.try_recv() {
+                result.stream_string.push(r);
+            }
+
+            result
         }
     }
 
@@ -1646,7 +1893,6 @@ mod tests {
         }
 
         fn has_streams() -> bool {
-            // If fields > 0
             true
         }
     }
