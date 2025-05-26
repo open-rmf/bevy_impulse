@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import React from 'react';
 
-import { Button, ButtonGroup, styled } from '@mui/material';
+import { Button, ButtonGroup, styled, Tooltip } from '@mui/material';
 import {
   type DiagramEditorNode,
   NODE_TYPES,
@@ -80,56 +80,61 @@ const DiagramEditor = () => {
     >
       <Panel position="top-center">
         <ButtonGroup variant="contained">
-          <Button
-            onClick={() => {
-              const startNode = nodes.find((n) => n.id === START_ID);
-              if (!startNode) {
-                console.error(
-                  'error applying auto layout: cannot find start node',
-                );
-                return;
-              }
-              // reset all positions
-              for (const n of nodes) {
-                n.position = { ...startNode.position };
-              }
-
-              const startEdge = edges.find((e) => e.source === START_ID);
-              if (startEdge) {
-                const changes = autoLayout(
-                  startEdge.target,
-                  nodes,
-                  startNode.position,
-                );
-                setNodes((prev) => applyNodeChanges(changes, prev));
-              }
-            }}
-          >
-            <AutoLayoutIcon />
-          </Button>
-          {/* biome-ignore lint/a11y/useValidAriaRole: button used as a label, should have no role */}
-          <Button component="label" role={undefined}>
-            <UploadIcon />
-            <VisuallyHiddenInput
-              type="file"
-              aria-label="upload diagram"
-              onChange={async (ev) => {
-                if (ev.target.files) {
-                  const graph = loadDiagramJson(
-                    await ev.target.files[0].text(),
+          <Tooltip title="Auto Layout">
+            <Button
+              onClick={() => {
+                const startNode = nodes.find((n) => n.id === START_ID);
+                if (!startNode) {
+                  console.error(
+                    'error applying auto layout: cannot find start node',
                   );
-                  const changes = autoLayout(graph.startNodeId, graph.nodes);
-                  setNodes(applyNodeChanges(changes, graph.nodes));
-                  setEdges(graph.edges);
-                  reactFlowInstance.current?.fitView();
+                  return;
+                }
+                // reset all positions
+                for (const n of nodes) {
+                  n.position = { ...startNode.position };
+                }
+
+                const startEdge = edges.find((e) => e.source === START_ID);
+                if (startEdge) {
+                  const changes = autoLayout(
+                    startEdge.target,
+                    nodes,
+                    startNode.position,
+                  );
+                  setNodes((prev) => applyNodeChanges(changes, prev));
                 }
               }}
-              onClick={(ev) => {
-                // Reset the input value so that the same file can be loaded multiple times
-                (ev.target as HTMLInputElement).value = '';
-              }}
-            />
-          </Button>
+            >
+              <AutoLayoutIcon />
+            </Button>
+          </Tooltip>
+          <Tooltip title="Load Diagram">
+            {/* biome-ignore lint/a11y/useValidAriaRole: button used as a label, should have no role */}
+            <Button component="label" role={undefined}>
+              <UploadIcon />
+              <VisuallyHiddenInput
+                type="file"
+                accept="application/json"
+                aria-label="upload diagram"
+                onChange={async (ev) => {
+                  if (ev.target.files) {
+                    const graph = loadDiagramJson(
+                      await ev.target.files[0].text(),
+                    );
+                    const changes = autoLayout(graph.startNodeId, graph.nodes);
+                    setNodes(applyNodeChanges(changes, graph.nodes));
+                    setEdges(graph.edges);
+                    reactFlowInstance.current?.fitView();
+                  }
+                }}
+                onClick={(ev) => {
+                  // Reset the input value so that the same file can be loaded multiple times
+                  (ev.target as HTMLInputElement).value = '';
+                }}
+              />
+            </Button>
+          </Tooltip>
         </ButtonGroup>
       </Panel>
     </ReactFlow>
