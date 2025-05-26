@@ -116,7 +116,7 @@ const DiagramEditor = () => {
               <VisuallyHiddenInput
                 type="file"
                 accept="application/json"
-                aria-label="upload diagram"
+                aria-label="load diagram"
                 onChange={async (ev) => {
                   if (ev.target.files) {
                     const graph = loadDiagramJson(
