@@ -6,6 +6,9 @@ import type { DiagramOperation } from '../types/diagram';
 import { InputOutputNode } from './input-output-node';
 import { OutputNode } from './output-node';
 
+export const START_ID = 'builtin:start';
+export const TERMINATE_ID = 'builtin:terminate';
+
 export const NODE_TYPES = {
   start: StartNode,
   terminate: TerminateNode,

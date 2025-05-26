@@ -1,5 +1,10 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "files": {
+    "include": [
+      "diagram-editor"
+    ]
+  },
   "organizeImports": {
     "enabled": true
   },
@@ -29,7 +34,10 @@
   },
   "overrides": [
     {
-      "include": ["*.test.ts", "*.test.tsx"],
+      "include": [
+        "*.test.ts",
+        "*.test.tsx"
+      ],
       "linter": {
         "rules": {
           "style": {

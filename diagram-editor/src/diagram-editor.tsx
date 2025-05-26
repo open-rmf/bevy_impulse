@@ -1,8 +1,10 @@
+import AutoLayoutIcon from '@mui/icons-material/Dashboard';
 import UploadIcon from '@mui/icons-material/UploadFile';
 import {
   type Edge,
   Panel,
   ReactFlow,
+  type ReactFlowInstance,
   StepEdge,
   addEdge,
   applyEdgeChanges,
@@ -11,7 +13,13 @@ import {
 import React from 'react';
 
 import { Button, ButtonGroup, styled } from '@mui/material';
-import { type DiagramEditorNode, NODE_TYPES } from './nodes';
+import {
+  type DiagramEditorNode,
+  NODE_TYPES,
+  START_ID,
+  TERMINATE_ID,
+} from './nodes';
+import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson } from './utils/load-diagram';
 
 const VisuallyHiddenInput = styled('input')({
@@ -27,16 +35,19 @@ const VisuallyHiddenInput = styled('input')({
 });
 
 const DiagramEditor = () => {
+  const reactFlowInstance =
+    React.useRef<ReactFlowInstance<DiagramEditorNode> | null>(null);
+
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(() => [
     {
-      id: 'builtin:start',
+      id: START_ID,
       type: 'start',
       position: { x: 0, y: 0 },
       selectable: false,
       data: {},
     },
     {
-      id: 'builtin:terminate',
+      id: TERMINATE_ID,
       type: 'terminate',
       position: { x: 0, y: 400 },
       selectable: false,
@@ -51,8 +62,12 @@ const DiagramEditor = () => {
       edges={edges}
       nodeOrigin={[0.5, 0.5]}
       fitView
+      fitViewOptions={{ padding: 0.2 }}
       nodeTypes={NODE_TYPES}
       edgeTypes={{ default: StepEdge }}
+      onInit={(instance) => {
+        reactFlowInstance.current = instance;
+      }}
       onNodesChange={(changes) =>
         setNodes((prev) => applyNodeChanges(changes, prev))
       }
@@ -61,11 +76,39 @@ const DiagramEditor = () => {
       }
       onConnect={(params) => setEdges((prev) => addEdge(params, prev))}
       colorMode="dark"
+      deleteKeyCode={'Delete'}
     >
       <Panel position="top-center">
-        <ButtonGroup>
+        <ButtonGroup variant="contained">
+          <Button
+            onClick={() => {
+              const startNode = nodes.find((n) => n.id === START_ID);
+              if (!startNode) {
+                console.error(
+                  'error applying auto layout: cannot find start node',
+                );
+                return;
+              }
+              // reset all positions
+              for (const n of nodes) {
+                n.position = { ...startNode.position };
+              }
+
+              const startEdge = edges.find((e) => e.source === START_ID);
+              if (startEdge) {
+                const changes = autoLayout(
+                  startEdge.target,
+                  nodes,
+                  startNode.position,
+                );
+                setNodes((prev) => applyNodeChanges(changes, prev));
+              }
+            }}
+          >
+            <AutoLayoutIcon />
+          </Button>
           {/* biome-ignore lint/a11y/useValidAriaRole: button used as a label, should have no role */}
-          <Button variant="contained" component="label" role={undefined}>
+          <Button component="label" role={undefined}>
             <UploadIcon />
             <VisuallyHiddenInput
               type="file"
@@ -75,11 +118,14 @@ const DiagramEditor = () => {
                   const graph = loadDiagramJson(
                     await ev.target.files[0].text(),
                   );
-                  setNodes(graph.nodes);
+                  const changes = autoLayout(graph.startNodeId, graph.nodes);
+                  setNodes(applyNodeChanges(changes, graph.nodes));
                   setEdges(graph.edges);
+                  reactFlowInstance.current?.fitView();
                 }
               }}
               onClick={(ev) => {
+                // Reset the input value so that the same file can be loaded multiple times
                 (ev.target as HTMLInputElement).value = '';
               }}
             />

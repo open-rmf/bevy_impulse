@@ -3,7 +3,7 @@ import addFormats from 'ajv-formats';
 
 import type { Edge } from '@xyflow/react';
 import diagramSchema from '../diagram.schema.json';
-import type { DiagramEditorNode } from '../nodes';
+import { type DiagramEditorNode, START_ID, TERMINATE_ID } from '../nodes';
 import type {
   BufferSelection,
   Diagram,
@@ -11,12 +11,8 @@ import type {
   NextOperation,
 } from '../types/diagram';
 
-const ajv = new Ajv();
-addFormats(ajv);
-ajv.addFormat('uint', /^[0-9]+$/);
-const validate = ajv.compile<Diagram>(diagramSchema);
-
 export interface Graph {
+  startNodeId: string;
   nodes: DiagramEditorNode[];
   edges: Edge[];
 }
@@ -29,11 +25,10 @@ export function loadDiagramJson(jsonStr: string): Graph {
   }
 
   const graph = buildGraph(diagram);
-  autoLayout(diagram.start, graph.nodes);
   return graph;
 }
 
-function getNodeId(next: NextOperation): string {
+export function getNodeId(next: NextOperation): string {
   if (typeof next === 'string') {
     return next;
   }
@@ -44,7 +39,7 @@ function getNodeId(next: NextOperation): string {
   return `${namespace}:${opId}`;
 }
 
-function getBufferIds(buffer: BufferSelection): string[] {
+export function getBufferIds(buffer: BufferSelection): string[] {
   if (typeof buffer === 'string') {
     return [getNodeId(buffer)];
   }
@@ -54,7 +49,7 @@ function getBufferIds(buffer: BufferSelection): string[] {
   return [getNodeId(buffer as NamespacedOperation)];
 }
 
-function getNextIds(
+export function getNextIds(
   node: DiagramEditorNode,
   allNodes: DiagramEditorNode[],
 ): string[] {
@@ -121,14 +116,14 @@ function getNextIds(
 function buildGraph(diagram: Diagram): Graph {
   const nodes: DiagramEditorNode[] = [
     {
-      id: 'builtin:start',
+      id: START_ID,
       type: 'start',
       position: { x: 0, y: 0 },
       selectable: false,
       data: {},
     },
     {
-      id: 'builtin:terminate',
+      id: TERMINATE_ID,
       type: 'terminate',
       position: { x: 0, y: 0 },
       selectable: false,
@@ -147,8 +142,8 @@ function buildGraph(diagram: Diagram): Graph {
   const startNodeId = getNodeId(diagram.start);
   const edges: Edge[] = [
     {
-      id: `builtin:start->${startNodeId}`,
-      source: 'builtin:start',
+      id: `${START_ID}->${startNodeId}`,
+      source: START_ID,
       target: startNodeId,
     },
   ];
@@ -161,58 +156,10 @@ function buildGraph(diagram: Diagram): Graph {
       });
     }
   }
-  return { nodes, edges };
+  return { startNodeId, nodes, edges };
 }
 
-/**
- * Layout an array of diagram nodes so that they don't overlap.
- */
-function autoLayout(
-  start: NextOperation,
-  nodes: DiagramEditorNode[],
-  rootPosition = { x: 0, y: 0 },
-) {
-  const cellWidth = 200;
-  const cellHeight = 100;
-  const map = new Map(nodes.map((node) => [node.id, node]));
-
-  const getNode = (id: string) => {
-    const node = map.get(id);
-    if (!node) {
-      throw new Error(`node ${id} not found`);
-    }
-    return node;
-  };
-
-  const firstNode = getNode(getNodeId(start));
-  firstNode.position = { x: rootPosition.x, y: rootPosition.y + cellHeight };
-  const fifo = [{ node: getNode(getNodeId(start)), depth: 2 }];
-  let maxX = firstNode.position.x;
-  for (let ctx = fifo.shift(); ctx; ctx = fifo.shift()) {
-    const { node, depth } = ctx;
-    const nextNodeIds = getNextIds(node, nodes);
-    let x = node.position.x - ((nextNodeIds.length - 1) * cellWidth) / 2;
-    for (const nextNodeId of nextNodeIds) {
-      const nextNode = getNode(nextNodeId);
-      nextNode.position.y = depth * cellHeight;
-      // If the node is in the inital position, move it directly below the parent node.
-      // If it is not in the initial position, that means that the node has multiple parents,
-      // in that case, move it to the center of its parents.
-      if (nextNode.position.x === rootPosition.x) {
-        nextNode.position.x = x;
-      } else {
-        nextNode.position.x = (nextNode.position.x + x) / 2;
-      }
-      x += cellWidth;
-      if (x > maxX) {
-        maxX = nextNode.position.x;
-      }
-
-      const existing = fifo.findIndex((ctx) => ctx.node.id === nextNode.id);
-      if (existing > -1) {
-        fifo.splice(existing, 1);
-      }
-      fifo.push({ node: nextNode, depth: depth + 1 });
-    }
-  }
-}
+const ajv = new Ajv();
+addFormats(ajv);
+ajv.addFormat('uint', /^[0-9]+$/);
+const validate = ajv.compile<Diagram>(diagramSchema);
