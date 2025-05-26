@@ -38,7 +38,7 @@ use std::{
 use smallvec::SmallVec;
 
 use crate::{
-    AddImpulse, AddOperation, AnonymousStreamRedirect, Broken, Builder, DeferredRoster,
+    AddImpulse, AddOperation, AnonymousStreamRedirect, Builder, DeferredRoster,
     DuplicateStream, InnerChannel, InputSlot, ManageInput, OperationError, OperationResult,
     OperationRoster, OrBroken, Output, Push, RedirectScopeStream, RedirectWorkflowStream,
     ReportUnhandled, SingleInputStorage, TakenStream, UnhandledErrors, UnusedStreams, UnusedTarget,
@@ -1097,6 +1097,7 @@ all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 #[cfg(test)]
 mod tests {
     use crate::{prelude::*, testing::*};
+    use std::borrow::Cow;
 
     #[test]
     fn test_single_stream() {
@@ -1558,7 +1559,16 @@ mod tests {
         });
         validate_stream_map(scoped_workflow, &mut context);
 
-        // TODO(@mxgrey): Add tests for dynamically named streams
+        // We can do a stream cast for the service-type providers but not for
+        // the callbacks or maps.
+        validate_dynamically_named_stream_receiver(parse_blocking_srv, &mut context);
+        validate_dynamically_named_stream_receiver(parse_async_srv, &mut context);
+        validate_dynamically_named_stream_receiver(parse_continuous_srv, &mut context);
+        validate_dynamically_named_stream_receiver(blocking_injection_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(async_injection_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(continuous_injection_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(nested_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(double_nested_workflow, &mut context);
     }
 
     fn validate_stream_map(
@@ -1613,6 +1623,65 @@ mod tests {
         assert!(recipient.response.take().available().is_some());
 
         let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, [-8]);
+        assert_eq!(outcome.stream_string, ["foo", "bar", "1.32", "-8"]);
+    }
+
+    fn validate_dynamically_named_stream_receiver(
+        provider: Service<Vec<String>, (), TestStreamMap>,
+        context: &mut TestingContext,
+    ) {
+        let provider: Service<Vec<String>, (), TestDynamicNamedStreams> = provider.optional_stream_cast();
+
+        let request = vec![
+            "5".to_owned(),
+            "10".to_owned(),
+            "-3".to_owned(),
+            "-27".to_owned(),
+            "hello".to_owned(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, [5, 10]);
+        assert_eq!(outcome.stream_i32, [5, 10, -3, -27]);
+        assert_eq!(outcome.stream_string, ["5", "10", "-3", "-27", "hello"]);
+
+        let request = vec![];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, Vec::<i32>::new());
+        assert_eq!(outcome.stream_string, Vec::<String>::new());
+
+        let request = vec![
+            "foo".to_string(),
+            "bar".to_string(),
+            "1.32".to_string(),
+            "-8".to_string(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
         assert_eq!(outcome.stream_u32, Vec::<u32>::new());
         assert_eq!(outcome.stream_i32, [-8]);
         assert_eq!(outcome.stream_string, ["foo", "bar", "1.32", "-8"]);
@@ -1699,12 +1768,366 @@ mod tests {
         }
     }
 
-    use crate::{Receiver, StreamAvailability, StreamChannel};
+    type TestDynamicNamedStreams = (
+        DynamicallyNamedStream<StreamOf<u32>>,
+        DynamicallyNamedStream<StreamOf<i32>>,
+        DynamicallyNamedStream<StreamOf<String>>,
+    );
+
+    impl TryFrom<Recipient<(), TestDynamicNamedStreams>> for StreamMapOutcome {
+        type Error = UnknownName;
+        fn try_from(mut recipient: Recipient<(), TestDynamicNamedStreams>) -> Result<Self, Self::Error> {
+            let mut result = Self::default();
+            while let Ok(NamedValue { name, value }) = recipient.streams.0.try_recv() {
+                if name == "stream_u32" {
+                    result.stream_u32.push(value);
+                } else {
+                    return Err(UnknownName { name })
+                }
+            }
+
+            while let Ok(NamedValue { name, value }) = recipient.streams.1.try_recv() {
+                if name == "stream_i32" {
+                    result.stream_i32.push(value);
+                } else {
+                    return Err(UnknownName { name })
+                }
+            }
+
+            while let Ok(NamedValue { name, value }) = recipient.streams.2.try_recv() {
+                if name == "stream_string" {
+                    result.stream_string.push(value);
+                } else {
+                    return Err(UnknownName { name })
+                }
+            }
+
+            Ok(result)
+        }
+    }
+
+    #[test]
+    fn test_dynamically_named_streams() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let parse_blocking_srv = context.command(|commands| {
+            commands.spawn_service(|In(input): BlockingServiceInput<NamedInputs, TestDynamicNamedStreams>| {
+                impl_dynamically_named_streams_blocking(input.request, input.streams);
+            })
+        });
+
+        validate_dynamically_named_streams(parse_blocking_srv, &mut context);
+
+        let parse_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<NamedInputs, TestDynamicNamedStreams>| async move {
+                    impl_dynamically_named_streams_async(input.request, input.streams);
+                },
+            )
+        });
+
+        validate_dynamically_named_streams(parse_async_srv, &mut context);
+
+        let parse_continuous_srv = context
+            .app
+            .spawn_continuous_service(Update, impl_dynamically_named_streams_continuous);
+
+        validate_dynamically_named_streams(parse_continuous_srv, &mut context);
+
+        let parse_blocking_callback =
+            (|In(input): BlockingCallbackInput<NamedInputs, TestDynamicNamedStreams>| {
+                impl_dynamically_named_streams_blocking(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_dynamically_named_streams(parse_blocking_callback, &mut context);
+
+        let parse_async_callback =
+            (|In(input): AsyncCallbackInput<NamedInputs, TestDynamicNamedStreams>| async move {
+                impl_dynamically_named_streams_async(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_dynamically_named_streams(parse_async_callback, &mut context);
+
+        let parse_blocking_map = (|input: BlockingMap<NamedInputs, TestDynamicNamedStreams>| {
+            impl_dynamically_named_streams_blocking(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_dynamically_named_streams(parse_blocking_map, &mut context);
+
+        let parse_async_map = (|input: AsyncMap<NamedInputs, TestDynamicNamedStreams>| async move {
+            impl_dynamically_named_streams_async(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_dynamically_named_streams(parse_async_map, &mut context);
+
+        let make_workflow = |service: Service<NamedInputs, (), TestDynamicNamedStreams>| {
+            move |scope: Scope<NamedInputs, (), TestDynamicNamedStreams>, builder: &mut Builder| {
+                let node = scope
+                    .input
+                    .chain(builder)
+                    .map_block(move |value| (value, service))
+                    .then_injection_node();
+
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
+
+                builder.connect(node.output, scope.terminate);
+            }
+        };
+
+        let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
+        validate_dynamically_named_streams(blocking_injection_workflow, &mut context);
+
+        let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
+        validate_dynamically_named_streams(async_injection_workflow, &mut context);
+
+        let continuous_injection_workflow =
+            context.spawn_workflow(make_workflow(parse_continuous_srv));
+        validate_dynamically_named_streams(continuous_injection_workflow, &mut context);
+
+        let nested_workflow = context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+            let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+            builder.connect(node.streams.0, scope.streams.0);
+            builder.connect(node.streams.1, scope.streams.1);
+            builder.connect(node.streams.2, scope.streams.2);
+
+            builder.connect(node.output, scope.terminate);
+        });
+        validate_dynamically_named_streams(nested_workflow, &mut context);
+
+        let double_nested_workflow = context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+            let node = scope.input.chain(builder).then_node(nested_workflow);
+
+            builder.connect(node.streams.0, scope.streams.0);
+            builder.connect(node.streams.1, scope.streams.1);
+            builder.connect(node.streams.2, scope.streams.2);
+
+            builder.connect(node.output, scope.terminate);
+        });
+        validate_dynamically_named_streams(double_nested_workflow, &mut context);
+
+        let scoped_workflow = context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+            let inner_scope = builder.create_scope::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
+
+                builder.connect(node.output, scope.terminate);
+            });
+
+            builder.connect(scope.input, inner_scope.input);
+
+            builder.connect(inner_scope.streams.0, scope.streams.0);
+            builder.connect(inner_scope.streams.1, scope.streams.1);
+            builder.connect(inner_scope.streams.2, scope.streams.2);
+
+            builder.connect(inner_scope.output, scope.terminate);
+        });
+        validate_dynamically_named_streams(scoped_workflow, &mut context);
+
+        // We can do a stream cast for the service-type providers but not for
+        // the callbacks or maps.
+        validate_dynamically_named_streams_into_stream_map(parse_blocking_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_map(parse_async_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_map(parse_continuous_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_map(blocking_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_map(async_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_map(continuous_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_map(nested_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_map(double_nested_workflow, &mut context);
+    }
+
+    fn validate_dynamically_named_streams(
+        provider: impl Provider<Request = NamedInputs, Response = (), Streams = TestDynamicNamedStreams> + Clone,
+        context: &mut TestingContext,
+    ) {
+        let expected_values_u32 = vec![
+            NamedValue::new("stream_u32", 5),
+            NamedValue::new("stream_u32", 10),
+            NamedValue::new("stream_i32", 12),
+        ];
+
+        let expected_values_i32 = vec![
+            NamedValue::new("stream_i32", 2),
+            NamedValue::new("stream_i32", -5),
+            NamedValue::new("stream_u32", 7),
+        ];
+
+        let expected_values_string = vec![
+            NamedValue::new("stream_string", "hello".to_owned()),
+            NamedValue::new("stream_string", "8".to_owned()),
+            NamedValue::new("stream_u32", "22".to_owned()),
+        ];
+
+        let request = NamedInputs {
+            values_u32: expected_values_u32.clone(),
+            values_i32: expected_values_i32.clone(),
+            values_string: expected_values_string.clone(),
+        };
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let received_values_u32 = collect_received_values(recipient.streams.0);
+        assert_eq!(expected_values_u32, received_values_u32);
+
+        let received_values_i32 = collect_received_values(recipient.streams.1);
+        assert_eq!(expected_values_i32, received_values_i32);
+
+        let received_values_string = collect_received_values(recipient.streams.2);
+        assert_eq!(expected_values_string, received_values_string);
+    }
+
+    fn collect_received_values<T>(mut receiver: crate::Receiver<T>) -> Vec<T> {
+        let mut result = Vec::new();
+        while let Ok(value) = receiver.try_recv() {
+            result.push(value);
+        }
+        result
+    }
+
+    fn validate_dynamically_named_streams_into_stream_map(
+        provider: Service<NamedInputs, (), TestDynamicNamedStreams>,
+        context: &mut TestingContext,
+    ) {
+        let provider: Service<NamedInputs, (), TestStreamMap> = provider.optional_stream_cast();
+
+        let request = NamedInputs {
+            values_u32: vec![
+                NamedValue::new("stream_u32", 5),
+                NamedValue::new("stream_u32", 10),
+
+                // This won't appear because its name isn't being listened for
+                // for this value type
+                NamedValue::new("stream_i32", 12),
+            ],
+            values_i32: vec![
+                NamedValue::new("stream_i32", 2),
+                NamedValue::new("stream_i32", -5),
+
+                // This won't appear because its name isn't being listened for
+                // for this value type
+                NamedValue::new("stream_u32", 7),
+            ],
+            values_string: vec![
+                NamedValue::new("stream_string", "hello".to_owned()),
+                NamedValue::new("stream_string", "8".to_owned()),
+
+                // This won't appear because its named isn't being listened for
+                // for this value type
+                NamedValue::new("stream_u32", "22".to_owned()),
+            ],
+        };
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, [5, 10]);
+        assert_eq!(outcome.stream_i32, [2, -5]);
+        assert_eq!(outcome.stream_string, ["hello", "8"]);
+    }
+
+    fn impl_dynamically_named_streams_blocking(
+        request: NamedInputs,
+        streams: <TestDynamicNamedStreams as StreamPack>::StreamBuffers,
+    ) {
+        for nv in request.values_u32 {
+            streams.0.send(nv);
+        }
+
+        for nv in request.values_i32 {
+            streams.1.send(nv);
+        }
+
+        for nv in request.values_string {
+            streams.2.send(nv);
+        }
+    }
+
+    fn impl_dynamically_named_streams_async(
+        request: NamedInputs,
+        streams: <TestDynamicNamedStreams as StreamPack>::StreamChannels,
+    ) {
+        for nv in request.values_u32 {
+            streams.0.send(nv);
+        }
+
+        for nv in request.values_i32 {
+            streams.1.send(nv);
+        }
+
+        for nv in request.values_string {
+            streams.2.send(nv);
+        }
+    }
+
+    fn impl_dynamically_named_streams_continuous(
+        In(ContinuousService { key }): In<ContinuousService<NamedInputs, (), TestDynamicNamedStreams>>,
+        mut param: ContinuousQuery<NamedInputs, (), TestDynamicNamedStreams>,
+    ) {
+        param.get_mut(&key).unwrap().for_each(|order| {
+            for nv in order.request().values_u32.iter() {
+                order.streams().0.send(nv.clone());
+            }
+
+            for nv in order.request().values_i32.iter() {
+                order.streams().1.send(nv.clone());
+            }
+
+            for nv in order.request().values_string.iter() {
+                order.streams().2.send(nv.clone());
+            }
+
+            order.respond(());
+        });
+    }
+
+    struct NamedInputs {
+        values_u32: Vec<NamedValue<u32>>,
+        values_i32: Vec<NamedValue<i32>>,
+        values_string: Vec<NamedValue<String>>,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("received unknown name: {name}")]
+    struct UnknownName {
+        name: Cow<'static, str>,
+    }
+
+    use crate::StreamAvailability;
 
     struct TestStreamMap {
         stream_u32: StreamOf<u32>,
         stream_i32: StreamOf<i32>,
         stream_string: StreamOf<String>,
+    }
+
+    impl TestStreamMap {
+        #[allow(unused)]
+        fn __bevy_impulse_allow_unused_fields(&self) {
+            println!("{:#?}", [
+                std::any::type_name_of_val(&self.stream_u32),
+                std::any::type_name_of_val(&self.stream_i32),
+                std::any::type_name_of_val(&self.stream_string),
+            ]);
+        }
     }
 
     impl StreamPack for TestStreamMap {

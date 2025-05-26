@@ -361,7 +361,7 @@ pub mod prelude {
             DeliveryInstructions, DeliveryLabel, DeliveryLabelId, IntoAsyncService,
             IntoBlockingService, Service, ServiceDiscovery, SpawnServicesExt,
         },
-        stream::{Stream, StreamFilter, StreamOf, StreamPack},
+        stream::{DynamicallyNamedStream, NamedValue, Stream, StreamFilter, StreamOf, StreamPack},
         trim::{TrimBranch, TrimPoint},
         workflow::{DeliverySettings, Scope, ScopeSettings, SpawnWorkflowExt, WorkflowSettings},
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,

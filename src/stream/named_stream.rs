@@ -203,10 +203,19 @@ impl<S: StreamEffect> NamedStream<S> {
 
 
 /// A container that can tie together a name with a value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NamedValue<T: 'static + Send + Sync> {
     pub name: Cow<'static, str>,
     pub value: T,
+}
+
+impl<T: 'static + Send + Sync> NamedValue<T> {
+    pub fn new(
+        name: impl Into<Cow<'static, str>>,
+        value: T,
+    ) -> Self {
+        Self { name: name.into(), value }
+    }
 }
 
 #[derive(Default)]

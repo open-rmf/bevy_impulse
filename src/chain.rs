@@ -29,7 +29,7 @@ use crate::{
     CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
     IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateCancel,
     OperateDynamicGate, OperateQuietCancel, OperateSplit, OperateStaticGate, Output, ProvideOnce,
-    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf, StreamPack,
+    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamPack,
     StreamTargetMap, Trim, TrimBranch, UnusedTarget,
 };
 
