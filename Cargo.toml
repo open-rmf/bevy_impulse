@@ -76,7 +76,10 @@ test-log = { version = "0.2.16", features = [
 ], default-features = false }
 
 [workspace]
-members = ["examples/diagram/calculator"]
+members = [
+  "examples/diagram/calculator",
+  "diagram-editor",
+]
 
 [[bin]]
 name = "generate_schema"

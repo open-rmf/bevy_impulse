@@ -1,14 +1,34 @@
-use std::{error::Error, fs::File, str::FromStr};
-
+use axum::Router;
 use bevy_impulse::{
     Diagram, DiagramElementRegistry, DiagramError, ImpulsePlugin, NodeBuilderOptions, Promise,
     RequestExt, RunCommandsOnWorldExt,
 };
+use bevy_impulse_diagram_editor::nest_diagram_router;
 use clap::Parser;
+use std::{error::Error, fs::File, str::FromStr};
 
 #[derive(Parser, Debug)]
-/// Example calculator app using diagrams.
-struct Args {
+#[clap(
+    name = "calculator",
+    version = "0.1.0",
+    about = "Example calculator app using diagrams."
+)]
+struct Cli {
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(Parser, Debug)]
+enum Commands {
+    /// Runs a diagram with the given request.
+    Run(RunArgs),
+
+    /// Starts a server to edit and run diagrams.
+    Serve(ServeArgs),
+}
+
+#[derive(Parser, Debug)]
+struct RunArgs {
     #[arg(help = "path to the diagram to run")]
     diagram: String,
 
@@ -16,11 +36,10 @@ struct Args {
     request: String,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+#[derive(Parser, Debug)]
+struct ServeArgs {}
 
-    tracing_subscriber::fmt::init();
-
+fn run(args: RunArgs) -> Result<(), Box<dyn Error>> {
     let mut registry = DiagramElementRegistry::new();
     registry.register_node_builder(
         NodeBuilderOptions::new("add").with_name("Add"),
@@ -58,4 +77,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("{}", promise.take().available().unwrap());
     Ok(())
+}
+
+async fn serve(_args: ServeArgs) -> Result<(), Box<dyn Error>> {
+    println!("Serving diagram editor at http://localhost:3000/diagram_editor");
+
+    let router = nest_diagram_router(Router::new());
+    let listener = tokio::net::TcpListener::bind("localhost:3000")
+        .await
+        .unwrap();
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
+
+    tracing_subscriber::fmt::init();
+
+    match cli.command {
+        Commands::Run(args) => run(args),
+        Commands::Serve(args) => serve(args).await,
+    }
 }

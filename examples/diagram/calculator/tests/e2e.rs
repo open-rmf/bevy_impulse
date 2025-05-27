@@ -4,7 +4,7 @@ use assert_cmd::Command;
 fn multiply3() {
     Command::cargo_bin("calculator")
         .unwrap()
-        .args(["multiply3.json", "4"])
+        .args(["run", "multiply3.json", "4"])
         .assert()
         .stdout("12.0\n");
 }
