@@ -46,8 +46,6 @@ use transform_schema::{TransformError, TransformSchema};
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
 
-// ----------
-
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -73,6 +71,8 @@ use serde::{
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+
+use thiserror::Error as ThisError;
 
 const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
@@ -1230,7 +1230,7 @@ impl TemplateStack {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(ThisError, Debug)]
 #[error("{context} {code}")]
 pub struct DiagramError {
     pub context: DiagramErrorContext,
@@ -1277,6 +1277,9 @@ pub enum DiagramErrorCode {
 
     #[error("{0}")]
     TypeMismatch(#[from] TypeMismatch),
+
+    #[error("{0}")]
+    MissingStream(#[from] MissingStream),
 
     #[error("Operation [{0}] attempted to instantiate a duplicate of itself.")]
     DuplicateInputsCreated(OperationRef),
@@ -1410,6 +1413,16 @@ impl DiagramErrorCode {
     pub fn in_operation(self, op_id: OperationRef) -> DiagramError {
         DiagramError::in_operation(op_id, self)
     }
+}
+
+/// An error that occurs when a diagram description expects a node to provide a
+/// named output stream, but the node does not provide any output stream that
+/// matches the expected name.
+#[derive(ThisError, Debug)]
+#[error("An expected stream is not provided by this node: {missing_name}. Available stream names: {}", format_list(&available_names))]
+pub struct MissingStream {
+    pub missing_name: OperationName,
+    pub available_names: Vec<OperationName>,
 }
 
 #[cfg(test)]
@@ -1715,4 +1728,11 @@ mod tests {
 
         assert!(matches!(result.code, DiagramErrorCode::UnknownOperation(_),));
     }
+}
+
+/// Used with `#[serde(default, skip_serializing_if = "is_default")]` for fields
+/// that don't need to be serialized if they are a default value.
+pub(crate) fn is_default<T: std::default::Default + Eq>(value: &T) -> bool {
+    let default = T::default();
+    *value == default
 }

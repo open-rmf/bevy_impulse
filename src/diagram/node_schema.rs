@@ -15,23 +15,29 @@
  *
 */
 
+use std::{
+    collections::HashMap,
+    sync::Arc,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::Builder;
 
 use super::{
-    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode, NextOperation,
-    OperationName,
+    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode,
+    MissingStream, NextOperation, OperationName, is_default,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeSchema {
     pub(super) builder: BuilderId,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub(super) config: serde_json::Value,
     pub(super) next: NextOperation,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub(super) stream_out: HashMap<OperationName, NextOperation>,
 }
 
 impl BuildDiagramOperation for NodeSchema {
@@ -42,10 +48,24 @@ impl BuildDiagramOperation for NodeSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
-        let node = node_registration.create_node(builder, self.config.clone())?;
+        let mut node = node_registration.create_node(builder, self.config.clone())?;
 
         ctx.set_input_for_target(id, node.input.into())?;
         ctx.add_output_into_target(&self.next, node.output);
+
+        let available_names = node.streams.available_names().map(|n| n.clone().into()).collect();
+
+        for (name, target) in &self.stream_out {
+            let Some(output) = node.streams.take_named(&name) else {
+                return Err(DiagramErrorCode::MissingStream(MissingStream {
+                    missing_name: Arc::clone(name),
+                    available_names,
+                }));
+            };
+
+            ctx.add_output_into_target(target, output);
+        }
+
         Ok(BuildStatus::Finished)
     }
 }

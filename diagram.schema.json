@@ -118,11 +118,15 @@
             "builder": {
               "type": "string"
             },
-            "config": {
-              "default": null
-            },
+            "config": true,
             "next": {
               "$ref": "#/definitions/NextOperation"
+            },
+            "stream_out": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/NextOperation"
+              }
             },
             "type": {
               "type": "string",

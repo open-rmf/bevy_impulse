@@ -19,7 +19,7 @@ use bevy_ecs::prelude::Entity;
 use std::{
     any::Any,
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, hash_map::Keys as HashMapKeys},
 };
 use thiserror::Error as ThisError;
 
@@ -240,5 +240,11 @@ impl DynStreamPack {
     /// taken because it will get consumed when it is connected to an input slot.
     pub fn take_anonymous(&mut self, type_info: &TypeInfo) -> Option<DynOutput> {
         self.anonymous.remove(type_info)
+    }
+
+    /// Get the names that are available in this stream pack. This may provide
+    /// a different result after you have called [`Self::take_named`].
+    pub fn available_names(&self) -> HashMapKeys<'_, Cow<'static, str>, DynOutput> {
+        self.named.keys()
     }
 }
