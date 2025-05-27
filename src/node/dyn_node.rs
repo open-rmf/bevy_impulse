@@ -32,7 +32,7 @@ use crate::{
 pub struct DynNode {
     pub input: DynInputSlot,
     pub output: DynOutput,
-    pub streams: DynStreamPack,
+    pub streams: DynStreamOutputPack,
 }
 
 impl DynNode {
@@ -56,8 +56,8 @@ where
     Streams: StreamPack,
 {
     fn from(node: Node<Request, Response, Streams>) -> Self {
-        let mut streams = DynStreamPack::default();
-        Streams::into_dyn_stream_pack(&mut streams, node.streams);
+        let mut streams = DynStreamOutputPack::default();
+        Streams::into_dyn_stream_output_pack(&mut streams, node.streams);
 
         Self {
             input: node.input.into(),
@@ -191,6 +191,8 @@ where
     }
 }
 
+// pub struct DynStreamInputSlots
+
 /// Error type that happens when you try to convert a [`DynOutput`] to an
 /// <code>[Output]<T></code> for the wrong `T`.
 #[derive(ThisError, Debug)]
@@ -202,16 +204,53 @@ pub struct TypeMismatch {
     pub target_type: TypeInfo,
 }
 
-/// This is a pack of streams whose message types are determined at runtime.
-/// Note that this does not implement the [`crate::StreamPack`] trait, but it
-/// can be created out of a `StreamPack`.
+/// This is a pack of stream inputs whose message types are determined at runtime.
+/// This can be created using the [`crate::StreamPack`] trait.
 #[derive(Default)]
-pub struct DynStreamPack {
-    named: HashMap<Cow<'static, str>, DynOutput>,
-    anonymous: HashMap<TypeInfo, DynOutput>,
+pub struct DynStreamInputPack {
+    pub named: HashMap<Cow<'static, str>, DynInputSlot>,
+    pub anonymous: HashMap<TypeInfo, DynInputSlot>,
 }
 
-impl DynStreamPack {
+impl DynStreamInputPack {
+    /// Add a named stream input to this pack.
+    pub fn add_named(
+        &mut self,
+        name: impl Into<Cow<'static, str>>,
+        input: impl Into<DynInputSlot>,
+    ) {
+        self.named.insert(name.into(), input.into());
+    }
+
+    /// Access a named stream input from this pack.
+    pub fn get_named(&self, name: &str) -> Option<&DynInputSlot> {
+        self.named.get(name)
+    }
+
+    /// Add an anonymous stream input to this pack.
+    pub fn add_anonymous(
+        &mut self,
+        input: impl Into<DynInputSlot>,
+    ) {
+        let input: DynInputSlot = input.into();
+        self.anonymous.insert(*input.message_info(), input);
+    }
+
+    /// Get an anonymous stream input from this pack.
+    pub fn get_anonymous(&self, type_info: &TypeInfo) -> Option<&DynInputSlot> {
+        self.anonymous.get(type_info)
+    }
+}
+
+/// This is a pack of streams outputs whose message types are determined at runtime.
+/// This can be created using the [`crate::StreamPack`].
+#[derive(Default)]
+pub struct DynStreamOutputPack {
+    pub named: HashMap<Cow<'static, str>, DynOutput>,
+    pub anonymous: HashMap<TypeInfo, DynOutput>,
+}
+
+impl DynStreamOutputPack {
     /// Add a named stream output to this pack.
     pub fn add_named(
         &mut self,
@@ -227,7 +266,7 @@ impl DynStreamPack {
         self.named.remove(name)
     }
 
-    /// Add a named stream output to this pack.
+    /// Add an anonymous stream output to this pack.
     pub fn add_anonymous(
         &mut self,
         output: impl Into<DynOutput>,

@@ -69,3 +69,44 @@ impl BuildDiagramOperation for NodeSchema {
         Ok(BuildStatus::Finished)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TODO(@mxgrey): Stop depending on stream::tests::* when we have the proc
+    // macro finished.
+    use crate::{
+        diagram::{*, testing::*},
+        prelude::*,
+        stream::tests::*,
+    };
+
+    #[test]
+    fn test_streams_in_diagram() {
+        let mut fixture = DiagramTestFixture::new();
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("streaming_node"),
+            |builder, _config: ()| {
+                builder.create_map(
+                    |input: BlockingMap<Vec<String>, TestStreamPack>| {
+                        for r in input.request {
+                            if let Ok(value) = r.parse::<u32>() {
+                                input.streams.stream_u32.send(value);
+                            }
+
+                            if let Ok(value) = r.parse::<i32>() {
+                                input.streams.stream_i32.send(value);
+                            }
+
+                            input.streams.stream_string.send(r);
+                        }
+                    }
+                )
+            },
+        );
+
+        // let diagram = Diagram::from_json(json!({
+
+        // }))
+    }
+}

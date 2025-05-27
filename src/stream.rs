@@ -38,7 +38,7 @@ use std::{
 use smallvec::SmallVec;
 
 use crate::{
-    dyn_node::DynStreamPack,
+    dyn_node::{DynStreamInputPack, DynStreamOutputPack},
     AddImpulse, AddOperation, AnonymousStreamRedirect, Builder, DeferredRoster,
     DuplicateStream, InnerChannel, InputSlot, ManageInput, OperationError, OperationResult,
     OperationRoster, OrBroken, Output, Push, RedirectScopeStream, RedirectWorkflowStream,
@@ -638,8 +638,13 @@ pub trait StreamPack: 'static + Send + Sync {
 
     fn are_streams_available(availability: &StreamAvailability) -> bool;
 
-    fn into_dyn_stream_pack(
-        pack: &mut DynStreamPack,
+    fn into_dyn_stream_input_pack(
+        pack: &mut DynStreamInputPack,
+        inputs: Self::StreamInputPack,
+    );
+
+    fn into_dyn_stream_output_pack(
+        pack: &mut DynStreamOutputPack,
         outputs: Self::StreamOutputPack
     );
 
@@ -727,8 +732,15 @@ impl<T: Stream + Unpin> StreamPack for T {
         availability.has_anonymous::<<Self as StreamEffect>::Output>()
     }
 
-    fn into_dyn_stream_pack(
-        pack: &mut DynStreamPack,
+    fn into_dyn_stream_input_pack(
+        pack: &mut DynStreamInputPack,
+        inputs: Self::StreamInputPack,
+    ) {
+        pack.add_anonymous(inputs);
+    }
+
+    fn into_dyn_stream_output_pack(
+        pack: &mut DynStreamOutputPack,
         outputs: Self::StreamOutputPack
     ) {
         pack.add_anonymous(outputs);
@@ -803,8 +815,15 @@ impl StreamPack for () {
         true
     }
 
-    fn into_dyn_stream_pack(
-        _: &mut DynStreamPack,
+    fn into_dyn_stream_input_pack(
+        _: &mut DynStreamInputPack,
+        _: Self::StreamInputPack,
+    ) {
+        // Do nothing
+    }
+
+    fn into_dyn_stream_output_pack(
+        _: &mut DynStreamOutputPack,
         _: Self::StreamOutputPack
     ) {
         // Do nothing
@@ -953,13 +972,23 @@ macro_rules! impl_streampack_for_tuple {
                 )*
             }
 
-            fn into_dyn_stream_pack(
-                pack: &mut DynStreamPack,
+            fn into_dyn_stream_input_pack(
+                pack: &mut DynStreamInputPack,
+                inputs: Self::StreamInputPack,
+            ) {
+                let ($($T,)*) = inputs;
+                $(
+                    $T::into_dyn_stream_input_pack(pack, $T);
+                )*
+            }
+
+            fn into_dyn_stream_output_pack(
+                pack: &mut DynStreamOutputPack,
                 outputs: Self::StreamOutputPack,
             ) {
                 let ($($T,)*) = outputs;
                 $(
-                    $T::into_dyn_stream_pack(pack, $T);
+                    $T::into_dyn_stream_output_pack(pack, $T);
                 )*
             }
 
@@ -1125,7 +1154,7 @@ macro_rules! impl_streamfilter_for_tuple {
 all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{
         prelude::*,
         testing::*,
@@ -2172,7 +2201,7 @@ mod tests {
 
     use crate::StreamAvailability;
 
-    struct TestStreamPack {
+    pub(crate) struct TestStreamPack {
         stream_u32: StreamOf<u32>,
         stream_i32: StreamOf<i32>,
         stream_string: StreamOf<String>,
@@ -2374,8 +2403,17 @@ mod tests {
             && availability.has_named::<<StreamOf::<String> as ::bevy_impulse::StreamEffect>::Output>("stream_string")
         }
 
-        fn into_dyn_stream_pack(
-            pack: &mut ::bevy_impulse::dyn_node::DynStreamPack,
+        fn into_dyn_stream_input_pack(
+            pack: &mut ::bevy_impulse::dyn_node::DynStreamInputPack,
+            inputs: Self::StreamInputPack,
+        ) {
+            pack.add_named("stream_u32", inputs.stream_u32);
+            pack.add_named("stream_i32", inputs.stream_i32);
+            pack.add_named("stream_string", inputs.stream_string);
+        }
+
+        fn into_dyn_stream_output_pack(
+            pack: &mut ::bevy_impulse::dyn_node::DynStreamOutputPack,
             outputs: Self::StreamOutputPack
         ) {
             pack.add_named("stream_u32", outputs.stream_u32);
@@ -2388,34 +2426,34 @@ mod tests {
         }
     }
 
-    struct TestStreamPackInputs {
-        stream_u32: ::bevy_impulse::InputSlot<u32>,
-        stream_i32: ::bevy_impulse::InputSlot<i32>,
-        stream_string: ::bevy_impulse::InputSlot<String>,
+    pub(crate) struct TestStreamPackInputs {
+        pub stream_u32: ::bevy_impulse::InputSlot<u32>,
+        pub stream_i32: ::bevy_impulse::InputSlot<i32>,
+        pub stream_string: ::bevy_impulse::InputSlot<String>,
     }
 
-    struct TestStreamPackOutputs {
-        stream_u32: ::bevy_impulse::Output<u32>,
-        stream_i32: ::bevy_impulse::Output<i32>,
-        stream_string: ::bevy_impulse::Output<String>,
+    pub(crate) struct TestStreamPackOutputs {
+        pub stream_u32: ::bevy_impulse::Output<u32>,
+        pub stream_i32: ::bevy_impulse::Output<i32>,
+        pub stream_string: ::bevy_impulse::Output<String>,
     }
 
-    struct TestStreamPackChannels {
-        stream_u32: ::bevy_impulse::NamedStreamChannel<StreamOf<u32>>,
-        stream_i32: ::bevy_impulse::NamedStreamChannel<StreamOf<i32>>,
-        stream_string: ::bevy_impulse::NamedStreamChannel<StreamOf<String>>,
+    pub(crate) struct TestStreamPackChannels {
+        pub stream_u32: ::bevy_impulse::NamedStreamChannel<StreamOf<u32>>,
+        pub stream_i32: ::bevy_impulse::NamedStreamChannel<StreamOf<i32>>,
+        pub stream_string: ::bevy_impulse::NamedStreamChannel<StreamOf<String>>,
     }
 
-    struct TestStreamPackReceivers {
-        stream_u32: ::bevy_impulse::Receiver<u32>,
-        stream_i32: ::bevy_impulse::Receiver<i32>,
-        stream_string: ::bevy_impulse::Receiver<String>,
+    pub(crate) struct TestStreamPackReceivers {
+        pub stream_u32: ::bevy_impulse::Receiver<u32>,
+        pub stream_i32: ::bevy_impulse::Receiver<i32>,
+        pub stream_string: ::bevy_impulse::Receiver<String>,
     }
 
     #[derive(Clone)]
-     struct TestStreamPackBuffers {
-        stream_u32: ::bevy_impulse::NamedStreamBuffer<u32>,
-        stream_i32: ::bevy_impulse::NamedStreamBuffer<i32>,
-        stream_string: ::bevy_impulse::NamedStreamBuffer<String>,
+     pub(crate) struct TestStreamPackBuffers {
+        pub stream_u32: ::bevy_impulse::NamedStreamBuffer<u32>,
+        pub stream_i32: ::bevy_impulse::NamedStreamBuffer<i32>,
+        pub stream_string: ::bevy_impulse::NamedStreamBuffer<String>,
      }
 }

@@ -24,6 +24,7 @@ mod registration;
 mod section_schema;
 mod serialization;
 mod split_schema;
+mod stream_out_schema;
 mod supported;
 mod transform_schema;
 mod unzip_schema;
@@ -41,6 +42,7 @@ pub use registration::*;
 pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
+pub use stream_out_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use unzip_schema::UnzipSchema;
@@ -380,6 +382,48 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     /// ```
     Section(SectionSchema),
+
+    /// Declare a stream output for the current scope. Outputs that you connect
+    /// to this operation will be streamed out of the scope that this operation
+    /// is declared in.
+    ///
+    /// For the root-level scope, make sure you use a stream pack that is
+    /// compatible with all stream out operations that you declare, otherwise
+    /// you may get a connection error at runtime.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "plan",
+    ///     "ops": {
+    ///         "progress_stream": {
+    ///             "type": "stream_out",
+    ///             "name": "progress"
+    ///         },
+    ///         "plan": {
+    ///             "type": "node",
+    ///             "builder": "planner",
+    ///             "next": "drive",
+    ///             "stream_out" : {
+    ///                 "progress": "progress_stream"
+    ///             }
+    ///         },
+    ///         "drive": {
+    ///             "type": "node",
+    ///             "builder": "navigation",
+    ///             "next": { "builtin": "terminate" },
+    ///             "stream_out": {
+    ///                 "progress": "progress_stream"
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    StreamOut(StreamOutSchema),
 
     /// If the request is cloneable, clone it into multiple responses that can
     /// each be sent to a different operation. The `next` property is an array.
@@ -860,6 +904,7 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
             Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::StreamOut(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
         }

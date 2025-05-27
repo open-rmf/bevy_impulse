@@ -188,6 +188,26 @@
           }
         },
         {
+          "description": "Declare a stream output for the current scope. Outputs that you connect to this operation will be streamed out of the scope that this operation is declared in.\n\nFor the root-level scope, make sure you use a stream pack that is compatible with all stream out operations that you declare, otherwise you may get a connection error at runtime.\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"plan\", \"ops\": { \"progress_stream\": { \"type\": \"stream_out\", \"name\": \"progress\" }, \"plan\": { \"type\": \"node\", \"builder\": \"planner\", \"next\": \"drive\", \"stream_out\" : { \"progress\": \"progress_stream\" } }, \"drive\": { \"type\": \"node\", \"builder\": \"navigation\", \"next\": { \"builtin\": \"terminate\" }, \"stream_out\": { \"progress\": \"progress_stream\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(()) ```",
+          "type": "object",
+          "required": [
+            "name",
+            "type"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the stream exiting the workflow or scope.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "stream_out"
+              ]
+            }
+          }
+        },
+        {
           "description": "If the request is cloneable, clone it into multiple responses that can each be sent to a different operation. The `next` property is an array.\n\nThis creates multiple simultaneous branches of execution within the workflow. Usually when you have multiple branches you will either * race - connect all branches to `terminate` and the first branch to finish \"wins\" the race and gets to the be output * join - connect each branch into a buffer and then use the `join` operation to reunite them * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)\n\n# Examples ``` # bevy_impulse::Diagram::from_json_str(r#\" { \"version\": \"0.1.0\", \"start\": \"begin_race\", \"ops\": { \"begin_race\": { \"type\": \"fork_clone\", \"next\": [ \"ferrari\", \"mustang\" ] }, \"ferrari\": { \"type\": \"node\", \"builder\": \"drive\", \"config\": \"ferrari\", \"next\": { \"builtin\": \"terminate\" } }, \"mustang\": { \"type\": \"node\", \"builder\": \"drive\", \"config\": \"mustang\", \"next\": { \"builtin\": \"terminate\" } } } } # \"#)?; # Ok::<_, serde_json::Error>(())",
           "type": "object",
           "required": [
