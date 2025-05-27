@@ -54,6 +54,9 @@ pub use named_stream::*;
 mod stream_channel;
 pub use stream_channel::*;
 
+mod stream_map;
+pub use stream_map::*;
+
 pub trait StreamEffect: 'static + Send + Sync + Sized {
     type Input: 'static + Send + Sync;
     type Output: 'static + Send + Sync;

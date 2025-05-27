@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    type_info::TypeInfo, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext,
+    TypeInfo, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, NextOperation, OperationName,
 };
 

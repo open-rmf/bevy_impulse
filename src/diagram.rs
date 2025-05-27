@@ -26,7 +26,6 @@ mod serialization;
 mod split_schema;
 mod supported;
 mod transform_schema;
-mod type_info;
 mod unzip_schema;
 mod workflow_builder;
 
@@ -44,7 +43,6 @@ pub use serialization::*;
 pub use split_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
-pub use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
 
@@ -60,13 +58,16 @@ use std::{
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
-    SplitConnectionError, StreamPack,
+    SplitConnectionError, StreamPack, dyn_output::TypeMismatch,
 };
+pub use crate::type_info::TypeInfo;
+
 use schemars::{
     r#gen::SchemaGenerator,
     schema::{InstanceType, Metadata, ObjectValidation, Schema, SchemaObject, SingleOrVec},
     JsonSchema,
 };
+
 use serde::{
     de::{Error, Visitor},
     ser::SerializeMap,
@@ -1274,11 +1275,8 @@ pub enum DiagramErrorCode {
     #[error("section template [{0}] does not exist")]
     TemplateNotFound(OperationName),
 
-    #[error("type mismatch, source {source_type}, target {target_type}")]
-    TypeMismatch {
-        source_type: TypeInfo,
-        target_type: TypeInfo,
-    },
+    #[error("{0}")]
+    TypeMismatch(#[from] TypeMismatch),
 
     #[error("Operation [{0}] attempted to instantiate a duplicate of itself.")]
     DuplicateInputsCreated(OperationRef),
@@ -1529,10 +1527,10 @@ mod tests {
         assert!(
             matches!(
                 err.code,
-                DiagramErrorCode::TypeMismatch {
+                DiagramErrorCode::TypeMismatch(TypeMismatch {
                     target_type: _,
                     source_type: _
-                }
+                })
             ),
             "{:?}",
             err

@@ -1062,7 +1062,7 @@ impl ConnectIntoTarget for BasicConnect {
         builder: &mut Builder,
         _: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        output.connect_to(&self.input_slot, builder)
+        output.connect_to(&self.input_slot, builder).map_err(Into::into)
     }
 
     fn infer_input_type(

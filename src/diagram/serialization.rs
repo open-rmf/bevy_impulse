@@ -24,8 +24,9 @@ use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{
-    supported::*, type_info::TypeInfo, DiagramContext, DiagramErrorCode, DynForkResult,
+    supported::*, TypeInfo, DiagramContext, DiagramErrorCode, DynForkResult,
     DynInputSlot, DynOutput, JsonMessage, MessageRegistration, MessageRegistry,
+    TypeMismatch,
 };
 use crate::{Builder, JsonBuffer};
 
@@ -202,10 +203,10 @@ pub struct ImplicitSerialization {
 impl ImplicitSerialization {
     pub fn new(serialized_input: DynInputSlot) -> Result<Self, DiagramErrorCode> {
         if serialized_input.message_info() != &TypeInfo::of::<JsonMessage>() {
-            return Err(DiagramErrorCode::TypeMismatch {
+            return Err(TypeMismatch {
                 source_type: TypeInfo::of::<JsonMessage>(),
                 target_type: *serialized_input.message_info(),
-            });
+            }.into());
         }
 
         Ok(Self {
@@ -309,7 +310,7 @@ impl ImplicitDeserialization {
     ) -> Result<(), DiagramErrorCode> {
         if incoming.message_info() == self.deserialized_input.message_info() {
             // Connect them directly because they match
-            return incoming.connect_to(&self.deserialized_input, builder);
+            return incoming.connect_to(&self.deserialized_input, builder).map_err(Into::into);
         }
 
         if incoming.message_info() == &TypeInfo::of::<JsonMessage>() {
@@ -334,13 +335,13 @@ impl ImplicitDeserialization {
                 }
             };
 
-            return incoming.connect_to(&serialized_input, builder);
+            return incoming.connect_to(&serialized_input, builder).map_err(Into::into);
         }
 
-        Err(DiagramErrorCode::TypeMismatch {
+        Err(TypeMismatch {
             source_type: *incoming.message_info(),
             target_type: *self.deserialized_input.message_info(),
-        })
+        }.into())
     }
 
     pub fn deserialized_input_slot(&self) -> &Arc<DynInputSlot> {
@@ -356,10 +357,10 @@ pub struct ImplicitStringify {
 impl ImplicitStringify {
     pub fn new(string_input: DynInputSlot) -> Result<Self, DiagramErrorCode> {
         if string_input.message_info() != &TypeInfo::of::<String>() {
-            return Err(DiagramErrorCode::TypeMismatch {
+            return Err(TypeMismatch {
                 source_type: TypeInfo::of::<String>(),
                 target_type: *string_input.message_info(),
-            });
+            }.into());
         }
 
         Ok(Self {

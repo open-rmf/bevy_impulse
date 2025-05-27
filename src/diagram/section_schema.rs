@@ -25,7 +25,7 @@ use crate::{
 };
 
 use super::{
-    type_info::TypeInfo, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext,
+    TypeInfo, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext,
     DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
     NextOperation, OperationName, Operations,
 };

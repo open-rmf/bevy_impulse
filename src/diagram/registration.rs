@@ -26,9 +26,14 @@ use std::{
 };
 
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Connect, InputSlot,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, InputSlot,
     Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
 };
+pub use crate::{
+    dyn_input_slot::DynInputSlot,
+    dyn_output::DynOutput,
+};
+
 use bevy_ecs::entity::Entity;
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
@@ -45,135 +50,11 @@ use tracing::debug;
 
 use super::{
     buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
-    fork_result_schema::RegisterForkResult, register_json, supported::*, type_info::TypeInfo,
+    fork_result_schema::RegisterForkResult, register_json, supported::*, TypeInfo,
     unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
     DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
     SectionMetadata, SectionMetadataProvider, SerializeMessage, SplitSchema, TransformError,
 };
-
-/// A type erased [`crate::InputSlot`]
-#[derive(Copy, Clone, Debug)]
-pub struct DynInputSlot {
-    scope: Entity,
-    source: Entity,
-    type_info: TypeInfo,
-}
-
-impl DynInputSlot {
-    pub fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    pub fn id(&self) -> Entity {
-        self.source
-    }
-
-    pub fn message_info(&self) -> &TypeInfo {
-        &self.type_info
-    }
-}
-
-impl<T: Any> From<InputSlot<T>> for DynInputSlot {
-    fn from(input: InputSlot<T>) -> Self {
-        Self {
-            scope: input.scope(),
-            source: input.id(),
-            type_info: TypeInfo::of::<T>(),
-        }
-    }
-}
-
-impl From<AnyBuffer> for DynInputSlot {
-    fn from(buffer: AnyBuffer) -> Self {
-        let any_interface = buffer.get_interface();
-        Self {
-            scope: buffer.scope(),
-            source: buffer.id(),
-            type_info: TypeInfo {
-                type_id: any_interface.message_type_id(),
-                type_name: any_interface.message_type_name(),
-            },
-        }
-    }
-}
-
-/// A type erased [`crate::Output`]
-#[derive(Debug)]
-pub struct DynOutput {
-    scope: Entity,
-    target: Entity,
-    message_info: TypeInfo,
-}
-
-impl DynOutput {
-    pub fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
-        Self {
-            scope,
-            target,
-            message_info,
-        }
-    }
-
-    pub fn message_info(&self) -> &TypeInfo {
-        &self.message_info
-    }
-
-    pub fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
-    where
-        T: Send + Sync + 'static + Any,
-    {
-        if self.message_info != TypeInfo::of::<T>() {
-            Err(DiagramErrorCode::TypeMismatch {
-                source_type: self.message_info,
-                target_type: TypeInfo::of::<T>(),
-            })
-        } else {
-            Ok(Output::<T>::new(self.scope, self.target))
-        }
-    }
-
-    pub fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    pub fn id(&self) -> Entity {
-        self.target
-    }
-
-    /// Connect a [`DynOutput`] to a [`DynInputSlot`].
-    pub fn connect_to(
-        self,
-        input: &DynInputSlot,
-        builder: &mut Builder,
-    ) -> Result<(), DiagramErrorCode> {
-        if self.message_info() != input.message_info() {
-            return Err(DiagramErrorCode::TypeMismatch {
-                source_type: *self.message_info(),
-                target_type: *input.message_info(),
-            });
-        }
-
-        builder.commands().add(Connect {
-            original_target: self.id(),
-            new_target: input.id(),
-        });
-
-        Ok(())
-    }
-}
-
-impl<T> From<Output<T>> for DynOutput
-where
-    T: Send + Sync + 'static + Any,
-{
-    fn from(output: Output<T>) -> Self {
-        Self {
-            scope: output.scope(),
-            target: output.id(),
-            message_info: TypeInfo::of::<T>(),
-        }
-    }
-}
 
 /// A type erased [`bevy_impulse::Node`]
 pub struct DynNode {

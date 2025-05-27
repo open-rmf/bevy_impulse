@@ -147,6 +147,8 @@ pub mod testing;
 pub mod trim;
 pub use trim::*;
 
+pub mod type_info;
+
 use bevy_app::prelude::{App, Plugin, Update};
 use bevy_ecs::prelude::{Entity, In};
 
