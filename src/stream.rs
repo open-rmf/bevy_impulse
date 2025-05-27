@@ -2078,7 +2078,7 @@ pub(crate) mod tests {
         assert_eq!(expected_values_string, received_values_string);
     }
 
-    fn collect_received_values<T>(mut receiver: crate::Receiver<T>) -> Vec<T> {
+    pub fn collect_received_values<T>(mut receiver: crate::Receiver<T>) -> Vec<T> {
         let mut result = Vec::new();
         while let Ok(value) = receiver.try_recv() {
             result.push(value);

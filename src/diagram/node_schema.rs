@@ -79,6 +79,7 @@ mod tests {
         prelude::*,
         stream::tests::*,
     };
+    use serde_json::json;
 
     #[test]
     fn test_streams_in_diagram() {
@@ -105,8 +106,54 @@ mod tests {
             },
         );
 
-        // let diagram = Diagram::from_json(json!({
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "test",
+            "ops": {
+                "test": {
+                    "type": "node",
+                    "builder": "streaming_node",
+                    "next": { "builtin": "terminate" },
+                    "stream_out": {
+                        "stream_u32": "stream_u32_out",
+                        "stream_i32": "stream_i32_out",
+                        "stream_string": "stream_string_out"
+                    }
+                },
+                "stream_u32_out": {
+                    "type": "stream_out",
+                    "name": "stream_u32"
+                },
+                "stream_i32_out": {
+                    "type": "stream_out",
+                    "name": "stream_i32"
+                },
+                "stream_string_out": {
+                    "type": "stream_out",
+                    "name": "stream_string"
+                }
+            }
+        }))
+        .unwrap();
 
-        // }))
+        let request = vec![
+            "5".to_owned(),
+            "10".to_owned(),
+            "-3".to_owned(),
+            "-27".to_owned(),
+            "hello".to_owned(),
+        ];
+
+        let (_, receivers) = fixture.spawn_and_run_with_streams::<_, (), TestStreamPack>(
+            &diagram, request,
+        ).unwrap();
+
+        let outcome_stream_u32 = collect_received_values(receivers.stream_u32);
+        let outcome_stream_i32 = collect_received_values(receivers.stream_i32);
+        let outcome_stream_string = collect_received_values(receivers.stream_string);
+
+        assert_eq!(outcome_stream_u32, [5, 10]);
+        assert_eq!(outcome_stream_i32, [5, 10, -3, -27]);
+        assert_eq!(outcome_stream_string, ["5", "10", "-3", "-27", "hello"]);
     }
 }

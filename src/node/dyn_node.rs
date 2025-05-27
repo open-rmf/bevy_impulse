@@ -35,20 +35,6 @@ pub struct DynNode {
     pub streams: DynStreamOutputPack,
 }
 
-impl DynNode {
-    pub fn new<Request, Response>(output: Output<Response>, input: InputSlot<Request>) -> Self
-    where
-        Request: 'static,
-        Response: Send + Sync + 'static,
-    {
-        Self {
-            input: input.into(),
-            output: output.into(),
-            streams: Default::default(),
-        }
-    }
-}
-
 impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
 where
     Request: 'static,

@@ -144,8 +144,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                 .subschema_for::<Config>(),
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
-                let n = f(builder, config);
-                Ok(DynNode::new(n.output, n.input))
+                Ok(f(builder, config).into())
             })),
         };
         self.registry.nodes.insert(options.id.clone(), registration);
