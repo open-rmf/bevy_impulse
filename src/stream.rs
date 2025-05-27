@@ -38,6 +38,7 @@ use std::{
 use smallvec::SmallVec;
 
 use crate::{
+    dyn_node::DynStreamPack,
     AddImpulse, AddOperation, AnonymousStreamRedirect, Builder, DeferredRoster,
     DuplicateStream, InnerChannel, InputSlot, ManageInput, OperationError, OperationResult,
     OperationRoster, OrBroken, Output, Push, RedirectScopeStream, RedirectWorkflowStream,
@@ -53,9 +54,6 @@ pub use named_stream::*;
 
 mod stream_channel;
 pub use stream_channel::*;
-
-mod stream_map;
-pub use stream_map::*;
 
 pub trait StreamEffect: 'static + Send + Sync + Sized {
     type Input: 'static + Send + Sync;
@@ -640,6 +638,11 @@ pub trait StreamPack: 'static + Send + Sync {
 
     fn are_streams_available(availability: &StreamAvailability) -> bool;
 
+    fn into_dyn_stream_pack(
+        pack: &mut DynStreamPack,
+        outputs: Self::StreamOutputPack
+    );
+
     /// Are there actually any streams in the pack?
     fn has_streams() -> bool;
 }
@@ -724,6 +727,13 @@ impl<T: Stream + Unpin> StreamPack for T {
         availability.has_anonymous::<<Self as StreamEffect>::Output>()
     }
 
+    fn into_dyn_stream_pack(
+        pack: &mut DynStreamPack,
+        outputs: Self::StreamOutputPack
+    ) {
+        pack.add_anonymous(outputs);
+    }
+
     fn has_streams() -> bool {
         true
     }
@@ -791,6 +801,13 @@ impl StreamPack for () {
 
     fn are_streams_available(_: &StreamAvailability) -> bool {
         true
+    }
+
+    fn into_dyn_stream_pack(
+        _: &mut DynStreamPack,
+        _: Self::StreamOutputPack
+    ) {
+        // Do nothing
     }
 
     fn has_streams() -> bool {
@@ -933,6 +950,16 @@ macro_rules! impl_streampack_for_tuple {
                 true
                 $(
                     && $T::are_streams_available(availability)
+                )*
+            }
+
+            fn into_dyn_stream_pack(
+                pack: &mut DynStreamPack,
+                outputs: Self::StreamOutputPack,
+            ) {
+                let ($($T,)*) = outputs;
+                $(
+                    $T::into_dyn_stream_pack(pack, $T);
                 )*
             }
 
@@ -1099,7 +1126,11 @@ all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*};
+    use crate::{
+        prelude::*,
+        testing::*,
+        dyn_node::*,
+    };
     use std::borrow::Cow;
 
     #[test]
@@ -1561,6 +1592,31 @@ mod tests {
             builder.connect(inner_scope.output, scope.terminate);
         });
         validate_stream_pack(scoped_workflow, &mut context);
+
+        let dyn_stream_workflow = context.spawn_workflow::<Vec<String>, (), TestStreamPack, _>(|scope, builder| {
+            let dyn_scope_input: DynOutput = scope.input.into();
+
+            let node = builder.create_node(parse_continuous_srv);
+            let mut dyn_node: DynNode = node.into();
+
+            dyn_scope_input.connect_to(&dyn_node.input, builder).unwrap();
+
+            let dyn_scope_stream_u32: DynInputSlot = scope.streams.stream_u32.into();
+            let dyn_node_stream_u32 = dyn_node.streams.take_named("stream_u32").unwrap();
+            dyn_node_stream_u32.connect_to(&dyn_scope_stream_u32, builder).unwrap();
+
+            let dyn_scope_stream_i32: DynInputSlot = scope.streams.stream_i32.into();
+            let dyn_node_stream_i32 = dyn_node.streams.take_named("stream_i32").unwrap();
+            dyn_node_stream_i32.connect_to(&dyn_scope_stream_i32, builder).unwrap();
+
+            let dyn_scope_stream_string: DynInputSlot = scope.streams.stream_string.into();
+            let dyn_node_stream_string = dyn_node.streams.take_named("stream_string").unwrap();
+            dyn_node_stream_string.connect_to(&dyn_scope_stream_string, builder).unwrap();
+
+            let terminate: DynInputSlot = scope.terminate.into();
+            dyn_node.output.connect_to(&terminate, builder).unwrap();
+        });
+        validate_stream_pack(dyn_stream_workflow, &mut context);
 
         // We can do a stream cast for the service-type providers but not for
         // the callbacks or maps.
@@ -2316,6 +2372,15 @@ mod tests {
             availability.has_named::<<StreamOf::<u32> as ::bevy_impulse::StreamEffect>::Output>("stream_u32")
             && availability.has_named::<<StreamOf::<i32> as ::bevy_impulse::StreamEffect>::Output>("stream_i32")
             && availability.has_named::<<StreamOf::<String> as ::bevy_impulse::StreamEffect>::Output>("stream_string")
+        }
+
+        fn into_dyn_stream_pack(
+            pack: &mut ::bevy_impulse::dyn_node::DynStreamPack,
+            outputs: Self::StreamOutputPack
+        ) {
+            pack.add_named("stream_u32", outputs.stream_u32);
+            pack.add_named("stream_i32", outputs.stream_i32);
+            pack.add_named("stream_string", outputs.stream_string);
         }
 
         fn has_streams() -> bool {

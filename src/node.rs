@@ -22,8 +22,7 @@ use crate::{
     SingleInputStorage, StreamPack, UnusedTarget,
 };
 
-pub mod dyn_input_slot;
-pub mod dyn_output;
+pub mod dyn_node;
 
 /// A collection of all the inputs and outputs for a node within a workflow.
 #[derive(Debug)]

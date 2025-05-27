@@ -58,7 +58,7 @@ use std::{
 
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
-    SplitConnectionError, StreamPack, dyn_output::TypeMismatch,
+    SplitConnectionError, StreamPack,
 };
 pub use crate::type_info::TypeInfo;
 

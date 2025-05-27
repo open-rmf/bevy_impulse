@@ -20,21 +20,16 @@ use std::{
     borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
-    fmt::Debug,
     marker::PhantomData,
     sync::Arc,
 };
 
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, InputSlot,
-    Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
+    Joined, JsonBuffer, JsonMessage, Node, StreamPack,
 };
-pub use crate::{
-    dyn_input_slot::DynInputSlot,
-    dyn_output::DynOutput,
-};
+pub use crate::dyn_node::*;
 
-use bevy_ecs::entity::Entity;
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
     schema::Schema,
@@ -55,39 +50,6 @@ use super::{
     DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
     SectionMetadata, SectionMetadataProvider, SerializeMessage, SplitSchema, TransformError,
 };
-
-/// A type erased [`bevy_impulse::Node`]
-pub struct DynNode {
-    pub input: DynInputSlot,
-    pub output: DynOutput,
-}
-
-impl DynNode {
-    fn new<Request, Response>(output: Output<Response>, input: InputSlot<Request>) -> Self
-    where
-        Request: 'static,
-        Response: Send + Sync + 'static,
-    {
-        Self {
-            input: input.into(),
-            output: output.into(),
-        }
-    }
-}
-
-impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
-where
-    Request: 'static,
-    Response: Send + Sync + 'static,
-    Streams: StreamPack,
-{
-    fn from(node: Node<Request, Response, Streams>) -> Self {
-        Self {
-            input: node.input.into(),
-            output: node.output.into(),
-        }
-    }
-}
 
 #[derive(Serialize)]
 pub struct NodeRegistration {
