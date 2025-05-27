@@ -1433,65 +1433,65 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_map() {
+    fn test_stream_pack() {
         let mut context = TestingContext::minimal_plugins();
 
         let parse_blocking_srv = context.command(|commands| {
-            commands.spawn_service(|In(input): BlockingServiceInput<Vec<String>, TestStreamMap>| {
-                impl_stream_map_test_blocking(input.request, input.streams);
+            commands.spawn_service(|In(input): BlockingServiceInput<Vec<String>, TestStreamPack>| {
+                impl_stream_pack_test_blocking(input.request, input.streams);
             })
         });
 
-        validate_stream_map(parse_blocking_srv, &mut context);
+        validate_stream_pack(parse_blocking_srv, &mut context);
 
         let parse_async_srv = context.command(|commands| {
             commands.spawn_service(
-                |In(input): AsyncServiceInput<Vec<String>, TestStreamMap>| async move {
-                    impl_stream_map_test_async(input.request, input.streams);
+                |In(input): AsyncServiceInput<Vec<String>, TestStreamPack>| async move {
+                    impl_stream_pack_test_async(input.request, input.streams);
                 },
             )
         });
 
-        validate_stream_map(parse_async_srv, &mut context);
+        validate_stream_pack(parse_async_srv, &mut context);
 
         let parse_continuous_srv = context
             .app
-            .spawn_continuous_service(Update, impl_stream_map_test_continuous);
+            .spawn_continuous_service(Update, impl_stream_pack_test_continuous);
 
-        validate_stream_map(parse_continuous_srv, &mut context);
+        validate_stream_pack(parse_continuous_srv, &mut context);
 
         let parse_blocking_callback =
-            (|In(input): BlockingCallbackInput<Vec<String>, TestStreamMap>| {
-                impl_stream_map_test_blocking(input.request, input.streams);
+            (|In(input): BlockingCallbackInput<Vec<String>, TestStreamPack>| {
+                impl_stream_pack_test_blocking(input.request, input.streams);
             })
             .as_callback();
 
-        validate_stream_map(parse_blocking_callback, &mut context);
+        validate_stream_pack(parse_blocking_callback, &mut context);
 
         let parse_async_callback =
-            (|In(input): AsyncCallbackInput<Vec<String>, TestStreamMap>| async move {
-                impl_stream_map_test_async(input.request, input.streams);
+            (|In(input): AsyncCallbackInput<Vec<String>, TestStreamPack>| async move {
+                impl_stream_pack_test_async(input.request, input.streams);
             })
             .as_callback();
 
-        validate_stream_map(parse_async_callback, &mut context);
+        validate_stream_pack(parse_async_callback, &mut context);
 
-        let parse_blocking_map = (|input: BlockingMap<Vec<String>, TestStreamMap>| {
-            impl_stream_map_test_blocking(input.request, input.streams);
+        let parse_blocking_map = (|input: BlockingMap<Vec<String>, TestStreamPack>| {
+            impl_stream_pack_test_blocking(input.request, input.streams);
         })
         .as_map();
 
-        validate_stream_map(parse_blocking_map, &mut context);
+        validate_stream_pack(parse_blocking_map, &mut context);
 
-        let parse_async_map = (|input: AsyncMap<Vec<String>, TestStreamMap>| async move {
-            impl_stream_map_test_async(input.request, input.streams);
+        let parse_async_map = (|input: AsyncMap<Vec<String>, TestStreamPack>| async move {
+            impl_stream_pack_test_async(input.request, input.streams);
         })
         .as_map();
 
-        validate_stream_map(parse_async_map, &mut context);
+        validate_stream_pack(parse_async_map, &mut context);
 
-        let make_workflow = |service: Service<Vec<String>, (), TestStreamMap>| {
-            move |scope: Scope<Vec<String>, (), TestStreamMap>, builder: &mut Builder| {
+        let make_workflow = |service: Service<Vec<String>, (), TestStreamPack>| {
+            move |scope: Scope<Vec<String>, (), TestStreamPack>, builder: &mut Builder| {
                 let node = scope
                     .input
                     .chain(builder)
@@ -1507,16 +1507,16 @@ mod tests {
         };
 
         let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
-        validate_stream_map(blocking_injection_workflow, &mut context);
+        validate_stream_pack(blocking_injection_workflow, &mut context);
 
         let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
-        validate_stream_map(async_injection_workflow, &mut context);
+        validate_stream_pack(async_injection_workflow, &mut context);
 
         let continuous_injection_workflow =
             context.spawn_workflow(make_workflow(parse_continuous_srv));
-        validate_stream_map(continuous_injection_workflow, &mut context);
+        validate_stream_pack(continuous_injection_workflow, &mut context);
 
-        let nested_workflow = context.spawn_workflow::<_, _, TestStreamMap, _>(|scope, builder| {
+        let nested_workflow = context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
             let node = scope.input.chain(builder).then_node(parse_continuous_srv);
 
             builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
@@ -1525,9 +1525,9 @@ mod tests {
 
             builder.connect(node.output, scope.terminate);
         });
-        validate_stream_map(nested_workflow, &mut context);
+        validate_stream_pack(nested_workflow, &mut context);
 
-        let double_nested_workflow = context.spawn_workflow::<_, _, TestStreamMap, _>(|scope, builder| {
+        let double_nested_workflow = context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
             let node = scope.input.chain(builder).then_node(nested_workflow);
 
             builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
@@ -1536,10 +1536,10 @@ mod tests {
 
             builder.connect(node.output, scope.terminate);
         });
-        validate_stream_map(double_nested_workflow, &mut context);
+        validate_stream_pack(double_nested_workflow, &mut context);
 
-        let scoped_workflow = context.spawn_workflow::<_, _, TestStreamMap, _>(|scope, builder| {
-            let inner_scope = builder.create_scope::<_, _, TestStreamMap, _>(|scope, builder| {
+        let scoped_workflow = context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
+            let inner_scope = builder.create_scope::<_, _, TestStreamPack, _>(|scope, builder| {
                 let node = scope.input.chain(builder).then_node(parse_continuous_srv);
 
                 builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
@@ -1557,7 +1557,7 @@ mod tests {
 
             builder.connect(inner_scope.output, scope.terminate);
         });
-        validate_stream_map(scoped_workflow, &mut context);
+        validate_stream_pack(scoped_workflow, &mut context);
 
         // We can do a stream cast for the service-type providers but not for
         // the callbacks or maps.
@@ -1571,8 +1571,8 @@ mod tests {
         validate_dynamically_named_stream_receiver(double_nested_workflow, &mut context);
     }
 
-    fn validate_stream_map(
-        provider: impl Provider<Request = Vec<String>, Response = (), Streams = TestStreamMap> + Clone,
+    fn validate_stream_pack(
+        provider: impl Provider<Request = Vec<String>, Response = (), Streams = TestStreamPack> + Clone,
         context: &mut TestingContext,
     ) {
         let request = vec![
@@ -1629,7 +1629,7 @@ mod tests {
     }
 
     fn validate_dynamically_named_stream_receiver(
-        provider: Service<Vec<String>, (), TestStreamMap>,
+        provider: Service<Vec<String>, (), TestStreamPack>,
         context: &mut TestingContext,
     ) {
         let provider: Service<Vec<String>, (), TestDynamicNamedStreams> = provider.optional_stream_cast();
@@ -1687,9 +1687,9 @@ mod tests {
         assert_eq!(outcome.stream_string, ["foo", "bar", "1.32", "-8"]);
     }
 
-    fn impl_stream_map_test_blocking(
+    fn impl_stream_pack_test_blocking(
         request: Vec<String>,
-        streams: <TestStreamMap as StreamPack>::StreamBuffers,
+        streams: <TestStreamPack as StreamPack>::StreamBuffers,
     ) {
         for r in request {
             if let Ok(value) = r.parse::<u32>() {
@@ -1704,9 +1704,9 @@ mod tests {
         }
     }
 
-    fn impl_stream_map_test_async(
+    fn impl_stream_pack_test_async(
         request: Vec<String>,
-        streams: <TestStreamMap as StreamPack>::StreamChannels,
+        streams: <TestStreamPack as StreamPack>::StreamChannels,
     ) {
         for r in request {
             if let Ok(value) = r.parse::<u32>() {
@@ -1721,9 +1721,9 @@ mod tests {
         }
     }
 
-    fn impl_stream_map_test_continuous(
-        In(ContinuousService { key }): In<ContinuousService<Vec<String>, (), TestStreamMap>>,
-        mut param: ContinuousQuery<Vec<String>, (), TestStreamMap>,
+    fn impl_stream_pack_test_continuous(
+        In(ContinuousService { key }): In<ContinuousService<Vec<String>, (), TestStreamPack>>,
+        mut param: ContinuousQuery<Vec<String>, (), TestStreamPack>,
     ) {
         param.get_mut(&key).unwrap().for_each(|order| {
             for r in order.request().clone() {
@@ -1749,8 +1749,8 @@ mod tests {
         stream_string: Vec<String>,
     }
 
-    impl From<Recipient<(), TestStreamMap>> for StreamMapOutcome {
-        fn from(mut recipient: Recipient<(), TestStreamMap>) -> Self {
+    impl From<Recipient<(), TestStreamPack>> for StreamMapOutcome {
+        fn from(mut recipient: Recipient<(), TestStreamPack>) -> Self {
             let mut result = Self::default();
             while let Ok(r) = recipient.streams.stream_u32.try_recv() {
                 result.stream_u32.push(r);
@@ -1935,14 +1935,14 @@ mod tests {
 
         // We can do a stream cast for the service-type providers but not for
         // the callbacks or maps.
-        validate_dynamically_named_streams_into_stream_map(parse_blocking_srv, &mut context);
-        validate_dynamically_named_streams_into_stream_map(parse_async_srv, &mut context);
-        validate_dynamically_named_streams_into_stream_map(parse_continuous_srv, &mut context);
-        validate_dynamically_named_streams_into_stream_map(blocking_injection_workflow, &mut context);
-        validate_dynamically_named_streams_into_stream_map(async_injection_workflow, &mut context);
-        validate_dynamically_named_streams_into_stream_map(continuous_injection_workflow, &mut context);
-        validate_dynamically_named_streams_into_stream_map(nested_workflow, &mut context);
-        validate_dynamically_named_streams_into_stream_map(double_nested_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(parse_blocking_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(parse_async_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(parse_continuous_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(blocking_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(async_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(continuous_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(nested_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(double_nested_workflow, &mut context);
     }
 
     fn validate_dynamically_named_streams(
@@ -1998,11 +1998,11 @@ mod tests {
         result
     }
 
-    fn validate_dynamically_named_streams_into_stream_map(
+    fn validate_dynamically_named_streams_into_stream_pack(
         provider: Service<NamedInputs, (), TestDynamicNamedStreams>,
         context: &mut TestingContext,
     ) {
-        let provider: Service<NamedInputs, (), TestStreamMap> = provider.optional_stream_cast();
+        let provider: Service<NamedInputs, (), TestStreamPack> = provider.optional_stream_cast();
 
         let request = NamedInputs {
             values_u32: vec![
@@ -2113,13 +2113,13 @@ mod tests {
 
     use crate::StreamAvailability;
 
-    struct TestStreamMap {
+    struct TestStreamPack {
         stream_u32: StreamOf<u32>,
         stream_i32: StreamOf<i32>,
         stream_string: StreamOf<String>,
     }
 
-    impl TestStreamMap {
+    impl TestStreamPack {
         #[allow(unused)]
         fn __bevy_impulse_allow_unused_fields(&self) {
             println!("{:#?}", [
@@ -2130,12 +2130,12 @@ mod tests {
         }
     }
 
-    impl StreamPack for TestStreamMap {
-        type StreamInputPack = TestStreamMapInputs;
-        type StreamOutputPack = TestStreamMapOutputs;
-        type StreamReceivers = TestStreamMapReceivers;
-        type StreamChannels = TestStreamMapChannels;
-        type StreamBuffers = TestStreamMapBuffers;
+    impl StreamPack for TestStreamPack {
+        type StreamInputPack = TestStreamPackInputs;
+        type StreamOutputPack = TestStreamPackOutputs;
+        type StreamReceivers = TestStreamPackReceivers;
+        type StreamChannels = TestStreamPackChannels;
+        type StreamBuffers = TestStreamPackBuffers;
 
         fn spawn_scope_streams(
             in_scope: ::bevy_impulse::re_exports::Entity,
@@ -2153,12 +2153,12 @@ mod tests {
             );
 
             (
-                TestStreamMapInputs {
+                TestStreamPackInputs {
                     stream_u32: input_stream_u32,
                     stream_i32: input_stream_i32,
                     stream_string: input_stream_string,
                 },
-                TestStreamMapOutputs {
+                TestStreamPackOutputs {
                     stream_u32: output_stream_u32,
                     stream_i32: output_stream_i32,
                     stream_string: output_stream_string,
@@ -2167,7 +2167,7 @@ mod tests {
         }
 
         fn spawn_workflow_streams(builder: &mut ::bevy_impulse::Builder) -> Self::StreamInputPack {
-            TestStreamMapInputs {
+            TestStreamPackInputs {
                 stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::spawn_workflow_stream(
                     ::std::borrow::Cow::Borrowed("stream_u32"), builder,
                 ),
@@ -2185,7 +2185,7 @@ mod tests {
             map: &mut ::bevy_impulse::StreamTargetMap,
             builder: &mut ::bevy_impulse::Builder,
         ) -> Self::StreamOutputPack {
-            TestStreamMapOutputs {
+            TestStreamPackOutputs {
                 stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::spawn_node_stream(
                     ::std::borrow::Cow::Borrowed("stream_u32"), source, map, builder,
                 ),
@@ -2203,7 +2203,7 @@ mod tests {
             map: &mut ::bevy_impulse::StreamTargetMap,
             commands: &mut ::bevy_impulse::re_exports::Commands,
         ) -> Self::StreamReceivers {
-            TestStreamMapReceivers {
+            TestStreamPackReceivers {
                 stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::take_stream(
                     ::std::borrow::Cow::Borrowed("stream_u32"), source, map, commands,
                 ),
@@ -2237,7 +2237,7 @@ mod tests {
             inner: &::std::sync::Arc<::bevy_impulse::InnerChannel>,
             world: &::bevy_impulse::re_exports::World,
         ) -> Self::StreamChannels {
-            TestStreamMapChannels {
+            TestStreamPackChannels {
                 stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::make_stream_channel(
                     ::std::borrow::Cow::Borrowed("stream_u32"), inner, world,
                 ),
@@ -2253,7 +2253,7 @@ mod tests {
         fn make_stream_buffers(
             target_map: Option<&::bevy_impulse::StreamTargetMap>,
         ) -> Self::StreamBuffers {
-            TestStreamMapBuffers {
+            TestStreamPackBuffers {
                 stream_u32: ::bevy_impulse::NamedStream::<StreamOf::<u32>>::make_stream_buffer(target_map),
                 stream_i32: ::bevy_impulse::NamedStream::<StreamOf::<i32>>::make_stream_buffer(target_map),
                 stream_string: ::bevy_impulse::NamedStream::<StreamOf::<String>>::make_stream_buffer(target_map),
@@ -2320,32 +2320,32 @@ mod tests {
         }
     }
 
-    struct TestStreamMapInputs {
+    struct TestStreamPackInputs {
         stream_u32: ::bevy_impulse::InputSlot<u32>,
         stream_i32: ::bevy_impulse::InputSlot<i32>,
         stream_string: ::bevy_impulse::InputSlot<String>,
     }
 
-    struct TestStreamMapOutputs {
+    struct TestStreamPackOutputs {
         stream_u32: ::bevy_impulse::Output<u32>,
         stream_i32: ::bevy_impulse::Output<i32>,
         stream_string: ::bevy_impulse::Output<String>,
     }
 
-    struct TestStreamMapChannels {
+    struct TestStreamPackChannels {
         stream_u32: ::bevy_impulse::NamedStreamChannel<StreamOf<u32>>,
         stream_i32: ::bevy_impulse::NamedStreamChannel<StreamOf<i32>>,
         stream_string: ::bevy_impulse::NamedStreamChannel<StreamOf<String>>,
     }
 
-    struct TestStreamMapReceivers {
+    struct TestStreamPackReceivers {
         stream_u32: ::bevy_impulse::Receiver<u32>,
         stream_i32: ::bevy_impulse::Receiver<i32>,
         stream_string: ::bevy_impulse::Receiver<String>,
     }
 
     #[derive(Clone)]
-     struct TestStreamMapBuffers {
+     struct TestStreamPackBuffers {
         stream_u32: ::bevy_impulse::NamedStreamBuffer<u32>,
         stream_i32: ::bevy_impulse::NamedStreamBuffer<i32>,
         stream_string: ::bevy_impulse::NamedStreamBuffer<String>,
