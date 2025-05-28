@@ -502,6 +502,17 @@ impl<S: StreamEffect> NamedStreamChannel<S> {
     }
 }
 
+impl<S> Clone for NamedStreamChannel<S> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            targets: Arc::clone(&self.targets),
+            inner: Arc::clone(&self.inner),
+            _ignore: Default::default(),
+        }
+    }
+}
+
 pub(crate) fn send_named_stream<S: StreamEffect>(
     source: Entity,
     session: Entity,

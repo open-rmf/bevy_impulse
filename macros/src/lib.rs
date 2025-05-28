@@ -18,6 +18,9 @@
 mod buffer;
 use buffer::{impl_buffer_key_map, impl_joined_value};
 
+mod derive_stream;
+use derive_stream::impl_derive_stream;
+
 mod section;
 use section::impl_section;
 
@@ -29,17 +32,15 @@ use quote::quote;
 use syn::{parse_macro_input, DeriveInput, ItemStruct};
 
 #[proc_macro_derive(Stream)]
-pub fn simple_stream_macro(item: TokenStream) -> TokenStream {
-    let ast: DeriveInput = syn::parse(item).unwrap();
-    let struct_name = &ast.ident;
-    let (impl_generics, type_generics, where_clause) = &ast.generics.split_for_impl();
-
-    quote! {
-        impl #impl_generics ::bevy_impulse::Stream for #struct_name #type_generics #where_clause {
-            type Container = ::bevy_impulse::DefaultStreamContainer<Self>;
+pub fn derive_stream(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemStruct);
+    match impl_derive_stream(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(msg) => quote! {
+            compile_error!(#msg);
         }
+        .into(),
     }
-    .into()
 }
 
 #[proc_macro_derive(DeliveryLabel)]

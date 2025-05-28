@@ -16,16 +16,19 @@
 */
 
 use bevy_ecs::prelude::{Commands, Entity, World};
+use bevy_hierarchy::BuildChildren;
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    AddOperation, Builder, DefaultStreamContainer, InnerChannel,
-    InputSlot, NamedStreamTargets, NamedStreamRedirect,
+    dyn_node::{DynStreamInputPack, DynStreamOutputPack},
+    AddImpulse, AddOperation, Builder, DefaultStreamContainer,
+    InnerChannel, InputSlot, NamedStreamTargets, NamedStreamRedirect,
     NamedTarget, NamedValue, OperationResult, OperationRoster,
-    OrBroken, Output, RedirectWorkflowStream, ReportUnhandled, SendNamedStreams,
-    SingleInputStorage, Stream, StreamEffect, StreamRequest, StreamTargetMap,
-    UnusedStreams, UnusedTarget,
+    OrBroken, Output, Push, Receiver, RedirectScopeStream, RedirectWorkflowStream,
+    ReportUnhandled, SendNamedStreams, SingleInputStorage, StreamAvailability, StreamEffect,
+    StreamPack, StreamRequest, StreamTargetMap, TakenStream, UnusedStreams, UnusedTarget,
     send_named_stream,
 };
 
@@ -45,11 +48,33 @@ impl<S: StreamEffect> StreamEffect for DynamicallyNamedStream<S> {
     }
 }
 
-impl<S: StreamEffect> Stream for DynamicallyNamedStream<S> {
-    type StreamChannel = DynamicallyNamedStreamChannel<S>;
-    type StreamBuffer = DynamicallyNamedStreamBuffer<S::Input>;
+impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
+    type StreamInputPack = InputSlot<<Self as StreamEffect>::Input>;
+    type StreamOutputPack = Output<<Self as StreamEffect>::Output>;
+    type StreamReceivers = Receiver<<Self as StreamEffect>::Output>;
+    type StreamChannels = DynamicallyNamedStreamChannel<S>;
+    type StreamBuffers = DynamicallyNamedStreamBuffer<S::Input>;
 
-    fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self::Input> {
+    fn spawn_scope_streams(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (InputSlot<NamedValue<S::Input>>, Output<NamedValue<S::Output>>) {
+        let source = commands.spawn(()).id();
+        let target = commands.spawn(UnusedTarget).id();
+        commands.add(AddOperation::new(
+            Some(in_scope),
+            source,
+            RedirectScopeStream::<Self>::new(target),
+        ));
+
+        (
+            InputSlot::new(in_scope, source),
+            Output::new(out_scope, target),
+        )
+    }
+
+    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
         let source = builder.commands.spawn(()).id();
         builder.commands.add(AddOperation::new(
             Some(builder.scope()),
@@ -59,11 +84,11 @@ impl<S: StreamEffect> Stream for DynamicallyNamedStream<S> {
         InputSlot::new(builder.scope, source)
     }
 
-    fn spawn_node_stream(
+    fn spawn_node_streams(
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
-    ) -> Output<Self::Output> {
+    ) -> Output<NamedValue<S::Output>> {
         let target = builder
             .commands
             .spawn((SingleInputStorage::new(source), UnusedTarget))
@@ -73,13 +98,43 @@ impl<S: StreamEffect> Stream for DynamicallyNamedStream<S> {
         Output::new(builder.scope, target)
     }
 
-    fn make_stream_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::StreamChannel {
+    fn take_streams(
+        source: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) -> Receiver<NamedValue<S::Output>> {
+        let (sender, receiver) = unbounded_channel::<NamedValue<S::Output>>();
+        let target = commands
+            .spawn(())
+            // Set the parent of this stream to be the impulse so it can be
+            // recursively despawned together.
+            .set_parent(source)
+            .id();
+
+        map.add_anonymous::<NamedValue<S::Output>>(target, commands);
+        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
+
+        receiver
+    }
+
+    fn collect_streams(
+        source: Entity,
+        target: Entity,
+        map: &mut StreamTargetMap,
+        commands: &mut Commands,
+    ) {
+        let redirect = commands.spawn(()).set_parent(source).id();
+        commands.add(AddImpulse::new(redirect, Push::<NamedValue<S::Output>>::new(target, true)));
+        map.add_anonymous::<NamedValue<S::Output>>(redirect, commands);
+    }
+
+    fn make_stream_channels(inner: &Arc<InnerChannel>, world: &World) -> Self::StreamChannels {
         let targets =
             NamedStreamTargets::new::<S::Output>(world.get::<StreamTargetMap>(inner.source()));
         DynamicallyNamedStreamChannel::new(Arc::new(targets), Arc::clone(&inner))
     }
 
-    fn make_stream_buffer(target_map: Option<&StreamTargetMap>) -> Self::StreamBuffer {
+    fn make_stream_buffers(target_map: Option<&StreamTargetMap>) -> Self::StreamBuffers {
         let targets = NamedStreamTargets::new::<S::Output>(target_map);
         DynamicallyNamedStreamBuffer {
             targets: Arc::new(targets),
@@ -87,8 +142,8 @@ impl<S: StreamEffect> Stream for DynamicallyNamedStream<S> {
         }
     }
 
-    fn process_stream_buffer(
-        buffer: Self::StreamBuffer,
+    fn process_stream_buffers(
+        buffer: Self::StreamBuffers,
         source: Entity,
         session: Entity,
         unused: &mut UnusedStreams,
@@ -128,8 +183,8 @@ impl<S: StreamEffect> Stream for DynamicallyNamedStream<S> {
         Ok(())
     }
 
-    fn defer_buffer(
-        buffer: Self::StreamBuffer,
+    fn defer_buffers(
+        buffer: Self::StreamBuffers,
         source: Entity,
         session: Entity,
         commands: &mut Commands,
@@ -140,6 +195,32 @@ impl<S: StreamEffect> Stream for DynamicallyNamedStream<S> {
         >::new(
             buffer.container.take(), source, session, buffer.targets
         ));
+    }
+
+    fn set_stream_availability(availability: &mut StreamAvailability) {
+        availability.add_anonymous::<NamedValue<S::Output>>();
+    }
+
+    fn are_streams_available(availability: &StreamAvailability) -> bool {
+        availability.has_anonymous::<S::Output>()
+    }
+
+    fn into_dyn_stream_input_pack(
+        pack: &mut DynStreamInputPack,
+        inputs: Self::StreamInputPack,
+    ) {
+        pack.add_anonymous(inputs);
+    }
+
+    fn into_dyn_stream_output_pack(
+        pack: &mut DynStreamOutputPack,
+        outputs: Self::StreamOutputPack
+    ) {
+        pack.add_anonymous(outputs);
+    }
+
+    fn has_streams() -> bool {
+        true
     }
 }
 

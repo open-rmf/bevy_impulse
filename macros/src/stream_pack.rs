@@ -17,7 +17,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned};
-use syn::{spanned::Spanned, Ident, ItemStruct};
+use syn::{spanned::Spanned, Ident, ItemStruct, Generics};
 
 // Top-level attr for StreamPack
 const STREAM_ATTR_TAG: &'static str = "stream";
@@ -33,29 +33,13 @@ const BUFFERS_ATTR_TAG: &'static str = "buffers";
 const EFFECT_ATTR_TAG: &'static str = "effect";
 
 pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, TokenStream> {
-    let identities = StructIdentities::from_pack_struct(pack_struct)?;
+    let StructIdentities { inputs, outputs, receivers, channels, buffers } = StructIdentities::from_pack_struct(pack_struct)?;
     let stream_configs = StreamConfig::from_pack_struct(pack_struct)?;
     let (field_idents, stream_effects, field_names_str) = unzip_stream_configs(&stream_configs);
-
-    let stream_pack_trait = impl_stream_pack_trait(pack_struct, &field_idents, &stream_effects, &field_names_str, &identities)?;
-    let stream_pack_structs = impl_stream_pack_structs(pack_struct, &identities, &field_idents, &stream_effects)?;
-
-    Ok(quote! {
-        #stream_pack_structs
-        #stream_pack_trait
-    })
-}
-
-fn impl_stream_pack_trait(
-    pack_struct: &ItemStruct,
-    field_idents: &Vec<&Ident>,
-    stream_effects: &Vec<&TokenStream>,
-    field_names_str: &Vec<String>,
-    struct_identities: &StructIdentities,
-) -> Result<TokenStream, TokenStream> {
-    let pack_ident = &pack_struct.ident;
     let (impl_generics, ty_generics, where_clause) = pack_struct.generics.split_for_impl();
-    let StructIdentities { inputs, outputs, receivers, channels, buffers } = struct_identities;
+    let pack_ident = &pack_struct.ident;
+    let generics = &pack_struct.generics;
+    let vis = &pack_struct.vis;
 
     let input_streams: Vec<Ident> = field_idents
         .iter()
@@ -67,7 +51,53 @@ fn impl_stream_pack_trait(
         .collect();
     let has_streams = !field_idents.is_empty();
 
+    // note: cannot clone for outputs or receivers
+    let clone_for_inputs = impl_clone_for(&inputs, &field_idents, generics);
+    let clone_for_channels = impl_clone_for(&channels, &field_idents, generics);
+    let clone_for_buffers = impl_clone_for(&buffers, &field_idents, generics);
+
     Ok(quote! {
+        #[allow(non_camel_case_types, unused)]
+        #vis struct #inputs #generics {
+            #(
+                pub #field_idents: ::bevy_impulse::InputSlot<<#stream_effects as ::bevy_impulse::StreamEffect>::Input>,
+            )*
+        }
+
+        #clone_for_inputs
+
+        #[allow(non_camel_case_types, unused)]
+        #vis struct #outputs #generics {
+            #(
+                pub #field_idents: ::bevy_impulse::Output<<#stream_effects as ::bevy_impulse::StreamEffect>::Output>,
+            )*
+        }
+
+        #[allow(non_camel_case_types, unused)]
+        #vis struct #receivers #generics {
+            #(
+                pub #field_idents: ::bevy_impulse::Receiver<<#stream_effects as ::bevy_impulse::StreamEffect>::Output>,
+            )*
+        }
+
+        #[allow(non_camel_case_types, unused)]
+        #vis struct #channels #generics {
+            #(
+                pub #field_idents: ::bevy_impulse::NamedStreamChannel<#stream_effects>,
+            )*
+        }
+
+        #clone_for_channels
+
+        #[allow(non_camel_case_types, unused)]
+        #vis struct #buffers #generics {
+            #(
+                pub #field_idents: ::bevy_impulse::NamedStreamBuffer<<#stream_effects as ::bevy_impulse::StreamEffect>::Input>,
+            )*
+        }
+
+        #clone_for_buffers
+
         impl #impl_generics #pack_ident #ty_generics #where_clause {
             #[allow(unused)]
             fn __bevy_impulse_allow_unused_fields(&self) {
@@ -211,7 +241,7 @@ fn impl_stream_pack_trait(
 
             fn into_dyn_stream_input_pack(
                 pack: &mut ::bevy_impulse::dyn_node::DynStreamInputPack,
-                input: Self::StreamInputPack,
+                inputs: Self::StreamInputPack,
             ) {
                 #(
                     pack.add_named(#field_names_str, inputs.#field_idents);
@@ -234,51 +264,24 @@ fn impl_stream_pack_trait(
     })
 }
 
-fn impl_stream_pack_structs(
-    pack_struct: &ItemStruct,
-    StructIdentities { inputs, outputs, receivers, channels, buffers }: &StructIdentities,
+fn impl_clone_for(
+    ident: &Ident,
     field_idents: &Vec<&Ident>,
-    stream_effects: &Vec<&TokenStream>,
-) -> Result<TokenStream, TokenStream> {
-    let generics = &pack_struct.generics;
-    let vis = &pack_struct.vis;
+    generics: &Generics,
+) -> TokenStream {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    Ok(quote!( {
-        #[allow(non_camel_case_types, unused)]
-        #vis struct #inputs #generics {
-            #(
-                pub #field_idents: ::bevy_impulse::InputSlot<<#stream_effects as ::bevy_impulse::StreamEffect>::Input>,
-            )*
+    quote! {
+        impl #impl_generics ::std::clone::Clone for #ident #ty_generics #where_clause {
+            fn clone(&self) -> Self {
+                Self {
+                    #(
+                        #field_idents: ::std::clone::Clone::clone(&self.#field_idents),
+                    )*
+                }
+            }
         }
-
-        #[allow(non_camel_case_types, unused)]
-        #vis struct #outputs #generics {
-            #(
-                pub #field_idents: ::bevy_impulse::Output<<#stream_effects as ::bevy_impulse::StreamEffect>::Output>,
-            )*
-        }
-
-        #[allow(non_camel_case_types, unused)]
-        #vis struct #receivers #generics {
-            #(
-                pub #field_idents: ::bevy_impulse::Receiver<<#stream_effects as ::bevy_impulse::StreamEffect>::Output>,
-            )*
-        }
-
-        #[allow(non_camel_case_types, unused)]
-        #vis struct #channels #generics {
-            #(
-                pub #field_idents: ::bevy_impulse::NamedStreamChannel<#stream_effects>,
-            )*
-        }
-
-        #[allow(non_camel_case_types, unused)]
-        #vis struct #buffers #generics {
-            #(
-                pub #field_idents: ::bevy_impulse::NamedStreamBuffer<<#stream_effects as ::bevy_impulse::StreamEffect>::Input>,
-            )*
-        }
-    }))
+    }
 }
 
 struct StructIdentities {

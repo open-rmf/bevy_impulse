@@ -341,7 +341,7 @@ fn impl_buffer_clone(
                 fn clone(&self) -> Self {
                     Self {
                         #(
-                            #field_ident: self.#field_ident.clone(),
+                            #field_ident: ::std::clone::Clone::clone(&self.#field_ident),
                         )*
                     }
                 }

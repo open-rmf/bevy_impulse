@@ -62,3 +62,13 @@ impl<S: StreamEffect> StreamChannel<S> {
         }
     }
 }
+
+impl<S> Clone for StreamChannel<S> {
+    fn clone(&self) -> Self {
+        Self {
+            target: ::std::clone::Clone::clone(&self.target),
+            inner: Arc::clone(&self.inner),
+            _ignore: Default::default(),
+        }
+    }
+}
