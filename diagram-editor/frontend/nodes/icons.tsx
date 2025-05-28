@@ -1,13 +1,67 @@
-// TODO: better icons
-export { default as NodeIcon } from '@mui/icons-material/Extension';
-// export { default as SectionIcon }
-export { default as ForkCloneIcon } from '@mui/icons-material/ContentCopy';
-export { default as UnzipIcon } from '@mui/icons-material/Unarchive';
-export { default as ForkResult } from '@mui/icons-material/ForkRight';
-export { default as SplitIcon } from '@mui/icons-material/ForkLeft';
-export { default as JoinIcon } from '@mui/icons-material/Merge';
-export { default as SerializedJoinIcon } from '@mui/icons-material/Merge';
-export { default as TransformIcon } from '@mui/icons-material/ChangeCircle';
-export { default as BufferIcon } from '@mui/icons-material/Cloud';
-export { default as BufferAccessIcon } from '@mui/icons-material/Cloud';
-export { default as ListenIcon } from '@mui/icons-material/Hearing';
+import TransformIcon from '@mui/icons-material/ChangeCircleOutlined';
+import {
+  default as BufferAccessIcon,
+  default as BufferIcon,
+} from '@mui/icons-material/CloudOutlined';
+import ForkCloneIcon from '@mui/icons-material/ContentCopyOutlined';
+import NodeIcon from '@mui/icons-material/ExtensionOutlined';
+import SplitIcon from '@mui/icons-material/ForkLeftOutlined';
+import ForkResult from '@mui/icons-material/ForkRightOutlined';
+import ListenIcon from '@mui/icons-material/HearingOutlined';
+import {
+  default as JoinIcon,
+  default as SerializedJoinIcon,
+} from '@mui/icons-material/Merge';
+import SectionIcon from '@mui/icons-material/SelectAllOutlined';
+import UnzipIcon from '@mui/icons-material/UnarchiveOutlined';
+import type React from 'react';
+
+import type { DiagramOperation } from '../types/diagram';
+
+export function getIcon(op: DiagramOperation): React.ComponentType {
+  switch (op.type) {
+    case 'node':
+      return NodeIcon;
+    case 'section':
+      return SectionIcon;
+    case 'fork_clone':
+      return ForkCloneIcon;
+    case 'unzip':
+      return UnzipIcon;
+    case 'fork_result':
+      return ForkResult;
+    case 'split':
+      return SplitIcon;
+    case 'join':
+      return JoinIcon;
+    case 'serialized_join':
+      return SerializedJoinIcon;
+    case 'transform':
+      return TransformIcon;
+    case 'buffer':
+      return BufferIcon;
+    case 'buffer_access':
+      return BufferAccessIcon;
+    case 'listen':
+      return ListenIcon;
+    default:
+      return () => null; // Return a component that renders nothing
+  }
+}
+
+export { default as TransformIcon } from '@mui/icons-material/ChangeCircleOutlined';
+export {
+  default as BufferAccessIcon,
+  default as BufferIcon,
+} from '@mui/icons-material/CloudOutlined';
+export { default as ForkCloneIcon } from '@mui/icons-material/ContentCopyOutlined';
+export { default as NodeIcon } from '@mui/icons-material/ExtensionOutlined';
+export { default as SplitIcon } from '@mui/icons-material/ForkLeftOutlined';
+export { default as ForkResult } from '@mui/icons-material/ForkRightOutlined';
+export { default as ListenIcon } from '@mui/icons-material/HearingOutlined';
+export {
+  default as JoinIcon,
+  default as SerializedJoinIcon,
+} from '@mui/icons-material/MergeOutlined';
+export { default as SectionIcon } from '@mui/icons-material/SelectAllOutlined';
+export { default as UnzipIcon } from '@mui/icons-material/UnarchiveOutlined';

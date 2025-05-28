@@ -3,16 +3,30 @@ import type { NodePositionChange } from '@xyflow/react';
 import type { DiagramEditorNode } from '../nodes';
 import { getNextIds } from './load-diagram';
 
+export interface AutoLayoutOptions {
+  rootPosition: { x: number; y: number };
+  cellWidth: number;
+  cellHeight: number;
+}
+
+const DEFAULT_OPTIONS: AutoLayoutOptions = {
+  rootPosition: { x: 0, y: 0 },
+  cellWidth: 200,
+  cellHeight: 100,
+};
+
 /**
  * Layout an array of diagram nodes so that they don't overlap.
  */
 export function autoLayout(
   start: string,
   nodes: DiagramEditorNode[],
-  rootPosition = { x: 0, y: 0 },
+  {
+    rootPosition = DEFAULT_OPTIONS.rootPosition,
+    cellWidth = DEFAULT_OPTIONS.cellWidth,
+    cellHeight = DEFAULT_OPTIONS.cellHeight,
+  }: Partial<AutoLayoutOptions> = DEFAULT_OPTIONS,
 ): NodePositionChange[] {
-  const cellWidth = 200;
-  const cellHeight = 100;
   const map = new Map(nodes.map((node) => [node.id, node]));
 
   const getNode = (id: string) => {

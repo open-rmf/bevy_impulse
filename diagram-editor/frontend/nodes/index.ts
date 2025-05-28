@@ -18,10 +18,14 @@ export const NODE_TYPES = {
 
 export type NodeTypes = keyof typeof NODE_TYPES;
 
-export type DiagramEditorNode = Node<
-  DiagramOperation | Record<string, never>,
+export type BuiltinNode = Node<Record<string, never>, NodeTypes>;
+
+export type OperationNode = Node<
+  DiagramOperation & { opId: string },
   NodeTypes
 >;
+
+export type DiagramEditorNode = BuiltinNode | OperationNode;
 
 type JoinOperation = Extract<
   DiagramOperation,
@@ -29,3 +33,9 @@ type JoinOperation = Extract<
 >;
 
 export type JoinNode = Node<JoinOperation, NodeTypes>;
+
+export function isOperationNode(
+  node: DiagramEditorNode,
+): node is OperationNode {
+  return !node.id.startsWith('builtin:');
+}

@@ -135,7 +135,7 @@ function buildGraph(diagram: Diagram): Graph {
           id: opId,
           type: 'inputOutput',
           position: { x: 0, y: 0 },
-          data: op,
+          data: { opId, ...op },
         }) satisfies DiagramEditorNode,
     ),
   ];
