@@ -22,8 +22,8 @@ use std::{
 };
 
 use crate::{
-    dyn_node::DynStreamInputPack,
-    AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope, StreamPack,
+    dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage,
+    Scope, StreamPack,
 };
 
 use super::{
@@ -57,7 +57,9 @@ impl OperationRef {
         match self {
             Self::Builtin { builtin } => Self::Builtin { builtin },
             Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
-            Self::StreamOut(stream_out) => Self::StreamOut(stream_out.in_namespaces(parent_namespaces)),
+            Self::StreamOut(stream_out) => {
+                Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
+            }
         }
     }
 }
@@ -235,10 +237,7 @@ impl From<StreamOutRef> for OperationRef {
     }
 }
 
-fn apply_parent_namespaces(
-    parent_namespaces: &[Arc<str>],
-    namespaces: &mut NamespaceList,
-) {
+fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut NamespaceList) {
     // Put the parent namespaces at the front and append the operation's
     // existing namespaces at the back.
     let new_namespaces = parent_namespaces
@@ -1119,7 +1118,9 @@ impl ConnectIntoTarget for BasicConnect {
         builder: &mut Builder,
         _: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        output.connect_to(&self.input_slot, builder).map_err(Into::into)
+        output
+            .connect_to(&self.input_slot, builder)
+            .map_err(Into::into)
     }
 
     fn infer_input_type(

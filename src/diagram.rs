@@ -56,11 +56,11 @@ use std::{
     sync::Arc,
 };
 
+pub use crate::type_info::TypeInfo;
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
     SplitConnectionError, StreamPack,
 };
-pub use crate::type_info::TypeInfo;
 
 use schemars::{
     r#gen::SchemaGenerator,

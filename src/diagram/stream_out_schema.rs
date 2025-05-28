@@ -15,15 +15,15 @@
  *
 */
 
-use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::Builder;
 
 use super::{
-    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    OperationName, StreamOutRef, RedirectConnection,
+    BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, OperationName,
+    RedirectConnection, StreamOutRef,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -40,7 +40,6 @@ impl BuildDiagramOperation for StreamOutSchema {
         _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-
         let redirect_to = ctx.into_operation_ref(StreamOutRef::new(Arc::clone(&self.name)));
         ctx.set_connect_into_target(id, RedirectConnection::new(redirect_to))?;
 

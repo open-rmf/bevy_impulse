@@ -17,7 +17,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned};
-use syn::{spanned::Spanned, Ident, ItemStruct, Generics};
+use syn::{spanned::Spanned, Generics, Ident, ItemStruct};
 
 // Top-level attr for StreamPack
 const STREAM_ATTR_TAG: &'static str = "stream";
@@ -33,7 +33,13 @@ const BUFFERS_ATTR_TAG: &'static str = "buffers";
 const EFFECT_ATTR_TAG: &'static str = "effect";
 
 pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, TokenStream> {
-    let StructIdentities { inputs, outputs, receivers, channels, buffers } = StructIdentities::from_pack_struct(pack_struct)?;
+    let StructIdentities {
+        inputs,
+        outputs,
+        receivers,
+        channels,
+        buffers,
+    } = StructIdentities::from_pack_struct(pack_struct)?;
     let stream_configs = StreamConfig::from_pack_struct(pack_struct)?;
     let (field_idents, stream_effects, field_names_str) = unzip_stream_configs(&stream_configs);
     let (impl_generics, ty_generics, where_clause) = pack_struct.generics.split_for_impl();
@@ -264,11 +270,7 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
     })
 }
 
-fn impl_clone_for(
-    ident: &Ident,
-    field_idents: &Vec<&Ident>,
-    generics: &Generics,
-) -> TokenStream {
+fn impl_clone_for(ident: &Ident, field_idents: &Vec<&Ident>, generics: &Generics) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     quote! {
@@ -325,7 +327,8 @@ impl StructIdentities {
                             "Unrecognized attribute for StreamPack macro. Choices are \
                             {INPUTS_ATTR_TAG}, {OUTPUTS_ATTR_TAG}, {RECEIVERS_ATTR_TAG}, \
                             {CHANNELS_ATTR_TAG}, {BUFFERS_ATTR_TAG}.",
-                    )));
+                        ),
+                    ));
                 }
 
                 Ok(())
@@ -348,10 +351,9 @@ impl StreamConfig {
             syn::Fields::Named(fields) => {
                 let mut configs = Vec::new();
                 for field in &fields.named {
-                    let field_name = field.ident.as_ref().cloned().ok_or_else(||
-                        syn::Error::new(field.span(), "expected named field")
-                        .into_compile_error()
-                    )?;
+                    let field_name = field.ident.as_ref().cloned().ok_or_else(|| {
+                        syn::Error::new(field.span(), "expected named field").into_compile_error()
+                    })?;
                     let mut has_effect = false;
                     for attr in field.attrs.iter() {
                         if !attr.path().is_ident(STREAM_ATTR_TAG) {
@@ -389,21 +391,33 @@ impl StreamConfig {
                         }
                     };
 
-                    configs.push(StreamConfig { field_name, stream_effect });
+                    configs.push(StreamConfig {
+                        field_name,
+                        stream_effect,
+                    });
                 }
 
                 Ok(configs)
             }
-            _ => Err(syn::Error::new(pack_struct.span(), "expected named fields").into_compile_error()),
+            _ => {
+                Err(syn::Error::new(pack_struct.span(), "expected named fields")
+                    .into_compile_error())
+            }
         }
     }
 }
 
-fn unzip_stream_configs(configs: &Vec<StreamConfig>) -> (Vec<&Ident>, Vec<&TokenStream>, Vec<String>) {
+fn unzip_stream_configs(
+    configs: &Vec<StreamConfig>,
+) -> (Vec<&Ident>, Vec<&TokenStream>, Vec<String>) {
     let mut field_idents = Vec::new();
     let mut field_names_str = Vec::new();
     let mut stream_effects = Vec::new();
-    for StreamConfig { field_name, stream_effect } in configs {
+    for StreamConfig {
+        field_name,
+        stream_effect,
+    } in configs
+    {
         field_idents.push(field_name);
         field_names_str.push(field_name.to_string());
         stream_effects.push(stream_effect);

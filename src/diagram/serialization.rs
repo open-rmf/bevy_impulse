@@ -24,9 +24,8 @@ use schemars::{gen::SchemaGenerator, JsonSchema};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{
-    supported::*, TypeInfo, DiagramContext, DiagramErrorCode, DynForkResult,
-    DynInputSlot, DynOutput, JsonMessage, MessageRegistration, MessageRegistry,
-    TypeMismatch,
+    supported::*, DiagramContext, DiagramErrorCode, DynForkResult, DynInputSlot, DynOutput,
+    JsonMessage, MessageRegistration, MessageRegistry, TypeInfo, TypeMismatch,
 };
 use crate::{Builder, JsonBuffer};
 
@@ -206,7 +205,8 @@ impl ImplicitSerialization {
             return Err(TypeMismatch {
                 source_type: TypeInfo::of::<JsonMessage>(),
                 target_type: *serialized_input.message_info(),
-            }.into());
+            }
+            .into());
         }
 
         Ok(Self {
@@ -310,7 +310,9 @@ impl ImplicitDeserialization {
     ) -> Result<(), DiagramErrorCode> {
         if incoming.message_info() == self.deserialized_input.message_info() {
             // Connect them directly because they match
-            return incoming.connect_to(&self.deserialized_input, builder).map_err(Into::into);
+            return incoming
+                .connect_to(&self.deserialized_input, builder)
+                .map_err(Into::into);
         }
 
         if incoming.message_info() == &TypeInfo::of::<JsonMessage>() {
@@ -335,13 +337,16 @@ impl ImplicitDeserialization {
                 }
             };
 
-            return incoming.connect_to(&serialized_input, builder).map_err(Into::into);
+            return incoming
+                .connect_to(&serialized_input, builder)
+                .map_err(Into::into);
         }
 
         Err(TypeMismatch {
             source_type: *incoming.message_info(),
             target_type: *self.deserialized_input.message_info(),
-        }.into())
+        }
+        .into())
     }
 
     pub fn deserialized_input_slot(&self) -> &Arc<DynInputSlot> {
@@ -360,7 +365,8 @@ impl ImplicitStringify {
             return Err(TypeMismatch {
                 source_type: TypeInfo::of::<String>(),
                 target_type: *string_input.message_info(),
-            }.into());
+            }
+            .into());
         }
 
         Ok(Self {

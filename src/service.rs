@@ -16,8 +16,8 @@
 */
 
 use crate::{
-    AddOperation, OperateService, ProvideOnce, Provider, RunCommandsOnWorldExt, StreamOf,
-    StreamPack, StreamAvailability,
+    AddOperation, OperateService, ProvideOnce, Provider, RunCommandsOnWorldExt, StreamAvailability,
+    StreamOf, StreamPack,
 };
 
 use bevy_app::prelude::App;

@@ -29,8 +29,8 @@ use crate::{
     CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
     IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateCancel,
     OperateDynamicGate, OperateQuietCancel, OperateSplit, OperateStaticGate, Output, ProvideOnce,
-    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamPack,
-    StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamPack, StreamTargetMap, Trim,
+    TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;

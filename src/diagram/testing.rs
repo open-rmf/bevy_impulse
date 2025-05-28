@@ -4,8 +4,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    testing::TestingContext,
-    Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service, StreamPack,
+    testing::TestingContext, Builder, JsonMessage, RequestExt, RunCommandsOnWorldExt, Service,
+    StreamPack,
 };
 
 use super::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions};
@@ -56,7 +56,6 @@ impl DiagramTestFixture {
             .world
             .command(|cmds| diagram.spawn_workflow(cmds, &self.registry))
     }
-
 
     /// Spawns a workflow from a diagram then run the workflow until completion.
     /// Returns the result of the workflow.

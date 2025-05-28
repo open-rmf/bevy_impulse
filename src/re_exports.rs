@@ -18,4 +18,4 @@
 //! This module contains symbols that are being re-exported so they can be used
 //! by bevy_impulse_derive.
 
-pub use bevy_ecs::prelude::{Entity, With, World, Commands};
+pub use bevy_ecs::prelude::{Commands, Entity, With, World};

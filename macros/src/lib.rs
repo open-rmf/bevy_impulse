@@ -15,17 +15,17 @@
  *
 */
 
-mod buffer;
-use buffer::{impl_buffer_key_map, impl_joined_value};
+mod derive_buffer;
+use derive_buffer::{impl_buffer_key_map, impl_joined_value};
+
+mod derive_section;
+use derive_section::impl_section;
 
 mod derive_stream;
 use derive_stream::impl_derive_stream;
 
-mod section;
-use section::impl_section;
-
-mod stream_pack;
-use stream_pack::impl_stream_pack;
+mod derive_stream_pack;
+use derive_stream_pack::impl_stream_pack;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -116,6 +116,6 @@ pub fn derive_stream_pack(input: TokenStream) -> TokenStream {
         Err(msg) => quote! {
             compile_error!(#msg);
         }
-        .into()
+        .into(),
     }
 }

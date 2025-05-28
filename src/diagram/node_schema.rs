@@ -15,18 +15,15 @@
  *
 */
 
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::Builder;
 
 use super::{
-    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode,
-    MissingStream, NextOperation, OperationName, is_default,
+    is_default, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode,
+    MissingStream, NextOperation, OperationName,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -53,7 +50,11 @@ impl BuildDiagramOperation for NodeSchema {
         ctx.set_input_for_target(id, node.input.into())?;
         ctx.add_output_into_target(&self.next, node.output);
 
-        let available_names = node.streams.available_names().map(|n| n.clone().into()).collect();
+        let available_names = node
+            .streams
+            .available_names()
+            .map(|n| n.clone().into())
+            .collect();
 
         for (name, target) in &self.stream_out {
             let Some(output) = node.streams.take_named(&name) else {
@@ -75,7 +76,7 @@ mod tests {
     // TODO(@mxgrey): Stop depending on stream::tests::* when we have the proc
     // macro finished.
     use crate::{
-        diagram::{*, testing::*},
+        diagram::{testing::*, *},
         prelude::*,
         stream::tests::*,
     };
@@ -88,21 +89,19 @@ mod tests {
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("streaming_node"),
             |builder, _config: ()| {
-                builder.create_map(
-                    |input: BlockingMap<Vec<String>, TestStreamPack>| {
-                        for r in input.request {
-                            if let Ok(value) = r.parse::<u32>() {
-                                input.streams.stream_u32.send(value);
-                            }
-
-                            if let Ok(value) = r.parse::<i32>() {
-                                input.streams.stream_i32.send(value);
-                            }
-
-                            input.streams.stream_string.send(r);
+                builder.create_map(|input: BlockingMap<Vec<String>, TestStreamPack>| {
+                    for r in input.request {
+                        if let Ok(value) = r.parse::<u32>() {
+                            input.streams.stream_u32.send(value);
                         }
+
+                        if let Ok(value) = r.parse::<i32>() {
+                            input.streams.stream_i32.send(value);
+                        }
+
+                        input.streams.stream_string.send(r);
                     }
-                )
+                })
             },
         );
 
@@ -144,9 +143,9 @@ mod tests {
             "hello".to_owned(),
         ];
 
-        let (_, receivers) = fixture.spawn_and_run_with_streams::<_, (), TestStreamPack>(
-            &diagram, request,
-        ).unwrap();
+        let (_, receivers) = fixture
+            .spawn_and_run_with_streams::<_, (), TestStreamPack>(&diagram, request)
+            .unwrap();
 
         let outcome_stream_u32 = collect_received_values(receivers.stream_u32);
         let outcome_stream_i32 = collect_received_values(receivers.stream_i32);

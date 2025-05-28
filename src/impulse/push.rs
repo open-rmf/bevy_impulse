@@ -21,8 +21,8 @@ use bevy_ecs::prelude::{Component, Entity};
 use bevy_hierarchy::DespawnRecursiveExt;
 
 use crate::{
-    add_lifecycle_dependency, Collection, Impulsive, Input, InputBundle, ManageInput,
-    OperationRequest, OperationResult, OperationSetup, OrBroken, Storage, NamedValue,
+    add_lifecycle_dependency, Collection, Impulsive, Input, InputBundle, ManageInput, NamedValue,
+    OperationRequest, OperationResult, OperationSetup, OrBroken, Storage,
 };
 
 pub(crate) struct Push<T> {
@@ -69,7 +69,12 @@ impl<T: 'static + Send + Sync> Impulsive for Push<T> {
     fn execute(OperationRequest { source, world, .. }: OperationRequest) -> OperationResult {
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let Input { session, data } = source_mut.take_input::<T>()?;
-        let PushSettings { target, is_stream, name, .. } = source_mut.get::<PushSettings>().or_broken()?.clone();
+        let PushSettings {
+            target,
+            is_stream,
+            name,
+            ..
+        } = source_mut.get::<PushSettings>().or_broken()?.clone();
         let mut target_mut = world.get_entity_mut(target).or_broken()?;
 
         if let Some(name) = name {

@@ -23,13 +23,12 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     dyn_node::{DynStreamInputPack, DynStreamOutputPack},
-    AddImpulse, AddOperation, Builder, DefaultStreamContainer,
-    InnerChannel, InputSlot, NamedStreamTargets, NamedStreamRedirect,
-    NamedTarget, NamedValue, OperationResult, OperationRoster,
-    OrBroken, Output, Push, Receiver, RedirectScopeStream, RedirectWorkflowStream,
-    ReportUnhandled, SendNamedStreams, SingleInputStorage, StreamAvailability, StreamEffect,
-    StreamPack, StreamRequest, StreamTargetMap, TakenStream, UnusedStreams, UnusedTarget,
-    send_named_stream,
+    send_named_stream, AddImpulse, AddOperation, Builder, DefaultStreamBufferContainer,
+    InnerChannel, InputSlot, NamedStreamRedirect, NamedStreamTargets, NamedTarget, NamedValue,
+    OperationResult, OperationRoster, OrBroken, Output, Push, Receiver, RedirectScopeStream,
+    RedirectWorkflowStream, ReportUnhandled, SendNamedStreams, SingleInputStorage,
+    StreamAvailability, StreamEffect, StreamPack, StreamRequest, StreamTargetMap, TakenStream,
+    UnusedStreams, UnusedTarget,
 };
 
 /// A wrapper to turn any stream type into a named stream. Each item that moves
@@ -59,7 +58,10 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         in_scope: Entity,
         out_scope: Entity,
         commands: &mut Commands,
-    ) -> (InputSlot<NamedValue<S::Input>>, Output<NamedValue<S::Output>>) {
+    ) -> (
+        InputSlot<NamedValue<S::Input>>,
+        Output<NamedValue<S::Output>>,
+    ) {
         let source = commands.spawn(()).id();
         let target = commands.spawn(UnusedTarget).id();
         commands.add(AddOperation::new(
@@ -124,7 +126,10 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         commands: &mut Commands,
     ) {
         let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<NamedValue<S::Output>>::new(target, true)));
+        commands.add(AddImpulse::new(
+            redirect,
+            Push::<NamedValue<S::Output>>::new(target, true),
+        ));
         map.add_anonymous::<NamedValue<S::Output>>(redirect, commands);
     }
 
@@ -191,7 +196,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
     ) {
         commands.add(SendNamedStreams::<
             S,
-            DefaultStreamContainer<NamedValue<S::Input>>,
+            DefaultStreamBufferContainer<NamedValue<S::Input>>,
         >::new(
             buffer.container.take(), source, session, buffer.targets
         ));
@@ -205,16 +210,13 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
         availability.has_anonymous::<S::Output>()
     }
 
-    fn into_dyn_stream_input_pack(
-        pack: &mut DynStreamInputPack,
-        inputs: Self::StreamInputPack,
-    ) {
+    fn into_dyn_stream_input_pack(pack: &mut DynStreamInputPack, inputs: Self::StreamInputPack) {
         pack.add_anonymous(inputs);
     }
 
     fn into_dyn_stream_output_pack(
         pack: &mut DynStreamOutputPack,
-        outputs: Self::StreamOutputPack
+        outputs: Self::StreamOutputPack,
     ) {
         pack.add_anonymous(outputs);
     }
@@ -255,7 +257,7 @@ impl<S: StreamEffect> DynamicallyNamedStreamChannel<S> {
 
 pub struct DynamicallyNamedStreamBuffer<T: 'static + Send + Sync> {
     targets: Arc<NamedStreamTargets>,
-    container: Rc<RefCell<DefaultStreamContainer<NamedValue<T>>>>,
+    container: Rc<RefCell<DefaultStreamBufferContainer<NamedValue<T>>>>,
 }
 
 impl<T: 'static + Send + Sync> Clone for DynamicallyNamedStreamBuffer<T> {

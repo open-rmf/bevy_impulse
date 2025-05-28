@@ -19,13 +19,12 @@ use bevy_ecs::prelude::Entity;
 use std::{
     any::Any,
     borrow::Cow,
-    collections::{HashMap, hash_map::Keys as HashMapKeys},
+    collections::{hash_map::Keys as HashMapKeys, HashMap},
 };
 use thiserror::Error as ThisError;
 
 use crate::{
-    type_info::TypeInfo,
-    AnyBuffer, Builder, Connect, InputSlot, Node, Output, StreamPack,
+    type_info::TypeInfo, AnyBuffer, Builder, Connect, InputSlot, Node, Output, StreamPack,
 };
 
 /// A type erased [`Node`]
@@ -214,10 +213,7 @@ impl DynStreamInputPack {
     }
 
     /// Add an anonymous stream input to this pack.
-    pub fn add_anonymous(
-        &mut self,
-        input: impl Into<DynInputSlot>,
-    ) {
+    pub fn add_anonymous(&mut self, input: impl Into<DynInputSlot>) {
         let input: DynInputSlot = input.into();
         self.anonymous.insert(*input.message_info(), input);
     }
@@ -238,11 +234,7 @@ pub struct DynStreamOutputPack {
 
 impl DynStreamOutputPack {
     /// Add a named stream output to this pack.
-    pub fn add_named(
-        &mut self,
-        name: impl Into<Cow<'static, str>>,
-        output: impl Into<DynOutput>,
-    ) {
+    pub fn add_named(&mut self, name: impl Into<Cow<'static, str>>, output: impl Into<DynOutput>) {
         self.named.insert(name.into(), output.into());
     }
 
@@ -253,10 +245,7 @@ impl DynStreamOutputPack {
     }
 
     /// Add an anonymous stream output to this pack.
-    pub fn add_anonymous(
-        &mut self,
-        output: impl Into<DynOutput>,
-    ) {
+    pub fn add_anonymous(&mut self, output: impl Into<DynOutput>) {
         let output: DynOutput = output.into();
         self.anonymous.insert(*output.message_info(), output);
     }

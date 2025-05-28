@@ -16,7 +16,7 @@
 */
 
 use bevy_ecs::{
-    prelude::{Commands, Entity, World, Component},
+    prelude::{Commands, Component, Entity, World},
     system::Command,
 };
 use bevy_hierarchy::BuildChildren;
@@ -26,13 +26,13 @@ use std::{borrow::Cow, cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    AddOperation, Builder, DefaultStreamContainer, DeferredRoster, ExitTargetStorage, InnerChannel,
-    Input, InputBundle, InputSlot, ManageInput, OperationRequest, OperationResult, OperationRoster,
-    OperationSetup, OrBroken, Output, RedirectScopeStream, RedirectWorkflowStream, ReportUnhandled, ScopeStorage,
-    SingleInputStorage, StreamEffect, StreamRedirect, StreamRequest, StreamTargetMap,
-    UnusedStreams, UnusedTarget, Receiver, AddImpulse, TakenStream, Push,
+    AddImpulse, AddOperation, Builder, DefaultStreamBufferContainer, DeferredRoster,
+    ExitTargetStorage, InnerChannel, Input, InputBundle, InputSlot, ManageInput, OperationRequest,
+    OperationResult, OperationRoster, OperationSetup, OrBroken, Output, Push, Receiver,
+    RedirectScopeStream, RedirectWorkflowStream, ReportUnhandled, ScopeStorage, SingleInputStorage,
+    StreamEffect, StreamRedirect, StreamRequest, StreamTargetMap, TakenStream, UnusedStreams,
+    UnusedTarget,
 };
-
 
 pub struct NamedStream<S: StreamEffect>(std::marker::PhantomData<fn(S)>);
 
@@ -91,10 +91,7 @@ impl<S: StreamEffect> NamedStream<S> {
         commands: &mut Commands,
     ) -> Receiver<S::Output> {
         let (sender, receiver) = unbounded_channel::<S::Output>();
-        let target = commands
-            .spawn(())
-            .set_parent(source)
-            .id();
+        let target = commands.spawn(()).set_parent(source).id();
 
         map.add_named::<S::Output>(name.into(), target, commands);
         commands.add(AddImpulse::new(target, TakenStream::new(sender)));
@@ -111,7 +108,10 @@ impl<S: StreamEffect> NamedStream<S> {
     ) {
         let name = name.into();
         let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<S::Output>::new(target, true).with_name(name.clone())));
+        commands.add(AddImpulse::new(
+            redirect,
+            Push::<S::Output>::new(target, true).with_name(name.clone()),
+        ));
         map.add_named::<S::Output>(name, redirect, commands);
     }
 
@@ -125,9 +125,7 @@ impl<S: StreamEffect> NamedStream<S> {
         NamedStreamChannel::new(name.into(), Arc::new(targets), Arc::clone(&inner))
     }
 
-    pub fn make_stream_buffer(
-        target_map: Option<&StreamTargetMap>
-    ) -> NamedStreamBuffer<S::Input> {
+    pub fn make_stream_buffer(target_map: Option<&StreamTargetMap>) -> NamedStreamBuffer<S::Input> {
         let targets = NamedStreamTargets::new::<S::Output>(target_map);
         NamedStreamBuffer {
             targets: Arc::new(targets),
@@ -165,7 +163,15 @@ impl<S: StreamEffect> NamedStream<S> {
             S::side_effect(value, &mut request)
                 .and_then(|value| {
                     target
-                        .map(|t| t.send_output(NamedValue { name: name.clone(), value }, request))
+                        .map(|t| {
+                            t.send_output(
+                                NamedValue {
+                                    name: name.clone(),
+                                    value,
+                                },
+                                request,
+                            )
+                        })
                         .unwrap_or(Ok(()))
                 })
                 .report_unhandled(source, world);
@@ -186,27 +192,22 @@ impl<S: StreamEffect> NamedStream<S> {
         commands: &mut Commands,
     ) {
         let name = name.into();
-        let container: DefaultStreamContainer<_> = buffer
+        let container: DefaultStreamBufferContainer<_> = buffer
             .container
             .take()
             .into_iter()
-            .map(|value| {
-                NamedValue {
-                    name: name.clone(),
-                    value,
-                }
+            .map(|value| NamedValue {
+                name: name.clone(),
+                value,
             })
             .collect();
 
         commands.add(SendNamedStreams::<
             S,
-            DefaultStreamContainer<NamedValue<S::Input>>,
-        >::new(
-            container, source, session, buffer.targets,
-        ));
+            DefaultStreamBufferContainer<NamedValue<S::Input>>,
+        >::new(container, source, session, buffer.targets));
     }
 }
-
 
 /// A container that can tie together a name with a value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,11 +217,11 @@ pub struct NamedValue<T: 'static + Send + Sync> {
 }
 
 impl<T: 'static + Send + Sync> NamedValue<T> {
-    pub fn new(
-        name: impl Into<Cow<'static, str>>,
-        value: T,
-    ) -> Self {
-        Self { name: name.into(), value }
+    pub fn new(name: impl Into<Cow<'static, str>>, value: T) -> Self {
+        Self {
+            name: name.into(),
+            value,
+        }
     }
 }
 
@@ -542,7 +543,7 @@ pub(crate) fn send_named_stream<S: StreamEffect>(
 
 pub struct NamedStreamBuffer<T: 'static + Send + Sync> {
     targets: Arc<NamedStreamTargets>,
-    container: Rc<RefCell<DefaultStreamContainer<T>>>,
+    container: Rc<RefCell<DefaultStreamBufferContainer<T>>>,
 }
 
 impl<T: 'static + Send + Sync> Clone for NamedStreamBuffer<T> {

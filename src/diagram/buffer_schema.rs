@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    TypeInfo, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, NextOperation, OperationName,
+    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    NextOperation, OperationName, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

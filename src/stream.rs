@@ -15,36 +15,14 @@
  *
 */
 
-use bevy_ecs::{
-    prelude::{Commands, Component, Entity, World},
-    system::Command,
-};
-use bevy_hierarchy::BuildChildren;
-pub use bevy_impulse_derive::{Stream, StreamPack};
-use bevy_utils::all_tuples;
+use bevy_ecs::prelude::{Entity, World};
 
-use tokio::sync::mpsc::unbounded_channel;
-pub use tokio::sync::mpsc::UnboundedReceiver as Receiver;
+use std::sync::OnceLock;
 
-use std::{
-    any::TypeId,
-    borrow::Cow,
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap, HashSet},
-    rc::Rc,
-    sync::{Arc, OnceLock},
-};
+use crate::{ManageInput, OperationError, OperationResult, OperationRoster, OrBroken};
 
-use smallvec::SmallVec;
-
-use crate::{
-    dyn_node::{DynStreamInputPack, DynStreamOutputPack},
-    AddImpulse, AddOperation, AnonymousStreamRedirect, Builder, DeferredRoster,
-    DuplicateStream, InnerChannel, InputSlot, ManageInput, OperationError, OperationResult,
-    OperationRoster, OrBroken, Output, Push, RedirectScopeStream, RedirectWorkflowStream,
-    ReportUnhandled, SingleInputStorage, TakenStream, UnhandledErrors, UnusedStreams, UnusedTarget,
-    MissingStreamsError,
-};
+mod anonymous_stream;
+pub use anonymous_stream::*;
 
 mod dynamically_named_stream;
 pub use dynamically_named_stream::*;
@@ -52,9 +30,39 @@ pub use dynamically_named_stream::*;
 mod named_stream;
 pub use named_stream::*;
 
+mod stream_availability;
+pub use stream_availability::*;
+
+mod stream_buffer;
+pub use stream_buffer::*;
+
 mod stream_channel;
 pub use stream_channel::*;
 
+mod stream_filter;
+pub use stream_filter::*;
+
+mod stream_pack;
+pub use stream_pack::*;
+
+mod stream_target_map;
+pub use stream_target_map::*;
+
+// TODO(@mxgrey): Add module-level documentation for stream.rs
+
+pub use bevy_impulse_derive::{Stream, StreamPack};
+/// You can create custom stream types that have side-effects, such as:
+/// - applying a transformation to the stream input to produce a different type of output
+/// - logging the message data
+/// - triggering an event or modifying a resource/component in the [`World`]
+///
+/// After you have implemented `StreamEffect` for your struct, you can apply
+/// `#[derive(Stream)]` to the struct and then use as a [`StreamPack`], either
+/// on its own or in a tuple.
+///
+/// If you just want to stream a message with no side-effects, you can simply
+/// wrap your message type in [`StreamOf`] to get a [`StreamPack`]. Users only
+/// need to use `StreamEffect` if you want custom stream side-effects.
 pub trait StreamEffect: 'static + Send + Sync + Sized {
     type Input: 'static + Send + Sync;
     type Output: 'static + Send + Sync;
@@ -90,12 +98,11 @@ impl<T: 'static + Send + Sync> std::fmt::Debug for StreamOf<T> {
     }
 }
 
-pub type DefaultStreamContainer<T> = SmallVec<[T; 16]>;
-
 impl<T: 'static + Send + Sync> StreamEffect for StreamOf<T> {
     type Input = T;
     type Output = T;
 
+    /// `StreamOf` has no side-effect
     fn side_effect(
         input: Self::Input,
         _: &mut StreamRequest,
@@ -104,225 +111,10 @@ impl<T: 'static + Send + Sync> StreamEffect for StreamOf<T> {
     }
 }
 
-/// A wrapper to turn any [`StreamEffect`] into an anonymous (unnamed) stream.
-/// This should be used if you want a stream with the same behavior as [`StreamOf`]
-/// but with some additional side effect. The input and output data types of the
-/// stream may be different.
-pub struct AnonymousStream<S: StreamEffect>(std::marker::PhantomData<fn(S)>);
-
-impl<S: StreamEffect> StreamEffect for AnonymousStream<S> {
-    type Input = S::Input;
-    type Output = S::Output;
-    fn side_effect(
-        input: Self::Input,
-        request: &mut StreamRequest,
-    ) -> Result<Self::Output, OperationError> {
-        S::side_effect(input, request)
-    }
-}
-
-impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
-    type StreamInputPack = InputSlot<S::Input>;
-    type StreamOutputPack = Output<S::Output>;
-    type StreamReceivers = Receiver<S::Output>;
-    type StreamChannels = StreamChannel<S>;
-    type StreamBuffers = StreamBuffer<S::Input>;
-
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (InputSlot<S::Input>, Output<S::Output>) {
-        let source = commands.spawn(()).id();
-        let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
-            Some(in_scope),
-            source,
-            RedirectScopeStream::<Self>::new(target),
-        ));
-
-        (
-            InputSlot::new(in_scope, source),
-            Output::new(out_scope, target),
-        )
-    }
-
-    fn spawn_workflow_streams(builder: &mut Builder) -> InputSlot<S::Input> {
-        let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(
-            Some(builder.scope()),
-            source,
-            RedirectWorkflowStream::new(AnonymousStreamRedirect::<S>::new(None)),
-        ));
-        InputSlot::new(builder.scope, source)
-    }
-
-    fn spawn_node_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> Output<S::Output> {
-        let target = builder
-            .commands
-            .spawn((SingleInputStorage::new(source), UnusedTarget))
-            .id();
-
-        map.add_anonymous::<S::Output>(target, builder.commands());
-        Output::new(builder.scope, target)
-    }
-
-    fn take_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Receiver<S::Output> {
-        let (sender, receiver) = unbounded_channel::<S::Output>();
-        let target = commands
-            .spawn(())
-            // Set the parent of this stream to be the impulse so it can be
-            // recursively despawned together.
-            .set_parent(source)
-            .id();
-
-        map.add_anonymous::<S::Output>(target, commands);
-        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
-
-        receiver
-    }
-
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) {
-        let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<S::Output>::new(target, true)));
-        map.add_anonymous::<S::Output>(redirect, commands);
-    }
-
-    fn make_stream_channels(inner: &Arc<InnerChannel>, world: &World) -> Self::StreamChannels {
-        let target = world
-            .get::<StreamTargetMap>(inner.source())
-            .and_then(|t| t.get_anonymous::<S::Output>());
-        StreamChannel::new(target, Arc::clone(inner))
-    }
-
-    fn make_stream_buffers(target_map: Option<&StreamTargetMap>) -> StreamBuffer<S::Input> {
-        let target = target_map.and_then(|map| map.get_anonymous::<S::Output>());
-
-        StreamBuffer {
-            container: Default::default(),
-            target,
-        }
-    }
-
-    fn process_stream_buffers(
-        buffer: Self::StreamBuffers,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        let target = buffer.target;
-        let mut was_unused = true;
-        for data in Rc::into_inner(buffer.container)
-            .or_broken()?
-            .into_inner()
-            .into_iter()
-        {
-            was_unused = false;
-            let mut request = StreamRequest {
-                source,
-                session,
-                target,
-                world,
-                roster,
-            };
-
-            Self::side_effect(data, &mut request)
-                .and_then(|output| request.send_output(output))
-                .report_unhandled(source, world);
-        }
-
-        if was_unused {
-            unused.streams.push(std::any::type_name::<Self>());
-        }
-
-        Ok(())
-    }
-
-    fn defer_buffers(
-        buffer: Self::StreamBuffers,
-        source: Entity,
-        session: Entity,
-        commands: &mut Commands,
-    ) {
-        commands.add(
-            SendAnonymousStreams::<S, DefaultStreamContainer<S::Input>>::new(
-                buffer.container.take(),
-                source,
-                session,
-                buffer.target,
-            ),
-        );
-    }
-
-    fn set_stream_availability(availability: &mut StreamAvailability) {
-        availability.add_anonymous::<S::Output>();
-    }
-
-    fn are_streams_available(availability: &StreamAvailability) -> bool {
-        availability.has_anonymous::<S::Output>()
-    }
-
-    fn into_dyn_stream_input_pack(
-        pack: &mut DynStreamInputPack,
-        inputs: Self::StreamInputPack,
-    ) {
-        pack.add_anonymous(inputs);
-    }
-
-    fn into_dyn_stream_output_pack(
-        pack: &mut DynStreamOutputPack,
-        outputs: Self::StreamOutputPack
-    ) {
-        pack.add_anonymous(outputs);
-    }
-
-    fn has_streams() -> bool {
-        true
-    }
-}
-
-pub struct StreamBuffer<T> {
-    // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
-    // no heap allocation is needed each time a stream is used in a blocking
-    // function.
-    container: Rc<RefCell<DefaultStreamContainer<T>>>,
-    target: Option<Entity>,
-}
-
-impl<Container> Clone for StreamBuffer<Container> {
-    fn clone(&self) -> Self {
-        Self {
-            container: Rc::clone(&self.container),
-            target: self.target,
-        }
-    }
-}
-
-impl<T> StreamBuffer<T> {
-    pub fn send(&self, input: T) {
-        self.container.borrow_mut().push(input);
-    }
-
-    pub fn target(&self) -> Option<Entity> {
-        self.target
-    }
-}
-
+/// `StreamRequest` is provided to types that implement [`StreamEffect`] so they
+/// can process a stream input and apply any side effects to it. Note that your
+/// implementation of [`StreamEffect::side_effect`] should return the output
+/// data; it should *not* use the `StreamRequest` send it the output to the target.
 pub struct StreamRequest<'a> {
     /// The node that emitted the stream
     pub source: Entity,
@@ -356,661 +148,9 @@ impl<'a> StreamRequest<'a> {
     }
 }
 
-/// [`StreamAvailability`] is a component that indicates what streams are offered by
-/// a service.
-#[derive(Component, Default)]
-pub struct StreamAvailability {
-    anonymous: HashSet<TypeId>,
-    named: HashMap<Cow<'static, str>, NamedAvailability>,
-}
-
-impl StreamAvailability {
-    pub fn add_anonymous<T: 'static + Send + Sync>(&mut self) {
-        self.anonymous.insert(TypeId::of::<T>());
-    }
-
-    pub fn add_named<T: 'static + Send + Sync>(
-        &mut self,
-        name: impl Into<Cow<'static, str>>,
-    ) -> Result<(), TypeId> {
-        match self.named.entry(name.into()) {
-            Entry::Vacant(vacant) => {
-                vacant.insert(NamedAvailability::new::<T>());
-                Ok(())
-            }
-            Entry::Occupied(occupied) => Err(occupied.get().value),
-        }
-    }
-
-    pub fn has_anonymous<T: 'static + Send + Sync>(&self) -> bool {
-        self.dyn_has_anonymous(&TypeId::of::<T>())
-    }
-
-    pub fn dyn_has_anonymous(&self, target_type: &TypeId) -> bool {
-        self.anonymous.contains(target_type)
-    }
-
-    pub fn has_named<T: 'static + Send + Sync>(&self, name: &str) -> bool {
-        self.dyn_has_named(name, &TypeId::of::<T>())
-    }
-
-    pub fn dyn_has_named(&self, name: &str, target_type: &TypeId) -> bool {
-        self.named.get(name).is_some_and(|ty| ty.value == *target_type)
-    }
-
-    pub fn can_cast_to(&self, target: &Self) -> Result<(), MissingStreamsError> {
-        let mut missing = MissingStreamsError::default();
-        for anon in &self.anonymous {
-            if !target.anonymous.contains(anon) {
-                missing.anonymous.insert(*anon);
-            }
-        }
-
-        for (name, avail) in &self.named {
-            if let Some(target_avail) = target.named.get(name) {
-                if avail.value != target_avail.value {
-                    missing.named.insert(name.clone(), avail.value);
-                }
-            } else if !target.anonymous.contains(&avail.named_value) {
-                missing.named.insert(name.clone(), avail.value);
-            }
-        }
-
-        missing.into_result()
-    }
-}
-
-#[derive(Clone, Copy)]
-struct NamedAvailability {
-    value: TypeId,
-    named_value: TypeId,
-}
-
-impl NamedAvailability {
-    fn new<T: 'static + Send + Sync>() -> Self {
-        Self {
-            value: TypeId::of::<T>(),
-            named_value: TypeId::of::<NamedValue<T>>(),
-        }
-    }
-}
-
-/// The actual entity target of the stream is held in this component which does
-/// not have any generic parameters. This means it is possible to lookup the
-/// targets of the streams coming out of the node without knowing the concrete
-/// type of the streams. This is crucial for being able to redirect the stream
-/// targets.
-#[derive(Component, Default, Clone, Debug)]
-pub struct StreamTargetMap {
-    pub(crate) anonymous: HashMap<TypeId, Entity>,
-    pub(crate) named: HashMap<Cow<'static, str>, (TypeId, Entity)>,
-}
-
-impl StreamTargetMap {
-    pub fn add_anonymous<T: 'static + Send + Sync>(
-        &mut self,
-        target: Entity,
-        commands: &mut Commands,
-    ) {
-        match self.anonymous.entry(TypeId::of::<T>()) {
-            Entry::Vacant(vacant) => {
-                vacant.insert(target);
-            }
-            Entry::Occupied(_) => {
-                commands.add(move |world: &mut World| {
-                    world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
-                        .duplicate_streams
-                        .push(DuplicateStream {
-                            target,
-                            type_name: std::any::type_name::<T>(),
-                            stream_name: None,
-                        })
-                });
-            }
-        }
-    }
-
-    pub fn add_named<T: 'static + Send + Sync>(
-        &mut self,
-        name: Cow<'static, str>,
-        target: Entity,
-        commands: &mut Commands,
-    ) {
-        match self.named.entry(name.clone()) {
-            Entry::Vacant(vacant) => {
-                vacant.insert((TypeId::of::<T>(), target));
-            }
-            Entry::Occupied(_) => {
-                commands.add(move |world: &mut World| {
-                    world
-                        .get_resource_or_insert_with(|| UnhandledErrors::default())
-                        .duplicate_streams
-                        .push(DuplicateStream {
-                            target,
-                            type_name: std::any::type_name::<T>(),
-                            stream_name: Some(name.clone()),
-                        });
-                });
-            }
-        }
-    }
-
-    pub fn anonymous(&self) -> &HashMap<TypeId, Entity> {
-        &self.anonymous
-    }
-
-    pub fn get_anonymous<T: 'static + Send + Sync>(&self) -> Option<Entity> {
-        self.anonymous.get(&TypeId::of::<T>()).copied()
-    }
-
-    pub fn get_named<T: 'static + Send + Sync>(&self, name: &str) -> Option<Entity> {
-        let target_type = TypeId::of::<T>();
-        self.named
-            .get(name)
-            .filter(|(ty, _)| *ty == target_type)
-            .map(|(_, target)| *target)
-    }
-
-    pub fn get_named_or_anonymous<T: 'static + Send + Sync>(
-        &self,
-        name: &str,
-    ) -> Option<NamedTarget> {
-        self.get_named::<T>(name)
-            .map(NamedTarget::Value)
-            .or_else(|| {
-                self.get_anonymous::<NamedValue<T>>()
-                    .map(NamedTarget::NamedValue)
-            })
-            .or_else(|| self.get_anonymous::<T>().map(NamedTarget::Value))
-    }
-}
-
-/// The `StreamPack` trait defines the interface for a pack of streams. Each
-/// [`Provider`](crate::Provider) can provide zero, one, or more streams of data
-/// that may be sent out while it's running. The `StreamPack` allows those
-/// streams to be packed together as one generic argument.
-pub trait StreamPack: 'static + Send + Sync {
-    type StreamInputPack;
-    type StreamOutputPack;
-    type StreamReceivers: Send + Sync;
-    type StreamChannels: Send;
-    type StreamBuffers: Clone;
-
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (Self::StreamInputPack, Self::StreamOutputPack);
-
-    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack;
-
-    fn spawn_node_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> Self::StreamOutputPack;
-
-    fn take_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Self::StreamReceivers;
-
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    );
-
-    fn make_stream_channels(inner: &Arc<InnerChannel>, world: &World) -> Self::StreamChannels;
-
-    fn make_stream_buffers(target_map: Option<&StreamTargetMap>) -> Self::StreamBuffers;
-
-    fn process_stream_buffers(
-        buffer: Self::StreamBuffers,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult;
-
-    fn defer_buffers(
-        buffer: Self::StreamBuffers,
-        source: Entity,
-        session: Entity,
-        commands: &mut Commands,
-    );
-
-    fn set_stream_availability(availability: &mut StreamAvailability);
-
-    fn are_streams_available(availability: &StreamAvailability) -> bool;
-
-    fn into_dyn_stream_input_pack(
-        pack: &mut DynStreamInputPack,
-        inputs: Self::StreamInputPack,
-    );
-
-    fn into_dyn_stream_output_pack(
-        pack: &mut DynStreamOutputPack,
-        outputs: Self::StreamOutputPack
-    );
-
-    /// Are there actually any streams in the pack?
-    fn has_streams() -> bool;
-}
-
-impl StreamPack for () {
-    type StreamInputPack = ();
-    type StreamOutputPack = ();
-    type StreamReceivers = ();
-    type StreamChannels = ();
-    type StreamBuffers = ();
-
-    fn spawn_scope_streams(
-        _: Entity,
-        _: Entity,
-        _: &mut Commands,
-    ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
-        ((), ())
-    }
-
-    fn spawn_workflow_streams(_: &mut Builder) -> Self::StreamInputPack {
-        // Just return ()
-    }
-
-    fn spawn_node_streams(
-        _: Entity,
-        _: &mut StreamTargetMap,
-        _: &mut Builder,
-    ) -> Self::StreamOutputPack {
-        // Just return ()
-    }
-
-    fn take_streams(_: Entity, _: &mut StreamTargetMap, _: &mut Commands) -> Self::StreamReceivers {
-        // Just return ()
-    }
-
-    fn collect_streams(_: Entity, _: Entity, _: &mut StreamTargetMap, _: &mut Commands) {
-        // Do nothing
-    }
-
-    fn make_stream_channels(_: &Arc<InnerChannel>, _: &World) -> Self::StreamChannels {
-        // Just return ()
-    }
-
-    fn make_stream_buffers(_: Option<&StreamTargetMap>) -> Self::StreamBuffers {
-        // Just return ()
-    }
-
-    fn process_stream_buffers(
-        _: Self::StreamBuffers,
-        _: Entity,
-        _: Entity,
-        _: &mut UnusedStreams,
-        _: &mut World,
-        _: &mut OperationRoster,
-    ) -> OperationResult {
-        Ok(())
-    }
-
-    fn defer_buffers(_: Self::StreamBuffers, _: Entity, _: Entity, _: &mut Commands) {}
-
-    fn set_stream_availability(_: &mut StreamAvailability) {
-        // Do nothing
-    }
-
-    fn are_streams_available(_: &StreamAvailability) -> bool {
-        true
-    }
-
-    fn into_dyn_stream_input_pack(
-        _: &mut DynStreamInputPack,
-        _: Self::StreamInputPack,
-    ) {
-        // Do nothing
-    }
-
-    fn into_dyn_stream_output_pack(
-        _: &mut DynStreamOutputPack,
-        _: Self::StreamOutputPack
-    ) {
-        // Do nothing
-    }
-
-    fn has_streams() -> bool {
-        false
-    }
-}
-
-macro_rules! impl_streampack_for_tuple {
-    ($(($T:ident, $U:ident)),*) => {
-        #[allow(non_snake_case)]
-        impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
-            type StreamInputPack = ($($T::StreamInputPack,)*);
-            type StreamOutputPack = ($($T::StreamOutputPack,)*);
-            type StreamReceivers = ($($T::StreamReceivers,)*);
-            type StreamChannels = ($($T::StreamChannels,)*);
-            type StreamBuffers = ($($T::StreamBuffers,)*);
-
-            fn spawn_scope_streams(
-                in_scope: Entity,
-                out_scope: Entity,
-                commands: &mut Commands,
-            ) -> (
-                Self::StreamInputPack,
-                Self::StreamOutputPack,
-            ) {
-                let ($($T,)*) = (
-                    $(
-                        $T::spawn_scope_streams(in_scope, out_scope, commands),
-                    )*
-                );
-                // Now unpack the tuples
-                (
-                    (
-                        $(
-                            $T.0,
-                        )*
-                    ),
-                    (
-                        $(
-                            $T.1,
-                        )*
-                    )
-                )
-            }
-
-            fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
-                (
-                    $(
-                        $T::spawn_workflow_streams(builder),
-                    )*
-                 )
-            }
-
-            fn spawn_node_streams(
-                source: Entity,
-                map: &mut StreamTargetMap,
-                builder: &mut Builder,
-            ) -> Self::StreamOutputPack {
-                (
-                    $(
-                        $T::spawn_node_streams(source, map, builder),
-                    )*
-                )
-            }
-
-            fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> Self::StreamReceivers {
-                (
-                    $(
-                        $T::take_streams(source, map, builder),
-                    )*
-                )
-            }
-
-            fn collect_streams(
-                source: Entity,
-                target: Entity,
-                map: &mut StreamTargetMap,
-                commands: &mut Commands,
-            ) {
-                $(
-                    $T::collect_streams(source, target, map, commands);
-                )*
-            }
-
-            fn make_stream_channels(
-                inner: &Arc<InnerChannel>,
-                world: &World,
-            ) -> Self::StreamChannels {
-                (
-                    $(
-                        $T::make_stream_channels(inner, world),
-                    )*
-                )
-            }
-
-            fn make_stream_buffers(
-                target_map: Option<&StreamTargetMap>,
-            ) -> Self::StreamBuffers {
-                (
-                    $(
-                        $T::make_stream_buffers(target_map),
-                    )*
-                )
-            }
-
-            fn process_stream_buffers(
-                buffer: Self::StreamBuffers,
-                source: Entity,
-                session: Entity,
-                unused: &mut UnusedStreams,
-                world: &mut World,
-                roster: &mut OperationRoster,
-            ) -> OperationResult {
-                let ($($T,)*) = buffer;
-                $(
-                    $T::process_stream_buffers($T, source, session, unused, world, roster)?;
-                )*
-                Ok(())
-            }
-
-            fn defer_buffers(
-                buffer: Self::StreamBuffers,
-                source: Entity,
-                session: Entity,
-                commands: &mut Commands,
-            ) {
-                let ($($T,)*) = buffer;
-                $(
-                    $T::defer_buffers($T, source, session, commands);
-                )*
-            }
-
-            fn set_stream_availability(availability: &mut StreamAvailability) {
-                $(
-                    $T::set_stream_availability(availability);
-                )*
-            }
-
-            fn are_streams_available(availability: &StreamAvailability) -> bool {
-                true
-                $(
-                    && $T::are_streams_available(availability)
-                )*
-            }
-
-            fn into_dyn_stream_input_pack(
-                pack: &mut DynStreamInputPack,
-                inputs: Self::StreamInputPack,
-            ) {
-                let ($($T,)*) = inputs;
-                $(
-                    $T::into_dyn_stream_input_pack(pack, $T);
-                )*
-            }
-
-            fn into_dyn_stream_output_pack(
-                pack: &mut DynStreamOutputPack,
-                outputs: Self::StreamOutputPack,
-            ) {
-                let ($($T,)*) = outputs;
-                $(
-                    $T::into_dyn_stream_output_pack(pack, $T);
-                )*
-            }
-
-            fn has_streams() -> bool {
-                let mut has_streams = false;
-                $(
-                    has_streams = has_streams || $T::has_streams();
-                )*
-                has_streams
-            }
-        }
-    }
-}
-
-// Implements the `StreamPack` trait for all tuples between size 1 and 12
-// (inclusive) made of types that implement `StreamPack`
-all_tuples!(impl_streampack_for_tuple, 1, 12, T, U);
-
-pub(crate) fn make_stream_buffers_from_world<Streams: StreamPack>(
-    source: Entity,
-    world: &mut World,
-) -> Result<Streams::StreamBuffers, OperationError> {
-    let target_map = world.get::<StreamTargetMap>(source);
-    Ok(Streams::make_stream_buffers(target_map))
-}
-
-pub struct SendAnonymousStreams<S, Container> {
-    container: Container,
-    source: Entity,
-    session: Entity,
-    target: Option<Entity>,
-    _ignore: std::marker::PhantomData<fn(S)>,
-}
-
-impl<S, Container> SendAnonymousStreams<S, Container> {
-    pub fn new(
-        container: Container,
-        source: Entity,
-        session: Entity,
-        target: Option<Entity>,
-    ) -> Self {
-        Self {
-            container,
-            source,
-            session,
-            target,
-            _ignore: Default::default(),
-        }
-    }
-}
-
-impl<S, Container> Command for SendAnonymousStreams<S, Container>
-where
-    S: StreamEffect,
-    Container: 'static + Send + Sync + IntoIterator<Item = S::Input>,
-{
-    fn apply(self, world: &mut World) {
-        world.get_resource_or_insert_with(DeferredRoster::default);
-        world.resource_scope::<DeferredRoster, _>(|world, mut deferred| {
-            for data in self.container {
-                let mut request = StreamRequest {
-                    source: self.source,
-                    session: self.session,
-                    target: self.target,
-                    world,
-                    roster: &mut deferred,
-                };
-
-                S::side_effect(data, &mut request)
-                    .and_then(move |output| request.send_output(output))
-                    .report_unhandled(self.source, world);
-            }
-        });
-    }
-}
-
-/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
-/// based on what streams they provide. If a stream is required, you should wrap
-/// the stream type in [`Require`]. If a stream is optional, then wrap it in
-/// [`Option`].
-///
-/// The service you receive will appear as though it provides all the stream
-/// types wrapped in both your `Require` and `Option` filters, but it might not
-/// actually provide any of the streams that were wrapped in `Option`. A service
-/// that does not actually provide the optional stream can be treated as if it
-/// does provide the stream, except it will never actually send out any of that
-/// optional stream data.
-///
-/// ```
-/// use bevy_impulse::{Require, prelude::*, testing::*};
-///
-/// fn service_discovery_system(
-///     discover: ServiceDiscovery<
-///         f32,
-///         f32,
-///         (
-///             Require<(StreamOf<f32>, StreamOf<u32>)>,
-///             Option<(StreamOf<String>, StreamOf<u8>)>,
-///         )
-///     >
-/// ) {
-///     let service: Service<
-///         f32,
-///         f32,
-///         (
-///             (StreamOf<f32>, StreamOf<u32>),
-///             (StreamOf<String>, StreamOf<u8>),
-///         )
-///     > = discover.iter().next().unwrap();
-/// }
-/// ```
-pub trait StreamFilter {
-    type Pack: StreamPack;
-    fn are_required_streams_available(availability: Option<&StreamAvailability>) -> bool;
-}
-
-/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to indicate that a
-/// certain pack of streams is required.
-///
-/// For streams that are optional, wrap them in [`Option`] instead.
-///
-/// See [`StreamFilter`] for a usage example.
-pub struct Require<T> {
-    _ignore: std::marker::PhantomData<fn(T)>,
-}
-
-impl<T: StreamPack> StreamFilter for Require<T> {
-    type Pack = T;
-    fn are_required_streams_available(availability: Option<&StreamAvailability>) -> bool {
-        let Some(availability) = availability else {
-            return false;
-        };
-        T::are_streams_available(availability)
-    }
-}
-
-impl<T: StreamPack> StreamFilter for Option<T> {
-    type Pack = T;
-
-    fn are_required_streams_available(_: Option<&StreamAvailability>) -> bool {
-        true
-    }
-}
-
-macro_rules! impl_streamfilter_for_tuple {
-    ($($T:ident),*) => {
-        #[allow(non_snake_case)]
-        impl<$($T: StreamFilter),*> StreamFilter for ($($T,)*) {
-            type Pack = ($($T::Pack,)*);
-
-            fn are_required_streams_available(_availability: Option<&StreamAvailability>) -> bool {
-                true
-                $(
-                    && $T::are_required_streams_available(_availability)
-                )*
-            }
-        }
-    }
-}
-
-// Implements the `StreamFilter` trait for all tuples between size 0 and 12
-// (inclusive) made of types that implement `StreamFilter`
-all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{
-        prelude::*,
-        testing::*,
-        dyn_node::*,
-    };
+    use crate::{dyn_node::*, prelude::*, testing::*};
     use std::borrow::Cow;
 
     #[test]
@@ -1190,7 +330,10 @@ pub(crate) mod tests {
         validate_formatting_stream(continuous_injection_workflow, &mut context);
 
         let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
-            let inner_node = scope.input.chain(builder).then_node(continuous_injection_workflow);
+            let inner_node = scope
+                .input
+                .chain(builder)
+                .then_node(continuous_injection_workflow);
             builder.connect(inner_node.streams.0, scope.streams.0);
             builder.connect(inner_node.streams.1, scope.streams.1);
             builder.connect(inner_node.streams.2, scope.streams.2);
@@ -1198,14 +341,15 @@ pub(crate) mod tests {
         });
         validate_formatting_stream(nested_workflow, &mut context);
 
-        let double_nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
-            let inner_node = builder.create_node(nested_workflow);
-            builder.connect(scope.input, inner_node.input);
-            builder.connect(inner_node.streams.0, scope.streams.0);
-            builder.connect(inner_node.streams.1, scope.streams.1);
-            builder.connect(inner_node.streams.2, scope.streams.2);
-            builder.connect(inner_node.output, scope.terminate);
-        });
+        let double_nested_workflow =
+            context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
+                let inner_node = builder.create_node(nested_workflow);
+                builder.connect(scope.input, inner_node.input);
+                builder.connect(inner_node.streams.0, scope.streams.0);
+                builder.connect(inner_node.streams.1, scope.streams.1);
+                builder.connect(inner_node.streams.2, scope.streams.2);
+                builder.connect(inner_node.output, scope.terminate);
+            });
         validate_formatting_stream(double_nested_workflow, &mut context);
     }
 
@@ -1351,9 +495,11 @@ pub(crate) mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let parse_blocking_srv = context.command(|commands| {
-            commands.spawn_service(|In(input): BlockingServiceInput<Vec<String>, TestStreamPack>| {
-                impl_stream_pack_test_blocking(input.request, input.streams);
-            })
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<Vec<String>, TestStreamPack>| {
+                    impl_stream_pack_test_blocking(input.request, input.streams);
+                },
+            )
         });
 
         validate_stream_pack(parse_blocking_srv, &mut context);
@@ -1430,30 +576,8 @@ pub(crate) mod tests {
             context.spawn_workflow(make_workflow(parse_continuous_srv));
         validate_stream_pack(continuous_injection_workflow, &mut context);
 
-        let nested_workflow = context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
-            let node = scope.input.chain(builder).then_node(parse_continuous_srv);
-
-            builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
-            builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
-            builder.connect(node.streams.stream_string, scope.streams.stream_string);
-
-            builder.connect(node.output, scope.terminate);
-        });
-        validate_stream_pack(nested_workflow, &mut context);
-
-        let double_nested_workflow = context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
-            let node = scope.input.chain(builder).then_node(nested_workflow);
-
-            builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
-            builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
-            builder.connect(node.streams.stream_string, scope.streams.stream_string);
-
-            builder.connect(node.output, scope.terminate);
-        });
-        validate_stream_pack(double_nested_workflow, &mut context);
-
-        let scoped_workflow = context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
-            let inner_scope = builder.create_scope::<_, _, TestStreamPack, _>(|scope, builder| {
+        let nested_workflow =
+            context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
                 let node = scope.input.chain(builder).then_node(parse_continuous_srv);
 
                 builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
@@ -1462,40 +586,78 @@ pub(crate) mod tests {
 
                 builder.connect(node.output, scope.terminate);
             });
+        validate_stream_pack(nested_workflow, &mut context);
 
-            builder.connect(scope.input, inner_scope.input);
+        let double_nested_workflow =
+            context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(nested_workflow);
 
-            builder.connect(inner_scope.streams.stream_u32, scope.streams.stream_u32);
-            builder.connect(inner_scope.streams.stream_i32, scope.streams.stream_i32);
-            builder.connect(inner_scope.streams.stream_string, scope.streams.stream_string);
+                builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(node.streams.stream_string, scope.streams.stream_string);
 
-            builder.connect(inner_scope.output, scope.terminate);
-        });
+                builder.connect(node.output, scope.terminate);
+            });
+        validate_stream_pack(double_nested_workflow, &mut context);
+
+        let scoped_workflow =
+            context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
+                let inner_scope =
+                    builder.create_scope::<_, _, TestStreamPack, _>(|scope, builder| {
+                        let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                        builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                        builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                        builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                        builder.connect(node.output, scope.terminate);
+                    });
+
+                builder.connect(scope.input, inner_scope.input);
+
+                builder.connect(inner_scope.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(inner_scope.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(
+                    inner_scope.streams.stream_string,
+                    scope.streams.stream_string,
+                );
+
+                builder.connect(inner_scope.output, scope.terminate);
+            });
         validate_stream_pack(scoped_workflow, &mut context);
 
-        let dyn_stream_workflow = context.spawn_workflow::<Vec<String>, (), TestStreamPack, _>(|scope, builder| {
-            let dyn_scope_input: DynOutput = scope.input.into();
+        let dyn_stream_workflow =
+            context.spawn_workflow::<Vec<String>, (), TestStreamPack, _>(|scope, builder| {
+                let dyn_scope_input: DynOutput = scope.input.into();
 
-            let node = builder.create_node(parse_continuous_srv);
-            let mut dyn_node: DynNode = node.into();
+                let node = builder.create_node(parse_continuous_srv);
+                let mut dyn_node: DynNode = node.into();
 
-            dyn_scope_input.connect_to(&dyn_node.input, builder).unwrap();
+                dyn_scope_input
+                    .connect_to(&dyn_node.input, builder)
+                    .unwrap();
 
-            let dyn_scope_stream_u32: DynInputSlot = scope.streams.stream_u32.into();
-            let dyn_node_stream_u32 = dyn_node.streams.take_named("stream_u32").unwrap();
-            dyn_node_stream_u32.connect_to(&dyn_scope_stream_u32, builder).unwrap();
+                let dyn_scope_stream_u32: DynInputSlot = scope.streams.stream_u32.into();
+                let dyn_node_stream_u32 = dyn_node.streams.take_named("stream_u32").unwrap();
+                dyn_node_stream_u32
+                    .connect_to(&dyn_scope_stream_u32, builder)
+                    .unwrap();
 
-            let dyn_scope_stream_i32: DynInputSlot = scope.streams.stream_i32.into();
-            let dyn_node_stream_i32 = dyn_node.streams.take_named("stream_i32").unwrap();
-            dyn_node_stream_i32.connect_to(&dyn_scope_stream_i32, builder).unwrap();
+                let dyn_scope_stream_i32: DynInputSlot = scope.streams.stream_i32.into();
+                let dyn_node_stream_i32 = dyn_node.streams.take_named("stream_i32").unwrap();
+                dyn_node_stream_i32
+                    .connect_to(&dyn_scope_stream_i32, builder)
+                    .unwrap();
 
-            let dyn_scope_stream_string: DynInputSlot = scope.streams.stream_string.into();
-            let dyn_node_stream_string = dyn_node.streams.take_named("stream_string").unwrap();
-            dyn_node_stream_string.connect_to(&dyn_scope_stream_string, builder).unwrap();
+                let dyn_scope_stream_string: DynInputSlot = scope.streams.stream_string.into();
+                let dyn_node_stream_string = dyn_node.streams.take_named("stream_string").unwrap();
+                dyn_node_stream_string
+                    .connect_to(&dyn_scope_stream_string, builder)
+                    .unwrap();
 
-            let terminate: DynInputSlot = scope.terminate.into();
-            dyn_node.output.connect_to(&terminate, builder).unwrap();
-        });
+                let terminate: DynInputSlot = scope.terminate.into();
+                dyn_node.output.connect_to(&terminate, builder).unwrap();
+            });
         validate_stream_pack(dyn_stream_workflow, &mut context);
 
         // We can do a stream cast for the service-type providers but not for
@@ -1527,7 +689,11 @@ pub(crate) mod tests {
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
-        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
 
         let outcome: StreamMapOutcome = recipient.into();
         assert_eq!(outcome.stream_u32, [5, 10]);
@@ -1541,7 +707,11 @@ pub(crate) mod tests {
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
-        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
 
         let outcome: StreamMapOutcome = recipient.into();
         assert_eq!(outcome.stream_u32, Vec::<u32>::new());
@@ -1571,7 +741,8 @@ pub(crate) mod tests {
         provider: Service<Vec<String>, (), TestStreamPack>,
         context: &mut TestingContext,
     ) {
-        let provider: Service<Vec<String>, (), TestDynamicNamedStreams> = provider.optional_stream_cast();
+        let provider: Service<Vec<String>, (), TestDynamicNamedStreams> =
+            provider.optional_stream_cast();
 
         let request = vec![
             "5".to_owned(),
@@ -1586,7 +757,11 @@ pub(crate) mod tests {
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
-        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
 
         let outcome: StreamMapOutcome = recipient.try_into().unwrap();
         assert_eq!(outcome.stream_u32, [5, 10]);
@@ -1600,7 +775,11 @@ pub(crate) mod tests {
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
-        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
 
         let outcome: StreamMapOutcome = recipient.try_into().unwrap();
         assert_eq!(outcome.stream_u32, Vec::<u32>::new());
@@ -1715,13 +894,15 @@ pub(crate) mod tests {
 
     impl TryFrom<Recipient<(), TestDynamicNamedStreams>> for StreamMapOutcome {
         type Error = UnknownName;
-        fn try_from(mut recipient: Recipient<(), TestDynamicNamedStreams>) -> Result<Self, Self::Error> {
+        fn try_from(
+            mut recipient: Recipient<(), TestDynamicNamedStreams>,
+        ) -> Result<Self, Self::Error> {
             let mut result = Self::default();
             while let Ok(NamedValue { name, value }) = recipient.streams.0.try_recv() {
                 if name == "stream_u32" {
                     result.stream_u32.push(value);
                 } else {
-                    return Err(UnknownName { name })
+                    return Err(UnknownName { name });
                 }
             }
 
@@ -1729,7 +910,7 @@ pub(crate) mod tests {
                 if name == "stream_i32" {
                     result.stream_i32.push(value);
                 } else {
-                    return Err(UnknownName { name })
+                    return Err(UnknownName { name });
                 }
             }
 
@@ -1737,7 +918,7 @@ pub(crate) mod tests {
                 if name == "stream_string" {
                     result.stream_string.push(value);
                 } else {
-                    return Err(UnknownName { name })
+                    return Err(UnknownName { name });
                 }
             }
 
@@ -1750,9 +931,11 @@ pub(crate) mod tests {
         let mut context = TestingContext::minimal_plugins();
 
         let parse_blocking_srv = context.command(|commands| {
-            commands.spawn_service(|In(input): BlockingServiceInput<NamedInputs, TestDynamicNamedStreams>| {
-                impl_dynamically_named_streams_blocking(input.request, input.streams);
-            })
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<NamedInputs, TestDynamicNamedStreams>| {
+                    impl_dynamically_named_streams_blocking(input.request, input.streams);
+                },
+            )
         });
 
         validate_dynamically_named_streams(parse_blocking_srv, &mut context);
@@ -1829,30 +1012,8 @@ pub(crate) mod tests {
             context.spawn_workflow(make_workflow(parse_continuous_srv));
         validate_dynamically_named_streams(continuous_injection_workflow, &mut context);
 
-        let nested_workflow = context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
-            let node = scope.input.chain(builder).then_node(parse_continuous_srv);
-
-            builder.connect(node.streams.0, scope.streams.0);
-            builder.connect(node.streams.1, scope.streams.1);
-            builder.connect(node.streams.2, scope.streams.2);
-
-            builder.connect(node.output, scope.terminate);
-        });
-        validate_dynamically_named_streams(nested_workflow, &mut context);
-
-        let double_nested_workflow = context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
-            let node = scope.input.chain(builder).then_node(nested_workflow);
-
-            builder.connect(node.streams.0, scope.streams.0);
-            builder.connect(node.streams.1, scope.streams.1);
-            builder.connect(node.streams.2, scope.streams.2);
-
-            builder.connect(node.output, scope.terminate);
-        });
-        validate_dynamically_named_streams(double_nested_workflow, &mut context);
-
-        let scoped_workflow = context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
-            let inner_scope = builder.create_scope::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+        let nested_workflow =
+            context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
                 let node = scope.input.chain(builder).then_node(parse_continuous_srv);
 
                 builder.connect(node.streams.0, scope.streams.0);
@@ -1861,15 +1022,41 @@ pub(crate) mod tests {
 
                 builder.connect(node.output, scope.terminate);
             });
+        validate_dynamically_named_streams(nested_workflow, &mut context);
 
-            builder.connect(scope.input, inner_scope.input);
+        let double_nested_workflow =
+            context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(nested_workflow);
 
-            builder.connect(inner_scope.streams.0, scope.streams.0);
-            builder.connect(inner_scope.streams.1, scope.streams.1);
-            builder.connect(inner_scope.streams.2, scope.streams.2);
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
 
-            builder.connect(inner_scope.output, scope.terminate);
-        });
+                builder.connect(node.output, scope.terminate);
+            });
+        validate_dynamically_named_streams(double_nested_workflow, &mut context);
+
+        let scoped_workflow =
+            context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                let inner_scope =
+                    builder.create_scope::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                        let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                        builder.connect(node.streams.0, scope.streams.0);
+                        builder.connect(node.streams.1, scope.streams.1);
+                        builder.connect(node.streams.2, scope.streams.2);
+
+                        builder.connect(node.output, scope.terminate);
+                    });
+
+                builder.connect(scope.input, inner_scope.input);
+
+                builder.connect(inner_scope.streams.0, scope.streams.0);
+                builder.connect(inner_scope.streams.1, scope.streams.1);
+                builder.connect(inner_scope.streams.2, scope.streams.2);
+
+                builder.connect(inner_scope.output, scope.terminate);
+            });
         validate_dynamically_named_streams(scoped_workflow, &mut context);
 
         // We can do a stream cast for the service-type providers but not for
@@ -1877,15 +1064,22 @@ pub(crate) mod tests {
         validate_dynamically_named_streams_into_stream_pack(parse_blocking_srv, &mut context);
         validate_dynamically_named_streams_into_stream_pack(parse_async_srv, &mut context);
         validate_dynamically_named_streams_into_stream_pack(parse_continuous_srv, &mut context);
-        validate_dynamically_named_streams_into_stream_pack(blocking_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(
+            blocking_injection_workflow,
+            &mut context,
+        );
         validate_dynamically_named_streams_into_stream_pack(async_injection_workflow, &mut context);
-        validate_dynamically_named_streams_into_stream_pack(continuous_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(
+            continuous_injection_workflow,
+            &mut context,
+        );
         validate_dynamically_named_streams_into_stream_pack(nested_workflow, &mut context);
         validate_dynamically_named_streams_into_stream_pack(double_nested_workflow, &mut context);
     }
 
     fn validate_dynamically_named_streams(
-        provider: impl Provider<Request = NamedInputs, Response = (), Streams = TestDynamicNamedStreams> + Clone,
+        provider: impl Provider<Request = NamedInputs, Response = (), Streams = TestDynamicNamedStreams>
+            + Clone,
         context: &mut TestingContext,
     ) {
         let expected_values_u32 = vec![
@@ -1912,8 +1106,7 @@ pub(crate) mod tests {
             values_string: expected_values_string.clone(),
         };
 
-        let mut recipient =
-            context.command(|commands| commands.request(request, provider).take());
+        let mut recipient = context.command(|commands| commands.request(request, provider).take());
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
@@ -1947,7 +1140,6 @@ pub(crate) mod tests {
             values_u32: vec![
                 NamedValue::new("stream_u32", 5),
                 NamedValue::new("stream_u32", 10),
-
                 // This won't appear because its name isn't being listened for
                 // for this value type
                 NamedValue::new("stream_i32", 12),
@@ -1955,7 +1147,6 @@ pub(crate) mod tests {
             values_i32: vec![
                 NamedValue::new("stream_i32", 2),
                 NamedValue::new("stream_i32", -5),
-
                 // This won't appear because its name isn't being listened for
                 // for this value type
                 NamedValue::new("stream_u32", 7),
@@ -1963,15 +1154,13 @@ pub(crate) mod tests {
             values_string: vec![
                 NamedValue::new("stream_string", "hello".to_owned()),
                 NamedValue::new("stream_string", "8".to_owned()),
-
                 // This won't appear because its named isn't being listened for
                 // for this value type
                 NamedValue::new("stream_u32", "22".to_owned()),
             ],
         };
 
-        let mut recipient =
-            context.command(|commands| commands.request(request, provider).take());
+        let mut recipient = context.command(|commands| commands.request(request, provider).take());
 
         context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
         assert!(recipient.response.take().available().is_some());
@@ -2018,7 +1207,9 @@ pub(crate) mod tests {
     }
 
     fn impl_dynamically_named_streams_continuous(
-        In(ContinuousService { key }): In<ContinuousService<NamedInputs, (), TestDynamicNamedStreams>>,
+        In(ContinuousService { key }): In<
+            ContinuousService<NamedInputs, (), TestDynamicNamedStreams>,
+        >,
         mut param: ContinuousQuery<NamedInputs, (), TestDynamicNamedStreams>,
     ) {
         param.get_mut(&key).unwrap().for_each(|order| {

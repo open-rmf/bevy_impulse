@@ -24,11 +24,11 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder,
-    Joined, JsonBuffer, JsonMessage, Node, StreamPack,
-};
 pub use crate::dyn_node::*;
+use crate::{
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Joined, JsonBuffer,
+    JsonMessage, Node, StreamPack,
+};
 
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
@@ -45,10 +45,11 @@ use tracing::debug;
 
 use super::{
     buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
-    fork_result_schema::RegisterForkResult, register_json, supported::*, TypeInfo,
+    fork_result_schema::RegisterForkResult, register_json, supported::*,
     unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
     DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
     SectionMetadata, SectionMetadataProvider, SerializeMessage, SplitSchema, TransformError,
+    TypeInfo,
 };
 
 #[derive(Serialize)]
