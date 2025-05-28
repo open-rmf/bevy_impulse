@@ -21,6 +21,9 @@ use buffer::{impl_buffer_key_map, impl_joined_value};
 mod section;
 use section::impl_section;
 
+mod stream_pack;
+use stream_pack::impl_stream_pack;
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, ItemStruct};
@@ -101,5 +104,17 @@ pub fn derive_section(input: TokenStream) -> TokenStream {
             compile_error!(#msg);
         }
         .into(),
+    }
+}
+
+#[proc_macro_derive(StreamPack, attributes(stream))]
+pub fn derive_stream_pack(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    match impl_stream_pack(&input) {
+        Ok(ok) => ok.into(),
+        Err(msg) => quote! {
+            compile_error!(#msg);
+        }
+        .into()
     }
 }

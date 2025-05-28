@@ -56,18 +56,21 @@ impl<S: StreamEffect> NamedStream<S> {
         )
     }
 
-    pub fn spawn_workflow_stream(name: Cow<'static, str>, builder: &mut Builder) -> InputSlot<S::Input> {
+    pub fn spawn_workflow_stream(
+        name: impl Into<Cow<'static, str>>,
+        builder: &mut Builder,
+    ) -> InputSlot<S::Input> {
         let source = builder.commands.spawn(()).id();
         builder.commands.add(AddOperation::new(
             Some(builder.scope()),
             source,
-            RedirectWorkflowStream::new(NamedStreamRedirect::<S>::static_name(name)),
+            RedirectWorkflowStream::new(NamedStreamRedirect::<S>::static_name(name.into())),
         ));
         InputSlot::new(builder.scope, source)
     }
 
     pub fn spawn_node_stream(
-        name: Cow<'static, str>,
+        name: impl Into<Cow<'static, str>>,
         source: Entity,
         map: &mut StreamTargetMap,
         builder: &mut Builder,
@@ -77,12 +80,12 @@ impl<S: StreamEffect> NamedStream<S> {
             .spawn((SingleInputStorage::new(source), UnusedTarget))
             .id();
 
-        map.add_named::<S::Output>(name, target, builder.commands());
+        map.add_named::<S::Output>(name.into(), target, builder.commands());
         Output::new(builder.scope, target)
     }
 
     pub fn take_stream(
-        name: Cow<'static, str>,
+        name: impl Into<Cow<'static, str>>,
         source: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
@@ -93,32 +96,33 @@ impl<S: StreamEffect> NamedStream<S> {
             .set_parent(source)
             .id();
 
-        map.add_named::<S::Output>(name, target, commands);
+        map.add_named::<S::Output>(name.into(), target, commands);
         commands.add(AddImpulse::new(target, TakenStream::new(sender)));
 
         receiver
     }
 
     pub fn collect_stream(
-        name: Cow<'static, str>,
+        name: impl Into<Cow<'static, str>>,
         source: Entity,
         target: Entity,
         map: &mut StreamTargetMap,
         commands: &mut Commands,
     ) {
+        let name = name.into();
         let redirect = commands.spawn(()).set_parent(source).id();
         commands.add(AddImpulse::new(redirect, Push::<S::Output>::new(target, true).with_name(name.clone())));
         map.add_named::<S::Output>(name, redirect, commands);
     }
 
     pub fn make_stream_channel(
-        name: Cow<'static, str>,
+        name: impl Into<Cow<'static, str>>,
         inner: &Arc<InnerChannel>,
         world: &World,
     ) -> NamedStreamChannel<S> {
         let targets =
             NamedStreamTargets::new::<S::Output>(world.get::<StreamTargetMap>(inner.source()));
-        NamedStreamChannel::new(name, Arc::new(targets), Arc::clone(&inner))
+        NamedStreamChannel::new(name.into(), Arc::new(targets), Arc::clone(&inner))
     }
 
     pub fn make_stream_buffer(
@@ -132,7 +136,7 @@ impl<S: StreamEffect> NamedStream<S> {
     }
 
     pub fn process_stream_buffer(
-        name: &Cow<'static, str>,
+        name: impl Into<Cow<'static, str>>,
         buffer: NamedStreamBuffer<S::Input>,
         source: Entity,
         session: Entity,
@@ -140,6 +144,7 @@ impl<S: StreamEffect> NamedStream<S> {
         world: &mut World,
         roster: &mut OperationRoster,
     ) -> OperationResult {
+        let name = name.into();
         let targets = buffer.targets;
         let mut was_unused = true;
         for value in Rc::into_inner(buffer.container)
@@ -148,7 +153,7 @@ impl<S: StreamEffect> NamedStream<S> {
             .into_iter()
         {
             was_unused = false;
-            let target = targets.get(name);
+            let target = targets.get(&name);
             let mut request = StreamRequest {
                 source,
                 session,
@@ -174,12 +179,13 @@ impl<S: StreamEffect> NamedStream<S> {
     }
 
     pub fn defer_buffer(
-        name: &Cow<'static, str>,
+        name: impl Into<Cow<'static, str>>,
         buffer: NamedStreamBuffer<S::Input>,
         source: Entity,
         session: Entity,
         commands: &mut Commands,
     ) {
+        let name = name.into();
         let container: DefaultStreamContainer<_> = buffer
             .container
             .take()
