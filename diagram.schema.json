@@ -149,8 +149,7 @@
                 "builder": {
                   "type": "string"
                 }
-              },
-              "additionalProperties": false
+              }
             },
             {
               "type": "object",
@@ -161,8 +160,7 @@
                 "template": {
                   "type": "string"
                 }
-              },
-              "additionalProperties": false
+              }
             }
           ],
           "required": [
@@ -530,11 +528,6 @@
       "title": "NamespacedOperation",
       "description": "Refer to an operation inside of a namespace, e.g. { \"<namespace>\": \"<operation>\"",
       "type": "object",
-      "allOf": [
-        {
-          "$ref": "NamespacedOperation"
-        }
-      ],
       "maxProperties": 1,
       "minProperties": 1,
       "additionalProperties": {
