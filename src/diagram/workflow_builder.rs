@@ -554,7 +554,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         &mut self,
         id: &OperationName,
         child_id: &OperationName,
-        op: &'a DiagramOperation,
+        op: impl Into<CowOperation<'a>>,
         sibling_ops: &'a Operations,
     ) {
         let mut namespaces = self.namespaces.clone();
@@ -565,7 +565,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
             .push(UnfinishedOperation {
                 id: Arc::clone(child_id),
                 namespaces,
-                op,
+                op: op.into(),
                 sibling_ops,
                 scope: self.scope,
             });
@@ -988,12 +988,37 @@ struct UnfinishedOperation<'a> {
     /// The namespaces that this operation takes place inside
     namespaces: NamespaceList,
     /// Description of the operation
-    op: &'a DiagramOperation,
+    op: CowOperation<'a>,
     /// The sibling operations of the one that is being built
     sibling_ops: &'a Operations,
     /// The scope of this operation. This is used to create the correct Builder
     /// for the operation.
     scope: BuilderScopeContext,
+}
+
+pub enum CowOperation<'a> {
+    Borrowed(&'a DiagramOperation),
+    Owned(Box<dyn BuildDiagramOperation>),
+}
+
+impl<'a> BuildDiagramOperation for CowOperation<'a> {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationName,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        match self {
+            Self::Borrowed(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Owned(op) => op.build_diagram_operation(id, builder, ctx),
+        }
+    }
+}
+
+impl<'a> Into<CowOperation<'a>> for &'a DiagramOperation {
+    fn into(self) -> CowOperation<'a> {
+        CowOperation::Borrowed(self)
+    }
 }
 
 struct Target {
@@ -1019,7 +1044,7 @@ impl<'a> UnfinishedOperation<'a> {
     ) -> Self {
         Self {
             id,
-            op,
+            op: op.into(),
             sibling_ops,
             namespaces: Default::default(),
             scope,
