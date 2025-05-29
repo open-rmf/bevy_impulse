@@ -72,7 +72,7 @@ pub(crate) struct OperateScope<Request, Response> {
     exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
     finish_scope_cancel: Entity,
-    begin_scope: DynBeginScope,
+    dyn_scope_request: DynScopeRequest,
     _ignore: std::marker::PhantomData<fn(Request, Response)>,
 }
 
@@ -200,9 +200,10 @@ where
     Response: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
+        (self.dyn_scope_request.setup_input)(OperationSetup { source, world })?;
+
         let mut source_mut = world.entity_mut(source);
         source_mut.insert((
-            InputBundle::<Request>::new(),
             ScopeEntryStorage(self.enter_scope),
             ScopedSessionStorage::default(),
             TerminalStorage(self.terminal),
@@ -213,7 +214,7 @@ where
             FinalizeCleanup::new(begin_cleanup_workflows::<Response>),
             BeginCleanupWorkflowStorage::default(),
             FinishCleanupWorkflowStorage(self.finish_scope_cancel),
-            self.begin_scope,
+            self.dyn_scope_request,
         ));
 
         if let Some(exit_scope) = self.exit_scope {
@@ -240,9 +241,9 @@ where
         let begin_scope = world
             .get_entity_mut(source)
             .or_broken()?
-            .get::<DynBeginScope>()
+            .get::<DynScopeRequest>()
             .or_broken()?
-            .0;
+            .begin_scope;
 
         (begin_scope)(
             OperationRequest {
@@ -346,12 +347,26 @@ where
 }
 
 #[derive(Component)]
-struct DynBeginScope(fn(OperationRequest) -> OperationResult);
+struct DynScopeRequest {
+    setup_input: fn(OperationSetup) -> OperationResult,
+    begin_scope: fn(OperationRequest) -> OperationResult,
+}
 
-impl DynBeginScope {
+impl DynScopeRequest {
     fn new<T: 'static + Send + Sync>() -> Self {
-        Self(dyn_begin_scope::<T>)
+        Self {
+            setup_input: dyn_setup_input::<T>,
+            begin_scope: dyn_begin_scope::<T>,
+        }
     }
+}
+
+fn dyn_setup_input<Request: 'static + Send + Sync>(
+    OperationSetup { source, world }: OperationSetup,
+) -> OperationResult {
+    let mut source_mut = world.entity_mut(source);
+    source_mut.insert(InputBundle::<Request>::new());
+    Ok(())
 }
 
 fn dyn_begin_scope<Request: 'static + Send + Sync>(
@@ -559,7 +574,7 @@ where
             terminal,
             exit_scope,
             finish_scope_cancel,
-            begin_scope: DynBeginScope::new::<Request>(),
+            dyn_scope_request: DynScopeRequest::new::<Request>(),
             _ignore: Default::default(),
         };
 
