@@ -962,15 +962,15 @@ where
     Ok(())
 }
 
-pub struct UnfinishedOperation<'a> {
+struct UnfinishedOperation<'a> {
     /// Name of the operation within its scope
-    pub id: OperationName,
+    id: OperationName,
     /// The namespaces that this operation takes place inside
-    pub namespaces: NamespaceList,
+    namespaces: NamespaceList,
     /// Description of the operation
-    pub op: &'a DiagramOperation,
+    op: &'a DiagramOperation,
     /// The sibling operations of the one that is being built
-    pub sibling_ops: &'a Operations,
+    sibling_ops: &'a Operations,
 }
 
 impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
