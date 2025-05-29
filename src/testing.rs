@@ -235,7 +235,7 @@ impl TestingContext {
                 query.get_mut(&input.key).unwrap().for_each(|order| {
                     let order_id = order.id();
                     let t0 = *timers.entry(order_id).or_insert_with(|| {
-                        order.streams().send(StreamOf(()));
+                        order.streams().send(());
                         now
                     });
 

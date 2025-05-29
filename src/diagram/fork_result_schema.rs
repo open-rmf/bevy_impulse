@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    supported::*, type_info::TypeInfo, BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation,
-    OperationName, PerformForkClone, SerializeMessage,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
+    PerformForkClone, SerializeMessage, TypeInfo,
 };
 
 pub struct DynForkResult {

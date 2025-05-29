@@ -26,10 +26,7 @@ use tokio::sync::mpsc::{
 
 use std::sync::Arc;
 
-use crate::{
-    OperationError, OperationRoster, Promise, Provider, RequestExt, Stream, StreamPack,
-    StreamRequest,
-};
+use crate::{OperationError, OperationRoster, Promise, Provider, RequestExt, StreamPack};
 
 /// Provides asynchronous access to the [`World`], allowing you to issue queries
 /// or commands and then await the result.
@@ -78,8 +75,8 @@ impl Channel {
     pub(crate) fn for_streams<Streams: StreamPack>(
         &self,
         world: &World,
-    ) -> Result<Streams::Channel, OperationError> {
-        Ok(Streams::make_channel(&self.inner, world))
+    ) -> Result<Streams::StreamChannels, OperationError> {
+        Ok(Streams::make_stream_channels(&self.inner, world))
     }
 
     pub(crate) fn new(source: Entity, session: Entity, sender: TokioSender<ChannelItem>) -> Self {
@@ -95,9 +92,9 @@ impl Channel {
 
 #[derive(Clone)]
 pub struct InnerChannel {
-    source: Entity,
-    session: Entity,
-    sender: TokioSender<ChannelItem>,
+    pub(crate) source: Entity,
+    pub(crate) session: Entity,
+    pub(crate) sender: TokioSender<ChannelItem>,
 }
 
 impl InnerChannel {
@@ -130,45 +127,6 @@ impl ChannelQueue {
 impl Default for ChannelQueue {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Use this channel to stream data using the [`StreamChannel::send`] method.
-pub struct StreamChannel<T> {
-    target: Option<Entity>,
-    inner: Arc<InnerChannel>,
-    _ignore: std::marker::PhantomData<fn(T)>,
-}
-
-impl<T: Stream> StreamChannel<T> {
-    /// Send an instance of data out over a stream.
-    pub fn send(&self, data: T) {
-        let source = self.inner.source;
-        let session = self.inner.session;
-        let target = self.target;
-        self.inner
-            .sender
-            .send(Box::new(
-                move |world: &mut World, roster: &mut OperationRoster| {
-                    data.send(StreamRequest {
-                        source,
-                        session,
-                        target,
-                        world,
-                        roster,
-                    })
-                    .ok();
-                },
-            ))
-            .ok();
-    }
-
-    pub(crate) fn new(target: Option<Entity>, inner: Arc<InnerChannel>) -> Self {
-        Self {
-            target,
-            inner,
-            _ignore: Default::default(),
-        }
     }
 }
 

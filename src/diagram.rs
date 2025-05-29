@@ -24,9 +24,9 @@ mod registration;
 mod section_schema;
 mod serialization;
 mod split_schema;
+mod stream_out_schema;
 mod supported;
 mod transform_schema;
-mod type_info;
 mod unzip_schema;
 mod workflow_builder;
 
@@ -42,13 +42,11 @@ pub use registration::*;
 pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
+pub use stream_out_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
-pub use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
-
-// ----------
 
 use std::{
     borrow::Cow,
@@ -58,20 +56,25 @@ use std::{
     sync::Arc,
 };
 
+pub use crate::type_info::TypeInfo;
 use crate::{
     Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
     SplitConnectionError, StreamPack,
 };
+
 use schemars::{
     r#gen::SchemaGenerator,
     schema::{InstanceType, Metadata, ObjectValidation, Schema, SchemaObject, SingleOrVec},
     JsonSchema,
 };
+
 use serde::{
     de::{Error, Visitor},
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+
+use thiserror::Error as ThisError;
 
 const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
@@ -379,6 +382,48 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     /// ```
     Section(SectionSchema),
+
+    /// Declare a stream output for the current scope. Outputs that you connect
+    /// to this operation will be streamed out of the scope that this operation
+    /// is declared in.
+    ///
+    /// For the root-level scope, make sure you use a stream pack that is
+    /// compatible with all stream out operations that you declare, otherwise
+    /// you may get a connection error at runtime.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "plan",
+    ///     "ops": {
+    ///         "progress_stream": {
+    ///             "type": "stream_out",
+    ///             "name": "progress"
+    ///         },
+    ///         "plan": {
+    ///             "type": "node",
+    ///             "builder": "planner",
+    ///             "next": "drive",
+    ///             "stream_out" : {
+    ///                 "progress": "progress_stream"
+    ///             }
+    ///         },
+    ///         "drive": {
+    ///             "type": "node",
+    ///             "builder": "navigation",
+    ///             "next": { "builtin": "terminate" },
+    ///             "stream_out": {
+    ///                 "progress": "progress_stream"
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    StreamOut(StreamOutSchema),
 
     /// If the request is cloneable, clone it into multiple responses that can
     /// each be sent to a different operation. The `next` property is an array.
@@ -859,6 +904,7 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
             Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::StreamOut(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
         }
@@ -1229,7 +1275,7 @@ impl TemplateStack {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(ThisError, Debug)]
 #[error("{context} {code}")]
 pub struct DiagramError {
     pub context: DiagramErrorContext,
@@ -1274,11 +1320,11 @@ pub enum DiagramErrorCode {
     #[error("section template [{0}] does not exist")]
     TemplateNotFound(OperationName),
 
-    #[error("type mismatch, source {source_type}, target {target_type}")]
-    TypeMismatch {
-        source_type: TypeInfo,
-        target_type: TypeInfo,
-    },
+    #[error("{0}")]
+    TypeMismatch(#[from] TypeMismatch),
+
+    #[error("{0}")]
+    MissingStream(#[from] MissingStream),
 
     #[error("Operation [{0}] attempted to instantiate a duplicate of itself.")]
     DuplicateInputsCreated(OperationRef),
@@ -1414,6 +1460,16 @@ impl DiagramErrorCode {
     }
 }
 
+/// An error that occurs when a diagram description expects a node to provide a
+/// named output stream, but the node does not provide any output stream that
+/// matches the expected name.
+#[derive(ThisError, Debug)]
+#[error("An expected stream is not provided by this node: {missing_name}. Available stream names: {}", format_list(&available_names))]
+pub struct MissingStream {
+    pub missing_name: OperationName,
+    pub available_names: Vec<OperationName>,
+}
+
 #[cfg(test)]
 mod testing;
 
@@ -1529,10 +1585,10 @@ mod tests {
         assert!(
             matches!(
                 err.code,
-                DiagramErrorCode::TypeMismatch {
+                DiagramErrorCode::TypeMismatch(TypeMismatch {
                     target_type: _,
                     source_type: _
-                }
+                })
             ),
             "{:?}",
             err
@@ -1717,4 +1773,11 @@ mod tests {
 
         assert!(matches!(result.code, DiagramErrorCode::UnknownOperation(_),));
     }
+}
+
+/// Used with `#[serde(default, skip_serializing_if = "is_default")]` for fields
+/// that don't need to be serialized if they are a default value.
+pub(crate) fn is_default<T: std::default::Default + Eq>(value: &T) -> bool {
+    let default = T::default();
+    *value == default
 }

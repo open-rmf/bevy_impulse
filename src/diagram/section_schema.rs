@@ -25,9 +25,9 @@ use crate::{
 };
 
 use super::{
-    type_info::TypeInfo, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext,
-    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
-    NextOperation, OperationName, Operations,
+    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramElementRegistry,
+    DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
+    Operations, TypeInfo,
 };
 
 pub use bevy_impulse_derive::Section;

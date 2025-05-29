@@ -21,7 +21,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::{AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage, Scope, StreamPack};
+use crate::{
+    dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage,
+    Scope, StreamPack,
+};
 
 use super::{
     BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
@@ -46,6 +49,7 @@ type NamespaceList = SmallVec<[OperationName; 4]>;
 pub enum OperationRef {
     Named(NamedOperationRef),
     Builtin { builtin: BuiltinTarget },
+    StreamOut(StreamOutRef),
 }
 
 impl OperationRef {
@@ -53,6 +57,9 @@ impl OperationRef {
         match self {
             Self::Builtin { builtin } => Self::Builtin { builtin },
             Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
+            Self::StreamOut(stream_out) => {
+                Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
+            }
         }
     }
 }
@@ -86,13 +93,14 @@ impl std::fmt::Display for OperationRef {
         match self {
             Self::Named(named) => write!(f, "{named}"),
             Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
+            Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
         }
     }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NamedOperationRef {
-    pub namespaces: SmallVec<[Arc<str>; 4]>,
+    pub namespaces: NamespaceList,
     /// If this references an exposed operation, such as an exposed input or
     /// output of a session, this will contain the session name. Suppose we have
     /// a section named `sec` and it has an exposed output named `out`. Then
@@ -134,15 +142,7 @@ pub struct NamedOperationRef {
 
 impl NamedOperationRef {
     fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
-        // Put the parent namespaces at the front and append the operation's
-        // existing namespaces at the back.
-        let new_namespaces = parent_namespaces
-            .iter()
-            .cloned()
-            .chain(self.namespaces.drain(..))
-            .collect();
-
-        self.namespaces = new_namespaces;
+        apply_parent_namespaces(parent_namespaces, &mut self.namespaces);
         self
     }
 }
@@ -197,6 +197,56 @@ impl std::fmt::Display for NamedOperationRef {
 
         f.write_str(&self.name)
     }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StreamOutRef {
+    /// The namespace of the scope is being streamed out of
+    pub namespaces: NamespaceList,
+    /// The name of the stream (within its scope) that is being referred to
+    pub name: Arc<str>,
+}
+
+impl StreamOutRef {
+    pub fn new(name: impl Into<Arc<str>>) -> Self {
+        Self {
+            namespaces: NamespaceList::new(),
+            name: name.into(),
+        }
+    }
+
+    fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
+        apply_parent_namespaces(parent_namespaces, &mut self.namespaces);
+        self
+    }
+}
+
+impl std::fmt::Display for StreamOutRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for namespace in &self.namespaces {
+            write!(f, "{namespace}:")?;
+        }
+
+        write!(f, "(stream_out:{})", self.name)
+    }
+}
+
+impl From<StreamOutRef> for OperationRef {
+    fn from(value: StreamOutRef) -> Self {
+        OperationRef::StreamOut(value)
+    }
+}
+
+fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut NamespaceList) {
+    // Put the parent namespaces at the front and append the operation's
+    // existing namespaces at the back.
+    let new_namespaces = parent_namespaces
+        .iter()
+        .cloned()
+        .chain(namespaces.drain(..))
+        .collect();
+
+    *namespaces = new_namespaces;
 }
 
 #[derive(Default)]
@@ -942,6 +992,12 @@ where
         standard_input_connection(scope.terminate.into(), &ctx.registry)?,
     );
 
+    let mut streams = DynStreamInputPack::default();
+    Streams::into_dyn_stream_input_pack(&mut streams, scope.streams);
+    for (name, input) in streams.named {
+        ctx.set_input_for_target(StreamOutRef::new(name), input)?;
+    }
+
     // Add the dispose operation
     ctx.construction.connect_into_target.insert(
         OperationRef::Builtin {
@@ -1062,7 +1118,9 @@ impl ConnectIntoTarget for BasicConnect {
         builder: &mut Builder,
         _: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        output.connect_to(&self.input_slot, builder)
+        output
+            .connect_to(&self.input_slot, builder)
+            .map_err(Into::into)
     }
 
     fn infer_input_type(
@@ -1157,7 +1215,7 @@ impl InferMessageType for DynInputSlot {
 }
 
 #[derive(Debug)]
-struct RedirectConnection {
+pub struct RedirectConnection {
     redirect_to: OperationRef,
     /// Keep track of which DynOutputs have been redirected in the past so we
     /// can identify when a circular redirection is happening.
@@ -1165,7 +1223,7 @@ struct RedirectConnection {
 }
 
 impl RedirectConnection {
-    fn new(redirect_to: OperationRef) -> Self {
+    pub fn new(redirect_to: OperationRef) -> Self {
         Self {
             redirect_to,
             redirected: Default::default(),

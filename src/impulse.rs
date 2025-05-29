@@ -95,9 +95,8 @@ where
             TakenResponse::<Response>::new(response_sender),
         ));
         let mut map = StreamTargetMap::default();
-        let (bundle, stream_receivers) =
-            Streams::take_streams(self.target, &mut map, self.commands);
-        self.commands.entity(self.source).insert((bundle, map));
+        let stream_receivers = Streams::take_streams(self.target, &mut map, self.commands);
+        self.commands.entity(self.source).insert(map);
 
         Recipient {
             response: response_promise,
@@ -306,7 +305,7 @@ where
 /// Contains the final response and streams produced at the end of an impulse chain.
 pub struct Recipient<Response, Streams: StreamPack> {
     pub response: Promise<Response>,
-    pub streams: Streams::Receiver,
+    pub streams: Streams::StreamReceivers,
 }
 
 /// Used to store a response of an impulse as a component of an entity.

@@ -15,247 +15,106 @@
  *
 */
 
-use bevy_derive::{Deref, DerefMut};
-use bevy_ecs::{
-    prelude::{Bundle, Commands, Component, Entity, With, World},
-    query::{ReadOnlyWorldQuery, WorldQuery},
-    system::Command,
-};
-use bevy_hierarchy::BuildChildren;
-pub use bevy_impulse_derive::Stream;
-use bevy_utils::all_tuples;
-use futures::{future::BoxFuture, join};
+use bevy_ecs::prelude::{Entity, World};
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver as Receiver};
+use std::sync::OnceLock;
 
-use std::{
-    any::TypeId,
-    cell::RefCell,
-    collections::HashSet,
-    future::Future,
-    pin::Pin,
-    rc::Rc,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use crate::{ManageInput, OperationError, OperationResult, OperationRoster, OrBroken};
 
-use smallvec::SmallVec;
+mod anonymous_stream;
+pub use anonymous_stream::*;
 
-use crate::{
-    AddImpulse, AddOperation, Broken, Builder, DeferredRoster, InnerChannel, InputSlot,
-    ManageInput, OperationError, OperationResult, OperationRoster, OrBroken, Output, Push,
-    RedirectScopeStream, RedirectWorkflowStream, SingleInputStorage, StreamChannel, TakenStream,
-    UnhandledErrors, UnusedStreams, UnusedTarget,
-};
+mod dynamically_named_stream;
+pub use dynamically_named_stream::*;
 
-pub trait Stream: 'static + Send + Sync + Sized {
-    type Container: IntoIterator<Item = Self> + Extend<Self> + Default + 'static + Send + Sync;
+mod named_stream;
+pub use named_stream::*;
 
-    fn send(
-        self,
-        StreamRequest {
-            session,
-            target,
-            world,
-            roster,
-            ..
-        }: StreamRequest,
-    ) -> OperationResult {
-        if let Some(target) = target {
-            world
-                .get_entity_mut(target)
-                .or_broken()?
-                .give_input(session, self, roster)?;
-        }
+mod stream_availability;
+pub use stream_availability::*;
 
-        Ok(())
-    }
+mod stream_buffer;
+pub use stream_buffer::*;
 
-    fn spawn_scope_stream(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (InputSlot<Self>, Output<Self>) {
-        let source = commands.spawn(()).id();
-        let target = commands.spawn(UnusedTarget).id();
-        commands.add(AddOperation::new(
-            Some(in_scope),
-            source,
-            RedirectScopeStream::<Self>::new(target),
-        ));
+mod stream_channel;
+pub use stream_channel::*;
 
-        (
-            InputSlot::new(in_scope, source),
-            Output::new(out_scope, target),
-        )
-    }
+mod stream_filter;
+pub use stream_filter::*;
 
-    fn spawn_workflow_stream(builder: &mut Builder) -> InputSlot<Self> {
-        let source = builder.commands.spawn(()).id();
-        builder.commands.add(AddOperation::new(
-            Some(builder.scope()),
-            source,
-            RedirectWorkflowStream::<Self>::new(),
-        ));
-        InputSlot::new(builder.scope, source)
-    }
+mod stream_pack;
+pub use stream_pack::*;
 
-    fn spawn_node_stream(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> (StreamTargetStorage<Self>, Output<Self>) {
-        let target = builder
-            .commands
-            .spawn((SingleInputStorage::new(source), UnusedTarget))
-            .id();
+mod stream_target_map;
+pub use stream_target_map::*;
 
-        let index = map.add(target);
-        (
-            StreamTargetStorage::new(index),
-            Output::new(builder.scope, target),
-        )
-    }
+// TODO(@mxgrey): Add module-level documentation for stream.rs
 
-    fn extract_target_storage(
-        source: Entity,
-        world: &World,
-    ) -> Result<StreamTargetStorage<Self>, OperationError> {
-        world
-            .get::<StreamTargetStorage<Self>>(source)
-            .or_broken()
-            .cloned()
-    }
+pub use bevy_impulse_derive::{Stream, StreamPack};
+/// You can create custom stream types that have side-effects, such as:
+/// - applying a transformation to the stream input to produce a different type of output
+/// - logging the message data
+/// - triggering an event or modifying a resource/component in the [`World`]
+///
+/// After you have implemented `StreamEffect` for your struct, you can apply
+/// `#[derive(Stream)]` to the struct and then use as a [`StreamPack`], either
+/// on its own or in a tuple.
+///
+/// If you just want to stream a message with no side-effects, you can simply
+/// wrap your message type in [`StreamOf`] to get a [`StreamPack`]. Users only
+/// need to use `StreamEffect` if you want custom stream side-effects.
+pub trait StreamEffect: 'static + Send + Sync + Sized {
+    type Input: 'static + Send + Sync;
+    type Output: 'static + Send + Sync;
 
-    fn take_stream(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> (StreamTargetStorage<Self>, Receiver<Self>) {
-        let (sender, receiver) = unbounded_channel::<Self>();
-        let target = commands
-            .spawn(())
-            // Set the parent of this stream to be the session so it can be
-            // recursively despawned together.
-            .set_parent(source)
-            .id();
-
-        let index = map.add(target);
-
-        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
-
-        (StreamTargetStorage::new(index), receiver)
-    }
-
-    fn collect_stream(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> StreamTargetStorage<Self> {
-        let redirect = commands.spawn(()).set_parent(source).id();
-        commands.add(AddImpulse::new(redirect, Push::<Self>::new(target, true)));
-        let index = map.add(redirect);
-        StreamTargetStorage::new(index)
-    }
+    /// Specify a side effect that is meant to happen whenever a stream value is
+    /// sent.
+    fn side_effect(
+        input: Self::Input,
+        request: &mut StreamRequest,
+    ) -> Result<Self::Output, OperationError>;
 }
 
-/// A simple newtype wrapper that turns any suitable data structure
-/// (`'static + Send + Sync`) into a stream.
-#[derive(Clone, Copy, Debug, Deref, DerefMut)]
-pub struct StreamOf<T: 'static + Send + Sync>(pub T);
+/// A wrapper to make an anonymous (unnamed) stream for any type `T` that
+/// implements `'static + Send + Sync`. This simply transmits the `T` with no
+/// side-effects.
+#[derive(Stream)]
+pub struct StreamOf<T: 'static + Send + Sync>(std::marker::PhantomData<fn(T)>);
 
-pub type DefaultStreamContainer<T> = SmallVec<[T; 16]>;
-
-impl<T: 'static + Send + Sync> Stream for StreamOf<T> {
-    type Container = DefaultStreamContainer<Self>;
-}
-
-pub struct StreamBuffer<T: Stream> {
-    // TODO(@mxgrey): Consider replacing the Rc with an unsafe pointer so that
-    // no heap allocation is needed each time a stream is used in a blocking
-    // function.
-    container: Rc<RefCell<T::Container>>,
-    target: Option<Entity>,
-}
-
-impl<T: Stream> Clone for StreamBuffer<T> {
+impl<T: 'static + Send + Sync> Clone for StreamOf<T> {
     fn clone(&self) -> Self {
-        Self {
-            container: Rc::clone(&self.container),
-            target: self.target,
-        }
+        *self
     }
 }
 
-impl<T: Stream> StreamBuffer<T> {
-    pub fn send(&self, data: T) {
-        self.container.borrow_mut().extend([data]);
-    }
+impl<T: 'static + Send + Sync> Copy for StreamOf<T> {}
 
-    pub fn target(&self) -> Option<Entity> {
-        self.target
-    }
-}
+impl<T: 'static + Send + Sync> std::fmt::Debug for StreamOf<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        static NAME: OnceLock<String> = OnceLock::new();
+        let name = NAME.get_or_init(|| format!("StreamOf<{}>", std::any::type_name::<T>(),));
 
-/// Used to forward the data from a stream receiver into a different
-/// [`StreamChannel`].
-pub struct StreamForward<T: Stream> {
-    receiver: Receiver<T>,
-    channel: StreamChannel<T>,
-}
-
-impl<T: Stream + Unpin> Future for StreamForward<T> {
-    /// This will keep forwarding the streams until the upstream sender
-    /// disconnects, so there is nothing of interest to return from the future.
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let self_mut = self.get_mut();
-        loop {
-            // We loop because even if there are multiple values available, the
-            // poll will only be triggered once.
-            match self_mut.receiver.poll_recv(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Some(result)) => {
-                    self_mut.channel.send(result);
-                }
-                Poll::Ready(None) => {
-                    // This channel has expired so we should indicate that we are
-                    // finished here
-                    return Poll::Ready(());
-                }
-            }
-        }
+        f.debug_struct(name.as_str()).finish()
     }
 }
 
-/// Used by [`StreamPack`] to implement the `StreamPack::forward_channels` method
-/// for an empty tuple.
-pub struct NoopForward;
+impl<T: 'static + Send + Sync> StreamEffect for StreamOf<T> {
+    type Input = T;
+    type Output = T;
 
-impl Future for NoopForward {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(())
+    /// `StreamOf` has no side-effect
+    fn side_effect(
+        input: Self::Input,
+        _: &mut StreamRequest,
+    ) -> Result<Self::Output, OperationError> {
+        Ok(input)
     }
 }
 
-/// Used by [`StreamPack`] to implement the `StreamPack::forward_channels` method
-/// for a non-empty tuple.
-pub struct StreamPackForward {
-    inner: BoxFuture<'static, ()>,
-}
-
-impl Future for StreamPackForward {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.get_mut().inner.as_mut().poll(cx)
-    }
-}
-
+/// `StreamRequest` is provided to types that implement [`StreamEffect`] so they
+/// can process a stream input and apply any side effects to it. Note that your
+/// implementation of [`StreamEffect::side_effect`] should return the output
+/// data; it should *not* use the `StreamRequest` send it the output to the target.
 pub struct StreamRequest<'a> {
     /// The node that emitted the stream
     pub source: Entity,
@@ -269,714 +128,30 @@ pub struct StreamRequest<'a> {
     pub roster: &'a mut OperationRoster,
 }
 
-/// [`StreamAvailable`] is a marker component that indicates what streams are offered by
-/// a service.
-#[derive(Component)]
-pub struct StreamAvailable<T: Stream> {
-    _ignore: std::marker::PhantomData<fn(T)>,
-}
-
-impl<T: Stream> Default for StreamAvailable<T> {
-    fn default() -> Self {
-        Self {
-            _ignore: Default::default(),
-        }
-    }
-}
-
-/// [`StreamTargetStorage`] keeps track of the target for each stream for a source.
-#[derive(Component)]
-pub struct StreamTargetStorage<T: Stream> {
-    index: usize,
-    _ignore: std::marker::PhantomData<fn(T)>,
-}
-
-impl<T: Stream> Clone for StreamTargetStorage<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Stream> Copy for StreamTargetStorage<T> {}
-
-impl<T: Stream> StreamTargetStorage<T> {
-    fn new(index: usize) -> Self {
-        Self {
-            index,
-            _ignore: Default::default(),
-        }
-    }
-
-    pub fn get(&self) -> usize {
-        self.index
-    }
-}
-
-/// The actual entity target of the stream is held in this component which does
-/// not have any generic parameters. This means it is possible to lookup the
-/// targets of the streams coming out of the node without knowing the concrete
-/// type of the streams. This is crucial for being able to redirect the stream
-/// targets.
-//
-// TODO(@mxgrey): Consider whether we should store stream type information in here
-#[derive(Component, Default, Clone, Debug)]
-pub struct StreamTargetMap {
-    pub(crate) map: SmallVec<[Entity; 8]>,
-}
-
-impl StreamTargetMap {
-    fn add(&mut self, target: Entity) -> usize {
-        let index = self.map.len();
-        self.map.push(target);
-        index
-    }
-
-    pub fn map(&self) -> &SmallVec<[Entity; 8]> {
-        &self.map
-    }
-
-    pub fn get(&self, index: usize) -> Option<Entity> {
-        self.map.get(index).copied()
-    }
-}
-
-/// The `StreamPack` trait defines the interface for a pack of streams. Each
-/// [`Provider`](crate::Provider) can provide zero, one, or more streams of data
-/// that may be sent out while it's running. The `StreamPack` allows those
-/// streams to be packed together as one generic argument.
-pub trait StreamPack: 'static + Send + Sync {
-    type StreamAvailableBundle: Bundle + Default;
-    type StreamFilter: ReadOnlyWorldQuery;
-    type StreamStorageBundle: Bundle + Clone;
-    type StreamInputPack;
-    type StreamOutputPack;
-    type Receiver: Send + Sync;
-    type Channel: Send;
-    type Forward: Future<Output = ()> + Send;
-    type Buffer: Clone;
-    type TargetIndexQuery: ReadOnlyWorldQuery;
-
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (Self::StreamInputPack, Self::StreamOutputPack);
-
-    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack;
-
-    fn spawn_node_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack);
-
-    fn extract_target_storage(
-        source: Entity,
-        world: &World,
-    ) -> Result<Self::StreamStorageBundle, OperationError>;
-
-    fn take_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        builder: &mut Commands,
-    ) -> (Self::StreamStorageBundle, Self::Receiver);
-
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Self::StreamStorageBundle;
-
-    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel;
-
-    fn make_buffer(
-        target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
-        target_map: Option<&StreamTargetMap>,
-    ) -> Self::Buffer;
-
-    fn process_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult;
-
-    fn defer_buffer(buffer: Self::Buffer, source: Entity, session: Entity, commands: &mut Commands);
-
-    fn forward_channels(receiver: Self::Receiver, channel: Self::Channel) -> Self::Forward;
-
-    /// Are there actually any streams in the pack?
-    fn has_streams() -> bool;
-
-    fn insert_types(types: &mut HashSet<TypeId>);
-}
-
-impl<T: Stream + Unpin> StreamPack for T {
-    type StreamAvailableBundle = StreamAvailable<Self>;
-    type StreamFilter = With<StreamAvailable<Self>>;
-    type StreamStorageBundle = StreamTargetStorage<Self>;
-    type StreamInputPack = InputSlot<Self>;
-    type StreamOutputPack = Output<Self>;
-    type Receiver = Receiver<Self>;
-    type Channel = StreamChannel<Self>;
-    type Forward = StreamForward<Self>;
-    type Buffer = StreamBuffer<Self>;
-    type TargetIndexQuery = Option<&'static StreamTargetStorage<Self>>;
-
-    fn spawn_scope_streams(
-        in_scope: Entity,
-        out_scope: Entity,
-        commands: &mut Commands,
-    ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
-        T::spawn_scope_stream(in_scope, out_scope, commands)
-    }
-
-    fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
-        T::spawn_workflow_stream(builder)
-    }
-
-    fn spawn_node_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        builder: &mut Builder,
-    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack) {
-        T::spawn_node_stream(source, map, builder)
-    }
-
-    fn extract_target_storage(
-        source: Entity,
-        world: &World,
-    ) -> Result<Self::StreamStorageBundle, OperationError> {
-        T::extract_target_storage(source, world)
-    }
-
-    fn take_streams(
-        source: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> (Self::StreamStorageBundle, Self::Receiver) {
-        Self::take_stream(source, map, commands)
-    }
-
-    fn collect_streams(
-        source: Entity,
-        target: Entity,
-        map: &mut StreamTargetMap,
-        commands: &mut Commands,
-    ) -> Self::StreamStorageBundle {
-        Self::collect_stream(source, target, map, commands)
-    }
-
-    fn make_channel(inner: &Arc<InnerChannel>, world: &World) -> Self::Channel {
-        let index = world
-            .get::<StreamTargetStorage<Self>>(inner.source())
-            .map(|t| t.index);
-        let target = index.and_then(|index| {
-            world
-                .get::<StreamTargetMap>(inner.source())
-                .and_then(|t| t.get(index))
-        });
-        StreamChannel::new(target, Arc::clone(inner))
-    }
-
-    fn make_buffer(
-        target_index: Option<&StreamTargetStorage<Self>>,
-        target_map: Option<&StreamTargetMap>,
-    ) -> Self::Buffer {
-        let target = target_index
-            .and_then(|s| target_map.map(|t| t.map.get(s.index)))
-            .flatten()
-            .copied();
-
-        StreamBuffer {
-            container: Default::default(),
-            target,
-        }
-    }
-
-    fn process_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        unused: &mut UnusedStreams,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        let target = buffer.target;
-        let mut was_unused = true;
-        for data in Rc::into_inner(buffer.container)
-            .or_broken()?
-            .into_inner()
-            .into_iter()
-        {
-            was_unused = false;
-            data.send(StreamRequest {
-                source,
-                session,
-                target,
-                world,
-                roster,
-            })?;
-        }
-
-        if was_unused {
-            unused.streams.push(std::any::type_name::<Self>());
-        }
-
-        Ok(())
-    }
-
-    fn defer_buffer(
-        buffer: Self::Buffer,
-        source: Entity,
-        session: Entity,
-        commands: &mut Commands,
-    ) {
-        commands.add(SendStreams::<Self> {
-            source,
+impl<'a> StreamRequest<'a> {
+    pub fn send_output<T: 'static + Send + Sync>(self, output: T) -> OperationResult {
+        let Self {
             session,
-            container: buffer.container.take(),
-            target: buffer.target,
-        });
-    }
+            target,
+            world,
+            roster,
+            ..
+        } = self;
+        if let Some(target) = target {
+            world
+                .get_entity_mut(target)
+                .or_broken()?
+                .give_input(session, output, roster)?;
+        }
 
-    fn forward_channels(receiver: Self::Receiver, channel: Self::Channel) -> Self::Forward {
-        StreamForward { receiver, channel }
-    }
-
-    fn has_streams() -> bool {
-        true
-    }
-
-    fn insert_types(types: &mut HashSet<TypeId>) {
-        types.insert(TypeId::of::<T>());
-    }
-}
-
-impl StreamPack for () {
-    type StreamAvailableBundle = ();
-    type StreamFilter = ();
-    type StreamStorageBundle = ();
-    type StreamInputPack = ();
-    type StreamOutputPack = ();
-    type Receiver = ();
-    type Channel = ();
-    type Forward = NoopForward;
-    type Buffer = ();
-    type TargetIndexQuery = ();
-
-    fn spawn_scope_streams(
-        _: Entity,
-        _: Entity,
-        _: &mut Commands,
-    ) -> (Self::StreamInputPack, Self::StreamOutputPack) {
-        ((), ())
-    }
-
-    fn spawn_workflow_streams(_: &mut Builder) -> Self::StreamInputPack {
-        // Just return ()
-    }
-
-    fn spawn_node_streams(
-        _: Entity,
-        _: &mut StreamTargetMap,
-        _: &mut Builder,
-    ) -> (Self::StreamStorageBundle, Self::StreamOutputPack) {
-        ((), ())
-    }
-
-    fn extract_target_storage(
-        _: Entity,
-        _: &World,
-    ) -> Result<Self::StreamStorageBundle, OperationError> {
         Ok(())
     }
-
-    fn take_streams(
-        _: Entity,
-        _: &mut StreamTargetMap,
-        _: &mut Commands,
-    ) -> (Self::StreamStorageBundle, Self::Receiver) {
-        ((), ())
-    }
-
-    fn collect_streams(
-        _: Entity,
-        _: Entity,
-        _: &mut StreamTargetMap,
-        _: &mut Commands,
-    ) -> Self::StreamStorageBundle {
-        // Just return ()
-    }
-
-    fn make_channel(_: &Arc<InnerChannel>, _: &World) -> Self::Channel {
-        // Just return ()
-    }
-
-    fn make_buffer(_: Self::TargetIndexQuery, _: Option<&StreamTargetMap>) -> Self::Buffer {
-        // Just return ()
-    }
-
-    fn process_buffer(
-        _: Self::Buffer,
-        _: Entity,
-        _: Entity,
-        _: &mut UnusedStreams,
-        _: &mut World,
-        _: &mut OperationRoster,
-    ) -> OperationResult {
-        Ok(())
-    }
-
-    fn defer_buffer(_: Self::Buffer, _: Entity, _: Entity, _: &mut Commands) {}
-
-    fn forward_channels(_: Self::Receiver, _: Self::Channel) -> Self::Forward {
-        NoopForward
-    }
-
-    fn has_streams() -> bool {
-        false
-    }
-
-    fn insert_types(_: &mut HashSet<TypeId>) {
-        // Do nothing
-    }
 }
-
-macro_rules! impl_streampack_for_tuple {
-    ($(($T:ident, $U:ident)),*) => {
-        #[allow(non_snake_case)]
-        impl<$($T: StreamPack),*> StreamPack for ($($T,)*) {
-            type StreamAvailableBundle = ($($T::StreamAvailableBundle,)*);
-            type StreamFilter = ($($T::StreamFilter,)*);
-            type StreamStorageBundle = ($($T::StreamStorageBundle,)*);
-            type StreamInputPack = ($($T::StreamInputPack,)*);
-            type StreamOutputPack = ($($T::StreamOutputPack,)*);
-            type Receiver = ($($T::Receiver,)*);
-            type Channel = ($($T::Channel,)*);
-            type Buffer = ($($T::Buffer,)*);
-            type Forward = StreamPackForward;
-            type TargetIndexQuery = ($($T::TargetIndexQuery,)*);
-
-            fn spawn_scope_streams(
-                in_scope: Entity,
-                out_scope: Entity,
-                commands: &mut Commands,
-            ) -> (
-                Self::StreamInputPack,
-                Self::StreamOutputPack,
-            ) {
-                let ($($T,)*) = (
-                    $(
-                        $T::spawn_scope_streams(in_scope, out_scope, commands),
-                    )*
-                );
-                // Now unpack the tuples
-                (
-                    (
-                        $(
-                            $T.0,
-                        )*
-                    ),
-                    (
-                        $(
-                            $T.1,
-                        )*
-                    )
-                )
-            }
-
-            fn spawn_workflow_streams(builder: &mut Builder) -> Self::StreamInputPack {
-                (
-                    $($T::spawn_workflow_streams(builder),
-                    )*
-                 )
-            }
-
-            fn spawn_node_streams(
-                source: Entity,
-                map: &mut StreamTargetMap,
-                builder: &mut Builder,
-            ) -> (
-                Self::StreamStorageBundle,
-                Self::StreamOutputPack,
-            ) {
-                let ($($T,)*) = (
-                    $(
-                        $T::spawn_node_streams(source, map, builder),
-                    )*
-                );
-                // Now unpack the tuples
-                (
-                    (
-                        $(
-                            $T.0,
-                        )*
-                    ),
-                    (
-                        $(
-                            $T.1,
-                        )*
-                    )
-                )
-            }
-
-            fn extract_target_storage(
-                source: Entity,
-                world: &World,
-            ) -> Result<Self::StreamStorageBundle, OperationError> {
-                Ok(($(
-                    $T::extract_target_storage(source, world)?,
-                )*))
-            }
-
-            fn take_streams(source: Entity, map: &mut StreamTargetMap, builder: &mut Commands) -> (
-                Self::StreamStorageBundle,
-                Self::Receiver,
-            ) {
-                let ($($T,)*) = (
-                    $(
-                        $T::take_streams(source, map, builder),
-                    )*
-                );
-                // Now unpack the tuples
-                (
-                    (
-                        $(
-                            $T.0,
-                        )*
-                    ),
-                    (
-                        $(
-                            $T.1,
-                        )*
-                    )
-                )
-            }
-
-            fn collect_streams(
-                source: Entity,
-                target: Entity,
-                map: &mut StreamTargetMap,
-                commands: &mut Commands,
-            ) -> Self::StreamStorageBundle {
-                (
-                    $(
-                        $T::collect_streams(source, target, map, commands),
-                    )*
-                )
-            }
-
-            fn make_channel(
-                inner: &Arc<InnerChannel>,
-                world: &World,
-            ) -> Self::Channel {
-                (
-                    $(
-                        $T::make_channel(inner, world),
-                    )*
-                )
-            }
-
-            fn make_buffer(
-                target_index: <Self::TargetIndexQuery as WorldQuery>::Item<'_>,
-                target_map: Option<&StreamTargetMap>,
-            ) -> Self::Buffer {
-                let ($($T,)*) = target_index;
-                (
-                    $(
-                        $T::make_buffer($T, target_map),
-                    )*
-                )
-            }
-
-            fn process_buffer(
-                buffer: Self::Buffer,
-                source: Entity,
-                session: Entity,
-                unused: &mut UnusedStreams,
-                world: &mut World,
-                roster: &mut OperationRoster,
-            ) -> OperationResult {
-                let ($($T,)*) = buffer;
-                $(
-                    $T::process_buffer($T, source, session, unused, world, roster)?;
-                )*
-                Ok(())
-            }
-
-            fn defer_buffer(
-                buffer: Self::Buffer,
-                source: Entity,
-                session: Entity,
-                commands: &mut Commands,
-            ) {
-                let ($($T,)*) = buffer;
-                $(
-                    $T::defer_buffer($T, source, session, commands);
-                )*
-            }
-
-            fn forward_channels(
-                receiver: Self::Receiver,
-                channel: Self::Channel,
-            ) -> Self::Forward {
-                let inner = async move {
-                    let ($($T,)*) = receiver;
-                    let ($($U,)*) = channel;
-                    join!($(
-                        $T::forward_channels($T, $U),
-                    )*);
-                };
-
-                StreamPackForward{ inner: Box::pin(inner) }
-            }
-
-            fn has_streams() -> bool {
-                let mut has_streams = false;
-                $(
-                    has_streams = has_streams || $T::has_streams();
-                )*
-                has_streams
-            }
-
-            fn insert_types(types: &mut HashSet<TypeId>) {
-                $(
-                    $T::insert_types(types);
-                )*
-            }
-        }
-    }
-}
-
-// Implements the `StreamPack` trait for all tuples between size 1 and 12
-// (inclusive) made of types that implement `StreamPack`
-all_tuples!(impl_streampack_for_tuple, 1, 12, T, U);
-
-pub(crate) fn make_stream_buffer_from_world<Streams: StreamPack>(
-    source: Entity,
-    world: &mut World,
-) -> Result<Streams::Buffer, OperationError> {
-    let mut stream_query =
-        world.query::<(Streams::TargetIndexQuery, Option<&'static StreamTargetMap>)>();
-    let (target_indices, target_map) = stream_query.get(world, source).or_broken()?;
-    Ok(Streams::make_buffer(target_indices, target_map))
-}
-
-struct SendStreams<S: Stream> {
-    container: S::Container,
-    source: Entity,
-    session: Entity,
-    target: Option<Entity>,
-}
-
-impl<S: Stream> Command for SendStreams<S> {
-    fn apply(self, world: &mut World) {
-        world.get_resource_or_insert_with(DeferredRoster::default);
-        world.resource_scope::<DeferredRoster, _>(|world, mut deferred| {
-            for data in self.container {
-                let r = data.send(StreamRequest {
-                    source: self.source,
-                    session: self.session,
-                    target: self.target,
-                    world,
-                    roster: &mut deferred,
-                });
-
-                if let Err(OperationError::Broken(backtrace)) = r {
-                    world
-                        .get_resource_or_insert_with(UnhandledErrors::default)
-                        .broken
-                        .push(Broken {
-                            node: self.source,
-                            backtrace,
-                        });
-                }
-            }
-        });
-    }
-}
-
-/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to filter services
-/// based on what streams they provide. If a stream is required, you should wrap
-/// the stream type in [`Require`]. If a stream is optional, then wrap it in
-/// [`Option`].
-///
-/// The service you receive will appear as though it provides all the stream
-/// types wrapped in both your `Require` and `Option` filters, but it might not
-/// actually provide any of the streams that were wrapped in `Option`. A service
-/// that does not actually provide the optional stream can be treated as if it
-/// does provide the stream, except it will never actually send out any of that
-/// optional stream data.
-///
-/// ```
-/// use bevy_impulse::{Require, prelude::*, testing::*};
-///
-/// fn service_discovery_system(
-///     discover: ServiceDiscovery<
-///         f32,
-///         f32,
-///         (
-///             Require<(StreamOf<f32>, StreamOf<u32>)>,
-///             Option<(StreamOf<String>, StreamOf<u8>)>,
-///         )
-///     >
-/// ) {
-///     let service: Service<
-///         f32,
-///         f32,
-///         (
-///             (StreamOf<f32>, StreamOf<u32>),
-///             (StreamOf<String>, StreamOf<u8>),
-///         )
-///     > = discover.iter().next().unwrap();
-/// }
-/// ```
-pub trait StreamFilter {
-    type Filter: ReadOnlyWorldQuery;
-    type Pack: StreamPack;
-}
-
-/// Used by [`ServiceDiscovery`](crate::ServiceDiscovery) to indicate that a
-/// certain pack of streams is required.
-///
-/// For streams that are optional, wrap them in [`Option`] instead.
-///
-/// See [`StreamFilter`] for a usage example.
-pub struct Require<T> {
-    _ignore: std::marker::PhantomData<fn(T)>,
-}
-
-impl<T: StreamPack> StreamFilter for Require<T> {
-    type Filter = T::StreamFilter;
-    type Pack = T;
-}
-
-impl<T: StreamPack> StreamFilter for Option<T> {
-    type Filter = ();
-    type Pack = T;
-}
-
-macro_rules! impl_streamfilter_for_tuple {
-    ($($T:ident),*) => {
-        #[allow(non_snake_case)]
-        impl<$($T: StreamFilter),*> StreamFilter for ($($T,)*) {
-            type Filter = ($($T::Filter,)*);
-            type Pack = ($($T::Pack,)*);
-        }
-    }
-}
-
-// Implements the `StreamFilter` trait for all tuples between size 0 and 12
-// (inclusive) made of types that implement `StreamFilter`
-all_tuples!(impl_streamfilter_for_tuple, 0, 12, T);
 
 #[cfg(test)]
-mod tests {
-    use crate::{prelude::*, testing::*};
+pub(crate) mod tests {
+    use crate::{dyn_node::*, prelude::*, testing::*};
+    use std::borrow::Cow;
 
     #[test]
     fn test_single_stream() {
@@ -985,7 +160,7 @@ mod tests {
         let count_blocking_srv = context.command(|commands| {
             commands.spawn_service(|In(input): BlockingServiceInput<u32, StreamOf<u32>>| {
                 for i in 0..input.request {
-                    input.streams.send(StreamOf(i));
+                    input.streams.send(i);
                 }
                 return input.request;
             })
@@ -997,7 +172,7 @@ mod tests {
             commands.spawn_service(
                 |In(input): AsyncServiceInput<u32, StreamOf<u32>>| async move {
                     for i in 0..input.request {
-                        input.streams.send(StreamOf(i));
+                        input.streams.send(i);
                     }
                     return input.request;
                 },
@@ -1008,7 +183,7 @@ mod tests {
 
         let count_blocking_callback = (|In(input): BlockingCallbackInput<u32, StreamOf<u32>>| {
             for i in 0..input.request {
-                input.streams.send(StreamOf(i));
+                input.streams.send(i);
             }
             return input.request;
         })
@@ -1019,7 +194,7 @@ mod tests {
         let count_async_callback =
             (|In(input): AsyncCallbackInput<u32, StreamOf<u32>>| async move {
                 for i in 0..input.request {
-                    input.streams.send(StreamOf(i));
+                    input.streams.send(i);
                 }
                 return input.request;
             })
@@ -1029,7 +204,7 @@ mod tests {
 
         let count_blocking_map = (|input: BlockingMap<u32, StreamOf<u32>>| {
             for i in 0..input.request {
-                input.streams.send(StreamOf(i));
+                input.streams.send(i);
             }
             return input.request;
         })
@@ -1039,7 +214,7 @@ mod tests {
 
         let count_async_map = (|input: AsyncMap<u32, StreamOf<u32>>| async move {
             for i in 0..input.request {
-                input.streams.send(StreamOf(i));
+                input.streams.send(i);
             }
             return input.request;
         })
@@ -1063,7 +238,7 @@ mod tests {
 
         let mut stream: Vec<u32> = Vec::new();
         while let Ok(r) = recipient.streams.try_recv() {
-            stream.push(r.0);
+            stream.push(r);
         }
         assert_eq!(stream, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         assert!(context.no_unhandled_errors());
@@ -1080,7 +255,7 @@ mod tests {
             })
         });
 
-        test_formatting_stream(parse_blocking_srv, &mut context);
+        validate_formatting_stream(parse_blocking_srv, &mut context);
 
         let parse_async_srv = context.command(|commands| {
             commands.spawn_service(
@@ -1090,13 +265,13 @@ mod tests {
             )
         });
 
-        test_formatting_stream(parse_async_srv, &mut context);
+        validate_formatting_stream(parse_async_srv, &mut context);
 
         let parse_continuous_srv = context
             .app
             .spawn_continuous_service(Update, impl_formatting_streams_continuous);
 
-        test_formatting_stream(parse_continuous_srv, &mut context);
+        validate_formatting_stream(parse_continuous_srv, &mut context);
 
         let parse_blocking_callback =
             (|In(input): BlockingCallbackInput<String, FormatStreams>| {
@@ -1104,7 +279,7 @@ mod tests {
             })
             .as_callback();
 
-        test_formatting_stream(parse_blocking_callback, &mut context);
+        validate_formatting_stream(parse_blocking_callback, &mut context);
 
         let parse_async_callback =
             (|In(input): AsyncCallbackInput<String, FormatStreams>| async move {
@@ -1112,21 +287,21 @@ mod tests {
             })
             .as_callback();
 
-        test_formatting_stream(parse_async_callback, &mut context);
+        validate_formatting_stream(parse_async_callback, &mut context);
 
         let parse_blocking_map = (|input: BlockingMap<String, FormatStreams>| {
             impl_formatting_streams_blocking(input.request, input.streams);
         })
         .as_map();
 
-        test_formatting_stream(parse_blocking_map, &mut context);
+        validate_formatting_stream(parse_blocking_map, &mut context);
 
         let parse_async_map = (|input: AsyncMap<String, FormatStreams>| async move {
             impl_formatting_streams_async(input.request, input.streams);
         })
         .as_map();
 
-        test_formatting_stream(parse_async_map, &mut context);
+        validate_formatting_stream(parse_async_map, &mut context);
 
         let make_workflow = |service: Service<String, (), FormatStreams>| {
             move |scope: Scope<String, (), FormatStreams>, builder: &mut Builder| {
@@ -1140,71 +315,75 @@ mod tests {
                 builder.connect(node.streams.1, scope.streams.1);
                 builder.connect(node.streams.2, scope.streams.2);
 
-                node.output.chain(builder).connect(scope.terminate);
+                builder.connect(node.output, scope.terminate);
             }
         };
 
         let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
-        test_formatting_stream(blocking_injection_workflow, &mut context);
+        validate_formatting_stream(blocking_injection_workflow, &mut context);
 
         let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
-        test_formatting_stream(async_injection_workflow, &mut context);
+        validate_formatting_stream(async_injection_workflow, &mut context);
 
         let continuous_injection_workflow =
             context.spawn_workflow(make_workflow(parse_continuous_srv));
-        test_formatting_stream(continuous_injection_workflow, &mut context);
+        validate_formatting_stream(continuous_injection_workflow, &mut context);
 
         let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
-            let inner_node = scope.input.chain(builder).then_node(parse_continuous_srv);
+            let inner_node = scope
+                .input
+                .chain(builder)
+                .then_node(continuous_injection_workflow);
             builder.connect(inner_node.streams.0, scope.streams.0);
             builder.connect(inner_node.streams.1, scope.streams.1);
             builder.connect(inner_node.streams.2, scope.streams.2);
             builder.connect(inner_node.output, scope.terminate);
         });
-        test_formatting_stream(nested_workflow, &mut context);
+        validate_formatting_stream(nested_workflow, &mut context);
 
-        let nested_workflow = context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
-            let inner_node = builder.create_node(parse_continuous_srv);
-            builder.connect(scope.input, inner_node.input);
-            builder.connect(inner_node.streams.0, scope.streams.0);
-            builder.connect(inner_node.streams.1, scope.streams.1);
-            builder.connect(inner_node.streams.2, scope.streams.2);
-            builder.connect(inner_node.output, scope.terminate);
-        });
-        test_formatting_stream(nested_workflow, &mut context);
+        let double_nested_workflow =
+            context.spawn_workflow::<_, _, FormatStreams, _>(|scope, builder| {
+                let inner_node = builder.create_node(nested_workflow);
+                builder.connect(scope.input, inner_node.input);
+                builder.connect(inner_node.streams.0, scope.streams.0);
+                builder.connect(inner_node.streams.1, scope.streams.1);
+                builder.connect(inner_node.streams.2, scope.streams.2);
+                builder.connect(inner_node.output, scope.terminate);
+            });
+        validate_formatting_stream(double_nested_workflow, &mut context);
     }
 
     fn impl_formatting_streams_blocking(
         request: String,
-        streams: <FormatStreams as StreamPack>::Buffer,
+        streams: <FormatStreams as StreamPack>::StreamBuffers,
     ) {
         if let Ok(value) = request.parse::<u32>() {
-            streams.0.send(StreamOf(value));
+            streams.0.send(value);
         }
 
         if let Ok(value) = request.parse::<i32>() {
-            streams.1.send(StreamOf(value));
+            streams.1.send(value);
         }
 
         if let Ok(value) = request.parse::<f32>() {
-            streams.2.send(StreamOf(value));
+            streams.2.send(value);
         }
     }
 
     fn impl_formatting_streams_async(
         request: String,
-        streams: <FormatStreams as StreamPack>::Channel,
+        streams: <FormatStreams as StreamPack>::StreamChannels,
     ) {
         if let Ok(value) = request.parse::<u32>() {
-            streams.0.send(StreamOf(value));
+            streams.0.send(value);
         }
 
         if let Ok(value) = request.parse::<i32>() {
-            streams.1.send(StreamOf(value));
+            streams.1.send(value);
         }
 
         if let Ok(value) = request.parse::<f32>() {
-            streams.2.send(StreamOf(value));
+            streams.2.send(value);
         }
     }
 
@@ -1214,22 +393,22 @@ mod tests {
     ) {
         param.get_mut(&key).unwrap().for_each(|order| {
             if let Ok(value) = order.request().parse::<u32>() {
-                order.streams().0.send(StreamOf(value));
+                order.streams().0.send(value);
             }
 
             if let Ok(value) = order.request().parse::<i32>() {
-                order.streams().1.send(StreamOf(value));
+                order.streams().1.send(value);
             }
 
             if let Ok(value) = order.request().parse::<f32>() {
-                order.streams().2.send(StreamOf(value));
+                order.streams().2.send(value);
             }
 
             order.respond(());
         });
     }
 
-    fn test_formatting_stream(
+    fn validate_formatting_stream(
         provider: impl Provider<Request = String, Response = (), Streams = FormatStreams> + Clone,
         context: &mut TestingContext,
     ) {
@@ -1296,18 +475,776 @@ mod tests {
         fn from(mut recipient: Recipient<(), FormatStreams>) -> Self {
             let mut result = Self::default();
             while let Ok(r) = recipient.streams.0.try_recv() {
-                result.stream_u32.push(r.0);
+                result.stream_u32.push(r);
             }
 
             while let Ok(r) = recipient.streams.1.try_recv() {
-                result.stream_i32.push(r.0);
+                result.stream_i32.push(r);
             }
 
             while let Ok(r) = recipient.streams.2.try_recv() {
-                result.stream_f32.push(r.0);
+                result.stream_f32.push(r);
             }
 
             result
         }
+    }
+
+    #[test]
+    fn test_stream_pack() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let parse_blocking_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<Vec<String>, TestStreamPack>| {
+                    impl_stream_pack_test_blocking(input.request, input.streams);
+                },
+            )
+        });
+
+        validate_stream_pack(parse_blocking_srv, &mut context);
+
+        let parse_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<Vec<String>, TestStreamPack>| async move {
+                    impl_stream_pack_test_async(input.request, input.streams);
+                },
+            )
+        });
+
+        validate_stream_pack(parse_async_srv, &mut context);
+
+        let parse_continuous_srv = context
+            .app
+            .spawn_continuous_service(Update, impl_stream_pack_test_continuous);
+
+        validate_stream_pack(parse_continuous_srv, &mut context);
+
+        let parse_blocking_callback =
+            (|In(input): BlockingCallbackInput<Vec<String>, TestStreamPack>| {
+                impl_stream_pack_test_blocking(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_stream_pack(parse_blocking_callback, &mut context);
+
+        let parse_async_callback =
+            (|In(input): AsyncCallbackInput<Vec<String>, TestStreamPack>| async move {
+                impl_stream_pack_test_async(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_stream_pack(parse_async_callback, &mut context);
+
+        let parse_blocking_map = (|input: BlockingMap<Vec<String>, TestStreamPack>| {
+            impl_stream_pack_test_blocking(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_stream_pack(parse_blocking_map, &mut context);
+
+        let parse_async_map = (|input: AsyncMap<Vec<String>, TestStreamPack>| async move {
+            impl_stream_pack_test_async(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_stream_pack(parse_async_map, &mut context);
+
+        let make_workflow = |service: Service<Vec<String>, (), TestStreamPack>| {
+            move |scope: Scope<Vec<String>, (), TestStreamPack>, builder: &mut Builder| {
+                let node = scope
+                    .input
+                    .chain(builder)
+                    .map_block(move |value| (value, service))
+                    .then_injection_node();
+
+                builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                builder.connect(node.output, scope.terminate);
+            }
+        };
+
+        let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
+        validate_stream_pack(blocking_injection_workflow, &mut context);
+
+        let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
+        validate_stream_pack(async_injection_workflow, &mut context);
+
+        let continuous_injection_workflow =
+            context.spawn_workflow(make_workflow(parse_continuous_srv));
+        validate_stream_pack(continuous_injection_workflow, &mut context);
+
+        let nested_workflow =
+            context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                builder.connect(node.output, scope.terminate);
+            });
+        validate_stream_pack(nested_workflow, &mut context);
+
+        let double_nested_workflow =
+            context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(nested_workflow);
+
+                builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                builder.connect(node.output, scope.terminate);
+            });
+        validate_stream_pack(double_nested_workflow, &mut context);
+
+        let scoped_workflow =
+            context.spawn_workflow::<_, _, TestStreamPack, _>(|scope, builder| {
+                let inner_scope =
+                    builder.create_scope::<_, _, TestStreamPack, _>(|scope, builder| {
+                        let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                        builder.connect(node.streams.stream_u32, scope.streams.stream_u32);
+                        builder.connect(node.streams.stream_i32, scope.streams.stream_i32);
+                        builder.connect(node.streams.stream_string, scope.streams.stream_string);
+
+                        builder.connect(node.output, scope.terminate);
+                    });
+
+                builder.connect(scope.input, inner_scope.input);
+
+                builder.connect(inner_scope.streams.stream_u32, scope.streams.stream_u32);
+                builder.connect(inner_scope.streams.stream_i32, scope.streams.stream_i32);
+                builder.connect(
+                    inner_scope.streams.stream_string,
+                    scope.streams.stream_string,
+                );
+
+                builder.connect(inner_scope.output, scope.terminate);
+            });
+        validate_stream_pack(scoped_workflow, &mut context);
+
+        let dyn_stream_workflow =
+            context.spawn_workflow::<Vec<String>, (), TestStreamPack, _>(|scope, builder| {
+                let dyn_scope_input: DynOutput = scope.input.into();
+
+                let node = builder.create_node(parse_continuous_srv);
+                let mut dyn_node: DynNode = node.into();
+
+                dyn_scope_input
+                    .connect_to(&dyn_node.input, builder)
+                    .unwrap();
+
+                let dyn_scope_stream_u32: DynInputSlot = scope.streams.stream_u32.into();
+                let dyn_node_stream_u32 = dyn_node.streams.take_named("stream_u32").unwrap();
+                dyn_node_stream_u32
+                    .connect_to(&dyn_scope_stream_u32, builder)
+                    .unwrap();
+
+                let dyn_scope_stream_i32: DynInputSlot = scope.streams.stream_i32.into();
+                let dyn_node_stream_i32 = dyn_node.streams.take_named("stream_i32").unwrap();
+                dyn_node_stream_i32
+                    .connect_to(&dyn_scope_stream_i32, builder)
+                    .unwrap();
+
+                let dyn_scope_stream_string: DynInputSlot = scope.streams.stream_string.into();
+                let dyn_node_stream_string = dyn_node.streams.take_named("stream_string").unwrap();
+                dyn_node_stream_string
+                    .connect_to(&dyn_scope_stream_string, builder)
+                    .unwrap();
+
+                let terminate: DynInputSlot = scope.terminate.into();
+                dyn_node.output.connect_to(&terminate, builder).unwrap();
+            });
+        validate_stream_pack(dyn_stream_workflow, &mut context);
+
+        // We can do a stream cast for the service-type providers but not for
+        // the callbacks or maps.
+        validate_dynamically_named_stream_receiver(parse_blocking_srv, &mut context);
+        validate_dynamically_named_stream_receiver(parse_async_srv, &mut context);
+        validate_dynamically_named_stream_receiver(parse_continuous_srv, &mut context);
+        validate_dynamically_named_stream_receiver(blocking_injection_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(async_injection_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(continuous_injection_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(nested_workflow, &mut context);
+        validate_dynamically_named_stream_receiver(double_nested_workflow, &mut context);
+    }
+
+    fn validate_stream_pack(
+        provider: impl Provider<Request = Vec<String>, Response = (), Streams = TestStreamPack> + Clone,
+        context: &mut TestingContext,
+    ) {
+        let request = vec![
+            "5".to_owned(),
+            "10".to_owned(),
+            "-3".to_owned(),
+            "-27".to_owned(),
+            "hello".to_owned(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
+
+        let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, [5, 10]);
+        assert_eq!(outcome.stream_i32, [5, 10, -3, -27]);
+        assert_eq!(outcome.stream_string, ["5", "10", "-3", "-27", "hello"]);
+
+        let request = vec![];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
+
+        let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, Vec::<i32>::new());
+        assert_eq!(outcome.stream_string, Vec::<String>::new());
+
+        let request = vec![
+            "foo".to_string(),
+            "bar".to_string(),
+            "1.32".to_string(),
+            "-8".to_string(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+
+        let outcome: StreamMapOutcome = recipient.into();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, [-8]);
+        assert_eq!(outcome.stream_string, ["foo", "bar", "1.32", "-8"]);
+    }
+
+    fn validate_dynamically_named_stream_receiver(
+        provider: Service<Vec<String>, (), TestStreamPack>,
+        context: &mut TestingContext,
+    ) {
+        let provider: Service<Vec<String>, (), TestDynamicNamedStreams> =
+            provider.optional_stream_cast();
+
+        let request = vec![
+            "5".to_owned(),
+            "10".to_owned(),
+            "-3".to_owned(),
+            "-27".to_owned(),
+            "hello".to_owned(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, [5, 10]);
+        assert_eq!(outcome.stream_i32, [5, 10, -3, -27]);
+        assert_eq!(outcome.stream_string, ["5", "10", "-3", "-27", "hello"]);
+
+        let request = vec![];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, Vec::<i32>::new());
+        assert_eq!(outcome.stream_string, Vec::<String>::new());
+
+        let request = vec![
+            "foo".to_string(),
+            "bar".to_string(),
+            "1.32".to_string(),
+            "-8".to_string(),
+        ];
+
+        let mut recipient =
+            context.command(|commands| commands.request(request, provider.clone()).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, Vec::<u32>::new());
+        assert_eq!(outcome.stream_i32, [-8]);
+        assert_eq!(outcome.stream_string, ["foo", "bar", "1.32", "-8"]);
+    }
+
+    fn impl_stream_pack_test_blocking(
+        request: Vec<String>,
+        streams: <TestStreamPack as StreamPack>::StreamBuffers,
+    ) {
+        for r in request {
+            if let Ok(value) = r.parse::<u32>() {
+                streams.stream_u32.send(value);
+            }
+
+            if let Ok(value) = r.parse::<i32>() {
+                streams.stream_i32.send(value);
+            }
+
+            streams.stream_string.send(r);
+        }
+    }
+
+    fn impl_stream_pack_test_async(
+        request: Vec<String>,
+        streams: <TestStreamPack as StreamPack>::StreamChannels,
+    ) {
+        for r in request {
+            if let Ok(value) = r.parse::<u32>() {
+                streams.stream_u32.send(value);
+            }
+
+            if let Ok(value) = r.parse::<i32>() {
+                streams.stream_i32.send(value);
+            }
+
+            streams.stream_string.send(r);
+        }
+    }
+
+    fn impl_stream_pack_test_continuous(
+        In(ContinuousService { key }): In<ContinuousService<Vec<String>, (), TestStreamPack>>,
+        mut param: ContinuousQuery<Vec<String>, (), TestStreamPack>,
+    ) {
+        param.get_mut(&key).unwrap().for_each(|order| {
+            for r in order.request().clone() {
+                if let Ok(value) = r.parse::<u32>() {
+                    order.streams().stream_u32.send(value);
+                }
+
+                if let Ok(value) = r.parse::<i32>() {
+                    order.streams().stream_i32.send(value);
+                }
+
+                order.streams().stream_string.send(r);
+            }
+
+            order.respond(());
+        });
+    }
+
+    #[derive(Default)]
+    struct StreamMapOutcome {
+        stream_u32: Vec<u32>,
+        stream_i32: Vec<i32>,
+        stream_string: Vec<String>,
+    }
+
+    impl From<Recipient<(), TestStreamPack>> for StreamMapOutcome {
+        fn from(mut recipient: Recipient<(), TestStreamPack>) -> Self {
+            let mut result = Self::default();
+            while let Ok(r) = recipient.streams.stream_u32.try_recv() {
+                result.stream_u32.push(r);
+            }
+
+            while let Ok(r) = recipient.streams.stream_i32.try_recv() {
+                result.stream_i32.push(r);
+            }
+
+            while let Ok(r) = recipient.streams.stream_string.try_recv() {
+                result.stream_string.push(r);
+            }
+
+            result
+        }
+    }
+
+    type TestDynamicNamedStreams = (
+        DynamicallyNamedStream<StreamOf<u32>>,
+        DynamicallyNamedStream<StreamOf<i32>>,
+        DynamicallyNamedStream<StreamOf<String>>,
+    );
+
+    impl TryFrom<Recipient<(), TestDynamicNamedStreams>> for StreamMapOutcome {
+        type Error = UnknownName;
+        fn try_from(
+            mut recipient: Recipient<(), TestDynamicNamedStreams>,
+        ) -> Result<Self, Self::Error> {
+            let mut result = Self::default();
+            while let Ok(NamedValue { name, value }) = recipient.streams.0.try_recv() {
+                if name == "stream_u32" {
+                    result.stream_u32.push(value);
+                } else {
+                    return Err(UnknownName { name });
+                }
+            }
+
+            while let Ok(NamedValue { name, value }) = recipient.streams.1.try_recv() {
+                if name == "stream_i32" {
+                    result.stream_i32.push(value);
+                } else {
+                    return Err(UnknownName { name });
+                }
+            }
+
+            while let Ok(NamedValue { name, value }) = recipient.streams.2.try_recv() {
+                if name == "stream_string" {
+                    result.stream_string.push(value);
+                } else {
+                    return Err(UnknownName { name });
+                }
+            }
+
+            Ok(result)
+        }
+    }
+
+    #[test]
+    fn test_dynamically_named_streams() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let parse_blocking_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): BlockingServiceInput<NamedInputs, TestDynamicNamedStreams>| {
+                    impl_dynamically_named_streams_blocking(input.request, input.streams);
+                },
+            )
+        });
+
+        validate_dynamically_named_streams(parse_blocking_srv, &mut context);
+
+        let parse_async_srv = context.command(|commands| {
+            commands.spawn_service(
+                |In(input): AsyncServiceInput<NamedInputs, TestDynamicNamedStreams>| async move {
+                    impl_dynamically_named_streams_async(input.request, input.streams);
+                },
+            )
+        });
+
+        validate_dynamically_named_streams(parse_async_srv, &mut context);
+
+        let parse_continuous_srv = context
+            .app
+            .spawn_continuous_service(Update, impl_dynamically_named_streams_continuous);
+
+        validate_dynamically_named_streams(parse_continuous_srv, &mut context);
+
+        let parse_blocking_callback =
+            (|In(input): BlockingCallbackInput<NamedInputs, TestDynamicNamedStreams>| {
+                impl_dynamically_named_streams_blocking(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_dynamically_named_streams(parse_blocking_callback, &mut context);
+
+        let parse_async_callback =
+            (|In(input): AsyncCallbackInput<NamedInputs, TestDynamicNamedStreams>| async move {
+                impl_dynamically_named_streams_async(input.request, input.streams);
+            })
+            .as_callback();
+
+        validate_dynamically_named_streams(parse_async_callback, &mut context);
+
+        let parse_blocking_map = (|input: BlockingMap<NamedInputs, TestDynamicNamedStreams>| {
+            impl_dynamically_named_streams_blocking(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_dynamically_named_streams(parse_blocking_map, &mut context);
+
+        let parse_async_map = (|input: AsyncMap<NamedInputs, TestDynamicNamedStreams>| async move {
+            impl_dynamically_named_streams_async(input.request, input.streams);
+        })
+        .as_map();
+
+        validate_dynamically_named_streams(parse_async_map, &mut context);
+
+        let make_workflow = |service: Service<NamedInputs, (), TestDynamicNamedStreams>| {
+            move |scope: Scope<NamedInputs, (), TestDynamicNamedStreams>, builder: &mut Builder| {
+                let node = scope
+                    .input
+                    .chain(builder)
+                    .map_block(move |value| (value, service))
+                    .then_injection_node();
+
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
+
+                builder.connect(node.output, scope.terminate);
+            }
+        };
+
+        let blocking_injection_workflow = context.spawn_workflow(make_workflow(parse_blocking_srv));
+        validate_dynamically_named_streams(blocking_injection_workflow, &mut context);
+
+        let async_injection_workflow = context.spawn_workflow(make_workflow(parse_async_srv));
+        validate_dynamically_named_streams(async_injection_workflow, &mut context);
+
+        let continuous_injection_workflow =
+            context.spawn_workflow(make_workflow(parse_continuous_srv));
+        validate_dynamically_named_streams(continuous_injection_workflow, &mut context);
+
+        let nested_workflow =
+            context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
+
+                builder.connect(node.output, scope.terminate);
+            });
+        validate_dynamically_named_streams(nested_workflow, &mut context);
+
+        let double_nested_workflow =
+            context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                let node = scope.input.chain(builder).then_node(nested_workflow);
+
+                builder.connect(node.streams.0, scope.streams.0);
+                builder.connect(node.streams.1, scope.streams.1);
+                builder.connect(node.streams.2, scope.streams.2);
+
+                builder.connect(node.output, scope.terminate);
+            });
+        validate_dynamically_named_streams(double_nested_workflow, &mut context);
+
+        let scoped_workflow =
+            context.spawn_workflow::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                let inner_scope =
+                    builder.create_scope::<_, _, TestDynamicNamedStreams, _>(|scope, builder| {
+                        let node = scope.input.chain(builder).then_node(parse_continuous_srv);
+
+                        builder.connect(node.streams.0, scope.streams.0);
+                        builder.connect(node.streams.1, scope.streams.1);
+                        builder.connect(node.streams.2, scope.streams.2);
+
+                        builder.connect(node.output, scope.terminate);
+                    });
+
+                builder.connect(scope.input, inner_scope.input);
+
+                builder.connect(inner_scope.streams.0, scope.streams.0);
+                builder.connect(inner_scope.streams.1, scope.streams.1);
+                builder.connect(inner_scope.streams.2, scope.streams.2);
+
+                builder.connect(inner_scope.output, scope.terminate);
+            });
+        validate_dynamically_named_streams(scoped_workflow, &mut context);
+
+        // We can do a stream cast for the service-type providers but not for
+        // the callbacks or maps.
+        validate_dynamically_named_streams_into_stream_pack(parse_blocking_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(parse_async_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(parse_continuous_srv, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(
+            blocking_injection_workflow,
+            &mut context,
+        );
+        validate_dynamically_named_streams_into_stream_pack(async_injection_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(
+            continuous_injection_workflow,
+            &mut context,
+        );
+        validate_dynamically_named_streams_into_stream_pack(nested_workflow, &mut context);
+        validate_dynamically_named_streams_into_stream_pack(double_nested_workflow, &mut context);
+    }
+
+    fn validate_dynamically_named_streams(
+        provider: impl Provider<Request = NamedInputs, Response = (), Streams = TestDynamicNamedStreams>
+            + Clone,
+        context: &mut TestingContext,
+    ) {
+        let expected_values_u32 = vec![
+            NamedValue::new("stream_u32", 5),
+            NamedValue::new("stream_u32", 10),
+            NamedValue::new("stream_i32", 12),
+        ];
+
+        let expected_values_i32 = vec![
+            NamedValue::new("stream_i32", 2),
+            NamedValue::new("stream_i32", -5),
+            NamedValue::new("stream_u32", 7),
+        ];
+
+        let expected_values_string = vec![
+            NamedValue::new("stream_string", "hello".to_owned()),
+            NamedValue::new("stream_string", "8".to_owned()),
+            NamedValue::new("stream_u32", "22".to_owned()),
+        ];
+
+        let request = NamedInputs {
+            values_u32: expected_values_u32.clone(),
+            values_i32: expected_values_i32.clone(),
+            values_string: expected_values_string.clone(),
+        };
+
+        let mut recipient = context.command(|commands| commands.request(request, provider).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let received_values_u32 = collect_received_values(recipient.streams.0);
+        assert_eq!(expected_values_u32, received_values_u32);
+
+        let received_values_i32 = collect_received_values(recipient.streams.1);
+        assert_eq!(expected_values_i32, received_values_i32);
+
+        let received_values_string = collect_received_values(recipient.streams.2);
+        assert_eq!(expected_values_string, received_values_string);
+    }
+
+    pub fn collect_received_values<T>(mut receiver: crate::Receiver<T>) -> Vec<T> {
+        let mut result = Vec::new();
+        while let Ok(value) = receiver.try_recv() {
+            result.push(value);
+        }
+        result
+    }
+
+    fn validate_dynamically_named_streams_into_stream_pack(
+        provider: Service<NamedInputs, (), TestDynamicNamedStreams>,
+        context: &mut TestingContext,
+    ) {
+        let provider: Service<NamedInputs, (), TestStreamPack> = provider.optional_stream_cast();
+
+        let request = NamedInputs {
+            values_u32: vec![
+                NamedValue::new("stream_u32", 5),
+                NamedValue::new("stream_u32", 10),
+                // This won't appear because its name isn't being listened for
+                // for this value type
+                NamedValue::new("stream_i32", 12),
+            ],
+            values_i32: vec![
+                NamedValue::new("stream_i32", 2),
+                NamedValue::new("stream_i32", -5),
+                // This won't appear because its name isn't being listened for
+                // for this value type
+                NamedValue::new("stream_u32", 7),
+            ],
+            values_string: vec![
+                NamedValue::new("stream_string", "hello".to_owned()),
+                NamedValue::new("stream_string", "8".to_owned()),
+                // This won't appear because its named isn't being listened for
+                // for this value type
+                NamedValue::new("stream_u32", "22".to_owned()),
+            ],
+        };
+
+        let mut recipient = context.command(|commands| commands.request(request, provider).take());
+
+        context.run_with_conditions(&mut recipient.response, Duration::from_secs(2));
+        assert!(recipient.response.take().available().is_some());
+        assert!(context.no_unhandled_errors());
+
+        let outcome: StreamMapOutcome = recipient.try_into().unwrap();
+        assert_eq!(outcome.stream_u32, [5, 10]);
+        assert_eq!(outcome.stream_i32, [2, -5]);
+        assert_eq!(outcome.stream_string, ["hello", "8"]);
+    }
+
+    fn impl_dynamically_named_streams_blocking(
+        request: NamedInputs,
+        streams: <TestDynamicNamedStreams as StreamPack>::StreamBuffers,
+    ) {
+        for nv in request.values_u32 {
+            streams.0.send(nv);
+        }
+
+        for nv in request.values_i32 {
+            streams.1.send(nv);
+        }
+
+        for nv in request.values_string {
+            streams.2.send(nv);
+        }
+    }
+
+    fn impl_dynamically_named_streams_async(
+        request: NamedInputs,
+        streams: <TestDynamicNamedStreams as StreamPack>::StreamChannels,
+    ) {
+        for nv in request.values_u32 {
+            streams.0.send(nv);
+        }
+
+        for nv in request.values_i32 {
+            streams.1.send(nv);
+        }
+
+        for nv in request.values_string {
+            streams.2.send(nv);
+        }
+    }
+
+    fn impl_dynamically_named_streams_continuous(
+        In(ContinuousService { key }): In<
+            ContinuousService<NamedInputs, (), TestDynamicNamedStreams>,
+        >,
+        mut param: ContinuousQuery<NamedInputs, (), TestDynamicNamedStreams>,
+    ) {
+        param.get_mut(&key).unwrap().for_each(|order| {
+            for nv in order.request().values_u32.iter() {
+                order.streams().0.send(nv.clone());
+            }
+
+            for nv in order.request().values_i32.iter() {
+                order.streams().1.send(nv.clone());
+            }
+
+            for nv in order.request().values_string.iter() {
+                order.streams().2.send(nv.clone());
+            }
+
+            order.respond(());
+        });
+    }
+
+    struct NamedInputs {
+        values_u32: Vec<NamedValue<u32>>,
+        values_i32: Vec<NamedValue<i32>>,
+        values_string: Vec<NamedValue<String>>,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("received unknown name: {name}")]
+    struct UnknownName {
+        name: Cow<'static, str>,
+    }
+
+    #[derive(StreamPack)]
+    pub(crate) struct TestStreamPack {
+        stream_u32: u32,
+        stream_i32: i32,
+        stream_string: String,
     }
 }

@@ -29,8 +29,8 @@ use crate::{
     CreateDisposalFilter, ForkTargetStorage, Gate, GateRequest, InputSlot, IntoAsyncMap,
     IntoBlockingCallback, IntoBlockingMap, Node, Noop, OperateBufferAccess, OperateCancel,
     OperateDynamicGate, OperateQuietCancel, OperateSplit, OperateStaticGate, Output, ProvideOnce,
-    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamOf, StreamPack,
-    StreamTargetMap, Trim, TrimBranch, UnusedTarget,
+    Provider, Scope, ScopeSettings, Sendish, Service, Spread, StreamPack, StreamTargetMap, Trim,
+    TrimBranch, UnusedTarget,
 };
 
 pub mod fork_clone_builder;
@@ -124,9 +124,9 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         provider.connect(Some(self.scope()), source, target, self.builder.commands);
 
         let mut map = StreamTargetMap::default();
-        let (bundle, streams) =
+        let streams =
             <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self.builder);
-        self.builder.commands.entity(source).insert((bundle, map));
+        self.builder.commands.entity(source).insert(map);
         Node {
             input: InputSlot::new(self.builder.scope, source),
             output: Output::new(self.builder.scope, target),
@@ -729,17 +729,6 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     }
 }
 
-impl<'w, 's, 'a, 'b, T> Chain<'w, 's, 'a, 'b, StreamOf<T>>
-where
-    T: 'static + Send + Sync,
-{
-    /// When the output value is wrapped in a [`StreamOf`] container, this will
-    /// strip it out of that wrapper.
-    pub fn inner(self) -> Chain<'w, 's, 'a, 'b, T> {
-        self.map_block(|v| v.0)
-    }
-}
-
 impl<'w, 's, 'a, 'b, T, E> Chain<'w, 's, 'a, 'b, Result<T, E>>
 where
     T: 'static + Send + Sync,
@@ -1070,7 +1059,6 @@ where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync + Unpin,
     Streams: StreamPack,
-    Streams::Receiver: Unpin,
 {
     /// Given the input `(request, service)`, pass `request` into `service` and
     /// forward its response. This is called `injection` because it's a
@@ -1496,14 +1484,13 @@ mod tests {
                 let node = scope.input.chain(builder).map_node(
                     |input: BlockingMap<i32, StreamOf<i32>>| {
                         for _ in 0..input.request {
-                            input.streams.send(StreamOf(input.request));
+                            input.streams.send(input.request);
                         }
                     },
                 );
 
                 node.streams
                     .chain(builder)
-                    .inner()
                     .collect_all::<16>()
                     .connect(scope.terminate);
             });
@@ -1522,14 +1509,13 @@ mod tests {
                 let node = scope.input.chain(builder).map_node(
                     |input: BlockingMap<i32, StreamOf<i32>>| {
                         for _ in 0..input.request {
-                            input.streams.send(StreamOf(input.request));
+                            input.streams.send(input.request);
                         }
                     },
                 );
 
                 node.streams
                     .chain(builder)
-                    .inner()
                     .collect::<16>(4, None)
                     .connect(scope.terminate);
             });

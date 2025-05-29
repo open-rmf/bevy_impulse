@@ -21,7 +21,7 @@ use backtrace::Backtrace;
 
 use anyhow::Error as Anyhow;
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use crate::{Broken, Cancel, Disposal, OperationError};
 
@@ -37,6 +37,7 @@ pub struct UnhandledErrors {
     pub broken: Vec<Broken>,
     pub unused_targets: Vec<UnusedTargetDrop>,
     pub connections: Vec<ConnectionFailure>,
+    pub duplicate_streams: Vec<DuplicateStream>,
     pub miscellaneous: Vec<MiscellaneousFailure>,
 }
 
@@ -50,6 +51,7 @@ impl UnhandledErrors {
             && self.broken.is_empty()
             && self.unused_targets.is_empty()
             && self.connections.is_empty()
+            && self.duplicate_streams.is_empty()
             && self.miscellaneous.is_empty()
     }
 }
@@ -119,4 +121,20 @@ pub struct ConnectionFailure {
 pub struct MiscellaneousFailure {
     pub error: Arc<Anyhow>,
     pub backtrace: Option<Backtrace>,
+}
+
+/// A stream pack has a duplicated stream name or the same stream type appears
+/// multiple times in the anonymous streams.
+///
+/// This can cause unexpected workflow behavior because the duplicate streams
+/// will never output any data.
+#[derive(Clone, Debug)]
+pub struct DuplicateStream {
+    /// The target that will never receive any stream data.
+    pub target: Entity,
+    /// The output type of the stream that's being duplicated.
+    pub type_name: &'static str,
+    /// The name of the stream that was duplicated (if it was an anonymous stream
+    /// this will be [`None`]).
+    pub stream_name: Option<Cow<'static, str>>,
 }
