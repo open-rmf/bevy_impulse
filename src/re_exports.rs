@@ -19,3 +19,9 @@
 //! by bevy_impulse_derive.
 
 pub use bevy_ecs::prelude::{Commands, Entity, With, World};
+
+// The std::any implementation of this is not stable in v1.75, so we provide a
+// simple implementation in this module for the derive macros.
+pub fn type_name_of_val<T>(_: &T) -> &'static str {
+    std::any::type_name::<T>()
+}

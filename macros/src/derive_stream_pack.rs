@@ -112,7 +112,7 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
                     There is no need to call this. {:#?}",
                     [
                         #(
-                            (#field_names_str, ::std::any::type_name_of_val(&self.#field_idents)),
+                            (#field_names_str, ::bevy_impulse::re_exports::type_name_of_val(&self.#field_idents)),
                         )*
                     ]
                 );
