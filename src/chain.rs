@@ -101,7 +101,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         provider.connect(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             target,
             self.builder.commands,
@@ -128,8 +128,8 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
             <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self.builder);
         self.builder.commands.entity(source).insert(map);
         Node {
-            input: InputSlot::new(self.builder.scope, source),
-            output: Output::new(self.builder.scope, target),
+            input: InputSlot::new(self.builder.scope(), source),
+            output: Output::new(self.builder.scope(), target),
             streams,
         }
     }
@@ -306,12 +306,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         B::BufferType: Accessing,
     {
         let buffers = buffers.into_buffer(self.builder);
-        buffers.verify_scope(self.builder.scope);
+        buffers.verify_scope(self.builder.scope());
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             OperateBufferAccess::<T, B::BufferType>::new(buffers, target),
         ));
@@ -461,7 +461,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             Spread::<T>::new(target),
         ));
@@ -497,7 +497,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             Collect::<T, N>::new(target, min, max),
         ));
@@ -528,13 +528,13 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     ) -> Chain<'w, 's, 'a, 'b, T> {
         let branches: SmallVec<[_; 16]> = branches.into_iter().collect();
         for branch in &branches {
-            branch.verify_scope(self.builder.scope);
+            branch.verify_scope(self.builder.scope());
         }
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             Trim::<T>::new(branches, target),
         ));
@@ -548,7 +548,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// See also: [`Self::then_trim`], [`Builder::create_trim`].
     pub fn then_trim_node(self, branches: impl IntoIterator<Item = TrimBranch>) -> Node<T, T> {
         let source = self.target;
-        let scope = self.builder.scope;
+        let scope = self.builder.scope();
         let target = self.then_trim(branches).output().id();
         Node {
             input: InputSlot::new(scope, source),
@@ -576,12 +576,12 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
         B: Bufferable,
     {
         let buffers = buffers.into_buffer(self.builder);
-        buffers.verify_scope(self.builder.scope);
+        buffers.verify_scope(self.builder.scope());
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             OperateStaticGate::<T, _>::new(buffers, target, action),
         ));
@@ -628,7 +628,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     {
         let source = self.target;
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             OperateSplit::<T>::default(),
         ));
@@ -709,7 +709,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
     /// Get a whole node that is simply a [no-op](Self::noop).
     pub fn noop_node(self) -> Node<T, T> {
         let source = self.target;
-        let scope = self.builder.scope;
+        let scope = self.builder.scope();
         let target = self.noop().output().id();
         Node {
             input: InputSlot::new(scope, source),
@@ -720,7 +720,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Send + Sync> Chain<'w, 's, 'a, 'b, T> {
 
     /// The scope that the chain is building inside of.
     pub fn scope(&self) -> Entity {
-        self.builder.scope
+        self.builder.scope()
     }
 
     /// The target where the chain will be sending its latest output.
@@ -1105,12 +1105,12 @@ where
         B::BufferType: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self.builder);
-        buffers.verify_scope(self.builder.scope);
+        buffers.verify_scope(self.builder.scope());
 
         let source = self.target;
         let target = self.builder.commands.spawn(UnusedTarget).id();
         self.builder.commands.add(AddOperation::new(
-            Some(self.builder.scope),
+            Some(self.builder.scope()),
             source,
             OperateDynamicGate::<T, _>::new(buffers, target),
         ));

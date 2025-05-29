@@ -971,6 +971,9 @@ struct UnfinishedOperation<'a> {
     op: &'a DiagramOperation,
     /// The sibling operations of the one that is being built
     sibling_ops: &'a Operations,
+    /// The scope of this operation. This is used to create the correct Builder
+    /// for the operation.
+    // scope: BuilderScopeContext,
 }
 
 impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {

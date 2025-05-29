@@ -117,7 +117,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
     where
         Response: 'static + Send + Sync,
     {
-        assert_eq!(self.scope, builder.scope);
+        assert_eq!(self.scope, builder.scope());
         Chain::new(self.target, builder)
     }
 
@@ -127,7 +127,7 @@ impl<Response: 'static + Send + Sync> Output<Response> {
     where
         Response: Clone,
     {
-        assert_eq!(self.scope, builder.scope);
+        assert_eq!(self.scope, builder.scope());
         builder.commands.add(AddOperation::new(
             Some(self.scope),
             self.target,
@@ -166,7 +166,7 @@ pub struct ForkCloneOutput<Response> {
 
 impl<Response: 'static + Send + Sync> ForkCloneOutput<Response> {
     pub fn clone_output(&self, builder: &mut Builder) -> Output<Response> {
-        assert_eq!(self.scope, builder.scope);
+        assert_eq!(self.scope, builder.scope());
         let target = builder
             .commands
             .spawn((SingleInputStorage::new(self.id()), UnusedTarget))

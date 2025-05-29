@@ -56,7 +56,7 @@ macro_rules! impl_unzippable_for_tuple {
                                 let $T = std::marker::PhantomData::<$T>;
                                 let target = builder.commands.spawn(UnusedTarget).id();
                                 targets.push(target);
-                                Output::new(builder.scope, target)
+                                Output::new(builder.scope(), target)
                             },
                         )*
                     );

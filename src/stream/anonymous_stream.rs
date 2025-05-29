@@ -87,7 +87,7 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
             source,
             RedirectWorkflowStream::new(AnonymousStreamRedirect::<S>::new(None)),
         ));
-        InputSlot::new(builder.scope, source)
+        InputSlot::new(builder.scope(), source)
     }
 
     fn spawn_node_streams(
@@ -101,7 +101,7 @@ impl<S: StreamEffect> StreamPack for AnonymousStream<S> {
             .id();
 
         map.add_anonymous::<S::Output>(target, builder.commands());
-        Output::new(builder.scope, target)
+        Output::new(builder.scope(), target)
     }
 
     fn take_streams(
