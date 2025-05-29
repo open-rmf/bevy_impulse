@@ -72,6 +72,14 @@ impl DynInputSlot {
     pub fn message_info(&self) -> &TypeInfo {
         &self.type_info
     }
+
+    pub(crate) fn new(
+        scope: Entity,
+        source: Entity,
+        type_info: TypeInfo,
+    ) -> Self {
+        Self { scope, source, type_info }
+    }
 }
 
 impl<T: Any> From<InputSlot<T>> for DynInputSlot {
@@ -107,14 +115,6 @@ pub struct DynOutput {
 }
 
 impl DynOutput {
-    pub fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
-        Self {
-            scope,
-            target,
-            message_info,
-        }
-    }
-
     pub fn message_info(&self) -> &TypeInfo {
         &self.message_info
     }
@@ -160,6 +160,14 @@ impl DynOutput {
         });
 
         Ok(())
+    }
+
+    pub(crate) fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
+        Self {
+            scope,
+            target,
+            message_info,
+        }
     }
 }
 
