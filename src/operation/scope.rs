@@ -268,39 +268,16 @@ where
         (cleanup)(clean)
     }
 
-    fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
-        if reachability.has_input::<Request>()? {
-            return Ok(true);
-        }
-
-        let source_ref = reachability
+    fn is_reachable(reachability: OperationReachability) -> ReachabilityResult {
+        let is_reachable = reachability
             .world
             .get_entity(reachability.source)
-            .or_broken()?;
-
-        if let Some(pair) = source_ref
-            .get::<ScopedSessionStorage>()
             .or_broken()?
-            .0
-            .iter()
-            .find(|pair| pair.parent_session == reachability.session)
-        {
-            let mut visited = HashMap::new();
-            let mut scoped_reachability = OperationReachability::new(
-                pair.scoped_session,
-                reachability.source,
-                reachability.disposed,
-                reachability.world,
-                &mut visited,
-            );
+            .get::<DynScopeRequest>()
+            .or_broken()?
+            .is_reachable;
 
-            let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
-            if scoped_reachability.check_upstream(terminal)? {
-                return Ok(true);
-            }
-        }
-
-        SingleInputStorage::is_reachable(&mut reachability)
+        (is_reachable)(reachability)
     }
 }
 
@@ -309,6 +286,7 @@ struct DynScopeRequest {
     setup_input: fn(OperationSetup) -> OperationResult,
     begin_scope: fn(OperationRequest) -> OperationResult,
     cleanup: fn(OperationCleanup) -> OperationResult,
+    is_reachable: fn(OperationReachability) -> ReachabilityResult,
 }
 
 impl DynScopeRequest {
@@ -317,6 +295,7 @@ impl DynScopeRequest {
             setup_input: dyn_setup_input::<T>,
             begin_scope: dyn_begin_scope::<T>,
             cleanup: dyn_cleanup::<T>,
+            is_reachable: dyn_is_reachable::<T>,
         }
     }
 }
@@ -398,6 +377,43 @@ fn dyn_cleanup<Request: 'static + Send + Sync>(
         world,
         roster,
     )
+}
+
+fn dyn_is_reachable<Request: 'static + Send + Sync>(
+    mut reachability: OperationReachability,
+) -> ReachabilityResult {
+    if reachability.has_input::<Request>()? {
+        return Ok(true);
+    }
+
+    let source_ref = reachability
+        .world
+        .get_entity(reachability.source)
+        .or_broken()?;
+
+    if let Some(pair) = source_ref
+        .get::<ScopedSessionStorage>()
+        .or_broken()?
+        .0
+        .iter()
+        .find(|pair| pair.parent_session == reachability.session)
+    {
+        let mut visited = HashMap::new();
+        let mut scoped_reachability = OperationReachability::new(
+            pair.scoped_session,
+            reachability.source,
+            reachability.disposed,
+            reachability.world,
+            &mut visited,
+        );
+
+        let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
+        if scoped_reachability.check_upstream(terminal)? {
+            return Ok(true);
+        }
+    }
+
+    SingleInputStorage::is_reachable(&mut reachability)
 }
 
 pub(crate) fn begin_scope<Request>(
