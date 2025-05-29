@@ -49,6 +49,7 @@ pub struct Builder<'w, 's, 'a> {
     pub(crate) commands: &'a mut Commands<'w, 's>,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct BuilderScopeContext {
     /// The scope that this builder is meant to help build
     pub(crate) scope: Entity,

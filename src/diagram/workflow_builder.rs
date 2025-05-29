@@ -22,8 +22,8 @@ use std::{
 };
 
 use crate::{
-    dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder, JsonMessage,
-    Scope, StreamPack,
+    dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder,
+    BuilderScopeContext, JsonMessage, Scope, StreamPack,
 };
 
 use super::{
@@ -274,7 +274,7 @@ fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut Name
 #[derive(Default)]
 struct DiagramConstruction<'a> {
     /// Implementations that define how outputs can connect to their target operations
-    connect_into_target: HashMap<OperationRef, Box<dyn ConnectIntoTarget>>,
+    connect_into_target: HashMap<OperationRef, Target>,
     /// A map of what outputs are going into each target operation
     outputs_into_target: HashMap<OperationRef, Vec<DynOutput>>,
     /// A map of what buffers exist in the diagram
@@ -320,6 +320,7 @@ pub struct DiagramContext<'a, 'c> {
     pub operations: &'a Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
+    scope: BuilderScopeContext,
     namespaces: NamespaceList,
 }
 
@@ -344,10 +345,11 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         id: impl Into<OperationRef>,
     ) -> Result<Option<TypeInfo>, DiagramErrorCode> {
         let id = self.into_operation_ref(id);
-        if let Some(connect) = self.construction.connect_into_target.get(&id) {
+        if let Some(target) = self.construction.connect_into_target.get(&id) {
             let mut visited = HashSet::new();
             visited.insert(id.clone());
-            let preferred = connect
+            let preferred = target
+                .connector
                 .infer_input_type(self, &mut visited)?
                 .map(|infer| infer.preferred_input_type())
                 .flatten();
@@ -437,7 +439,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     fn impl_connect_into_target(
         &mut self,
         operation: OperationRef,
-        connect: Box<dyn ConnectIntoTarget + 'static>,
+        connector: Box<dyn ConnectIntoTarget + 'static>,
     ) -> Result<(), DiagramErrorCode> {
         match self
             .construction
@@ -448,7 +450,10 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 return Err(DiagramErrorCode::DuplicateInputsCreated(operation));
             }
             Entry::Vacant(vacant) => {
-                vacant.insert(connect);
+                vacant.insert(Target {
+                    connector,
+                    scope: self.scope,
+                });
             }
         }
         Ok(())
@@ -562,6 +567,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 namespaces,
                 op,
                 sibling_ops,
+                scope: self.scope,
             });
     }
 
@@ -823,13 +829,14 @@ where
             templates: &diagram.templates,
             on_implicit_error,
             namespaces: NamespaceList::new(),
+            scope: builder.context,
         },
     )?;
 
     let mut unfinished_operations: Vec<UnfinishedOperation> = diagram
         .ops
         .iter()
-        .map(|(id, op)| UnfinishedOperation::new(Arc::clone(id), op, &diagram.ops))
+        .map(|(id, op)| UnfinishedOperation::new(Arc::clone(id), op, &diagram.ops, builder.context))
         .collect();
     let mut deferred_operations: Vec<UnfinishedOperation> = Vec::new();
     let mut deferred_statuses: Vec<(OperationRef, BuildStatus)> = Vec::new();
@@ -851,12 +858,18 @@ where
                 templates: &diagram.templates,
                 on_implicit_error,
                 namespaces: unfinished.namespaces.clone(),
+                scope: unfinished.scope,
+            };
+
+            let mut builder = Builder {
+                context: unfinished.scope,
+                commands: builder.commands(),
             };
 
             // Attempt to build this operation
             let status = unfinished
                 .op
-                .build_diagram_operation(&unfinished.id, builder, &mut ctx)
+                .build_diagram_operation(&unfinished.id, &mut builder, &mut ctx)
                 .map_err(|code| code.in_operation(unfinished.as_operation_ref()))?;
 
             ctx.construction
@@ -880,16 +893,7 @@ where
         connector_construction.buffers = construction.buffers.clone();
         loop {
             for (id, outputs) in construction.outputs_into_target.drain() {
-                let mut ctx = DiagramContext {
-                    construction: &mut connector_construction,
-                    registry,
-                    operations: &diagram.ops,
-                    templates: &diagram.templates,
-                    on_implicit_error,
-                    namespaces: Default::default(),
-                };
-
-                let Some(connect) = construction.connect_into_target.get_mut(&id) else {
+                let Some(target) = construction.connect_into_target.get_mut(&id) else {
                     if unfinished_operations.is_empty() {
                         return Err(DiagramErrorCode::UnknownOperation(id.into()).into());
                     } else {
@@ -898,10 +902,26 @@ where
                     }
                 };
 
+                let mut ctx = DiagramContext {
+                    construction: &mut connector_construction,
+                    registry,
+                    operations: &diagram.ops,
+                    templates: &diagram.templates,
+                    on_implicit_error,
+                    namespaces: Default::default(),
+                    scope: target.scope,
+                };
+
+                let mut builder = Builder {
+                    context: target.scope,
+                    commands: builder.commands(),
+                };
+
                 for output in outputs {
                     made_progress = true;
-                    connect
-                        .connect_into_target(output, builder, &mut ctx)
+                    target
+                        .connector
+                        .connect_into_target(output, &mut builder, &mut ctx)
                         .map_err(|code| code.in_operation(id.clone()))?;
                 }
             }
@@ -952,8 +972,8 @@ where
     }
 
     let mut finishing = FinishingErrors::default();
-    for (op, connect) in &construction.connect_into_target {
-        if let Err(err) = connect.is_finished() {
+    for (op, target) in &construction.connect_into_target {
+        if let Err(err) = target.connector.is_finished() {
             finishing.errors.insert(op.clone(), err);
         }
     }
@@ -973,7 +993,12 @@ struct UnfinishedOperation<'a> {
     sibling_ops: &'a Operations,
     /// The scope of this operation. This is used to create the correct Builder
     /// for the operation.
-    // scope: BuilderScopeContext,
+    scope: BuilderScopeContext,
+}
+
+struct Target {
+    connector: Box<dyn ConnectIntoTarget>,
+    scope: BuilderScopeContext,
 }
 
 impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
@@ -986,12 +1011,18 @@ impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
 }
 
 impl<'a> UnfinishedOperation<'a> {
-    pub fn new(id: OperationName, op: &'a DiagramOperation, sibling_ops: &'a Operations) -> Self {
+    pub fn new(
+        id: OperationName,
+        op: &'a DiagramOperation,
+        sibling_ops: &'a Operations,
+        scope: BuilderScopeContext,
+    ) -> Self {
         Self {
             id,
             op,
             sibling_ops,
             namespaces: Default::default(),
+            scope,
         }
     }
 
@@ -1020,10 +1051,10 @@ where
     ctx.add_output_into_target(&start, scope.input.into());
 
     // Add the terminate operation
-    ctx.construction.connect_into_target.insert(
+    ctx.impl_connect_into_target(
         OperationRef::Terminate(NamespaceList::new()),
         standard_input_connection(scope.terminate.into(), &ctx.registry)?,
-    );
+    )?;
 
     let mut streams = DynStreamInputPack::default();
     Streams::into_dyn_stream_input_pack(&mut streams, scope.streams);
@@ -1032,16 +1063,16 @@ where
     }
 
     // Add the dispose operation
-    ctx.construction.connect_into_target.insert(
+    ctx.set_connect_into_target(
         OperationRef::Dispose,
-        Box::new(ConnectToDispose),
-    );
+        ConnectToDispose,
+    )?;
 
     // Add the cancel operation
-    ctx.construction.connect_into_target.insert(
+    ctx.set_connect_into_target(
         OperationRef::Cancel(NamespaceList::new()),
-        Box::new(ConnectToCancel::new(builder)?),
-    );
+        ConnectToCancel::new(builder)?,
+    )?;
 
     Ok(())
 }
@@ -1288,8 +1319,8 @@ impl ConnectIntoTarget for RedirectConnection {
         visited: &mut HashSet<OperationRef>,
     ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
         if visited.insert(self.redirect_to.clone()) {
-            if let Some(connect) = ctx.construction.connect_into_target.get(&self.redirect_to) {
-                return connect.infer_input_type(ctx, visited);
+            if let Some(target) = ctx.construction.connect_into_target.get(&self.redirect_to) {
+                return target.connector.infer_input_type(ctx, visited);
             } else {
                 return Ok(None);
             }
@@ -1333,11 +1364,11 @@ struct DebugConnections<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
 impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_map();
-        for (op, connect) in &self.0.construction.connect_into_target {
+        for (op, target) in &self.0.construction.connect_into_target {
             debug.entry(
                 op,
                 &DebugConnection {
-                    connect,
+                    connect: &target.connector,
                     context: self.0,
                 },
             );
