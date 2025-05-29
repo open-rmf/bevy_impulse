@@ -21,6 +21,7 @@ mod fork_result_schema;
 mod join_schema;
 mod node_schema;
 mod registration;
+mod scope_schema;
 mod section_schema;
 mod serialization;
 mod split_schema;
@@ -39,6 +40,7 @@ pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
 pub use registration::*;
+pub use scope_schema::*;
 pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
@@ -1309,7 +1311,7 @@ impl Display for DiagramErrorContext {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(ThisError, Debug)]
 pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
@@ -1430,6 +1432,9 @@ pub enum DiagramErrorCode {
 
     #[error("A circular dependency exists between templates: {}", format_list(&.0))]
     CircularTemplateDependency(Vec<OperationName>),
+
+    #[error("An error occurred while finishing the workflow build: {0}")]
+    FinishingErrors(FinishingErrors),
 }
 
 fn format_list<T: std::fmt::Display>(list: &[T]) -> String {
@@ -1468,6 +1473,31 @@ impl DiagramErrorCode {
 pub struct MissingStream {
     pub missing_name: OperationName,
     pub available_names: Vec<OperationName>,
+}
+
+#[derive(ThisError, Debug, Default)]
+pub struct FinishingErrors {
+    pub errors: HashMap<OperationRef, DiagramErrorCode>,
+}
+
+impl FinishingErrors {
+    pub fn as_result(self) -> Result<(), Self> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl std::fmt::Display for FinishingErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (op, code) in &self.errors {
+            write!(f, " - [{op}]: {code}")?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

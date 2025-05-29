@@ -180,7 +180,7 @@ where
 
 /// Error type that happens when you try to convert a [`DynOutput`] to an
 /// <code>[Output]&lt;T&gt;</code> for the wrong `T`.
-#[derive(ThisError, Debug)]
+#[derive(ThisError, Debug, Clone)]
 #[error("type mismatch: source {source_type}, target {target_type}")]
 pub struct TypeMismatch {
     /// What type of message is the [`DynOutput`] able to provide.

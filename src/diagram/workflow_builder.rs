@@ -30,7 +30,7 @@ use super::{
     BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
     DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization,
     ImplicitSerialization, ImplicitStringify, NamespacedOperation, NextOperation, OperationName,
-    Operations, Templates, TypeInfo,
+    Operations, Templates, TypeInfo, FinishingErrors,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -768,6 +768,10 @@ pub trait ConnectIntoTarget {
         ctx: &DiagramContext,
         visited: &mut HashSet<OperationRef>,
     ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode>;
+
+    fn is_finished(&self) -> Result<(), DiagramErrorCode> {
+        Ok(())
+    }
 }
 
 /// This trait helps to determine what types of messages can go into an input
@@ -946,6 +950,14 @@ where
             return Err(DiagramErrorCode::ExcessiveIterations.into());
         }
     }
+
+    let mut finishing = FinishingErrors::default();
+    for (op, connect) in &construction.connect_into_target {
+        if let Err(err) = connect.is_finished() {
+            finishing.errors.insert(op.clone(), err);
+        }
+    }
+    finishing.as_result().map_err(DiagramErrorCode::FinishingErrors)?;
 
     Ok(())
 }
