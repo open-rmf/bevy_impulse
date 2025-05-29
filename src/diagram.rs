@@ -60,7 +60,7 @@ use std::{
 
 pub use crate::type_info::TypeInfo;
 use crate::{
-    Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
+    Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service, SpawnWorkflowExt,
     SplitConnectionError, StreamPack,
 };
 
@@ -1435,6 +1435,9 @@ pub enum DiagramErrorCode {
 
     #[error("An error occurred while finishing the workflow build: {0}")]
     FinishingErrors(FinishingErrors),
+
+    #[error("An error occurred while creating a scope: {0}")]
+    IncrementalScopeError(#[from] IncrementalScopeError),
 }
 
 fn format_list<T: std::fmt::Display>(list: &[T]) -> String {

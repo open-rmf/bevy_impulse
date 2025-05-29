@@ -690,14 +690,20 @@ pub(crate) struct IncrementalScope {
 
 #[derive(ThisError, Debug)]
 #[error("An error happened while building a dynamic scope")]
-pub enum DynamicScopeError {
-    #[error("This scope has already been built and should not be built again")]
-    AlreadyBuilt,
-    #[error("The request type for this scope has already been set so it cannot be set again")]
-    RequestAlreadySet,
+pub enum IncrementalScopeError {
+    #[error("This request type for this scope has already been set to a different message type")]
+    RequestMismatch {
+        already_set: TypeInfo,
+        attempted: TypeInfo,
+    },
     #[error("The response type for this scope has already been set so it cannot be set again")]
-    ResponseAlreadySet,
+    ResponseMismatch {
+        already_set: TypeInfo,
+        attempted: TypeInfo,
+    },
 }
+
+pub(crate) type IncrementalScopeResult = Result<Option<IncrementalScope>, IncrementalScopeError>;
 
 impl IncrementalScopeBuilder {
     pub(crate) fn begin(
@@ -760,48 +766,62 @@ impl IncrementalScopeBuilder {
     pub(crate) fn set_request<Request: 'static + Send + Sync>(
         &mut self,
         commands: &mut Commands,
-    ) -> Result<Option<IncrementalScope>, DynamicScopeError> {
+    ) -> IncrementalScopeResult {
         let mut inner = self.inner.lock().unwrap();
-        if inner.request.is_some() {
-            return Err(DynamicScopeError::RequestAlreadySet);
+        let message_info = TypeInfo::of::<Request>();
+        if let Some((_, expected_info)) = inner.request.as_ref() {
+            if *expected_info != message_info {
+                return Err(IncrementalScopeError::RequestMismatch {
+                    already_set: *expected_info,
+                    attempted: message_info,
+                });
+            }
+        } else {
+            inner.request = Some((
+                DynScopeRequest::new::<Request>(),
+                message_info,
+            ));
         }
 
-        inner.request = Some((
-            DynScopeRequest::new::<Request>(),
-            TypeInfo::of::<Request>(),
-        ));
         inner.consider_building(commands)
     }
 
     pub(crate) fn set_response<Response: 'static + Send + Sync>(
         &mut self,
         commands: &mut Commands,
-    ) -> Result<Option<IncrementalScope>, DynamicScopeError> {
+    ) -> IncrementalScopeResult {
         let mut inner = self.inner.lock().unwrap();
-        if inner.response.is_some() {
-            return Err(DynamicScopeError::ResponseAlreadySet);
+        let message_info = TypeInfo::of::<Response>();
+        if let Some((_, expected_info)) = inner.response.as_ref() {
+            if *expected_info != message_info {
+                return Err(IncrementalScopeError::ResponseMismatch {
+                    already_set: *expected_info,
+                    attempted: message_info
+                });
+            }
+        } else {
+            commands.add(AddOperation::new(
+                // We do not consider the terminal node to be "inside" the scope,
+                // otherwise it will get cleaned up prematurely
+                None,
+                inner.terminal,
+                Terminate::<Response>::new(inner.scope_id),
+            ));
+
+            commands.add(AddOperation::new(
+                // We do not consider the finish cancel node to be "inside" the
+                // scope, otherwise it will get cleaned up prematurely
+                None,
+                inner.finish_scope_cancel,
+                FinishCleanup::<Response>::new(inner.scope_id),
+            ));
+
+            inner.response = Some((
+                FinalizeCleanup::new(begin_cleanup_workflows::<Response>),
+                message_info,
+            ));
         }
 
-        commands.add(AddOperation::new(
-            // We do not consider the terminal node to be "inside" the scope,
-            // otherwise it will get cleaned up prematurely
-            None,
-            inner.terminal,
-            Terminate::<Response>::new(inner.scope_id),
-        ));
-
-        commands.add(AddOperation::new(
-            // We do not consider the finish cancel node to be "inside" the
-            // scope, otherwise it will get cleaned up prematurely
-            None,
-            inner.finish_scope_cancel,
-            FinishCleanup::<Response>::new(inner.scope_id),
-        ));
-
-        inner.response = Some((
-            FinalizeCleanup::new(begin_cleanup_workflows::<Response>),
-            TypeInfo::of::<Response>(),
-        ));
         inner.consider_building(commands)
     }
 
@@ -827,7 +847,7 @@ impl IncrementalScopeBuilderInner {
     fn consider_building(
         &mut self,
         commands: &mut Commands,
-    ) -> Result<Option<IncrementalScope>, DynamicScopeError> {
+    ) -> IncrementalScopeResult {
         let (
             Some((dyn_scope_request, input_type)),
             Some((finalize_cleanup, output_type)),

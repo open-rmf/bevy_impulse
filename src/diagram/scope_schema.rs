@@ -50,6 +50,13 @@ pub struct ScopeSchema {
 
     /// Operations that exist inside this scope.
     pub ops: Operations,
+
+    /// Where to connect streams that are coming out of this scope.
+    #[serde(default)]
+    pub stream_out: HashMap<OperationName, NextOperation>,
+
+    /// Where to connect the output of this scope.
+    pub next: NextOperation,
 }
 
 impl BuildDiagramOperation for ScopeSchema {

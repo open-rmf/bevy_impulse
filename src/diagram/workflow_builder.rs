@@ -51,6 +51,7 @@ pub enum OperationRef {
     Terminate(NamespaceList),
     Dispose,
     Cancel(NamespaceList),
+    EnterScope(NamespaceList),
     StreamOut(StreamOutRef),
 }
 
@@ -61,6 +62,7 @@ impl OperationRef {
             Self::Terminate(_) => Self::Terminate(parent_namespaces.iter().cloned().collect()),
             Self::Dispose => Self::Dispose,
             Self::Cancel(_) => Self::Cancel(parent_namespaces.iter().cloned().collect()),
+            Self::EnterScope(_) => Self::EnterScope(parent_namespaces.iter().cloned().collect()),
             Self::StreamOut(stream_out) => {
                 Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
             }
@@ -103,6 +105,7 @@ impl std::fmt::Display for OperationRef {
             Self::Terminate(namespaces) => write!(f, "{}(terminate)", DisplayNamespaces(namespaces)),
             Self::Cancel(namespaces) => write!(f, "{}(cancel)", DisplayNamespaces(namespaces)),
             Self::Dispose => write!(f, "(dispose)"),
+            Self::EnterScope(namespaces) => write!(f, "{}(enter)", DisplayNamespaces(namespaces)),
             Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
         }
     }
