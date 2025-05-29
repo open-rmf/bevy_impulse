@@ -23,7 +23,7 @@ use crate::{
     Operation, OperationCancel, OperationCleanup, OperationError, OperationReachability,
     OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
     ReachabilityResult, ScopeSettings, SingleInputStorage, SingleTargetStorage, StreamEffect,
-    StreamPack, StreamRequest, StreamTargetMap, UnhandledErrors, Unreachability, UnusedTarget,
+    StreamRequest, StreamTargetMap, UnhandledErrors, Unreachability, UnusedTarget,
 };
 
 use backtrace::Backtrace;
@@ -58,7 +58,7 @@ pub enum SessionStatus {
     Cleaning,
 }
 
-pub(crate) struct OperateScope<Request, Response, Streams> {
+pub(crate) struct OperateScope<Request, Response> {
     /// The first node that is inside of the scope
     enter_scope: Entity,
     /// The final target of the nodes inside the scope. It receives the final
@@ -72,7 +72,8 @@ pub(crate) struct OperateScope<Request, Response, Streams> {
     exit_scope: Option<Entity>,
     /// Cancellation finishes at this node
     finish_scope_cancel: Entity,
-    _ignore: std::marker::PhantomData<fn(Request, Response, Streams)>,
+    begin_scope: DynBeginScope,
+    _ignore: std::marker::PhantomData<fn(Request, Response)>,
 }
 
 pub(crate) struct ScopeEndpoints {
@@ -193,10 +194,9 @@ impl ScopeContents {
     }
 }
 
-impl<Request, Response, Streams> Operation for OperateScope<Request, Response, Streams>
+impl<Request, Response> Operation for OperateScope<Request, Response>
 where
     Request: 'static + Send + Sync,
-    Streams: StreamPack,
     Response: 'static + Send + Sync,
 {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
@@ -206,13 +206,14 @@ where
             ScopeEntryStorage(self.enter_scope),
             ScopedSessionStorage::default(),
             TerminalStorage(self.terminal),
-            Cancellable::new(Self::receive_cancel),
-            ValidateScopeReachability(Self::validate_scope_reachability),
+            Cancellable::new(receive_cancel),
+            ValidateScopeReachability(validate_scope_reachability),
             CleanupContents::new(),
             ScopeContents::new(),
-            FinalizeCleanup::new(Self::begin_cleanup_workflows),
+            FinalizeCleanup::new(begin_cleanup_workflows::<Response>),
             BeginCleanupWorkflowStorage::default(),
             FinishCleanupWorkflowStorage(self.finish_scope_cancel),
+            self.begin_scope,
         ));
 
         if let Some(exit_scope) = self.exit_scope {
@@ -236,17 +237,14 @@ where
             roster,
         }: OperationRequest,
     ) -> OperationResult {
-        let input = world
+        let begin_scope = world
             .get_entity_mut(source)
             .or_broken()?
-            .take_input::<Request>()?;
+            .get::<DynBeginScope>()
+            .or_broken()?
+            .0;
 
-        let scoped_session = world
-            .spawn((ParentSession(input.session), SessionStatus::Active))
-            .id();
-        begin_scope::<Request, Response, Streams>(
-            input,
-            scoped_session,
+        (begin_scope)(
             OperationRequest {
                 source,
                 world,
@@ -347,7 +345,36 @@ where
     }
 }
 
-pub(crate) fn begin_scope<Request, Response, Streams>(
+#[derive(Component)]
+struct DynBeginScope(fn(OperationRequest) -> OperationResult);
+
+impl DynBeginScope {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self(dyn_begin_scope::<T>)
+    }
+}
+
+fn dyn_begin_scope<Request: 'static + Send + Sync>(
+    OperationRequest {
+        source,
+        world,
+        roster,
+    }: OperationRequest,
+) -> OperationResult {
+
+    let input = world
+        .get_entity_mut(source)
+        .or_broken()?
+        .take_input::<Request>()?;
+
+    let scoped_session = world
+        .spawn((ParentSession(input.session), SessionStatus::Active))
+        .id();
+
+    begin_scope(input, scoped_session, OperationRequest { source, world, roster })
+}
+
+pub(crate) fn begin_scope<Request>(
     input: Input<Request>,
     scoped_session: Entity,
     OperationRequest {
@@ -358,8 +385,6 @@ pub(crate) fn begin_scope<Request, Response, Streams>(
 ) -> OperationResult
 where
     Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync,
-    Streams: StreamPack,
 {
     let result = begin_scope_impl(
         input,
@@ -382,7 +407,7 @@ where
 
     if let Some(reachability) = world.get::<InitialReachability>(source) {
         if let InitialReachability::Error(cancellation) = reachability {
-            OperateScope::<Request, Response, Streams>::cancel_one(
+            cancel_one(
                 scoped_session,
                 source,
                 cancellation.clone(),
@@ -396,7 +421,7 @@ where
             // We have found in the past that this workflow cannot reach its
             // terminal point from its start point, so we should trigger the
             // reachability check to begin the cancellation process right away.
-            OperateScope::<Request, Response, Streams>::validate_scope_reachability(
+            validate_scope_reachability(
                 ValidationRequest {
                     source,
                     origin: source,
@@ -416,7 +441,7 @@ where
                 .get_entity_mut(source)
                 .or_broken()?
                 .insert(InitialReachability::Error(cancellation.clone()));
-            OperateScope::<Request, Response, Streams>::cancel_one(
+            cancel_one(
                 scoped_session,
                 source,
                 cancellation,
@@ -429,7 +454,7 @@ where
         // We should do a one-time check to make sure the terminal node can be
         // reached from the scope entry node. As long as this passes, we will
         // not run it again.
-        let is_reachable = OperateScope::<Request, Response, Streams>::validate_scope_reachability(
+        let is_reachable = validate_scope_reachability(
             ValidationRequest {
                 source,
                 origin: source,
@@ -510,11 +535,10 @@ where
     Ok(())
 }
 
-impl<Request, Response, Streams> OperateScope<Request, Response, Streams>
+impl<Request, Response> OperateScope<Request, Response>
 where
     Request: 'static + Send + Sync,
     Response: 'static + Send + Sync,
-    Streams: StreamPack,
 {
     pub(crate) fn add(
         parent_scope: Option<Entity>,
@@ -530,11 +554,12 @@ where
             .set_parent(scope_id)
             .id();
 
-        let scope = OperateScope::<Request, Response, Streams> {
+        let scope = OperateScope::<Request, Response> {
             enter_scope,
             terminal,
             exit_scope,
             finish_scope_cancel,
+            begin_scope: DynBeginScope::new::<Request>(),
             _ignore: Default::default(),
         };
 
@@ -565,248 +590,248 @@ where
             enter_scope,
         }
     }
+}
 
-    fn receive_cancel(
-        OperationCancel {
-            cancel:
-                Cancel {
-                    origin: _origin,
-                    target: source,
-                    session,
-                    cancellation,
-                },
-            world,
-            roster,
-        }: OperationCancel,
-    ) -> OperationResult {
-        if let Some(session) = session {
-            // We only need to cancel one specific session
-            return Self::cancel_one(session, source, cancellation, world, roster);
-        }
-
-        // We need to cancel all sessions. This is usually because a workflow
-        // is fundamentally broken.
-        let all_scoped_sessions: SmallVec<[Entity; 16]> = world
-            .get::<ScopedSessionStorage>(source)
-            .or_broken()?
-            .0
-            .iter()
-            .map(|p| p.scoped_session)
-            .collect();
-
-        for scoped_session in all_scoped_sessions {
-            if let Err(error) =
-                Self::cancel_one(scoped_session, source, cancellation.clone(), world, roster)
-            {
-                world
-                    .get_resource_or_insert_with(UnhandledErrors::default)
-                    .operations
-                    .push(error);
-            }
-        }
-
-        Ok(())
+fn receive_cancel(
+    OperationCancel {
+        cancel:
+            Cancel {
+                origin: _origin,
+                target: source,
+                session,
+                cancellation,
+            },
+        world,
+        roster,
+    }: OperationCancel,
+) -> OperationResult {
+    if let Some(session) = session {
+        // We only need to cancel one specific session
+        return cancel_one(session, source, cancellation, world, roster);
     }
 
-    fn cancel_one(
-        session: Entity,
-        source: Entity,
-        cancellation: Cancellation,
-        world: &mut World,
-        roster: &mut OperationRoster,
-    ) -> OperationResult {
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let relevant_scoped_sessions = source_mut
-            .get_mut::<ScopedSessionStorage>()
-            .or_broken()?
-            .0
-            .iter_mut()
-            // The cancelled session could be a scoped session or it could be a
-            // parent session (e.g. an external cancellation trigger). We won't
-            // be able to tell without checking against both.
-            .filter(|pair| pair.scoped_session == session || pair.parent_session == session)
-            .filter_map(|p| {
-                if p.status.to_cancelled() {
-                    Some(p.scoped_session)
-                } else {
-                    None
-                }
-            })
-            .collect();
+    // We need to cancel all sessions. This is usually because a workflow
+    // is fundamentally broken.
+    let all_scoped_sessions: SmallVec<[Entity; 16]> = world
+        .get::<ScopedSessionStorage>(source)
+        .or_broken()?
+        .0
+        .iter()
+        .map(|p| p.scoped_session)
+        .collect();
 
+    for scoped_session in all_scoped_sessions {
+        if let Err(error) =
+            cancel_one(scoped_session, source, cancellation.clone(), world, roster)
+        {
+            world
+                .get_resource_or_insert_with(UnhandledErrors::default)
+                .operations
+                .push(error);
+        }
+    }
+
+    Ok(())
+}
+
+fn cancel_one(
+    session: Entity,
+    source: Entity,
+    cancellation: Cancellation,
+    world: &mut World,
+    roster: &mut OperationRoster,
+) -> OperationResult {
+    let mut source_mut = world.get_entity_mut(source).or_broken()?;
+    let relevant_scoped_sessions = source_mut
+        .get_mut::<ScopedSessionStorage>()
+        .or_broken()?
+        .0
+        .iter_mut()
+        // The cancelled session could be a scoped session or it could be a
+        // parent session (e.g. an external cancellation trigger). We won't
+        // be able to tell without checking against both.
+        .filter(|pair| pair.scoped_session == session || pair.parent_session == session)
+        .filter_map(|p| {
+            if p.status.to_cancelled() {
+                Some(p.scoped_session)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let cleanup = Cleanup {
+        cleaner: source,
+        node: source,
+        session,
+        cleanup_id: session,
+    };
+    cleanup_entire_scope(
+        source,
+        cleanup,
+        FinishStatus::Cancelled(cancellation),
+        relevant_scoped_sessions,
+        world,
+        roster,
+    )
+}
+
+/// Check if the terminal node of the scope can be reached. If not, cancel
+/// the scope immediately.
+fn validate_scope_reachability(
+    ValidationRequest {
+        source,
+        origin,
+        session,
+        world,
+        roster,
+    }: ValidationRequest,
+) -> ReachabilityResult {
+    let nodes = world
+        .get::<ScopeContents>(source)
+        .or_broken()?
+        .nodes()
+        .clone();
+    for node in nodes.iter() {
+        let Some(disposal_listener) = world.get::<DisposalListener>(*node) else {
+            continue;
+        };
+        let f = disposal_listener.0;
+        f(DisposalUpdate {
+            source: *node,
+            origin,
+            session,
+            world,
+            roster,
+        })?;
+    }
+
+    let scoped_session = session;
+    let source_ref = world.get_entity(source).or_broken()?;
+    let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
+    if check_reachability(scoped_session, terminal, Some(origin), world)? {
+        // The terminal node can still be reached, so we're done
+        return Ok(true);
+    }
+
+    // The terminal node cannot be reached so we should cancel this scope.
+    let mut disposals = Vec::new();
+    for node in nodes.iter() {
+        if let Some(node_disposals) = world
+            .get_entity(*node)
+            .or_broken()?
+            .get_disposals(scoped_session)
+        {
+            disposals.extend(node_disposals.iter().cloned());
+        }
+    }
+
+    let mut source_mut = world.get_entity_mut(source).or_broken()?;
+    let mut sessions = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
+    let pair = sessions
+        .0
+        .iter_mut()
+        .find(|pair| pair.scoped_session == scoped_session)
+        .or_not_ready()?;
+
+    let cancellation: Cancellation = Unreachability {
+        scope: source,
+        session: pair.parent_session,
+        disposals,
+    }
+    .into();
+    if pair.status.to_cancelled() {
         let cleanup = Cleanup {
             cleaner: source,
             node: source,
-            session,
-            cleanup_id: session,
+            session: scoped_session,
+            cleanup_id: scoped_session,
         };
         cleanup_entire_scope(
             source,
             cleanup,
             FinishStatus::Cancelled(cancellation),
-            relevant_scoped_sessions,
-            world,
-            roster,
-        )
-    }
-
-    /// Check if the terminal node of the scope can be reached. If not, cancel
-    /// the scope immediately.
-    fn validate_scope_reachability(
-        ValidationRequest {
-            source,
-            origin,
-            session,
-            world,
-            roster,
-        }: ValidationRequest,
-    ) -> ReachabilityResult {
-        let nodes = world
-            .get::<ScopeContents>(source)
-            .or_broken()?
-            .nodes()
-            .clone();
-        for node in nodes.iter() {
-            let Some(disposal_listener) = world.get::<DisposalListener>(*node) else {
-                continue;
-            };
-            let f = disposal_listener.0;
-            f(DisposalUpdate {
-                source: *node,
-                origin,
-                session,
-                world,
-                roster,
-            })?;
-        }
-
-        let scoped_session = session;
-        let source_ref = world.get_entity(source).or_broken()?;
-        let terminal = source_ref.get::<TerminalStorage>().or_broken()?.0;
-        if check_reachability(scoped_session, terminal, Some(origin), world)? {
-            // The terminal node can still be reached, so we're done
-            return Ok(true);
-        }
-
-        // The terminal node cannot be reached so we should cancel this scope.
-        let mut disposals = Vec::new();
-        for node in nodes.iter() {
-            if let Some(node_disposals) = world
-                .get_entity(*node)
-                .or_broken()?
-                .get_disposals(scoped_session)
-            {
-                disposals.extend(node_disposals.iter().cloned());
-            }
-        }
-
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        let mut sessions = source_mut.get_mut::<ScopedSessionStorage>().or_broken()?;
-        let pair = sessions
-            .0
-            .iter_mut()
-            .find(|pair| pair.scoped_session == scoped_session)
-            .or_not_ready()?;
-
-        let cancellation: Cancellation = Unreachability {
-            scope: source,
-            session: pair.parent_session,
-            disposals,
-        }
-        .into();
-        if pair.status.to_cancelled() {
-            let cleanup = Cleanup {
-                cleaner: source,
-                node: source,
-                session: scoped_session,
-                cleanup_id: scoped_session,
-            };
-            cleanup_entire_scope(
-                source,
-                cleanup,
-                FinishStatus::Cancelled(cancellation),
-                SmallVec::from_iter([scoped_session]),
-                world,
-                roster,
-            )?;
-        }
-
-        Ok(false)
-    }
-
-    fn begin_cleanup_workflows(
-        FinalizeCleanupRequest {
-            cleanup,
-            world,
-            roster,
-        }: FinalizeCleanupRequest,
-    ) -> OperationResult {
-        let scope = cleanup.cleaner;
-        let scoped_session = cleanup.session;
-        let mut scope_mut = world.get_entity_mut(scope).or_broken()?;
-        scope_mut
-            .get_mut::<ScopedSessionStorage>()
-            .or_broken()?
-            .0
-            .retain(|p| p.scoped_session != scoped_session);
-
-        let finish_cleanup = scope_mut
-            .get::<FinishCleanupWorkflowStorage>()
-            .or_broken()?
-            .0;
-        let begin_cleanup_workflows = scope_mut
-            .get::<BeginCleanupWorkflowStorage>()
-            .or_broken()?
-            .0
-            .clone();
-        let mut finish_cleanup_workflow_mut = world.get_entity_mut(finish_cleanup).or_broken()?;
-        let mut awaiting_storage = finish_cleanup_workflow_mut
-            .get_mut::<AwaitingCleanupStorage>()
-            .or_broken()?;
-        let awaiting = awaiting_storage.get(scoped_session).or_broken()?;
-        awaiting.cleanup_workflow_sessions = Some(Default::default());
-
-        let is_terminated = awaiting.info.status.is_terminated();
-
-        for begin in begin_cleanup_workflows {
-            let run_this_workflow =
-                (is_terminated && begin.on_terminate) || (!is_terminated && begin.on_cancelled);
-
-            if !run_this_workflow {
-                continue;
-            }
-
-            // We execute the begin nodes immediately so that they can load up the
-            // finish_cancel node with all their cancellation behavior IDs before
-            // the finish_cancel node gets executed.
-            let execute = unsafe {
-                // INVARIANT: We can use sneak_input here because we execute the
-                // recipient node immediately after giving the input.
-                world
-                    .get_entity_mut(begin.source)
-                    .or_broken()?
-                    .sneak_input(scoped_session, (), false, roster)?
-            };
-            if execute {
-                execute_operation(OperationRequest {
-                    source: begin.source,
-                    world,
-                    roster,
-                });
-            }
-        }
-
-        // Check if there are any cleanup workflows waiting to be run. If not,
-        // the workflow can fully terminate.
-        FinishCleanup::<Response>::check_awaiting_session(
-            finish_cleanup,
-            scoped_session,
+            SmallVec::from_iter([scoped_session]),
             world,
             roster,
         )?;
-
-        Ok(())
     }
+
+    Ok(false)
+}
+
+fn begin_cleanup_workflows<Response: 'static + Send + Sync>(
+    FinalizeCleanupRequest {
+        cleanup,
+        world,
+        roster,
+    }: FinalizeCleanupRequest,
+) -> OperationResult {
+    let scope = cleanup.cleaner;
+    let scoped_session = cleanup.session;
+    let mut scope_mut = world.get_entity_mut(scope).or_broken()?;
+    scope_mut
+        .get_mut::<ScopedSessionStorage>()
+        .or_broken()?
+        .0
+        .retain(|p| p.scoped_session != scoped_session);
+
+    let finish_cleanup = scope_mut
+        .get::<FinishCleanupWorkflowStorage>()
+        .or_broken()?
+        .0;
+    let begin_cleanup_workflows = scope_mut
+        .get::<BeginCleanupWorkflowStorage>()
+        .or_broken()?
+        .0
+        .clone();
+    let mut finish_cleanup_workflow_mut = world.get_entity_mut(finish_cleanup).or_broken()?;
+    let mut awaiting_storage = finish_cleanup_workflow_mut
+        .get_mut::<AwaitingCleanupStorage>()
+        .or_broken()?;
+    let awaiting = awaiting_storage.get(scoped_session).or_broken()?;
+    awaiting.cleanup_workflow_sessions = Some(Default::default());
+
+    let is_terminated = awaiting.info.status.is_terminated();
+
+    for begin in begin_cleanup_workflows {
+        let run_this_workflow =
+            (is_terminated && begin.on_terminate) || (!is_terminated && begin.on_cancelled);
+
+        if !run_this_workflow {
+            continue;
+        }
+
+        // We execute the begin nodes immediately so that they can load up the
+        // finish_cancel node with all their cancellation behavior IDs before
+        // the finish_cancel node gets executed.
+        let execute = unsafe {
+            // INVARIANT: We can use sneak_input here because we execute the
+            // recipient node immediately after giving the input.
+            world
+                .get_entity_mut(begin.source)
+                .or_broken()?
+                .sneak_input(scoped_session, (), false, roster)?
+        };
+        if execute {
+            execute_operation(OperationRequest {
+                source: begin.source,
+                world,
+                roster,
+            });
+        }
+    }
+
+    // Check if there are any cleanup workflows waiting to be run. If not,
+    // the workflow can fully terminate.
+    FinishCleanup::<Response>::check_awaiting_session(
+        finish_cleanup,
+        scoped_session,
+        world,
+        roster,
+    )?;
+
+    Ok(())
 }
 
 /// This component keeps track of whether the terminal node of a scope can be

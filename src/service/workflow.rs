@@ -266,7 +266,7 @@ where
             blocker,
         },
     );
-    begin_scope::<Request, Response, Streams>(
+    begin_scope::<Request>(
         input,
         scoped_session,
         OperationRequest {

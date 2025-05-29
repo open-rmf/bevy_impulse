@@ -703,7 +703,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             terminal,
             enter_scope,
             finish_scope_cancel,
-        } = OperateScope::<Request, Response, Streams>::add(
+        } = OperateScope::<Request, Response>::add(
             Some(self.scope()),
             scope_id,
             Some(exit_scope),
