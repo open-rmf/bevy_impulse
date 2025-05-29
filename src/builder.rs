@@ -704,6 +704,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Streams: StreamPack,
         Settings: Into<ScopeSettings>,
     {
+        // NOTE(@mxgrey): When changing the implementation of this function,
+        // remember to similarly update the implementation of IncrementalScopeBuilder
         let ScopeEndpoints {
             terminal,
             enter_scope,

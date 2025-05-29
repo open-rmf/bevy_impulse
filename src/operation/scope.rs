@@ -17,7 +17,7 @@
 
 use crate::{
     check_reachability, execute_operation, is_downstream_of, Accessing, AddOperation, Blocker,
-    BufferKeyBuilder, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
+    BufferKeyBuilder, Builder, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
     CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest,
     Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, NamedTarget, NamedValue,
     Operation, OperationCancel, OperationCleanup, OperationError, OperationReachability,
@@ -37,7 +37,10 @@ use smallvec::SmallVec;
 use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap},
+    sync::{Arc, Mutex},
 };
+
+use thiserror::Error as ThisError;
 
 #[derive(Component)]
 pub struct ParentSession(Entity);
@@ -76,6 +79,7 @@ pub(crate) struct OperateScope {
     finalize_cleanup: FinalizeCleanup,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct ScopeEndpoints {
     pub(crate) terminal: Entity,
     pub(crate) enter_scope: Entity,
@@ -277,7 +281,7 @@ impl Operation for OperateScope {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 struct DynScopeRequest {
     setup_input: fn(OperationSetup) -> OperationResult,
     begin_scope: fn(OperationRequest) -> OperationResult,
@@ -584,6 +588,8 @@ impl OperateScope {
         Request: 'static + Send + Sync,
         Response: 'static + Send + Sync,
     {
+        // NOTE(@mxgrey): When changing this implementation, remember to similarly
+        // update the implementation of IncrementalScopeBuilder.
         let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
 
         let terminal = commands.spawn(()).set_parent(scope_id).id();
@@ -627,6 +633,159 @@ impl OperateScope {
             terminal,
             enter_scope,
         }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct IncrementalScopeBuilder {
+    inner: Arc<Mutex<IncrementalScopeBuilderInner>>,
+}
+
+#[derive(ThisError, Debug)]
+#[error("An error happened while building a dynamic scope")]
+pub enum DynamicScopeError {
+    #[error("This scope has already been built and should not be built again")]
+    AlreadyBuilt,
+    #[error("The request type for this scope has already been set so it cannot be set again")]
+    RequestAlreadySet,
+    #[error("The response type for this scope has already been set so it cannot be set again")]
+    ResponseAlreadySet,
+}
+
+impl IncrementalScopeBuilder {
+
+    pub(crate) fn begin(
+        settings: ScopeSettings,
+        builder: &mut Builder,
+    ) -> IncrementalScopeBuilder {
+        let parent_scope = Some(builder.scope());
+        let commands = builder.commands();
+
+        // TODO(@mxgrey): Consider how to refactor this to share an implementation
+        // with OperateScope::add.
+        let scope_id = commands.spawn(()).id();
+        let exit_scope = Some(commands.spawn(UnusedTarget).id());
+        let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
+        let terminal = commands.spawn(()).set_parent(scope_id).id();
+        let finish_scope_cancel = commands
+            .spawn(FinishCleanupForScope(scope_id))
+            .set_parent(scope_id)
+            .id();
+
+        commands.entity(scope_id).insert(ScopeSettingsStorage(settings));
+
+        let endpoints = ScopeEndpoints {
+            terminal,
+            enter_scope,
+            finish_scope_cancel,
+        };
+
+        IncrementalScopeBuilder { inner: Arc::new(Mutex::new(IncrementalScopeBuilderInner {
+            parent_scope,
+            scope_id,
+            endpoints,
+            enter_scope,
+            terminal,
+            exit_scope,
+            finish_scope_cancel,
+            dyn_scope_request: None,
+            finalize_cleanup: None,
+            already_built: false
+        })) }
+    }
+
+    pub(crate) fn endpoints(&self) -> ScopeEndpoints {
+        self.inner.lock().unwrap().endpoints
+    }
+
+    pub(crate) fn set_request<Request: 'static + Send + Sync>(
+        &mut self,
+        commands: &mut Commands,
+    ) -> Result<(), DynamicScopeError> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.dyn_scope_request.is_some() {
+            return Err(DynamicScopeError::RequestAlreadySet);
+        }
+
+        inner.dyn_scope_request = Some(DynScopeRequest::new::<Request>());
+        inner.consider_building(commands)
+    }
+
+    pub(crate) fn set_response<Response: 'static + Send + Sync>(
+        &mut self,
+        commands: &mut Commands,
+    ) -> Result<(), DynamicScopeError> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.finalize_cleanup.is_some() {
+            return Err(DynamicScopeError::ResponseAlreadySet);
+        }
+
+        commands.add(AddOperation::new(
+            // We do not consider the terminal node to be "inside" the scope,
+            // otherwise it will get cleaned up prematurely
+            None,
+            inner.terminal,
+            Terminate::<Response>::new(inner.scope_id),
+        ));
+
+        commands.add(AddOperation::new(
+            // We do not consider the finish cancel node to be "inside" the
+            // scope, otherwise it will get cleaned up prematurely
+            None,
+            inner.finish_scope_cancel,
+            FinishCleanup::<Response>::new(inner.scope_id),
+        ));
+
+        inner.finalize_cleanup = Some(FinalizeCleanup::new(begin_cleanup_workflows::<Response>));
+        inner.consider_building(commands)
+    }
+
+    pub(crate) fn is_finished(&self) -> bool {
+        self.inner.lock().unwrap().already_built
+    }
+}
+
+struct IncrementalScopeBuilderInner {
+    parent_scope: Option<Entity>,
+    scope_id: Entity,
+    endpoints: ScopeEndpoints,
+    enter_scope: Entity,
+    terminal: Entity,
+    exit_scope: Option<Entity>,
+    finish_scope_cancel: Entity,
+    dyn_scope_request: Option<DynScopeRequest>,
+    finalize_cleanup: Option<FinalizeCleanup>,
+    already_built: bool,
+}
+
+impl IncrementalScopeBuilderInner {
+    fn consider_building(
+        &mut self,
+        commands: &mut Commands,
+    ) -> Result<(), DynamicScopeError> {
+        if self.already_built {
+            return Err(DynamicScopeError::AlreadyBuilt);
+        }
+
+        let (Some(dyn_scope_request), Some(finalize_cleanup)) = (
+            self.dyn_scope_request.as_ref().copied(),
+            self.finalize_cleanup.as_ref().copied()
+        ) else {
+            return Ok(());
+        };
+
+        let scope = OperateScope {
+            enter_scope: self.enter_scope,
+            terminal: self.terminal,
+            exit_scope: self.exit_scope,
+            finish_scope_cancel: self.finish_scope_cancel,
+            dyn_scope_request,
+            finalize_cleanup,
+        };
+
+        commands.add(AddOperation::new(self.parent_scope, self.scope_id, scope));
+
+        Ok(())
     }
 }
 

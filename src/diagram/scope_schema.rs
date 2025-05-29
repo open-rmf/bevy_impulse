@@ -51,3 +51,14 @@ pub struct ScopeSchema {
     /// Operations that exist inside this scope.
     pub ops: Operations,
 }
+
+impl BuildDiagramOperation for ScopeSchema {
+    fn build_diagram_operation(
+        &self,
+        id: &OperationName,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<BuildStatus, DiagramErrorCode> {
+        Ok(BuildStatus::Finished)
+    }
+}
