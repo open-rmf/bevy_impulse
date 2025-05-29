@@ -36,9 +36,11 @@ use crate::{
 };
 
 /// A wrapper to turn any [`StreamEffect`] into an anonymous (unnamed) stream.
-/// This should be used if you want a stream with the same behavior as [`StreamOf`]
+/// This should be used if you want a stream with the same behavior as [`StreamOf`][1]
 /// but with some additional side effect. The input and output data types of the
 /// stream may be different.
+///
+/// [1]: crate::StreamOf
 pub struct AnonymousStream<S: StreamEffect>(std::marker::PhantomData<fn(S)>);
 
 impl<S: StreamEffect> StreamEffect for AnonymousStream<S> {

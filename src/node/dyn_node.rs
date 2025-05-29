@@ -179,7 +179,7 @@ where
 // pub struct DynStreamInputSlots
 
 /// Error type that happens when you try to convert a [`DynOutput`] to an
-/// <code>[Output]<T></code> for the wrong `T`.
+/// <code>[Output]&lt;T&gt;</code> for the wrong `T`.
 #[derive(ThisError, Debug)]
 #[error("type mismatch: source {source_type}, target {target_type}")]
 pub struct TypeMismatch {
