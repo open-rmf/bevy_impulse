@@ -48,15 +48,19 @@ type NamespaceList = SmallVec<[OperationName; 4]>;
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OperationRef {
     Named(NamedOperationRef),
-    Builtin { builtin: BuiltinTarget },
+    Terminate(NamespaceList),
+    Dispose,
+    Cancel(NamespaceList),
     StreamOut(StreamOutRef),
 }
 
 impl OperationRef {
     fn in_namespaces(self, parent_namespaces: &[Arc<str>]) -> Self {
         match self {
-            Self::Builtin { builtin } => Self::Builtin { builtin },
             Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
+            Self::Terminate(_) => Self::Terminate(parent_namespaces.iter().cloned().collect()),
+            Self::Dispose => Self::Dispose,
+            Self::Cancel(_) => Self::Cancel(parent_namespaces.iter().cloned().collect()),
             Self::StreamOut(stream_out) => {
                 Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
             }
@@ -69,8 +73,12 @@ impl<'a> From<&'a NextOperation> for OperationRef {
         match value {
             NextOperation::Name(name) => OperationRef::Named(name.into()),
             NextOperation::Namespace(id) => OperationRef::Named(id.into()),
-            NextOperation::Builtin { builtin } => OperationRef::Builtin {
-                builtin: builtin.clone(),
+            NextOperation::Builtin { builtin } => {
+                match builtin {
+                    BuiltinTarget::Terminate => OperationRef::Terminate(NamespaceList::new()),
+                    BuiltinTarget::Dispose => OperationRef::Dispose,
+                    BuiltinTarget::Cancel => OperationRef::Cancel(NamespaceList::new()),
+                }
             },
         }
     }
@@ -92,9 +100,23 @@ impl std::fmt::Display for OperationRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Named(named) => write!(f, "{named}"),
-            Self::Builtin { builtin } => write!(f, "builtin:{builtin}"),
+            Self::Terminate(namespaces) => write!(f, "{}(terminate)", DisplayNamespaces(namespaces)),
+            Self::Cancel(namespaces) => write!(f, "{}(cancel)", DisplayNamespaces(namespaces)),
+            Self::Dispose => write!(f, "(dispose)"),
             Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
         }
+    }
+}
+
+struct DisplayNamespaces<'a>(&'a NamespaceList);
+
+impl std::fmt::Display for DisplayNamespaces<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for namespace in self.0 {
+            write!(f, "{namespace}:")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -778,9 +800,7 @@ where
 
     let mut construction = DiagramConstruction::default();
 
-    let default_on_implicit_error = OperationRef::Builtin {
-        builtin: BuiltinTarget::Cancel,
-    };
+    let default_on_implicit_error = OperationRef::Cancel(NamespaceList::new());
     let opt_on_implicit_error: Option<OperationRef> =
         diagram.on_implicit_error.as_ref().map(Into::into);
 
@@ -986,9 +1006,7 @@ where
 
     // Add the terminate operation
     ctx.construction.connect_into_target.insert(
-        OperationRef::Builtin {
-            builtin: BuiltinTarget::Terminate,
-        },
+        OperationRef::Terminate(NamespaceList::new()),
         standard_input_connection(scope.terminate.into(), &ctx.registry)?,
     );
 
@@ -1000,17 +1018,13 @@ where
 
     // Add the dispose operation
     ctx.construction.connect_into_target.insert(
-        OperationRef::Builtin {
-            builtin: BuiltinTarget::Dispose,
-        },
+        OperationRef::Dispose,
         Box::new(ConnectToDispose),
     );
 
     // Add the cancel operation
     ctx.construction.connect_into_target.insert(
-        OperationRef::Builtin {
-            builtin: BuiltinTarget::Cancel,
-        },
+        OperationRef::Cancel(NamespaceList::new()),
         Box::new(ConnectToCancel::new(builder)?),
     );
 
