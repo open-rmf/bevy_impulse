@@ -239,7 +239,7 @@ where
         }: OperationRequest,
     ) -> OperationResult {
         let begin_scope = world
-            .get_entity_mut(source)
+            .get_entity(source)
             .or_broken()?
             .get::<DynScopeRequest>()
             .or_broken()?
@@ -255,59 +255,17 @@ where
     }
 
     fn cleanup(
-        OperationCleanup {
-            source,
-            cleanup,
-            world,
-            roster,
-        }: OperationCleanup,
+        clean: OperationCleanup,
     ) -> OperationResult {
-        let parent_session = cleanup.session;
-
-        let mut source_mut = world.get_entity_mut(source).or_broken()?;
-        source_mut.cleanup_inputs::<Request>(cleanup.session);
-
-        let uninterruptible = source_mut
-            .get::<ScopeSettingsStorage>()
+        let cleanup = clean
+            .world
+            .get_entity(clean.source)
             .or_broken()?
-            .0
-            .is_uninterruptible();
-
-        let relevant_scoped_sessions: SmallVec<[_; 16]> = source_mut
-            .get_mut::<ScopedSessionStorage>()
+            .get::<DynScopeRequest>()
             .or_broken()?
-            .0
-            .iter_mut()
-            .filter(|pair| pair.parent_session == parent_session)
-            .filter_map(|p| {
-                if p.status.to_cleanup(uninterruptible) {
-                    Some(p.scoped_session)
-                } else {
-                    None
-                }
-            })
-            .collect();
+            .cleanup;
 
-        if relevant_scoped_sessions.is_empty() {
-            // We have no record of the mentioned session in this scope, so it
-            // is already clean.
-            return OperationCleanup {
-                source,
-                cleanup,
-                world,
-                roster,
-            }
-            .notify_cleaned();
-        };
-
-        cleanup_entire_scope(
-            source,
-            cleanup,
-            FinishStatus::EarlyCleanup,
-            relevant_scoped_sessions,
-            world,
-            roster,
-        )
+        (cleanup)(clean)
     }
 
     fn is_reachable(mut reachability: OperationReachability) -> ReachabilityResult {
@@ -350,6 +308,7 @@ where
 struct DynScopeRequest {
     setup_input: fn(OperationSetup) -> OperationResult,
     begin_scope: fn(OperationRequest) -> OperationResult,
+    cleanup: fn(OperationCleanup) -> OperationResult,
 }
 
 impl DynScopeRequest {
@@ -357,6 +316,7 @@ impl DynScopeRequest {
         Self {
             setup_input: dyn_setup_input::<T>,
             begin_scope: dyn_begin_scope::<T>,
+            cleanup: dyn_cleanup::<T>,
         }
     }
 }
@@ -387,6 +347,57 @@ fn dyn_begin_scope<Request: 'static + Send + Sync>(
         .id();
 
     begin_scope(input, scoped_session, OperationRequest { source, world, roster })
+}
+
+fn dyn_cleanup<Request: 'static + Send + Sync>(
+    OperationCleanup { source, cleanup, world, roster }: OperationCleanup,
+) -> OperationResult {
+    let parent_session = cleanup.session;
+
+    let mut source_mut = world.get_entity_mut(source).or_broken()?;
+    source_mut.cleanup_inputs::<Request>(cleanup.session);
+
+    let uninterruptible = source_mut
+        .get::<ScopeSettingsStorage>()
+        .or_broken()?
+        .0
+        .is_uninterruptible();
+
+    let relevant_scoped_sessions: SmallVec<[_; 16]> = source_mut
+        .get_mut::<ScopedSessionStorage>()
+        .or_broken()?
+        .0
+        .iter_mut()
+        .filter(|pair| pair.parent_session == parent_session)
+        .filter_map(|p| {
+            if p.status.to_cleanup(uninterruptible) {
+                Some(p.scoped_session)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if relevant_scoped_sessions.is_empty() {
+        // We have no record of the mentioned session in this scope, so it
+        // is already clean.
+        return OperationCleanup {
+            source,
+            cleanup,
+            world,
+            roster,
+        }
+        .notify_cleaned();
+    };
+
+    cleanup_entire_scope(
+        source,
+        cleanup,
+        FinishStatus::EarlyCleanup,
+        relevant_scoped_sessions,
+        world,
+        roster,
+    )
 }
 
 pub(crate) fn begin_scope<Request>(
