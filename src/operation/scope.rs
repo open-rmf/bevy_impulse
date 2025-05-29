@@ -58,7 +58,7 @@ pub enum SessionStatus {
     Cleaning,
 }
 
-pub(crate) struct OperateScope<Request, Response> {
+pub(crate) struct OperateScope {
     /// The first node that is inside of the scope
     enter_scope: Entity,
     /// The final target of the nodes inside the scope. It receives the final
@@ -73,7 +73,7 @@ pub(crate) struct OperateScope<Request, Response> {
     /// Cancellation finishes at this node
     finish_scope_cancel: Entity,
     dyn_scope_request: DynScopeRequest,
-    _ignore: std::marker::PhantomData<fn(Request, Response)>,
+    finalize_cleanup: FinalizeCleanup,
 }
 
 pub(crate) struct ScopeEndpoints {
@@ -194,11 +194,7 @@ impl ScopeContents {
     }
 }
 
-impl<Request, Response> Operation for OperateScope<Request, Response>
-where
-    Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync,
-{
+impl Operation for OperateScope {
     fn setup(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         (self.dyn_scope_request.setup_input)(OperationSetup { source, world })?;
 
@@ -211,10 +207,10 @@ where
             ValidateScopeReachability(validate_scope_reachability),
             CleanupContents::new(),
             ScopeContents::new(),
-            FinalizeCleanup::new(begin_cleanup_workflows::<Response>),
             BeginCleanupWorkflowStorage::default(),
             FinishCleanupWorkflowStorage(self.finish_scope_cancel),
             self.dyn_scope_request,
+            self.finalize_cleanup,
         ));
 
         if let Some(exit_scope) = self.exit_scope {
@@ -577,17 +573,17 @@ where
     Ok(())
 }
 
-impl<Request, Response> OperateScope<Request, Response>
-where
-    Request: 'static + Send + Sync,
-    Response: 'static + Send + Sync,
-{
-    pub(crate) fn add(
+impl OperateScope {
+    pub(crate) fn add<Request, Response>(
         parent_scope: Option<Entity>,
         scope_id: Entity,
         exit_scope: Option<Entity>,
         commands: &mut Commands,
-    ) -> ScopeEndpoints {
+    ) -> ScopeEndpoints
+    where
+        Request: 'static + Send + Sync,
+        Response: 'static + Send + Sync,
+    {
         let enter_scope = commands.spawn((EntryForScope(scope_id), UnusedTarget)).id();
 
         let terminal = commands.spawn(()).set_parent(scope_id).id();
@@ -596,13 +592,13 @@ where
             .set_parent(scope_id)
             .id();
 
-        let scope = OperateScope::<Request, Response> {
+        let scope = OperateScope {
             enter_scope,
             terminal,
             exit_scope,
             finish_scope_cancel,
             dyn_scope_request: DynScopeRequest::new::<Request>(),
-            _ignore: Default::default(),
+            finalize_cleanup: FinalizeCleanup(begin_cleanup_workflows::<Response>),
         };
 
         // Note: We need to make sure the scope object gets set up before any of

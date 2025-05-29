@@ -233,7 +233,7 @@ impl<'w, 's> SpawnWorkflowExt for Commands<'w, 's> {
             terminal,
             enter_scope,
             finish_scope_cancel,
-        } = OperateScope::<Request, Response>::add(None, scope_id, None, self);
+        } = OperateScope::add::<Request, Response>(None, scope_id, None, self);
 
         let mut builder = Builder {
             scope: scope_id,
