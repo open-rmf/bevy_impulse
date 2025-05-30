@@ -180,7 +180,7 @@ impl BuildDiagramOperation for SectionSchema {
                 let section = ctx.templates.get_template(section_template)?;
 
                 for (child_id, op) in section.ops.iter() {
-                    ctx.add_child_operation(id, child_id, op, &section.ops);
+                    ctx.add_child_operation(id, child_id, op, &section.ops, None);
                 }
 
                 section

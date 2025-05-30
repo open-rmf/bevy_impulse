@@ -25,7 +25,7 @@ use crate::{
     IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse, ConnectIntoTarget,
     InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext, DiagramElementRegistry,
     DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
-    Operations, TypeInfo, OperationRef,
+    Operations, TypeInfo, OperationRef, ScopeSettings,
     standard_input_connection,
 };
 
@@ -65,6 +65,20 @@ impl BuildDiagramOperation for ScopeSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        let scope = IncrementalScopeBuilder::begin(ScopeSettings::default(), builder);
+
+        for (child_id, op) in self.ops.iter() {
+            ctx.add_child_operation(
+                id,
+                child_id,
+                op,
+                &self.ops,
+                Some(scope.builder_scope_context()),
+            );
+        }
+
+
+
         Ok(BuildStatus::Finished)
     }
 }
@@ -89,7 +103,7 @@ impl ConnectIntoTarget for ConnectScopeRequest {
                 .registry.messages.set_scope_request(
                     output.message_info(),
                     &mut self.scope,
-                    builder.commands()
+                    builder.commands(),
                 )?;
 
             if let Some(begin_scope) = begin_scope {
@@ -119,4 +133,56 @@ impl ConnectIntoTarget for ConnectScopeRequest {
     fn is_finished(&self) -> Result<(), DiagramErrorCode> {
         self.scope.is_finished().map_err(Into::into)
     }
+}
+
+struct ConnectScopeResponse {
+    scope: IncrementalScopeBuilder,
+    next: OperationRef,
+    connection: Option<Box<dyn ConnectIntoTarget + 'static>>,
+}
+
+impl ConnectIntoTarget for ConnectScopeResponse {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        if let Some(connection) = &mut self.connection {
+            return connection.connect_into_target(output, builder, ctx);
+        } else {
+            let IncrementalScopeResponse { terminate, external_output } = ctx
+                .registry.messages.set_scope_response(
+                    output.message_info(),
+                    &mut self.scope,
+                    builder.commands(),
+                )?;
+
+            if let Some(external_output) = external_output {
+                ctx.add_output_into_target(self.next.clone(), output);
+            }
+
+            let mut connection = standard_input_connection(terminate, ctx.registry)?;
+            connection.connect_into_target(output, builder, ctx)?;
+            self.connection = Some(connection);
+        }
+
+        Ok(())
+    }
+
+    fn infer_input_type(
+        &self,
+        ctx: &DiagramContext,
+        visited: &mut HashSet<OperationRef>,
+    ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
+        if let Some(connection) = &self.connection {
+            connection.infer_input_type(ctx, visited)
+        } else {
+            ctx.redirect_infer_input_type(&self.next, visited)
+        }
+    }
+
+    // We do not implement is_finished because just having it for
+    // ConnectScopeRequest is sufficient, since it will report that the scope
+    // isn't finished whether the request or the response didn't get a connection.
 }

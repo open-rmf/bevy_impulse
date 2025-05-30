@@ -574,12 +574,16 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     /// Operations added this way will be internal to the parent operation,
     /// which means they are not "exposed" to be connected to other operations
     /// that are not inside the parent.
+    ///
+    /// Use the scope argument if the child operation exists in a different scope
+    /// than the parent. For the child of a Section, this is None.
     pub fn add_child_operation(
         &mut self,
         id: &OperationName,
         child_id: &OperationName,
         op: impl Into<CowOperation<'a>>,
         sibling_ops: &'a Operations,
+        scope: Option<BuilderScopeContext>,
     ) {
         let mut namespaces = self.namespaces.clone();
         namespaces.push(Arc::clone(id));
@@ -591,7 +595,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 namespaces,
                 op: op.into(),
                 sibling_ops,
-                scope: self.scope,
+                scope: scope.unwrap_or(self.scope),
             });
     }
 
