@@ -17,6 +17,7 @@
 
 use crate::{
     dyn_node::{DynInputSlot, DynOutput},
+    type_info::TypeInfo,
     check_reachability, execute_operation, is_downstream_of, Accessing, AddOperation, Blocker, Broken,
     BufferKeyBuilder, Builder, BuilderScopeContext, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
     CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest,
@@ -24,7 +25,7 @@ use crate::{
     Operation, OperationCancel, OperationCleanup, OperationError, OperationReachability,
     OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
     ReachabilityResult, ScopeSettings, SingleInputStorage, SingleTargetStorage, StreamEffect,
-    StreamRequest, StreamTargetMap, TypeInfo, UnhandledErrors, Unreachability, UnusedTarget,
+    StreamRequest, StreamTargetMap, UnhandledErrors, Unreachability, UnusedTarget,
 };
 
 use backtrace::Backtrace;
@@ -680,14 +681,6 @@ pub(crate) struct IncrementalScopeBuilder {
     inner: Arc<Mutex<IncrementalScopeBuilderInner>>,
 }
 
-#[derive(Debug)]
-pub(crate) struct IncrementalScope {
-    pub(crate) external_input: DynInputSlot,
-    pub(crate) external_output: DynOutput,
-    pub(crate) begin_scope: DynOutput,
-    pub(crate) terminate: DynInputSlot,
-}
-
 #[derive(ThisError, Debug)]
 #[error("An error happened while building a dynamic scope")]
 pub enum IncrementalScopeError {
@@ -703,7 +696,21 @@ pub enum IncrementalScopeError {
     },
 }
 
-pub(crate) type IncrementalScopeResult = Result<Option<IncrementalScope>, IncrementalScopeError>;
+#[derive(Debug)]
+pub(crate) struct IncrementalScopeRequest {
+    pub(crate) external_input: DynInputSlot,
+    pub(crate) begin_scope: Option<DynOutput>,
+}
+
+pub(crate) type IncrementalScopeRequestResult = Result<IncrementalScopeRequest, IncrementalScopeError>;
+
+#[derive(Debug)]
+pub(crate) struct IncrementalScopeResponse {
+    pub(crate) terminate: DynInputSlot,
+    pub(crate) external_output: Option<DynOutput>,
+}
+
+pub(crate) type IncrementalScopeResponseResult = Result<IncrementalScopeResponse, IncrementalScopeError>;
 
 impl IncrementalScopeBuilder {
     pub(crate) fn begin(
@@ -751,7 +758,9 @@ impl IncrementalScopeBuilder {
             finish_scope_cancel,
             request: None,
             response: None,
-            already_built: false
+            already_built: false,
+            begin_scope_not_sent: true,
+            external_output_not_sent: true,
         })) }
     }
 
@@ -766,7 +775,7 @@ impl IncrementalScopeBuilder {
     pub(crate) fn set_request<Request: 'static + Send + Sync>(
         &mut self,
         commands: &mut Commands,
-    ) -> IncrementalScopeResult {
+    ) -> IncrementalScopeRequestResult {
         let mut inner = self.inner.lock().unwrap();
         let message_info = TypeInfo::of::<Request>();
         if let Some((_, expected_info)) = inner.request.as_ref() {
@@ -783,13 +792,23 @@ impl IncrementalScopeBuilder {
             ));
         }
 
-        inner.consider_building(commands)
+        inner.consider_building(commands);
+
+        let request = IncrementalScopeRequest {
+            external_input: DynInputSlot::new(inner.parent_scope, inner.scope_id, message_info),
+            begin_scope: inner.begin_scope_not_sent.then(
+                || DynOutput::new(inner.scope_id, inner.enter_scope, message_info)
+            ),
+        };
+
+        inner.begin_scope_not_sent = false;
+        Ok(request)
     }
 
     pub(crate) fn set_response<Response: 'static + Send + Sync>(
         &mut self,
         commands: &mut Commands,
-    ) -> IncrementalScopeResult {
+    ) -> IncrementalScopeResponseResult {
         let mut inner = self.inner.lock().unwrap();
         let message_info = TypeInfo::of::<Response>();
         if let Some((_, expected_info)) = inner.response.as_ref() {
@@ -822,7 +841,17 @@ impl IncrementalScopeBuilder {
             ));
         }
 
-        inner.consider_building(commands)
+        inner.consider_building(commands);
+
+        let response = IncrementalScopeResponse {
+            terminate: DynInputSlot::new(inner.scope_id, inner.terminal, message_info),
+            external_output: inner.external_output_not_sent.then(
+                || DynOutput::new(inner.parent_scope, inner.exit_scope, message_info)
+            ),
+        };
+
+        inner.external_output_not_sent = false;
+        Ok(response)
     }
 
     pub(crate) fn is_finished(&self) -> bool {
@@ -841,37 +870,34 @@ struct IncrementalScopeBuilderInner {
     request: Option<(DynScopeRequest, TypeInfo)>,
     response: Option<(FinalizeCleanup, TypeInfo)>,
     already_built: bool,
+    begin_scope_not_sent: bool,
+    external_output_not_sent: bool,
 }
 
 impl IncrementalScopeBuilderInner {
     fn consider_building(
         &mut self,
         commands: &mut Commands,
-    ) -> IncrementalScopeResult {
+    ) {
+        if self.already_built {
+            return;
+        }
+
         let (
-            Some((dyn_scope_request, input_type)),
-            Some((finalize_cleanup, output_type)),
+            Some((dyn_scope_request, _)),
+            Some((finalize_cleanup, _)),
         ) = (
             self.request.as_ref().copied(),
             self.response.as_ref().copied()
         ) else {
-            return Ok(None);
+            return;
         };
 
-        if !self.already_built {
-            commands.add(InsertTypeSensitiveComponents {
-                source: self.scope_id,
-                components: TypeSensitiveScopeComponents { dyn_scope_request, finalize_cleanup },
-            });
-            self.already_built = true;
-        }
-
-        Ok(Some(IncrementalScope {
-            external_input: DynInputSlot::new(self.parent_scope, self.scope_id, input_type),
-            external_output: DynOutput::new(self.parent_scope, self.exit_scope, output_type),
-            begin_scope: DynOutput::new(self.scope_id, self.enter_scope, input_type),
-            terminate: DynInputSlot::new(self.scope_id, self.terminal, output_type),
-        }))
+        commands.add(InsertTypeSensitiveComponents {
+            source: self.scope_id,
+            components: TypeSensitiveScopeComponents { dyn_scope_request, finalize_cleanup },
+        });
+        self.already_built = true;
     }
 }
 
@@ -2156,7 +2182,12 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, dyn_node::DynOutput};
+    use crate::{
+        prelude::*,
+        testing::*,
+        dyn_node::DynOutput,
+        operation::{IncrementalScopeRequest, IncrementalScopeResponse},
+    };
 
     #[test]
     fn test_scope_race() {
@@ -2211,11 +2242,13 @@ mod tests {
                 (fork, slow, fast)
             };
 
-            assert!(incremental_scope_builder.set_request::<()>(builder.commands()).unwrap().is_none());
-            let incremental_scope = incremental_scope_builder.set_response::<&'static str>(builder.commands()).unwrap().unwrap();
+            let IncrementalScopeRequest { external_input, begin_scope } =
+                incremental_scope_builder.set_request::<()>(builder.commands()).unwrap();
+            let IncrementalScopeResponse { terminate, external_output } =
+                incremental_scope_builder.set_response::<&'static str>(builder.commands()).unwrap();
 
             let workflow_input: DynOutput = scope.input.into();
-            workflow_input.connect_to(&incremental_scope.external_input.into(), builder).unwrap();
+            workflow_input.connect_to(&external_input.into(), builder).unwrap();
 
             {
                 let mut builder = Builder {
