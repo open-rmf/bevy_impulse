@@ -698,6 +698,11 @@ pub enum IncrementalScopeError {
         already_set: TypeInfo,
         attempted: TypeInfo,
     },
+    #[error("The scope has not finished building yet. request: {request_set}, response: {response_set}")]
+    Unfinished {
+        request_set: bool,
+        response_set: bool,
+    }
 }
 
 #[derive(Debug)]
@@ -858,8 +863,16 @@ impl IncrementalScopeBuilder {
         Ok(response)
     }
 
-    pub(crate) fn is_finished(&self) -> bool {
-        self.inner.lock().unwrap().already_built
+    pub(crate) fn is_finished(&self) -> Result<(), IncrementalScopeError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.begin_scope_not_sent || inner.external_output_not_sent {
+            return Err(IncrementalScopeError::Unfinished {
+                request_set: !inner.begin_scope_not_sent,
+                response_set: !inner.external_output_not_sent
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -2233,6 +2246,7 @@ mod tests {
                 ScopeSettings::default(),
                 builder
             );
+            assert!(incremental_scope_builder.is_finished().is_err());
 
             let ((fork_input, fork_outputs), slow, fast) = {
                 let mut builder = Builder {
@@ -2249,6 +2263,8 @@ mod tests {
             let IncrementalScopeRequest { external_input, begin_scope } =
                 incremental_scope_builder.set_request::<()>(builder.commands()).unwrap();
             let begin_scope = begin_scope.unwrap();
+
+            assert!(incremental_scope_builder.is_finished().is_err());
 
             // Call set_request a second time to see that we get the intended behavior
             let second_set_request = incremental_scope_builder
@@ -2267,10 +2283,13 @@ mod tests {
                 .set_request::<i64>(builder.commands()).unwrap_err();
             assert!(matches!(bad_set_request, IncrementalScopeError::RequestMismatch { .. }));
 
+            assert!(incremental_scope_builder.is_finished().is_err());
 
             let IncrementalScopeResponse { terminate, external_output } =
                 incremental_scope_builder.set_response::<&'static str>(builder.commands()).unwrap();
             let external_output = external_output.unwrap();
+
+            assert!(incremental_scope_builder.is_finished().is_ok());
 
             // Call set_response a second time to see that we get the intended behavior
             let second_set_response = incremental_scope_builder
@@ -2288,6 +2307,8 @@ mod tests {
             let bad_set_response = incremental_scope_builder
                 .set_response::<String>(builder.commands()).unwrap_err();
             assert!(matches!(bad_set_response, IncrementalScopeError::ResponseMismatch { .. }));
+
+            assert!(incremental_scope_builder.is_finished().is_ok());
 
             let workflow_input: DynOutput = scope.input.into();
             workflow_input.connect_to(&external_input.into(), builder).unwrap();

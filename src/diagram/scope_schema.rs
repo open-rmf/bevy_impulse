@@ -15,19 +15,18 @@
  *
 */
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use schemars::{schema::Schema, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output,
-};
-
-use super::{
-    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramElementRegistry,
+    IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse, ConnectIntoTarget,
+    InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext, DiagramElementRegistry,
     DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
-    Operations, TypeInfo,
+    Operations, TypeInfo, OperationRef,
+    standard_input_connection,
 };
 
 /// The schema to define a scope within a diagram.
@@ -67,5 +66,57 @@ impl BuildDiagramOperation for ScopeSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         Ok(BuildStatus::Finished)
+    }
+}
+
+struct ConnectScopeRequest {
+    scope: IncrementalScopeBuilder,
+    start: OperationRef,
+    connection: Option<Box<dyn ConnectIntoTarget + 'static>>,
+}
+
+impl ConnectIntoTarget for ConnectScopeRequest {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        if let Some(connection) = &mut self.connection {
+            return connection.connect_into_target(output, builder, ctx);
+        } else {
+            let IncrementalScopeRequest { external_input, begin_scope } = ctx
+                .registry.messages.set_scope_request(
+                    output.message_info(),
+                    &mut self.scope,
+                    builder.commands()
+                )?;
+
+            if let Some(begin_scope) = begin_scope {
+                ctx.add_output_into_target(self.start.clone(), begin_scope);
+            }
+
+            let mut connection = standard_input_connection(external_input, &ctx.registry)?;
+            connection.connect_into_target(output, builder, ctx)?;
+            self.connection = Some(connection);
+        }
+
+        Ok(())
+    }
+
+    fn infer_input_type(
+        &self,
+        ctx: &DiagramContext,
+        visited: &mut HashSet<OperationRef>,
+    ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
+        if let Some(connection) = &self.connection {
+            connection.infer_input_type(ctx, visited)
+        } else {
+            ctx.redirect_infer_input_type(&self.start, visited)
+        }
+    }
+
+    fn is_finished(&self) -> Result<(), DiagramErrorCode> {
+        self.scope.is_finished().map_err(Into::into)
     }
 }

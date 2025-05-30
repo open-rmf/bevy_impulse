@@ -370,6 +370,27 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         Ok(infer)
     }
 
+    /// Redirect the inference of an input type to another input. This can be
+    /// used by implementations of [`ConnectIntoTarget`] whose input types are
+    /// dependent on a downstream operation.
+    pub fn redirect_infer_input_type(
+        &self,
+        redirect_to: &OperationRef,
+        visited: &mut HashSet<OperationRef>,
+    ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
+        if visited.insert(redirect_to.clone()) {
+            if let Some(target) = self.construction.connect_into_target.get(&redirect_to) {
+                return target.connector.infer_input_type(self, visited);
+            } else {
+                return Ok(None);
+            }
+        } else {
+            return Err(DiagramErrorCode::CircularRedirect(
+                visited.drain().collect(),
+            ));
+        }
+    }
+
     /// Add an output to connect into a target.
     ///
     /// This can be used during both the [`BuildDiagramOperation`] phase and the
@@ -911,6 +932,17 @@ where
                     operations: &diagram.ops,
                     templates: &diagram.templates,
                     on_implicit_error,
+                    // TODO(@mxgrey): The namespace while connecting into targets
+                    // is always empty since the ConnectIntoTargets implementation
+                    // is expected to provide targets that are already fully
+                    // resolved. This inconsistency is questionable and will
+                    // probably lead to bugs in the future, so we should
+                    // reconisder our approach to this.
+                    //
+                    // Perhaps we can introduce a specific trait IntoOperationRef
+                    // that takes in parent namespace information and behaves
+                    // differently between NextOperation vs OperationRef. Then
+                    // we also store namespace information per Target.
                     namespaces: Default::default(),
                     scope: target.scope,
                 };
@@ -1346,17 +1378,7 @@ impl ConnectIntoTarget for RedirectConnection {
         ctx: &DiagramContext,
         visited: &mut HashSet<OperationRef>,
     ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
-        if visited.insert(self.redirect_to.clone()) {
-            if let Some(target) = ctx.construction.connect_into_target.get(&self.redirect_to) {
-                return target.connector.infer_input_type(ctx, visited);
-            } else {
-                return Ok(None);
-            }
-        } else {
-            return Err(DiagramErrorCode::CircularRedirect(
-                visited.drain().collect(),
-            ));
-        }
+        ctx.redirect_infer_input_type(&self.redirect_to, visited)
     }
 }
 
