@@ -389,6 +389,8 @@ pub enum DiagramOperation {
     /// ```
     Section(SectionSchema),
 
+    Scope(ScopeSchema),
+
     /// Declare a stream output for the current scope. Outputs that you connect
     /// to this operation will be streamed out of the scope that this operation
     /// is declared in.
@@ -907,6 +909,7 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Scope(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
             Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Split(op) => op.build_diagram_operation(id, builder, ctx),

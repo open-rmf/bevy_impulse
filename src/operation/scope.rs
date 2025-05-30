@@ -742,12 +742,6 @@ impl IncrementalScopeBuilder {
 
         commands.entity(scope_id).insert(ScopeSettingsStorage(settings));
 
-        let endpoints = ScopeEndpoints {
-            terminal,
-            enter_scope,
-            finish_scope_cancel,
-        };
-
         let scope = OperateScope {
             enter_scope,
             terminal,
@@ -760,7 +754,6 @@ impl IncrementalScopeBuilder {
         IncrementalScopeBuilder { inner: Arc::new(Mutex::new(IncrementalScopeBuilderInner {
             parent_scope,
             scope_id,
-            endpoints,
             enter_scope,
             terminal,
             exit_scope,
@@ -879,7 +872,6 @@ impl IncrementalScopeBuilder {
 struct IncrementalScopeBuilderInner {
     parent_scope: Entity,
     scope_id: Entity,
-    endpoints: ScopeEndpoints,
     enter_scope: Entity,
     terminal: Entity,
     exit_scope: Entity,

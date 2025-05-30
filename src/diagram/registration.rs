@@ -657,7 +657,7 @@ pub(super) struct MessageOperation {
     pub(super) to_string_impl: Option<ToStringFn>,
     pub(super) create_buffer_impl: CreateBufferFn,
     pub(super) create_trigger_impl: CreateTriggerFn,
-    pub(super) build_scope: BuildScope,
+    build_scope: BuildScope,
 }
 
 impl MessageOperation {

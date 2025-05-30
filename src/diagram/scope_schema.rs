@@ -17,15 +17,15 @@
 
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 
-use schemars::{schema::Schema, JsonSchema};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
 use crate::{
-    Builder, IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse, ConnectIntoTarget,
-    InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext, DiagramElementRegistry,
-    DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
-    Operations, TypeInfo, OperationRef, ScopeSettings,
+    Builder, IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse,
+    ConnectIntoTarget, InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, DynOutput, NextOperation, OperationName,
+    Operations, OperationRef, ScopeSettings,
     standard_input_connection,
 };
 
@@ -81,7 +81,7 @@ impl BuildDiagramOperation for ScopeSchema {
             id,
             ConnectScopeRequest {
                 scope: scope.clone(),
-                start: ctx.into_operation_ref(id),
+                start: ctx.into_child_operation_ref(id, &self.start),
                 connection: None,
             },
         )?;
@@ -201,4 +201,44 @@ impl ConnectIntoTarget for ConnectScopeResponse {
     // We do not implement is_finished because just having it for
     // ConnectScopeRequest is sufficient, since it will report that the scope
     // isn't finished whether the request or the response didn't get a connection.
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{prelude::*, testing::*, diagram::{*, testing::*}};
+    use serde_json::json;
+
+    #[test]
+    fn test_simple_scope() {
+        let mut fixture = DiagramTestFixture::new();
+        fixture.context.set_flush_loop_limit(Some(10));
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "scope",
+            "ops": {
+                "scope": {
+                    "type": "scope",
+                    "start": "multiply",
+                    "ops": {
+                        "multiply": {
+                            "type": "node",
+                            "builder": "multiply3",
+                            "next": { "builtin" : "terminate" },
+                        }
+                    },
+                    "next": { "builtin" : "terminate" },
+                }
+            }
+        }))
+        .unwrap();
+
+        // let result: i64 = fixture.spawn_and_run(&diagram, 4_i64).unwrap();
+        let workflow: Service<i64, i64> = fixture.spawn_io_workflow(&diagram).unwrap();
+
+        let mut promise = fixture.context.command(|commands| commands.request(4_i64, workflow).take_response());
+        fixture.context.run_with_conditions(&mut promise, 1);
+        let result = promise.take().available().unwrap();
+        assert_eq!(result, 12);
+    }
 }

@@ -572,6 +572,17 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         id.in_namespaces(&self.namespaces)
     }
 
+    pub fn into_child_operation_ref(
+        &self,
+        id: &OperationName,
+        child_id: impl Into<OperationRef>,
+    ) -> OperationRef {
+        let child_id: OperationRef = child_id.into();
+        child_id
+            .in_namespaces(&[id.clone()])
+            .in_namespaces(&self.namespaces)
+    }
+
     /// Add an operation which exists as a child inside another operation.
     ///
     /// For example this is used by section templates to add their inner
