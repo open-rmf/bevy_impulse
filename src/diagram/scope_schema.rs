@@ -72,11 +72,10 @@ impl BuildDiagramOperation for ScopeSchema {
                 id,
                 child_id,
                 op,
-                &self.ops,
-                Some(scope.builder_scope_context()),
+                self.ops.clone(),
+                Some(scope.builder_scope_context())
             );
         }
-
 
 
         Ok(BuildStatus::Finished)
@@ -159,7 +158,7 @@ impl ConnectIntoTarget for ConnectScopeResponse {
                 )?;
 
             if let Some(external_output) = external_output {
-                ctx.add_output_into_target(self.next.clone(), output);
+                ctx.add_output_into_target(self.next.clone(), external_output);
             }
 
             let mut connection = standard_input_connection(terminate, ctx.registry)?;

@@ -275,7 +275,7 @@ fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut Name
 }
 
 #[derive(Default)]
-struct DiagramConstruction<'a> {
+struct DiagramConstruction {
     /// Implementations that define how outputs can connect to their target operations
     connect_into_target: HashMap<OperationRef, Target>,
     /// A map of what outputs are going into each target operation
@@ -283,13 +283,13 @@ struct DiagramConstruction<'a> {
     /// A map of what buffers exist in the diagram
     buffers: HashMap<OperationRef, BufferRef>,
     /// Operations that were spawned by another operation.
-    generated_operations: Vec<UnfinishedOperation<'a>>,
+    generated_operations: Vec<UnfinishedOperation>,
 }
 
-impl<'a> DiagramConstruction<'a> {
+impl<'a> DiagramConstruction {
     fn transfer_generated_operations(
         &mut self,
-        deferred_operations: &mut Vec<UnfinishedOperation<'a>>,
+        deferred_operations: &mut Vec<UnfinishedOperation>,
         made_progress: &mut bool,
     ) {
         deferred_operations.extend(self.generated_operations.drain(..).map(|unfinished| {
@@ -305,7 +305,7 @@ enum BufferRef {
     Value(AnyBuffer),
 }
 
-impl<'a> DiagramConstruction<'a> {
+impl DiagramConstruction {
     fn has_outputs(&self) -> bool {
         for outputs in self.outputs_into_target.values() {
             if !outputs.is_empty() {
@@ -318,9 +318,9 @@ impl<'a> DiagramConstruction<'a> {
 }
 
 pub struct DiagramContext<'a, 'c> {
-    construction: &'c mut DiagramConstruction<'a>,
+    construction: &'c mut DiagramConstruction,
     pub registry: &'a DiagramElementRegistry,
-    pub operations: &'a Operations,
+    pub operations: Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
     scope: BuilderScopeContext,
@@ -577,16 +577,17 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
     ///
     /// Use the scope argument if the child operation exists in a different scope
     /// than the parent. For the child of a Section, this is None.
-    pub fn add_child_operation(
+    pub fn add_child_operation<T: BuildDiagramOperation + 'static>(
         &mut self,
         id: &OperationName,
         child_id: &OperationName,
-        op: impl Into<CowOperation<'a>>,
-        sibling_ops: &'a Operations,
+        op: &Arc<T>,
+        sibling_ops: Operations,
         scope: Option<BuilderScopeContext>,
     ) {
         let mut namespaces = self.namespaces.clone();
         namespaces.push(Arc::clone(id));
+        let op = as_build_diagram_operation(op);
 
         self.construction
             .generated_operations
@@ -594,7 +595,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 id: Arc::clone(child_id),
                 namespaces,
                 op: op.into(),
-                sibling_ops,
+                sibling_ops: sibling_ops.clone(),
                 scope: scope.unwrap_or(self.scope),
             });
     }
@@ -771,12 +772,18 @@ impl BuildStatus {
     }
 }
 
+pub fn as_build_diagram_operation<T: BuildDiagramOperation + 'static>(
+    op: &Arc<T>
+) -> Arc<dyn BuildDiagramOperation> {
+    op.clone()
+}
+
 /// This trait is used to instantiate operations in the workflow. This trait
 /// will be called on each operation in the diagram until it finishes building.
 /// Each operation should use this to provide a [`ConnectIntoTarget`] handle for
 /// itself (if relevant) and deposit [`DynOutput`]s into [`DiagramContext`].
 pub trait BuildDiagramOperation {
-    fn build_diagram_operation(
+    fn build_diagram_operation<'a, 'c>(
         &self,
         id: &OperationName,
         builder: &mut Builder,
@@ -853,7 +860,7 @@ where
         &mut DiagramContext {
             construction: &mut construction,
             registry,
-            operations: &diagram.ops,
+            operations: diagram.ops.clone(),
             templates: &diagram.templates,
             on_implicit_error,
             namespaces: NamespaceList::new(),
@@ -864,7 +871,12 @@ where
     let mut unfinished_operations: Vec<UnfinishedOperation> = diagram
         .ops
         .iter()
-        .map(|(id, op)| UnfinishedOperation::new(Arc::clone(id), op, &diagram.ops, builder.context))
+        .map(|(id, op)| UnfinishedOperation::new(
+            Arc::clone(id),
+            as_build_diagram_operation(op),
+            &diagram.ops,
+            builder.context,
+        ))
         .collect();
     let mut deferred_operations: Vec<UnfinishedOperation> = Vec::new();
     let mut deferred_statuses: Vec<(OperationRef, BuildStatus)> = Vec::new();
@@ -882,7 +894,7 @@ where
             let mut ctx = DiagramContext {
                 construction: &mut construction,
                 registry,
-                operations: &unfinished.sibling_ops,
+                operations: unfinished.sibling_ops.clone(),
                 templates: &diagram.templates,
                 on_implicit_error,
                 namespaces: unfinished.namespaces.clone(),
@@ -933,7 +945,7 @@ where
                 let mut ctx = DiagramContext {
                     construction: &mut connector_construction,
                     registry,
-                    operations: &diagram.ops,
+                    operations: diagram.ops.clone(),
                     templates: &diagram.templates,
                     on_implicit_error,
                     // TODO(@mxgrey): The namespace while connecting into targets
@@ -1021,43 +1033,18 @@ where
     Ok(())
 }
 
-struct UnfinishedOperation<'a> {
+struct UnfinishedOperation {
     /// Name of the operation within its scope
     id: OperationName,
     /// The namespaces that this operation takes place inside
     namespaces: NamespaceList,
     /// Description of the operation
-    op: CowOperation<'a>,
+    op: Arc<dyn BuildDiagramOperation>,
     /// The sibling operations of the one that is being built
-    sibling_ops: &'a Operations,
+    sibling_ops: Operations,
     /// The scope of this operation. This is used to create the correct Builder
     /// for the operation.
     scope: BuilderScopeContext,
-}
-
-pub enum CowOperation<'a> {
-    Borrowed(&'a DiagramOperation),
-    Owned(Box<dyn BuildDiagramOperation>),
-}
-
-impl<'a> BuildDiagramOperation for CowOperation<'a> {
-    fn build_diagram_operation(
-        &self,
-        id: &OperationName,
-        builder: &mut Builder,
-        ctx: &mut DiagramContext,
-    ) -> Result<BuildStatus, DiagramErrorCode> {
-        match self {
-            Self::Borrowed(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Owned(op) => op.build_diagram_operation(id, builder, ctx),
-        }
-    }
-}
-
-impl<'a> Into<CowOperation<'a>> for &'a DiagramOperation {
-    fn into(self) -> CowOperation<'a> {
-        CowOperation::Borrowed(self)
-    }
 }
 
 struct Target {
@@ -1065,7 +1052,7 @@ struct Target {
     scope: BuilderScopeContext,
 }
 
-impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
+impl std::fmt::Debug for UnfinishedOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UnfinishedOperation")
             .field("id", &self.id)
@@ -1074,17 +1061,17 @@ impl<'a> std::fmt::Debug for UnfinishedOperation<'a> {
     }
 }
 
-impl<'a> UnfinishedOperation<'a> {
+impl UnfinishedOperation {
     pub fn new(
         id: OperationName,
-        op: &'a DiagramOperation,
-        sibling_ops: &'a Operations,
+        op: Arc<dyn BuildDiagramOperation>,
+        sibling_ops: &Operations,
         scope: BuilderScopeContext,
     ) -> Self {
         Self {
             id,
-            op: op.into(),
-            sibling_ops,
+            op,
+            sibling_ops: sibling_ops.clone(),
             namespaces: Default::default(),
             scope,
         }

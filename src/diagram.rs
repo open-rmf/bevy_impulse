@@ -1136,7 +1136,7 @@ impl Diagram {
     /// templates will not be validated.
     pub fn validate_template_usage(&self) -> Result<(), DiagramErrorCode> {
         for op in self.ops.values() {
-            match op {
+            match op.as_ref() {
                 DiagramOperation::Section(section) => match &section.provider {
                     SectionProvider::Template(template) => {
                         self.templates.validate_template(template)?;
@@ -1153,12 +1153,12 @@ impl Diagram {
 
 #[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
 #[serde(transparent, rename_all = "snake_case")]
-pub struct Operations(HashMap<OperationName, DiagramOperation>);
+pub struct Operations(Arc<HashMap<OperationName, Arc<DiagramOperation>>>);
 
 impl Operations {
     /// Get an operation from this map, or a diagram error code if the operation
     /// is not available.
-    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&DiagramOperation, DiagramErrorCode> {
+    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&Arc<DiagramOperation>, DiagramErrorCode> {
         self.get(op_id)
             .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
     }
@@ -1202,7 +1202,7 @@ impl Templates {
 }
 
 fn validate_operation_names(
-    ops: &HashMap<OperationName, DiagramOperation>,
+    ops: &HashMap<OperationName, Arc<DiagramOperation>>,
 ) -> Result<(), DiagramErrorCode> {
     for name in ops.keys() {
         validate_operation_name(name)?;
@@ -1234,7 +1234,7 @@ fn check_circular_template_dependency(
         };
 
         for op in template.ops.0.values() {
-            match op {
+            match op.as_ref() {
                 DiagramOperation::Section(section) => match &section.provider {
                     SectionProvider::Template(template) => {
                         queue.push(top.child(template)?);
