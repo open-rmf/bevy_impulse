@@ -53,7 +53,7 @@ where
 }
 
 /// A type erased [`InputSlot`]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,

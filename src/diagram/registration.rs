@@ -29,7 +29,8 @@ use bevy_ecs::prelude::Commands;
 pub use crate::dyn_node::*;
 use crate::{
     Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Joined, JsonBuffer,
-    JsonMessage, Node, StreamPack, IncrementalScope, IncrementalScopeBuilder, IncrementalScopeResult,
+    JsonMessage, Node, StreamPack, IncrementalScopeBuilder, IncrementalScopeRequest,
+    IncrementalScopeResponseResult, IncrementalScopeResponse, IncrementalScopeRequestResult,
 };
 
 use schemars::{
@@ -98,8 +99,8 @@ type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;
 
 struct BuildScope {
-    set_request: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeResult,
-    set_response: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeResult,
+    set_request: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeRequestResult,
+    set_response: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeResponseResult,
 }
 
 impl BuildScope {
@@ -113,14 +114,14 @@ impl BuildScope {
     fn impl_set_request<T: 'static + Send + Sync>(
         incremental: &mut IncrementalScopeBuilder,
         commands: &mut Commands,
-    ) -> IncrementalScopeResult {
+    ) -> IncrementalScopeRequestResult {
         incremental.set_request::<T>(commands)
     }
 
     fn impl_set_response<T: 'static + Send + Sync>(
         incremental: &mut IncrementalScopeBuilder,
         commands: &mut Commands,
-    ) -> IncrementalScopeResult {
+    ) -> IncrementalScopeResponseResult {
         incremental.set_response::<T>(commands)
     }
 }
@@ -988,7 +989,7 @@ impl MessageRegistry {
         message_info: &TypeInfo,
         incremental: &mut IncrementalScopeBuilder,
         commands: &mut Commands,
-    ) -> Result<Option<IncrementalScope>, DiagramErrorCode> {
+    ) -> Result<IncrementalScopeRequest, DiagramErrorCode> {
         let f = self
             .messages
             .get(message_info)
@@ -1005,7 +1006,7 @@ impl MessageRegistry {
         message_info: &TypeInfo,
         incremental: &mut IncrementalScopeBuilder,
         commands: &mut Commands,
-    ) -> Result<Option<IncrementalScope>, DiagramErrorCode> {
+    ) -> Result<IncrementalScopeResponse, DiagramErrorCode> {
         let f = self
             .messages
             .get(message_info)

@@ -676,6 +676,10 @@ impl OperateScope {
     }
 }
 
+/// This struct facilitates the gradual building of a scope as the types of the
+/// request and response messages is discovered. This is used by the scope
+/// operation of the diagram module, which needs to build the scope gradually
+/// while it discovers type information at runtime.
 #[derive(Clone)]
 pub(crate) struct IncrementalScopeBuilder {
     inner: Arc<Mutex<IncrementalScopeBuilderInner>>,
@@ -2186,7 +2190,7 @@ mod tests {
         prelude::*,
         testing::*,
         dyn_node::DynOutput,
-        operation::{IncrementalScopeRequest, IncrementalScopeResponse},
+        operation::{IncrementalScopeRequest, IncrementalScopeResponse, IncrementalScopeError},
     };
 
     #[test]
@@ -2244,8 +2248,46 @@ mod tests {
 
             let IncrementalScopeRequest { external_input, begin_scope } =
                 incremental_scope_builder.set_request::<()>(builder.commands()).unwrap();
+            let begin_scope = begin_scope.unwrap();
+
+            // Call set_request a second time to see that we get the intended behavior
+            let second_set_request = incremental_scope_builder
+                .set_request::<()>(builder.commands()).unwrap();
+            // The external_input should be provided again, and it should be
+            // equivalent to the first one we had received.
+            assert_eq!(external_input, second_set_request.external_input);
+            // The begin_scope should be none now because it was already provided
+            // earlier. Each DynOutput in existence should uniquely identify a
+            // single output.
+            assert!(second_set_request.begin_scope.is_none());
+
+            // Call set_request again with a different type to see that it
+            // produces the correct error.
+            let bad_set_request = incremental_scope_builder
+                .set_request::<i64>(builder.commands()).unwrap_err();
+            assert!(matches!(bad_set_request, IncrementalScopeError::RequestMismatch { .. }));
+
+
             let IncrementalScopeResponse { terminate, external_output } =
                 incremental_scope_builder.set_response::<&'static str>(builder.commands()).unwrap();
+            let external_output = external_output.unwrap();
+
+            // Call set_response a second time to see that we get the intended behavior
+            let second_set_response = incremental_scope_builder
+                .set_response::<&'static str>(builder.commands()).unwrap();
+            // The terminate should be provided again, and it should be
+            // equivalent to the first one we had received.
+            assert_eq!(terminate, second_set_response.terminate);
+            // The external_output should be none now because it was already
+            // provided earlier. Each DynOutput in existence should uniquely
+            // identify a single output.
+            assert!(second_set_response.external_output.is_none());
+
+            // Call set_response again with a different type to see that it
+            // produces teh correct error.
+            let bad_set_response = incremental_scope_builder
+                .set_response::<String>(builder.commands()).unwrap_err();
+            assert!(matches!(bad_set_response, IncrementalScopeError::ResponseMismatch { .. }));
 
             let workflow_input: DynOutput = scope.input.into();
             workflow_input.connect_to(&external_input.into(), builder).unwrap();
@@ -2259,16 +2301,16 @@ mod tests {
                 fork_outputs.clone_chain(&mut builder).then(long_delay).connect(slow.input);
                 fork_outputs.clone_chain(&mut builder).then(short_delay).connect(fast.input);
 
-                incremental_scope.begin_scope.connect_to(&fork_input.into(), &mut builder).unwrap();
+                begin_scope.connect_to(&fork_input.into(), &mut builder).unwrap();
 
                 let slow_output: DynOutput = slow.output.into();
-                slow_output.connect_to(&incremental_scope.terminate, &mut builder).unwrap();
+                slow_output.connect_to(&terminate, &mut builder).unwrap();
 
                 let fast_output: DynOutput = fast.output.into();
-                fast_output.connect_to(&incremental_scope.terminate, &mut builder).unwrap();
+                fast_output.connect_to(&terminate, &mut builder).unwrap();
             }
 
-            incremental_scope.external_output.connect_to(&scope.terminate.into(), builder).unwrap();
+            external_output.connect_to(&scope.terminate.into(), builder).unwrap();
         });
 
         let mut promise =
