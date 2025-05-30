@@ -19,10 +19,10 @@ use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use schemars::{schema::Schema, JsonSchema};
 use serde::{Deserialize, Serialize};
+use smallvec::smallvec;
 
 use crate::{
-    AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output,
-    IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse, ConnectIntoTarget,
+    Builder, IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse, ConnectIntoTarget,
     InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext, DiagramElementRegistry,
     DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
     Operations, TypeInfo, OperationRef, ScopeSettings,
@@ -77,6 +77,23 @@ impl BuildDiagramOperation for ScopeSchema {
             );
         }
 
+        ctx.set_connect_into_target(
+            id,
+            ConnectScopeRequest {
+                scope: scope.clone(),
+                start: ctx.into_operation_ref(id),
+                connection: None,
+            },
+        )?;
+
+        ctx.set_connect_into_target(
+            OperationRef::Terminate(smallvec![Arc::clone(id)]),
+            ConnectScopeResponse {
+                scope,
+                next: ctx.into_operation_ref(&self.next),
+                connection: None,
+            },
+        )?;
 
         Ok(BuildStatus::Finished)
     }

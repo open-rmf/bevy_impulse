@@ -35,7 +35,7 @@ use super::{
 
 use bevy_ecs::prelude::Entity;
 
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 type NamespaceList = SmallVec<[OperationName; 4]>;
 
@@ -51,7 +51,6 @@ pub enum OperationRef {
     Terminate(NamespaceList),
     Dispose,
     Cancel(NamespaceList),
-    EnterScope(NamespaceList),
     StreamOut(StreamOutRef),
 }
 
@@ -59,14 +58,17 @@ impl OperationRef {
     fn in_namespaces(self, parent_namespaces: &[Arc<str>]) -> Self {
         match self {
             Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
-            Self::Terminate(_) => Self::Terminate(parent_namespaces.iter().cloned().collect()),
+            Self::Terminate(namespaces) => Self::Terminate(with_parent_namespaces(parent_namespaces, namespaces)),
             Self::Dispose => Self::Dispose,
-            Self::Cancel(_) => Self::Cancel(parent_namespaces.iter().cloned().collect()),
-            Self::EnterScope(_) => Self::EnterScope(parent_namespaces.iter().cloned().collect()),
+            Self::Cancel(namespaces) => Self::Cancel(with_parent_namespaces(parent_namespaces, namespaces)),
             Self::StreamOut(stream_out) => {
                 Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
             }
         }
+    }
+
+    pub fn terminate_for(namespace: Arc<str>) -> Self {
+        Self::Terminate(smallvec![namespace])
     }
 }
 
@@ -105,7 +107,6 @@ impl std::fmt::Display for OperationRef {
             Self::Terminate(namespaces) => write!(f, "{}(terminate)", DisplayNamespaces(namespaces)),
             Self::Cancel(namespaces) => write!(f, "{}(cancel)", DisplayNamespaces(namespaces)),
             Self::Dispose => write!(f, "(dispose)"),
-            Self::EnterScope(namespaces) => write!(f, "{}(enter)", DisplayNamespaces(namespaces)),
             Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
         }
     }
@@ -272,6 +273,11 @@ fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut Name
         .collect();
 
     *namespaces = new_namespaces;
+}
+
+fn with_parent_namespaces(parent_namespaces: &[Arc<str>], mut namespaces: NamespaceList) -> NamespaceList {
+    apply_parent_namespaces(parent_namespaces, &mut namespaces);
+    namespaces
 }
 
 #[derive(Default)]

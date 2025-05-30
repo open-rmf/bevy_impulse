@@ -105,6 +105,10 @@ impl NextOperation {
             builtin: BuiltinTarget::Dispose,
         }
     }
+
+    pub fn terminate() -> Self {
+        NextOperation::Builtin { builtin: BuiltinTarget::Terminate }
+    }
 }
 
 impl Display for NextOperation {

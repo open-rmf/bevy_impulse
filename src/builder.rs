@@ -50,7 +50,7 @@ pub struct Builder<'w, 's, 'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct BuilderScopeContext {
+pub struct BuilderScopeContext {
     /// The scope that this builder is meant to help build
     pub(crate) scope: Entity,
     /// The target for cancellation workflows
@@ -771,6 +771,10 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             output: Output::new(self.scope(), target),
             streams,
         }
+    }
+
+    pub fn context(&self) -> BuilderScopeContext {
+        self.context
     }
 }
 
