@@ -73,12 +73,12 @@ impl DynInputSlot {
         &self.type_info
     }
 
-    pub(crate) fn new(
-        scope: Entity,
-        source: Entity,
-        type_info: TypeInfo,
-    ) -> Self {
-        Self { scope, source, type_info }
+    pub(crate) fn new(scope: Entity, source: Entity, type_info: TypeInfo) -> Self {
+        Self {
+            scope,
+            source,
+            type_info,
+        }
     }
 }
 

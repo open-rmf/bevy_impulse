@@ -22,9 +22,9 @@ use bevy_ecs::{
 use bevy_hierarchy::BuildChildren;
 
 use crate::{
-    Builder, BuilderScopeContext, DeliveryChoice, InputSlot, OperateScope, Output,
-    ScopeEndpoints, ScopeSettingsStorage, Service, ServiceBundle, StreamAvailability,
-    StreamPack, WorkflowService, WorkflowStorage,
+    Builder, BuilderScopeContext, DeliveryChoice, InputSlot, OperateScope, Output, ScopeEndpoints,
+    ScopeSettingsStorage, Service, ServiceBundle, StreamAvailability, StreamPack, WorkflowService,
+    WorkflowStorage,
 };
 
 mod internal;
@@ -242,7 +242,10 @@ impl<'w, 's> SpawnWorkflowExt for Commands<'w, 's> {
         } = OperateScope::add::<Request, Response>(None, scope_id, None, self);
 
         let mut builder = Builder {
-            context: BuilderScopeContext { scope: scope_id, finish_scope_cancel },
+            context: BuilderScopeContext {
+                scope: scope_id,
+                finish_scope_cancel,
+            },
             commands: self,
         };
 

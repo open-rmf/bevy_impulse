@@ -28,14 +28,14 @@ use crate::{
 
 use super::{
     BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
-    DiagramErrorCode, DynInputSlot, DynOutput, ImplicitDeserialization,
+    DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
     ImplicitSerialization, ImplicitStringify, NamespacedOperation, NextOperation, OperationName,
-    Operations, Templates, TypeInfo, FinishingErrors,
+    Operations, Templates, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
 
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 
 type NamespaceList = SmallVec<[OperationName; 4]>;
 
@@ -58,9 +58,13 @@ impl OperationRef {
     fn in_namespaces(self, parent_namespaces: &[Arc<str>]) -> Self {
         match self {
             Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
-            Self::Terminate(namespaces) => Self::Terminate(with_parent_namespaces(parent_namespaces, namespaces)),
+            Self::Terminate(namespaces) => {
+                Self::Terminate(with_parent_namespaces(parent_namespaces, namespaces))
+            }
             Self::Dispose => Self::Dispose,
-            Self::Cancel(namespaces) => Self::Cancel(with_parent_namespaces(parent_namespaces, namespaces)),
+            Self::Cancel(namespaces) => {
+                Self::Cancel(with_parent_namespaces(parent_namespaces, namespaces))
+            }
             Self::StreamOut(stream_out) => {
                 Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
             }
@@ -77,12 +81,10 @@ impl<'a> From<&'a NextOperation> for OperationRef {
         match value {
             NextOperation::Name(name) => OperationRef::Named(name.into()),
             NextOperation::Namespace(id) => OperationRef::Named(id.into()),
-            NextOperation::Builtin { builtin } => {
-                match builtin {
-                    BuiltinTarget::Terminate => OperationRef::Terminate(NamespaceList::new()),
-                    BuiltinTarget::Dispose => OperationRef::Dispose,
-                    BuiltinTarget::Cancel => OperationRef::Cancel(NamespaceList::new()),
-                }
+            NextOperation::Builtin { builtin } => match builtin {
+                BuiltinTarget::Terminate => OperationRef::Terminate(NamespaceList::new()),
+                BuiltinTarget::Dispose => OperationRef::Dispose,
+                BuiltinTarget::Cancel => OperationRef::Cancel(NamespaceList::new()),
             },
         }
     }
@@ -104,7 +106,9 @@ impl std::fmt::Display for OperationRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Named(named) => write!(f, "{named}"),
-            Self::Terminate(namespaces) => write!(f, "{}(terminate)", DisplayNamespaces(namespaces)),
+            Self::Terminate(namespaces) => {
+                write!(f, "{}(terminate)", DisplayNamespaces(namespaces))
+            }
             Self::Cancel(namespaces) => write!(f, "{}(cancel)", DisplayNamespaces(namespaces)),
             Self::Dispose => write!(f, "(dispose)"),
             Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
@@ -285,7 +289,10 @@ fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut Name
     *namespaces = new_namespaces;
 }
 
-fn with_parent_namespaces(parent_namespaces: &[Arc<str>], mut namespaces: NamespaceList) -> NamespaceList {
+fn with_parent_namespaces(
+    parent_namespaces: &[Arc<str>],
+    mut namespaces: NamespaceList,
+) -> NamespaceList {
     apply_parent_namespaces(parent_namespaces, &mut namespaces);
     namespaces
 }
@@ -800,7 +807,7 @@ impl BuildStatus {
 }
 
 pub fn as_build_diagram_operation<T: BuildDiagramOperation + 'static>(
-    op: &Arc<T>
+    op: &Arc<T>,
 ) -> Arc<dyn BuildDiagramOperation> {
     op.clone()
 }
@@ -898,12 +905,14 @@ where
     let mut unfinished_operations: Vec<UnfinishedOperation> = diagram
         .ops
         .iter()
-        .map(|(id, op)| UnfinishedOperation::new(
-            Arc::clone(id),
-            as_build_diagram_operation(op),
-            &diagram.ops,
-            builder.context,
-        ))
+        .map(|(id, op)| {
+            UnfinishedOperation::new(
+                Arc::clone(id),
+                as_build_diagram_operation(op),
+                &diagram.ops,
+                builder.context,
+            )
+        })
         .collect();
     let mut deferred_operations: Vec<UnfinishedOperation> = Vec::new();
     let mut deferred_statuses: Vec<(OperationRef, BuildStatus)> = Vec::new();
@@ -1055,7 +1064,9 @@ where
             finishing.errors.insert(op.clone(), err);
         }
     }
-    finishing.as_result().map_err(DiagramErrorCode::FinishingErrors)?;
+    finishing
+        .as_result()
+        .map_err(DiagramErrorCode::FinishingErrors)?;
 
     Ok(())
 }
@@ -1141,10 +1152,7 @@ where
     }
 
     // Add the dispose operation
-    ctx.set_connect_into_target(
-        OperationRef::Dispose,
-        ConnectToDispose,
-    )?;
+    ctx.set_connect_into_target(OperationRef::Dispose, ConnectToDispose)?;
 
     // Add the cancel operation
     ctx.set_connect_into_target(

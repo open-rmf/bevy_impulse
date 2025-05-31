@@ -28,10 +28,10 @@ use bevy_ecs::prelude::{Commands, Entity};
 
 pub use crate::dyn_node::*;
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Joined, JsonBuffer,
-    JsonMessage, Node, StreamPack, IncrementalScopeBuilder, IncrementalScopeRequest,
-    IncrementalScopeResponseResult, IncrementalScopeResponse, IncrementalScopeRequestResult,
-    NamedStream, StreamOf,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, IncrementalScopeBuilder,
+    IncrementalScopeRequest, IncrementalScopeRequestResult, IncrementalScopeResponse,
+    IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage, NamedStream, Node, StreamOf,
+    StreamPack,
 };
 
 use schemars::{
@@ -136,10 +136,7 @@ impl BuildScope {
         let (stream_in, stream_out) =
             NamedStream::<StreamOf<T>>::spawn_scope_stream(in_scope, out_scope, commands);
 
-        (
-            stream_in.into(),
-            stream_out.into(),
-        )
+        (stream_in.into(), stream_out.into())
     }
 }
 

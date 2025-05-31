@@ -16,16 +16,18 @@
 */
 
 use crate::{
+    check_reachability,
     dyn_node::{DynInputSlot, DynOutput},
+    execute_operation, is_downstream_of,
     type_info::TypeInfo,
-    check_reachability, execute_operation, is_downstream_of, Accessing, AddOperation, Blocker, Broken,
-    BufferKeyBuilder, Builder, BuilderScopeContext, Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn,
-    CollectMarker, DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest,
-    Input, InputBundle, InspectDisposals, ManageCancellation, ManageInput, NamedTarget, NamedValue,
-    Operation, OperationCancel, OperationCleanup, OperationError, OperationReachability,
-    OperationRequest, OperationResult, OperationRoster, OperationSetup, OrBroken,
-    ReachabilityResult, ScopeSettings, SingleInputStorage, SingleTargetStorage, StreamEffect,
-    StreamRequest, StreamTargetMap, UnhandledErrors, Unreachability, UnusedTarget,
+    Accessing, AddOperation, Blocker, Broken, BufferKeyBuilder, Builder, BuilderScopeContext,
+    Cancel, Cancellable, Cancellation, Cleanup, CleanupContents, ClearBufferFn, CollectMarker,
+    DisposalListener, DisposalUpdate, FinalizeCleanup, FinalizeCleanupRequest, Input, InputBundle,
+    InspectDisposals, ManageCancellation, ManageInput, NamedTarget, NamedValue, Operation,
+    OperationCancel, OperationCleanup, OperationError, OperationReachability, OperationRequest,
+    OperationResult, OperationRoster, OperationSetup, OrBroken, ReachabilityResult, ScopeSettings,
+    SingleInputStorage, SingleTargetStorage, StreamEffect, StreamRequest, StreamTargetMap,
+    UnhandledErrors, Unreachability, UnusedTarget,
 };
 
 use backtrace::Backtrace;
@@ -92,10 +94,9 @@ impl TypeSensitiveScopeComponents {
     fn apply(self, OperationSetup { source, world }: OperationSetup) -> OperationResult {
         (self.dyn_scope_request.setup_input)(OperationSetup { source, world })?;
 
-        world.entity_mut(source).insert((
-            self.dyn_scope_request,
-            self.finalize_cleanup,
-        ));
+        world
+            .entity_mut(source)
+            .insert((self.dyn_scope_request, self.finalize_cleanup));
         Ok(())
     }
 }
@@ -107,12 +108,18 @@ struct InsertTypeSensitiveComponents {
 
 impl Command for InsertTypeSensitiveComponents {
     fn apply(self, world: &mut World) {
-        let r = self.components.apply(OperationSetup { source: self.source, world });
+        let r = self.components.apply(OperationSetup {
+            source: self.source,
+            world,
+        });
         if let Err(OperationError::Broken(backtrace)) = r {
             world
                 .get_resource_or_insert_with(|| UnhandledErrors::default())
                 .broken
-                .push(Broken { node: self.source, backtrace });
+                .push(Broken {
+                    node: self.source,
+                    backtrace,
+                });
         }
     }
 }
@@ -283,18 +290,14 @@ impl Operation for OperateScope {
             .or_broken()?
             .begin_scope;
 
-        (begin_scope)(
-            OperationRequest {
-                source,
-                world,
-                roster,
-            },
-        )
+        (begin_scope)(OperationRequest {
+            source,
+            world,
+            roster,
+        })
     }
 
-    fn cleanup(
-        clean: OperationCleanup,
-    ) -> OperationResult {
+    fn cleanup(clean: OperationCleanup) -> OperationResult {
         let cleanup = clean
             .world
             .get_entity(clean.source)
@@ -353,7 +356,6 @@ fn dyn_begin_scope<Request: 'static + Send + Sync>(
         roster,
     }: OperationRequest,
 ) -> OperationResult {
-
     let input = world
         .get_entity_mut(source)
         .or_broken()?
@@ -363,11 +365,24 @@ fn dyn_begin_scope<Request: 'static + Send + Sync>(
         .spawn((ParentSession(input.session), SessionStatus::Active))
         .id();
 
-    begin_scope(input, scoped_session, OperationRequest { source, world, roster })
+    begin_scope(
+        input,
+        scoped_session,
+        OperationRequest {
+            source,
+            world,
+            roster,
+        },
+    )
 }
 
 fn dyn_cleanup<Request: 'static + Send + Sync>(
-    OperationCleanup { source, cleanup, world, roster }: OperationCleanup,
+    OperationCleanup {
+        source,
+        cleanup,
+        world,
+        roster,
+    }: OperationCleanup,
 ) -> OperationResult {
     let parent_session = cleanup.session;
 
@@ -487,13 +502,7 @@ where
 
     if let Some(reachability) = world.get::<InitialReachability>(source) {
         if let InitialReachability::Error(cancellation) = reachability {
-            cancel_one(
-                scoped_session,
-                source,
-                cancellation.clone(),
-                world,
-                roster,
-            )?;
+            cancel_one(scoped_session, source, cancellation.clone(), world, roster)?;
             return Ok(());
         }
 
@@ -501,15 +510,13 @@ where
             // We have found in the past that this workflow cannot reach its
             // terminal point from its start point, so we should trigger the
             // reachability check to begin the cancellation process right away.
-            validate_scope_reachability(
-                ValidationRequest {
-                    source,
-                    origin: source,
-                    session: scoped_session,
-                    world,
-                    roster,
-                },
-            )?;
+            validate_scope_reachability(ValidationRequest {
+                source,
+                origin: source,
+                session: scoped_session,
+                world,
+                roster,
+            })?;
         }
     } else {
         let circular_collects = find_circular_collects(source, world)?;
@@ -521,28 +528,20 @@ where
                 .get_entity_mut(source)
                 .or_broken()?
                 .insert(InitialReachability::Error(cancellation.clone()));
-            cancel_one(
-                scoped_session,
-                source,
-                cancellation,
-                world,
-                roster,
-            )?;
+            cancel_one(scoped_session, source, cancellation, world, roster)?;
             return Ok(());
         }
 
         // We should do a one-time check to make sure the terminal node can be
         // reached from the scope entry node. As long as this passes, we will
         // not run it again.
-        let is_reachable = validate_scope_reachability(
-            ValidationRequest {
-                source,
-                origin: source,
-                session: scoped_session,
-                world,
-                roster,
-            },
-        )?;
+        let is_reachable = validate_scope_reachability(ValidationRequest {
+            source,
+            origin: source,
+            session: scoped_session,
+            world,
+            roster,
+        })?;
 
         world
             .get_entity_mut(source)
@@ -698,11 +697,13 @@ pub enum IncrementalScopeError {
         already_set: TypeInfo,
         attempted: TypeInfo,
     },
-    #[error("The scope has not finished building yet. request: {request_set}, response: {response_set}")]
+    #[error(
+        "The scope has not finished building yet. request: {request_set}, response: {response_set}"
+    )]
     Unfinished {
         request_set: bool,
         response_set: bool,
-    }
+    },
 }
 
 #[derive(Debug)]
@@ -711,7 +712,8 @@ pub(crate) struct IncrementalScopeRequest {
     pub(crate) begin_scope: Option<DynOutput>,
 }
 
-pub(crate) type IncrementalScopeRequestResult = Result<IncrementalScopeRequest, IncrementalScopeError>;
+pub(crate) type IncrementalScopeRequestResult =
+    Result<IncrementalScopeRequest, IncrementalScopeError>;
 
 #[derive(Debug)]
 pub(crate) struct IncrementalScopeResponse {
@@ -719,13 +721,11 @@ pub(crate) struct IncrementalScopeResponse {
     pub(crate) external_output: Option<DynOutput>,
 }
 
-pub(crate) type IncrementalScopeResponseResult = Result<IncrementalScopeResponse, IncrementalScopeError>;
+pub(crate) type IncrementalScopeResponseResult =
+    Result<IncrementalScopeResponse, IncrementalScopeError>;
 
 impl IncrementalScopeBuilder {
-    pub(crate) fn begin(
-        settings: ScopeSettings,
-        builder: &mut Builder,
-    ) -> IncrementalScopeBuilder {
+    pub(crate) fn begin(settings: ScopeSettings, builder: &mut Builder) -> IncrementalScopeBuilder {
         let parent_scope = builder.scope();
         let commands = builder.commands();
 
@@ -740,7 +740,9 @@ impl IncrementalScopeBuilder {
             .set_parent(scope_id)
             .id();
 
-        commands.entity(scope_id).insert(ScopeSettingsStorage(settings));
+        commands
+            .entity(scope_id)
+            .insert(ScopeSettingsStorage(settings));
 
         let scope = OperateScope {
             enter_scope,
@@ -751,19 +753,21 @@ impl IncrementalScopeBuilder {
         };
         commands.add(AddOperation::new(Some(parent_scope), scope_id, scope));
 
-        IncrementalScopeBuilder { inner: Arc::new(Mutex::new(IncrementalScopeBuilderInner {
-            parent_scope,
-            scope_id,
-            enter_scope,
-            terminal,
-            exit_scope,
-            finish_scope_cancel,
-            request: None,
-            response: None,
-            already_built: false,
-            begin_scope_not_sent: true,
-            external_output_not_sent: true,
-        })) }
+        IncrementalScopeBuilder {
+            inner: Arc::new(Mutex::new(IncrementalScopeBuilderInner {
+                parent_scope,
+                scope_id,
+                enter_scope,
+                terminal,
+                exit_scope,
+                finish_scope_cancel,
+                request: None,
+                response: None,
+                already_built: false,
+                begin_scope_not_sent: true,
+                external_output_not_sent: true,
+            })),
+        }
     }
 
     pub(crate) fn builder_scope_context(&self) -> BuilderScopeContext {
@@ -788,19 +792,16 @@ impl IncrementalScopeBuilder {
                 });
             }
         } else {
-            inner.request = Some((
-                DynScopeRequest::new::<Request>(),
-                message_info,
-            ));
+            inner.request = Some((DynScopeRequest::new::<Request>(), message_info));
         }
 
         inner.consider_building(commands);
 
         let request = IncrementalScopeRequest {
             external_input: DynInputSlot::new(inner.parent_scope, inner.scope_id, message_info),
-            begin_scope: inner.begin_scope_not_sent.then(
-                || DynOutput::new(inner.scope_id, inner.enter_scope, message_info)
-            ),
+            begin_scope: inner
+                .begin_scope_not_sent
+                .then(|| DynOutput::new(inner.scope_id, inner.enter_scope, message_info)),
         };
 
         inner.begin_scope_not_sent = false;
@@ -817,7 +818,7 @@ impl IncrementalScopeBuilder {
             if *expected_info != message_info {
                 return Err(IncrementalScopeError::ResponseMismatch {
                     already_set: *expected_info,
-                    attempted: message_info
+                    attempted: message_info,
                 });
             }
         } else {
@@ -847,9 +848,9 @@ impl IncrementalScopeBuilder {
 
         let response = IncrementalScopeResponse {
             terminate: DynInputSlot::new(inner.scope_id, inner.terminal, message_info),
-            external_output: inner.external_output_not_sent.then(
-                || DynOutput::new(inner.parent_scope, inner.exit_scope, message_info)
-            ),
+            external_output: inner
+                .external_output_not_sent
+                .then(|| DynOutput::new(inner.parent_scope, inner.exit_scope, message_info)),
         };
 
         inner.external_output_not_sent = false;
@@ -861,7 +862,7 @@ impl IncrementalScopeBuilder {
         if inner.begin_scope_not_sent || inner.external_output_not_sent {
             return Err(IncrementalScopeError::Unfinished {
                 request_set: !inner.begin_scope_not_sent,
-                response_set: !inner.external_output_not_sent
+                response_set: !inner.external_output_not_sent,
             });
         }
 
@@ -884,27 +885,24 @@ struct IncrementalScopeBuilderInner {
 }
 
 impl IncrementalScopeBuilderInner {
-    fn consider_building(
-        &mut self,
-        commands: &mut Commands,
-    ) {
+    fn consider_building(&mut self, commands: &mut Commands) {
         if self.already_built {
             return;
         }
 
-        let (
-            Some((dyn_scope_request, _)),
-            Some((finalize_cleanup, _)),
-        ) = (
+        let (Some((dyn_scope_request, _)), Some((finalize_cleanup, _))) = (
             self.request.as_ref().copied(),
-            self.response.as_ref().copied()
+            self.response.as_ref().copied(),
         ) else {
             return;
         };
 
         commands.add(InsertTypeSensitiveComponents {
             source: self.scope_id,
-            components: TypeSensitiveScopeComponents { dyn_scope_request, finalize_cleanup },
+            components: TypeSensitiveScopeComponents {
+                dyn_scope_request,
+                finalize_cleanup,
+            },
         });
         self.already_built = true;
     }
@@ -939,8 +937,7 @@ fn receive_cancel(
         .collect();
 
     for scoped_session in all_scoped_sessions {
-        if let Err(error) =
-            cancel_one(scoped_session, source, cancellation.clone(), world, roster)
+        if let Err(error) = cancel_one(scoped_session, source, cancellation.clone(), world, roster)
         {
             world
                 .get_resource_or_insert_with(UnhandledErrors::default)
@@ -2192,10 +2189,10 @@ impl<S: StreamEffect> StreamRedirect for AnonymousStreamRedirect<S> {
 #[cfg(test)]
 mod tests {
     use crate::{
+        dyn_node::DynOutput,
+        operation::{IncrementalScopeError, IncrementalScopeRequest, IncrementalScopeResponse},
         prelude::*,
         testing::*,
-        dyn_node::DynOutput,
-        operation::{IncrementalScopeRequest, IncrementalScopeResponse, IncrementalScopeError},
     };
 
     #[test]
@@ -2208,8 +2205,18 @@ mod tests {
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let inner_scope = builder.create_io_scope(|scope, builder| {
                 builder.chain(scope.input).fork_clone((
-                    |chain: Chain<_>| chain.then(long_delay).map_block(|_| "slow").connect(scope.terminate),
-                    |chain: Chain<_>| chain.then(short_delay).map_block(|_| "fast").connect(scope.terminate),
+                    |chain: Chain<_>| {
+                        chain
+                            .then(long_delay)
+                            .map_block(|_| "slow")
+                            .connect(scope.terminate)
+                    },
+                    |chain: Chain<_>| {
+                        chain
+                            .then(short_delay)
+                            .map_block(|_| "fast")
+                            .connect(scope.terminate)
+                    },
                 ));
             });
 
@@ -2234,10 +2241,8 @@ mod tests {
         let long_delay = context.spawn_delay::<()>(Duration::from_secs_f32(10.0));
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
-            let mut incremental_scope_builder = crate::IncrementalScopeBuilder::begin(
-                ScopeSettings::default(),
-                builder
-            );
+            let mut incremental_scope_builder =
+                crate::IncrementalScopeBuilder::begin(ScopeSettings::default(), builder);
             assert!(incremental_scope_builder.is_finished().is_err());
 
             let ((fork_input, fork_outputs), slow, fast) = {
@@ -2252,15 +2257,20 @@ mod tests {
                 (fork, slow, fast)
             };
 
-            let IncrementalScopeRequest { external_input, begin_scope } =
-                incremental_scope_builder.set_request::<()>(builder.commands()).unwrap();
+            let IncrementalScopeRequest {
+                external_input,
+                begin_scope,
+            } = incremental_scope_builder
+                .set_request::<()>(builder.commands())
+                .unwrap();
             let begin_scope = begin_scope.unwrap();
 
             assert!(incremental_scope_builder.is_finished().is_err());
 
             // Call set_request a second time to see that we get the intended behavior
             let second_set_request = incremental_scope_builder
-                .set_request::<()>(builder.commands()).unwrap();
+                .set_request::<()>(builder.commands())
+                .unwrap();
             // The external_input should be provided again, and it should be
             // equivalent to the first one we had received.
             assert_eq!(external_input, second_set_request.external_input);
@@ -2272,20 +2282,29 @@ mod tests {
             // Call set_request again with a different type to see that it
             // produces the correct error.
             let bad_set_request = incremental_scope_builder
-                .set_request::<i64>(builder.commands()).unwrap_err();
-            assert!(matches!(bad_set_request, IncrementalScopeError::RequestMismatch { .. }));
+                .set_request::<i64>(builder.commands())
+                .unwrap_err();
+            assert!(matches!(
+                bad_set_request,
+                IncrementalScopeError::RequestMismatch { .. }
+            ));
 
             assert!(incremental_scope_builder.is_finished().is_err());
 
-            let IncrementalScopeResponse { terminate, external_output } =
-                incremental_scope_builder.set_response::<&'static str>(builder.commands()).unwrap();
+            let IncrementalScopeResponse {
+                terminate,
+                external_output,
+            } = incremental_scope_builder
+                .set_response::<&'static str>(builder.commands())
+                .unwrap();
             let external_output = external_output.unwrap();
 
             assert!(incremental_scope_builder.is_finished().is_ok());
 
             // Call set_response a second time to see that we get the intended behavior
             let second_set_response = incremental_scope_builder
-                .set_response::<&'static str>(builder.commands()).unwrap();
+                .set_response::<&'static str>(builder.commands())
+                .unwrap();
             // The terminate should be provided again, and it should be
             // equivalent to the first one we had received.
             assert_eq!(terminate, second_set_response.terminate);
@@ -2297,13 +2316,19 @@ mod tests {
             // Call set_response again with a different type to see that it
             // produces teh correct error.
             let bad_set_response = incremental_scope_builder
-                .set_response::<String>(builder.commands()).unwrap_err();
-            assert!(matches!(bad_set_response, IncrementalScopeError::ResponseMismatch { .. }));
+                .set_response::<String>(builder.commands())
+                .unwrap_err();
+            assert!(matches!(
+                bad_set_response,
+                IncrementalScopeError::ResponseMismatch { .. }
+            ));
 
             assert!(incremental_scope_builder.is_finished().is_ok());
 
             let workflow_input: DynOutput = scope.input.into();
-            workflow_input.connect_to(&external_input.into(), builder).unwrap();
+            workflow_input
+                .connect_to(&external_input.into(), builder)
+                .unwrap();
 
             {
                 let mut builder = Builder {
@@ -2311,10 +2336,18 @@ mod tests {
                     commands: builder.commands(),
                 };
 
-                fork_outputs.clone_chain(&mut builder).then(long_delay).connect(slow.input);
-                fork_outputs.clone_chain(&mut builder).then(short_delay).connect(fast.input);
+                fork_outputs
+                    .clone_chain(&mut builder)
+                    .then(long_delay)
+                    .connect(slow.input);
+                fork_outputs
+                    .clone_chain(&mut builder)
+                    .then(short_delay)
+                    .connect(fast.input);
 
-                begin_scope.connect_to(&fork_input.into(), &mut builder).unwrap();
+                begin_scope
+                    .connect_to(&fork_input.into(), &mut builder)
+                    .unwrap();
 
                 let slow_output: DynOutput = slow.output.into();
                 slow_output.connect_to(&terminate, &mut builder).unwrap();
@@ -2323,14 +2356,20 @@ mod tests {
                 fast_output.connect_to(&terminate, &mut builder).unwrap();
             }
 
-            external_output.connect_to(&scope.terminate.into(), builder).unwrap();
+            external_output
+                .connect_to(&scope.terminate.into(), builder)
+                .unwrap();
         });
 
         let mut promise =
             context.command(|commands| commands.request((), workflow).take_response());
 
         context.run_with_conditions(&mut promise, Duration::from_secs(1));
-        assert!(context.no_unhandled_errors(), "{:#?}", context.get_unhandled_errors());
+        assert!(
+            context.no_unhandled_errors(),
+            "{:#?}",
+            context.get_unhandled_errors()
+        );
         let result: &'static str = promise.take().available().unwrap();
         assert_eq!(result, "fast");
     }

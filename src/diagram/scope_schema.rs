@@ -17,18 +17,20 @@
 
 use bevy_ecs::prelude::Entity;
 
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
 use crate::{
-    Builder, IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse,
-    ConnectIntoTarget, InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, DynOutput, NextOperation, OperationName,
-    Operations, OperationRef, ScopeSettings, StreamOutRef,
-    standard_input_connection,
+    standard_input_connection, BuildDiagramOperation, BuildStatus, Builder, ConnectIntoTarget,
+    DiagramContext, DiagramErrorCode, DynOutput, IncrementalScopeBuilder, IncrementalScopeRequest,
+    IncrementalScopeResponse, InferMessageType, NextOperation, OperationName, OperationRef,
+    Operations, ScopeSettings, StreamOutRef,
 };
 
 /// The schema to define a scope within a diagram.
@@ -91,7 +93,7 @@ impl BuildDiagramOperation for ScopeSchema {
                 child_id,
                 op,
                 self.ops.clone(),
-                Some(scope.builder_scope_context())
+                Some(scope.builder_scope_context()),
             );
         }
 
@@ -133,12 +135,14 @@ impl ConnectIntoTarget for ConnectScopeRequest {
         if let Some(connection) = &mut self.connection {
             return connection.connect_into_target(output, builder, ctx);
         } else {
-            let IncrementalScopeRequest { external_input, begin_scope } = ctx
-                .registry.messages.set_scope_request(
-                    output.message_info(),
-                    &mut self.scope,
-                    builder.commands(),
-                )?;
+            let IncrementalScopeRequest {
+                external_input,
+                begin_scope,
+            } = ctx.registry.messages.set_scope_request(
+                output.message_info(),
+                &mut self.scope,
+                builder.commands(),
+            )?;
 
             if let Some(begin_scope) = begin_scope {
                 ctx.add_output_into_target(self.start.clone(), begin_scope);
@@ -185,12 +189,14 @@ impl ConnectIntoTarget for ConnectScopeResponse {
         if let Some(connection) = &mut self.connection {
             return connection.connect_into_target(output, builder, ctx);
         } else {
-            let IncrementalScopeResponse { terminate, external_output } = ctx
-                .registry.messages.set_scope_response(
-                    output.message_info(),
-                    &mut self.scope,
-                    builder.commands(),
-                )?;
+            let IncrementalScopeResponse {
+                terminate,
+                external_output,
+            } = ctx.registry.messages.set_scope_response(
+                output.message_info(),
+                &mut self.scope,
+                builder.commands(),
+            )?;
 
             if let Some(external_output) = external_output {
                 ctx.add_output_into_target(self.next.clone(), external_output);
@@ -238,15 +244,12 @@ impl ConnectIntoTarget for ConnectScopeStream {
         if let Some(connection) = &mut self.connection {
             return connection.connect_into_target(output, builder, ctx);
         } else {
-            let (stream_input, stream_output) = ctx
-                .registry
-                .messages
-                .spawn_basic_scope_stream(
-                    output.message_info(),
-                    self.scope_id,
-                    self.parent_scope_id,
-                    builder.commands(),
-                )?;
+            let (stream_input, stream_output) = ctx.registry.messages.spawn_basic_scope_stream(
+                output.message_info(),
+                self.scope_id,
+                self.parent_scope_id,
+                builder.commands(),
+            )?;
 
             ctx.add_output_into_target(self.stream_out_target.clone(), stream_output);
             let mut connection = standard_input_connection(stream_input, ctx.registry)?;
@@ -279,10 +282,10 @@ impl ConnectIntoTarget for ConnectScopeStream {
 #[cfg(test)]
 mod tests {
     use crate::{
+        diagram::{testing::*, *},
         prelude::*,
-        testing::*,
-        diagram::{*, testing::*},
         stream::tests::*,
+        testing::*,
     };
     use serde_json::json;
 
@@ -326,8 +329,12 @@ mod tests {
     fn test_diagram_scope_race() {
         let mut fixture = DiagramTestFixture::new();
 
-        let short_delay = fixture.context.spawn_delay::<()>(Duration::from_secs_f32(0.01));
-        let long_delay = fixture.context.spawn_delay::<()>(Duration::from_secs_f64(10.0));
+        let short_delay = fixture
+            .context
+            .spawn_delay::<()>(Duration::from_secs_f32(0.01));
+        let long_delay = fixture
+            .context
+            .spawn_delay::<()>(Duration::from_secs_f64(10.0));
 
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("delay"),
@@ -338,13 +345,14 @@ mod tests {
                 };
 
                 builder.create_node(provider)
-            });
+            },
+        );
 
         fixture.registry.register_node_builder(
             NodeBuilderOptions::new("text"),
             move |builder, config: String| {
                 builder.create_map_block(move |_: JsonMessage| config.clone())
-            }
+            },
         );
 
         let diagram = Diagram::from_json(json!({

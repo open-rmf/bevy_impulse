@@ -58,7 +58,6 @@ pub struct BuilderScopeContext {
 }
 
 impl<'w, 's, 'a> Builder<'w, 's, 'a> {
-
     /// Begin building a chain of operations off of an output.
     pub fn chain<'b, Response: 'static + Send + Sync>(
         &'b mut self,

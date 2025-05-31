@@ -60,8 +60,8 @@ use std::{
 
 pub use crate::type_info::TypeInfo;
 use crate::{
-    Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service, SpawnWorkflowExt,
-    SplitConnectionError, StreamPack,
+    Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
+    SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
 
 use schemars::{
@@ -107,7 +107,9 @@ impl NextOperation {
     }
 
     pub fn terminate() -> Self {
-        NextOperation::Builtin { builtin: BuiltinTarget::Terminate }
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Terminate,
+        }
     }
 }
 

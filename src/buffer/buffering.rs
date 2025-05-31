@@ -187,7 +187,11 @@ pub trait Accessing: Buffering {
             build,
         );
 
-        let begin_cancel = builder.commands.spawn(()).set_parent(builder.context.scope).id();
+        let begin_cancel = builder
+            .commands
+            .spawn(())
+            .set_parent(builder.context.scope)
+            .id();
         self.verify_scope(builder.scope());
         builder.commands.add(AddOperation::new(
             None,

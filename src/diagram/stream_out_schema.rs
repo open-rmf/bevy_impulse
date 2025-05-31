@@ -40,7 +40,8 @@ impl BuildDiagramOperation for StreamOutSchema {
         _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let redirect_to = ctx.into_operation_ref(StreamOutRef::new_for_root(Arc::clone(&self.name)));
+        let redirect_to =
+            ctx.into_operation_ref(StreamOutRef::new_for_root(Arc::clone(&self.name)));
         ctx.set_connect_into_target(id, RedirectConnection::new(redirect_to))?;
 
         Ok(BuildStatus::Finished)
