@@ -222,6 +222,17 @@
                 "$ref": "#/definitions/DiagramOperation"
               }
             },
+            "settings": {
+              "description": "Settings specific to the scope, e.g. whether it is interruptible.",
+              "default": {
+                "uninterruptible": false
+              },
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ScopeSettings"
+                }
+              ]
+            },
             "start": {
               "description": "Indicates which node inside the scope should receive the input into the scope.",
               "allOf": [
@@ -662,6 +673,19 @@
           ]
         }
       ]
+    },
+    "ScopeSettings": {
+      "description": "Settings which determine how the top-level scope of the workflow behaves.",
+      "type": "object",
+      "required": [
+        "uninterruptible"
+      ],
+      "properties": {
+        "uninterruptible": {
+          "description": "Should we prevent the scope from being interrupted (e.g. cancelled)? False by default, meaning by default scopes can be cancelled or interrupted.",
+          "type": "boolean"
+        }
+      }
     },
     "SectionTemplate": {
       "type": "object",

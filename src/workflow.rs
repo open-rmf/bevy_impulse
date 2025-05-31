@@ -180,7 +180,12 @@ pub enum DeliverySettings {
 }
 
 /// Settings which determine how the top-level scope of the workflow behaves.
-#[derive(Default, Clone)]
+#[cfg_attr(
+    feature = "diagram",
+    derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema),
+    serde(rename_all = "snake_case")
+)]
+#[derive(Default, Clone, Debug)]
 pub struct ScopeSettings {
     /// Should we prevent the scope from being interrupted (e.g. cancelled)?
     /// False by default, meaning by default scopes can be cancelled or

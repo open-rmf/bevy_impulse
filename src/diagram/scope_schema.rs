@@ -58,6 +58,10 @@ pub struct ScopeSchema {
 
     /// Where to connect the output of this scope.
     pub next: NextOperation,
+
+    /// Settings specific to the scope, e.g. whether it is interruptible.
+    #[serde(default)]
+    pub settings: ScopeSettings,
 }
 
 impl BuildDiagramOperation for ScopeSchema {
@@ -67,7 +71,7 @@ impl BuildDiagramOperation for ScopeSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let scope = IncrementalScopeBuilder::begin(ScopeSettings::default(), builder);
+        let scope = IncrementalScopeBuilder::begin(self.settings.clone(), builder);
 
         for (stream_in_id, stream_out_target) in &self.stream_out {
             ctx.set_connect_into_target(
@@ -487,4 +491,6 @@ mod tests {
         assert_eq!(outcome_stream_i32, [5, 10, -3, -27]);
         assert_eq!(outcome_stream_string, ["5", "10", "-3", "-27", "hello"]);
     }
+
+    // TODO(@mxgrey): Add an interruptibility test
 }
