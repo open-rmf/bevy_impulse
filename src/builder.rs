@@ -45,14 +45,27 @@ pub(crate) use connect::*;
 /// please open an issue with a minimal reproducible example if you find a way
 /// to make it panic.
 pub struct Builder<'w, 's, 'a> {
+    pub(crate) context: BuilderScopeContext,
+    pub(crate) commands: &'a mut Commands<'w, 's>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BuilderScopeContext {
     /// The scope that this builder is meant to help build
     pub(crate) scope: Entity,
     /// The target for cancellation workflows
     pub(crate) finish_scope_cancel: Entity,
-    pub(crate) commands: &'a mut Commands<'w, 's>,
 }
 
 impl<'w, 's, 'a> Builder<'w, 's, 'a> {
+    /// Begin building a chain of operations off of an output.
+    pub fn chain<'b, Response: 'static + Send + Sync>(
+        &'b mut self,
+        output: Output<Response>,
+    ) -> Chain<'w, 's, 'a, 'b, Response> {
+        output.chain(self)
+    }
+
     /// Create a node for a provider. This will give access to an input slot, an
     /// output slots, and a pack of stream outputs which can all be connected to
     /// other nodes.
@@ -67,14 +80,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        provider.connect(Some(self.scope), source, target, self.commands);
+        provider.connect(Some(self.scope()), source, target, self.commands);
 
         let mut map = StreamTargetMap::default();
         let streams = <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self);
         self.commands.entity(source).insert(map);
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams,
         }
     }
@@ -159,7 +172,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ) -> Buffer<T> {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateBuffer::<T>::new(settings),
         ));
@@ -222,13 +235,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             ForkClone::<T>::new(ForkTargetStorage::new()),
         ));
         (
-            InputSlot::new(self.scope, source),
-            ForkCloneOutput::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
+            ForkCloneOutput::new(self.scope(), source),
         )
     }
 
@@ -240,8 +253,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         (
-            InputSlot::new(self.scope, source),
-            T::unzip_output(Output::<T>::new(self.scope, source), self),
+            InputSlot::new(self.scope(), source),
+            T::unzip_output(Output::<T>::new(self.scope(), source), self),
         )
     }
 
@@ -258,16 +271,16 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target_err = self.commands.spawn(UnusedTarget).id();
 
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
         ));
 
         (
-            InputSlot::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
             ForkResultOutput {
-                ok: Output::new(self.scope, target_ok),
-                err: Output::new(self.scope, target_err),
+                ok: Output::new(self.scope(), target_ok),
+                err: Output::new(self.scope(), target_err),
             },
         )
     }
@@ -287,16 +300,16 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target_none = self.commands.spawn(UnusedTarget).id();
 
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
         ));
 
         (
-            InputSlot::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
             ForkOptionOutput {
-                some: Output::new(self.scope, target_some),
-                none: Output::new(self.scope, target_none),
+                some: Output::new(self.scope(), target_some),
+                none: Output::new(self.scope(), target_none),
             },
         )
     }
@@ -390,14 +403,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             Collect::<T, N>::new(target, min, max),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -427,14 +440,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateSplit::<T>::default(),
         ));
 
         (
-            InputSlot::new(self.scope, source),
-            SplitOutputs::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
+            SplitOutputs::new(self.scope(), source),
         )
     }
 
@@ -450,12 +463,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateCancel::<T>::new(),
         ));
 
-        InputSlot::new(self.scope, source)
+        InputSlot::new(self.scope(), source)
     }
 
     /// Create an input slot that will cancel that current scope when it gets
@@ -466,12 +479,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_quiet_cancel(&mut self) -> InputSlot<()> {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateQuietCancel,
         ));
 
-        InputSlot::new(self.scope, source)
+        InputSlot::new(self.scope(), source)
     }
 
     /// This method allows you to define a cleanup workflow that branches off of
@@ -576,20 +589,20 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let branches: SmallVec<[_; 16]> = branches.into_iter().collect();
         for branch in &branches {
-            branch.verify_scope(self.scope);
+            branch.verify_scope(self.scope());
         }
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             Trim::<T>::new(branches, target),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -608,19 +621,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
-        buffers.verify_scope(self.scope);
+        buffers.verify_scope(self.scope());
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateDynamicGate::<T, _>::new(buffers, target),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -637,19 +650,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
-        buffers.verify_scope(self.scope);
+        buffers.verify_scope(self.scope());
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateStaticGate::<T, _>::new(buffers, target, action),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -678,7 +691,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
     /// Get the scope that this builder is building for.
     pub fn scope(&self) -> Entity {
-        self.scope
+        self.context.scope
     }
 
     /// Borrow the commands for the builder
@@ -699,11 +712,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Streams: StreamPack,
         Settings: Into<ScopeSettings>,
     {
+        // NOTE(@mxgrey): When changing the implementation of this function,
+        // remember to similarly update the implementation of IncrementalScopeBuilder
         let ScopeEndpoints {
             terminal,
             enter_scope,
             finish_scope_cancel,
-        } = OperateScope::<Request, Response, Streams>::add(
+        } = OperateScope::add::<Request, Response>(
             Some(self.scope()),
             scope_id,
             Some(exit_scope),
@@ -711,11 +726,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         );
 
         let (stream_in, stream_out) =
-            Streams::spawn_scope_streams(scope_id, self.scope, self.commands);
+            Streams::spawn_scope_streams(scope_id, self.scope(), self.commands);
 
         let mut builder = Builder {
-            scope: scope_id,
-            finish_scope_cancel,
+            context: BuilderScopeContext {
+                scope: scope_id,
+                finish_scope_cancel,
+            },
             commands: self.commands,
         };
 
@@ -731,8 +748,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             .insert(ScopeSettingsStorage(settings));
 
         Node {
-            input: InputSlot::new(self.scope, scope_id),
-            output: Output::new(self.scope, exit_scope),
+            input: InputSlot::new(self.scope(), scope_id),
+            output: Output::new(self.scope(), exit_scope),
             streams: stream_out,
         }
     }
@@ -752,16 +769,20 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let streams = Streams::spawn_node_streams(source, &mut map, self);
         self.commands.entity(source).insert(map);
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             Injection::<Request, Response, Streams>::new(target),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams,
         }
+    }
+
+    pub fn context(&self) -> BuilderScopeContext {
+        self.context
     }
 }
 

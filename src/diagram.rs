@@ -21,6 +21,7 @@ mod fork_result_schema;
 mod join_schema;
 mod node_schema;
 mod registration;
+mod scope_schema;
 mod section_schema;
 mod serialization;
 mod split_schema;
@@ -39,6 +40,7 @@ pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
 pub use registration::*;
+pub use scope_schema::*;
 pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
@@ -58,8 +60,8 @@ use std::{
 
 pub use crate::type_info::TypeInfo;
 use crate::{
-    Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
-    SplitConnectionError, StreamPack,
+    Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
+    SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
 
 use schemars::{
@@ -101,6 +103,12 @@ impl NextOperation {
     pub fn dispose() -> Self {
         NextOperation::Builtin {
             builtin: BuiltinTarget::Dispose,
+        }
+    }
+
+    pub fn terminate() -> Self {
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Terminate,
         }
     }
 }
@@ -382,6 +390,8 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     /// ```
     Section(SectionSchema),
+
+    Scope(ScopeSchema),
 
     /// Declare a stream output for the current scope. Outputs that you connect
     /// to this operation will be streamed out of the scope that this operation
@@ -901,6 +911,7 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Scope(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
             Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
@@ -1134,7 +1145,7 @@ impl Diagram {
     /// templates will not be validated.
     pub fn validate_template_usage(&self) -> Result<(), DiagramErrorCode> {
         for op in self.ops.values() {
-            match op {
+            match op.as_ref() {
                 DiagramOperation::Section(section) => match &section.provider {
                     SectionProvider::Template(template) => {
                         self.templates.validate_template(template)?;
@@ -1151,12 +1162,12 @@ impl Diagram {
 
 #[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
 #[serde(transparent, rename_all = "snake_case")]
-pub struct Operations(HashMap<OperationName, DiagramOperation>);
+pub struct Operations(Arc<HashMap<OperationName, Arc<DiagramOperation>>>);
 
 impl Operations {
     /// Get an operation from this map, or a diagram error code if the operation
     /// is not available.
-    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&DiagramOperation, DiagramErrorCode> {
+    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&Arc<DiagramOperation>, DiagramErrorCode> {
         self.get(op_id)
             .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
     }
@@ -1200,7 +1211,7 @@ impl Templates {
 }
 
 fn validate_operation_names(
-    ops: &HashMap<OperationName, DiagramOperation>,
+    ops: &HashMap<OperationName, Arc<DiagramOperation>>,
 ) -> Result<(), DiagramErrorCode> {
     for name in ops.keys() {
         validate_operation_name(name)?;
@@ -1232,7 +1243,7 @@ fn check_circular_template_dependency(
         };
 
         for op in template.ops.0.values() {
-            match op {
+            match op.as_ref() {
                 DiagramOperation::Section(section) => match &section.provider {
                     SectionProvider::Template(template) => {
                         queue.push(top.child(template)?);
@@ -1309,7 +1320,7 @@ impl Display for DiagramErrorContext {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(ThisError, Debug)]
 pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
@@ -1430,6 +1441,12 @@ pub enum DiagramErrorCode {
 
     #[error("A circular dependency exists between templates: {}", format_list(&.0))]
     CircularTemplateDependency(Vec<OperationName>),
+
+    #[error("An error occurred while finishing the workflow build: {0}")]
+    FinishingErrors(FinishingErrors),
+
+    #[error("An error occurred while creating a scope: {0}")]
+    IncrementalScopeError(#[from] IncrementalScopeError),
 }
 
 fn format_list<T: std::fmt::Display>(list: &[T]) -> String {
@@ -1468,6 +1485,31 @@ impl DiagramErrorCode {
 pub struct MissingStream {
     pub missing_name: OperationName,
     pub available_names: Vec<OperationName>,
+}
+
+#[derive(ThisError, Debug, Default)]
+pub struct FinishingErrors {
+    pub errors: HashMap<OperationRef, DiagramErrorCode>,
+}
+
+impl FinishingErrors {
+    pub fn as_result(self) -> Result<(), Self> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl std::fmt::Display for FinishingErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (op, code) in &self.errors {
+            write!(f, " - [{op}]: {code}")?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

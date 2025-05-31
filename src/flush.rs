@@ -122,6 +122,10 @@ fn flush_impulses_impl(
                 roster: &mut roster,
             });
             garbage_cleanup(world, &mut roster);
+            loop_count += 1;
+            if flush_loop_limit.is_some_and(|limit| limit < loop_count) {
+                break;
+            }
         }
 
         while let Some(source) = roster.awake.pop_front() {

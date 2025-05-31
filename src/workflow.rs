@@ -22,8 +22,9 @@ use bevy_ecs::{
 use bevy_hierarchy::BuildChildren;
 
 use crate::{
-    Builder, DeliveryChoice, InputSlot, OperateScope, Output, ScopeEndpoints, ScopeSettingsStorage,
-    Service, ServiceBundle, StreamAvailability, StreamPack, WorkflowService, WorkflowStorage,
+    Builder, BuilderScopeContext, DeliveryChoice, InputSlot, OperateScope, Output, ScopeEndpoints,
+    ScopeSettingsStorage, Service, ServiceBundle, StreamAvailability, StreamPack, WorkflowService,
+    WorkflowStorage,
 };
 
 mod internal;
@@ -179,7 +180,12 @@ pub enum DeliverySettings {
 }
 
 /// Settings which determine how the top-level scope of the workflow behaves.
-#[derive(Default, Clone)]
+#[cfg_attr(
+    feature = "diagram",
+    derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema),
+    serde(rename_all = "snake_case")
+)]
+#[derive(Default, Clone, Debug)]
 pub struct ScopeSettings {
     /// Should we prevent the scope from being interrupted (e.g. cancelled)?
     /// False by default, meaning by default scopes can be cancelled or
@@ -233,11 +239,13 @@ impl<'w, 's> SpawnWorkflowExt for Commands<'w, 's> {
             terminal,
             enter_scope,
             finish_scope_cancel,
-        } = OperateScope::<Request, Response, Streams>::add(None, scope_id, None, self);
+        } = OperateScope::add::<Request, Response>(None, scope_id, None, self);
 
         let mut builder = Builder {
-            scope: scope_id,
-            finish_scope_cancel,
+            context: BuilderScopeContext {
+                scope: scope_id,
+                finish_scope_cancel,
+            },
             commands: self,
         };
 

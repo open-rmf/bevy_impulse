@@ -53,7 +53,7 @@ where
 }
 
 /// A type erased [`InputSlot`]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct DynInputSlot {
     scope: Entity,
     source: Entity,
@@ -71,6 +71,14 @@ impl DynInputSlot {
 
     pub fn message_info(&self) -> &TypeInfo {
         &self.type_info
+    }
+
+    pub(crate) fn new(scope: Entity, source: Entity, type_info: TypeInfo) -> Self {
+        Self {
+            scope,
+            source,
+            type_info,
+        }
     }
 }
 
@@ -107,14 +115,6 @@ pub struct DynOutput {
 }
 
 impl DynOutput {
-    pub fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
-        Self {
-            scope,
-            target,
-            message_info,
-        }
-    }
-
     pub fn message_info(&self) -> &TypeInfo {
         &self.message_info
     }
@@ -161,6 +161,14 @@ impl DynOutput {
 
         Ok(())
     }
+
+    pub(crate) fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
+        Self {
+            scope,
+            target,
+            message_info,
+        }
+    }
 }
 
 impl<T> From<Output<T>> for DynOutput
@@ -180,7 +188,7 @@ where
 
 /// Error type that happens when you try to convert a [`DynOutput`] to an
 /// <code>[Output]&lt;T&gt;</code> for the wrong `T`.
-#[derive(ThisError, Debug)]
+#[derive(ThisError, Debug, Clone)]
 #[error("type mismatch: source {source_type}, target {target_type}")]
 pub struct TypeMismatch {
     /// What type of message is the [`DynOutput`] able to provide.

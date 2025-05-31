@@ -74,7 +74,7 @@ impl<T> Buffer<T> {
         &self,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> Chain<'w, 's, 'a, 'b, ()> {
-        assert_eq!(self.scope(), builder.scope);
+        assert_eq!(self.scope(), builder.scope());
         let target = builder.commands.spawn(UnusedTarget).id();
         builder
             .commands

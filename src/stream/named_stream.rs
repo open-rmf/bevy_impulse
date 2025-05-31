@@ -66,7 +66,7 @@ impl<S: StreamEffect> NamedStream<S> {
             source,
             RedirectWorkflowStream::new(NamedStreamRedirect::<S>::static_name(name.into())),
         ));
-        InputSlot::new(builder.scope, source)
+        InputSlot::new(builder.scope(), source)
     }
 
     pub fn spawn_node_stream(
@@ -81,7 +81,7 @@ impl<S: StreamEffect> NamedStream<S> {
             .id();
 
         map.add_named::<S::Output>(name.into(), target, builder.commands());
-        Output::new(builder.scope, target)
+        Output::new(builder.scope(), target)
     }
 
     pub fn take_stream(
