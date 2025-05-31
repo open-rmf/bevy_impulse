@@ -28,7 +28,7 @@ use crate::{
 
 use super::{
     BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
-    DiagramErrorCode, DiagramOperation, DynInputSlot, DynOutput, ImplicitDeserialization,
+    DiagramErrorCode, DynInputSlot, DynOutput, ImplicitDeserialization,
     ImplicitSerialization, ImplicitStringify, NamespacedOperation, NextOperation, OperationName,
     Operations, Templates, TypeInfo, FinishingErrors,
 };
@@ -234,10 +234,20 @@ pub struct StreamOutRef {
 }
 
 impl StreamOutRef {
-    pub fn new(name: impl Into<Arc<str>>) -> Self {
+    pub fn new_for_root(stream_name: impl Into<Arc<str>>) -> Self {
         Self {
             namespaces: NamespaceList::new(),
-            name: name.into(),
+            name: stream_name.into(),
+        }
+    }
+
+    pub fn new_for_scope(
+        scope_name: impl Into<Arc<str>>,
+        stream_name: impl Into<Arc<str>>,
+    ) -> Self {
+        Self {
+            namespaces: smallvec![scope_name.into()],
+            name: stream_name.into(),
         }
     }
 
@@ -1127,7 +1137,7 @@ where
     let mut streams = DynStreamInputPack::default();
     Streams::into_dyn_stream_input_pack(&mut streams, scope.streams);
     for (name, input) in streams.named {
-        ctx.set_input_for_target(StreamOutRef::new(name), input)?;
+        ctx.set_input_for_target(StreamOutRef::new_for_root(name), input)?;
     }
 
     // Add the dispose operation

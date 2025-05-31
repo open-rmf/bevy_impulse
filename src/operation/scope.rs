@@ -2207,7 +2207,7 @@ mod tests {
 
         let workflow = context.spawn_io_workflow(|scope, builder| {
             let inner_scope = builder.create_io_scope(|scope, builder| {
-                scope.input.chain(builder).fork_clone((
+                builder.chain(scope.input).fork_clone((
                     |chain: Chain<_>| chain.then(long_delay).map_block(|_| "slow").connect(scope.terminate),
                     |chain: Chain<_>| chain.then(short_delay).map_block(|_| "fast").connect(scope.terminate),
                 ));

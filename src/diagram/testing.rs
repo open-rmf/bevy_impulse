@@ -87,7 +87,7 @@ impl DiagramTestFixture {
             .context
             .command(|cmds| cmds.request(request, workflow).take());
         self.context.run_while_pending(&mut recipient.response);
-        assert!(self.context.no_unhandled_errors());
+        assert!(self.context.no_unhandled_errors(), "{:#?}", self.context.get_unhandled_errors());
         let taken = recipient.response.take();
         if taken.is_available() {
             Ok((taken.available().unwrap(), recipient.streams))

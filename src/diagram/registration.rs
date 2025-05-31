@@ -24,13 +24,14 @@ use std::{
     sync::Arc,
 };
 
-use bevy_ecs::prelude::Commands;
+use bevy_ecs::prelude::{Commands, Entity};
 
 pub use crate::dyn_node::*;
 use crate::{
     Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Joined, JsonBuffer,
     JsonMessage, Node, StreamPack, IncrementalScopeBuilder, IncrementalScopeRequest,
     IncrementalScopeResponseResult, IncrementalScopeResponse, IncrementalScopeRequestResult,
+    NamedStream, StreamOf,
 };
 
 use schemars::{
@@ -101,6 +102,7 @@ type ToStringFn = fn(&mut Builder) -> DynNode;
 struct BuildScope {
     set_request: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeRequestResult,
     set_response: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeResponseResult,
+    spawn_basic_scope_stream: fn(Entity, Entity, &mut Commands) -> (DynInputSlot, DynOutput),
 }
 
 impl BuildScope {
@@ -108,6 +110,7 @@ impl BuildScope {
         Self {
             set_request: Self::impl_set_request::<T>,
             set_response: Self::impl_set_response::<T>,
+            spawn_basic_scope_stream: Self::impl_spawn_basic_scope_stream::<T>,
         }
     }
 
@@ -123,6 +126,20 @@ impl BuildScope {
         commands: &mut Commands,
     ) -> IncrementalScopeResponseResult {
         incremental.set_response::<T>(commands)
+    }
+
+    fn impl_spawn_basic_scope_stream<T: 'static + Send + Sync>(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (DynInputSlot, DynOutput) {
+        let (stream_in, stream_out) =
+            NamedStream::<StreamOf<T>>::spawn_scope_stream(in_scope, out_scope, commands);
+
+        (
+            stream_in.into(),
+            stream_out.into(),
+        )
     }
 }
 
@@ -1016,6 +1033,24 @@ impl MessageRegistry {
             .set_response;
 
         f(incremental, commands).map_err(Into::into)
+    }
+
+    pub(crate) fn spawn_basic_scope_stream(
+        &self,
+        message_info: &TypeInfo,
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> Result<(DynInputSlot, DynOutput), DiagramErrorCode> {
+        let f = self
+            .messages
+            .get(message_info)
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*message_info))?
+            .operations
+            .build_scope
+            .spawn_basic_scope_stream;
+
+        Ok(f(in_scope, out_scope, commands))
     }
 
     pub fn trigger(

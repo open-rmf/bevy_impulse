@@ -15,6 +15,8 @@
  *
 */
 
+use bevy_ecs::prelude::Entity;
+
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use schemars::JsonSchema;
@@ -25,7 +27,7 @@ use crate::{
     Builder, IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeResponse,
     ConnectIntoTarget, InferMessageType,BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, DynOutput, NextOperation, OperationName,
-    Operations, OperationRef, ScopeSettings,
+    Operations, OperationRef, ScopeSettings, StreamOutRef,
     standard_input_connection,
 };
 
@@ -66,6 +68,18 @@ impl BuildDiagramOperation for ScopeSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let scope = IncrementalScopeBuilder::begin(ScopeSettings::default(), builder);
+
+        for (stream_in_id, stream_out_target) in &self.stream_out {
+            ctx.set_connect_into_target(
+                StreamOutRef::new_for_scope(id.clone(), stream_in_id.clone()),
+                ConnectScopeStream {
+                    scope_id: scope.builder_scope_context().scope,
+                    parent_scope_id: builder.scope(),
+                    stream_out_target: ctx.into_operation_ref(stream_out_target),
+                    connection: None,
+                },
+            )?;
+        }
 
         for (child_id, op) in self.ops.iter() {
             ctx.add_child_operation(
@@ -203,13 +217,73 @@ impl ConnectIntoTarget for ConnectScopeResponse {
     // isn't finished whether the request or the response didn't get a connection.
 }
 
+struct ConnectScopeStream {
+    scope_id: Entity,
+    parent_scope_id: Entity,
+    stream_out_target: OperationRef,
+    connection: Option<Box<dyn ConnectIntoTarget + 'static>>,
+}
+
+impl ConnectIntoTarget for ConnectScopeStream {
+    fn connect_into_target(
+        &mut self,
+        output: DynOutput,
+        builder: &mut Builder,
+        ctx: &mut DiagramContext,
+    ) -> Result<(), DiagramErrorCode> {
+        if let Some(connection) = &mut self.connection {
+            return connection.connect_into_target(output, builder, ctx);
+        } else {
+            let (stream_input, stream_output) = ctx
+                .registry
+                .messages
+                .spawn_basic_scope_stream(
+                    output.message_info(),
+                    self.scope_id,
+                    self.parent_scope_id,
+                    builder.commands(),
+                )?;
+
+            ctx.add_output_into_target(self.stream_out_target.clone(), stream_output);
+            let mut connection = standard_input_connection(stream_input, ctx.registry)?;
+            connection.connect_into_target(output, builder, ctx)?;
+            self.connection = Some(connection);
+        }
+
+        Ok(())
+    }
+
+    fn infer_input_type(
+        &self,
+        ctx: &DiagramContext,
+        visited: &mut HashSet<OperationRef>,
+    ) -> Result<Option<Arc<dyn InferMessageType>>, DiagramErrorCode> {
+        if let Some(connection) = &self.connection {
+            connection.infer_input_type(ctx, visited)
+        } else {
+            ctx.redirect_infer_input_type(&self.stream_out_target, visited)
+        }
+    }
+
+    // We do not implement is_finished because there is no negative impact on
+    // the soundness of the workflow if the user hasn't connected any output to
+    // a stream, as long as the rest of the workflow can build. The worst case
+    // scenario is an operation downstream of the stream output won't be able to
+    // infer its message type, but that will show up as a diagram error elsewhere.
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, diagram::{*, testing::*}};
+    use crate::{
+        prelude::*,
+        testing::*,
+        diagram::{*, testing::*},
+        stream::tests::*,
+    };
     use serde_json::json;
 
     #[test]
-    fn test_simple_scope() {
+    fn test_simple_diagram_scope() {
         let mut fixture = DiagramTestFixture::new();
         fixture.context.set_flush_loop_limit(Some(10));
 
@@ -233,12 +307,184 @@ mod tests {
         }))
         .unwrap();
 
-        // let result: i64 = fixture.spawn_and_run(&diagram, 4_i64).unwrap();
-        let workflow: Service<i64, i64> = fixture.spawn_io_workflow(&diagram).unwrap();
-
-        let mut promise = fixture.context.command(|commands| commands.request(4_i64, workflow).take_response());
-        fixture.context.run_with_conditions(&mut promise, 1);
-        let result = promise.take().available().unwrap();
+        let result: i64 = fixture.spawn_and_run(&diagram, 4_i64).unwrap();
         assert_eq!(result, 12);
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case")]
+    enum DelayDuration {
+        Short,
+        Long,
+    }
+
+    #[test]
+    fn test_diagram_scope_race() {
+        let mut fixture = DiagramTestFixture::new();
+
+        let short_delay = fixture.context.spawn_delay::<()>(Duration::from_secs_f32(0.01));
+        let long_delay = fixture.context.spawn_delay::<()>(Duration::from_secs_f64(10.0));
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("delay"),
+            move |builder, config: DelayDuration| {
+                let provider = match config {
+                    DelayDuration::Short => short_delay,
+                    DelayDuration::Long => long_delay,
+                };
+
+                builder.create_node(provider)
+            });
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("text"),
+            move |builder, config: String| {
+                builder.create_map_block(move |_: JsonMessage| config.clone())
+            }
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "scope",
+            "ops": {
+                "scope": {
+                    "type": "scope",
+                    "start": "fork",
+                    "ops": {
+                        "fork": {
+                            "type": "fork_clone",
+                            "next": ["long_delay", "short_delay"]
+                        },
+                        "long_delay": {
+                            "type": "node",
+                            "builder": "delay",
+                            "config": "long",
+                            "next": "print_slow"
+                        },
+                        "print_slow": {
+                            "type": "node",
+                            "builder": "text",
+                            "config": "slow",
+                            "next": { "builtin" : "terminate" }
+                        },
+                        "short_delay": {
+                            "type": "node",
+                            "builder": "delay",
+                            "config": "short",
+                            "next": "print_fast"
+                        },
+                        "print_fast": {
+                            "type": "node",
+                            "builder": "text",
+                            "config": "fast",
+                            "next": { "builtin" : "terminate" }
+                        }
+                    },
+                    "next": { "builtin" : "terminate" }
+                }
+            }
+        }))
+        .unwrap();
+
+        let result: String = fixture.spawn_and_run(&diagram, ()).unwrap();
+        assert_eq!(result, "fast");
+    }
+
+    #[test]
+    fn test_streams_in_diagram_scope() {
+        let mut fixture = DiagramTestFixture::new();
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("streaming_node"),
+            |builder, _config: ()| {
+                builder.create_map(|input: BlockingMap<Vec<String>, TestStreamPack>| {
+                    for r in input.request {
+                        if let Ok(value) = r.parse::<u32>() {
+                            input.streams.stream_u32.send(value);
+                        }
+
+                        if let Ok(value) = r.parse::<i32>() {
+                            input.streams.stream_i32.send(value);
+                        }
+
+                        input.streams.stream_string.send(r);
+                    }
+                })
+            },
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "scope",
+            "ops": {
+                "scope": {
+                    "type": "scope",
+                    "start": "test",
+                    "ops": {
+                        "test": {
+                            "type": "node",
+                            "builder": "streaming_node",
+                            "next": { "builtin": "terminate" },
+                            "stream_out": {
+                                "stream_u32": "stream_u32_out",
+                                "stream_i32": "stream_i32_out",
+                                "stream_string": "stream_string_out"
+                            }
+                        },
+                        "stream_u32_out": {
+                            "type": "stream_out",
+                            "name": "stream_u32"
+                        },
+                        "stream_i32_out": {
+                            "type": "stream_out",
+                            "name": "stream_i32"
+                        },
+                        "stream_string_out": {
+                            "type": "stream_out",
+                            "name": "stream_string"
+                        }
+                    },
+                    "stream_out": {
+                        "stream_u32": "stream_u32_out",
+                        "stream_i32": "stream_i32_out",
+                        "stream_string": "stream_string_out"
+                    },
+                    "next": { "builtin": "terminate" }
+                },
+                "stream_u32_out": {
+                    "type": "stream_out",
+                    "name": "stream_u32"
+                },
+                "stream_i32_out": {
+                    "type": "stream_out",
+                    "name": "stream_i32"
+                },
+                "stream_string_out": {
+                    "type": "stream_out",
+                    "name": "stream_string"
+                }
+            }
+        }))
+        .unwrap();
+
+        let request = vec![
+            "5".to_owned(),
+            "10".to_owned(),
+            "-3".to_owned(),
+            "-27".to_owned(),
+            "hello".to_owned(),
+        ];
+
+        let (_, receivers) = fixture
+            .spawn_and_run_with_streams::<_, (), TestStreamPack>(&diagram, request)
+            .unwrap();
+
+        let outcome_stream_u32 = collect_received_values(receivers.stream_u32);
+        let outcome_stream_i32 = collect_received_values(receivers.stream_i32);
+        let outcome_stream_string = collect_received_values(receivers.stream_string);
+
+        assert_eq!(outcome_stream_u32, [5, 10]);
+        assert_eq!(outcome_stream_i32, [5, 10, -3, -27]);
+        assert_eq!(outcome_stream_string, ["5", "10", "-3", "-27", "hello"]);
     }
 }

@@ -58,6 +58,15 @@ pub struct BuilderScopeContext {
 }
 
 impl<'w, 's, 'a> Builder<'w, 's, 'a> {
+
+    /// Begin building a chain of operations off of an output.
+    pub fn chain<'b, Response: 'static + Send + Sync>(
+        &'b mut self,
+        output: Output<Response>,
+    ) -> Chain<'w, 's, 'a, 'b, Response> {
+        output.chain(self)
+    }
+
     /// Create a node for a provider. This will give access to an input slot, an
     /// output slots, and a pack of stream outputs which can all be connected to
     /// other nodes.
