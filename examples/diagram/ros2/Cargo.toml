@@ -1,0 +1,19 @@
+[package]
+name = "ros2-workflow-examples"
+edition = "2021"
+
+[[bin]]
+name = "nav-example"
+path = "src/nav_example.rs"
+
+[dependencies]
+bevy_app = "0.12"
+bevy_core = "0.12"
+bevy_impulse = { path = "../../..", features = ["diagram"] }
+serde = "*"
+schemars = "*"
+serde_json = "*"
+tokio = { version = "1.39", features = ["sync"] }
+
+rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "worker", features = ["serde"] }
+nav_msgs = { version = "*", features = ["serde"] }

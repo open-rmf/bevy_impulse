@@ -76,7 +76,10 @@ test-log = { version = "0.2.16", features = [
 ], default-features = false }
 
 [workspace]
-members = ["examples/diagram/calculator"]
+members = [
+  "examples/diagram/calculator",
+  "examples/diagram/ros2",
+]
 
 [[bin]]
 name = "generate_schema"
