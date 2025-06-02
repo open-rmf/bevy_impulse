@@ -38,7 +38,6 @@ fn main() {
     let mut app = bevy_app::App::new();
 
     let mut registry = DiagramElementRegistry::new();
-
     let node = executor.create_node("nav_manager").unwrap();
 
     // Create a subscriber that listens for goal messages to arrive.
@@ -51,16 +50,21 @@ fn main() {
                 builder.create_map(move |input: AsyncMap<(), GoalStream>| {
                     let (sender, mut receiver) = unbounded_channel();
 
-                    node.create_subscription(
-                        &config.topic,
+                    let _subscription = node.create_subscription(
+                        config
+                        .topic
+                        .transient_local(),
                         move |msg: Goals| {
                             let _ = sender.send(msg);
                         }
                     ).unwrap();
 
                     let node = node.clone();
-                    log!(&*node, "Waiting to receive goals...");
+                    log!(&*node, "Waiting to receive goals from topic {}...", config.topic);
                     async move {
+                        // Force the _subscription variable to be captured since
+                        // it has side effects.
+                        let _subscription = _subscription;
                         while let Some(msg) = receiver.recv().await {
                             log!(&*node, "Received a sequence of {} goals", msg.goals.len());
                             input.streams.goals.send(msg);
@@ -87,14 +91,20 @@ fn main() {
                 let tolerance = config.tolerance;
                 let client = node.create_client::<GetPlan>(&config.planner_service).unwrap();
 
+                let logger = node.logger().clone();
                 builder.create_map(move |input: AsyncMap<Goals, PlanStream>| {
                     let client = client.clone();
+                    let logger = logger.clone();
                     async move {
+                        log!(&logger, "Waiting for planning service...");
+                        client.notify_on_service_ready().await.unwrap();
+
                         let mut from_iter = input.request.goals.iter();
                         let mut to_iter = input.request.goals.iter().skip(1);
 
                         let mut plan_promises = VecDeque::new();
                         while let (Some(start), Some(goal)) = (from_iter.next().cloned(), to_iter.next().cloned()) {
+                            log!(&logger, "Requesting a plan from {start:?} to {goal:?}");
                             let request = GetPlan_Request { start, goal, tolerance };
                             let promise: Promise<GetPlan_Response> = client.call(request).unwrap();
                             plan_promises.push_back(promise);
@@ -102,6 +112,12 @@ fn main() {
 
                         while let Some(promise) = plan_promises.pop_front() {
                             let response = promise.await.unwrap();
+                            log!(
+                                &logger,
+                                "Received a plan from {:?} to {:?}",
+                                response.plan.poses.first().map(|x| x.pose.clone()),
+                                response.plan.poses.last().map(|x| x.pose.clone()),
+                            );
                             input.streams.plans.send(response.plan);
                         }
                     }
@@ -160,6 +176,16 @@ fn main() {
             "plan_buffer": {
                 "type": "buffer",
                 "settings": { "retention": "keep_all" }
+            },
+            "listen_to_plan_buffer": {
+                "type": "listen",
+                "buffers": ["plan_buffer"],
+                "next": "print_paths",
+            },
+            "print_paths": {
+                "type": "node",
+                "builder": "print_paths",
+                "next": { "builtin": "dispose" }
             }
         }
     }))

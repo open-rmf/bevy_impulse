@@ -6,6 +6,14 @@ edition = "2021"
 name = "nav-example"
 path = "src/nav_example.rs"
 
+[[bin]]
+name = "fake-plan-generator"
+path = "src/fake_plan_generator.rs"
+
+[[bin]]
+name = "goal-requester"
+path = "src/goal_requester.rs"
+
 [dependencies]
 bevy_app = "0.12"
 bevy_core = "0.12"
@@ -14,6 +22,11 @@ serde = "*"
 schemars = "*"
 serde_json = "*"
 tokio = { version = "1.39", features = ["sync"] }
+clap = { version = "*", features = ["derive"] }
+rand = "*"
 
 rclrs = { git = "https://github.com/mxgrey/ros2_rust", branch = "worker", features = ["serde"] }
 nav_msgs = { version = "*", features = ["serde"] }
+geometry_msgs = { version = "*", features = ["serde"] }
+std_msgs = { version = "*", features = ["serde"] }
+builtin_interfaces = { version = "*", features = ["serde"] }
