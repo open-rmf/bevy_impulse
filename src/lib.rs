@@ -376,9 +376,7 @@ pub mod prelude {
 
     #[cfg(feature = "diagram")]
     pub use crate::{
-        buffer::{
-            JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage,
-        },
-        diagram::{DiagramElementRegistry, Diagram, DiagramError, NodeBuilderOptions},
+        buffer::{JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage},
+        diagram::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions},
     };
 }
