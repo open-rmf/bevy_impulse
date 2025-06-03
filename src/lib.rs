@@ -375,4 +375,6 @@ pub mod prelude {
     pub use crate::buffer::{
         JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage,
     };
+
+    pub use futures::FutureExt;
 }

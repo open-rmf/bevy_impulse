@@ -120,11 +120,11 @@ pub(crate) fn impl_stream_pack(pack_struct: &ItemStruct) -> Result<TokenStream, 
         }
 
         impl #impl_generics ::bevy_impulse::StreamPack for #pack_ident #ty_generics #where_clause {
-            type StreamInputPack = #inputs;
-            type StreamOutputPack = #outputs;
-            type StreamReceivers = #receivers;
-            type StreamChannels = #channels;
-            type StreamBuffers = #buffers;
+            type StreamInputPack = #inputs #ty_generics;
+            type StreamOutputPack = #outputs #ty_generics;
+            type StreamReceivers = #receivers #ty_generics;
+            type StreamChannels = #channels #ty_generics;
+            type StreamBuffers = #buffers #ty_generics;
 
             fn spawn_scope_streams(
                 in_scope: ::bevy_impulse::re_exports::Entity,
