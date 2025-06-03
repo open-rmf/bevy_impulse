@@ -369,6 +369,10 @@ impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
                 session,
             })
     }
+
+    pub fn get_newest<'a>(&'a self, key: &BufferKey<T>) -> Option<&'a T> {
+        self.get(key).ok().map(|view| view.newest()).flatten()
+    }
 }
 
 /// This system parameter lets you get mutable access to a buffer that exists
@@ -397,6 +401,10 @@ where
                 gate,
                 session,
             })
+    }
+
+    pub fn get_newest<'a>(&'a self, key: &BufferKey<T>) -> Option<&'a T> {
+        self.get(key).ok().map(|view| view.newest()).flatten()
     }
 
     pub fn get_mut<'a>(
@@ -488,23 +496,23 @@ where
     T: 'static + Send + Sync,
 {
     /// Iterate over the contents in the buffer
-    pub fn iter(&self) -> IterBufferView<'_, T> {
+    pub fn iter(&self) -> IterBufferView<'a, T> {
         self.storage.iter(self.session)
     }
 
     /// Borrow the oldest item in the buffer.
-    pub fn oldest(&self) -> Option<&T> {
+    pub fn oldest(&self) -> Option<&'a T> {
         self.storage.oldest(self.session)
     }
 
     /// Borrow the newest item in the buffer.
-    pub fn newest(&self) -> Option<&T> {
+    pub fn newest(&self) -> Option<&'a T> {
         self.storage.newest(self.session)
     }
 
     /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
     /// with the highest index being the newest item in the buffer.
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub fn get(&self, index: usize) -> Option<&'a T> {
         self.storage.get(self.session, index)
     }
 
@@ -623,6 +631,31 @@ where
     pub fn newest_mut(&mut self) -> Option<&mut T> {
         self.modified = true;
         self.storage.newest_mut(self.session)
+    }
+
+    /// Modify the newest item in the buffer or create a default-initialized
+    /// item to modify if the buffer was empty.
+    ///
+    /// This may fail to provide a mutable borrow if the buffer was already
+    /// expired or if the buffer capacity was zero.
+    pub fn newest_mut_or_default(&mut self) -> Option<&mut T>
+    where
+        T: Default,
+    {
+        self.newest_mut_or_else(|| T::default())
+    }
+
+    /// Modify the newest item in the buffer or initialize an item if the
+    /// buffer was empty.
+    ///
+    /// This may fail to provide a mutable borrow if the buffer was already
+    /// expired or if the buffer capacity was zero.
+    pub fn newest_mut_or_else(
+        &mut self,
+        f: impl FnOnce() -> T,
+    ) -> Option<&mut T> {
+        self.modified = true;
+        self.storage.newest_mut_or_else(self.session, f)
     }
 
     /// Modify an item in the buffer. Index 0 is the oldest item in the buffer

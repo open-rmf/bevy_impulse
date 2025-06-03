@@ -107,3 +107,10 @@ pub fn zenoh_subscription_node<T: 'static + Send + Sync + Message + Default>(
 
     builder.create_node(service)
 }
+
+pub fn zenoh_publisher_node<T: 'static + Send + Sync>(
+    topic_name: Arc<str>,
+    builder: &mut Builder,
+) -> Node<(), Result<(), ArcError>> {
+
+}
