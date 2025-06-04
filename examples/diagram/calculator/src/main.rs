@@ -79,7 +79,7 @@ fn run(args: RunArgs) -> Result<(), Box<dyn Error>> {
 }
 
 async fn serve(_args: ServeArgs) -> Result<(), Box<dyn Error>> {
-    println!("Serving diagram editor at http://localhost:3000/diagram_editor");
+    println!("Serving diagram editor at http://localhost:3000");
 
     let router = new_router();
     let listener = tokio::net::TcpListener::bind("localhost:3000")
