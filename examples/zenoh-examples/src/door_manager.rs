@@ -60,10 +60,10 @@ fn main() {
             let door_control_buffers = DoorControlBuffers::select_buffers(
                 position_buffer,
                 command_buffer,
+                status_buffer,
             );
 
             let controller_node = builder.create_node(door_controller);
-            builder.connect(controller_node.streams.status, status_buffer.input_slot());
 
             builder.chain(scope.input).fork_clone((
                 |setup: Chain<_>| setup
@@ -124,11 +124,6 @@ impl Default for DoorPosition {
     }
 }
 
-#[derive(StreamPack)]
-struct DoorControlStream {
-    status: protos::door_state::Status,
-}
-
 #[derive(Clone, Debug, Default)]
 struct DoorSessions {
     names: HashSet<String>,
@@ -171,13 +166,15 @@ fn process_request(
 struct DoorControlBuffers {
     position: BufferKey<DoorPosition>,
     command: BufferKey<DoorCommand>,
+    status: BufferKey<protos::door_state::Status>
 }
 
 fn door_controller(
-    In(input): ContinuousServiceInput<((), DoorControlBuffers), (), DoorControlStream>,
-    mut requests: ContinuousQuery<((), DoorControlBuffers), (), DoorControlStream>,
+    In(input): ContinuousServiceInput<((), DoorControlBuffers), ()>,
+    mut requests: ContinuousQuery<((), DoorControlBuffers), ()>,
     mut position_access: BufferAccessMut<DoorPosition>,
     command_access: BufferAccess<DoorCommand>,
+    mut status_access: BufferAccessMut<protos::door_state::Status>,
     time: Res<Time>,
 ) {
     let mut orders = requests.get_mut(&input.key).unwrap();
@@ -195,6 +192,10 @@ fn door_controller(
             return;
         };
 
+        let Ok(mut status) = status_access.get_mut(&keys.status) else {
+            return;
+        };
+
         match command {
             DoorCommand::Close => {
                 if state.position < 1.0 {
@@ -203,7 +204,9 @@ fn door_controller(
                     let new_position = f32::min(state.position + delta, 1.0);
                     state.position = new_position;
                     if new_position == 1.0 {
-                        order.streams().status.send(protos::door_state::Status::Closed);
+                        status.push(protos::door_state::Status::Closed);
+                    } else if status.newest().is_none_or(|status| *status != protos::door_state::Status::Moving) {
+                        status.push(protos::door_state::Status::Moving);
                     }
                 }
             }
@@ -214,7 +217,9 @@ fn door_controller(
                     let new_position = f32::max(state.position - delta, 0.0);
                     state.position = new_position;
                     if new_position == 0.0 {
-                        order.streams().status.send(protos::door_state::Status::Open);
+                        status.push(protos::door_state::Status::Open);
+                    } else if status.newest().is_none_or(|status| *status != protos::door_state::Status::Moving) {
+                        status.push(protos::door_state::Status::Moving);
                     }
                 }
             }
