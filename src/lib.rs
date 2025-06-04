@@ -339,11 +339,30 @@ impl Plugin for ImpulsePlugin {
     }
 }
 
+/// This plugin adds [`ImpulsePlugin`] plus a few more that allows plus a few
+/// more plugins that allow create a sufficient but minimal app for executing
+/// workflows.
+#[derive(Default)]
+pub struct ImpulseAppPlugin {}
+
+impl Plugin for ImpulseAppPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ImpulsePlugin::default(),
+            bevy_core::TaskPoolPlugin::default(),
+            bevy_core::TypeRegistrationPlugin,
+            bevy_core::FrameCountPlugin,
+            bevy_app::ScheduleRunnerPlugin::default(),
+        ));
+    }
+}
+
 pub mod prelude {
     pub use crate::{
         buffer::{
             Accessible, Accessor, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess,
-            AnyMessageBox, AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey,
+            AnyMessageBox, AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferGateAccess,
+            BufferGateAccessMut, BufferKey,
             BufferMap, BufferMapLayout, BufferSettings, BufferWorldAccess, Bufferable, Buffering,
             IncompatibleLayout, IterBufferable, Joinable, Joined, RetentionPolicy,
         },
@@ -369,7 +388,7 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
-        ImpulsePlugin,
+        ImpulsePlugin, ImpulseAppPlugin,
     };
 
     pub use bevy_ecs::prelude::In;

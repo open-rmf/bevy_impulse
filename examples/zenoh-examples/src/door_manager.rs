@@ -22,17 +22,19 @@ use bevy_time::Time;
 use clap::Parser;
 use zenoh_examples::protos;
 use std::collections::HashSet;
+use serde_json::json;
 use tracing::error;
 
 use zenoh_examples::{
     zenoh_publisher_node, zenoh_subscription_node,
-    ZenohSubscriptionConfig,
+    ZenohSubscriptionConfig, ArcError,
 };
 
 fn main() {
     let args = Args::parse();
 
     let mut app = App::new();
+    app.add_plugins(ImpulseAppPlugin::default());
     let mut registry = DiagramElementRegistry::new();
 
     let process_door_request = app.world.spawn_service(process_request);
@@ -77,6 +79,19 @@ fn main() {
         .no_deserializing()
         .register_message::<protos::DoorRequest>();
 
+    let door_state_notifier = app.world.spawn_service(door_state_notifier.into_blocking_service());
+    registry
+        .opt_out()
+        .no_serializing()
+        .no_deserializing()
+        .register_node_builder(
+            NodeBuilderOptions::new("door_state_notifier"),
+            move |builder, _: ()| {
+                builder.create_node(door_state_notifier)
+            }
+        )
+        .with_listen();
+
     registry
         .opt_out()
         .no_serializing()
@@ -88,7 +103,76 @@ fn main() {
             }
         );
 
+    for door_name in args.names {
+        let request_topic_name = format!("door_request/{door_name}");
+        let state_topic_name = format!("door_state/{door_name}");
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "startup",
+            "ops": {
+                "start": {
+                    "type": "fork_clone",
+                    "next": [
+                        "controller_access",
+                        "receive_requests"
+                    ]
+                },
+                "controller_access": {
+                    "type": "buffer_access",
+                    "buffers": {
+                        "command": "command_buffer",
+                        "position": "position_buffer"
+                    },
+                    "next": "controller"
+                },
+                "controller": {
+                    "type": "node",
+                    "builder": "door_controller",
+                    "next": { "builtin": "dispose" }
+                },
+                "receive_requests": {
+                    "type": "node",
+                    "builder": "door_request_receiver",
+                    "config": {
+                        "topic_name": request_topic_name
+                    },
+                    "next": { "builtin": "terminate" },
+                    "stream_out": {
+                        "sample": "process_requests"
+                    }
+                },
+                "process_requests": {
+                    "type": "node",
+                    "builder": "process_door_request",
+                    "next": "command_buffer"
+                },
+                "command_buffer": { "type": "buffer" },
+                "position_buffer": { "type": "buffer" },
+                "session_buffer": { "type": "buffer" },
+                "state_notifier": {
+                    "type": "node",
+                    "builder": "door_state_notifier",
+                    "next": "door_state_publisher"
+                },
+                "publish_states": {
+                    "type": "node",
+                    "builder": "door_state_publisher",
+                    "config": {
+                        "topic_name": state_topic_name
+                    },
+                    "next": { "builtin": "dispose" }
+                }
+            }
+        }))
+        .unwrap();
 
+        app.world.command(|commands| {
+            let workflow = diagram.spawn_io_workflow::<(), Result<(), ArcError>>(commands, &mut registry).unwrap();
+            let _ = commands.request((), workflow).detach();
+        });
+    }
+
+    app.run();
 }
 
 #[derive(Parser, Debug)]
@@ -110,6 +194,15 @@ struct DoorPosition {
     nominal_speed: f32,
 }
 
+impl Default for DoorPosition {
+    fn default() -> Self {
+        DoorPosition {
+            position: 1.0,
+            nominal_speed: 0.2
+        }
+    }
+}
+
 #[derive(StreamPack)]
 struct DoorControlStream {
     status: protos::door_state::Status,
@@ -123,38 +216,33 @@ struct DoorSessions {
 #[derive(Clone, Accessor)]
 struct ProcessRequestBuffers {
     sessions: BufferKey<DoorSessions>,
-    commands: BufferKey<DoorCommand>,
 }
 
 fn process_request(
     In(service): BlockingServiceInput<(protos::DoorRequest, ProcessRequestBuffers)>,
     mut session_access: BufferAccessMut<DoorSessions>,
-    mut command_access: BufferAccessMut<DoorCommand>,
-) {
+) -> DoorCommand {
     let (request, keys) = service.request;
     let Ok(mut sessions) = session_access.get_mut(&keys.sessions) else {
         error!("Session buffer is broken");
-        return;
+        return DoorCommand::Close;
     };
 
     let sessions = sessions.newest_mut_or_default().unwrap();
 
-    let Ok(mut commands) = command_access.get_mut(&keys.commands) else {
-        error!("Command buffer is broken");
-        return;
-    };
-
     match request.mode() {
         protos::door_request::Mode::Open => {
-            if sessions.names.insert(request.session) {
-                commands.push(DoorCommand::Open);
-            }
+            sessions.names.insert(request.session);
         }
         protos::door_request::Mode::Release => {
-            if sessions.names.remove(&request.session) {
-                commands.push(DoorCommand::Close);
-            }
+            sessions.names.remove(&request.session);
         }
+    }
+
+    if sessions.names.is_empty() {
+        DoorCommand::Close
+    } else {
+        DoorCommand::Open
     }
 }
 
@@ -178,7 +266,7 @@ fn door_controller(
             error!("Position buffer is broken");
             return;
         };
-        let Some(state) = position_buffer.newest_mut() else {
+        let Some(state) = position_buffer.newest_mut_or_default() else {
             return;
         };
 

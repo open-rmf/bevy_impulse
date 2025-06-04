@@ -31,7 +31,7 @@ use std::{
 use zenoh::Session;
 use zenoh_ext::{AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig, HistoryConfig, RecoveryConfig};
 
-type ArcError = Arc<dyn Error + Send + Sync + 'static>;
+pub type ArcError = Arc<dyn Error + Send + Sync + 'static>;
 
 #[derive(Default)]
 pub struct ZenohImpulsePlugin {}
