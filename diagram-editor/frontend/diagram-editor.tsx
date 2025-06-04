@@ -118,8 +118,8 @@ const DiagramEditor = () => {
       return;
     }
 
-    const decodedDiagram = atob(diagramParam);
     try {
+      const decodedDiagram = atob(diagramParam);
       loadDiagram(decodedDiagram);
     } catch (e) {
       if (e instanceof Error) {
