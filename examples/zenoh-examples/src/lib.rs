@@ -21,12 +21,15 @@ use bevy_impulse::prelude::*;
 use futures::future::Shared;
 use prost::Message;
 pub mod protos;
+use schemars::JsonSchema;
+use serde::{Serialize, Deserialize};
 use std::{
     error::Error,
-    sync::Arc
+    sync::Arc,
+    future::Future,
 };
 use zenoh::Session;
-use zenoh_ext::{AdvancedSubscriberBuilderExt, HistoryConfig, RecoveryConfig};
+use zenoh_ext::{AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig, HistoryConfig, RecoveryConfig};
 
 type ArcError = Arc<dyn Error + Send + Sync + 'static>;
 
@@ -61,8 +64,9 @@ impl FromWorld for ZenohSession {
     }
 }
 
-pub struct ZenoSubscriptionRequest {
-    pub topic_name: String,
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ZenohSubscriptionConfig {
+    pub topic_name: Arc<str>,
 }
 
 #[derive(StreamPack)]
@@ -74,43 +78,76 @@ pub fn zenoh_subscription_node<T: 'static + Send + Sync + Message + Default>(
     topic_name: Arc<str>,
     builder: &mut Builder,
 ) -> Node<(), Result<(), ArcError>, ZenohSubscriptionStream<T>> {
-    let service = builder.commands().spawn_service(
-        move |
-            In(input): AsyncServiceInput<(), ZenohSubscriptionStream<T>>,
-            session: Res<ZenohSession>,
-        | {
-            let session = session.promise.clone();
-            let topic_name = topic_name.clone();
-            async move {
-                let session = session.await.available().unwrap()?;
+    let callback = move |
+        In(input): AsyncCallbackInput<(), ZenohSubscriptionStream<T>>,
+        session: Res<ZenohSession>,
+    | {
+        let session = session.promise.clone();
+        let topic_name = topic_name.clone();
+        async move {
+            let session = session.await.available().unwrap()?;
 
-                let subscriber = session
-                    .declare_subscriber(topic_name.as_ref())
-                    .history(HistoryConfig::default().detect_late_publishers())
-                    .recovery(RecoveryConfig::default())
-                    .await?;
+            let subscriber = session
+                .declare_subscriber(topic_name.as_ref())
+                .history(HistoryConfig::default().detect_late_publishers())
+                .recovery(RecoveryConfig::default())
+                .await?;
 
-                loop {
-                    let sample = subscriber.recv_async().await?;
-                    match T::decode(&*sample.payload().to_bytes()) {
-                        Ok(msg) => {
-                            input.streams.sample.send(msg);
-                        }
-                        Err(err) => {
-                            println!("Error decoding incoming sample on topic [{topic_name}]: {err}");
-                        }
+            loop {
+                let sample = subscriber.recv_async().await?;
+                match T::decode(&*sample.payload().to_bytes()) {
+                    Ok(msg) => {
+                        input.streams.sample.send(msg);
+                    }
+                    Err(err) => {
+                        println!("Error decoding incoming sample on topic [{topic_name}]: {err}");
                     }
                 }
             }
         }
-    );
+    };
 
-    builder.create_node(service)
+    builder.create_node(callback.as_callback())
 }
 
-pub fn zenoh_publisher_node<T: 'static + Send + Sync>(
+pub fn zenoh_publisher_node<T: 'static + Send + Sync + Message>(
     topic_name: Arc<str>,
     builder: &mut Builder,
-) -> Node<(), Result<(), ArcError>> {
+) -> Node<T, Result<(), ArcError>> {
+    let publisher = builder.commands().request(
+        topic_name,
+        get_zenoh_publisher.into_async_callback(),
+    ).take_response();
+    let publisher = publisher.shared();
 
+    let callback = move |message: T| {
+        let publisher = publisher.clone();
+        async move {
+            let publisher = publisher.await.available().unwrap()?;
+
+            publisher.put(zenoh::bytes::ZBytes::from(message.encode_to_vec())).await?;
+            Ok(())
+        }
+    };
+
+    builder.create_map_async(callback)
+}
+
+fn get_zenoh_publisher(
+    In(topic_name): In<Arc<str>>,
+    session: Res<ZenohSession>,
+) -> impl Future<Output = Result<Arc<AdvancedPublisher<'static>>, ArcError>> {
+    let session_promise = session.promise.clone();
+
+    async move {
+        let session = session_promise.await.available().unwrap()?;
+        let publisher = session
+            .declare_publisher(topic_name.to_string())
+            .cache(CacheConfig::default().max_samples(1))
+            .sample_miss_detection(Default::default())
+            .publisher_detection()
+            .await?;
+
+        Ok(Arc::new(publisher))
+    }
 }

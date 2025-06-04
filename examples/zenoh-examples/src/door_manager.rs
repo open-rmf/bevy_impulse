@@ -15,6 +15,8 @@
  *
 */
 
+use bevy_app::{App, Update};
+use bevy_ecs::prelude::Res;
 use bevy_impulse::prelude::*;
 use bevy_time::Time;
 use clap::Parser;
@@ -22,14 +24,76 @@ use zenoh_examples::protos;
 use std::collections::HashSet;
 use tracing::error;
 
+use zenoh_examples::{
+    zenoh_publisher_node, zenoh_subscription_node,
+    ZenohSubscriptionConfig,
+};
+
 fn main() {
     let args = Args::parse();
+
+    let mut app = App::new();
+    let mut registry = DiagramElementRegistry::new();
+
+    let process_door_request = app.world.spawn_service(process_request);
+    registry
+        .opt_out()
+        .no_serializing()
+        .no_deserializing()
+        .register_node_builder(
+            NodeBuilderOptions::new("process_door_request"),
+            move |builder, _config: ()| {
+                builder.create_node(process_door_request)
+            },
+        )
+        .with_buffer_access();
+
+    let door_controller = app.spawn_continuous_service(Update, door_controller);
+    registry
+        .opt_out()
+        .no_serializing()
+        .no_deserializing()
+        .register_node_builder(
+            NodeBuilderOptions::new("door_controller"),
+            move |builder, _config: ()| {
+                builder.create_node(door_controller)
+            },
+        );
+
+    registry
+        .opt_out()
+        .no_serializing()
+        .no_deserializing()
+        .register_node_builder(
+            NodeBuilderOptions::new("door_request_subscription"),
+            |builder, config: ZenohSubscriptionConfig| {
+                zenoh_subscription_node::<protos::DoorRequest>(config.topic_name, builder)
+            }
+        );
+
+    registry
+        .opt_out()
+        .no_serializing()
+        .no_deserializing()
+        .register_message::<protos::DoorRequest>();
+
+    registry
+        .opt_out()
+        .no_serializing()
+        .no_deserializing()
+        .register_node_builder(
+            NodeBuilderOptions::new("door_state_publisher"),
+            |builder, config: ZenohSubscriptionConfig| {
+                zenoh_publisher_node::<protos::DoorState>(config.topic_name, builder)
+            }
+        );
 
 
 }
 
 #[derive(Parser, Debug)]
 struct Args {
+    #[arg(short, long, help = "The names of all doors that are being managed by this door manager")]
     names: Vec<String>,
 }
 
@@ -56,7 +120,7 @@ struct DoorSessions {
     names: HashSet<String>,
 }
 
-#[derive(Clone, Copy, Accessor)]
+#[derive(Clone, Accessor)]
 struct ProcessRequestBuffers {
     sessions: BufferKey<DoorSessions>,
     commands: BufferKey<DoorCommand>,
@@ -70,12 +134,14 @@ fn process_request(
     let (request, keys) = service.request;
     let Ok(mut sessions) = session_access.get_mut(&keys.sessions) else {
         error!("Session buffer is broken");
+        return;
     };
 
     let sessions = sessions.newest_mut_or_default().unwrap();
 
     let Ok(mut commands) = command_access.get_mut(&keys.commands) else {
         error!("Command buffer is broken");
+        return;
     };
 
     match request.mode() {
@@ -92,7 +158,7 @@ fn process_request(
     }
 }
 
-#[derive(Clone, Copy, Accessor)]
+#[derive(Clone, Accessor)]
 struct DoorControlBuffers {
     position: BufferKey<DoorPosition>,
     command: BufferKey<DoorCommand>,
@@ -102,12 +168,12 @@ fn door_controller(
     In(input): ContinuousServiceInput<((), DoorControlBuffers), (), DoorControlStream>,
     mut requests: ContinuousQuery<((), DoorControlBuffers), (), DoorControlStream>,
     mut position_access: BufferAccessMut<DoorPosition>,
-    mut command_access: BufferAccess<DoorCommand>,
+    command_access: BufferAccess<DoorCommand>,
     time: Res<Time>,
 ) {
     let mut orders = requests.get_mut(&input.key).unwrap();
     orders.for_each(|order| {
-        let keys = order.request().1;
+        let keys = order.request().1.clone();
         let Ok(mut position_buffer) = position_access.get_mut(&keys.position) else {
             error!("Position buffer is broken");
             return;
@@ -116,7 +182,7 @@ fn door_controller(
             return;
         };
 
-        let Some(command_buffer) = command_access.get_newest(&keys.command) else {
+        let Some(command) = command_access.get_newest(&keys.command) else {
             return;
         };
 
@@ -145,4 +211,28 @@ fn door_controller(
             }
         }
     });
+}
+
+#[derive(Clone, Accessor)]
+struct DoorStateBuffers {
+    sessions: BufferKey<DoorSessions>,
+    status: BufferKey<protos::door_state::Status>,
+}
+
+fn door_state_notifier(
+    In(input): In<DoorStateBuffers>,
+    sessions_access: BufferAccess<DoorSessions>,
+    status_access: BufferAccess<protos::door_state::Status>,
+) -> Option<protos::DoorState> {
+    let Some(sessions) = sessions_access.get_newest(&input.sessions) else {
+        return None;
+    };
+    let Some(status) = status_access.get_newest(&input.status) else {
+        return None;
+    };
+
+    Some(protos::DoorState {
+        status: (*status).into(),
+        sessions: sessions.names.iter().cloned().collect(),
+    })
 }

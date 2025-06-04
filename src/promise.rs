@@ -404,7 +404,7 @@ impl Default for Interrupter {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*};
+    use crate::prelude::*;
 
     #[test]
     fn test_promise_flatten() {
