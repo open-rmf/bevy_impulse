@@ -13,11 +13,5 @@ export default defineConfig({
       viewport: 'width=device-width, initial-scale=1.0',
     },
   },
-  output: {
-    assetPrefix: '/diagram_editor',
-  },
-  dev: {
-    assetPrefix: '/diagram_editor',
-  },
   plugins: [pluginReact()],
 });

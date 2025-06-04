@@ -1,9 +1,8 @@
-use axum::Router;
 use bevy_impulse::{
     Diagram, DiagramElementRegistry, DiagramError, ImpulsePlugin, NodeBuilderOptions, Promise,
     RequestExt, RunCommandsOnWorldExt,
 };
-use bevy_impulse_diagram_editor::nest_diagram_router;
+use bevy_impulse_diagram_editor::new_router;
 use clap::Parser;
 use std::{error::Error, fs::File, str::FromStr};
 
@@ -82,7 +81,7 @@ fn run(args: RunArgs) -> Result<(), Box<dyn Error>> {
 async fn serve(_args: ServeArgs) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:3000/diagram_editor");
 
-    let router = nest_diagram_router(Router::new());
+    let router = new_router();
     let listener = tokio::net::TcpListener::bind("localhost:3000")
         .await
         .unwrap();
