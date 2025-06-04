@@ -22,12 +22,11 @@ use bevy_time::{Time, TimePlugin};
 use clap::Parser;
 use zenoh_examples::protos;
 use std::collections::HashSet;
-use serde_json::json;
 use tracing::error;
 
 use zenoh_examples::{
     zenoh_publisher_node, zenoh_subscription_node,
-    ZenohSubscriptionConfig, ArcError,
+    ArcError, ZenohImpulsePlugin,
 };
 
 fn main() {
@@ -36,148 +35,59 @@ fn main() {
     let mut app = App::new();
     app.add_plugins((
         ImpulseAppPlugin::default(),
+        ZenohImpulsePlugin::default(),
         TimePlugin::default(),
     ));
-    let mut registry = DiagramElementRegistry::new();
 
     let process_door_request = app.world.spawn_service(process_request);
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_node_builder(
-            NodeBuilderOptions::new("process_door_request"),
-            move |builder, _config: ()| {
-                builder.create_node(process_door_request)
-            },
-        )
-        .with_buffer_access();
-
     let door_controller = app.spawn_continuous_service(Update, door_controller);
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_node_builder(
-            NodeBuilderOptions::new("door_controller"),
-            move |builder, _config: ()| {
-                builder.create_node(door_controller)
-            },
-        );
-
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_node_builder(
-            NodeBuilderOptions::new("door_request_subscription"),
-            |builder, config: ZenohSubscriptionConfig| {
-                zenoh_subscription_node::<protos::DoorRequest>(config.topic_name, builder)
-            }
-        );
-
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_message::<protos::DoorRequest>();
-
     let door_state_notifier = app.world.spawn_service(door_state_notifier.into_blocking_service());
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_node_builder(
-            NodeBuilderOptions::new("door_state_notifier"),
-            move |builder, _: ()| {
-                builder.create_node(door_state_notifier)
-            }
-        )
-        .with_listen();
-
-    registry
-        .opt_out()
-        .no_serializing()
-        .no_deserializing()
-        .register_node_builder(
-            NodeBuilderOptions::new("door_state_publisher"),
-            |builder, config: ZenohSubscriptionConfig| {
-                zenoh_publisher_node::<protos::DoorState>(config.topic_name, builder)
-            }
-        );
 
     for door_name in args.names {
         let request_topic_name = format!("door_request/{door_name}");
         let state_topic_name = format!("door_state/{door_name}");
-        let diagram = Diagram::from_json(json!({
-            "version": "0.1.0",
-            "start": "startup",
-            "ops": {
-                "start": {
-                    "type": "fork_clone",
-                    "next": [
-                        "controller_access",
-                        "receive_requests"
-                    ]
-                },
-                "controller_access": {
-                    "type": "buffer_access",
-                    "buffers": {
-                        "command": "command_buffer",
-                        "position": "position_buffer"
-                    },
-                    "next": "controller"
-                },
-                "controller": {
-                    "type": "node",
-                    "builder": "door_controller",
-                    "next": { "builtin": "dispose" }
-                },
-                "receive_requests": {
-                    "type": "node",
-                    "builder": "door_request_subscription",
-                    "config": {
-                        "topic_name": request_topic_name
-                    },
-                    "next": { "builtin": "terminate" },
-                    "stream_out": {
-                        "sample": "process_requests_access"
-                    }
-                },
-                "process_requests_access": {
-                    "type": "buffer_access",
-                    "buffers": {
-                        "sessions": "session_buffer"
-                    },
-                    "next": "process_requests"
-                },
-                "process_requests": {
-                    "type": "node",
-                    "builder": "process_door_request",
-                    "next": "command_buffer"
-                },
-                "command_buffer": { "type": "buffer" },
-                "position_buffer": { "type": "buffer" },
-                "session_buffer": { "type": "buffer" },
-                "state_notifier": {
-                    "type": "node",
-                    "builder": "door_state_notifier",
-                    "next": "door_state_publisher"
-                },
-                "publish_states": {
-                    "type": "node",
-                    "builder": "door_state_publisher",
-                    "config": {
-                        "topic_name": state_topic_name
-                    },
-                    "next": { "builtin": "dispose" }
-                }
-            }
-        }))
-        .unwrap();
+
+        let workflow = app.world.spawn_io_workflow::<(), Result<(), ArcError>, _>(|scope, builder| {
+            let command_buffer = builder.create_buffer(BufferSettings::default());
+            let position_buffer = builder.create_buffer(BufferSettings::default());
+            let session_buffer = builder.create_buffer(BufferSettings::default());
+            let status_buffer = builder.create_buffer(BufferSettings::default());
+
+            let publisher = zenoh_publisher_node::<protos::DoorState>(state_topic_name.as_str().into(), builder);
+            let subscriber = zenoh_subscription_node::<protos::DoorRequest>(request_topic_name.as_str().into(), builder);
+            builder.connect(subscriber.output, scope.terminate);
+
+            let door_control_buffers = DoorControlBuffers::select_buffers(
+                position_buffer,
+                command_buffer,
+            );
+
+            let controller_node = builder.create_node(door_controller);
+            builder.connect(controller_node.streams.status, status_buffer.input_slot());
+
+            builder.chain(scope.input).fork_clone((
+                |setup: Chain<_>| setup
+                    .with_access(door_control_buffers)
+                    .connect(controller_node.input),
+                |setup: Chain<_>| setup.connect(subscriber.input),
+            ));
+
+            let process_request_buffers = ProcessRequestBuffers::select_buffers(session_buffer);
+            builder
+                .chain(subscriber.streams.sample)
+                .with_access(process_request_buffers)
+                .then(process_door_request)
+                .connect(command_buffer.input_slot());
+
+            let door_state_buffers = DoorStateBuffers::select_buffers(session_buffer, status_buffer);
+            builder
+                .listen(door_state_buffers)
+                .then(door_state_notifier)
+                .dispose_on_none()
+                .connect(publisher.input);
+        });
 
         app.world.command(|commands| {
-            let workflow = diagram.spawn_io_workflow::<(), Result<(), ArcError>>(commands, &mut registry).unwrap();
             let _ = commands.request((), workflow).detach();
         });
     }
@@ -188,7 +98,7 @@ fn main() {
 #[derive(Parser, Debug)]
 struct Args {
     /// The names of all doors that are being managed by this door manager
-    #[arg(short, long, required = true)]
+    #[arg(short, long, num_args = 1.., required = true)]
     names: Vec<String>,
 }
 

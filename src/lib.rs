@@ -388,7 +388,7 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
-        ImpulsePlugin, ImpulseAppPlugin,
+        ImpulsePlugin, ImpulseAppPlugin, Section,
     };
 
     pub use bevy_ecs::prelude::In;

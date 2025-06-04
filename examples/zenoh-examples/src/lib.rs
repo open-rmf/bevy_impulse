@@ -65,7 +65,7 @@ impl FromWorld for ZenohSession {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ZenohSubscriptionConfig {
+pub struct ZenohTopicConfig {
     pub topic_name: Arc<str>,
 }
 
@@ -86,6 +86,7 @@ pub fn zenoh_subscription_node<T: 'static + Send + Sync + Message + Default>(
         let topic_name = topic_name.clone();
         async move {
             let session = session.await.available().unwrap()?;
+            println!("Listening for messages on topic [{topic_name}]");
 
             let subscriber = session
                 .declare_subscriber(topic_name.as_ref())
@@ -115,16 +116,18 @@ pub fn zenoh_publisher_node<T: 'static + Send + Sync + Message>(
     builder: &mut Builder,
 ) -> Node<T, Result<(), ArcError>> {
     let publisher = builder.commands().request(
-        topic_name,
+        topic_name.clone(),
         get_zenoh_publisher.into_async_callback(),
     ).take_response();
     let publisher = publisher.shared();
 
     let callback = move |message: T| {
         let publisher = publisher.clone();
+        let topic_name = topic_name.clone();
         async move {
             let publisher = publisher.await.available().unwrap()?;
 
+            println!("Publishing message on topic [{topic_name}]:\n{message:#?}");
             publisher.put(zenoh::bytes::ZBytes::from(message.encode_to_vec())).await?;
             Ok(())
         }
