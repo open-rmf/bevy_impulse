@@ -18,7 +18,7 @@
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::Res;
 use bevy_impulse::prelude::*;
-use bevy_time::Time;
+use bevy_time::{Time, TimePlugin};
 use clap::Parser;
 use zenoh_examples::protos;
 use std::collections::HashSet;
@@ -34,7 +34,10 @@ fn main() {
     let args = Args::parse();
 
     let mut app = App::new();
-    app.add_plugins(ImpulseAppPlugin::default());
+    app.add_plugins((
+        ImpulseAppPlugin::default(),
+        TimePlugin::default(),
+    ));
     let mut registry = DiagramElementRegistry::new();
 
     let process_door_request = app.world.spawn_service(process_request);
@@ -132,14 +135,21 @@ fn main() {
                 },
                 "receive_requests": {
                     "type": "node",
-                    "builder": "door_request_receiver",
+                    "builder": "door_request_subscription",
                     "config": {
                         "topic_name": request_topic_name
                     },
                     "next": { "builtin": "terminate" },
                     "stream_out": {
-                        "sample": "process_requests"
+                        "sample": "process_requests_access"
                     }
+                },
+                "process_requests_access": {
+                    "type": "buffer_access",
+                    "buffers": {
+                        "sessions": "session_buffer"
+                    },
+                    "next": "process_requests"
                 },
                 "process_requests": {
                     "type": "node",
@@ -177,7 +187,8 @@ fn main() {
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(short, long, help = "The names of all doors that are being managed by this door manager")]
+    /// The names of all doors that are being managed by this door manager
+    #[arg(short, long, required = true)]
     names: Vec<String>,
 }
 

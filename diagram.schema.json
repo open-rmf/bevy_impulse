@@ -51,9 +51,6 @@
     "BufferSelection": {
       "anyOf": [
         {
-          "$ref": "#/definitions/NextOperation"
-        },
-        {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/definitions/NextOperation"

@@ -27,7 +27,7 @@ use std::{ops::RangeBounds, sync::Arc};
 use thiserror::Error as ThisError;
 
 use crate::{
-    Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
+    Builder, Chain, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
 };
 
 mod any_buffer;

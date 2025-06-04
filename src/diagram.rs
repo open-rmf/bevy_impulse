@@ -220,7 +220,6 @@ impl JsonSchema for NamespacedOperation {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub enum BufferSelection {
-    Single(NextOperation),
     Dict(HashMap<String, NextOperation>),
     Array(Vec<NextOperation>),
 }
@@ -228,7 +227,6 @@ pub enum BufferSelection {
 impl BufferSelection {
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Single(_) => false,
             Self::Dict(d) => d.is_empty(),
             Self::Array(a) => a.is_empty(),
         }
