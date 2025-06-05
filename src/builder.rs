@@ -810,6 +810,7 @@ impl CleanupWorkflowConditions {
 mod tests {
     use crate::{prelude::*, testing::*, CancellationCause};
     use smallvec::SmallVec;
+    use std::time::Instant;
 
     #[test]
     fn test_disconnected_workflow() {
@@ -1297,5 +1298,160 @@ mod tests {
             .available()
             .is_some_and(|v| v == expectation));
         assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn benchmarks() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let (start_test, end_test) = build_benchmark_fixture(scope, builder);
+            builder.connect(start_test, end_test);
+        });
+
+        let mut promise =
+            context.command(|commands| commands.request((), workflow).take_response());
+        context.run_with_conditions(&mut promise, Duration::from_secs(10));
+        assert!(context.no_unhandled_errors());
+        let result = promise.take().available().unwrap();
+        println!("Performance for basic connection:\n{result:#?}");
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let (start_test, end_test) = build_benchmark_fixture(scope, builder);
+            builder
+                .chain(start_test)
+                .then_io_scope(|scope, builder| {
+                    builder.connect(scope.input, scope.terminate);
+                })
+                .connect(end_test);
+        });
+
+        let mut promise =
+            context.command(|commands| commands.request((), workflow).take_response());
+        context.run_with_conditions(&mut promise, Duration::from_secs(10));
+        assert!(context.no_unhandled_errors());
+        let result = promise.take().available().unwrap();
+        println!("Performance for basic connection:\n{result:#?}");
+    }
+
+    fn build_benchmark_fixture(
+        scope: Scope<(), TimeStats>,
+        builder: &mut Builder,
+    ) -> (Output<Instant>, InputSlot<Instant>) {
+        let initial_time = builder
+            .commands()
+            .spawn_service(get_initial_time.into_blocking_service());
+        let finish_time = builder
+            .commands()
+            .spawn_service(finish_time_range.into_blocking_service());
+        let collect_samples = builder
+            .commands()
+            .spawn_service(collect_samples.into_blocking_service());
+
+        let samples = builder.create_buffer(BufferSettings::keep_all());
+
+        let initial_node = builder.create_node(initial_time);
+        let finish_node = builder.create_node(finish_time);
+
+        builder.connect(scope.input, initial_node.input);
+        builder.connect(finish_node.output, samples.input_slot());
+
+        builder
+            .listen(samples)
+            .then(collect_samples)
+            .dispose_on_none()
+            .connect(scope.terminate);
+
+        builder
+            .listen(samples)
+            .map_block(|_| ())
+            .connect(initial_node.input);
+
+        (initial_node.output, finish_node.input)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TimeRange {
+        initial_time: Instant,
+        finish_time: Instant,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TimeStats {
+        #[allow(unused)]
+        sample_count: usize,
+        #[allow(unused)]
+        average: Duration,
+        #[allow(unused)]
+        std_dev: Duration,
+        #[allow(unused)]
+        highest: Duration,
+        #[allow(unused)]
+        lowest: Duration,
+    }
+
+    impl TimeStats {
+        fn new(samples: impl IntoIterator<Item = TimeRange>) -> Self {
+            let samples: Vec<_> = samples
+                .into_iter()
+                .map(|s| s.finish_time - s.initial_time)
+                .collect();
+            let sample_count = samples.len();
+
+            let mut highest = None;
+            let mut lowest = None;
+            let mut average = Duration::new(0, 0);
+            for sample in &samples {
+                average += *sample;
+                if highest.is_none_or(|h| *sample > h) {
+                    highest = Some(*sample);
+                }
+
+                if lowest.is_none_or(|l| *sample < l) {
+                    lowest = Some(*sample);
+                }
+            }
+
+            let average = average / sample_count as u32;
+            let mut radicand = 0.0;
+            for sample in samples {
+                let delta = (sample.as_nanos() as i64 - average.as_nanos() as i64) as f64;
+                radicand += f64::powf(delta, 2.0);
+            }
+
+            let std_dev = Duration::from_nanos(f64::sqrt(radicand) as u64);
+            let highest = highest.unwrap();
+            let lowest = lowest.unwrap();
+            TimeStats {
+                sample_count,
+                average,
+                std_dev,
+                highest,
+                lowest,
+            }
+        }
+    }
+
+    fn get_initial_time(_: In<()>) -> Instant {
+        Instant::now()
+    }
+
+    fn finish_time_range(In(initial_time): In<Instant>) -> TimeRange {
+        TimeRange {
+            initial_time,
+            finish_time: Instant::now(),
+        }
+    }
+
+    fn collect_samples(
+        In(key): In<BufferKey<TimeRange>>,
+        access: BufferAccess<TimeRange>,
+    ) -> Option<TimeStats> {
+        let samples = access.get(&key).unwrap();
+        if samples.len() >= 1000 {
+            Some(TimeStats::new(samples.iter().copied()))
+        } else {
+            None
+        }
     }
 }

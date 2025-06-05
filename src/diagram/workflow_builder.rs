@@ -555,11 +555,6 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         };
 
         match inputs {
-            BufferSelection::Single(op_id) => {
-                let mut buffer_map = BufferMap::with_capacity(1);
-                buffer_map.insert(BufferIdentifier::Index(0), attempt_get_buffer(op_id)?);
-                Ok(buffer_map)
-            }
             BufferSelection::Dict(mapping) => {
                 let mut buffer_map = BufferMap::with_capacity(mapping.len());
                 for (k, op_id) in mapping {

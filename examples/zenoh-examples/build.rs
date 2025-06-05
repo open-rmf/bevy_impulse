@@ -15,17 +15,12 @@
  *
 */
 
-//! This module contains symbols that are being re-exported so they can be used
-//! by bevy_impulse_derive.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    prost_build::compile_protos(&["protos/door.proto"], &["protos/"]).map_err(box_error)?;
 
-pub use bevy_ecs::prelude::{Commands, Entity, With, World};
+    Ok(())
+}
 
-pub use smallvec::{smallvec, SmallVec};
-
-pub use std::{clone::Clone, marker::Copy};
-
-// The std::any implementation of this is not stable in v1.75, so we provide a
-// simple implementation in this module for the derive macros.
-pub fn type_name_of_val<T>(_: &T) -> &'static str {
-    std::any::type_name::<T>()
+fn box_error<E: std::error::Error + 'static>(err: E) -> Box<dyn std::error::Error> {
+    Box::new(err)
 }

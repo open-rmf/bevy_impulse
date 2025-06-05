@@ -312,7 +312,6 @@ impl<'a> AnyBufferView<'a> {
 /// inside.
 pub struct AnyBufferMut<'w, 's, 'a> {
     storage: Box<dyn AnyBufferManagement + 'a>,
-    gate: Mut<'a, GateState>,
     buffer: Entity,
     session: Entity,
     accessor: Option<Entity>,
@@ -353,15 +352,6 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
     /// Check if the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Check whether the gate of this buffer is open or closed.
-    pub fn gate(&self) -> Gate {
-        self.gate
-            .map
-            .get(&self.session)
-            .copied()
-            .unwrap_or(Gate::Open)
     }
 
     /// Modify the oldest message in the buffer.
@@ -480,33 +470,6 @@ impl<'w, 's, 'a> AnyBufferMut<'w, 's, 'a> {
         value: AnyMessageBox,
     ) -> Result<Option<AnyMessageBox>, AnyMessageError> {
         self.storage.any_push_as_oldest(self.session, value)
-    }
-
-    /// Tell the buffer [`Gate`] to open.
-    pub fn open_gate(&mut self) {
-        if let Some(gate) = self.gate.map.get_mut(&self.session) {
-            if *gate != Gate::Open {
-                *gate = Gate::Open;
-                self.modified = true;
-            }
-        }
-    }
-
-    /// Tell the buffer [`Gate`] to close.
-    pub fn close_gate(&mut self) {
-        if let Some(gate) = self.gate.map.get_mut(&self.session) {
-            *gate = Gate::Closed;
-            // There is no need to to indicate that a modification happened
-            // because listeners do not get notified about gates closing.
-        }
-    }
-
-    /// Perform an action on the gate of the buffer.
-    pub fn gate_action(&mut self, action: Gate) {
-        match action {
-            Gate::Open => self.open_gate(),
-            Gate::Closed => self.close_gate(),
-        }
     }
 
     /// Trigger the listeners for this buffer to wake up even if nothing in the
@@ -827,12 +790,12 @@ impl<'w, 's, T: 'static + Send + Sync + Any> AnyBufferAccessMut<'w, 's>
         key: &AnyBufferKey,
     ) -> Result<AnyBufferMut<'w, 's, 'a>, BufferError> {
         let BufferAccessMut { query, commands } = self;
-        let (storage, gate) = query
+        let storage = query
             .get_mut(key.tag.buffer)
             .map_err(|_| BufferError::BufferMissing)?;
+
         Ok(AnyBufferMut {
             storage: Box::new(storage),
-            gate,
             buffer: key.tag.buffer,
             session: key.tag.session,
             accessor: Some(key.tag.accessor),

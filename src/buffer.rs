@@ -27,7 +27,7 @@ use std::{ops::RangeBounds, sync::Arc};
 use thiserror::Error as ThisError;
 
 use crate::{
-    Builder, Chain, Gate, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
+    Builder, Chain, GateState, InputSlot, NotifyBufferUpdate, OnNewBufferValue, UnusedTarget,
 };
 
 mod any_buffer;
@@ -39,6 +39,9 @@ pub(crate) use buffer_access_lifecycle::*;
 
 mod buffer_key_builder;
 pub use buffer_key_builder::*;
+
+mod buffer_gate;
+pub use buffer_gate::*;
 
 mod buffer_map;
 pub use buffer_map::*;
@@ -355,7 +358,7 @@ pub struct BufferAccess<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    query: Query<'w, 's, (&'static BufferStorage<T>, &'static GateState)>,
+    query: Query<'w, 's, &'static BufferStorage<T>>,
 }
 
 impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
@@ -363,11 +366,11 @@ impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
         let session = key.session();
         self.query
             .get(key.buffer())
-            .map(|(storage, gate)| BufferView {
-                storage,
-                gate,
-                session,
-            })
+            .map(|storage| BufferView { storage, session })
+    }
+
+    pub fn get_newest<'a>(&'a self, key: &BufferKey<T>) -> Option<&'a T> {
+        self.get(key).ok().map(|view| view.newest()).flatten()
     }
 }
 
@@ -380,7 +383,7 @@ pub struct BufferAccessMut<'w, 's, T>
 where
     T: 'static + Send + Sync,
 {
-    query: Query<'w, 's, (&'static mut BufferStorage<T>, &'static mut GateState)>,
+    query: Query<'w, 's, &'static mut BufferStorage<T>>,
     commands: Commands<'w, 's>,
 }
 
@@ -392,11 +395,11 @@ where
         let session = key.session();
         self.query
             .get(key.buffer())
-            .map(|(storage, gate)| BufferView {
-                storage,
-                gate,
-                session,
-            })
+            .map(|storage| BufferView { storage, session })
+    }
+
+    pub fn get_newest<'a>(&'a self, key: &BufferKey<T>) -> Option<&'a T> {
+        self.get(key).ok().map(|view| view.newest()).flatten()
     }
 
     pub fn get_mut<'a>(
@@ -406,9 +409,9 @@ where
         let buffer = key.buffer();
         let session = key.session();
         let accessor = key.tag.accessor;
-        self.query.get_mut(key.buffer()).map(|(storage, gate)| {
-            BufferMut::new(storage, gate, buffer, session, accessor, &mut self.commands)
-        })
+        self.query
+            .get_mut(key.buffer())
+            .map(|storage| BufferMut::new(storage, buffer, session, accessor, &mut self.commands))
     }
 }
 
@@ -422,6 +425,12 @@ pub trait BufferWorldAccess {
     where
         T: 'static + Send + Sync;
 
+    /// Call this to get read-only access to the gate of a buffer from a [`World`].
+    fn buffer_gate_view(
+        &self,
+        key: impl Into<AnyBufferKey>,
+    ) -> Result<BufferGateView<'_>, BufferError>;
+
     /// Call this to get mutable access to a buffer.
     ///
     /// Pass in a callback that will receive [`BufferMut`], allowing it to view
@@ -433,6 +442,16 @@ pub trait BufferWorldAccess {
     ) -> Result<U, BufferError>
     where
         T: 'static + Send + Sync;
+
+    /// Call this to get mutable access to the gate of a buffer.
+    ///
+    /// Pass in a callback that will receive [`BufferGateMut`], allowing it to
+    /// view and modify the gate of the buffer.
+    fn buffer_gate_mut<U>(
+        &mut self,
+        key: impl Into<AnyBufferKey>,
+        f: impl FnOnce(BufferGateMut) -> U,
+    ) -> Result<U, BufferError>;
 }
 
 impl BufferWorldAccess for World {
@@ -446,11 +465,24 @@ impl BufferWorldAccess for World {
         let storage = buffer_ref
             .get::<BufferStorage<T>>()
             .ok_or(BufferError::BufferMissing)?;
+        Ok(BufferView {
+            storage,
+            session: key.tag.session,
+        })
+    }
+
+    fn buffer_gate_view(
+        &self,
+        key: impl Into<AnyBufferKey>,
+    ) -> Result<BufferGateView<'_>, BufferError> {
+        let key: AnyBufferKey = key.into();
+        let buffer_ref = self
+            .get_entity(key.tag.buffer)
+            .ok_or(BufferError::BufferMissing)?;
         let gate = buffer_ref
             .get::<GateState>()
             .ok_or(BufferError::BufferMissing)?;
-        Ok(BufferView {
-            storage,
+        Ok(BufferGateView {
             gate,
             session: key.tag.session,
         })
@@ -471,6 +503,19 @@ impl BufferWorldAccess for World {
             .map_err(|_| BufferError::BufferMissing)?;
         Ok(f(buffer_mut))
     }
+
+    fn buffer_gate_mut<U>(
+        &mut self,
+        key: impl Into<AnyBufferKey>,
+        f: impl FnOnce(BufferGateMut) -> U,
+    ) -> Result<U, BufferError> {
+        let mut state = SystemState::<BufferGateAccessMut>::new(self);
+        let mut buffer_gate_access_mut = state.get_mut(self);
+        let buffer_mut = buffer_gate_access_mut
+            .get_mut(key)
+            .map_err(|_| BufferError::BufferMissing)?;
+        Ok(f(buffer_mut))
+    }
 }
 
 /// Access to view a buffer that exists inside a workflow.
@@ -479,7 +524,6 @@ where
     T: 'static + Send + Sync,
 {
     storage: &'a BufferStorage<T>,
-    gate: &'a GateState,
     session: Entity,
 }
 
@@ -488,23 +532,23 @@ where
     T: 'static + Send + Sync,
 {
     /// Iterate over the contents in the buffer
-    pub fn iter(&self) -> IterBufferView<'_, T> {
+    pub fn iter(&self) -> IterBufferView<'a, T> {
         self.storage.iter(self.session)
     }
 
     /// Borrow the oldest item in the buffer.
-    pub fn oldest(&self) -> Option<&T> {
+    pub fn oldest(&self) -> Option<&'a T> {
         self.storage.oldest(self.session)
     }
 
     /// Borrow the newest item in the buffer.
-    pub fn newest(&self) -> Option<&T> {
+    pub fn newest(&self) -> Option<&'a T> {
         self.storage.newest(self.session)
     }
 
     /// Borrow an item from the buffer. Index 0 is the oldest item in the buffer
     /// with the highest index being the newest item in the buffer.
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub fn get(&self, index: usize) -> Option<&'a T> {
         self.storage.get(self.session, index)
     }
 
@@ -517,17 +561,6 @@ where
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// Check whether the gate of this buffer is open or closed
-    pub fn gate(&self) -> Gate {
-        // Gate buffers are open by default, so pretend it's open if a session
-        // has never touched this buffer gate.
-        self.gate
-            .map
-            .get(&self.session)
-            .copied()
-            .unwrap_or(Gate::Open)
-    }
 }
 
 /// Access to mutate a buffer that exists inside a workflow.
@@ -536,7 +569,6 @@ where
     T: 'static + Send + Sync,
 {
     storage: Mut<'a, BufferStorage<T>>,
-    gate: Mut<'a, GateState>,
     buffer: Entity,
     session: Entity,
     accessor: Option<Entity>,
@@ -598,15 +630,6 @@ where
         self.len() == 0
     }
 
-    /// Check whether the gate of this buffer is open or closed.
-    pub fn gate(&self) -> Gate {
-        self.gate
-            .map
-            .get(&self.session)
-            .copied()
-            .unwrap_or(Gate::Open)
-    }
-
     /// Iterate over mutable borrows of the contents in the buffer.
     pub fn iter_mut(&mut self) -> IterBufferMut<'_, T> {
         self.modified = true;
@@ -623,6 +646,28 @@ where
     pub fn newest_mut(&mut self) -> Option<&mut T> {
         self.modified = true;
         self.storage.newest_mut(self.session)
+    }
+
+    /// Modify the newest item in the buffer or create a default-initialized
+    /// item to modify if the buffer was empty.
+    ///
+    /// This may fail to provide a mutable borrow if the buffer was already
+    /// expired or if the buffer capacity was zero.
+    pub fn newest_mut_or_default(&mut self) -> Option<&mut T>
+    where
+        T: Default,
+    {
+        self.newest_mut_or_else(|| T::default())
+    }
+
+    /// Modify the newest item in the buffer or initialize an item if the
+    /// buffer was empty.
+    ///
+    /// This may fail to provide a mutable borrow if the buffer was already
+    /// expired or if the buffer capacity was zero.
+    pub fn newest_mut_or_else(&mut self, f: impl FnOnce() -> T) -> Option<&mut T> {
+        self.modified = true;
+        self.storage.newest_mut_or_else(self.session, f)
     }
 
     /// Modify an item in the buffer. Index 0 is the oldest item in the buffer
@@ -669,38 +714,6 @@ where
         self.storage.push_as_oldest(self.session, value)
     }
 
-    // TODO(@mxgrey): Consider putting the gate viewing and modifying methods
-    // into a separate SystemParam because they are currently preventing any two
-    // continuous systems with BufferAccessMut from running at the same time no
-    // matter what the buffer type is.
-
-    /// Tell the buffer [`Gate`] to open.
-    pub fn open_gate(&mut self) {
-        if let Some(gate) = self.gate.map.get_mut(&self.session) {
-            if *gate != Gate::Open {
-                *gate = Gate::Open;
-                self.modified = true;
-            }
-        }
-    }
-
-    /// Tell the buffer [`Gate`] to close.
-    pub fn close_gate(&mut self) {
-        if let Some(gate) = self.gate.map.get_mut(&self.session) {
-            *gate = Gate::Closed;
-            // There is no need to to indicate that a modification happened
-            // because listeners do not get notified about gates closing.
-        }
-    }
-
-    /// Perform an action on the gate of the buffer.
-    pub fn gate_action(&mut self, action: Gate) {
-        match action {
-            Gate::Open => self.open_gate(),
-            Gate::Closed => self.close_gate(),
-        }
-    }
-
     /// Trigger the listeners for this buffer to wake up even if nothing in the
     /// buffer has changed. This could be used for timers or timeout elements
     /// in a workflow.
@@ -710,7 +723,6 @@ where
 
     fn new(
         storage: Mut<'a, BufferStorage<T>>,
-        gate: Mut<'a, GateState>,
         buffer: Entity,
         session: Entity,
         accessor: Entity,
@@ -718,7 +730,6 @@ where
     ) -> Self {
         Self {
             storage,
-            gate,
             buffer,
             session,
             accessor: Some(accessor),
@@ -1134,6 +1145,7 @@ mod tests {
     fn gate_access_test_open_loop(
         In(BlockingService { request: key, .. }): BlockingServiceInput<BufferKey<u64>>,
         mut access: BufferAccessMut<u64>,
+        mut gate_access: BufferGateAccessMut,
     ) -> (Option<u64>, Option<u64>) {
         // We should never see a spurious wake-up in this service because the
         // gate opening is done by the key of this service.
@@ -1142,11 +1154,12 @@ mod tests {
 
         // The gate should have previously been closed before reaching this
         // service
-        assert_eq!(buffer.gate(), Gate::Closed);
+        let mut gate = gate_access.get_mut(key).unwrap();
+        assert_eq!(gate.get(), Gate::Closed);
         // Open the gate, which would normally trigger a notice, but the notice
         // should not come to this service because we're using the key without
         // closed loops allowed.
-        buffer.open_gate();
+        gate.open_gate();
 
         if value >= 5 {
             (None, Some(value))

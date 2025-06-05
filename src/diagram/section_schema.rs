@@ -906,7 +906,7 @@ mod tests {
                 },
                 "listen": {
                     "type": "listen",
-                    "buffers": { "multiply": "buffer" },
+                    "buffers": [{ "multiply": "buffer" }],
                     "next": "pull",
                 },
                 "pull": {
