@@ -73,6 +73,8 @@ impl<'a> BufferGateView<'a> {
 /// to unlock the access.
 ///
 /// See [`BufferGateAccess`] for read-only access.
+///
+/// [1]: crate::BufferKey
 #[derive(SystemParam)]
 pub struct BufferGateAccessMut<'w, 's> {
     query: Query<'w, 's, &'static mut GateState>,
