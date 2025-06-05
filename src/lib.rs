@@ -388,7 +388,7 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
-        ImpulsePlugin, ImpulseAppPlugin, Section,
+        ImpulsePlugin, ImpulseAppPlugin,
     };
 
     pub use bevy_ecs::prelude::In;
@@ -396,7 +396,7 @@ pub mod prelude {
     #[cfg(feature = "diagram")]
     pub use crate::{
         buffer::{JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage},
-        diagram::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions},
+        diagram::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions, Section},
     };
 
     pub use futures::FutureExt;
