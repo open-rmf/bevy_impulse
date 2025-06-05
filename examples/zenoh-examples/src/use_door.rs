@@ -15,22 +15,19 @@
  *
 */
 
-use bevy_app::{App, Update, AppExit};
-use bevy_ecs::prelude::{Res, EventWriter};
+use bevy_app::{App, AppExit, Update};
+use bevy_ecs::prelude::{EventWriter, Res};
 use bevy_impulse::prelude::*;
 use bevy_time::{Time, TimePlugin};
 use clap::Parser;
-use zenoh_examples::protos;
-use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
 use uuid::Uuid;
+use zenoh_examples::protos;
 
-use zenoh_examples::{
-    zenoh_publisher_node, zenoh_subscription_node,
-    ZenohImpulsePlugin,
-};
+use zenoh_examples::{zenoh_publisher_node, zenoh_subscription_node, ZenohImpulsePlugin};
 
 #[derive(Parser)]
 struct Args {
@@ -74,18 +71,14 @@ fn main() {
             startup.clone_chain(builder).connect(subscriber.input);
 
             let request_msg = match config.usage {
-                DoorUsageMode::Open => {
-                    protos::DoorRequest {
-                        mode: protos::door_request::Mode::Open.into(),
-                        session: config.session.clone(),
-                    }
-                }
-                DoorUsageMode::Release => {
-                    protos::DoorRequest {
-                        mode: protos::door_request::Mode::Release.into(),
-                        session: config.session.clone(),
-                    }
-                }
+                DoorUsageMode::Open => protos::DoorRequest {
+                    mode: protos::door_request::Mode::Open.into(),
+                    session: config.session.clone(),
+                },
+                DoorUsageMode::Release => protos::DoorRequest {
+                    mode: protos::door_request::Mode::Release.into(),
+                    session: config.session.clone(),
+                },
             };
 
             startup
@@ -124,8 +117,12 @@ fn main() {
                 .then_trim([TrimBranch::single_point(&subscriber.input)])
                 .output();
 
-            Node::<_, _, ()> { input, output, streams: () }
-        }
+            Node::<_, _, ()> {
+                input,
+                output,
+                streams: (),
+            }
+        },
     );
 
     let move_robot_service = app.spawn_continuous_service(Update, move_robot);
@@ -134,7 +131,10 @@ fn main() {
         move |builder, config: MoveConfig| {
             let time_buffer = builder.create_buffer(BufferSettings::default());
             let access = builder.create_buffer_access(time_buffer);
-            let output = builder.chain(access.output).then(move_robot_service).output();
+            let output = builder
+                .chain(access.output)
+                .then(move_robot_service)
+                .output();
 
             let (input, startup) = builder.create_fork_clone::<()>();
             startup
@@ -147,8 +147,12 @@ fn main() {
 
             startup.clone_chain(builder).connect(access.input);
 
-            Node::<_, _, ()> { input, output, streams: () }
-        }
+            Node::<_, _, ()> {
+                input,
+                output,
+                streams: (),
+            }
+        },
     );
 
     let diagram = Diagram::from_json(json!({
@@ -188,13 +192,17 @@ fn main() {
     .unwrap();
 
     app.world.command(|commands| {
-        let workflow = diagram.spawn_io_workflow::<(), ()>(commands, &mut registry).unwrap();
-        let _ = commands.request((), workflow).then(exit_app.into_blocking_callback()).detach();
+        let workflow = diagram
+            .spawn_io_workflow::<(), ()>(commands, &mut registry)
+            .unwrap();
+        let _ = commands
+            .request((), workflow)
+            .then(exit_app.into_blocking_callback())
+            .detach();
     });
 
     app.run();
 }
-
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct UseDoorConfig {
@@ -243,9 +251,6 @@ fn move_robot(
     });
 }
 
-fn exit_app(
-    In(_): In<()>,
-    mut exit: EventWriter<AppExit>,
-) {
+fn exit_app(In(_): In<()>, mut exit: EventWriter<AppExit>) {
     exit.send(AppExit);
 }

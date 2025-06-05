@@ -366,10 +366,7 @@ impl<'w, 's, T: 'static + Send + Sync> BufferAccess<'w, 's, T> {
         let session = key.session();
         self.query
             .get(key.buffer())
-            .map(|storage| BufferView {
-                storage,
-                session,
-            })
+            .map(|storage| BufferView { storage, session })
     }
 
     pub fn get_newest<'a>(&'a self, key: &BufferKey<T>) -> Option<&'a T> {
@@ -398,10 +395,7 @@ where
         let session = key.session();
         self.query
             .get(key.buffer())
-            .map(|storage| BufferView {
-                storage,
-                session,
-            })
+            .map(|storage| BufferView { storage, session })
     }
 
     pub fn get_newest<'a>(&'a self, key: &BufferKey<T>) -> Option<&'a T> {
@@ -415,9 +409,9 @@ where
         let buffer = key.buffer();
         let session = key.session();
         let accessor = key.tag.accessor;
-        self.query.get_mut(key.buffer()).map(|storage| {
-            BufferMut::new(storage, buffer, session, accessor, &mut self.commands)
-        })
+        self.query
+            .get_mut(key.buffer())
+            .map(|storage| BufferMut::new(storage, buffer, session, accessor, &mut self.commands))
     }
 }
 
@@ -477,7 +471,10 @@ impl BufferWorldAccess for World {
         })
     }
 
-    fn buffer_gate_view(&self, key: impl Into<AnyBufferKey>) -> Result<BufferGateView<'_>, BufferError> {
+    fn buffer_gate_view(
+        &self,
+        key: impl Into<AnyBufferKey>,
+    ) -> Result<BufferGateView<'_>, BufferError> {
         let key: AnyBufferKey = key.into();
         let buffer_ref = self
             .get_entity(key.tag.buffer)
@@ -668,10 +665,7 @@ where
     ///
     /// This may fail to provide a mutable borrow if the buffer was already
     /// expired or if the buffer capacity was zero.
-    pub fn newest_mut_or_else(
-        &mut self,
-        f: impl FnOnce() -> T,
-    ) -> Option<&mut T> {
+    pub fn newest_mut_or_else(&mut self, f: impl FnOnce() -> T) -> Option<&mut T> {
         self.modified = true;
         self.storage.newest_mut_or_else(self.session, f)
     }

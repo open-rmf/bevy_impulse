@@ -362,9 +362,9 @@ pub mod prelude {
         buffer::{
             Accessible, Accessor, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess,
             AnyMessageBox, AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferGateAccess,
-            BufferGateAccessMut, BufferKey,
-            BufferMap, BufferMapLayout, BufferSettings, BufferWorldAccess, Bufferable, Buffering,
-            IncompatibleLayout, IterBufferable, Joinable, Joined, RetentionPolicy,
+            BufferGateAccessMut, BufferKey, BufferMap, BufferMapLayout, BufferSettings,
+            BufferWorldAccess, Bufferable, Buffering, IncompatibleLayout, IterBufferable, Joinable,
+            Joined, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
@@ -388,7 +388,7 @@ pub mod prelude {
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
-        ImpulsePlugin, ImpulseAppPlugin,
+        ImpulseAppPlugin, ImpulsePlugin,
     };
 
     pub use bevy_ecs::prelude::In;

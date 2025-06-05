@@ -191,15 +191,13 @@ impl<T> BufferStorage<T> {
         session: Entity,
         f: impl FnOnce() -> T,
     ) -> Option<&mut T> {
-        self.reverse_queues
-            .get_mut(&session)
-            .and_then(|q| {
-                if q.is_empty() {
-                    Self::impl_push(q, self.settings.retention(), f());
-                }
+        self.reverse_queues.get_mut(&session).and_then(|q| {
+            if q.is_empty() {
+                Self::impl_push(q, self.settings.retention(), f());
+            }
 
-                q.first_mut()
-            })
+            q.first_mut()
+        })
     }
 
     pub(crate) fn get_mut(&mut self, session: Entity, index: usize) -> Option<&mut T> {

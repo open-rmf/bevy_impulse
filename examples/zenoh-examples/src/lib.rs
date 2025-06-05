@@ -22,14 +22,13 @@ use futures::future::Shared;
 use prost::Message;
 pub mod protos;
 use schemars::JsonSchema;
-use serde::{Serialize, Deserialize};
-use std::{
-    error::Error,
-    sync::Arc,
-    future::Future,
-};
+use serde::{Deserialize, Serialize};
+use std::{error::Error, future::Future, sync::Arc};
 use zenoh::Session;
-use zenoh_ext::{AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig, HistoryConfig, RecoveryConfig};
+use zenoh_ext::{
+    AdvancedPublisher, AdvancedPublisherBuilderExt, AdvancedSubscriberBuilderExt, CacheConfig,
+    HistoryConfig, RecoveryConfig,
+};
 
 pub type ArcError = Arc<dyn Error + Send + Sync + 'static>;
 
@@ -49,16 +48,17 @@ pub struct ZenohSession {
 
 impl FromWorld for ZenohSession {
     fn from_world(world: &mut World) -> Self {
-        let promise = world.command(|commands| {
-            commands
-                .serve(async {
-                    zenoh::open(zenoh::Config::default())
-                        .await
-                        .map_err(Arc::from)
-                })
-                .take_response()
-        })
-        .shared();
+        let promise = world
+            .command(|commands| {
+                commands
+                    .serve(async {
+                        zenoh::open(zenoh::Config::default())
+                            .await
+                            .map_err(Arc::from)
+                    })
+                    .take_response()
+            })
+            .shared();
 
         Self { promise }
     }
@@ -78,10 +78,8 @@ pub fn zenoh_subscription_node<T: 'static + Send + Sync + Message + Default>(
     topic_name: Arc<str>,
     builder: &mut Builder,
 ) -> Node<(), Result<(), ArcError>, ZenohSubscriptionStream<T>> {
-    let callback = move |
-        In(input): AsyncCallbackInput<(), ZenohSubscriptionStream<T>>,
-        session: Res<ZenohSession>,
-    | {
+    let callback = move |In(input): AsyncCallbackInput<(), ZenohSubscriptionStream<T>>,
+                         session: Res<ZenohSession>| {
         let session = session.promise.clone();
         let topic_name = topic_name.clone();
         async move {
@@ -115,10 +113,13 @@ pub fn zenoh_publisher_node<T: 'static + Send + Sync + Message>(
     topic_name: Arc<str>,
     builder: &mut Builder,
 ) -> Node<T, Result<(), ArcError>> {
-    let publisher = builder.commands().request(
-        topic_name.clone(),
-        get_zenoh_publisher.into_async_callback(),
-    ).take_response();
+    let publisher = builder
+        .commands()
+        .request(
+            topic_name.clone(),
+            get_zenoh_publisher.into_async_callback(),
+        )
+        .take_response();
     let publisher = publisher.shared();
 
     let callback = move |message: T| {
@@ -128,7 +129,9 @@ pub fn zenoh_publisher_node<T: 'static + Send + Sync + Message>(
             let publisher = publisher.await.available().unwrap()?;
 
             println!("Publishing message on topic [{topic_name}]:\n{message:#?}");
-            publisher.put(zenoh::bytes::ZBytes::from(message.encode_to_vec())).await?;
+            publisher
+                .put(zenoh::bytes::ZBytes::from(message.encode_to_vec()))
+                .await?;
             Ok(())
         }
     };

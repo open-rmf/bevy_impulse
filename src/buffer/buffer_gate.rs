@@ -22,7 +22,7 @@ use bevy_ecs::{
     system::SystemParam,
 };
 
-use crate::{Gate, GateState, NotifyBufferUpdate, AnyBufferKey};
+use crate::{AnyBufferKey, Gate, GateState, NotifyBufferUpdate};
 
 /// This system parameter lets you get read-only access to the gate of a buffer
 /// that exists within a workflow. Use a [`BufferKey`][1] or [`AnyBufferKey`]
@@ -37,7 +37,10 @@ pub struct BufferGateAccess<'w, 's> {
 }
 
 impl<'w, 's> BufferGateAccess<'w, 's> {
-    pub fn get<'a>(&'a self, key: impl Into<AnyBufferKey>) -> Result<BufferGateView<'a>, QueryEntityError> {
+    pub fn get<'a>(
+        &'a self,
+        key: impl Into<AnyBufferKey>,
+    ) -> Result<BufferGateView<'a>, QueryEntityError> {
         let key: AnyBufferKey = key.into();
         let session = key.session();
         self.query
@@ -77,7 +80,10 @@ pub struct BufferGateAccessMut<'w, 's> {
 }
 
 impl<'w, 's> BufferGateAccessMut<'w, 's> {
-    pub fn get<'a>(&'a self, key: impl Into<AnyBufferKey>) -> Result<BufferGateView<'a>, QueryEntityError> {
+    pub fn get<'a>(
+        &'a self,
+        key: impl Into<AnyBufferKey>,
+    ) -> Result<BufferGateView<'a>, QueryEntityError> {
         let key: AnyBufferKey = key.into();
         let session = key.session();
         self.query
@@ -93,9 +99,9 @@ impl<'w, 's> BufferGateAccessMut<'w, 's> {
         let buffer = key.id();
         let session = key.session();
         let accessor = key.tag.accessor;
-        self.query.get_mut(buffer).map(|gate| {
-            BufferGateMut::new(gate, buffer, session, accessor, &mut self.commands)
-        })
+        self.query
+            .get_mut(buffer)
+            .map(|gate| BufferGateMut::new(gate, buffer, session, accessor, &mut self.commands))
     }
 }
 

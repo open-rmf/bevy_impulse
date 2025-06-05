@@ -1309,7 +1309,8 @@ mod tests {
             builder.connect(start_test, end_test);
         });
 
-        let mut promise = context.command(|commands| commands.request((), workflow).take_response());
+        let mut promise =
+            context.command(|commands| commands.request((), workflow).take_response());
         context.run_with_conditions(&mut promise, Duration::from_secs(10));
         assert!(context.no_unhandled_errors());
         let result = promise.take().available().unwrap();
@@ -1325,23 +1326,27 @@ mod tests {
                 .connect(end_test);
         });
 
-        let mut promise = context.command(|commands| commands.request((), workflow).take_response());
+        let mut promise =
+            context.command(|commands| commands.request((), workflow).take_response());
         context.run_with_conditions(&mut promise, Duration::from_secs(10));
         assert!(context.no_unhandled_errors());
         let result = promise.take().available().unwrap();
         println!("Performance for basic connection:\n{result:#?}");
     }
 
-    fn build_benchmark_fixture(scope: Scope<(), TimeStats>, builder: &mut Builder) -> (Output<Instant>, InputSlot<Instant>) {
-        let initial_time = builder.commands().spawn_service(
-            get_initial_time.into_blocking_service()
-        );
-        let finish_time = builder.commands().spawn_service(
-            finish_time_range.into_blocking_service()
-        );
-        let collect_samples = builder.commands().spawn_service(
-            collect_samples.into_blocking_service()
-        );
+    fn build_benchmark_fixture(
+        scope: Scope<(), TimeStats>,
+        builder: &mut Builder,
+    ) -> (Output<Instant>, InputSlot<Instant>) {
+        let initial_time = builder
+            .commands()
+            .spawn_service(get_initial_time.into_blocking_service());
+        let finish_time = builder
+            .commands()
+            .spawn_service(finish_time_range.into_blocking_service());
+        let collect_samples = builder
+            .commands()
+            .spawn_service(collect_samples.into_blocking_service());
 
         let samples = builder.create_buffer(BufferSettings::keep_all());
 
@@ -1386,7 +1391,7 @@ mod tests {
     }
 
     impl TimeStats {
-        fn new(samples: impl IntoIterator<Item=TimeRange>) -> Self {
+        fn new(samples: impl IntoIterator<Item = TimeRange>) -> Self {
             let samples: Vec<_> = samples
                 .into_iter()
                 .map(|s| s.finish_time - s.initial_time)
@@ -1417,7 +1422,13 @@ mod tests {
             let std_dev = Duration::from_nanos(f64::sqrt(radicand) as u64);
             let highest = highest.unwrap();
             let lowest = lowest.unwrap();
-            TimeStats { sample_count, average, std_dev, highest, lowest }
+            TimeStats {
+                sample_count,
+                average,
+                std_dev,
+                highest,
+                lowest,
+            }
         }
     }
 
