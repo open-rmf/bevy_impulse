@@ -25,6 +25,9 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Get apt dependencies
+      run: sudo apt-get install libprotoc-dev
+
     - name: Setup rust
       run: rustup default ${{ matrix.rust-version }}
 
