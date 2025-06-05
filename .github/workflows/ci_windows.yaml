@@ -30,15 +30,15 @@ jobs:
       shell: powershell
 
     - name: Build default features
-      run: cargo build --package bevy_impulse --workspace
+      run: cargo build --package bevy_impulse
       shell: cmd
 
     - name: Test default features
-      run: cargo test --package bevy_impulse --workspace
+      run: cargo test --package bevy_impulse
       shell: cmd
 
     - name: Test diagram
-      run: cargo test --package bevy_impulse --workspace -F=diagram
+      run: cargo test --package bevy_impulse -F=diagram
       shell: cmd
 
     - name: Build single_threaded_async
