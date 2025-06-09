@@ -39,3 +39,10 @@ export function isOperationNode(
 ): node is OperationNode {
   return !node.id.startsWith('builtin:');
 }
+
+export function extractOperation(node: OperationNode): DiagramOperation {
+  const op: DiagramOperation = { ...node.data };
+  const opIdKey = 'opId';
+  delete op[opIdKey];
+  return op;
+}

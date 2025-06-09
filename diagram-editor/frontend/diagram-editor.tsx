@@ -1,4 +1,5 @@
 import AutoLayoutIcon from '@mui/icons-material/Dashboard';
+import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/UploadFile';
 import {
   Alert,
@@ -21,19 +22,21 @@ import {
   applyNodeChanges,
   reconnectEdge,
 } from '@xyflow/react';
+import { inflateSync, strFromU8 } from 'fflate';
 import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
 import type { OperationFormProps } from './forms';
 import NodeForm from './forms/node-form';
 import {
   type DiagramEditorNode,
-  isOperationNode,
   NODE_TYPES,
   START_ID,
   TERMINATE_ID,
+  isOperationNode,
 } from './nodes';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson } from './utils/load-diagram';
+import ExportDiagramDialog from './export-diagram-dialog';
 
 const VisuallyHiddenInput = styled('input')({
   clip: 'rect(0 0 0 0)',
@@ -60,7 +63,7 @@ function getOperationForm(
   }
 }
 
-const NonIntrusivePopoverContainer = ({
+const NonCapturingPopoverContainer = ({
   children,
 }: { children: React.ReactNode }) => <>{children}</>;
 
@@ -119,8 +122,13 @@ const DiagramEditor = () => {
     }
 
     try {
-      const decodedDiagram = atob(diagramParam);
-      loadDiagram(decodedDiagram);
+      const binaryString = atob(diagramParam);
+      const byteArray = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        byteArray[i] = binaryString.charCodeAt(i);
+      }
+      const diagramJson = strFromU8(inflateSync(byteArray));
+      loadDiagram(diagramJson);
     } catch (e) {
       if (e instanceof Error) {
         setErrorToast(`failed to load diagram: ${e.message}`);
@@ -133,6 +141,8 @@ const DiagramEditor = () => {
 
   const [errorToast, setErrorToast] = React.useState<string | null>(null);
   const [openErrorToast, setOpenErrorToast] = React.useState(false);
+  const [openExportDiagramDialog, setOpenExportDiagramDialog] =
+    React.useState(false);
 
   const handleMouseDown = React.useCallback(() => {
     mouseDownTime.current = new Date().getTime();
@@ -234,6 +244,15 @@ const DiagramEditor = () => {
                 <AutoLayoutIcon />
               </Button>
             </Tooltip>
+            <Tooltip title="Export Diagram">
+              <Button
+                onClick={() => {
+                  setOpenExportDiagramDialog(true);
+                }}
+              >
+                <DownloadIcon />
+              </Button>
+            </Tooltip>
             <Tooltip title="Load Diagram">
               {/* biome-ignore lint/a11y/useValidAriaRole: button used as a label, should have no role */}
               <Button component="label" role={undefined}>
@@ -263,7 +282,7 @@ const DiagramEditor = () => {
         anchorReference="anchorPosition"
         anchorPosition={addOpAnchorPos}
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
-        component={NonIntrusivePopoverContainer}
+        component={NonCapturingPopoverContainer}
       >
         <AddOperation
           onAdd={(change) => {
@@ -295,7 +314,7 @@ const DiagramEditor = () => {
         anchorEl={formAnchorEl}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
-        component={NonIntrusivePopoverContainer}
+        component={NonCapturingPopoverContainer}
       >
         {renderForm}
       </Popover>
@@ -313,6 +332,12 @@ const DiagramEditor = () => {
           {errorToast}
         </Alert>
       </Snackbar>
+      <ExportDiagramDialog
+        open={openExportDiagramDialog}
+        onClose={() => setOpenExportDiagramDialog(false)}
+        nodes={nodes}
+        edges={edges}
+      />
     </>
   );
 };
