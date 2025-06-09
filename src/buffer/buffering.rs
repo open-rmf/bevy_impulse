@@ -114,14 +114,14 @@ pub trait Accessing: Buffering {
         let source = builder.commands.spawn(()).id();
         let target = builder.commands.spawn(UnusedTarget).id();
         builder.commands.add(AddOperation::new(
-            Some(builder.scope),
+            Some(builder.scope()),
             source,
             OperateBufferAccess::<T, Self>::new(self, target),
         ));
 
         Node {
-            input: InputSlot::new(builder.scope, source),
-            output: Output::new(builder.scope, target),
+            input: InputSlot::new(builder.scope(), source),
+            output: Output::new(builder.scope(), target),
             streams: (),
         }
     }
@@ -183,17 +183,21 @@ pub trait Accessing: Buffering {
         let cancelling_scope_id = builder.commands.spawn(()).id();
         let _ = builder.create_scope_impl::<Self::Key, (), (), Settings>(
             cancelling_scope_id,
-            builder.finish_scope_cancel,
+            builder.context.finish_scope_cancel,
             build,
         );
 
-        let begin_cancel = builder.commands.spawn(()).set_parent(builder.scope).id();
-        self.verify_scope(builder.scope);
+        let begin_cancel = builder
+            .commands
+            .spawn(())
+            .set_parent(builder.context.scope)
+            .id();
+        self.verify_scope(builder.scope());
         builder.commands.add(AddOperation::new(
             None,
             begin_cancel,
             BeginCleanupWorkflow::<Self>::new(
-                builder.scope,
+                builder.scope(),
                 self,
                 cancelling_scope_id,
                 conditions.run_on_terminate,

@@ -192,7 +192,7 @@ pub trait IterBufferable {
             Join::new(buffers, target),
         ));
 
-        Output::new(builder.scope, target).chain(builder)
+        Output::new(builder.scope(), target).chain(builder)
     }
 }
 

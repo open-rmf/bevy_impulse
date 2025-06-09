@@ -20,16 +20,20 @@ use std::{
     borrow::Borrow,
     cell::RefCell,
     collections::HashMap,
-    fmt::Debug,
     marker::PhantomData,
     sync::Arc,
 };
 
+use bevy_ecs::prelude::{Commands, Entity};
+
+pub use crate::dyn_node::*;
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, Connect, InputSlot,
-    Joined, JsonBuffer, JsonMessage, Node, Output, StreamPack,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, IncrementalScopeBuilder,
+    IncrementalScopeRequest, IncrementalScopeRequestResult, IncrementalScopeResponse,
+    IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage, NamedStream, Node, StreamOf,
+    StreamPack,
 };
-use bevy_ecs::entity::Entity;
+
 use schemars::{
     gen::{SchemaGenerator, SchemaSettings},
     schema::Schema,
@@ -45,168 +49,12 @@ use tracing::debug;
 
 use super::{
     buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
-    fork_result_schema::RegisterForkResult, register_json, supported::*, type_info::TypeInfo,
+    fork_result_schema::RegisterForkResult, register_json, supported::*,
     unzip_schema::PerformUnzip, BuilderId, DeserializeMessage, DiagramErrorCode, DynForkClone,
     DynForkResult, DynSplit, DynType, JsonRegistration, RegisterJson, RegisterSplit, Section,
     SectionMetadata, SectionMetadataProvider, SerializeMessage, SplitSchema, TransformError,
+    TypeInfo,
 };
-
-/// A type erased [`crate::InputSlot`]
-#[derive(Copy, Clone, Debug)]
-pub struct DynInputSlot {
-    scope: Entity,
-    source: Entity,
-    type_info: TypeInfo,
-}
-
-impl DynInputSlot {
-    pub fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    pub fn id(&self) -> Entity {
-        self.source
-    }
-
-    pub fn message_info(&self) -> &TypeInfo {
-        &self.type_info
-    }
-}
-
-impl<T: Any> From<InputSlot<T>> for DynInputSlot {
-    fn from(input: InputSlot<T>) -> Self {
-        Self {
-            scope: input.scope(),
-            source: input.id(),
-            type_info: TypeInfo::of::<T>(),
-        }
-    }
-}
-
-impl From<AnyBuffer> for DynInputSlot {
-    fn from(buffer: AnyBuffer) -> Self {
-        let any_interface = buffer.get_interface();
-        Self {
-            scope: buffer.scope(),
-            source: buffer.id(),
-            type_info: TypeInfo {
-                type_id: any_interface.message_type_id(),
-                type_name: any_interface.message_type_name(),
-            },
-        }
-    }
-}
-
-/// A type erased [`crate::Output`]
-#[derive(Debug)]
-pub struct DynOutput {
-    scope: Entity,
-    target: Entity,
-    message_info: TypeInfo,
-}
-
-impl DynOutput {
-    pub fn new(scope: Entity, target: Entity, message_info: TypeInfo) -> Self {
-        Self {
-            scope,
-            target,
-            message_info,
-        }
-    }
-
-    pub fn message_info(&self) -> &TypeInfo {
-        &self.message_info
-    }
-
-    pub fn into_output<T>(self) -> Result<Output<T>, DiagramErrorCode>
-    where
-        T: Send + Sync + 'static + Any,
-    {
-        if self.message_info != TypeInfo::of::<T>() {
-            Err(DiagramErrorCode::TypeMismatch {
-                source_type: self.message_info,
-                target_type: TypeInfo::of::<T>(),
-            })
-        } else {
-            Ok(Output::<T>::new(self.scope, self.target))
-        }
-    }
-
-    pub fn scope(&self) -> Entity {
-        self.scope
-    }
-
-    pub fn id(&self) -> Entity {
-        self.target
-    }
-
-    /// Connect a [`DynOutput`] to a [`DynInputSlot`].
-    pub fn connect_to(
-        self,
-        input: &DynInputSlot,
-        builder: &mut Builder,
-    ) -> Result<(), DiagramErrorCode> {
-        if self.message_info() != input.message_info() {
-            return Err(DiagramErrorCode::TypeMismatch {
-                source_type: *self.message_info(),
-                target_type: *input.message_info(),
-            });
-        }
-
-        builder.commands().add(Connect {
-            original_target: self.id(),
-            new_target: input.id(),
-        });
-
-        Ok(())
-    }
-}
-
-impl<T> From<Output<T>> for DynOutput
-where
-    T: Send + Sync + 'static + Any,
-{
-    fn from(output: Output<T>) -> Self {
-        Self {
-            scope: output.scope(),
-            target: output.id(),
-            message_info: TypeInfo::of::<T>(),
-        }
-    }
-}
-
-/// A type erased [`bevy_impulse::Node`]
-pub struct DynNode {
-    pub input: DynInputSlot,
-    pub output: DynOutput,
-}
-
-impl DynNode {
-    fn new<Request, Response>(output: Output<Response>, input: InputSlot<Request>) -> Self
-    where
-        Request: 'static,
-        Response: Send + Sync + 'static,
-    {
-        Self {
-            input: input.into(),
-            output: output.into(),
-        }
-    }
-}
-
-impl<Request, Response, Streams> From<Node<Request, Response, Streams>> for DynNode
-where
-    Request: 'static,
-    Response: Send + Sync + 'static,
-    Streams: StreamPack,
-{
-    fn from(node: Node<Request, Response, Streams>) -> Self {
-        Self {
-            input: node.input.into(),
-            output: node.output.into(),
-        }
-    }
-}
 
 #[derive(Serialize)]
 pub struct NodeRegistration {
@@ -250,6 +98,47 @@ type ListenFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCo
 type CreateBufferFn = fn(BufferSettings, &mut Builder) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;
+
+struct BuildScope {
+    set_request: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeRequestResult,
+    set_response: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeResponseResult,
+    spawn_basic_scope_stream: fn(Entity, Entity, &mut Commands) -> (DynInputSlot, DynOutput),
+}
+
+impl BuildScope {
+    fn new<T: 'static + Send + Sync>() -> Self {
+        Self {
+            set_request: Self::impl_set_request::<T>,
+            set_response: Self::impl_set_response::<T>,
+            spawn_basic_scope_stream: Self::impl_spawn_basic_scope_stream::<T>,
+        }
+    }
+
+    fn impl_set_request<T: 'static + Send + Sync>(
+        incremental: &mut IncrementalScopeBuilder,
+        commands: &mut Commands,
+    ) -> IncrementalScopeRequestResult {
+        incremental.set_request::<T>(commands)
+    }
+
+    fn impl_set_response<T: 'static + Send + Sync>(
+        incremental: &mut IncrementalScopeBuilder,
+        commands: &mut Commands,
+    ) -> IncrementalScopeResponseResult {
+        incremental.set_response::<T>(commands)
+    }
+
+    fn impl_spawn_basic_scope_stream<T: 'static + Send + Sync>(
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> (DynInputSlot, DynOutput) {
+        let (stream_in, stream_out) =
+            NamedStream::<StreamOf<T>>::spawn_scope_stream(in_scope, out_scope, commands);
+
+        (stream_in.into(), stream_out.into())
+    }
+}
 
 #[must_use]
 pub struct CommonOperations<'a, Deserialize, Serialize, Cloneable> {
@@ -301,8 +190,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                 .subschema_for::<Config>(),
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config = serde_json::from_value(config)?;
-                let n = f(builder, config);
-                Ok(DynNode::new(n.output, n.input))
+                Ok(f(builder, config).into())
             })),
         };
         self.registry.nodes.insert(options.id.clone(), registration);
@@ -783,6 +671,7 @@ pub(super) struct MessageOperation {
     pub(super) to_string_impl: Option<ToStringFn>,
     pub(super) create_buffer_impl: CreateBufferFn,
     pub(super) create_trigger_impl: CreateTriggerFn,
+    build_scope: BuildScope,
 }
 
 impl MessageOperation {
@@ -805,6 +694,7 @@ impl MessageOperation {
                 builder.create_buffer::<T>(settings).as_any_buffer()
             },
             create_trigger_impl: |builder| builder.create_map_block(|_: T| ()).into(),
+            build_scope: BuildScope::new::<T>(),
         }
     }
 }
@@ -1106,6 +996,58 @@ impl MessageRegistry {
             .create_buffer_impl;
 
         Ok(f(settings, builder))
+    }
+
+    pub(crate) fn set_scope_request(
+        &self,
+        message_info: &TypeInfo,
+        incremental: &mut IncrementalScopeBuilder,
+        commands: &mut Commands,
+    ) -> Result<IncrementalScopeRequest, DiagramErrorCode> {
+        let f = self
+            .messages
+            .get(message_info)
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*message_info))?
+            .operations
+            .build_scope
+            .set_request;
+
+        f(incremental, commands).map_err(Into::into)
+    }
+
+    pub(crate) fn set_scope_response(
+        &self,
+        message_info: &TypeInfo,
+        incremental: &mut IncrementalScopeBuilder,
+        commands: &mut Commands,
+    ) -> Result<IncrementalScopeResponse, DiagramErrorCode> {
+        let f = self
+            .messages
+            .get(message_info)
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*message_info))?
+            .operations
+            .build_scope
+            .set_response;
+
+        f(incremental, commands).map_err(Into::into)
+    }
+
+    pub(crate) fn spawn_basic_scope_stream(
+        &self,
+        message_info: &TypeInfo,
+        in_scope: Entity,
+        out_scope: Entity,
+        commands: &mut Commands,
+    ) -> Result<(DynInputSlot, DynOutput), DiagramErrorCode> {
+        let f = self
+            .messages
+            .get(message_info)
+            .ok_or_else(|| DiagramErrorCode::UnregisteredType(*message_info))?
+            .operations
+            .build_scope
+            .spawn_basic_scope_stream;
+
+        Ok(f(in_scope, out_scope, commands))
     }
 
     pub fn trigger(

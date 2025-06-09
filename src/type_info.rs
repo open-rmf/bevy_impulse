@@ -4,8 +4,6 @@ use std::{
     hash::Hash,
 };
 
-use serde::Serialize;
-
 #[derive(Copy, Clone, Debug, Eq)]
 pub struct TypeInfo {
     pub type_id: TypeId,
@@ -13,7 +11,7 @@ pub struct TypeInfo {
 }
 
 impl TypeInfo {
-    pub(super) fn of<T>() -> Self
+    pub(crate) fn of<T>() -> Self
     where
         T: Any,
     {
@@ -42,6 +40,10 @@ impl Display for TypeInfo {
     }
 }
 
+#[cfg(feature = "diagram")]
+use serde::Serialize;
+
+#[cfg(feature = "diagram")]
 impl Serialize for TypeInfo {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

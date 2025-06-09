@@ -18,23 +18,18 @@ jobs:
   build:
     strategy:
       matrix:
-        rust-version: [stable, 1.75]
+        rust-version: [stable]
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
 
+    - name: Get apt dependencies
+      run: sudo apt-get install protobuf-compiler
+
     - name: Setup rust
       run: rustup default ${{ matrix.rust-version }}
-
-    # As new versions of our dependencies come out, they might depend on newer
-    # versions of the Rust compiler. When that happens, we'll use this step to
-    # lock down the dependency to a version that is known to be compatible with
-    # compiler version 1.75.
-    - name: Patch dependencies
-      if: ${{ matrix.rust-version == 1.75 }}
-      run: ./scripts/patch-versions-msrv-1_75.sh
 
     - name: Build default features
       run: cargo build --workspace

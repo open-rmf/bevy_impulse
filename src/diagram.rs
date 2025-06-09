@@ -21,12 +21,13 @@ mod fork_result_schema;
 mod join_schema;
 mod node_schema;
 mod registration;
+mod scope_schema;
 mod section_schema;
 mod serialization;
 mod split_schema;
+mod stream_out_schema;
 mod supported;
 mod transform_schema;
-mod type_info;
 mod unzip_schema;
 mod workflow_builder;
 
@@ -39,16 +40,15 @@ pub use join_schema::JoinOutput;
 use join_schema::{JoinSchema, SerializedJoinSchema};
 pub use node_schema::NodeSchema;
 pub use registration::*;
+pub use scope_schema::*;
 pub use section_schema::*;
 pub use serialization::*;
 pub use split_schema::*;
+pub use stream_out_schema::*;
 use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
-pub use type_info::TypeInfo;
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
-
-// ----------
 
 use std::{
     borrow::Cow,
@@ -58,20 +58,25 @@ use std::{
     sync::Arc,
 };
 
+pub use crate::type_info::TypeInfo;
 use crate::{
-    Builder, IncompatibleLayout, JsonMessage, Scope, Service, SpawnWorkflowExt,
-    SplitConnectionError, StreamPack,
+    Builder, IncompatibleLayout, IncrementalScopeError, JsonMessage, Scope, Service,
+    SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
+
 use schemars::{
     r#gen::SchemaGenerator,
     schema::{InstanceType, Metadata, ObjectValidation, Schema, SchemaObject, SingleOrVec},
     JsonSchema,
 };
+
 use serde::{
     de::{Error, Visitor},
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+
+use thiserror::Error as ThisError;
 
 const CURRENT_DIAGRAM_VERSION: &str = "0.1.0";
 const SUPPORTED_DIAGRAM_VERSION: &str = ">=0.1.0, <0.2.0";
@@ -98,6 +103,12 @@ impl NextOperation {
     pub fn dispose() -> Self {
         NextOperation::Builtin {
             builtin: BuiltinTarget::Dispose,
+        }
+    }
+
+    pub fn terminate() -> Self {
+        NextOperation::Builtin {
+            builtin: BuiltinTarget::Terminate,
         }
     }
 }
@@ -209,7 +220,6 @@ impl JsonSchema for NamespacedOperation {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", untagged)]
 pub enum BufferSelection {
-    Single(NextOperation),
     Dict(HashMap<String, NextOperation>),
     Array(Vec<NextOperation>),
 }
@@ -217,7 +227,6 @@ pub enum BufferSelection {
 impl BufferSelection {
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Single(_) => false,
             Self::Dict(d) => d.is_empty(),
             Self::Array(a) => a.is_empty(),
         }
@@ -379,6 +388,50 @@ pub enum DiagramOperation {
     /// # Ok::<_, serde_json::Error>(())
     /// ```
     Section(SectionSchema),
+
+    Scope(ScopeSchema),
+
+    /// Declare a stream output for the current scope. Outputs that you connect
+    /// to this operation will be streamed out of the scope that this operation
+    /// is declared in.
+    ///
+    /// For the root-level scope, make sure you use a stream pack that is
+    /// compatible with all stream out operations that you declare, otherwise
+    /// you may get a connection error at runtime.
+    ///
+    /// # Examples
+    /// ```
+    /// # bevy_impulse::Diagram::from_json_str(r#"
+    /// {
+    ///     "version": "0.1.0",
+    ///     "start": "plan",
+    ///     "ops": {
+    ///         "progress_stream": {
+    ///             "type": "stream_out",
+    ///             "name": "progress"
+    ///         },
+    ///         "plan": {
+    ///             "type": "node",
+    ///             "builder": "planner",
+    ///             "next": "drive",
+    ///             "stream_out" : {
+    ///                 "progress": "progress_stream"
+    ///             }
+    ///         },
+    ///         "drive": {
+    ///             "type": "node",
+    ///             "builder": "navigation",
+    ///             "next": { "builtin": "terminate" },
+    ///             "stream_out": {
+    ///                 "progress": "progress_stream"
+    ///             }
+    ///         }
+    ///     }
+    /// }
+    /// # "#)?;
+    /// # Ok::<_, serde_json::Error>(())
+    /// ```
+    StreamOut(StreamOutSchema),
 
     /// If the request is cloneable, clone it into multiple responses that can
     /// each be sent to a different operation. The `next` property is an array.
@@ -856,9 +909,11 @@ impl BuildDiagramOperation for DiagramOperation {
             Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Scope(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
             Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::StreamOut(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
             Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
         }
@@ -1088,7 +1143,7 @@ impl Diagram {
     /// templates will not be validated.
     pub fn validate_template_usage(&self) -> Result<(), DiagramErrorCode> {
         for op in self.ops.values() {
-            match op {
+            match op.as_ref() {
                 DiagramOperation::Section(section) => match &section.provider {
                     SectionProvider::Template(template) => {
                         self.templates.validate_template(template)?;
@@ -1105,12 +1160,12 @@ impl Diagram {
 
 #[derive(Debug, Clone, Default, JsonSchema, Serialize, Deserialize, Deref, DerefMut)]
 #[serde(transparent, rename_all = "snake_case")]
-pub struct Operations(HashMap<OperationName, DiagramOperation>);
+pub struct Operations(Arc<HashMap<OperationName, Arc<DiagramOperation>>>);
 
 impl Operations {
     /// Get an operation from this map, or a diagram error code if the operation
     /// is not available.
-    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&DiagramOperation, DiagramErrorCode> {
+    pub fn get_op(&self, op_id: &Arc<str>) -> Result<&Arc<DiagramOperation>, DiagramErrorCode> {
         self.get(op_id)
             .ok_or_else(|| DiagramErrorCode::operation_name_not_found(op_id.clone()))
     }
@@ -1154,7 +1209,7 @@ impl Templates {
 }
 
 fn validate_operation_names(
-    ops: &HashMap<OperationName, DiagramOperation>,
+    ops: &HashMap<OperationName, Arc<DiagramOperation>>,
 ) -> Result<(), DiagramErrorCode> {
     for name in ops.keys() {
         validate_operation_name(name)?;
@@ -1186,7 +1241,7 @@ fn check_circular_template_dependency(
         };
 
         for op in template.ops.0.values() {
-            match op {
+            match op.as_ref() {
                 DiagramOperation::Section(section) => match &section.provider {
                     SectionProvider::Template(template) => {
                         queue.push(top.child(template)?);
@@ -1229,7 +1284,7 @@ impl TemplateStack {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(ThisError, Debug)]
 #[error("{context} {code}")]
 pub struct DiagramError {
     pub context: DiagramErrorContext,
@@ -1263,7 +1318,7 @@ impl Display for DiagramErrorContext {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(ThisError, Debug)]
 pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
@@ -1274,11 +1329,11 @@ pub enum DiagramErrorCode {
     #[error("section template [{0}] does not exist")]
     TemplateNotFound(OperationName),
 
-    #[error("type mismatch, source {source_type}, target {target_type}")]
-    TypeMismatch {
-        source_type: TypeInfo,
-        target_type: TypeInfo,
-    },
+    #[error("{0}")]
+    TypeMismatch(#[from] TypeMismatch),
+
+    #[error("{0}")]
+    MissingStream(#[from] MissingStream),
 
     #[error("Operation [{0}] attempted to instantiate a duplicate of itself.")]
     DuplicateInputsCreated(OperationRef),
@@ -1384,6 +1439,12 @@ pub enum DiagramErrorCode {
 
     #[error("A circular dependency exists between templates: {}", format_list(&.0))]
     CircularTemplateDependency(Vec<OperationName>),
+
+    #[error("An error occurred while finishing the workflow build: {0}")]
+    FinishingErrors(FinishingErrors),
+
+    #[error("An error occurred while creating a scope: {0}")]
+    IncrementalScopeError(#[from] IncrementalScopeError),
 }
 
 fn format_list<T: std::fmt::Display>(list: &[T]) -> String {
@@ -1411,6 +1472,41 @@ impl DiagramErrorCode {
 
     pub fn in_operation(self, op_id: OperationRef) -> DiagramError {
         DiagramError::in_operation(op_id, self)
+    }
+}
+
+/// An error that occurs when a diagram description expects a node to provide a
+/// named output stream, but the node does not provide any output stream that
+/// matches the expected name.
+#[derive(ThisError, Debug)]
+#[error("An expected stream is not provided by this node: {missing_name}. Available stream names: {}", format_list(&available_names))]
+pub struct MissingStream {
+    pub missing_name: OperationName,
+    pub available_names: Vec<OperationName>,
+}
+
+#[derive(ThisError, Debug, Default)]
+pub struct FinishingErrors {
+    pub errors: HashMap<OperationRef, DiagramErrorCode>,
+}
+
+impl FinishingErrors {
+    pub fn as_result(self) -> Result<(), Self> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl std::fmt::Display for FinishingErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (op, code) in &self.errors {
+            write!(f, " - [{op}]: {code}")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1529,10 +1625,10 @@ mod tests {
         assert!(
             matches!(
                 err.code,
-                DiagramErrorCode::TypeMismatch {
+                DiagramErrorCode::TypeMismatch(TypeMismatch {
                     target_type: _,
                     source_type: _
-                }
+                })
             ),
             "{:?}",
             err
@@ -1717,4 +1813,11 @@ mod tests {
 
         assert!(matches!(result.code, DiagramErrorCode::UnknownOperation(_),));
     }
+}
+
+/// Used with `#[serde(default, skip_serializing_if = "is_default")]` for fields
+/// that don't need to be serialized if they are a default value.
+pub(crate) fn is_default<T: std::default::Default + Eq>(value: &T) -> bool {
+    let default = T::default();
+    *value == default
 }

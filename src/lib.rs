@@ -147,6 +147,8 @@ pub mod testing;
 pub mod trim;
 pub use trim::*;
 
+pub mod type_info;
+
 use bevy_app::prelude::{App, Plugin, Update};
 use bevy_ecs::prelude::{Entity, In};
 
@@ -185,7 +187,7 @@ pub struct BlockingService<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
-    pub streams: Streams::Buffer,
+    pub streams: Streams::StreamBuffers,
     /// The entity providing the service
     pub provider: Entity,
     /// The node in a workflow or impulse chain that asked for the service
@@ -210,7 +212,7 @@ pub struct AsyncService<Request, Streams: StreamPack = ()> {
     /// Stream channels that will let you send stream information. This will
     /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+    pub streams: Streams::StreamChannels,
     /// The channel that allows querying and syncing with the world while the
     /// service runs asynchronously.
     pub channel: Channel,
@@ -250,7 +252,7 @@ pub struct BlockingCallback<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
-    pub streams: Streams::Buffer,
+    pub streams: Streams::StreamBuffers,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
@@ -271,7 +273,7 @@ pub struct AsyncCallback<Request, Streams: StreamPack = ()> {
     /// Stream channels that will let you send stream information. This will
     /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+    pub streams: Streams::StreamChannels,
     /// The channel that allows querying and syncing with the world while the
     /// callback executes asynchronously.
     pub channel: Channel,
@@ -292,7 +294,7 @@ pub struct BlockingMap<Request, Streams: StreamPack = ()> {
     /// The input data of the request
     pub request: Request,
     /// The buffer to hold stream output data until the function is finished
-    pub streams: Streams::Buffer,
+    pub streams: Streams::StreamBuffers,
     /// The node in a workflow or impulse chain that asked for the callback
     pub source: Entity,
     /// The unique session ID for the workflow
@@ -312,7 +314,7 @@ pub struct AsyncMap<Request, Streams: StreamPack = ()> {
     /// Stream channels that will let you send stream information. This will
     /// usually be a [`StreamChannel`] or a (possibly nested) tuple of
     /// `StreamChannel`s, whichever matches the [`StreamPack`] description.
-    pub streams: Streams::Channel,
+    pub streams: Streams::StreamChannels,
     /// The channel that allows querying and syncing with the world while the
     /// map executes asynchronously.
     pub channel: Channel,
@@ -337,13 +339,32 @@ impl Plugin for ImpulsePlugin {
     }
 }
 
+/// This plugin adds [`ImpulsePlugin`] plus a few more that allows plus a few
+/// more plugins that allow create a sufficient but minimal app for executing
+/// workflows.
+#[derive(Default)]
+pub struct ImpulseAppPlugin {}
+
+impl Plugin for ImpulseAppPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ImpulsePlugin::default(),
+            bevy_core::TaskPoolPlugin::default(),
+            bevy_core::TypeRegistrationPlugin,
+            bevy_core::FrameCountPlugin,
+            bevy_app::ScheduleRunnerPlugin::default(),
+        ));
+    }
+}
+
 pub mod prelude {
     pub use crate::{
         buffer::{
             Accessible, Accessor, AnyBuffer, AnyBufferKey, AnyBufferMut, AnyBufferWorldAccess,
-            AnyMessageBox, AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferKey,
-            BufferMap, BufferMapLayout, BufferSettings, BufferWorldAccess, Bufferable, Buffering,
-            IncompatibleLayout, IterBufferable, Joinable, Joined, RetentionPolicy,
+            AnyMessageBox, AsAnyBuffer, Buffer, BufferAccess, BufferAccessMut, BufferGateAccess,
+            BufferGateAccessMut, BufferKey, BufferMap, BufferMapLayout, BufferSettings,
+            BufferWorldAccess, Bufferable, Buffering, IncompatibleLayout, IterBufferable, Joinable,
+            Joined, RetentionPolicy,
         },
         builder::Builder,
         callback::{AsCallback, Callback, IntoAsyncCallback, IntoBlockingCallback},
@@ -361,16 +382,22 @@ pub mod prelude {
             DeliveryInstructions, DeliveryLabel, DeliveryLabelId, IntoAsyncService,
             IntoBlockingService, Service, ServiceDiscovery, SpawnServicesExt,
         },
-        stream::{Stream, StreamFilter, StreamOf, StreamPack},
+        stream::{DynamicallyNamedStream, NamedValue, Stream, StreamFilter, StreamOf, StreamPack},
         trim::{TrimBranch, TrimPoint},
         workflow::{DeliverySettings, Scope, ScopeSettings, SpawnWorkflowExt, WorkflowSettings},
         AsyncCallback, AsyncCallbackInput, AsyncMap, AsyncService, AsyncServiceInput,
         BlockingCallback, BlockingCallbackInput, BlockingMap, BlockingService,
         BlockingServiceInput, ContinuousQuery, ContinuousService, ContinuousServiceInput,
+        ImpulseAppPlugin, ImpulsePlugin,
     };
 
+    pub use bevy_ecs::prelude::In;
+
     #[cfg(feature = "diagram")]
-    pub use crate::buffer::{
-        JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage,
+    pub use crate::{
+        buffer::{JsonBuffer, JsonBufferKey, JsonBufferMut, JsonBufferWorldAccess, JsonMessage},
+        diagram::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions, Section},
     };
+
+    pub use futures::FutureExt;
 }

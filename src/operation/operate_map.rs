@@ -21,7 +21,7 @@ use std::future::Future;
 
 use crate::{
     async_execution::{spawn_task, task_cancel_sender},
-    make_stream_buffer_from_world, ActiveTasksStorage, AsyncMap, BlockingMap, CallAsyncMap,
+    make_stream_buffers_from_world, ActiveTasksStorage, AsyncMap, BlockingMap, CallAsyncMap,
     CallBlockingMap, Channel, ChannelQueue, Input, InputBundle, ManageDisposal, ManageInput,
     OperateTask, Operation, OperationCleanup, OperationReachability, OperationRequest,
     OperationResult, OperationSetup, OrBroken, ReachabilityResult, Sendish, SingleInputStorage,
@@ -89,7 +89,7 @@ where
             roster,
         }: OperationRequest,
     ) -> OperationResult {
-        let streams = make_stream_buffer_from_world::<Streams>(source, world)?;
+        let streams = make_stream_buffers_from_world::<Streams>(source, world)?;
         let mut source_mut = world.get_entity_mut(source).or_broken()?;
         let target = source_mut.get::<SingleTargetStorage>().or_broken()?.0;
         let Input {
@@ -108,7 +108,14 @@ where
         map.f = Some(f);
 
         let mut unused_streams = UnusedStreams::new(source);
-        Streams::process_buffer(streams, source, session, &mut unused_streams, world, roster)?;
+        Streams::process_stream_buffers(
+            streams,
+            source,
+            session,
+            &mut unused_streams,
+            world,
+            roster,
+        )?;
         if !unused_streams.streams.is_empty() {
             world.get_entity_mut(source).or_broken()?.emit_disposal(
                 session,

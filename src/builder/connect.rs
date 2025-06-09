@@ -109,7 +109,14 @@ fn try_connect(connect: Connect, world: &mut World) -> OperationResult {
         }
 
         if let Some(mut targets) = input_mut.get_mut::<StreamTargetMap>() {
-            for target in &mut targets.map {
+            for target in targets.anonymous.values_mut() {
+                if *target == connect.original_target {
+                    connection_happened = true;
+                    *target = connect.new_target;
+                }
+            }
+
+            for (_, target) in targets.named.values_mut() {
                 if *target == connect.original_target {
                     connection_happened = true;
                     *target = connect.new_target;

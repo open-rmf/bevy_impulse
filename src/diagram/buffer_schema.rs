@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    type_info::TypeInfo, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, NextOperation, OperationName,
+    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    NextOperation, OperationName, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -532,7 +532,7 @@ mod tests {
                 },
                 "count_access": {
                     "type": "buffer_access",
-                    "buffers": "json_buffer",
+                    "buffers": ["json_buffer"],
                     "next": "count",
                 },
                 "count": {
@@ -583,7 +583,7 @@ mod tests {
                 },
                 "count_access": {
                     "type": "buffer_access",
-                    "buffers": "json_buffer",
+                    "buffers": ["json_buffer"],
                     "next": "count",
                 },
                 "count": {
@@ -639,7 +639,7 @@ mod tests {
                 "buffer": { "type": "buffer" },
                 "listen": {
                     "type": "listen",
-                    "buffers": "buffer",
+                    "buffers": ["buffer"],
                     "next": "count",
                 },
                 "count": {
@@ -723,7 +723,7 @@ mod tests {
                 "buffer": { "type": "buffer" },
                 "listen": {
                     "type": "listen",
-                    "buffers": "buffer",
+                    "buffers": ["buffer"],
                     "next": "count",
                 },
                 "count": {
@@ -751,7 +751,7 @@ mod tests {
                 "buffer": { "type": "buffer" },
                 "listen": {
                     "type": "listen",
-                    "buffers": "buffer",
+                    "buffers": ["buffer"],
                     "next": "count",
                 },
                 "count": {

@@ -25,9 +25,9 @@ use crate::{
 };
 
 use super::{
-    type_info::TypeInfo, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext,
-    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
-    NextOperation, OperationName, Operations,
+    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramElementRegistry,
+    DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
+    OperationRef, Operations, RedirectConnection, TypeInfo,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -180,7 +180,7 @@ impl BuildDiagramOperation for SectionSchema {
                 let section = ctx.templates.get_template(section_template)?;
 
                 for (child_id, op) in section.ops.iter() {
-                    ctx.add_child_operation(id, child_id, op, &section.ops);
+                    ctx.add_child_operation(id, child_id, op, section.ops.clone(), None);
                 }
 
                 section
@@ -210,6 +210,11 @@ impl BuildDiagramOperation for SectionSchema {
                 }
             }
         }
+
+        ctx.set_connect_into_target(
+            OperationRef::terminate_for(id.clone()),
+            RedirectConnection::new(ctx.into_operation_ref(&NextOperation::terminate())),
+        )?;
 
         Ok(BuildStatus::Finished)
     }
@@ -901,7 +906,7 @@ mod tests {
                 },
                 "listen": {
                     "type": "listen",
-                    "buffers": { "multiply": "buffer" },
+                    "buffers": [{ "multiply": "buffer" }],
                     "next": "pull",
                 },
                 "pull": {

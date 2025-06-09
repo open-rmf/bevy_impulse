@@ -578,6 +578,24 @@ impl<T> OrBroken for Option<T> {
     }
 }
 
+pub trait ReportUnhandled {
+    fn report_unhandled(self, source: Entity, world: &mut World);
+}
+
+impl ReportUnhandled for OperationResult {
+    fn report_unhandled(self, source: Entity, world: &mut World) {
+        if let Err(OperationError::Broken(backtrace)) = self {
+            world
+                .get_resource_or_insert_with(UnhandledErrors::default)
+                .broken
+                .push(Broken {
+                    node: source,
+                    backtrace,
+                });
+        }
+    }
+}
+
 pub(crate) struct AddOperation<Op: Operation> {
     scope: Option<Entity>,
     source: Entity,
@@ -712,7 +730,7 @@ fn perform_operation<Op: Operation>(
 
 pub struct DownstreamIter<'a> {
     output: DownstreamFinishIter<'a>,
-    streams: Option<std::slice::Iter<'a, Entity>>,
+    streams: Option<std::collections::hash_map::Iter<'a, std::any::TypeId, Entity>>,
 }
 
 impl<'a> Iterator for DownstreamIter<'a> {
@@ -723,7 +741,7 @@ impl<'a> Iterator for DownstreamIter<'a> {
         }
 
         if let Some(streams) = &mut self.streams {
-            return streams.next().copied();
+            return streams.next().map(|(_, e)| *e);
         }
 
         None
@@ -754,7 +772,9 @@ pub fn immediately_downstream_of(source: Entity, world: &World) -> DownstreamIte
         DownstreamFinishIter::Single(None)
     };
 
-    let streams = world.get::<StreamTargetMap>(source).map(|s| s.map.iter());
+    let streams = world
+        .get::<StreamTargetMap>(source)
+        .map(|s| s.anonymous.iter());
 
     DownstreamIter { output, streams }
 }

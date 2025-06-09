@@ -337,11 +337,11 @@ fn impl_buffer_clone(
     if noncopy {
         // Clone impl for structs with a buffer that is not copyable
         quote! {
-            impl #impl_generics ::std::clone::Clone for #buffer_struct_ident #ty_generics #where_clause {
+            impl #impl_generics ::bevy_impulse::re_exports::Clone for #buffer_struct_ident #ty_generics #where_clause {
                 fn clone(&self) -> Self {
                     Self {
                         #(
-                            #field_ident: self.#field_ident.clone(),
+                            #field_ident: ::bevy_impulse::re_exports::Clone::clone(&self.#field_ident),
                         )*
                     }
                 }
@@ -350,13 +350,13 @@ fn impl_buffer_clone(
     } else {
         // Clone and copy impl for structs with buffers that are all copyable
         quote! {
-            impl #impl_generics ::std::clone::Clone for #buffer_struct_ident #ty_generics #where_clause {
+            impl #impl_generics ::bevy_impulse::re_exports::Clone for #buffer_struct_ident #ty_generics #where_clause {
                 fn clone(&self) -> Self {
                     *self
                 }
             }
 
-            impl #impl_generics ::std::marker::Copy for #buffer_struct_ident #ty_generics #where_clause {}
+            impl #impl_generics ::bevy_impulse::re_exports::Copy for #buffer_struct_ident #ty_generics #where_clause {}
         }
     }
 }
@@ -401,9 +401,8 @@ fn impl_buffer_map_layout(
         }
 
         impl #impl_generics ::bevy_impulse::BufferMapStruct for #struct_ident #ty_generics #where_clause {
-            fn buffer_list(&self) -> ::smallvec::SmallVec<[::bevy_impulse::AnyBuffer; 8]> {
-                use smallvec::smallvec;
-                smallvec![#(
+            fn buffer_list(&self) -> ::bevy_impulse::re_exports::SmallVec<[::bevy_impulse::AnyBuffer; 8]> {
+                ::bevy_impulse::re_exports::smallvec![#(
                     ::bevy_impulse::AsAnyBuffer::as_any_buffer(&self.#field_ident),
                 )*]
             }

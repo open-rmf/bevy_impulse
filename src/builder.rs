@@ -45,14 +45,27 @@ pub(crate) use connect::*;
 /// please open an issue with a minimal reproducible example if you find a way
 /// to make it panic.
 pub struct Builder<'w, 's, 'a> {
+    pub(crate) context: BuilderScopeContext,
+    pub(crate) commands: &'a mut Commands<'w, 's>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BuilderScopeContext {
     /// The scope that this builder is meant to help build
     pub(crate) scope: Entity,
     /// The target for cancellation workflows
     pub(crate) finish_scope_cancel: Entity,
-    pub(crate) commands: &'a mut Commands<'w, 's>,
 }
 
 impl<'w, 's, 'a> Builder<'w, 's, 'a> {
+    /// Begin building a chain of operations off of an output.
+    pub fn chain<'b, Response: 'static + Send + Sync>(
+        &'b mut self,
+        output: Output<Response>,
+    ) -> Chain<'w, 's, 'a, 'b, Response> {
+        output.chain(self)
+    }
+
     /// Create a node for a provider. This will give access to an input slot, an
     /// output slots, and a pack of stream outputs which can all be connected to
     /// other nodes.
@@ -67,15 +80,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
-        provider.connect(Some(self.scope), source, target, self.commands);
+        provider.connect(Some(self.scope()), source, target, self.commands);
 
         let mut map = StreamTargetMap::default();
-        let (bundle, streams) =
-            <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self);
-        self.commands.entity(source).insert((bundle, map));
+        let streams = <P::Streams as StreamPack>::spawn_node_streams(source, &mut map, self);
+        self.commands.entity(source).insert(map);
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams,
         }
     }
@@ -160,7 +172,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     ) -> Buffer<T> {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateBuffer::<T>::new(settings),
         ));
@@ -223,13 +235,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             ForkClone::<T>::new(ForkTargetStorage::new()),
         ));
         (
-            InputSlot::new(self.scope, source),
-            ForkCloneOutput::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
+            ForkCloneOutput::new(self.scope(), source),
         )
     }
 
@@ -241,8 +253,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         (
-            InputSlot::new(self.scope, source),
-            T::unzip_output(Output::<T>::new(self.scope, source), self),
+            InputSlot::new(self.scope(), source),
+            T::unzip_output(Output::<T>::new(self.scope(), source), self),
         )
     }
 
@@ -259,16 +271,16 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target_err = self.commands.spawn(UnusedTarget).id();
 
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             make_result_branching::<T, E>(ForkTargetStorage::from_iter([target_ok, target_err])),
         ));
 
         (
-            InputSlot::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
             ForkResultOutput {
-                ok: Output::new(self.scope, target_ok),
-                err: Output::new(self.scope, target_err),
+                ok: Output::new(self.scope(), target_ok),
+                err: Output::new(self.scope(), target_err),
             },
         )
     }
@@ -288,16 +300,16 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target_none = self.commands.spawn(UnusedTarget).id();
 
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             make_option_branching::<T>(ForkTargetStorage::from_iter([target_some, target_none])),
         ));
 
         (
-            InputSlot::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
             ForkOptionOutput {
-                some: Output::new(self.scope, target_some),
-                none: Output::new(self.scope, target_none),
+                some: Output::new(self.scope(), target_some),
+                none: Output::new(self.scope(), target_none),
             },
         )
     }
@@ -391,14 +403,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             Collect::<T, N>::new(target, min, max),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -428,14 +440,14 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateSplit::<T>::default(),
         ));
 
         (
-            InputSlot::new(self.scope, source),
-            SplitOutputs::new(self.scope, source),
+            InputSlot::new(self.scope(), source),
+            SplitOutputs::new(self.scope(), source),
         )
     }
 
@@ -451,12 +463,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateCancel::<T>::new(),
         ));
 
-        InputSlot::new(self.scope, source)
+        InputSlot::new(self.scope(), source)
     }
 
     /// Create an input slot that will cancel that current scope when it gets
@@ -467,12 +479,12 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     pub fn create_quiet_cancel(&mut self) -> InputSlot<()> {
         let source = self.commands.spawn(()).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateQuietCancel,
         ));
 
-        InputSlot::new(self.scope, source)
+        InputSlot::new(self.scope(), source)
     }
 
     /// This method allows you to define a cleanup workflow that branches off of
@@ -577,20 +589,20 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
     {
         let branches: SmallVec<[_; 16]> = branches.into_iter().collect();
         for branch in &branches {
-            branch.verify_scope(self.scope);
+            branch.verify_scope(self.scope());
         }
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             Trim::<T>::new(branches, target),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -609,19 +621,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
-        buffers.verify_scope(self.scope);
+        buffers.verify_scope(self.scope());
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateDynamicGate::<T, _>::new(buffers, target),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -638,19 +650,19 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         T: 'static + Send + Sync,
     {
         let buffers = buffers.into_buffer(self);
-        buffers.verify_scope(self.scope);
+        buffers.verify_scope(self.scope());
 
         let source = self.commands.spawn(()).id();
         let target = self.commands.spawn(UnusedTarget).id();
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             OperateStaticGate::<T, _>::new(buffers, target, action),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams: (),
         }
     }
@@ -679,7 +691,7 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
 
     /// Get the scope that this builder is building for.
     pub fn scope(&self) -> Entity {
-        self.scope
+        self.context.scope
     }
 
     /// Borrow the commands for the builder
@@ -700,11 +712,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         Streams: StreamPack,
         Settings: Into<ScopeSettings>,
     {
+        // NOTE(@mxgrey): When changing the implementation of this function,
+        // remember to similarly update the implementation of IncrementalScopeBuilder
         let ScopeEndpoints {
             terminal,
             enter_scope,
             finish_scope_cancel,
-        } = OperateScope::<Request, Response, Streams>::add(
+        } = OperateScope::add::<Request, Response>(
             Some(self.scope()),
             scope_id,
             Some(exit_scope),
@@ -712,11 +726,13 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         );
 
         let (stream_in, stream_out) =
-            Streams::spawn_scope_streams(scope_id, self.scope, self.commands);
+            Streams::spawn_scope_streams(scope_id, self.scope(), self.commands);
 
         let mut builder = Builder {
-            scope: scope_id,
-            finish_scope_cancel,
+            context: BuilderScopeContext {
+                scope: scope_id,
+                finish_scope_cancel,
+            },
             commands: self.commands,
         };
 
@@ -732,8 +748,8 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
             .insert(ScopeSettingsStorage(settings));
 
         Node {
-            input: InputSlot::new(self.scope, scope_id),
-            output: Output::new(self.scope, exit_scope),
+            input: InputSlot::new(self.scope(), scope_id),
+            output: Output::new(self.scope(), exit_scope),
             streams: stream_out,
         }
     }
@@ -750,19 +766,23 @@ impl<'w, 's, 'a> Builder<'w, 's, 'a> {
         let target = self.commands.spawn(UnusedTarget).id();
 
         let mut map = StreamTargetMap::default();
-        let (bundle, streams) = Streams::spawn_node_streams(source, &mut map, self);
-        self.commands.entity(source).insert((bundle, map));
+        let streams = Streams::spawn_node_streams(source, &mut map, self);
+        self.commands.entity(source).insert(map);
         self.commands.add(AddOperation::new(
-            Some(self.scope),
+            Some(self.scope()),
             source,
             Injection::<Request, Response, Streams>::new(target),
         ));
 
         Node {
-            input: InputSlot::new(self.scope, source),
-            output: Output::new(self.scope, target),
+            input: InputSlot::new(self.scope(), source),
+            output: Output::new(self.scope(), target),
             streams,
         }
+    }
+
+    pub fn context(&self) -> BuilderScopeContext {
+        self.context
     }
 }
 
@@ -790,6 +810,7 @@ impl CleanupWorkflowConditions {
 mod tests {
     use crate::{prelude::*, testing::*, CancellationCause};
     use smallvec::SmallVec;
+    use std::time::Instant;
 
     #[test]
     fn test_disconnected_workflow() {
@@ -958,7 +979,6 @@ mod tests {
             stream_node
                 .streams
                 .chain(builder)
-                .inner()
                 .map_block(|value| 2 * value)
                 .connect(scope.terminate);
         });
@@ -980,7 +1000,6 @@ mod tests {
             stream_node
                 .streams
                 .chain(builder)
-                .inner()
                 .map_block(|value| 2 * value)
                 .connect(scope.terminate);
         });
@@ -1279,5 +1298,160 @@ mod tests {
             .available()
             .is_some_and(|v| v == expectation));
         assert!(context.no_unhandled_errors());
+    }
+
+    #[test]
+    fn benchmarks() {
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let (start_test, end_test) = build_benchmark_fixture(scope, builder);
+            builder.connect(start_test, end_test);
+        });
+
+        let mut promise =
+            context.command(|commands| commands.request((), workflow).take_response());
+        context.run_with_conditions(&mut promise, Duration::from_secs(10));
+        assert!(context.no_unhandled_errors());
+        let result = promise.take().available().unwrap();
+        println!("Performance for basic connection:\n{result:#?}");
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let (start_test, end_test) = build_benchmark_fixture(scope, builder);
+            builder
+                .chain(start_test)
+                .then_io_scope(|scope, builder| {
+                    builder.connect(scope.input, scope.terminate);
+                })
+                .connect(end_test);
+        });
+
+        let mut promise =
+            context.command(|commands| commands.request((), workflow).take_response());
+        context.run_with_conditions(&mut promise, Duration::from_secs(10));
+        assert!(context.no_unhandled_errors());
+        let result = promise.take().available().unwrap();
+        println!("Performance for basic connection:\n{result:#?}");
+    }
+
+    fn build_benchmark_fixture(
+        scope: Scope<(), TimeStats>,
+        builder: &mut Builder,
+    ) -> (Output<Instant>, InputSlot<Instant>) {
+        let initial_time = builder
+            .commands()
+            .spawn_service(get_initial_time.into_blocking_service());
+        let finish_time = builder
+            .commands()
+            .spawn_service(finish_time_range.into_blocking_service());
+        let collect_samples = builder
+            .commands()
+            .spawn_service(collect_samples.into_blocking_service());
+
+        let samples = builder.create_buffer(BufferSettings::keep_all());
+
+        let initial_node = builder.create_node(initial_time);
+        let finish_node = builder.create_node(finish_time);
+
+        builder.connect(scope.input, initial_node.input);
+        builder.connect(finish_node.output, samples.input_slot());
+
+        builder
+            .listen(samples)
+            .then(collect_samples)
+            .dispose_on_none()
+            .connect(scope.terminate);
+
+        builder
+            .listen(samples)
+            .map_block(|_| ())
+            .connect(initial_node.input);
+
+        (initial_node.output, finish_node.input)
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TimeRange {
+        initial_time: Instant,
+        finish_time: Instant,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct TimeStats {
+        #[allow(unused)]
+        sample_count: usize,
+        #[allow(unused)]
+        average: Duration,
+        #[allow(unused)]
+        std_dev: Duration,
+        #[allow(unused)]
+        highest: Duration,
+        #[allow(unused)]
+        lowest: Duration,
+    }
+
+    impl TimeStats {
+        fn new(samples: impl IntoIterator<Item = TimeRange>) -> Self {
+            let samples: Vec<_> = samples
+                .into_iter()
+                .map(|s| s.finish_time - s.initial_time)
+                .collect();
+            let sample_count = samples.len();
+
+            let mut highest = None;
+            let mut lowest = None;
+            let mut average = Duration::new(0, 0);
+            for sample in &samples {
+                average += *sample;
+                if highest.is_none_or(|h| *sample > h) {
+                    highest = Some(*sample);
+                }
+
+                if lowest.is_none_or(|l| *sample < l) {
+                    lowest = Some(*sample);
+                }
+            }
+
+            let average = average / sample_count as u32;
+            let mut radicand = 0.0;
+            for sample in samples {
+                let delta = (sample.as_nanos() as i64 - average.as_nanos() as i64) as f64;
+                radicand += f64::powf(delta, 2.0);
+            }
+
+            let std_dev = Duration::from_nanos(f64::sqrt(radicand) as u64);
+            let highest = highest.unwrap();
+            let lowest = lowest.unwrap();
+            TimeStats {
+                sample_count,
+                average,
+                std_dev,
+                highest,
+                lowest,
+            }
+        }
+    }
+
+    fn get_initial_time(_: In<()>) -> Instant {
+        Instant::now()
+    }
+
+    fn finish_time_range(In(initial_time): In<Instant>) -> TimeRange {
+        TimeRange {
+            initial_time,
+            finish_time: Instant::now(),
+        }
+    }
+
+    fn collect_samples(
+        In(key): In<BufferKey<TimeRange>>,
+        access: BufferAccess<TimeRange>,
+    ) -> Option<TimeStats> {
+        let samples = access.get(&key).unwrap();
+        if samples.len() >= 1000 {
+            Some(TimeStats::new(samples.iter().copied()))
+        } else {
+            None
+        }
     }
 }

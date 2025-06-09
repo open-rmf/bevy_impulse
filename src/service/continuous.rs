@@ -75,9 +75,10 @@ where
     Streams: StreamPack,
 {
     queues: Query<'w, 's, &'static ContinuousQueueStorage<Request>>,
-    streams: Query<'w, 's, StreamTargetQuery<Streams>>,
+    streams: Query<'w, 's, Option<&'static StreamTargetMap>>,
     delivered: Local<'s, HashMap<Entity, DeliveredQueue<Response>>>,
     commands: Commands<'w, 's>,
+    _ignore: std::marker::PhantomData<fn(Streams)>,
 }
 
 impl<'w, 's, Request, Response, Streams> ContinuousQuery<'w, 's, Request, Response, Streams>
@@ -112,6 +113,7 @@ where
                 streams: &self.streams,
                 delivered: self.delivered.entry(key.provider()).or_default(),
                 commands: &mut self.commands,
+                _ignore: Default::default(),
             })
     }
 }
@@ -232,9 +234,10 @@ where
 {
     provider: Entity,
     queue: &'a ContinuousQueueStorage<Request>,
-    streams: &'a Query<'w, 's, StreamTargetQuery<Streams>>,
+    streams: &'a Query<'w, 's, Option<&'static StreamTargetMap>>,
     delivered: &'a mut DeliveredQueue<Response>,
     commands: &'a mut Commands<'w, 's>,
+    _ignore: std::marker::PhantomData<fn(Streams)>,
 }
 
 impl<'w, 's, 'a, Request, Response, Streams>
@@ -287,7 +290,7 @@ where
         // INVARIANT: We have already confirmed that the index is smaller than
         // the length of the SmallVec, so it should be a valid index.
         let item = self.queue.inner.get(index).unwrap();
-        let streams = self.make_stream_buffer(item.source);
+        let streams = self.make_stream_buffers(item.source);
         Some(OrderMut {
             index,
             streams: Some(streams),
@@ -308,7 +311,7 @@ where
                 continue;
             }
 
-            let streams = self.make_stream_buffer(item.source);
+            let streams = self.make_stream_buffers(item.source);
             f(OrderMut {
                 index,
                 streams: Some(streams),
@@ -340,7 +343,7 @@ where
                 continue;
             }
 
-            let streams = self.make_stream_buffer(item.source);
+            let streams = self.make_stream_buffers(item.source);
             let u = f(OrderMut {
                 index,
                 streams: Some(streams),
@@ -356,10 +359,10 @@ where
         output
     }
 
-    fn make_stream_buffer(&self, source: Entity) -> Streams::Buffer {
+    fn make_stream_buffers(&self, source: Entity) -> Streams::StreamBuffers {
         // INVARIANT: The query can't fail because all of its components are optional
-        let (target_indices, target_map) = self.streams.get(source).unwrap();
-        Streams::make_buffer(target_indices, target_map)
+        let target_map = self.streams.get(source).unwrap();
+        Streams::make_stream_buffers(target_map)
     }
 }
 
@@ -375,7 +378,7 @@ where
     // We use Option here so that the buffer can be taken inside the destructor.
     // We need to take the buffer so that the data can be sent into commands and
     // flushed later.
-    streams: Option<Streams::Buffer>,
+    streams: Option<Streams::StreamBuffers>,
     delivered: &'a mut DeliveredQueue<Response>,
     commands: &'a mut Commands<'w, 's>,
 }
@@ -421,7 +424,7 @@ where
     }
 
     /// Access the stream buffer so you can send streams from your service.
-    pub fn streams(&self) -> &Streams::Buffer {
+    pub fn streams(&self) -> &Streams::StreamBuffers {
         // INVARIANT: This is always initialized with Some(_) and never gets
         // taken until OrderMut is dropped, so this will always contain a valid
         // buffer for as long as the OrderMut is not being dropped.
@@ -449,7 +452,7 @@ where
     Streams: StreamPack,
 {
     fn drop(&mut self) {
-        Streams::defer_buffer(
+        Streams::defer_buffers(
             // INVARIANT: This is the only place where streams are taken
             self.streams.take().unwrap(),
             self.request.source,
@@ -686,11 +689,6 @@ fn try_give_response<Response: 'static + Send + Sync>(
         .or_broken()?
         .give_input(session, data, roster)
 }
-
-type StreamTargetQuery<Streams> = (
-    <Streams as StreamPack>::TargetIndexQuery,
-    Option<&'static StreamTargetMap>,
-);
 
 fn try_retire_request<Request: 'static + Send + Sync>(
     provider: Entity,
@@ -997,7 +995,7 @@ pub fn event_streaming_service<E>(
 
     for event in events.read() {
         requests.for_each(|order| {
-            order.streams().send(StreamOf(event.clone()));
+            order.streams().send(event.clone());
         });
     }
 }

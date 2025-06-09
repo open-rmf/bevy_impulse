@@ -225,7 +225,7 @@ impl<'w, 's, 'a, 'b, T: 'static + Splittable> SplitBuilder<'w, 's, 'a, 'b, T> {
     /// Used internally to create a new split connector
     pub(crate) fn new(source: Entity, builder: &'b mut Builder<'w, 's, 'a>) -> Self {
         Self {
-            outputs: SplitOutputs::new(builder.scope, source),
+            outputs: SplitOutputs::new(builder.scope(), source),
             builder,
         }
     }
@@ -285,7 +285,7 @@ impl<T: Splittable> SplitOutputs<T> {
         self,
         builder: &'b mut Builder<'w, 's, 'a>,
     ) -> SplitBuilder<'w, 's, 'a, 'b, T> {
-        assert_eq!(self.scope, builder.scope);
+        assert_eq!(self.scope, builder.scope());
         SplitBuilder {
             outputs: self,
             builder,
