@@ -1,9 +1,13 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
-import type { Edge } from '@xyflow/react';
 import diagramSchema from '../diagram.schema.json';
-import { type DiagramEditorNode, START_ID, TERMINATE_ID } from '../nodes';
+import {
+  type DiagramEditorEdge,
+  type DiagramEditorNode,
+  START_ID,
+  TERMINATE_ID,
+} from '../nodes';
 import type {
   BufferSelection,
   Diagram,
@@ -14,7 +18,7 @@ import type {
 export interface Graph {
   startNodeId: string;
   nodes: DiagramEditorNode[];
-  edges: Edge[];
+  edges: DiagramEditorEdge[];
 }
 
 export function loadDiagramJson(jsonStr: string): Graph {
@@ -140,7 +144,7 @@ function buildGraph(diagram: Diagram): Graph {
     ),
   ];
   const startNodeId = getNodeId(diagram.start);
-  const edges: Edge[] = [
+  const edges: DiagramEditorEdge[] = [
     {
       id: `${START_ID}->${startNodeId}`,
       source: START_ID,
@@ -156,6 +160,9 @@ function buildGraph(diagram: Diagram): Graph {
       });
     }
   }
+
+  // TODO: fill in the edge data
+
   return { startNodeId, nodes, edges };
 }
 

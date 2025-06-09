@@ -1,10 +1,16 @@
+import { applyNodeChanges } from '@xyflow/react';
+import { autoLayout } from './auto-layout';
 import { loadDiagramJson } from './load-diagram';
 import testDiagram from './test-data/test-diagram.json';
 
-test('load diagram json', () => {
-  const { nodes, edges } = loadDiagramJson(JSON.stringify(testDiagram));
+test('load diagram json and auto layout', () => {
+  const graph = loadDiagramJson(JSON.stringify(testDiagram));
+  const nodes = applyNodeChanges(
+    autoLayout(graph.startNodeId, graph.nodes),
+    graph.nodes,
+  );
   expect(nodes.length).toBe(8);
-  expect(edges.length).toBe(8);
+  expect(graph.edges.length).toBe(8);
   const map = new Map(nodes.map((node) => [node.id, node]));
 
   const start = map.get('builtin:start');

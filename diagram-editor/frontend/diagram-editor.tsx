@@ -12,7 +12,6 @@ import {
   styled,
 } from '@mui/material';
 import {
-  type Edge,
   Panel,
   ReactFlow,
   type ReactFlowInstance,
@@ -25,9 +24,11 @@ import {
 import { inflateSync, strFromU8 } from 'fflate';
 import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
+import ExportDiagramDialog from './export-diagram-dialog';
 import type { OperationFormProps } from './forms';
 import NodeForm from './forms/node-form';
 import {
+  type DiagramEditorEdge,
   type DiagramEditorNode,
   NODE_TYPES,
   START_ID,
@@ -35,8 +36,8 @@ import {
   isOperationNode,
 } from './nodes';
 import { autoLayout } from './utils/auto-layout';
+import { addConnection } from './utils/connection';
 import { loadDiagramJson } from './utils/load-diagram';
-import ExportDiagramDialog from './export-diagram-dialog';
 
 const VisuallyHiddenInput = styled('input')({
   clip: 'rect(0 0 0 0)',
@@ -68,8 +69,10 @@ const NonCapturingPopoverContainer = ({
 }: { children: React.ReactNode }) => <>{children}</>;
 
 const DiagramEditor = () => {
-  const reactFlowInstance =
-    React.useRef<ReactFlowInstance<DiagramEditorNode> | null>(null);
+  const reactFlowInstance = React.useRef<ReactFlowInstance<
+    DiagramEditorNode,
+    DiagramEditorEdge
+  > | null>(null);
 
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(() => [
     {
@@ -87,7 +90,7 @@ const DiagramEditor = () => {
       data: {},
     },
   ]);
-  const [edges, setEdges] = React.useState<Edge[]>([]);
+  const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
 
   const [openAddOpPopover, setOpenAddOpPopover] = React.useState(false);
   const [addOpAnchorPos, setAddOpAnchorPos] = React.useState<PopoverPosition>({
@@ -164,10 +167,26 @@ const DiagramEditor = () => {
         onNodesChange={(changes) =>
           setNodes((prev) => applyNodeChanges(changes, prev))
         }
-        onEdgesChange={(changes) =>
-          setEdges((prev) => applyEdgeChanges(changes, prev))
-        }
-        onConnect={(params) => setEdges((prev) => addEdge(params, prev))}
+        onEdgesChange={(changes) => {
+          for (const change of changes) {
+            if (change.type === 'add' || change.type === 'replace') {
+              const source = nodes.find(
+                (node) => node.id === change.item.source,
+              );
+              if (!source) {
+                throw new Error(
+                  `failed to add connection: cannot find source node "${change.item.source}`,
+                );
+              }
+              addConnection(source, change.item);
+            }
+          }
+          setEdges((prev) => applyEdgeChanges(changes, prev));
+          // no need to apply node changes
+        }}
+        onConnect={(conn) => {
+          setEdges((prev) => addEdge(conn, prev));
+        }}
         onReconnect={(oldEdge, newConnection) =>
           setEdges((prev) => reconnectEdge(oldEdge, newConnection, prev))
         }

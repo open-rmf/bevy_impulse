@@ -1,7 +1,7 @@
 import { StartNode } from './start-node';
 import { TerminateNode } from './terminate-node';
 
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import type { DiagramOperation } from '../types/diagram';
 import { InputOutputNode } from './input-output-node';
 import { OutputNode } from './output-node';
@@ -46,3 +46,39 @@ export function extractOperation(node: OperationNode): DiagramOperation {
   delete op[opIdKey];
   return op;
 }
+
+export type BasicEdgeData = {
+  type: 'basic';
+};
+
+export type UnzipEdgeData = {
+  type: 'unzip';
+  seq: number;
+};
+
+export type ForkResultEdgeData = {
+  type: 'ok' | 'err';
+};
+
+export type SplitKeyEdgeData = {
+  type: 'splitKey';
+  key: string;
+};
+
+export type SplitSequentialEdgeData = {
+  type: 'splitSequential';
+  seq: number;
+};
+
+export type SplitRemainingEdgeData = {
+  type: 'splitRemaining';
+};
+
+export type SplitEdgeData =
+  | SplitKeyEdgeData
+  | SplitSequentialEdgeData
+  | SplitRemainingEdgeData;
+
+export type DiagramEditorEdge = Edge<
+  BasicEdgeData | UnzipEdgeData | ForkResultEdgeData | SplitEdgeData
+>;
