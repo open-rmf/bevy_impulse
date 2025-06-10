@@ -1,19 +1,23 @@
 import { EdgeType, type DiagramEditorEdge } from '../nodes';
 import type {
   BufferSelection,
+  BuiltinTarget,
   DiagramOperation,
-  NamespacedOperation,
   NextOperation,
 } from '../types/diagram';
 
 /**
  * Encodes a `NextOperation` into a node id for react flow.
+ * Returns `null` if the operation is "dispose".
  */
-export function nextOperationToNodeId(next: NextOperation): string {
+export function nextOperationToNodeId(next: NextOperation): string | null {
   if (typeof next === 'string') {
     return next;
   }
-  if ('builtin' in next) {
+  if (isBuiltin(next)) {
+    if (next.builtin === 'dispose') {
+      return null;
+    }
     return `builtin:${next.builtin}`;
   }
   const [namespace, opId] = Object.entries(next)[0];
@@ -46,37 +50,6 @@ export function isArrayBufferSelection(
   return Array.isArray(bufferSelection);
 }
 
-/**
- * Encodes a `BufferSelection` into an array of node ids.
- */
-export function bufferSelectionToNodeIds(buffer: BufferSelection): string[] {
-  if (typeof buffer === 'string') {
-    return [nextOperationToNodeId(buffer)];
-  }
-  if (Array.isArray(buffer)) {
-    return buffer.map((b) => nextOperationToNodeId(b));
-  }
-  return [nextOperationToNodeId(buffer as NamespacedOperation)];
-}
-
-/**
- * Decodes an array of node ids into a `BufferSelection`
- */
-export function nodeIdsToBufferSelection(nodeIds: string[]): BufferSelection {
-  if (nodeIds.length === 0) {
-    return [];
-  }
-  if (nodeIds[0].includes(':')) {
-    const bufferSelection: Record<string, NextOperation> = {};
-    for (const nodeId of nodeIds) {
-      const parts = nodeId.split(':', 2);
-      bufferSelection[parts[0]] = parts[1];
-    }
-    return bufferSelection;
-  }
-  return nodeIds.map((nodeId) => nodeIdToNextOperation(nodeId));
-}
-
 export function buildEdges(
   op: DiagramOperation,
   opId: string,
@@ -84,17 +57,6 @@ export function buildEdges(
   switch (op.type) {
     case 'buffer': {
       return [];
-      // for (const joinNode of allNodes) {
-      //   if (
-      //     joinNode.data.type === 'join' ||
-      //     joinNode.data.type === 'serialized_join'
-      //   ) {
-      //     const buffers = bufferSelectionToNodeIds(joinNode.data.buffers);
-      //     if (buffers.includes(node.id)) {
-      //       nextIds.push(joinNode.id);
-      //     }
-      //   }
-      // }
     }
     case 'buffer_access':
     case 'join':
@@ -102,139 +64,157 @@ export function buildEdges(
     case 'listen': {
       const edges: DiagramEditorEdge[] = [];
       if (isArrayBufferSelection(op.buffers)) {
-        edges.push(
-          ...op.buffers.map<DiagramEditorEdge>((buffer, idx) => {
-            const source = nextOperationToNodeId(buffer);
-            return {
+        for (const [idx, buffer] of op.buffers.entries()) {
+          const source = nextOperationToNodeId(buffer);
+          if (source) {
+            edges.push({
               id: `${source}->${opId}-${idx}`,
               source,
               target: opId,
               data: { type: EdgeType.BufferSeq, seq: idx },
-            };
-          }),
-        );
+            });
+          }
+        }
       } else if (isKeyedBufferSelection(op.buffers)) {
-        edges.push(
-          ...Object.entries(op.buffers).map<DiagramEditorEdge>(
-            ([key, buffer]) => {
-              const source = nextOperationToNodeId(buffer);
-              return {
-                id: `${source}->${opId}-${key}`,
-                source,
-                target: opId,
-                data: { type: EdgeType.BufferKey, key },
-              };
-            },
-          ),
-        );
+        for (const [key, buffer] of Object.entries(op.buffers)) {
+          const source = nextOperationToNodeId(buffer);
+          if (source) {
+            edges.push({
+              id: `${source}->${opId}-${key}`,
+              source,
+              target: opId,
+              data: { type: EdgeType.BufferKey, key },
+            });
+          }
+        }
       } else {
         const source = nextOperationToNodeId(op.buffers);
-        edges.push({
-          id: `${source}->${opId}-0`,
-          source,
-          target: opId,
-          data: { type: EdgeType.BufferSeq, seq: 0 },
-        });
+        if (source) {
+          edges.push({
+            id: `${source}->${opId}-0`,
+            source,
+            target: opId,
+            data: { type: EdgeType.BufferSeq, seq: 0 },
+          });
+        }
       }
 
       const target = nextOperationToNodeId(op.next);
-      edges.push({
-        id: `${opId}->${target}`,
-        source: opId,
-        target,
-        data: { type: EdgeType.Basic },
-      });
+      if (target) {
+        edges.push({
+          id: `${opId}->${target}`,
+          source: opId,
+          target,
+          data: { type: EdgeType.Basic },
+        });
+      }
 
       return edges;
     }
     case 'node':
     case 'transform': {
       const target = nextOperationToNodeId(op.next);
-      return [
-        {
-          id: `${opId}->${target}`,
-          source: opId,
-          target,
-          data: { type: EdgeType.Basic },
-        },
-      ];
+      return target
+        ? [
+            {
+              id: `${opId}->${target}`,
+              source: opId,
+              target,
+              data: { type: EdgeType.Basic },
+            },
+          ]
+        : [];
     }
     case 'fork_clone': {
-      return op.next.map((next, idx) => {
+      const edges: DiagramEditorEdge[] = [];
+      for (const [idx, next] of op.next.entries()) {
         const target = nextOperationToNodeId(next);
-        return {
-          id: `${opId}->${target}-${idx}`,
-          source: opId,
-          target,
-          data: { type: EdgeType.Basic },
-        };
-      });
+        if (target) {
+          edges.push({
+            id: `${opId}->${target}-${idx}`,
+            source: opId,
+            target,
+            data: { type: EdgeType.Basic },
+          });
+        }
+      }
+      return edges;
     }
     case 'unzip': {
-      return op.next.map((next, idx) => {
+      const edges: DiagramEditorEdge[] = [];
+      for (const [idx, next] of op.next.entries()) {
         const target = nextOperationToNodeId(next);
-        return {
-          id: `${opId}->${target}-${idx}`,
-          source: opId,
-          target,
-          data: { type: EdgeType.Unzip, seq: idx },
-        };
-      });
+        if (target) {
+          edges.push({
+            id: `${opId}->${target}-${idx}`,
+            source: opId,
+            target,
+            data: { type: EdgeType.Unzip, seq: idx },
+          });
+        }
+      }
+      return edges;
     }
     case 'fork_result': {
       const okTarget = nextOperationToNodeId(op.ok);
       const errTarget = nextOperationToNodeId(op.err);
-      return [
-        {
+      const edges: DiagramEditorEdge[] = [];
+      if (okTarget) {
+        edges.push({
           id: `${opId}->${okTarget}-ok`,
           source: opId,
           target: okTarget,
           data: { type: EdgeType.ForkResultOk },
-        },
-        {
-          id: `${opId}->${okTarget}-err`,
+        });
+      }
+      if (errTarget) {
+        edges.push({
+          id: `${opId}->${errTarget}-err`,
           source: opId,
           target: errTarget,
           data: { type: EdgeType.ForkResultErr },
-        },
-      ];
+        });
+      }
+      return edges;
     }
     case 'split': {
       const edges: DiagramEditorEdge[] = [];
       if (op.keyed) {
-        edges.push(
-          ...Object.entries(op.keyed).map<DiagramEditorEdge>(([key, next]) => {
-            const target = nextOperationToNodeId(next);
-            return {
+        for (const [key, next] of Object.entries(op.keyed)) {
+          const target = nextOperationToNodeId(next);
+          if (target) {
+            edges.push({
               id: `${opId}->${target}-${key}`,
               source: opId,
               target,
               data: { type: EdgeType.SplitKey, key },
-            };
-          }),
-        );
+            });
+          }
+        }
       }
       if (op.sequential) {
-        edges.push(
-          ...op.sequential.map<DiagramEditorEdge>((next, idx) => {
-            const target = nextOperationToNodeId(next);
-            return {
+        for (const [idx, next] of op.sequential.entries()) {
+          const target = nextOperationToNodeId(next);
+          if (target) {
+            edges.push({
               id: `${opId}->${target}-${idx}`,
               source: opId,
               target,
               data: { type: EdgeType.SplitSequential, seq: idx },
-            };
-          }),
-        );
+            });
+          }
+        }
       }
       if (op.remaining) {
         const target = nextOperationToNodeId(op.remaining);
-        edges.push({
-          id: `${opId}->${target}-remaining`,
-          source: opId,
-          target,
-          data: { type: EdgeType.SplitRemaining },
-        });
+        if (target) {
+          edges.push({
+            id: `${opId}->${target}-remaining`,
+            source: opId,
+            target,
+            data: { type: EdgeType.SplitRemaining },
+          });
+        }
       }
       return edges;
     }
@@ -257,4 +237,10 @@ export function buildEdges(
       return [];
     }
   }
+}
+
+export function isBuiltin(
+  next: NextOperation,
+): next is { builtin: BuiltinTarget } {
+  return typeof next === 'object' && 'builtin' in next;
 }

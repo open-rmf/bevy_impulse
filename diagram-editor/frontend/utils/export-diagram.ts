@@ -15,7 +15,7 @@ export function exportDiagram(
     $schema:
       'https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json',
     version: '0.1.0',
-    start: '',
+    start: { builtin: 'dispose' },
     ops: {},
   };
 

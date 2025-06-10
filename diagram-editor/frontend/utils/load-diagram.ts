@@ -65,8 +65,7 @@ function buildGraph(diagram: Diagram): Graph {
   );
   const edges = graph.edges;
   const startNodeId = nextOperationToNodeId(diagram.start);
-  // `start` may be empty for new empty diagram
-  if (diagram.start !== '') {
+  if (startNodeId) {
     edges.push({
       id: `${START_ID}->${startNodeId}`,
       source: START_ID,
