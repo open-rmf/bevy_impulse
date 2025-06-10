@@ -12,7 +12,6 @@ import type { Diagram } from '../types/diagram';
 import { buildEdges, nextOperationToNodeId } from './operation';
 
 export interface Graph {
-  startNodeId: string;
   nodes: DiagramEditorNode[];
   edges: DiagramEditorEdge[];
 }
@@ -28,22 +27,32 @@ export function loadDiagramJson(jsonStr: string): Graph {
   return graph;
 }
 
+export function loadEmpty(): Graph {
+  return {
+    nodes: [
+      {
+        id: START_ID,
+        type: 'start',
+        position: { x: 0, y: 0 },
+        selectable: false,
+        data: {},
+      },
+      {
+        id: TERMINATE_ID,
+        type: 'terminate',
+        position: { x: 0, y: 400 },
+        selectable: false,
+        data: {},
+      },
+    ],
+    edges: [],
+  };
+}
+
 function buildGraph(diagram: Diagram): Graph {
-  const nodes: DiagramEditorNode[] = [
-    {
-      id: START_ID,
-      type: 'start',
-      position: { x: 0, y: 0 },
-      selectable: false,
-      data: {},
-    },
-    {
-      id: TERMINATE_ID,
-      type: 'terminate',
-      position: { x: 0, y: 0 },
-      selectable: false,
-      data: {},
-    },
+  const graph = loadEmpty();
+  const nodes = graph.nodes;
+  nodes.push(
     ...Object.entries(diagram.ops).map(
       ([opId, op]) =>
         ({
@@ -53,20 +62,22 @@ function buildGraph(diagram: Diagram): Graph {
           data: { opId, ...op },
         }) satisfies DiagramEditorNode,
     ),
-  ];
+  );
+  const edges = graph.edges;
   const startNodeId = nextOperationToNodeId(diagram.start);
-  const edges: DiagramEditorEdge[] = [
-    {
+  // `start` may be empty for new empty diagram
+  if (diagram.start !== '') {
+    edges.push({
       id: `${START_ID}->${startNodeId}`,
       source: START_ID,
       target: startNodeId,
-    },
-  ];
+    });
+  }
   for (const [opId, op] of Object.entries(diagram.ops)) {
     edges.push(...buildEdges(op, opId));
   }
 
-  return { startNodeId, nodes, edges };
+  return graph;
 }
 
 const ajv = new Ajv();

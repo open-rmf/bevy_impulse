@@ -32,11 +32,10 @@ import {
   type DiagramEditorNode,
   NODE_TYPES,
   START_ID,
-  TERMINATE_ID,
   isOperationNode,
 } from './nodes';
 import { autoLayout } from './utils/auto-layout';
-import { loadDiagramJson } from './utils/load-diagram';
+import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
 
 const VisuallyHiddenInput = styled('input')({
   clip: 'rect(0 0 0 0)',
@@ -73,22 +72,9 @@ const DiagramEditor = () => {
     DiagramEditorEdge
   > | null>(null);
 
-  const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(() => [
-    {
-      id: START_ID,
-      type: 'start',
-      position: { x: 0, y: 0 },
-      selectable: false,
-      data: {},
-    },
-    {
-      id: TERMINATE_ID,
-      type: 'terminate',
-      position: { x: 0, y: 400 },
-      selectable: false,
-      data: {},
-    },
-  ]);
+  const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
+    () => loadEmpty().nodes,
+  );
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
 
   const [openAddOpPopover, setOpenAddOpPopover] = React.useState(false);
@@ -107,7 +93,7 @@ const DiagramEditor = () => {
 
   const loadDiagram = React.useCallback((jsonStr: string) => {
     const graph = loadDiagramJson(jsonStr);
-    const changes = autoLayout(graph.startNodeId, graph.nodes, graph.edges);
+    const changes = autoLayout(START_ID, graph.nodes, graph.edges);
     setNodes(applyNodeChanges(changes, graph.nodes));
     setEdges(graph.edges);
     reactFlowInstance.current?.fitView();

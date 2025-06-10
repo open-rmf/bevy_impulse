@@ -1,5 +1,9 @@
+import CheckIcon from '@mui/icons-material/Check';
+import CopyIcon from '@mui/icons-material/ContentCopy';
+import DownloadIcon from '@mui/icons-material/Download';
 import {
   Button,
+  ButtonGroup,
   Dialog,
   DialogActions,
   DialogContent,
@@ -81,6 +85,8 @@ function ExportDiagramDialog({
     URL.revokeObjectURL(url);
   };
 
+  const [copiedShareLink, setCopiedShareLink] = React.useState(false);
+
   return (
     <Dialog
       onClose={onClose}
@@ -93,10 +99,33 @@ function ExportDiagramDialog({
       <DialogContent>
         <Stack spacing={2}>
           <Typography variant="h6">Share</Typography>
-          <TextField variant="outlined" value={dialogData?.shareLink} />
+          <ButtonGroup>
+            <TextField
+              variant="outlined"
+              value={dialogData?.shareLink}
+              fullWidth
+            />
+            <Button
+              variant="contained"
+              aria-label="copy share link"
+              onClick={() => {
+                if (!dialogData || copiedShareLink) {
+                  return;
+                }
+                navigator.clipboard.writeText(dialogData.shareLink);
+                setCopiedShareLink(true);
+              }}
+            >
+              {copiedShareLink ? <CheckIcon /> : <CopyIcon />}
+            </Button>
+          </ButtonGroup>
           <Stack direction="row" justifyContent="space-between">
             <Typography variant="h6">Diagram JSON</Typography>
-            <Button variant="contained" onClick={handleDownload}>
+            <Button
+              variant="contained"
+              onClick={handleDownload}
+              startIcon={<DownloadIcon />}
+            >
               Download
             </Button>
           </Stack>

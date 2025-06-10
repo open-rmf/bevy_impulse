@@ -22,7 +22,6 @@ export function autoLayout(
   nodes: DiagramEditorNode[],
   edges: DiagramEditorEdge[],
   {
-    rootPosition = DEFAULT_OPTIONS.rootPosition,
     cellWidth = DEFAULT_OPTIONS.cellWidth,
     cellHeight = DEFAULT_OPTIONS.cellHeight,
   }: Partial<AutoLayoutOptions> = DEFAULT_OPTIONS,
@@ -52,16 +51,11 @@ export function autoLayout(
   const getNode = (id: string) => getWorkingData(id).node;
   const getNextIds = (id: string) => getWorkingData(id).nextIds;
 
-  const firstNode = getNode(start);
-  const changes: NodePositionChange[] = [
-    {
-      id: firstNode.id,
-      type: 'position',
-      position: { x: rootPosition.x, y: rootPosition.y + cellHeight },
-    },
-  ];
-  const fifo = [{ node: getNode(start), depth: 2 }];
-  let maxX = firstNode.position.x;
+  const rootNode = getNode(start);
+  const rootPosition = { ...rootNode.position };
+  const changes: NodePositionChange[] = [];
+  const fifo = [{ node: getNode(start), depth: 1 }];
+  let maxX = rootNode.position.x;
   for (let ctx = fifo.shift(); ctx; ctx = fifo.shift()) {
     const { node, depth } = ctx;
     const nextNodeIds = getNextIds(node.id);

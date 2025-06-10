@@ -1,4 +1,5 @@
 import { applyNodeChanges } from '@xyflow/react';
+import { START_ID } from '../nodes';
 import { autoLayout } from './auto-layout';
 import { loadDiagramJson } from './load-diagram';
 import testDiagram from './test-data/test-diagram.json';
@@ -6,7 +7,7 @@ import testDiagram from './test-data/test-diagram.json';
 test('load diagram json and auto layout', () => {
   const graph = loadDiagramJson(JSON.stringify(testDiagram));
   const nodes = applyNodeChanges(
-    autoLayout(graph.startNodeId, graph.nodes, graph.edges),
+    autoLayout(START_ID, graph.nodes, graph.edges),
     graph.nodes,
   );
   expect(nodes.length).toBe(8);
