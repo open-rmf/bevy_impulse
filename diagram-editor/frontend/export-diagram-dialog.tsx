@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Stack,
   TextField,
   Typography,
@@ -104,6 +105,7 @@ function ExportDiagramDialog({
               variant="outlined"
               value={dialogData?.shareLink}
               fullWidth
+              size="small"
             />
             <Button
               variant="contained"
@@ -120,7 +122,7 @@ function ExportDiagramDialog({
             </Button>
           </ButtonGroup>
           <Stack direction="row" justifyContent="space-between">
-            <Typography variant="h6">Diagram JSON</Typography>
+            <Typography variant="h6">Export JSON</Typography>
             <Button
               variant="contained"
               onClick={handleDownload}
