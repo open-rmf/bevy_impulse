@@ -104,8 +104,8 @@ function AddOperation({ onAdd }: AddOperationProps) {
               data: {
                 opId: 'new_operation',
                 type: 'fork_result',
-                err: '',
-                ok: '',
+                err: { builtin: 'dispose' },
+                ok: { builtin: 'dispose' },
               },
             },
             type: 'add',
