@@ -36,10 +36,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_node',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'node',
                 builder: '',
                 next: { builtin: 'dispose' },
@@ -57,10 +58,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_fork_clone',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'fork_clone',
                 next: [],
               },
@@ -76,10 +78,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_unzip',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'unzip',
                 next: [],
               },
@@ -95,10 +98,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_fork_result',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'fork_result',
                 err: '',
                 ok: '',
@@ -115,10 +119,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_split',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'split',
               },
             },
@@ -133,10 +138,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_join',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'join',
                 buffers: [],
                 next: { builtin: 'dispose' },
@@ -153,10 +159,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_serialized_join',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'serialized_join',
                 buffers: [],
                 next: { builtin: 'dispose' },
@@ -173,10 +180,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_transform',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'transform',
                 cel: '',
                 next: { builtin: 'dispose' },
@@ -193,10 +201,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_buffer',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'buffer',
               },
             },
@@ -211,10 +220,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_buffer_access',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'buffer_access',
                 buffers: [],
                 next: { builtin: 'dispose' },
@@ -231,10 +241,11 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_listen',
+              id: 'new_operation',
               type: 'inputOutput',
               position: { x: 0, y: 0 },
               data: {
+                opId: 'new_operation',
                 type: 'listen',
                 buffers: [],
                 next: { builtin: 'dispose' },

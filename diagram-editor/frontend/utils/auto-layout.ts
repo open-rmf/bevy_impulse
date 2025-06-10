@@ -1,7 +1,6 @@
 import type { NodePositionChange } from '@xyflow/react';
 
-import type { DiagramEditorNode } from '../nodes';
-import { getNextIds } from './load-diagram';
+import type { DiagramEditorEdge, DiagramEditorNode } from '../nodes';
 
 export interface AutoLayoutOptions {
   rootPosition: { x: number; y: number };
@@ -21,21 +20,37 @@ const DEFAULT_OPTIONS: AutoLayoutOptions = {
 export function autoLayout(
   start: string,
   nodes: DiagramEditorNode[],
+  edges: DiagramEditorEdge[],
   {
     rootPosition = DEFAULT_OPTIONS.rootPosition,
     cellWidth = DEFAULT_OPTIONS.cellWidth,
     cellHeight = DEFAULT_OPTIONS.cellHeight,
   }: Partial<AutoLayoutOptions> = DEFAULT_OPTIONS,
 ): NodePositionChange[] {
-  const map = new Map(nodes.map((node) => [node.id, node]));
+  interface WorkingData {
+    node: DiagramEditorNode;
+    nextIds: string[];
+  }
 
-  const getNode = (id: string) => {
-    const node = map.get(id);
-    if (!node) {
+  const map = new Map(
+    nodes.map((node) => [node.id, { node, nextIds: [] } as WorkingData]),
+  );
+
+  const getWorkingData = (id: string) => {
+    const workingData = map.get(id);
+    if (!workingData) {
       throw new Error(`node ${id} not found`);
     }
-    return node;
+    return workingData;
   };
+
+  for (const edge of edges) {
+    const source = getWorkingData(edge.source);
+    source.nextIds.push(edge.target);
+  }
+
+  const getNode = (id: string) => getWorkingData(id).node;
+  const getNextIds = (id: string) => getWorkingData(id).nextIds;
 
   const firstNode = getNode(start);
   const changes: NodePositionChange[] = [
@@ -49,7 +64,7 @@ export function autoLayout(
   let maxX = firstNode.position.x;
   for (let ctx = fifo.shift(); ctx; ctx = fifo.shift()) {
     const { node, depth } = ctx;
-    const nextNodeIds = getNextIds(node, nodes);
+    const nextNodeIds = getNextIds(node.id);
     let currentX = node.position.x - ((nextNodeIds.length - 1) * cellWidth) / 2;
     for (const nextNodeId of nextNodeIds) {
       const nextNode = getNode(nextNodeId);

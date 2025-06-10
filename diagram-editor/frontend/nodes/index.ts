@@ -47,31 +47,53 @@ export function extractOperation(node: OperationNode): DiagramOperation {
   return op;
 }
 
+export enum EdgeType {
+  Basic,
+  Unzip,
+  ForkResultOk,
+  ForkResultErr,
+  SplitKey,
+  SplitSequential,
+  SplitRemaining,
+  BufferKey,
+  BufferSeq,
+}
+
 export type BasicEdgeData = {
-  type: 'basic';
+  type: EdgeType.Basic;
 };
 
 export type UnzipEdgeData = {
-  type: 'unzip';
+  type: EdgeType.Unzip;
   seq: number;
 };
 
 export type ForkResultEdgeData = {
-  type: 'ok' | 'err';
+  type: EdgeType.ForkResultOk | EdgeType.ForkResultErr;
 };
 
 export type SplitKeyEdgeData = {
-  type: 'splitKey';
+  type: EdgeType.SplitKey;
   key: string;
 };
 
 export type SplitSequentialEdgeData = {
-  type: 'splitSequential';
+  type: EdgeType.SplitSequential;
   seq: number;
 };
 
 export type SplitRemainingEdgeData = {
-  type: 'splitRemaining';
+  type: EdgeType.SplitRemaining;
+};
+
+export type BufferKeyEdgeData = {
+  type: EdgeType.BufferKey;
+  key: string;
+};
+
+export type BufferSeqEdgeData = {
+  type: EdgeType.BufferSeq;
+  seq: number;
 };
 
 export type SplitEdgeData =
@@ -80,5 +102,10 @@ export type SplitEdgeData =
   | SplitRemainingEdgeData;
 
 export type DiagramEditorEdge = Edge<
-  BasicEdgeData | UnzipEdgeData | ForkResultEdgeData | SplitEdgeData
+  | BasicEdgeData
+  | UnzipEdgeData
+  | ForkResultEdgeData
+  | SplitEdgeData
+  | BufferKeyEdgeData
+  | BufferSeqEdgeData
 >;

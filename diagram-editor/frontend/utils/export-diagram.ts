@@ -1,13 +1,16 @@
-import type { Edge } from '@xyflow/react';
 import {
+  type DiagramEditorEdge,
   type DiagramEditorNode,
   extractOperation,
   isOperationNode,
-  START_ID,
 } from '../nodes';
 import type { Diagram } from '../types/diagram';
+import { syncEdge } from './connection';
 
-export function exportDiagram(nodes: DiagramEditorNode[], edges: Edge[]) {
+export function exportDiagram(
+  nodes: DiagramEditorNode[],
+  edges: DiagramEditorEdge[],
+): Diagram {
   const diagram: Diagram = {
     $schema:
       'https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json',
@@ -22,10 +25,8 @@ export function exportDiagram(nodes: DiagramEditorNode[], edges: Edge[]) {
     }
   }
 
-  // only need to process the start edge, the diagram connections should always be in sync with the edges.
-  const startEdge = edges.find((edge) => edge.source === START_ID);
-  if (startEdge) {
-    diagram.start = startEdge.target;
+  for (const edge of edges) {
+    syncEdge(diagram, edge);
   }
 
   return diagram;

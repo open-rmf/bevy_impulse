@@ -6,7 +6,7 @@ import testDiagram from './test-data/test-diagram.json';
 test('load diagram json and auto layout', () => {
   const graph = loadDiagramJson(JSON.stringify(testDiagram));
   const nodes = applyNodeChanges(
-    autoLayout(graph.startNodeId, graph.nodes),
+    autoLayout(graph.startNodeId, graph.nodes, graph.edges),
     graph.nodes,
   );
   expect(nodes.length).toBe(8);

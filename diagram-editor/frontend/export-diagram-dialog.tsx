@@ -8,17 +8,16 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import type { Edge } from '@xyflow/react';
 import { deflateSync, strToU8 } from 'fflate';
-import type { DiagramEditorNode } from './nodes';
-import { exportDiagram } from './utils/export-diagram';
 import React from 'react';
+import type { DiagramEditorEdge, DiagramEditorNode } from './nodes';
+import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {
   open: boolean;
   onClose: () => void;
   nodes: DiagramEditorNode[];
-  edges: Edge[];
+  edges: DiagramEditorEdge[];
 }
 
 interface DialogData {

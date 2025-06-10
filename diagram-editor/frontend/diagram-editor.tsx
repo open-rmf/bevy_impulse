@@ -36,7 +36,6 @@ import {
   isOperationNode,
 } from './nodes';
 import { autoLayout } from './utils/auto-layout';
-import { addConnection } from './utils/connection';
 import { loadDiagramJson } from './utils/load-diagram';
 
 const VisuallyHiddenInput = styled('input')({
@@ -108,7 +107,7 @@ const DiagramEditor = () => {
 
   const loadDiagram = React.useCallback((jsonStr: string) => {
     const graph = loadDiagramJson(jsonStr);
-    const changes = autoLayout(graph.startNodeId, graph.nodes);
+    const changes = autoLayout(graph.startNodeId, graph.nodes, graph.edges);
     setNodes(applyNodeChanges(changes, graph.nodes));
     setEdges(graph.edges);
     reactFlowInstance.current?.fitView();
@@ -168,21 +167,7 @@ const DiagramEditor = () => {
           setNodes((prev) => applyNodeChanges(changes, prev))
         }
         onEdgesChange={(changes) => {
-          for (const change of changes) {
-            if (change.type === 'add' || change.type === 'replace') {
-              const source = nodes.find(
-                (node) => node.id === change.item.source,
-              );
-              if (!source) {
-                throw new Error(
-                  `failed to add connection: cannot find source node "${change.item.source}`,
-                );
-              }
-              addConnection(source, change.item);
-            }
-          }
           setEdges((prev) => applyEdgeChanges(changes, prev));
-          // no need to apply node changes
         }}
         onConnect={(conn) => {
           setEdges((prev) => addEdge(conn, prev));
@@ -253,7 +238,7 @@ const DiagramEditor = () => {
 
                   const startEdge = edges.find((e) => e.source === START_ID);
                   if (startEdge) {
-                    const changes = autoLayout(startEdge.target, nodes, {
+                    const changes = autoLayout(startEdge.target, nodes, edges, {
                       rootPosition: startNode.position,
                     });
                     setNodes((prev) => applyNodeChanges(changes, prev));
