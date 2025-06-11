@@ -1,13 +1,13 @@
 import { Card, CardContent, CardHeader, Stack, TextField } from '@mui/material';
-import type { OperationFormProps } from '.';
+import type { NodeReplaceChange } from '@xyflow/react';
+import type { OperationNode } from '../nodes';
 
-export type NodeFormProps = OperationFormProps;
+export interface NodeFormProps {
+  node: OperationNode<'node'>;
+  onChange?: (change: NodeReplaceChange<OperationNode<'node'>>) => void;
+}
 
 function NodeForm({ node, onChange }: NodeFormProps) {
-  if (node.data.type !== 'node') {
-    throw new Error('expected node operation');
-  }
-
   return (
     <Card>
       <CardHeader title="Edit Operation" />

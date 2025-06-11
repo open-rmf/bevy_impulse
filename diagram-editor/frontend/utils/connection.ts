@@ -9,7 +9,7 @@ import type {
   Diagram,
   DiagramOperation,
 } from '../types/diagram';
-import { exhaustiveCheck } from './exhaustive';
+import { exhaustiveCheck } from './exhaustive-check';
 import {
   isArrayBufferSelection,
   isKeyedBufferSelection,

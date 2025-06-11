@@ -25,14 +25,12 @@ import { inflateSync, strFromU8 } from 'fflate';
 import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
 import ExportDiagramDialog from './export-diagram-dialog';
-import type { OperationFormProps } from './forms';
-import NodeForm from './forms/node-form';
+import OperationForm, { hasOperationForm } from './forms';
 import {
   type DiagramEditorEdge,
   type DiagramEditorNode,
   NODE_TYPES,
   START_ID,
-  isOperationNode,
 } from './nodes';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
@@ -48,19 +46,6 @@ const VisuallyHiddenInput = styled('input')({
   whiteSpace: 'nowrap',
   width: 1,
 });
-
-function getOperationForm(
-  node: DiagramEditorNode,
-): React.ComponentType<OperationFormProps> {
-  switch (node.data.type) {
-    case 'node': {
-      return NodeForm;
-    }
-    default: {
-      return () => <div>TODO</div>;
-    }
-  }
-}
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -83,9 +68,8 @@ const DiagramEditor = () => {
     top: 0,
   });
 
-  const [renderForm, setRenderForm] = React.useState<React.JSX.Element | null>(
-    null,
-  );
+  const [clickedNode, setClickedNode] =
+    React.useState<DiagramEditorNode | null>(null);
   const [openFormPopover, setOpenFormPopover] = React.useState(false);
   const [formAnchorEl, setFormAnchorEl] = React.useState<Element | null>(null);
 
@@ -163,22 +147,14 @@ const DiagramEditor = () => {
         }
         onNodeClick={(ev, node) => {
           ev.stopPropagation();
+          setClickedNode(node);
 
-          if (!isOperationNode(node)) {
-            return;
+          if (hasOperationForm(node)) {
+            setFormAnchorEl(ev.currentTarget);
+            setOpenFormPopover(true);
+          } else {
+            setOpenFormPopover(false);
           }
-
-          const FormComponent = getOperationForm(node);
-          setRenderForm(
-            <FormComponent
-              node={node}
-              onChange={(change) => {
-                setNodes((prev) => applyNodeChanges([change], prev));
-              }}
-            />,
-          );
-          setFormAnchorEl(ev.currentTarget);
-          setOpenFormPopover(true);
           setOpenAddOpPopover(false);
         }}
         onEdgeClick={(ev) => ev.stopPropagation()}
@@ -306,7 +282,14 @@ const DiagramEditor = () => {
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
         component={NonCapturingPopoverContainer}
       >
-        {renderForm}
+        {clickedNode && (
+          <OperationForm
+            node={clickedNode}
+            onChange={(change) => {
+              setNodes((prev) => applyNodeChanges([change], prev));
+            }}
+          />
+        )}
       </Popover>
       <Snackbar
         open={openErrorToast}
