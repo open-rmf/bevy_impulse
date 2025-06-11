@@ -22,6 +22,7 @@ There are several different categories of problems that bevy impulse sets out to
 # Helpful Links
 
  * [Introduction to workflows](https://docs.google.com/presentation/d/1_vJTyFKOB1T0ylCbp1jG72tn8AXYQOKgTGh9En9si-w/edit?usp=sharing)
+ * [JSON Diagram Format](https://docs.google.com/presentation/d/1ShGRrbXtZYzaHTS-bPCU0nSmY-716OiFiB1VjGGTCfw/edit?usp=sharing)
  * [Bevy Impulse Docs](https://docs.rs/bevy_impulse/latest/bevy_impulse/)
  * [Bevy Engine](https://bevyengine.org/)
  * [Bevy Cheat Book](https://bevy-cheatbook.github.io/)
