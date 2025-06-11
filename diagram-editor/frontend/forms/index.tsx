@@ -1,14 +1,21 @@
-import type { NodeReplaceChange } from '@xyflow/react';
-import type { DiagramEditorNode, OperationNode } from '../nodes';
-import NodeForm from './node-form';
+import type { EdgeReplaceChange, NodeReplaceChange } from '@xyflow/react';
+import {
+  type DiagramEditorEdge,
+  type DiagramEditorNode,
+  EdgeType,
+  type OperationNode,
+  type UnzipEdge,
+} from '../nodes';
 import BufferForm from './buffer-form';
+import NodeForm from './node-form';
+import UnzipForm from './unzip-edge-form';
 
-export interface OperationFormProps {
+export interface EditNodeFormProps {
   node: DiagramEditorNode;
   onChange?: (change: NodeReplaceChange<DiagramEditorNode>) => void;
 }
 
-function OperationForm({ node, onChange }: OperationFormProps) {
+export function EditNodeForm({ node, onChange }: EditNodeFormProps) {
   switch (node.data.type) {
     case 'node': {
       return (
@@ -26,21 +33,13 @@ function OperationForm({ node, onChange }: OperationFormProps) {
         />
       );
     }
-    case 'fork_clone':
-    case 'unzip':
-    case 'fork_result':
-    case 'split':
-    case 'join':
-    case 'serialized_join': {
-      return null;
-    }
     default: {
-      throw new Error('not implemented');
+      return null;
     }
   }
 }
 
-export function hasOperationForm(node: DiagramEditorNode): boolean {
+export function nodeHasEditForm(node: DiagramEditorNode): boolean {
   switch (node.data.type) {
     case 'node':
     case 'buffer': {
@@ -52,4 +51,34 @@ export function hasOperationForm(node: DiagramEditorNode): boolean {
   }
 }
 
-export default OperationForm;
+export interface EditEdgeFormProps {
+  edge: DiagramEditorEdge;
+  onChange?: (change: EdgeReplaceChange<DiagramEditorEdge>) => void;
+}
+
+export function EditEdgeForm({ edge, onChange }: EditEdgeFormProps) {
+  switch (edge.data?.type) {
+    case EdgeType.Unzip: {
+      return (
+        <UnzipForm
+          edge={edge as UnzipEdge}
+          onChange={(change) => onChange?.(change)}
+        />
+      );
+    }
+    default: {
+      return null;
+    }
+  }
+}
+
+export function edgeHasEditForm(edge: DiagramEditorEdge): boolean {
+  switch (edge.data?.type) {
+    case EdgeType.Basic: {
+      return false;
+    }
+    default: {
+      return true;
+    }
+  }
+}

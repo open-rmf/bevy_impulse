@@ -7,6 +7,7 @@ import {
   ButtonGroup,
   Popover,
   type PopoverPosition,
+  type PopoverProps,
   Snackbar,
   Tooltip,
   styled,
@@ -25,7 +26,12 @@ import { inflateSync, strFromU8 } from 'fflate';
 import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
 import ExportDiagramDialog from './export-diagram-dialog';
-import OperationForm, { hasOperationForm } from './forms';
+import {
+  EditEdgeForm,
+  EditNodeForm,
+  edgeHasEditForm,
+  nodeHasEditForm,
+} from './forms';
 import {
   type DiagramEditorEdge,
   type DiagramEditorNode,
@@ -70,20 +76,35 @@ const DiagramEditor = () => {
 
   const [clickedNode, setClickedNode] =
     React.useState<DiagramEditorNode | null>(null);
-  const [openFormPopover, setOpenFormPopover] = React.useState(false);
-  const [formAnchorEl, setFormAnchorEl] = React.useState<Element | null>(null);
+  const [clickedEdge, setClickedEdge] =
+    React.useState<DiagramEditorEdge | null>(null);
+  const [editOpFormPopoverProps, setEditOpFormPopoverProps] = React.useState<
+    Pick<
+      PopoverProps,
+      'open' | 'anchorReference' | 'anchorEl' | 'anchorPosition'
+    >
+  >({ open: false });
+
+  const closeAllPopovers = React.useCallback(() => {
+    setClickedNode(null);
+    setClickedEdge(null);
+    setOpenAddOpPopover(false);
+    setEditOpFormPopoverProps({ open: false });
+  }, []);
 
   const mouseDownTime = React.useRef(0);
 
-  const loadDiagram = React.useCallback((jsonStr: string) => {
-    const graph = loadDiagramJson(jsonStr);
-    const changes = autoLayout(START_ID, graph.nodes, graph.edges);
-    setNodes(applyNodeChanges(changes, graph.nodes));
-    setEdges(graph.edges);
-    reactFlowInstance.current?.fitView();
-    setOpenAddOpPopover(false);
-    setOpenFormPopover(false);
-  }, []);
+  const loadDiagram = React.useCallback(
+    (jsonStr: string) => {
+      const graph = loadDiagramJson(jsonStr);
+      const changes = autoLayout(START_ID, graph.nodes, graph.edges);
+      setNodes(applyNodeChanges(changes, graph.nodes));
+      setEdges(graph.edges);
+      reactFlowInstance.current?.fitView();
+      closeAllPopovers();
+    },
+    [closeAllPopovers],
+  );
 
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
@@ -147,24 +168,31 @@ const DiagramEditor = () => {
         }
         onNodeClick={(ev, node) => {
           ev.stopPropagation();
+          closeAllPopovers();
           setClickedNode(node);
-
-          if (hasOperationForm(node)) {
-            setFormAnchorEl(ev.currentTarget);
-            setOpenFormPopover(true);
-          } else {
-            setOpenFormPopover(false);
+          if (nodeHasEditForm(node)) {
+            setEditOpFormPopoverProps({
+              open: true,
+              anchorReference: 'anchorEl',
+              anchorEl: ev.currentTarget,
+            });
           }
-          setOpenAddOpPopover(false);
         }}
-        onEdgeClick={(ev) => ev.stopPropagation()}
-        onPaneClick={(ev) => {
-          if (openFormPopover) {
-            setOpenFormPopover(false);
-            return;
+        onEdgeClick={(ev, edge) => {
+          ev.stopPropagation();
+          closeAllPopovers();
+          setClickedEdge(edge);
+          if (edgeHasEditForm(edge)) {
+            setEditOpFormPopoverProps({
+              open: true,
+              anchorReference: 'anchorPosition',
+              anchorPosition: { left: ev.clientX, top: ev.clientY },
+            });
           }
-          if (openAddOpPopover) {
-            setOpenAddOpPopover(false);
+        }}
+        onPaneClick={(ev) => {
+          if (openAddOpPopover || editOpFormPopoverProps.open) {
+            closeAllPopovers();
             return;
           }
 
@@ -275,18 +303,25 @@ const DiagramEditor = () => {
         />
       </Popover>
       <Popover
-        open={openFormPopover}
-        onClose={() => setOpenFormPopover(false)}
-        anchorEl={formAnchorEl}
+        {...editOpFormPopoverProps}
+        onClose={() => setEditOpFormPopoverProps({ open: false })}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
         component={NonCapturingPopoverContainer}
       >
         {clickedNode && (
-          <OperationForm
+          <EditNodeForm
             node={clickedNode}
             onChange={(change) => {
               setNodes((prev) => applyNodeChanges([change], prev));
+            }}
+          />
+        )}
+        {clickedEdge && (
+          <EditEdgeForm
+            edge={clickedEdge}
+            onChange={(change) => {
+              setEdges((prev) => applyEdgeChanges([change], prev));
             }}
           />
         )}
