@@ -7,7 +7,7 @@ export interface UnzipEdgeFormProps {
   onChange: (change: EdgeReplaceChange<UnzipEdge>) => void;
 }
 
-export function UnzipEdgeForm({ edge, onChange }: UnzipEdgeFormProps) {
+function UnzipEdgeForm({ edge, onChange }: UnzipEdgeFormProps) {
   return (
     <Card>
       <CardHeader title="Edit Edge" />
