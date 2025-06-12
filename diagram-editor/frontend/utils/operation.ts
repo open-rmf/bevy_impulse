@@ -5,6 +5,7 @@ import type {
   DiagramOperation,
   NextOperation,
 } from '../types/diagram';
+import { exhaustiveCheck } from './exhaustive-check';
 
 /**
  * Encodes a `NextOperation` into a node id for react flow.
@@ -246,7 +247,8 @@ export function buildEdges(
       return [];
     }
     default: {
-      return [];
+      exhaustiveCheck(op);
+      throw new Error('unknown op');
     }
   }
 }

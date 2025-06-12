@@ -17,6 +17,7 @@ import UnzipIcon from '@mui/icons-material/UnarchiveOutlined';
 import type React from 'react';
 
 import type { DiagramOperation } from '../types/diagram';
+import { exhaustiveCheck } from '../utils/exhaustive-check';
 
 export function getIcon(op: DiagramOperation): React.ComponentType {
   switch (op.type) {
@@ -45,7 +46,8 @@ export function getIcon(op: DiagramOperation): React.ComponentType {
     case 'listen':
       return ListenIcon;
     default:
-      return () => null; // Return a component that renders nothing
+      exhaustiveCheck(op);
+      throw new Error('unknown op');
   }
 }
 
