@@ -1,11 +1,6 @@
 import type { EdgeReplaceChange, NodeReplaceChange } from '@xyflow/react';
-import {
-  type DiagramEditorEdge,
-  type DiagramEditorNode,
-  EdgeType,
-  type OperationNode,
-  type UnzipEdge,
-} from '../nodes';
+import { type DiagramEditorEdge, EdgeType, type UnzipEdge } from '../edges';
+import type { DiagramEditorNode, OperationNode } from '../nodes';
 import BufferForm from './buffer-form';
 import NodeForm from './node-form';
 import UnzipForm from './unzip-edge-form';

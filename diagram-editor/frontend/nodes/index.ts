@@ -1,10 +1,10 @@
-import { StartNode } from './start-node';
-import { TerminateNode } from './terminate-node';
+import type { Node } from '@xyflow/react';
 
-import type { Edge, Node } from '@xyflow/react';
 import type { DiagramOperation } from '../types/diagram';
 import { InputOutputNode } from './input-output-node';
 import { OutputNode } from './output-node';
+import { StartNode } from './start-node';
+import { TerminateNode } from './terminate-node';
 
 export const START_ID = 'builtin:start';
 export const TERMINATE_ID = 'builtin:terminate';
@@ -51,74 +51,3 @@ export function extractOperation(node: AnyOperationNode): DiagramOperation {
   delete op[opIdKey];
   return op;
 }
-
-export enum EdgeType {
-  Basic,
-  Unzip,
-  ForkResultOk,
-  ForkResultErr,
-  SplitKey,
-  SplitSequential,
-  SplitRemaining,
-  BufferKey,
-  BufferSeq,
-}
-
-export type BasicEdgeData = {
-  type: EdgeType.Basic;
-};
-export type BasicEdge = Edge<BasicEdgeData>;
-
-export type UnzipEdgeData = {
-  type: EdgeType.Unzip;
-  seq: number;
-};
-export type UnzipEdge = Edge<UnzipEdgeData>;
-
-export type ForkResultEdgeData = {
-  type: EdgeType.ForkResultOk | EdgeType.ForkResultErr;
-};
-export type ForkResultEdge = Edge<ForkResultEdgeData>;
-
-export type SplitKeyEdgeData = {
-  type: EdgeType.SplitKey;
-  key: string;
-};
-export type SplitKeyEdge = Edge<SplitKeyEdgeData>;
-
-export type SplitSequentialEdgeData = {
-  type: EdgeType.SplitSequential;
-  seq: number;
-};
-export type SplitSequentialEdge = Edge<SplitSequentialEdgeData>;
-
-export type SplitRemainingEdgeData = {
-  type: EdgeType.SplitRemaining;
-};
-export type SplitRemainingEdge = Edge<SplitRemainingEdgeData>;
-
-export type BufferKeyEdgeData = {
-  type: EdgeType.BufferKey;
-  key: string;
-};
-export type BufferKeyEdge = Edge<BufferKeyEdgeData>;
-
-export type BufferSeqEdgeData = {
-  type: EdgeType.BufferSeq;
-  seq: number;
-};
-export type BufferSeqEdge = Edge<BufferSeqEdgeData>;
-
-export type SplitEdgeData =
-  | SplitKeyEdgeData
-  | SplitSequentialEdgeData
-  | SplitRemainingEdgeData;
-
-export type DiagramEditorEdge = Edge<
-  | BasicEdgeData
-  | UnzipEdgeData
-  | ForkResultEdgeData
-  | SplitEdgeData
-  | BufferKeyEdgeData
-  | BufferSeqEdgeData
->;

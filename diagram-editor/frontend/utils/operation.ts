@@ -1,4 +1,4 @@
-import { type DiagramEditorEdge, EdgeType } from '../nodes';
+import { type DiagramEditorEdge, EdgeType } from '../edges';
 import type {
   BufferSelection,
   BuiltinTarget,

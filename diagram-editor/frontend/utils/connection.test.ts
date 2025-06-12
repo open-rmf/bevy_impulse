@@ -1,4 +1,5 @@
-import { type DiagramEditorEdge, EdgeType, TERMINATE_ID } from '../nodes';
+import { type DiagramEditorEdge, EdgeType } from '../edges';
+import { TERMINATE_ID } from '../nodes';
 import type { Diagram, DiagramOperation } from '../types/diagram';
 import { syncEdge } from './connection';
 

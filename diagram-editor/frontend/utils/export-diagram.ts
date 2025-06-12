@@ -1,5 +1,5 @@
+import type { DiagramEditorEdge } from '../edges';
 import {
-  type DiagramEditorEdge,
   type DiagramEditorNode,
   extractOperation,
   isOperationNode,

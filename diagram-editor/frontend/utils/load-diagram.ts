@@ -2,12 +2,8 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import diagramSchema from '../diagram.schema.json';
-import {
-  type DiagramEditorEdge,
-  type DiagramEditorNode,
-  START_ID,
-  TERMINATE_ID,
-} from '../nodes';
+import type { DiagramEditorEdge } from '../edges';
+import { type DiagramEditorNode, START_ID, TERMINATE_ID } from '../nodes';
 import type { Diagram } from '../types/diagram';
 import { buildEdges, nextOperationToNodeId } from './operation';
 

@@ -1,9 +1,5 @@
-import {
-  type DiagramEditorEdge,
-  EdgeType,
-  START_ID,
-  TERMINATE_ID,
-} from '../nodes';
+import { type DiagramEditorEdge, EdgeType } from '../edges';
+import { START_ID, TERMINATE_ID } from '../nodes';
 import type {
   BufferSelection,
   Diagram,
