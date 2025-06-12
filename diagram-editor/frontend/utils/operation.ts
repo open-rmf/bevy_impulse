@@ -1,4 +1,4 @@
-import { type DiagramEditorEdge, EdgeType } from '../edges';
+import type { DiagramEditorEdge } from '../edges';
 import type {
   BufferSelection,
   BuiltinTarget,
@@ -69,9 +69,10 @@ export function buildEdges(
           if (source) {
             edges.push({
               id: `${source}->${opId}-${idx}`,
+              type: 'bufferSeq',
               source,
               target: opId,
-              data: { type: EdgeType.BufferSeq, seq: idx },
+              data: { seq: idx },
             });
           }
         }
@@ -81,9 +82,10 @@ export function buildEdges(
           if (source) {
             edges.push({
               id: `${source}->${opId}-${key}`,
+              type: 'bufferKey',
               source,
               target: opId,
-              data: { type: EdgeType.BufferKey, key },
+              data: { key },
             });
           }
         }
@@ -92,9 +94,10 @@ export function buildEdges(
         if (source) {
           edges.push({
             id: `${source}->${opId}-0`,
+            type: 'bufferSeq',
             source,
             target: opId,
-            data: { type: EdgeType.BufferSeq, seq: 0 },
+            data: { seq: 0 },
           });
         }
       }
@@ -103,9 +106,10 @@ export function buildEdges(
       if (target) {
         edges.push({
           id: `${opId}->${target}`,
+          type: 'default',
           source: opId,
           target,
-          data: { type: EdgeType.Basic },
+          data: {},
         });
       }
 
@@ -118,9 +122,10 @@ export function buildEdges(
         ? [
             {
               id: `${opId}->${target}`,
+              type: 'default',
               source: opId,
               target,
-              data: { type: EdgeType.Basic },
+              data: {},
             },
           ]
         : [];
@@ -132,9 +137,10 @@ export function buildEdges(
         if (target) {
           edges.push({
             id: `${opId}->${target}-${idx}`,
+            type: 'default',
             source: opId,
             target,
-            data: { type: EdgeType.Basic },
+            data: {},
           });
         }
       }
@@ -147,9 +153,10 @@ export function buildEdges(
         if (target) {
           edges.push({
             id: `${opId}->${target}-${idx}`,
+            type: 'unzip',
             source: opId,
             target,
-            data: { type: EdgeType.Unzip, seq: idx },
+            data: { seq: idx },
           });
         }
       }
@@ -162,17 +169,19 @@ export function buildEdges(
       if (okTarget) {
         edges.push({
           id: `${opId}->${okTarget}-ok`,
+          type: 'forkResultOk',
           source: opId,
           target: okTarget,
-          data: { type: EdgeType.ForkResultOk },
+          data: {},
         });
       }
       if (errTarget) {
         edges.push({
           id: `${opId}->${errTarget}-err`,
+          type: 'forkResultErr',
           source: opId,
           target: errTarget,
-          data: { type: EdgeType.ForkResultErr },
+          data: {},
         });
       }
       return edges;
@@ -185,9 +194,10 @@ export function buildEdges(
           if (target) {
             edges.push({
               id: `${opId}->${target}-${key}`,
+              type: 'splitKey',
               source: opId,
               target,
-              data: { type: EdgeType.SplitKey, key },
+              data: { key },
             });
           }
         }
@@ -198,9 +208,10 @@ export function buildEdges(
           if (target) {
             edges.push({
               id: `${opId}->${target}-${idx}`,
+              type: 'splitSeq',
               source: opId,
               target,
-              data: { type: EdgeType.SplitSequential, seq: idx },
+              data: { seq: idx },
             });
           }
         }
@@ -210,9 +221,10 @@ export function buildEdges(
         if (target) {
           edges.push({
             id: `${opId}->${target}-remaining`,
+            type: 'splitRemaining',
             source: opId,
             target,
-            data: { type: EdgeType.SplitRemaining },
+            data: {},
           });
         }
       }

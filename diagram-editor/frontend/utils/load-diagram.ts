@@ -64,8 +64,10 @@ function buildGraph(diagram: Diagram): Graph {
   if (startNodeId) {
     edges.push({
       id: `${START_ID}->${startNodeId}`,
+      type: 'default',
       source: START_ID,
       target: startNodeId,
+      data: {},
     });
   }
   for (const [opId, op] of Object.entries(diagram.ops)) {

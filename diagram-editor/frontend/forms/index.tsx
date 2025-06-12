@@ -1,5 +1,5 @@
 import type { EdgeReplaceChange, NodeReplaceChange } from '@xyflow/react';
-import { type DiagramEditorEdge, EdgeType, type UnzipEdge } from '../edges';
+import type { DiagramEditorEdge, UnzipEdge } from '../edges';
 import type { DiagramEditorNode, OperationNode } from '../nodes';
 import BufferForm from './buffer-form';
 import NodeForm from './node-form';
@@ -52,8 +52,8 @@ export interface EditEdgeFormProps {
 }
 
 export function EditEdgeForm({ edge, onChange }: EditEdgeFormProps) {
-  switch (edge.data?.type) {
-    case EdgeType.Unzip: {
+  switch (edge.type) {
+    case 'unzip': {
       return (
         <UnzipForm
           edge={edge as UnzipEdge}
@@ -68,8 +68,8 @@ export function EditEdgeForm({ edge, onChange }: EditEdgeFormProps) {
 }
 
 export function edgeHasEditForm(edge: DiagramEditorEdge): boolean {
-  switch (edge.data?.type) {
-    case EdgeType.Basic: {
+  switch (edge.type) {
+    case 'default': {
       return false;
     }
     default: {

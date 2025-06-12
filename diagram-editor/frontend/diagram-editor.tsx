@@ -16,7 +16,6 @@ import {
   Panel,
   ReactFlow,
   type ReactFlowInstance,
-  StepEdge,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
@@ -25,7 +24,7 @@ import {
 import { inflateSync, strFromU8 } from 'fflate';
 import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
-import type { DiagramEditorEdge } from './edges';
+import { type DiagramEditorEdge, EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import {
   EditEdgeForm,
@@ -146,7 +145,7 @@ const DiagramEditor = () => {
         fitView
         fitViewOptions={{ padding: 0.2 }}
         nodeTypes={NODE_TYPES}
-        edgeTypes={{ default: StepEdge }}
+        edgeTypes={EDGE_TYPES}
         onInit={(instance) => {
           reactFlowInstance.current = instance;
         }}

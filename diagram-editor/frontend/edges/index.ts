@@ -1,72 +1,58 @@
-import type { Edge } from '@xyflow/react';
+import { StepEdge } from '@xyflow/react';
+import type { Edge, EdgeTypes } from './types';
+import UnzipEdgeComp, { type UnzipEdge } from './unzip-edge';
 
-export enum EdgeType {
-  Basic,
-  Unzip,
-  ForkResultOk,
-  ForkResultErr,
-  SplitKey,
-  SplitSequential,
-  SplitRemaining,
-  BufferKey,
-  BufferSeq,
-}
+export type { EdgeTypes } from './types';
+export type { UnzipEdge, UnzipEdgeData } from './unzip-edge';
 
-export type BasicEdgeData = {
-  type: EdgeType.Basic;
-};
-export type BasicEdge = Edge<BasicEdgeData>;
+// TODO: Implement all edges
+export const EDGE_TYPES = {
+  default: StepEdge,
+  unzip: UnzipEdgeComp,
+  forkResultOk: StepEdge,
+  forkResultErr: StepEdge,
+  splitKey: StepEdge,
+  splitSeq: StepEdge,
+  splitRemaining: StepEdge,
+  bufferKey: StepEdge,
+  bufferSeq: StepEdge,
+} satisfies Record<EdgeTypes, unknown>;
 
-export type UnzipEdgeData = {
-  type: EdgeType.Unzip;
-  seq: number;
-};
-export type UnzipEdge = Edge<UnzipEdgeData>;
-
-export type ForkResultEdgeData = {
-  type: EdgeType.ForkResultOk | EdgeType.ForkResultErr;
-};
-export type ForkResultEdge = Edge<ForkResultEdgeData>;
+export type ForkResultEdgeData = Record<string, never>;
+export type ForkResultEdge = Edge<
+  ForkResultEdgeData,
+  'forkResultOk' | 'forkResultErr'
+>;
 
 export type SplitKeyEdgeData = {
-  type: EdgeType.SplitKey;
   key: string;
 };
-export type SplitKeyEdge = Edge<SplitKeyEdgeData>;
+export type SplitKeyEdge = Edge<SplitKeyEdgeData, 'splitKey'>;
 
 export type SplitSequentialEdgeData = {
-  type: EdgeType.SplitSequential;
   seq: number;
 };
-export type SplitSequentialEdge = Edge<SplitSequentialEdgeData>;
+export type SplitSeqEdge = Edge<SplitSequentialEdgeData, 'splitSeq'>;
 
-export type SplitRemainingEdgeData = {
-  type: EdgeType.SplitRemaining;
-};
-export type SplitRemainingEdge = Edge<SplitRemainingEdgeData>;
+export type SplitRemainingEdgeData = Record<string, never>;
+export type SplitRemainingEdge = Edge<SplitRemainingEdgeData, 'splitRemaining'>;
 
 export type BufferKeyEdgeData = {
-  type: EdgeType.BufferKey;
   key: string;
 };
-export type BufferKeyEdge = Edge<BufferKeyEdgeData>;
+export type BufferKeyEdge = Edge<BufferKeyEdgeData, 'bufferKey'>;
 
 export type BufferSeqEdgeData = {
-  type: EdgeType.BufferSeq;
   seq: number;
 };
-export type BufferSeqEdge = Edge<BufferSeqEdgeData>;
+export type BufferSeq = Edge<BufferSeqEdgeData, 'bufferSeq'>;
 
-export type SplitEdgeData =
-  | SplitKeyEdgeData
-  | SplitSequentialEdgeData
-  | SplitRemainingEdgeData;
-
-export type DiagramEditorEdge = Edge<
-  | BasicEdgeData
-  | UnzipEdgeData
-  | ForkResultEdgeData
-  | SplitEdgeData
-  | BufferKeyEdgeData
-  | BufferSeqEdgeData
->;
+export type DiagramEditorEdge =
+  | Edge<Record<string, never>, 'default'>
+  | UnzipEdge
+  | ForkResultEdge
+  | SplitKeyEdge
+  | SplitSeqEdge
+  | SplitRemainingEdge
+  | BufferKeyEdge
+  | BufferSeq;

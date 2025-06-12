@@ -1,4 +1,4 @@
-import { type DiagramEditorEdge, EdgeType } from '../edges';
+import type { DiagramEditorEdge } from '../edges';
 import { TERMINATE_ID } from '../nodes';
 import type { Diagram, DiagramOperation } from '../types/diagram';
 import { syncEdge } from './connection';
@@ -30,9 +30,8 @@ describe('syncEdge', () => {
       id: 'testEdge',
       source: 'testOp1',
       target: 'testOp2',
-      data: {
-        type: EdgeType.Basic,
-      },
+      type: 'default',
+      data: {},
     };
   });
 
@@ -81,18 +80,24 @@ describe('syncEdge', () => {
       syncEdge(diagram, edge);
       expect(testOp1.next).toEqual(['node3', 'testOp2']);
     });
+
+    it('should throw for other edge data types', () => {
+      edge.type = 'forkResultOk';
+      expect(() => syncEdge(diagram, edge)).toThrow();
+    });
   });
 
   describe('unzip', () => {
     let testOp1: Extract<DiagramOperation, { type: 'unzip' }>;
 
     beforeEach(() => {
+      edge.type = 'unzip';
       testOp1 = { type: 'unzip', next: [] };
       diagram.ops.testOp1 = testOp1;
     });
 
     it('should set target at specified sequence in next array for "unzip" edge data type', () => {
-      edge.data = { type: EdgeType.Unzip, seq: 1 };
+      edge.data = { seq: 1 };
       syncEdge(diagram, edge);
       expect(testOp1.next[1]).toBe('testOp2');
       expect(testOp1.next.length).toBe(2); // JS allows sparse arrays
@@ -100,16 +105,14 @@ describe('syncEdge', () => {
 
     it('should overwrite target at specified sequence', () => {
       testOp1.next[1] = 'oldNode';
-      edge.data = { type: EdgeType.Unzip, seq: 1 };
+      edge.data = { seq: 1 };
       syncEdge(diagram, edge);
       expect(testOp1.next[1]).toBe('testOp2');
     });
 
-    it('should do nothing if edge data type is not "unzip"', () => {
-      edge.data = { type: EdgeType.Basic };
-      const originalNext = [...testOp1.next];
-      syncEdge(diagram, edge);
-      expect(testOp1.next).toEqual(originalNext);
+    it('should throw for other edge data types', () => {
+      edge.type = 'default';
+      expect(() => syncEdge(diagram, edge)).toThrow();
     });
   });
 
@@ -126,21 +129,21 @@ describe('syncEdge', () => {
     });
 
     it('should set "ok" target for "ok" edge data type', () => {
-      edge.data = { type: EdgeType.ForkResultOk };
+      edge.type = 'forkResultOk';
       syncEdge(diagram, edge);
       expect(testOp1.ok).toBe('testOp2');
       expect(testOp1.err).toEqual({ builtin: 'dispose' });
     });
 
     it('should set "err" target for "err" edge data type', () => {
-      edge.data = { type: EdgeType.ForkResultErr };
+      edge.type = 'forkResultErr';
       syncEdge(diagram, edge);
       expect(testOp1.err).toBe('testOp2');
       expect(testOp1.ok).toEqual({ builtin: 'dispose' });
     });
 
     it('should throw error for other edge data types', () => {
-      edge.data = { type: EdgeType.Basic };
+      edge.type = 'default';
       expect(() => syncEdge(diagram, edge)).toThrow();
     });
   });
@@ -156,8 +159,12 @@ describe('syncEdge', () => {
     });
 
     describe('splitKey', () => {
+      beforeEach(() => {
+        edge.type = 'splitKey';
+      });
+
       it('should initialize keyed and set target for "splitKey" edge data type', () => {
-        edge.data = { type: EdgeType.SplitKey, key: 'myKey' };
+        edge.data = { key: 'myKey' };
         syncEdge(diagram, edge);
         expect(testOp1.keyed).toEqual({ myKey: 'testOp2' });
         expect(testOp1.sequential).toBeUndefined();
@@ -166,7 +173,7 @@ describe('syncEdge', () => {
 
       it('should add to existing keyed object for "splitKey"', () => {
         testOp1.keyed = { existingKey: 'node0' };
-        edge.data = { type: EdgeType.SplitKey, key: 'myKey' };
+        edge.data = { key: 'myKey' };
         syncEdge(diagram, edge);
         expect(testOp1.keyed).toEqual({
           existingKey: 'node0',
@@ -176,15 +183,19 @@ describe('syncEdge', () => {
 
       it('should overwrite existing key for "splitKey"', () => {
         testOp1.keyed = { myKey: 'oldNode' };
-        edge.data = { type: EdgeType.SplitKey, key: 'myKey' };
+        edge.data = { key: 'myKey' };
         syncEdge(diagram, edge);
         expect(testOp1.keyed).toEqual({ myKey: 'testOp2' });
       });
     });
 
-    describe('splitSequential', () => {
+    describe('splitSeq', () => {
+      beforeEach(() => {
+        edge.type = 'splitSeq';
+      });
+
       it('should initialize sequential and set target for "splitSequential" edge data type', () => {
-        edge.data = { type: EdgeType.SplitSequential, seq: 0 };
+        edge.data = { seq: 0 };
         syncEdge(diagram, edge);
         expect(testOp1.sequential?.[0]).toBe('testOp2');
         expect(testOp1.keyed).toBeUndefined();
@@ -193,7 +204,7 @@ describe('syncEdge', () => {
 
       it('should add to existing sequential array for "splitSequential"', () => {
         testOp1.sequential = ['node0'];
-        edge.data = { type: EdgeType.SplitSequential, seq: 1 };
+        edge.data = { seq: 1 };
         syncEdge(diagram, edge);
         expect(testOp1.sequential?.[0]).toBe('node0');
         expect(testOp1.sequential?.[1]).toBe('testOp2');
@@ -201,22 +212,26 @@ describe('syncEdge', () => {
 
       it('should overwrite existing sequence for "splitSequential"', () => {
         testOp1.sequential = ['node0', 'oldNode'];
-        edge.data = { type: EdgeType.SplitSequential, seq: 1 };
+        edge.data = { seq: 1 };
         syncEdge(diagram, edge);
         expect(testOp1.sequential?.[1]).toBe('testOp2');
       });
 
       it('should handle non-sequential array indices for "splitSequential"', () => {
-        edge.data = { type: EdgeType.SplitSequential, seq: 2 };
+        edge.data = { seq: 2 };
         syncEdge(diagram, edge);
         expect(testOp1.sequential?.[2]).toBe('testOp2');
         expect(testOp1.sequential?.length).toBe(3); // JS allows sparse arrays
       });
     });
 
-    describe(EdgeType.SplitRemaining, () => {
+    describe('splitRemaining', () => {
+      beforeEach(() => {
+        edge.type = 'splitRemaining';
+      });
+
       it('should set remaining target for "splitRemaining" edge data type', () => {
-        edge.data = { type: EdgeType.SplitRemaining };
+        edge.type = 'splitRemaining';
         syncEdge(diagram, edge);
         expect(testOp1.remaining).toBe('testOp2');
         expect(testOp1.keyed).toBeUndefined();
@@ -225,14 +240,14 @@ describe('syncEdge', () => {
 
       it('should overwrite existing remaining target', () => {
         testOp1.remaining = 'oldNode';
-        edge.data = { type: EdgeType.SplitRemaining };
+        edge.type = 'splitRemaining';
         syncEdge(diagram, edge);
         expect(testOp1.remaining).toBe('testOp2');
       });
     });
 
     it('should throw for other edge data types', () => {
-      edge.data = { type: EdgeType.Basic };
+      edge.type = 'default';
       expect(() => syncEdge(diagram, edge)).toThrow();
     });
   });

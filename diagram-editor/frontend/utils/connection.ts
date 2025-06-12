@@ -1,4 +1,4 @@
-import { type DiagramEditorEdge, EdgeType } from '../edges';
+import type { DiagramEditorEdge } from '../edges';
 import { START_ID, TERMINATE_ID } from '../nodes';
 import type {
   BufferSelection,
@@ -26,14 +26,8 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
   if (edge.source === TERMINATE_ID) {
     throw new Error('source node cannot be "terminate"');
   }
-  if (!edge.data) {
-    throw new Error('missing edge data');
-  }
 
-  if (
-    edge.data.type === EdgeType.BufferKey ||
-    edge.data.type === EdgeType.BufferSeq
-  ) {
+  if (edge.type === 'bufferKey' || edge.type === 'bufferSeq') {
     syncBufferSelection(diagram, edge);
     return;
   }
@@ -50,6 +44,10 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
     case 'transform':
     case 'buffer_access':
     case 'listen': {
+      if (edge.type !== 'default') {
+        throw new Error('expected "default" edge');
+      }
+
       sourceOp.next = nodeIdToNextOperation(edge.target);
       break;
     }
@@ -57,6 +55,10 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
       throw new Error('TODO');
     }
     case 'fork_clone': {
+      if (edge.type !== 'default') {
+        throw new Error('expected "default" edge');
+      }
+
       const target = nodeIdToNextOperation(edge.target);
       if (
         !sourceOp.next.some(
@@ -68,19 +70,19 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
       break;
     }
     case 'unzip': {
-      if (edge.data.type !== EdgeType.Unzip) {
-        break;
+      if (edge.type !== 'unzip') {
+        throw new Error('expected "unzip" edge');
       }
       sourceOp.next[edge.data.seq] = nodeIdToNextOperation(edge.target);
       break;
     }
     case 'fork_result': {
-      switch (edge.data?.type) {
-        case EdgeType.ForkResultOk: {
+      switch (edge.type) {
+        case 'forkResultOk': {
           sourceOp.ok = nodeIdToNextOperation(edge.target);
           break;
         }
-        case EdgeType.ForkResultErr: {
+        case 'forkResultErr': {
           sourceOp.err = nodeIdToNextOperation(edge.target);
           break;
         }
@@ -91,15 +93,15 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
       break;
     }
     case 'split': {
-      switch (edge.data?.type) {
-        case EdgeType.SplitKey: {
+      switch (edge.type) {
+        case 'splitKey': {
           if (!sourceOp.keyed) {
             sourceOp.keyed = {};
           }
           sourceOp.keyed[edge.data.key] = nodeIdToNextOperation(edge.target);
           break;
         }
-        case EdgeType.SplitSequential: {
+        case 'splitSeq': {
           if (!sourceOp.sequential) {
             sourceOp.sequential = [];
           }
@@ -109,7 +111,7 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
           );
           break;
         }
-        case EdgeType.SplitRemaining: {
+        case 'splitRemaining': {
           sourceOp.remaining = nodeIdToNextOperation(edge.target);
           break;
         }
@@ -131,14 +133,7 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
 }
 
 function syncBufferSelection(diagram: Diagram, edge: DiagramEditorEdge) {
-  if (!edge.data) {
-    throw new Error('missing edge data');
-  }
-
-  if (
-    edge.data.type === EdgeType.BufferKey ||
-    edge.data.type === EdgeType.BufferSeq
-  ) {
+  if (edge.type === 'bufferKey' || edge.type === 'bufferSeq') {
     const targetOp = diagram.ops[edge.target];
     if (!targetOp) {
       throw new Error(`target operation "${edge.target}" not found`);
@@ -146,14 +141,14 @@ function syncBufferSelection(diagram: Diagram, edge: DiagramEditorEdge) {
     const bufferSelection = getBufferSelection(targetOp);
 
     if (
-      edge.data.type === EdgeType.BufferKey &&
+      edge.type === 'bufferKey' &&
       Array.isArray(bufferSelection) &&
       bufferSelection.length === 0
     ) {
       // the array is empty so it is safe to change it to a keyed buffer selection
       setBufferSelection(targetOp, {});
     } else if (
-      edge.data.type === EdgeType.BufferSeq &&
+      edge.type === 'bufferSeq' &&
       typeof bufferSelection === 'object' &&
       Object.keys(bufferSelection).length === 0
     ) {
@@ -162,7 +157,7 @@ function syncBufferSelection(diagram: Diagram, edge: DiagramEditorEdge) {
     }
 
     // check that the buffer selection is compatible
-    if (edge.data.type === EdgeType.BufferSeq) {
+    if (edge.type === 'bufferSeq') {
       if (!isArrayBufferSelection(bufferSelection)) {
         throw new Error(
           'a sequential buffer edge must be assigned to an array of buffers',
@@ -172,7 +167,7 @@ function syncBufferSelection(diagram: Diagram, edge: DiagramEditorEdge) {
         bufferSelection[edge.data.seq] = edge.source;
       }
     }
-    if (edge.data.type === EdgeType.BufferKey) {
+    if (edge.type === 'bufferKey') {
       if (!isKeyedBufferSelection(bufferSelection)) {
         throw new Error(
           'a keyed buffer edge must be assigned to a keyed buffer selection',
