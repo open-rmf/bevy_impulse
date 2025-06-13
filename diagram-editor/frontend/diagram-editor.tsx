@@ -22,7 +22,7 @@ import {
   reconnectEdge,
 } from '@xyflow/react';
 import { inflateSync, strFromU8 } from 'fflate';
-import React, { useEffect } from 'react';
+import React, { type JSX, useEffect } from 'react';
 import AddOperation from './add-operation';
 import { type DiagramEditorEdge, EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
@@ -69,20 +69,16 @@ const DiagramEditor = () => {
     top: 0,
   });
 
-  const [clickedNode, setClickedNode] =
-    React.useState<DiagramEditorNode | null>(null);
-  const [clickedEdge, setClickedEdge] =
-    React.useState<DiagramEditorEdge | null>(null);
   const [editOpFormPopoverProps, setEditOpFormPopoverProps] = React.useState<
     Pick<
       PopoverProps,
       'open' | 'anchorReference' | 'anchorEl' | 'anchorPosition'
     >
   >({ open: false });
+  const [renderEditForm, setRenderEditForm] =
+    React.useState<JSX.Element | null>(null);
 
   const closeAllPopovers = React.useCallback(() => {
-    setClickedNode(null);
-    setClickedEdge(null);
     setOpenAddOpPopover(false);
     setEditOpFormPopoverProps({ open: false });
   }, []);
@@ -164,8 +160,15 @@ const DiagramEditor = () => {
         onNodeClick={(ev, node) => {
           ev.stopPropagation();
           closeAllPopovers();
-          setClickedNode(node);
           if (nodeHasEditForm(node)) {
+            setRenderEditForm(
+              <EditNodeForm
+                node={node}
+                onChange={(change) => {
+                  setNodes((prev) => applyNodeChanges([change], prev));
+                }}
+              />,
+            );
             setEditOpFormPopoverProps({
               open: true,
               anchorReference: 'anchorEl',
@@ -176,8 +179,15 @@ const DiagramEditor = () => {
         onEdgeClick={(ev, edge) => {
           ev.stopPropagation();
           closeAllPopovers();
-          setClickedEdge(edge);
           if (edgeHasEditForm(edge)) {
+            setRenderEditForm(
+              <EditEdgeForm
+                edge={edge}
+                onChange={(change) => {
+                  setEdges((prev) => applyEdgeChanges([change], prev));
+                }}
+              />,
+            );
             setEditOpFormPopoverProps({
               open: true,
               anchorReference: 'anchorPosition',
@@ -304,22 +314,7 @@ const DiagramEditor = () => {
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
         component={NonCapturingPopoverContainer}
       >
-        {clickedNode && (
-          <EditNodeForm
-            node={clickedNode}
-            onChange={(change) => {
-              setNodes((prev) => applyNodeChanges([change], prev));
-            }}
-          />
-        )}
-        {clickedEdge && (
-          <EditEdgeForm
-            edge={clickedEdge}
-            onChange={(change) => {
-              setEdges((prev) => applyEdgeChanges([change], prev));
-            }}
-          />
-        )}
+        {renderEditForm}
       </Popover>
       <Snackbar
         open={openErrorToast}

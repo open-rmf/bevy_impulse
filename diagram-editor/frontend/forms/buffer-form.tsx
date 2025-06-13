@@ -27,7 +27,7 @@ export function BufferForm({ node, onChange }: BufferFormProps) {
                 onChange?.({
                   type: 'replace',
                   id: node.id,
-                  item: node,
+                  item: { ...node },
                 });
               }}
             />

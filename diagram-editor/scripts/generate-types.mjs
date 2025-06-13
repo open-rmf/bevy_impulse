@@ -1,6 +1,6 @@
+import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { execSync } from 'node:child_process';
 import { compile } from 'json-schema-to-typescript';
 
 const schemaRaw = fs.readFileSync('../diagram.schema.json');

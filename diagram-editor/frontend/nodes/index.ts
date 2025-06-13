@@ -4,7 +4,7 @@ import { StartNode } from './start-node';
 import { TerminateNode } from './terminate-node';
 import type { DiagramEditorNode, NodeTypes, OperationNode } from './types';
 
-export * from './types';
+export type * from './types';
 
 export const START_ID = 'builtin:start';
 export const TERMINATE_ID = 'builtin:terminate';

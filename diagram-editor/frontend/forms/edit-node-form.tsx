@@ -4,6 +4,7 @@ import type { DiagramEditorNode, OperationNode } from '../nodes';
 import { exhaustiveCheck } from '../utils/exhaustive-check';
 import BufferForm from './buffer-form';
 import NodeForm from './node-form';
+import TransformForm from './transform-form';
 
 export interface EditNodeFormProps {
   node: DiagramEditorNode;
@@ -24,6 +25,14 @@ function EditNodeForm({ node, onChange }: EditNodeFormProps) {
       return (
         <BufferForm
           node={node as OperationNode<'buffer'>}
+          onChange={(change) => onChange?.(change)}
+        />
+      );
+    }
+    case 'transform': {
+      return (
+        <TransformForm
+          node={node as OperationNode<'transform'>}
           onChange={(change) => onChange?.(change)}
         />
       );

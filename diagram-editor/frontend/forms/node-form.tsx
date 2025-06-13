@@ -22,7 +22,7 @@ function NodeForm({ node, onChange }: NodeFormProps) {
               onChange?.({
                 type: 'replace',
                 id: node.id,
-                item: node,
+                item: { ...node },
               });
             }}
           />
@@ -35,7 +35,7 @@ function NodeForm({ node, onChange }: NodeFormProps) {
               onChange?.({
                 type: 'replace',
                 id: node.id,
-                item: node,
+                item: { ...node },
               });
             }}
           />
