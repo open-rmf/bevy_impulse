@@ -53,7 +53,7 @@ function buildGraph(diagram: Diagram): Graph {
       ([opId, op]) =>
         ({
           id: opId,
-          type: 'inputOutput',
+          type: op.type,
           position: { x: 0, y: 0 },
           data: { opId, ...op },
         }) satisfies DiagramEditorNode,

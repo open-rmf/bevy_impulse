@@ -1,10 +1,10 @@
-import type { Node } from '@xyflow/react';
-
 import type { DiagramOperation } from '../types/diagram';
 import { InputOutputNode } from './input-output-node';
-import { OutputNode } from './output-node';
 import { StartNode } from './start-node';
 import { TerminateNode } from './terminate-node';
+import type { DiagramEditorNode, NodeTypes, OperationNode } from './types';
+
+export * from './types';
 
 export const START_ID = 'builtin:start';
 export const TERMINATE_ID = 'builtin:terminate';
@@ -12,40 +12,27 @@ export const TERMINATE_ID = 'builtin:terminate';
 export const NODE_TYPES = {
   start: StartNode,
   terminate: TerminateNode,
-  inputOutput: InputOutputNode,
-  output: OutputNode,
-};
-
-export type NodeTypes = keyof typeof NODE_TYPES;
-
-export type BuiltinNode = Node<Record<string, never>, NodeTypes>;
-
-export type AnyOperationNode = Node<
-  DiagramOperation & { opId: string },
-  NodeTypes
->;
-
-export type OperationNode<K extends DiagramOperation['type']> = Node<
-  Extract<DiagramOperation, { type: K }> & { opId: string },
-  NodeTypes
->;
-
-export type DiagramEditorNode = BuiltinNode | AnyOperationNode;
-
-type JoinOperation = Extract<
-  DiagramOperation,
-  { type: 'join' } | { type: 'serialized_join' }
->;
-
-export type JoinNode = Node<JoinOperation, NodeTypes>;
+  node: InputOutputNode,
+  section: InputOutputNode,
+  fork_clone: InputOutputNode,
+  unzip: InputOutputNode,
+  fork_result: InputOutputNode,
+  split: InputOutputNode,
+  join: InputOutputNode,
+  serialized_join: InputOutputNode,
+  transform: InputOutputNode,
+  buffer: InputOutputNode,
+  buffer_access: InputOutputNode,
+  listen: InputOutputNode,
+} satisfies Record<NodeTypes, unknown>;
 
 export function isOperationNode(
   node: DiagramEditorNode,
-): node is AnyOperationNode {
+): node is OperationNode {
   return !node.id.startsWith('builtin:');
 }
 
-export function extractOperation(node: AnyOperationNode): DiagramOperation {
+export function extractOperation(node: OperationNode): DiagramOperation {
   const op: DiagramOperation = { ...node.data };
   const opIdKey = 'opId';
   delete op[opIdKey];

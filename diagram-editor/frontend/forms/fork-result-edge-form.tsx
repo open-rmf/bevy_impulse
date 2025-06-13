@@ -1,4 +1,12 @@
-import { Card, CardContent, CardHeader, MenuItem, Select } from '@mui/material';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+} from '@mui/material';
 import type { EdgeReplaceChange } from '@xyflow/react';
 import type { ForkResultErrEdge, ForkResultOkEdge } from '../edges';
 
@@ -14,24 +22,28 @@ function ForkResultEdgeForm({ edge, onChange }: ForkResultEdgeFormProps) {
     <Card>
       <CardHeader title="Edit Edge" />
       <CardContent>
-        <Select
-          label="type"
-          value={edge.type}
-          onChange={(ev) => {
-            const newType = ev.target.value as 'forkResultOk' | 'forkResultErr';
-            if (edge.type !== newType) {
-              edge.type = newType;
-              onChange?.({
-                type: 'replace',
-                id: edge.id,
-                item: edge,
-              });
-            }
-          }}
-        >
-          <MenuItem value="forkResultOk">Ok</MenuItem>
-          <MenuItem value="forkResultErr">Error</MenuItem>
-        </Select>
+        <FormControl fullWidth>
+          <InputLabel id="fork-result-edge-type-label">Type</InputLabel>
+          <Select
+            labelId="fork-result-edge-type-label"
+            label="Type"
+            value={edge.type}
+            onChange={(ev) => {
+              const newType = ev.target.value;
+              if (edge.type !== newType) {
+                const newEdge = { ...edge, type: newType };
+                onChange?.({
+                  type: 'replace',
+                  id: edge.id,
+                  item: newEdge,
+                });
+              }
+            }}
+          >
+            <MenuItem value="forkResultOk">Ok</MenuItem>
+            <MenuItem value="forkResultErr">Error</MenuItem>
+          </Select>
+        </FormControl>
       </CardContent>
     </Card>
   );

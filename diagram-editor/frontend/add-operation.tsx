@@ -37,7 +37,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'node',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -59,7 +59,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'fork_clone',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -79,7 +79,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'unzip',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -99,7 +99,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'fork_result',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -120,7 +120,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'split',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -139,7 +139,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'join',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -160,7 +160,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'serialized_join',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -181,7 +181,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'transform',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -202,7 +202,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'buffer',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -221,7 +221,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'buffer_access',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',
@@ -242,7 +242,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.({
             item: {
               id: 'new_operation',
-              type: 'inputOutput',
+              type: 'listen',
               position: { x: 0, y: 0 },
               data: {
                 opId: 'new_operation',

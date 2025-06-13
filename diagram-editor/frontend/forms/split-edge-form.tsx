@@ -80,18 +80,17 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
       <CardContent>
         <Stack spacing={2}>
           <FormControl fullWidth>
-            <InputLabel>
-              Type
-              <Select
-                label="Type"
-                value={edge.type}
-                onChange={handleTypeChange}
-              >
-                <MenuItem value="splitKey">Key</MenuItem>
-                <MenuItem value="splitSeq">Sequence</MenuItem>
-                <MenuItem value="splitRemaining">Remaining</MenuItem>
-              </Select>
-            </InputLabel>
+            <InputLabel id="split-edge-type-label">Type</InputLabel>
+            <Select
+              labelId="split-edge-type-label"
+              label="Type"
+              value={edge.type}
+              onChange={handleTypeChange}
+            >
+              <MenuItem value="splitKey">Key</MenuItem>
+              <MenuItem value="splitSeq">Sequence</MenuItem>
+              <MenuItem value="splitRemaining">Remaining</MenuItem>
+            </Select>
           </FormControl>
 
           {edge.type === 'splitKey' && (

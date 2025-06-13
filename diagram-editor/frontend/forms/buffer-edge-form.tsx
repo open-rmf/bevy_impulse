@@ -74,17 +74,16 @@ function BufferEdgeForm({ edge, onChange }: BufferEdgeFormProps) {
       <CardContent>
         <Stack spacing={2}>
           <FormControl fullWidth>
-            <InputLabel>
-              Type
-              <Select
-                label="Type"
-                value={edge.type}
-                onChange={handleTypeChange}
-              >
-                <MenuItem value="bufferKey">Key</MenuItem>
-                <MenuItem value="bufferSeq">Sequence</MenuItem>
-              </Select>
-            </InputLabel>
+            <InputLabel id="buffer-edge-type-label">Type</InputLabel>
+            <Select
+              labelId="buffer-edge-type-label"
+              label="Type"
+              value={edge.type}
+              onChange={handleTypeChange}
+            >
+              <MenuItem value="bufferKey">Key</MenuItem>
+              <MenuItem value="bufferSeq">Sequence</MenuItem>
+            </Select>
           </FormControl>
 
           {edge.type === 'bufferKey' && (
