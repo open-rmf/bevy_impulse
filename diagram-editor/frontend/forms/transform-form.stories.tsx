@@ -33,7 +33,7 @@ export const Default: Story = {
       data: {
         opId: 'transform-op-1',
         type: 'transform',
-        cel: 'input.value + 1',
+        cel: 'request + 1',
         next: '',
       },
     },

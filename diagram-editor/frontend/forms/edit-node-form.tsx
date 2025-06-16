@@ -48,7 +48,8 @@ export default EditNodeForm;
 export function nodeHasEditForm(node: DiagramEditorNode): boolean {
   switch (node.data.type) {
     case 'node':
-    case 'buffer': {
+    case 'buffer':
+    case 'transform': {
       return true;
     }
     case 'buffer_access':
@@ -59,7 +60,6 @@ export function nodeHasEditForm(node: DiagramEditorNode): boolean {
     case 'section':
     case 'serialized_join':
     case 'split':
-    case 'transform':
     case 'unzip': {
       return false;
     }
