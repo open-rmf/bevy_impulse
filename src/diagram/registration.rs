@@ -34,11 +34,7 @@ use crate::{
     StreamPack,
 };
 
-use schemars::{
-    gen::{SchemaGenerator, SchemaSettings},
-    schema::Schema,
-    JsonSchema,
-};
+use schemars::{generate::SchemaSettings, JsonSchema, Schema, SchemaGenerator};
 use serde::{
     de::DeserializeOwned,
     ser::{SerializeMap, SerializeStruct},
@@ -732,7 +728,7 @@ impl Serialize for MessageOperation {
 
 pub struct MessageRegistration {
     pub(super) type_name: &'static str,
-    pub(super) schema: Option<schemars::schema::Schema>,
+    pub(super) schema: Option<Schema>,
     pub(super) operations: MessageOperation,
 }
 
@@ -776,7 +772,7 @@ pub struct MessageRegistry {
 impl MessageRegistry {
     fn new() -> Self {
         let mut settings = SchemaSettings::default();
-        settings.definitions_path = "#/schemas/".to_string();
+        settings.definitions_path = "#/schemas/".into();
 
         Self {
             schema_generator: SchemaGenerator::new(settings),

@@ -16,11 +16,12 @@
 */
 
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
 };
 
-use schemars::{gen::SchemaGenerator, JsonSchema};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{
@@ -31,20 +32,20 @@ use crate::{Builder, JsonBuffer};
 
 pub trait DynType {
     /// Returns the type name of the request. Note that the type name must be unique.
-    fn type_name() -> String;
+    fn type_name() -> Cow<'static, str>;
 
-    fn json_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema;
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema;
 }
 
 impl<T> DynType for T
 where
     T: JsonSchema,
 {
-    fn type_name() -> String {
+    fn type_name() -> Cow<'static, str> {
         <T>::schema_name()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
         gen.subschema_for::<T>()
     }
 }
