@@ -17,7 +17,7 @@
 
 use std::{
     any::{type_name, Any},
-    borrow::Borrow,
+    borrow::{Borrow, Cow},
     cell::RefCell,
     collections::HashMap,
     marker::PhantomData,
@@ -34,7 +34,7 @@ use crate::{
     StreamPack,
 };
 
-use schemars::{generate::SchemaSettings, JsonSchema, Schema, SchemaGenerator};
+use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{
     de::DeserializeOwned,
     ser::{SerializeMap, SerializeStruct},
@@ -52,7 +52,7 @@ use super::{
     TypeInfo,
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct NodeRegistration {
     #[serde(rename = "$key$")]
     pub(super) id: BuilderId,
@@ -590,7 +590,7 @@ pub trait IntoNodeRegistration {
 
 type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section>;
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct SectionRegistration {
     pub(super) name: BuilderId,
     pub(super) metadata: SectionMetadata,
@@ -645,7 +645,7 @@ where
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct DiagramElementRegistry {
     pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
     pub(super) sections: HashMap<BuilderId, SectionRegistration>,
@@ -726,6 +726,45 @@ impl Serialize for MessageOperation {
     }
 }
 
+struct NullSchema;
+
+impl JsonSchema for NullSchema {
+    fn schema_name() -> Cow<'static, str> {
+        "".into()
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({ "type": "null" })
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+}
+
+#[derive(JsonSchema)]
+#[allow(unused)] // only used to generate schema
+struct MessageOperationSchema {
+    deserialize: Option<NullSchema>,
+    serialize: Option<NullSchema>,
+    fork_clone: Option<NullSchema>,
+    unzip: Option<Vec<TypeInfo>>,
+    fork_result: Option<NullSchema>,
+    split: Option<NullSchema>,
+    join: Option<NullSchema>,
+}
+
+impl JsonSchema for MessageOperation {
+    fn schema_name() -> Cow<'static, str> {
+        "MessageOperation".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <MessageOperationSchema as JsonSchema>::json_schema(generator)
+    }
+}
+
+#[derive(JsonSchema)]
 pub struct MessageRegistration {
     pub(super) type_name: &'static str,
     pub(super) schema: Option<Schema>,
@@ -757,15 +796,12 @@ impl Serialize for MessageRegistration {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 pub struct MessageRegistry {
     #[serde(serialize_with = "MessageRegistry::serialize_messages")]
     pub messages: HashMap<TypeInfo, MessageRegistration>,
 
-    #[serde(
-        rename = "schemas",
-        serialize_with = "MessageRegistry::serialize_schemas"
-    )]
+    #[serde(rename = "schemas", with = "MessageRegistrySerializeSchemas")]
     pub schema_generator: SchemaGenerator,
 }
 
@@ -1199,8 +1235,18 @@ impl MessageRegistry {
         }
         s.end()
     }
+}
 
-    fn serialize_schemas<S>(v: &SchemaGenerator, serializer: S) -> Result<S::Ok, S::Error>
+#[derive(JsonSchema)]
+#[schemars(rename = "MessageRegistry", inline)]
+struct MessageRegistrySerializeSchemas {
+    #[allow(unused)] // This is only used to generate schema
+    #[schemars(flatten)]
+    schemas: serde_json::Map<String, serde_json::Value>,
+}
+
+impl MessageRegistrySerializeSchemas {
+    fn serialize<S>(v: &SchemaGenerator, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
