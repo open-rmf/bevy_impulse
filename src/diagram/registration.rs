@@ -34,11 +34,11 @@ use crate::{
     StreamPack,
 };
 
-use schemars::{generate::SchemaSettings, JsonSchema, Schema, SchemaGenerator};
+use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{
     de::DeserializeOwned,
     ser::{SerializeMap, SerializeStruct},
-    Serialize,
+    Deserialize, Serialize,
 };
 use serde_json::json;
 use tracing::debug;
@@ -695,47 +695,91 @@ impl MessageOperation {
     }
 }
 
+/// Represents an empty js object.
+///
+/// ```json
+/// { "type": "object" }
+/// ```
+struct JsEmptyObject;
+
+impl Serialize for JsEmptyObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_map(Some(0))?.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for JsEmptyObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(serde::de::IgnoredAny)?;
+        Ok(JsEmptyObject {})
+    }
+}
+
+impl JsonSchema for JsEmptyObject {
+    fn schema_name() -> Cow<'static, str> {
+        "object".into()
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({ "type": "object" })
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+}
+
 impl Serialize for MessageOperation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         let mut s = serializer.serialize_map(None)?;
+        let empty_object = JsEmptyObject {};
         if self.deserialize_impl.is_some() {
-            s.serialize_entry("deserialize", &true)?;
+            s.serialize_entry("deserialize", &empty_object)?;
         }
         if self.serialize_impl.is_some() {
-            s.serialize_entry("serialize", &true)?;
+            s.serialize_entry("serialize", &empty_object)?;
         }
         if self.fork_clone_impl.is_some() {
-            s.serialize_entry("fork_clone", &true)?;
+            s.serialize_entry("fork_clone", &empty_object)?;
         }
         if let Some(unzip_impl) = &self.unzip_impl {
             s.serialize_entry("unzip", &json!({"output_types": unzip_impl.output_types()}))?;
         }
         if self.fork_result_impl.is_some() {
-            s.serialize_entry("fork_result", &true)?;
+            s.serialize_entry("fork_result", &empty_object)?;
         }
         if self.split_impl.is_some() {
-            s.serialize_entry("split", &true)?;
+            s.serialize_entry("split", &empty_object)?;
         }
         if self.join_impl.is_some() {
-            s.serialize_entry("join", &true)?;
+            s.serialize_entry("join", &empty_object)?;
         }
         s.end()
     }
 }
 
+#[derive(Serialize, JsonSchema)]
+struct Empty;
+
 #[derive(JsonSchema)]
 #[allow(unused)] // only used to generate schema
 struct MessageOperationSchema {
-    deserialize: Option<bool>,
-    serialize: Option<bool>,
-    fork_clone: Option<bool>,
+    deserialize: Option<Empty>,
+    serialize: Option<JsEmptyObject>,
+    fork_clone: Option<JsEmptyObject>,
     unzip: Option<Vec<TypeInfo>>,
-    fork_result: Option<bool>,
-    split: Option<bool>,
-    join: Option<bool>,
+    fork_result: Option<JsEmptyObject>,
+    split: Option<JsEmptyObject>,
+    join: Option<JsEmptyObject>,
 }
 
 impl JsonSchema for MessageOperation {
@@ -1815,5 +1859,21 @@ mod tests {
         assert_eq!(bar_schema["$ref"].as_str().unwrap(), "#/schemas/Bar");
         assert!(schemas.get("Bar").is_some());
         assert!(schemas.get("Foo").is_some());
+    }
+
+    #[test]
+    fn test_serialize_js_empty_object() {
+        let json = serde_json::to_string(&JsEmptyObject {}).unwrap();
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn test_deserialize_js_empty_object() {
+        serde_json::from_str::<JsEmptyObject>("{}").unwrap();
+        serde_json::from_str::<JsEmptyObject>(r#"{ "extra": "fields" }"#).unwrap();
+        assert!(serde_json::from_str::<JsEmptyObject>(r#""some string""#).is_err());
+        assert!(serde_json::from_str::<JsEmptyObject>("123").is_err());
+        assert!(serde_json::from_str::<JsEmptyObject>("true").is_err());
+        assert!(serde_json::from_str::<JsEmptyObject>("null").is_err());
     }
 }

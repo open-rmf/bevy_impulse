@@ -33,42 +33,49 @@
     "schemas"
   ],
   "$defs": {
+    "Empty": {
+      "type": "null"
+    },
     "MessageOperation": {
       "type": "object",
       "properties": {
         "deserialize": {
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Empty"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "fork_clone": {
           "type": [
-            "boolean",
+            "object",
             "null"
           ]
         },
         "fork_result": {
           "type": [
-            "boolean",
+            "object",
             "null"
           ]
         },
         "join": {
           "type": [
-            "boolean",
+            "object",
             "null"
           ]
         },
         "serialize": {
           "type": [
-            "boolean",
+            "object",
             "null"
           ]
         },
         "split": {
           "type": [
-            "boolean",
+            "object",
             "null"
           ]
         },
