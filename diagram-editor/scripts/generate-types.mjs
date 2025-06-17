@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
+import fs, { copyFileSync } from 'node:fs';
 import { compile } from 'json-schema-to-typescript';
 
 const schemaRaw = fs.readFileSync('../diagram.schema.json');
@@ -36,3 +36,4 @@ const fd = fs.openSync('src/types/diagram.d.ts', 'w');
 fs.writeSync(fd, `// Generated from diagram.schema.json (sha1:${hash})\n`);
 fs.writeSync(fd, output);
 execSync('biome format --write ./src/types/diagram.d.ts');
+copyFileSync('../diagram.schema.json', './frontend/diagram.schema.json');

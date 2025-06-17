@@ -5,3 +5,10 @@ Cargo.lock
 
 # nodejs
 node_modules
+
+# diagram-editor
+/diagram-editor/dist
+
+# storybook
+*storybook.log
+storybook-static

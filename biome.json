@@ -1,8 +1,8 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "include": ["diagram-editor"],
-    "ignore": ["dist", "diagram-editor/frontend/diagram.schema.json"]
+    "include": ["*.tsx", "*.ts", "*.mjs", "*.cjs", "*.json"],
+    "ignore": ["*.schema.json"]
   },
   "organizeImports": {
     "enabled": true
