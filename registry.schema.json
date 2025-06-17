@@ -37,22 +37,40 @@
       "type": "object",
       "properties": {
         "deserialize": {
-          "type": "null"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "fork_clone": {
-          "type": "null"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "fork_result": {
-          "type": "null"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "join": {
-          "type": "null"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "serialize": {
-          "type": "null"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "split": {
-          "type": "null"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "unzip": {
           "type": [

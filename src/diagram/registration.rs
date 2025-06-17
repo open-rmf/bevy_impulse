@@ -34,7 +34,7 @@ use crate::{
     StreamPack,
 };
 
-use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
+use schemars::{generate::SchemaSettings, JsonSchema, Schema, SchemaGenerator};
 use serde::{
     de::DeserializeOwned,
     ser::{SerializeMap, SerializeStruct},
@@ -702,56 +702,40 @@ impl Serialize for MessageOperation {
     {
         let mut s = serializer.serialize_map(None)?;
         if self.deserialize_impl.is_some() {
-            s.serialize_entry("deserialize", &serde_json::Value::Null)?;
+            s.serialize_entry("deserialize", &true)?;
         }
         if self.serialize_impl.is_some() {
-            s.serialize_entry("serialize", &serde_json::Value::Null)?;
+            s.serialize_entry("serialize", &true)?;
         }
         if self.fork_clone_impl.is_some() {
-            s.serialize_entry("fork_clone", &serde_json::Value::Null)?;
+            s.serialize_entry("fork_clone", &true)?;
         }
         if let Some(unzip_impl) = &self.unzip_impl {
             s.serialize_entry("unzip", &json!({"output_types": unzip_impl.output_types()}))?;
         }
         if self.fork_result_impl.is_some() {
-            s.serialize_entry("fork_result", &serde_json::Value::Null)?;
+            s.serialize_entry("fork_result", &true)?;
         }
         if self.split_impl.is_some() {
-            s.serialize_entry("split", &serde_json::Value::Null)?;
+            s.serialize_entry("split", &true)?;
         }
         if self.join_impl.is_some() {
-            s.serialize_entry("join", &serde_json::Value::Null)?;
+            s.serialize_entry("join", &true)?;
         }
         s.end()
-    }
-}
-
-struct NullSchema;
-
-impl JsonSchema for NullSchema {
-    fn schema_name() -> Cow<'static, str> {
-        "".into()
-    }
-
-    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-        json_schema!({ "type": "null" })
-    }
-
-    fn inline_schema() -> bool {
-        true
     }
 }
 
 #[derive(JsonSchema)]
 #[allow(unused)] // only used to generate schema
 struct MessageOperationSchema {
-    deserialize: Option<NullSchema>,
-    serialize: Option<NullSchema>,
-    fork_clone: Option<NullSchema>,
+    deserialize: Option<bool>,
+    serialize: Option<bool>,
+    fork_clone: Option<bool>,
     unzip: Option<Vec<TypeInfo>>,
-    fork_result: Option<NullSchema>,
-    split: Option<NullSchema>,
-    join: Option<NullSchema>,
+    fork_result: Option<bool>,
+    split: Option<bool>,
+    join: Option<bool>,
 }
 
 impl JsonSchema for MessageOperation {
