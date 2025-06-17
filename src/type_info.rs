@@ -43,7 +43,7 @@ impl Display for TypeInfo {
 }
 
 #[cfg(feature = "diagram")]
-use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 #[cfg(feature = "diagram")]
 use serde::Serialize;
 
@@ -63,8 +63,8 @@ impl JsonSchema for TypeInfo {
         "TypeInfo".into()
     }
 
-    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-        json_schema!({ "type": "string" })
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <String as JsonSchema>::json_schema(generator)
     }
 
     fn inline_schema() -> bool {
