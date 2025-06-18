@@ -5,7 +5,7 @@ import {
   BufferAccessIcon,
   BufferIcon,
   ForkCloneIcon,
-  ForkResult,
+  ForkResultIcon,
   JoinIcon,
   ListenIcon,
   NodeIcon,
@@ -94,7 +94,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
         Unzip
       </StyledOperationButton>
       <StyledOperationButton
-        startIcon={<ForkResult />}
+        startIcon={<ForkResultIcon />}
         onClick={() => {
           onAdd?.({
             item: {

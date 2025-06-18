@@ -65,11 +65,13 @@ export {
 export { default as ForkCloneIcon } from '@mui/icons-material/ContentCopyOutlined';
 export { default as NodeIcon } from '@mui/icons-material/ExtensionOutlined';
 export { default as SplitIcon } from '@mui/icons-material/ForkLeftOutlined';
-export { default as ForkResult } from '@mui/icons-material/ForkRightOutlined';
+export { default as ForkResultIcon } from '@mui/icons-material/ForkRightOutlined';
 export { default as ListenIcon } from '@mui/icons-material/HearingOutlined';
 export {
   default as JoinIcon,
   default as SerializedJoinIcon,
 } from '@mui/icons-material/MergeOutlined';
+export { default as StreamOutIcon } from '@mui/icons-material/Notes';
+export { default as ScopeIcon } from '@mui/icons-material/Rectangle';
 export { default as SectionIcon } from '@mui/icons-material/SelectAllOutlined';
 export { default as UnzipIcon } from '@mui/icons-material/UnarchiveOutlined';

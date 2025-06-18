@@ -15,6 +15,6 @@ export type Node<
 export type BuiltinNode = Node<Record<string, never>, BuiltinNodeTypes>;
 
 export type OperationNode<K extends OperationNodeTypes = OperationNodeTypes> =
-  Node<Extract<DiagramOperation, { type: K }> & { opId: string }, K>;
+  Node<Extract<DiagramOperation, { type: K }>, K>;
 
 export type DiagramEditorNode = BuiltinNode | OperationNode;

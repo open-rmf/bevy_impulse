@@ -14,7 +14,7 @@ import SplitRemainingEdgeComp, {
 } from './split-remaining-edge';
 import type { SplitSeqEdge } from './split-seq-edge';
 import SplitSeqEdgeComp from './split-seq-edge';
-import StreamOutEdgeComp, { StreamOutEdge } from './stream-out-edge';
+import StreamOutEdgeComp, { type StreamOutEdge } from './stream-out-edge';
 import type { Edge, EdgeTypes } from './types';
 import UnzipEdgeComp, { type UnzipEdge } from './unzip-edge';
 
