@@ -1,3 +1,5 @@
+#[cfg(feature = "diagram")]
+use std::borrow::Cow;
 use std::{
     any::{type_name, Any, TypeId},
     fmt::Display,
@@ -41,6 +43,8 @@ impl Display for TypeInfo {
 }
 
 #[cfg(feature = "diagram")]
+use schemars::{JsonSchema, Schema, SchemaGenerator};
+#[cfg(feature = "diagram")]
 use serde::Serialize;
 
 #[cfg(feature = "diagram")]
@@ -50,5 +54,20 @@ impl Serialize for TypeInfo {
         S: serde::Serializer,
     {
         serializer.serialize_str(self.type_name)
+    }
+}
+
+#[cfg(feature = "diagram")]
+impl JsonSchema for TypeInfo {
+    fn schema_name() -> Cow<'static, str> {
+        "TypeInfo".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <String as JsonSchema>::json_schema(generator)
+    }
+
+    fn inline_schema() -> bool {
+        true
     }
 }

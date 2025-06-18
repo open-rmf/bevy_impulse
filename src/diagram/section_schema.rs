@@ -141,7 +141,7 @@ impl BuildDiagramOperation for SectionSchema {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, JsonSchema)]
 pub struct SectionMetadata {
     pub(super) inputs: HashMap<OperationName, SectionInput>,
     pub(super) outputs: HashMap<OperationName, SectionOutput>,
@@ -282,17 +282,17 @@ impl SectionItem for JsonBuffer {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, JsonSchema)]
 pub struct SectionInput {
     pub(super) message_type: TypeInfo,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, JsonSchema)]
 pub struct SectionOutput {
     pub(super) message_type: TypeInfo,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, JsonSchema)]
 pub struct SectionBuffer {
     pub(super) item_type: Option<TypeInfo>,
 }
