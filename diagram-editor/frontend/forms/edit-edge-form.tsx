@@ -75,7 +75,8 @@ export function edgeHasEditForm(edge: DiagramEditorEdge): boolean {
     case 'splitKey':
     case 'splitRemaining':
     case 'splitSeq':
-    case 'unzip': {
+    case 'unzip':
+    case 'streamOut': {
       return true;
     }
     default: {
