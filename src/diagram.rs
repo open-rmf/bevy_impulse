@@ -64,11 +64,7 @@ use crate::{
     SpawnWorkflowExt, SplitConnectionError, StreamPack,
 };
 
-use schemars::{
-    r#gen::SchemaGenerator,
-    schema::{InstanceType, Metadata, ObjectValidation, Schema, SchemaObject, SingleOrVec},
-    JsonSchema,
-};
+use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 
 use serde::{
     de::{Error, Visitor},
@@ -191,29 +187,21 @@ impl<'de> Deserialize<'de> for NamespacedOperation {
 }
 
 impl JsonSchema for NamespacedOperation {
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let mut schema = SchemaObject::default();
-        schema.instance_type = Some(SingleOrVec::Single(Box::new(InstanceType::Object)));
-        schema.object = Some(Box::new(ObjectValidation {
-            max_properties: Some(1),
-            min_properties: Some(1),
-            required: Default::default(),
-            properties: Default::default(),
-            pattern_properties: Default::default(),
-            property_names: Default::default(),
-            additional_properties: Some(Box::new(generator.subschema_for::<String>())),
-        }));
-        schema.metadata = Some(Box::new(Metadata {
-            title: Some("NamespacedOperation".to_string()),
-            description: Some("Refer to an operation inside of a namespace, e.g. { \"<namespace>\": \"<operation>\"".to_string()),
-            ..Default::default()
-        }));
-
-        Schema::Object(schema)
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+          "title": "NamespacedOperation",
+          "description": "Refer to an operation inside of a namespace, e.g. { \"<namespace>\": \"<operation>\"",
+          "type": "object",
+          "maxProperties": 1,
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          }
+        })
     }
 
-    fn schema_name() -> String {
-        "NamespacedOperation".to_string()
+    fn schema_name() -> Cow<'static, str> {
+        "NamespacedOperation".into()
     }
 }
 
@@ -984,7 +972,7 @@ impl BuildDiagramOperation for DiagramOperation {
 }
 
 /// Returns the schema for [`String`]
-fn schema_with_string(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+fn schema_with_string(gen: &mut SchemaGenerator) -> Schema {
     gen.subschema_for::<String>()
 }
 
