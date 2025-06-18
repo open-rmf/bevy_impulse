@@ -767,13 +767,10 @@ impl Serialize for MessageOperation {
     }
 }
 
-#[derive(Serialize, JsonSchema)]
-struct Empty;
-
 #[derive(JsonSchema)]
 #[allow(unused)] // only used to generate schema
 struct MessageOperationSchema {
-    deserialize: Option<Empty>,
+    deserialize: Option<JsEmptyObject>,
     serialize: Option<JsEmptyObject>,
     fork_clone: Option<JsEmptyObject>,
     unzip: Option<Vec<TypeInfo>>,

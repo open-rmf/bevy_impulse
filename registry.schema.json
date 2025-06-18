@@ -33,20 +33,13 @@
     "schemas"
   ],
   "$defs": {
-    "Empty": {
-      "type": "null"
-    },
     "MessageOperation": {
       "type": "object",
       "properties": {
         "deserialize": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Empty"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ]
         },
         "fork_clone": {
