@@ -116,7 +116,34 @@ export function buildEdges(
 
       return edges;
     }
-    case 'node':
+    case 'node': {
+      const edges: DiagramEditorEdge[] = [];
+      const target = nextOperationToNodeId(op.next);
+      if (target) {
+        edges.push({
+          id: `${opId}->${target}`,
+          type: 'default',
+          source: opId,
+          target,
+          data: {},
+        });
+      }
+      if (op.stream_out) {
+        for (const streamOut of Object.values(op.stream_out)) {
+          const target = nextOperationToNodeId(streamOut);
+          if (target) {
+            edges.push({
+              id: `${opId}->${target}`,
+              type: 'default',
+              source: opId,
+              target,
+              data: {},
+            });
+          }
+        }
+      }
+      return edges;
+    }
     case 'transform': {
       const target = nextOperationToNodeId(op.next);
       return target
@@ -232,23 +259,40 @@ export function buildEdges(
       return edges;
     }
     case 'section': {
-      // TODO: support section
-      // if (op.connect) {
-      //   return Object.values(op.connect).map<DiagramEditorEdge>((next) => {
-      //     const target = nextOperationToNodeId(next);
-      //     return {
-      //       id: `${opId}->${target}`,
-      //       source: opId,
-      //       target,
-      //       data: { type: EdgeType.Basic },
-      //     };
-      //   });
-      // }
+      const edges: DiagramEditorEdge[] = [];
+      if (op.connect) {
+        for (const next of Object.values(op.connect)) {
+          const target = nextOperationToNodeId(next);
+          if (target) {
+            edges.push({
+              id: `${opId}->${target}`,
+              type: 'default',
+              source: opId,
+              target,
+              data: {},
+            });
+          }
+        }
+      }
+      return edges;
+    }
+    case 'scope': {
+      const target = nextOperationToNodeId(op.next);
+      if (target) {
+        return [
+          {
+            id: `${opId}->${target}`,
+            type: 'default',
+            source: opId,
+            target,
+            data: {},
+          },
+        ];
+      }
       return [];
     }
-    case 'scope':
     case 'stream_out': {
-      throw new Error('Not implemented');
+      return [];
     }
     default: {
       exhaustiveCheck(op);

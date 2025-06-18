@@ -14,6 +14,7 @@ import SplitRemainingEdgeComp, {
 } from './split-remaining-edge';
 import type { SplitSeqEdge } from './split-seq-edge';
 import SplitSeqEdgeComp from './split-seq-edge';
+import StreamOutEdgeComp, { StreamOutEdge } from './stream-out-edge';
 import type { Edge, EdgeTypes } from './types';
 import UnzipEdgeComp, { type UnzipEdge } from './unzip-edge';
 
@@ -33,6 +34,7 @@ export type {
   SplitRemainingEdgeData,
 } from './split-remaining-edge';
 export type { SplitSeqEdge, SplitSeqEdgeData } from './split-seq-edge';
+export type { StreamOutEdge, StreamOutEdgeData } from './stream-out-edge';
 export type { EdgeTypes } from './types';
 export type { UnzipEdge, UnzipEdgeData } from './unzip-edge';
 
@@ -46,6 +48,7 @@ export const EDGE_TYPES = {
   splitRemaining: SplitRemainingEdgeComp,
   bufferKey: BufferKeyEdgeComp,
   bufferSeq: BufferSeqEdgeComp,
+  streamOut: StreamOutEdgeComp,
 } satisfies Record<EdgeTypes, unknown>;
 
 export type DefaultEdgeData = Record<string, never>;
@@ -60,4 +63,5 @@ export type DiagramEditorEdge =
   | SplitSeqEdge
   | SplitRemainingEdge
   | BufferKeyEdge
-  | BufferSeqEdge;
+  | BufferSeqEdge
+  | StreamOutEdge;

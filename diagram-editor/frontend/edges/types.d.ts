@@ -9,7 +9,8 @@ export type EdgeTypes =
   | 'splitSeq'
   | 'splitRemaining'
   | 'bufferKey'
-  | 'bufferSeq';
+  | 'bufferSeq'
+  | 'streamOut';
 
 export type Edge<
   D extends Record<string, unknown>,

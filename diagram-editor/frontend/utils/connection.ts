@@ -38,7 +38,17 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
   }
 
   switch (sourceOp.type) {
-    case 'node':
+    case 'node': {
+      if (edge.type === 'streamOut') {
+        sourceOp.stream_out = sourceOp.stream_out ? sourceOp.stream_out : {};
+        sourceOp.stream_out[edge.data.name] = nodeIdToNextOperation(
+          edge.target,
+        );
+      } else if (edge.type === 'default') {
+        sourceOp.next = nodeIdToNextOperation(edge.target);
+      }
+      break;
+    }
     case 'join':
     case 'serialized_join':
     case 'transform':
@@ -126,9 +136,15 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
     case 'buffer': {
       throw new Error('buffer operations cannot have connections');
     }
-    case 'scope':
+    case 'scope': {
+      if (edge.type !== 'default') {
+        throw new Error('scope operation must have default edge');
+      }
+      sourceOp.next = nodeIdToNextOperation(edge.target);
+      break;
+    }
     case 'stream_out': {
-      throw new Error('Not implemented');
+      break;
     }
     default: {
       exhaustiveCheck(sourceOp);

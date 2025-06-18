@@ -13,6 +13,7 @@ import {
   default as SerializedJoinIcon,
 } from '@mui/icons-material/Merge';
 import StreamOutIcon from '@mui/icons-material/Notes';
+import ScopeIcon from '@mui/icons-material/Rectangle';
 import SectionIcon from '@mui/icons-material/SelectAllOutlined';
 import UnzipIcon from '@mui/icons-material/UnarchiveOutlined';
 import type React from 'react';
@@ -47,7 +48,7 @@ export function getIcon(op: DiagramOperation): React.ComponentType {
     case 'listen':
       return ListenIcon;
     case 'scope':
-      throw new Error('Not implemented');
+      return ScopeIcon;
     case 'stream_out':
       return StreamOutIcon;
     default:
