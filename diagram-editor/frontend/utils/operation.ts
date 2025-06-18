@@ -51,6 +51,30 @@ export function isArrayBufferSelection(
   return Array.isArray(bufferSelection);
 }
 
+type StreamOutSupportedOperation = Extract<
+  DiagramOperation,
+  { type: 'node' | 'scope' }
+>;
+
+function syncStreamOut(op: StreamOutSupportedOperation, opId: string) {
+  const edges: DiagramEditorEdge[] = [];
+  if (op.stream_out) {
+    for (const streamOut of Object.values(op.stream_out)) {
+      const target = nextOperationToNodeId(streamOut);
+      if (target) {
+        edges.push({
+          id: `${opId}->${target}`,
+          type: 'default',
+          source: opId,
+          target,
+          data: {},
+        });
+      }
+    }
+  }
+  return edges;
+}
+
 export function buildEdges(
   op: DiagramOperation,
   opId: string,
@@ -128,20 +152,7 @@ export function buildEdges(
           data: {},
         });
       }
-      if (op.stream_out) {
-        for (const streamOut of Object.values(op.stream_out)) {
-          const target = nextOperationToNodeId(streamOut);
-          if (target) {
-            edges.push({
-              id: `${opId}->${target}`,
-              type: 'default',
-              source: opId,
-              target,
-              data: {},
-            });
-          }
-        }
-      }
+      edges.push(...syncStreamOut(op, opId));
       return edges;
     }
     case 'transform': {
@@ -277,19 +288,19 @@ export function buildEdges(
       return edges;
     }
     case 'scope': {
+      const edges: DiagramEditorEdge[] = [];
       const target = nextOperationToNodeId(op.next);
       if (target) {
-        return [
-          {
-            id: `${opId}->${target}`,
-            type: 'default',
-            source: opId,
-            target,
-            data: {},
-          },
-        ];
+        edges.push({
+          id: `${opId}->${target}`,
+          type: 'default',
+          source: opId,
+          target,
+          data: {},
+        });
       }
-      return [];
+      edges.push(...syncStreamOut(op, opId));
+      return edges;
     }
     case 'stream_out': {
       return [];
