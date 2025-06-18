@@ -38,7 +38,7 @@
       "properties": {
         "deserialize": {
           "type": [
-            "string",
+            "object",
             "null"
           ]
         },

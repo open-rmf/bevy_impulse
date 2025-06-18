@@ -246,6 +246,10 @@ export function buildEdges(
       // }
       return [];
     }
+    case 'scope':
+    case 'stream_out': {
+      throw new Error('Not implemented');
+    }
     default: {
       exhaustiveCheck(op);
       throw new Error('unknown op');

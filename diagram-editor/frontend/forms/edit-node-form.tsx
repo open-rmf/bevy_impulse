@@ -60,7 +60,9 @@ export function nodeHasEditForm(node: DiagramEditorNode): boolean {
     case 'section':
     case 'serialized_join':
     case 'split':
-    case 'unzip': {
+    case 'unzip':
+    case 'scope':
+    case 'stream_out': {
       return false;
     }
     default: {

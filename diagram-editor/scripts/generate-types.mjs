@@ -7,33 +7,58 @@ const schemaRaw = fs.readFileSync('../diagram.schema.json');
 const hash = crypto.createHash('sha1').update(schemaRaw).digest('hex');
 const schema = JSON.parse(schemaRaw);
 
-// normalize the schema to workaround https://github.com/bcherny/json-schema-to-typescript/issues/637.
-const toCheck = Object.values(schema.definitions);
-while (toCheck.length) {
-  const def = toCheck.pop();
-  toCheck.push(...(def.allOf || []));
-  toCheck.push(...(def.anyOf || []));
-  toCheck.push(...(def.oneOf || []));
+function fixJsonSchema(schema) {
+  const combinations = new Set(['oneOf', 'allOf', 'anyOf']);
+  const inheritance = new Set([...combinations, '$ref']);
 
-  if ('oneOf' in def && 'properties' in def) {
-    // move properties defined in the same schema level as oneOf into an allOf
-    const directProps = { properties: def.properties };
-    if ('required' in def) {
-      directProps.required = def.required;
+  for (const k of combinations) {
+    if (k in schema) {
+      for (const v of schema[k]) {
+        fixJsonSchema(v);
+      }
     }
-    def.allOf = [{ oneOf: def.oneOf }, directProps];
-    // biome-ignore lint/performance/noDelete:
-    delete def.properties;
-    // biome-ignore lint/performance/noDelete:
-    delete def.required;
-    // biome-ignore lint/performance/noDelete:
-    delete def.oneOf;
+  }
+
+  if ('properties' in schema) {
+    for (const propertyKey of Object.keys(schema.properties)) {
+      const propertyValue = schema.properties[propertyKey];
+      // having other fields and $ref causes json-schema-to-typescript to inline it, workaround
+      // by removing all other fields.
+      if (
+        typeof propertyValue === 'object' &&
+        Object.keys(propertyValue).length > 1 &&
+        '$ref' in propertyValue
+      ) {
+        schema.properties[propertyKey] = { $ref: propertyValue.$ref };
+      }
+    }
+  }
+
+  const keys = Object.keys(schema);
+  if (keys.length > 1 && keys.some((k) => inheritance.has(k))) {
+    const allOf = [];
+    const otherFields = {};
+    for (const k of keys) {
+      if (inheritance.has(k)) {
+        allOf.push({ [k]: schema[k] });
+      } else {
+        otherFields[k] = schema[k];
+      }
+      delete schema[k];
+    }
+    allOf.push(otherFields);
+    schema.allOf = allOf;
   }
 }
 
-const output = await compile(schema);
-const fd = fs.openSync('src/types/diagram.d.ts', 'w');
+// preprocess the schema to workaround https://github.com/bcherny/json-schema-to-typescript/issues/637 and https://github.com/bcherny/json-schema-to-typescript/issues/613
+for (const def of Object.values(schema.$defs)) {
+  fixJsonSchema(def);
+}
+
+const output = await compile(schema, 'Diagram', {});
+const fd = fs.openSync('frontend/types/diagram.d.ts', 'w');
 fs.writeSync(fd, `// Generated from diagram.schema.json (sha1:${hash})\n`);
 fs.writeSync(fd, output);
-execSync('biome format --write ./src/types/diagram.d.ts');
+execSync('biome format --write ./frontend/types/diagram.d.ts');
 copyFileSync('../diagram.schema.json', './frontend/diagram.schema.json');

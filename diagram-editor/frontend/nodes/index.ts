@@ -1,4 +1,5 @@
 import type { DiagramOperation } from '../types/diagram';
+import { InputNode } from './input-node';
 import { InputOutputNode } from './input-output-node';
 import { StartNode } from './start-node';
 import { TerminateNode } from './terminate-node';
@@ -24,6 +25,8 @@ export const NODE_TYPES = {
   buffer: InputOutputNode,
   buffer_access: InputOutputNode,
   listen: InputOutputNode,
+  scope: InputOutputNode,
+  stream_out: InputNode,
 } satisfies Record<NodeTypes, unknown>;
 
 export function isOperationNode(

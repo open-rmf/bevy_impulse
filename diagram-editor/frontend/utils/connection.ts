@@ -126,6 +126,10 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
     case 'buffer': {
       throw new Error('buffer operations cannot have connections');
     }
+    case 'scope':
+    case 'stream_out': {
+      throw new Error('Not implemented');
+    }
     default: {
       exhaustiveCheck(sourceOp);
     }

@@ -2,14 +2,9 @@ import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
 
-import type { DiagramEditorNode, OperationNode } from '.';
+import type { DiagramEditorNode } from '.';
 import { getIcon } from './icons';
-
-function isOperationData(
-  data: DiagramEditorNode['data'],
-): data is OperationNode['data'] {
-  return 'type' in data;
-}
+import { isOperationData } from './utils';
 
 export function InputOutputNode({
   data,

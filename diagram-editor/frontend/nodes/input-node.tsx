@@ -6,30 +6,29 @@ import type { DiagramEditorNode } from '.';
 import { getIcon } from './icons';
 import { isOperationData } from './utils';
 
-export function OutputNode({
+export function InputNode({
   data,
-  id,
   isConnectable,
   selected,
-  sourcePosition = Position.Bottom,
+  targetPosition = Position.Top,
 }: NodeProps<DiagramEditorNode>) {
   const IconComponent = isOperationData(data) ? getIcon(data) : null;
 
   return (
     <Paper sx={{ minWidth: 100 }}>
+      <Handle
+        type="target"
+        position={targetPosition}
+        isConnectable={isConnectable}
+      />
       <Button
         fullWidth
         startIcon={IconComponent ? <IconComponent /> : undefined}
         variant={selected ? 'contained' : 'outlined'}
         sx={{ textTransform: 'none' }}
       >
-        {id}
+        {data.opId}
       </Button>
-      <Handle
-        type="source"
-        position={sourcePosition}
-        isConnectable={isConnectable}
-      />
     </Paper>
   );
 }
