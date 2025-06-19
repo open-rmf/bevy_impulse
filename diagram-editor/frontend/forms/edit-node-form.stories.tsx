@@ -19,10 +19,9 @@ export const Node: Story = {
       type: 'node',
       position: { x: 0, y: 0 },
       data: {
-        opId: 'opId',
         type: 'node',
         builder: 'builder',
-        next: '',
+        next: { builtin: 'dispose' },
       },
     },
   },
@@ -46,9 +45,34 @@ export const Buffer: Story = {
       type: 'buffer',
       position: { x: 0, y: 0 },
       data: {
-        opId: 'opId',
         type: 'buffer',
         serialize: false,
+      },
+    },
+  },
+  render: function Render(args) {
+    const [, updateArgs] = useArgs();
+    return (
+      <EditNodeForm
+        {...args}
+        onChange={(change) => {
+          updateArgs({ node: change.item });
+        }}
+      />
+    );
+  },
+};
+
+export const Transform: Story = {
+  args: {
+    node: {
+      id: 'transform-1',
+      type: 'transform',
+      position: { x: 0, y: 0 },
+      data: {
+        type: 'transform',
+        cel: '',
+        next: { builtin: 'dispose' },
       },
     },
   },
