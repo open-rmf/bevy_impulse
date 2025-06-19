@@ -7,6 +7,7 @@ import type {
   DiagramOperation,
   EdgeTypes,
   NodeTypes,
+  StreamOutEdge,
 } from '../types';
 import { exhaustiveCheck } from './exhaustive-check';
 import {
@@ -15,6 +16,14 @@ import {
   nextOperationToNodeId,
   nodeIdToNextOperation,
 } from './operation';
+
+function syncStreamOut(
+  sourceOp: Extract<DiagramOperation, { type: 'node' | 'scope' }>,
+  edge: StreamOutEdge,
+) {
+  sourceOp.stream_out = sourceOp.stream_out ? sourceOp.stream_out : {};
+  sourceOp.stream_out[edge.data.name] = nodeIdToNextOperation(edge.target);
+}
 
 /**
  * Adds a connection to a node data.
@@ -43,10 +52,7 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
   switch (sourceOp.type) {
     case 'node': {
       if (edge.type === 'streamOut') {
-        sourceOp.stream_out = sourceOp.stream_out ? sourceOp.stream_out : {};
-        sourceOp.stream_out[edge.data.name] = nodeIdToNextOperation(
-          edge.target,
-        );
+        syncStreamOut(sourceOp, edge);
       } else if (edge.type === 'default') {
         sourceOp.next = nodeIdToNextOperation(edge.target);
       }
@@ -140,8 +146,10 @@ export function syncEdge(diagram: Diagram, edge: DiagramEditorEdge): void {
       throw new Error('buffer operations cannot have connections');
     }
     case 'scope': {
-      if (edge.type !== 'default') {
-        throw new Error('scope operation must have default edge');
+      if (edge.type === 'streamOut') {
+        syncStreamOut(sourceOp, edge);
+      } else if (edge.type !== 'default') {
+        throw new Error('scope operation must have default or streamOut edge');
       }
       sourceOp.next = nodeIdToNextOperation(edge.target);
       break;
