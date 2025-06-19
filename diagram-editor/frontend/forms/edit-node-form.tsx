@@ -1,73 +1,36 @@
-import type { NodeReplaceChange } from '@xyflow/react';
+import type { NodeRemoveChange, NodeReplaceChange } from '@xyflow/react';
 
-import type { DiagramEditorNode, OperationNode } from '..';
-import { exhaustiveCheck } from '..';
+import type { DiagramEditorNode } from '..';
 import BufferForm from './buffer-form';
+import EditOperationForm, {
+  type EditOperationFormProps,
+} from './edit-operation-form';
 import NodeForm from './node-form';
 import TransformForm from './transform-form';
 
 export interface EditNodeFormProps {
   node: DiagramEditorNode;
   onChange?: (change: NodeReplaceChange<DiagramEditorNode>) => void;
+  onDelete?: (change: NodeRemoveChange) => void;
 }
 
-function EditNodeForm({ node, onChange }: EditNodeFormProps) {
-  switch (node.data.type) {
+function EditNodeForm(props: EditOperationFormProps) {
+  switch (props.node.data.type) {
     case 'node': {
-      return (
-        <NodeForm
-          node={node as OperationNode<'node'>}
-          onChange={(change) => onChange?.(change)}
-        />
-      );
+      return <NodeForm {...(props as EditOperationFormProps<'node'>)} />;
     }
     case 'buffer': {
-      return (
-        <BufferForm
-          node={node as OperationNode<'buffer'>}
-          onChange={(change) => onChange?.(change)}
-        />
-      );
+      return <BufferForm {...(props as EditOperationFormProps<'buffer'>)} />;
     }
     case 'transform': {
       return (
-        <TransformForm
-          node={node as OperationNode<'transform'>}
-          onChange={(change) => onChange?.(change)}
-        />
+        <TransformForm {...(props as EditOperationFormProps<'transform'>)} />
       );
     }
     default: {
-      return null;
+      return <EditOperationForm {...props} />;
     }
   }
 }
 
 export default EditNodeForm;
-
-export function nodeHasEditForm(node: DiagramEditorNode): boolean {
-  switch (node.data.type) {
-    case 'node':
-    case 'buffer':
-    case 'transform': {
-      return true;
-    }
-    case 'buffer_access':
-    case 'fork_clone':
-    case 'fork_result':
-    case 'join':
-    case 'listen':
-    case 'section':
-    case 'serialized_join':
-    case 'split':
-    case 'unzip':
-    case 'scope':
-    case 'stream_out': {
-      return false;
-    }
-    default: {
-      exhaustiveCheck(node.data);
-      throw new Error('unknown node');
-    }
-  }
-}

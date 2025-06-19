@@ -1,41 +1,28 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  FormControlLabel,
-  Switch,
-} from '@mui/material';
-import type { NodeReplaceChange } from '@xyflow/react';
-import type { OperationNode } from '..';
+import { FormControlLabel, Switch } from '@mui/material';
+import EditOperationForm, {
+  type EditOperationFormProps,
+} from './edit-operation-form';
 
-export interface BufferFormProps {
-  node: OperationNode<'buffer'>;
-  onChange: (change: NodeReplaceChange<OperationNode<'buffer'>>) => void;
-}
-
-export function BufferForm({ node, onChange }: BufferFormProps) {
+export function BufferForm(props: EditOperationFormProps<'buffer'>) {
   return (
-    <Card>
-      <CardHeader title="Edit Operation" />
-      <CardContent>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={node.data.serialize ?? false}
-              onChange={(_, checked) => {
-                node.data.serialize = checked;
-                onChange?.({
-                  type: 'replace',
-                  id: node.id,
-                  item: { ...node },
-                });
-              }}
-            />
-          }
-          label="Serialize"
-        />
-      </CardContent>
-    </Card>
+    <EditOperationForm {...props}>
+      <FormControlLabel
+        control={
+          <Switch
+            checked={props.node.data.serialize ?? false}
+            onChange={(_, checked) => {
+              props.node.data.serialize = checked;
+              props.onChange?.({
+                type: 'replace',
+                id: props.node.id,
+                item: { ...props.node },
+              });
+            }}
+          />
+        }
+        label="Serialize"
+      />
+    </EditOperationForm>
   );
 }
 

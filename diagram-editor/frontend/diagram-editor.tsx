@@ -26,14 +26,13 @@ import React, { type JSX, useEffect } from 'react';
 import AddOperation from './add-operation';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
-import {
-  EditEdgeForm,
-  EditNodeForm,
-  edgeHasEditForm,
-  nodeHasEditForm,
-} from './forms';
-import { NODE_TYPES, START_ID } from './nodes';
-import type { DiagramEditorEdge, DiagramEditorNode } from './types';
+import { EditEdgeForm, EditNodeForm, edgeHasEditForm } from './forms';
+import { NODE_TYPES, START_ID, isOperationNode } from './nodes';
+import type {
+  DiagramEditorEdge,
+  DiagramEditorNode,
+  OperationNode,
+} from './types';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
 
@@ -149,8 +148,14 @@ const DiagramEditor = () => {
         onNodesChange={(changes) =>
           setNodes((prev) => applyNodeChanges(changes, prev))
         }
+        onNodesDelete={() => {
+          closeAllPopovers();
+        }}
         onEdgesChange={(changes) => {
           setEdges((prev) => applyEdgeChanges(changes, prev));
+        }}
+        onEdgesDelete={() => {
+          closeAllPopovers();
         }}
         onConnect={(conn) => {
           setEdges((prev) => addEdge(conn, prev));
@@ -161,21 +166,28 @@ const DiagramEditor = () => {
         onNodeClick={(ev, node) => {
           ev.stopPropagation();
           closeAllPopovers();
-          if (nodeHasEditForm(node)) {
-            setRenderEditForm(
-              <EditNodeForm
-                node={node}
-                onChange={(change) => {
-                  setNodes((prev) => applyNodeChanges([change], prev));
-                }}
-              />,
-            );
-            setEditOpFormPopoverProps({
-              open: true,
-              anchorReference: 'anchorEl',
-              anchorEl: ev.currentTarget,
-            });
+
+          if (!isOperationNode(node)) {
+            return;
           }
+
+          setRenderEditForm(
+            <EditNodeForm
+              node={node}
+              onChange={(change) => {
+                setNodes((prev) => applyNodeChanges([change], prev));
+              }}
+              onDelete={(change) => {
+                setNodes((prev) => applyNodeChanges([change], prev));
+                closeAllPopovers();
+              }}
+            />,
+          );
+          setEditOpFormPopoverProps({
+            open: true,
+            anchorReference: 'anchorEl',
+            anchorEl: ev.currentTarget,
+          });
         }}
         onEdgeClick={(ev, edge) => {
           ev.stopPropagation();

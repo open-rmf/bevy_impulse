@@ -1,6 +1,6 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
-import { v4 as uuidv4 } from 'uuid';
 import type { NodeAddChange } from '@xyflow/react';
+import { v4 as uuidv4 } from 'uuid';
 import {
   BufferAccessIcon,
   BufferIcon,

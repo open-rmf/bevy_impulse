@@ -1,33 +1,38 @@
-import { Card, CardContent, CardHeader, TextField } from '@mui/material';
-import type { NodeReplaceChange } from '@xyflow/react';
-import type { OperationNode } from '..';
+import { TextField } from '@mui/material';
+import EditOperationForm, {
+  type EditOperationFormProps,
+} from './edit-operation-form';
 
-export interface TransformFormProps {
-  node: OperationNode<'transform'>;
-  onChange?: (change: NodeReplaceChange<OperationNode<'transform'>>) => void;
-}
-
-function TransformForm({ node, onChange }: TransformFormProps) {
+function TransformForm(props: EditOperationFormProps<'transform'>) {
   return (
-    <Card>
-      <CardHeader title="Edit Operation" />
-      <CardContent>
-        <TextField
-          label="CEL"
-          multiline
-          fullWidth
-          defaultValue={node.data.cel}
-          onChange={(ev) => {
-            node.data.cel = ev.target.value;
-            onChange?.({
-              type: 'replace',
-              id: node.id,
-              item: { ...node },
-            });
-          }}
-        />
-      </CardContent>
-    </Card>
+    <EditOperationForm {...props}>
+      <TextField
+        required
+        label="id"
+        defaultValue={props.node.id}
+        onChange={(ev) => {
+          props.onChange?.({
+            type: 'replace',
+            id: props.node.id,
+            item: { ...props.node, id: ev.target.value },
+          });
+        }}
+      />
+      <TextField
+        label="CEL"
+        multiline
+        fullWidth
+        defaultValue={props.node.data.cel}
+        onChange={(ev) => {
+          props.node.data.cel = ev.target.value;
+          props.onChange?.({
+            type: 'replace',
+            id: props.node.id,
+            item: { ...props.node },
+          });
+        }}
+      />
+    </EditOperationForm>
   );
 }
 
