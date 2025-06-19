@@ -1,11 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
-import type { Edge } from './types';
-
-export type StreamOutEdgeData = {
-  name: string;
-};
-
-export type StreamOutEdge = Edge<StreamOutEdgeData, 'streamOut'>;
+import type { StreamOutEdge } from '..';
 
 export type StreamOutEdgeProps = Exclude<EdgeProps<StreamOutEdge>, 'label'>;
 

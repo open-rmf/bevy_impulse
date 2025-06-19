@@ -1,10 +1,8 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
-import diagramSchema from '../diagram.schema.json';
-import type { DiagramEditorEdge } from '../edges';
-import { type DiagramEditorNode, START_ID, TERMINATE_ID } from '../nodes';
-import type { Diagram } from '../types/diagram';
+import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '..';
+import { START_ID, TERMINATE_ID, diagramSchema } from '..';
 import { buildEdges, nextOperationToNodeId } from './operation';
 
 export interface Graph {

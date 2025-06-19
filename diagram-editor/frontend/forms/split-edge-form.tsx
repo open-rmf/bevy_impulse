@@ -11,7 +11,7 @@ import {
   TextField,
 } from '@mui/material';
 import type { EdgeReplaceChange } from '@xyflow/react';
-import type { SplitKeyEdge, SplitRemainingEdge, SplitSeqEdge } from '../edges';
+import type { SplitKeyEdge, SplitRemainingEdge, SplitSeqEdge } from '..';
 
 export type SplitEdge = SplitKeyEdge | SplitSeqEdge | SplitRemainingEdge;
 

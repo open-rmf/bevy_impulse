@@ -24,7 +24,7 @@ import {
 import { inflateSync, strFromU8 } from 'fflate';
 import React, { type JSX, useEffect } from 'react';
 import AddOperation from './add-operation';
-import { type DiagramEditorEdge, EDGE_TYPES } from './edges';
+import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import {
   EditEdgeForm,
@@ -32,7 +32,8 @@ import {
   edgeHasEditForm,
   nodeHasEditForm,
 } from './forms';
-import { type DiagramEditorNode, NODE_TYPES, START_ID } from './nodes';
+import { NODE_TYPES, START_ID } from './nodes';
+import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
 

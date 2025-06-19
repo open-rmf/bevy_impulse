@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, TextField } from '@mui/material';
 import type { NodeReplaceChange } from '@xyflow/react';
-import type { OperationNode } from '../nodes';
+import type { OperationNode } from '..';
 
 export interface TransformFormProps {
   node: OperationNode<'transform'>;

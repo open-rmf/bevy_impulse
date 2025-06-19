@@ -1,10 +1,10 @@
-import type { DiagramEditorEdge } from '../edges';
-import { START_ID, TERMINATE_ID } from '../nodes';
 import type {
   BufferSelection,
   Diagram,
+  DiagramEditorEdge,
   DiagramOperation,
-} from '../types/diagram';
+} from '..';
+import { START_ID, TERMINATE_ID } from '..';
 import { exhaustiveCheck } from './exhaustive-check';
 import {
   isArrayBufferSelection,

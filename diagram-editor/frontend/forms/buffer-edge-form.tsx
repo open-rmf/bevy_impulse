@@ -11,7 +11,7 @@ import {
   TextField,
 } from '@mui/material';
 import type { EdgeReplaceChange } from '@xyflow/react';
-import type { BufferKeyEdge, BufferSeqEdge } from '../edges';
+import type { BufferKeyEdge, BufferSeqEdge } from '..';
 
 export type BufferEdge = BufferKeyEdge | BufferSeqEdge;
 

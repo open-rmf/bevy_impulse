@@ -1,5 +1,5 @@
 import { applyNodeChanges } from '@xyflow/react';
-import { START_ID } from '../nodes';
+import { START_ID } from '..';
 import { autoLayout } from './auto-layout';
 import { loadDiagramJson } from './load-diagram';
 import testDiagram from './test-data/test-diagram.json';

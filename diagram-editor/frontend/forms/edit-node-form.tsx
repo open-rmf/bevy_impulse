@@ -1,7 +1,7 @@
 import type { NodeReplaceChange } from '@xyflow/react';
 
-import type { DiagramEditorNode, OperationNode } from '../nodes';
-import { exhaustiveCheck } from '../utils/exhaustive-check';
+import type { DiagramEditorNode, OperationNode } from '..';
+import { exhaustiveCheck } from '..';
 import BufferForm from './buffer-form';
 import NodeForm from './node-form';
 import TransformForm from './transform-form';

@@ -1,6 +1,5 @@
-import type { DiagramEditorEdge } from '../edges';
-import { TERMINATE_ID } from '../nodes';
-import type { Diagram, DiagramOperation } from '../types/diagram';
+import type { Diagram, DiagramEditorEdge, DiagramOperation } from '..';
+import { TERMINATE_ID } from '..';
 import { syncEdge } from './connection';
 
 describe('syncEdge', () => {

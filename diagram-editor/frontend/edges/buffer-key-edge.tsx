@@ -1,11 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
-import type { Edge } from './types';
-
-export type BufferKeyEdgeData = {
-  key: string;
-};
-
-export type BufferKeyEdge = Edge<BufferKeyEdgeData, 'bufferKey'>;
+import type { BufferKeyEdge } from '..';
 
 export type BufferKeyEdgeProps = Exclude<EdgeProps<BufferKeyEdge>, 'label'>;
 

@@ -1,7 +1,6 @@
 import type { NodePositionChange } from '@xyflow/react';
 
-import type { DiagramEditorEdge } from '../edges';
-import type { DiagramEditorNode } from '../nodes';
+import type { DiagramEditorEdge, DiagramEditorNode } from '..';
 
 export interface AutoLayoutOptions {
   rootPosition: { x: number; y: number };

@@ -1,5 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '.';
+import type { DiagramEditorNode } from '..';
 
 import { Button, Paper } from '@mui/material';
 import { Handle, Position } from '@xyflow/react';

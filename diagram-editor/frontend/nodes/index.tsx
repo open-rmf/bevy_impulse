@@ -1,4 +1,9 @@
-import type { DiagramOperation } from '../types/diagram';
+import type {
+  DiagramEditorNode,
+  DiagramOperation,
+  NodeTypes,
+  OperationNode,
+} from '../types';
 import BufferAccessNode from './buffer-access-node';
 import BufferNode from './buffer-node';
 import ForkCloneNode from './fork-clone-node';
@@ -14,10 +19,7 @@ import { StartNode } from './start-node';
 import StreamOutNode from './stream-out-node';
 import { TerminateNode } from './terminate-node';
 import TransformNode from './transform-node';
-import type { DiagramEditorNode, NodeTypes, OperationNode } from './types';
 import UnzipNode from './unzip-node';
-
-export type * from './types';
 
 export const START_ID = 'builtin:start';
 export const TERMINATE_ID = 'builtin:terminate';

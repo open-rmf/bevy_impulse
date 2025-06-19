@@ -1,6 +1,5 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
 import type { NodeAddChange } from '@xyflow/react';
-import type { DiagramEditorNode } from './nodes';
 import {
   BufferAccessIcon,
   BufferIcon,
@@ -14,6 +13,7 @@ import {
   TransformIcon,
   UnzipIcon,
 } from './nodes/icons';
+import type { DiagramEditorNode } from './types';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',

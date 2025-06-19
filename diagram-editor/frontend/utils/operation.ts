@@ -1,10 +1,10 @@
-import type { DiagramEditorEdge } from '../edges';
 import type {
   BufferSelection,
   BuiltinTarget,
+  DiagramEditorEdge,
   DiagramOperation,
   NextOperation,
-} from '../types/diagram';
+} from '..';
 import { exhaustiveCheck } from './exhaustive-check';
 
 /**

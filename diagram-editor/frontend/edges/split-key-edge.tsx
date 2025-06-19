@@ -1,11 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
-import type { Edge } from './types';
-
-export type SplitKeyEdgeData = {
-  key: string;
-};
-
-export type SplitKeyEdge = Edge<SplitKeyEdgeData, 'splitKey'>;
+import type { SplitKeyEdge } from '..';
 
 export type SplitKeyEdgeProps = Exclude<EdgeProps<SplitKeyEdge>, 'label'>;
 

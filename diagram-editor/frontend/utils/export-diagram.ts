@@ -1,10 +1,5 @@
-import type { DiagramEditorEdge } from '../edges';
-import {
-  type DiagramEditorNode,
-  extractOperation,
-  isOperationNode,
-} from '../nodes';
-import type { Diagram } from '../types/diagram';
+import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '..';
+import { extractOperation, isOperationNode } from '..';
 import { syncEdge } from './connection';
 
 export function exportDiagram(
