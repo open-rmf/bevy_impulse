@@ -1,4 +1,5 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
+import { v4 as uuidv4 } from 'uuid';
 import type { NodeAddChange } from '@xyflow/react';
 import {
   BufferAccessIcon,
@@ -36,11 +37,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'node',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'node',
                 builder: '',
                 next: { builtin: 'dispose' },
@@ -58,11 +58,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'fork_clone',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'fork_clone',
                 next: [],
               },
@@ -78,11 +77,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'unzip',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'unzip',
                 next: [],
               },
@@ -98,11 +96,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'fork_result',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'fork_result',
                 err: { builtin: 'dispose' },
                 ok: { builtin: 'dispose' },
@@ -119,11 +116,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'split',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'split',
               },
             },
@@ -138,11 +134,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'join',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'join',
                 buffers: [],
                 next: { builtin: 'dispose' },
@@ -159,11 +154,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'serialized_join',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'serialized_join',
                 buffers: [],
                 next: { builtin: 'dispose' },
@@ -180,11 +174,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'transform',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'transform',
                 cel: '',
                 next: { builtin: 'dispose' },
@@ -201,11 +194,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'buffer',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'buffer',
               },
             },
@@ -220,11 +212,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'buffer_access',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'buffer_access',
                 buffers: [],
                 next: { builtin: 'dispose' },
@@ -241,11 +232,10 @@ function AddOperation({ onAdd }: AddOperationProps) {
         onClick={() => {
           onAdd?.({
             item: {
-              id: 'new_operation',
+              id: uuidv4(),
               type: 'listen',
               position: { x: 0, y: 0 },
               data: {
-                opId: 'new_operation',
                 type: 'listen',
                 buffers: [],
                 next: { builtin: 'dispose' },

@@ -287,12 +287,6 @@ const DiagramEditor = () => {
         <AddOperation
           onAdd={(change) => {
             const newNode = change.item;
-            let i = 1;
-            let newId = newNode.id;
-            while (nodes.findIndex((n) => n.id === newId) >= 0) {
-              newId = `${newNode.id}_${i++}`;
-            }
-            newNode.id = newId;
             const newPos = reactFlowInstance.current?.screenToFlowPosition({
               x: addOpAnchorPos.left,
               y: addOpAnchorPos.top,
