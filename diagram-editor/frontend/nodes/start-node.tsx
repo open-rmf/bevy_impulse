@@ -4,7 +4,7 @@ import { Handle, Position } from '@xyflow/react';
 
 import type { DiagramEditorNode } from '..';
 
-export function StartNode({
+function StartNode({
   isConnectable,
   sourcePosition = Position.Bottom,
 }: NodeProps<DiagramEditorNode>) {
@@ -21,3 +21,5 @@ export function StartNode({
     </Paper>
   );
 }
+
+export default StartNode;

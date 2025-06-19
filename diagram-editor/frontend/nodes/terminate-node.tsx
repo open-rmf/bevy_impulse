@@ -4,7 +4,7 @@ import type { DiagramEditorNode } from '..';
 import { Button, Paper } from '@mui/material';
 import { Handle, Position } from '@xyflow/react';
 
-export function TerminateNode({
+function TerminateNode({
   isConnectable,
   targetPosition = Position.Top,
 }: NodeProps<DiagramEditorNode>) {
@@ -21,3 +21,5 @@ export function TerminateNode({
     </Paper>
   );
 }
+
+export default TerminateNode;

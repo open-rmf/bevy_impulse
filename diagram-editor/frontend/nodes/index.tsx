@@ -15,9 +15,9 @@ import ScopeNode from './scope-node';
 import SectionNode from './section-node';
 import SerializedJoinNode from './serialized-join-node';
 import SplitNode from './split-node';
-import { StartNode } from './start-node';
+import StartNode from './start-node';
 import StreamOutNode from './stream-out-node';
-import { TerminateNode } from './terminate-node';
+import TerminateNode from './terminate-node';
 import TransformNode from './transform-node';
 import UnzipNode from './unzip-node';
 
