@@ -10,7 +10,7 @@ import type {
   SplitRemainingEdge,
   SplitSeqEdge,
   UnzipEdge,
-} from '..';
+} from '../types';
 import EditEdgeForm from './edit-edge-form';
 
 const meta: Meta<typeof EditEdgeForm> = {

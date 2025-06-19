@@ -27,12 +27,9 @@ import AddOperation from './add-operation';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { EditEdgeForm, EditNodeForm, edgeHasEditForm } from './forms';
-import { NODE_TYPES, START_ID, isOperationNode } from './nodes';
-import type {
-  DiagramEditorEdge,
-  DiagramEditorNode,
-  OperationNode,
-} from './types';
+import { NODE_TYPES, START_ID } from './nodes';
+import type { DiagramEditorEdge, DiagramEditorNode } from './types';
+import { isOperationNode } from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
 

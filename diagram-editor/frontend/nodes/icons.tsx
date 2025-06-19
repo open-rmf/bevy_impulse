@@ -18,8 +18,8 @@ import SectionIcon from '@mui/icons-material/SelectAllOutlined';
 import UnzipIcon from '@mui/icons-material/UnarchiveOutlined';
 import type React from 'react';
 
-import type { DiagramOperation } from '..';
-import { exhaustiveCheck } from '..';
+import type { DiagramOperation } from '../types';
+import { exhaustiveCheck } from '../utils';
 
 export function getIcon(op: DiagramOperation): React.ComponentType {
   switch (op.type) {

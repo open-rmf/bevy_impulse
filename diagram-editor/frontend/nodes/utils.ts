@@ -1,4 +1,4 @@
-import type { DiagramEditorNode, OperationNode } from '..';
+import type { DiagramEditorNode, OperationNode } from '../types';
 
 export function isOperationData(
   data: DiagramEditorNode['data'],

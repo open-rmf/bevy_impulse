@@ -1,5 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
-import type { UnzipEdge } from '..';
+import type { UnzipEdge } from '../types';
 
 export type UnzipEdgeProps = Exclude<EdgeProps<UnzipEdge>, 'label'>;
 

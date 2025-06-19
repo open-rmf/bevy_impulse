@@ -2,9 +2,11 @@ import type {
   BufferSelection,
   BuiltinTarget,
   DiagramEditorEdge,
+  DiagramEditorNode,
   DiagramOperation,
   NextOperation,
-} from '..';
+  OperationNode,
+} from '../types';
 import { exhaustiveCheck } from './exhaustive-check';
 
 /**
@@ -316,4 +318,17 @@ export function isBuiltin(
   next: NextOperation,
 ): next is { builtin: BuiltinTarget } {
   return typeof next === 'object' && 'builtin' in next;
+}
+
+export function isOperationNode(
+  node: DiagramEditorNode,
+): node is OperationNode {
+  return !node.id.startsWith('builtin:');
+}
+
+export function extractOperation(node: OperationNode): DiagramOperation {
+  const op: DiagramOperation = { ...node.data };
+  const opIdKey = 'opId';
+  delete op[opIdKey];
+  return op;
 }

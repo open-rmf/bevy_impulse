@@ -2,7 +2,7 @@ import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
 
-import type { DiagramEditorNode } from '..';
+import type { DiagramEditorNode } from '../types';
 
 function StartNode({
   isConnectable,

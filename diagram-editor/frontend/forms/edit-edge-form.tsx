@@ -1,8 +1,12 @@
 import type { EdgeReplaceChange } from '@xyflow/react';
 
-import type { ForkResultErrEdge, ForkResultOkEdge, UnzipEdge } from '..';
-import type { DiagramEditorEdge } from '..';
-import { exhaustiveCheck } from '..';
+import type {
+  DiagramEditorEdge,
+  ForkResultErrEdge,
+  ForkResultOkEdge,
+  UnzipEdge,
+} from '../types';
+import { exhaustiveCheck } from '../utils';
 import BufferEdgeForm, { type BufferEdge } from './buffer-edge-form';
 import ForkResultEdgeForm from './fork-result-edge-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';

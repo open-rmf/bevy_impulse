@@ -1,5 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '..';
+import type { DiagramEditorNode } from '../types';
 import BaseNode from './base-node';
 import { StreamOutIcon } from './icons';
 

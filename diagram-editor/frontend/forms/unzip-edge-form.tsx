@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, TextField } from '@mui/material';
 import type { EdgeReplaceChange } from '@xyflow/react';
-import type { UnzipEdge } from '..';
+import type { UnzipEdge } from '../types';
 
 export interface UnzipEdgeFormProps {
   edge: UnzipEdge;

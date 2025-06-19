@@ -1,9 +1,9 @@
 import addFormats from 'ajv-formats';
 import Ajv from 'ajv/dist/2020';
 
-import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '..';
-import { START_ID, TERMINATE_ID } from '..';
 import diagramSchema from '../diagram.schema.json';
+import { START_ID, TERMINATE_ID } from '../nodes';
+import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
 import { buildEdges, nextOperationToNodeId } from './operation';
 
 export interface Graph {

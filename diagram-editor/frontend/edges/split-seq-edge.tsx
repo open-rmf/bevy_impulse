@@ -1,5 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
-import type { SplitSeqEdge } from '..';
+import type { SplitSeqEdge } from '../types';
 
 export type SplitSeqEdgeProps = Exclude<EdgeProps<SplitSeqEdge>, 'label'>;
 

@@ -1,9 +1,4 @@
-import type {
-  DiagramEditorNode,
-  DiagramOperation,
-  NodeTypes,
-  OperationNode,
-} from '../types';
+import type { NodeTypes } from '../types';
 import BufferAccessNode from './buffer-access-node';
 import BufferNode from './buffer-node';
 import ForkCloneNode from './fork-clone-node';
@@ -42,16 +37,3 @@ export const NODE_TYPES = {
   scope: ScopeNode,
   stream_out: StreamOutNode,
 } satisfies Record<NodeTypes, unknown>;
-
-export function isOperationNode(
-  node: DiagramEditorNode,
-): node is OperationNode {
-  return !node.id.startsWith('builtin:');
-}
-
-export function extractOperation(node: OperationNode): DiagramOperation {
-  const op: DiagramOperation = { ...node.data };
-  const opIdKey = 'opId';
-  delete op[opIdKey];
-  return op;
-}

@@ -8,7 +8,7 @@ import {
   Select,
 } from '@mui/material';
 import type { EdgeReplaceChange } from '@xyflow/react';
-import type { ForkResultErrEdge, ForkResultOkEdge } from '..';
+import type { ForkResultErrEdge, ForkResultOkEdge } from '../types';
 
 export type ForkResultEdge = ForkResultOkEdge | ForkResultErrEdge;
 

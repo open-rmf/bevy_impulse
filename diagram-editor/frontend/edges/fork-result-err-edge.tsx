@@ -1,5 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
-import type { ForkResultErrEdge } from '..';
+import type { ForkResultErrEdge } from '../types';
 
 export type ForkResultErrEdgeProps = Exclude<
   EdgeProps<ForkResultErrEdge>,

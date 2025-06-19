@@ -1,5 +1,5 @@
 import { StepEdge } from '@xyflow/react';
-import type { EdgeTypes } from '..';
+import type { EdgeTypes } from '../types';
 import BufferKeyEdgeComp from './buffer-key-edge';
 import BufferSeqEdgeComp from './buffer-seq-edge';
 import ForkResultErrEdgeComp from './fork-result-err-edge';
