@@ -12,7 +12,6 @@ if (rootEl) {
   );
 }
 
-export { default as diagramSchema } from './diagram.schema.json';
 export * from './nodes';
 export * from './types';
 export * from './utils';
