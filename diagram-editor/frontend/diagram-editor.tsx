@@ -203,6 +203,10 @@ const DiagramEditor = () => {
               onChange={(change) => {
                 setEdges((prev) => applyEdgeChanges([change], prev));
               }}
+              onDelete={(change) => {
+                setEdges((prev) => applyEdgeChanges([change], prev));
+                closeAllPopovers();
+              }}
             />,
           );
           setEditOpFormPopoverProps({
