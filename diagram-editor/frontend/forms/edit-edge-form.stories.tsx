@@ -1,16 +1,6 @@
 import { useArgs } from '@storybook/preview-api';
 import type { Meta, StoryObj } from 'storybook-react-rsbuild';
 
-import type {
-  BufferKeyEdge,
-  BufferSeqEdge,
-  ForkResultErrEdge,
-  ForkResultOkEdge,
-  SplitKeyEdge,
-  SplitRemainingEdge,
-  SplitSeqEdge,
-  UnzipEdge,
-} from '../types';
 import EditEdgeForm from './edit-edge-form';
 
 const meta: Meta<typeof EditEdgeForm> = {
@@ -34,7 +24,7 @@ const render: Story['render'] = (args) => {
   );
 };
 
-export const BufferKey: Story = {
+export const BufferEdge: Story = {
   args: {
     edge: {
       id: 'edge-1',
@@ -44,46 +34,22 @@ export const BufferKey: Story = {
       data: {
         key: 'testKey',
       },
-    } as BufferKeyEdge,
+    },
+    allowedEdgeTypes: ['bufferKey', 'bufferSeq'],
   },
   render,
 };
 
-export const BufferSeq: Story = {
-  args: {
-    edge: {
-      id: 'edge-1',
-      source: 'a',
-      target: 'b',
-      type: 'bufferSeq',
-      data: {
-        seq: 1,
-      },
-    } as BufferSeqEdge,
-  },
-  render,
-};
-
-export const ForkResultOk: Story = {
+export const ForkResult: Story = {
   args: {
     edge: {
       id: 'edge-1',
       source: 'a',
       target: 'b',
       type: 'forkResultOk',
-    } as ForkResultOkEdge,
-  },
-  render,
-};
-
-export const ForkResultErr: Story = {
-  args: {
-    edge: {
-      id: 'edge-1',
-      source: 'a',
-      target: 'b',
-      type: 'forkResultErr',
-    } as ForkResultErrEdge,
+      data: {},
+    },
+    allowedEdgeTypes: ['forkResultOk', 'forkResultErr'],
   },
   render,
 };
@@ -98,35 +64,8 @@ export const SplitKey: Story = {
       data: {
         key: 'splitTestKey',
       },
-    } as SplitKeyEdge,
-  },
-  render,
-};
-
-export const SplitSeq: Story = {
-  args: {
-    edge: {
-      id: 'edge-1',
-      source: 'a',
-      target: 'b',
-      type: 'splitSeq',
-      data: {
-        seq: 2,
-      },
-    } as SplitSeqEdge,
-  },
-  render,
-};
-
-export const SplitRemaining: Story = {
-  args: {
-    edge: {
-      id: 'edge-1',
-      source: 'a',
-      target: 'b',
-      type: 'splitRemaining',
-      data: {},
-    } as SplitRemainingEdge,
+    },
+    allowedEdgeTypes: ['splitKey', 'splitSeq', 'splitRemaining'],
   },
   render,
 };
@@ -141,7 +80,22 @@ export const Unzip: Story = {
       data: {
         seq: 3,
       },
-    } as UnzipEdge,
+    },
+    allowedEdgeTypes: ['unzip'],
+  },
+  render,
+};
+
+export const Default: Story = {
+  args: {
+    edge: {
+      id: 'edge-1',
+      source: 'a',
+      target: 'b',
+      type: 'default',
+      data: {},
+    },
+    allowedEdgeTypes: ['default'],
   },
   render,
 };

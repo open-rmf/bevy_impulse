@@ -1,10 +1,9 @@
 import DeleteIcon from '@mui/icons-material/Delete';
 import {
-  Button,
   Card,
   CardContent,
   CardHeader,
-  DialogActions,
+  IconButton,
   Stack,
   TextField,
 } from '@mui/material';
@@ -28,7 +27,17 @@ function EditOperationForm({
 }: React.PropsWithChildren<EditOperationFormProps>) {
   return (
     <Card>
-      <CardHeader title="Edit Operation" />
+      <CardHeader
+        title="Edit Operation"
+        action={
+          <IconButton
+            color="error"
+            onClick={() => onDelete?.({ type: 'remove', id: node.id })}
+          >
+            <DeleteIcon />
+          </IconButton>
+        }
+      />
       <CardContent>
         <Stack spacing={2}>
           <TextField
@@ -46,15 +55,6 @@ function EditOperationForm({
           {children}
         </Stack>
       </CardContent>
-      <DialogActions>
-        <Button
-          variant="contained"
-          startIcon={<DeleteIcon />}
-          onClick={() => onDelete?.({ type: 'remove', id: node.id })}
-        >
-          Delete
-        </Button>
-      </DialogActions>
     </Card>
   );
 }

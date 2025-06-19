@@ -26,10 +26,10 @@ import React, { type JSX, useEffect } from 'react';
 import AddOperation from './add-operation';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
-import { EditEdgeForm, EditNodeForm, edgeHasEditForm } from './forms';
+import { EditEdgeForm, EditNodeForm } from './forms';
 import { NODE_TYPES, START_ID } from './nodes';
 import type { DiagramEditorEdge, DiagramEditorNode } from './types';
-import { isOperationNode } from './utils';
+import { allowEdges, isOperationNode } from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
 
@@ -189,21 +189,27 @@ const DiagramEditor = () => {
         onEdgeClick={(ev, edge) => {
           ev.stopPropagation();
           closeAllPopovers();
-          if (edgeHasEditForm(edge)) {
-            setRenderEditForm(
-              <EditEdgeForm
-                edge={edge}
-                onChange={(change) => {
-                  setEdges((prev) => applyEdgeChanges([change], prev));
-                }}
-              />,
-            );
-            setEditOpFormPopoverProps({
-              open: true,
-              anchorReference: 'anchorPosition',
-              anchorPosition: { left: ev.clientX, top: ev.clientY },
-            });
+
+          const sourceNode = nodes.find((n) => n.id === edge.source);
+          const targetNode = nodes.find((n) => n.id === edge.target);
+          if (!sourceNode || !targetNode) {
+            throw new Error('unable to find source or target node');
           }
+
+          setRenderEditForm(
+            <EditEdgeForm
+              edge={edge}
+              allowedEdgeTypes={allowEdges(sourceNode, targetNode)}
+              onChange={(change) => {
+                setEdges((prev) => applyEdgeChanges([change], prev));
+              }}
+            />,
+          );
+          setEditOpFormPopoverProps({
+            open: true,
+            anchorReference: 'anchorPosition',
+            anchorPosition: { left: ev.clientX, top: ev.clientY },
+          });
         }}
         onPaneClick={(ev) => {
           if (openAddOpPopover || editOpFormPopoverProps.open) {

@@ -21,18 +21,6 @@ export type DiagramEditorNode = BuiltinNode | OperationNode;
 
 import type { Edge as ReactFlowEdge } from '@xyflow/react';
 
-export type EdgeTypes =
-  | 'default'
-  | 'unzip'
-  | 'forkResultOk'
-  | 'forkResultErr'
-  | 'splitKey'
-  | 'splitSeq'
-  | 'splitRemaining'
-  | 'bufferKey'
-  | 'bufferSeq'
-  | 'streamOut';
-
 export type Edge<
   D extends Record<string, unknown>,
   T extends EdgeTypes,
@@ -79,6 +67,21 @@ export type UnzipEdgeData = {
   seq: number;
 };
 export type UnzipEdge = Edge<UnzipEdgeData, 'unzip'>;
+
+export type EdgeData = {
+  default: DefaultEdgeData;
+  unzip: UnzipEdgeData;
+  forkResultOk: ForkResultOkEdgeData;
+  forkResultErr: ForkResultErrEdgeData;
+  splitKey: SplitKeyEdgeData;
+  splitSeq: SplitSeqEdgeData;
+  splitRemaining: SplitRemainingEdgeData;
+  bufferKey: BufferKeyEdgeData;
+  bufferSeq: BufferSeqEdgeData;
+  streamOut: StreamOutEdgeData;
+};
+
+export type EdgeTypes = keyof EdgeData;
 
 export type DiagramEditorEdge =
   | DefaultEdge
