@@ -406,7 +406,6 @@ const DiagramEditor = () => {
               selectedEdge.targetNode,
             )}
             onChange={(change) => {
-              console.log(change.item.type);
               setEdges((prev) => applyEdgeChanges([change], prev));
             }}
             onDelete={(change) => {
