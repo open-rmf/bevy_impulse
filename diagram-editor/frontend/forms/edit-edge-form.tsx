@@ -49,6 +49,10 @@ const EDGE_DEFAULT_DATA = {
   unzip: { seq: 0 },
 } satisfies { [k in EdgeTypes]: EdgeData[k] };
 
+export function defaultEdgeData(type: EdgeTypes): EdgeData[EdgeTypes] {
+  return { ...EDGE_DEFAULT_DATA[type] };
+}
+
 export interface EditEdgeFormProps {
   edge: DiagramEditorEdge;
   allowedEdgeTypes: EdgeTypes[];
@@ -110,7 +114,7 @@ function EditEdgeForm({
               onChange={(ev) => {
                 const newEdge = { ...edge };
                 newEdge.type = ev.target.value;
-                newEdge.data = EDGE_DEFAULT_DATA[newEdge.type];
+                newEdge.data = defaultEdgeData(newEdge.type);
                 onChange?.({
                   type: 'replace',
                   id: edge.id,

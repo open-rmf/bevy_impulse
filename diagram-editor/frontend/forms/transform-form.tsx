@@ -7,18 +7,6 @@ function TransformForm(props: EditOperationFormProps<'transform'>) {
   return (
     <EditOperationForm {...props}>
       <TextField
-        required
-        label="id"
-        defaultValue={props.node.id}
-        onChange={(ev) => {
-          props.onChange?.({
-            type: 'replace',
-            id: props.node.id,
-            item: { ...props.node, id: ev.target.value },
-          });
-        }}
-      />
-      <TextField
         label="CEL"
         multiline
         fullWidth
