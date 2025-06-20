@@ -1,5 +1,5 @@
 import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
-import { extractOperation, isOperationNode } from '../utils';
+import { isOperationNode } from '../utils';
 import { syncEdge } from './connection';
 
 export function exportDiagram(
@@ -16,7 +16,7 @@ export function exportDiagram(
 
   for (const node of nodes) {
     if (isOperationNode(node)) {
-      diagram.ops[node.id] = extractOperation(node);
+      diagram.ops[node.id] = node.data;
     }
   }
 

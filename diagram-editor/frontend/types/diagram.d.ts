@@ -12,77 +12,66 @@ export type NextOperation =
       builtin: BuiltinTarget;
       [k: string]: unknown;
     }
-  | (NamespacedOperation & {
-      [k: string]: unknown;
-    });
+  | NamespacedOperation;
 export type BuiltinTarget = 'terminate' | 'dispose' | 'cancel';
 export type DiagramOperation =
-  | (NodeSchema & {
+  | ({
       type: 'node';
       [k: string]: unknown;
-    })
-  | (SectionSchema & {
+    } & NodeSchema)
+  | ({
       type: 'section';
       [k: string]: unknown;
-    })
-  | (ScopeSchema & {
+    } & SectionSchema)
+  | ({
       type: 'scope';
       [k: string]: unknown;
-    })
-  | (StreamOutSchema & {
+    } & ScopeSchema)
+  | ({
       type: 'stream_out';
       [k: string]: unknown;
-    })
-  | (ForkCloneSchema & {
+    } & StreamOutSchema)
+  | ({
       type: 'fork_clone';
       [k: string]: unknown;
-    })
-  | (UnzipSchema & {
+    } & ForkCloneSchema)
+  | ({
       type: 'unzip';
       [k: string]: unknown;
-    })
-  | (ForkResultSchema & {
+    } & UnzipSchema)
+  | ({
       type: 'fork_result';
       [k: string]: unknown;
-    })
-  | (SplitSchema & {
+    } & ForkResultSchema)
+  | ({
       type: 'split';
       [k: string]: unknown;
-    })
-  | (JoinSchema & {
+    } & SplitSchema)
+  | ({
       type: 'join';
       [k: string]: unknown;
-    })
-  | (SerializedJoinSchema & {
+    } & JoinSchema)
+  | ({
       type: 'serialized_join';
       [k: string]: unknown;
-    })
-  | (TransformSchema & {
+    } & SerializedJoinSchema)
+  | ({
       type: 'transform';
       [k: string]: unknown;
-    })
-  | (BufferSchema & {
+    } & TransformSchema)
+  | ({
       type: 'buffer';
       [k: string]: unknown;
-    })
-  | (BufferAccessSchema & {
+    } & BufferSchema)
+  | ({
       type: 'buffer_access';
       [k: string]: unknown;
-    })
-  | (ListenSchema & {
+    } & BufferAccessSchema)
+  | ({
       type: 'listen';
       [k: string]: unknown;
-    });
-export type SectionSchema = (
-  | {
-      builder: string;
-      [k: string]: unknown;
-    }
-  | {
-      template: string;
-      [k: string]: unknown;
-    }
-) & {
+    } & ListenSchema);
+export type SectionSchema = {
   config?: {
     [k: string]: unknown;
   };
@@ -90,31 +79,46 @@ export type SectionSchema = (
     [k: string]: NextOperation;
   };
   [k: string]: unknown;
-};
+} & SectionSchema1;
+export type SectionSchema1 =
+  | {
+      builder: string;
+      [k: string]: unknown;
+    }
+  | {
+      template: string;
+      [k: string]: unknown;
+    };
 export type BufferSelection =
   | {
       [k: string]: NextOperation;
     }
   | NextOperation[];
-export type RetentionPolicy = (
+/**
+ * Describe how data within a buffer gets retained. Most mechanisms that pull
+ *  data from a buffer will remove the oldest item in the buffer, so this policy
+ *  is for dealing with situations where items are being stored faster than they
+ *  are being pulled.
+ *
+ *  The default value is KeepLast(1).
+ */
+export type RetentionPolicy =
   | {
       keep_last: number;
     }
   | {
       keep_first: number;
     }
-  | 'keep_all'
-) & {
-  [k: string]: unknown;
-};
-export type InputRemapping = (
+  | 'keep_all';
+/**
+ * This defines how sections remap their inner operations (inputs and buffers)
+ *  to expose them to operations that are siblings to the section.
+ */
+export type InputRemapping =
   | string[]
   | {
       [k: string]: NextOperation;
-    }
-) & {
-  [k: string]: unknown;
-};
+    };
 
 export interface Diagram {
   /**
@@ -142,9 +146,7 @@ export interface Diagram {
         builtin: BuiltinTarget;
         [k: string]: unknown;
       }
-    | (NamespacedOperation & {
-        [k: string]: unknown;
-      });
+    | NamespacedOperation;
   templates?: {
     [k: string]: SectionTemplate;
   };
@@ -190,7 +192,9 @@ export interface ScopeSchema {
   ops: {
     [k: string]: DiagramOperation;
   };
-  settings?: ScopeSettings;
+  settings?: {
+    [k: string]: unknown;
+  } & ScopeSettings;
   start: NextOperation;
   /**
    * Where to connect streams that are coming out of this scope.
@@ -270,7 +274,9 @@ export interface BufferSchema {
    * If true, messages will be serialized before sending into the buffer.
    */
   serialize?: boolean | null;
-  settings?: BufferSettings;
+  settings?: {
+    [k: string]: unknown;
+  } & BufferSettings;
   [k: string]: unknown;
 }
 /**
@@ -295,8 +301,12 @@ export interface ListenSchema {
   [k: string]: unknown;
 }
 export interface SectionTemplate {
-  buffers?: InputRemapping;
-  inputs?: InputRemapping;
+  buffers?: {
+    [k: string]: unknown;
+  } & InputRemapping;
+  inputs?: {
+    [k: string]: unknown;
+  } & InputRemapping;
   /**
    * Operations that define the behavior of the section.
    */

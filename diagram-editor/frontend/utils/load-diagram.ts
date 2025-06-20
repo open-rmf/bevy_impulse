@@ -1,7 +1,7 @@
 import addFormats from 'ajv-formats';
 import Ajv from 'ajv/dist/2020';
 
-import diagramSchema from '../diagram.schema.json';
+import diagramSchema from '../diagram.preprocessed.schema.json';
 import { START_ID, TERMINATE_ID } from '../nodes';
 import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
 import { buildEdges, nextOperationToNodeId } from './operation';
@@ -54,7 +54,7 @@ function buildGraph(diagram: Diagram): Graph {
           id: opId,
           type: op.type,
           position: { x: 0, y: 0 },
-          data: { opId, ...op },
+          data: op,
         }) satisfies DiagramEditorNode,
     ),
   );

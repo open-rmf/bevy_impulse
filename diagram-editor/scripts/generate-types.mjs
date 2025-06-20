@@ -1,64 +1,77 @@
 import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import fs, { copyFileSync } from 'node:fs';
+import fs, { writeFileSync } from 'node:fs';
 import { compile } from 'json-schema-to-typescript';
 
 const schemaRaw = fs.readFileSync('../diagram.schema.json');
 const hash = crypto.createHash('sha1').update(schemaRaw).digest('hex');
 const schema = JSON.parse(schemaRaw);
 
-function fixJsonSchema(schema) {
-  const combinations = new Set(['oneOf', 'allOf', 'anyOf']);
-  const inheritance = new Set([...combinations, '$ref']);
-
-  for (const k of combinations) {
-    if (k in schema) {
-      for (const v of schema[k]) {
-        fixJsonSchema(v);
-      }
-    }
+// preprocess the schema to workaround https://github.com/bcherny/json-schema-to-typescript/issues/637 and https://github.com/bcherny/json-schema-to-typescript/issues/613
+const workingSet = [...Object.values(schema.$defs)];
+while (workingSet.length > 0) {
+  const schema = workingSet.pop();
+  if (typeof schema !== 'object') {
+    continue;
   }
 
   if ('properties' in schema) {
-    for (const propertyKey of Object.keys(schema.properties)) {
-      const propertyValue = schema.properties[propertyKey];
-      // having other fields and $ref causes json-schema-to-typescript to inline it, workaround
-      // by removing all other fields.
-      if (
-        typeof propertyValue === 'object' &&
-        Object.keys(propertyValue).length > 1 &&
-        '$ref' in propertyValue
-      ) {
-        schema.properties[propertyKey] = { $ref: propertyValue.$ref };
-      }
+    for (const property of Object.values(schema.properties)) {
+      workingSet.push(property);
+      // if (
+      //   typeof property === 'object' &&
+      //   '$ref' in property &&
+      //   Object.keys(property).length > 1
+      // ) {
+      //   const $ref = property.$ref;
+      //   for (const k of Object.keys(property)) {
+      //     delete property[k];
+      //   }
+      //   property.$ref = $ref;
+      // }
     }
   }
 
-  const keys = Object.keys(schema);
-  if (keys.length > 1 && keys.some((k) => inheritance.has(k))) {
-    const allOf = [];
-    const otherFields = {};
-    for (const k of keys) {
-      if (inheritance.has(k)) {
-        allOf.push({ [k]: schema[k] });
-      } else {
-        otherFields[k] = schema[k];
-      }
+  if ('oneOf' in schema) {
+    workingSet.push(...Object.values(schema.oneOf));
+  }
+
+  if ('anyOf' in schema) {
+    workingSet.push(...Object.values(schema.anyOf));
+  }
+
+  // json schema draft-07 (used by json-schema-to-typescript) does not merge $ref, workaround
+  // by putting the $ref and other fields in a `allOf`.
+  if ('$ref' in schema && Object.keys(schema).length > 1) {
+    const $ref = schema.$ref;
+    const copy = {
+      ...schema,
+    };
+    // biome-ignore lint/performance/noDelete:
+    delete copy.$ref;
+
+    for (const k of Object.keys(schema)) {
       delete schema[k];
     }
-    allOf.push(otherFields);
-    schema.allOf = allOf;
+
+    if (Object.keys(copy).some((k) => !['description', 'title'].includes(k))) {
+      // At least one field is not metadata only field.
+      const allOf = [copy, { $ref }];
+      schema.allOf = allOf;
+    } else {
+      // All the remaining fields are metadata only fields. We cannot use `allOf` as the
+      // metadata only branch will allow any types.
+      schema.$ref = $ref;
+    }
   }
 }
 
-// preprocess the schema to workaround https://github.com/bcherny/json-schema-to-typescript/issues/637 and https://github.com/bcherny/json-schema-to-typescript/issues/613
-for (const def of Object.values(schema.$defs)) {
-  fixJsonSchema(def);
-}
-
-const output = await compile(schema, 'Diagram', {});
+const output = await compile(schema, 'Diagram');
 const fd = fs.openSync('frontend/types/diagram.d.ts', 'w');
 fs.writeSync(fd, `// Generated from diagram.schema.json (sha1:${hash})\n`);
 fs.writeSync(fd, output);
 execSync('biome format --write ./frontend/types/diagram.d.ts');
-copyFileSync('../diagram.schema.json', './frontend/diagram.schema.json');
+writeFileSync(
+  'frontend/diagram.preprocessed.schema.json',
+  JSON.stringify(schema, undefined, 2),
+);

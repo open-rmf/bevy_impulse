@@ -6,6 +6,7 @@ import type {
   DiagramOperation,
   NextOperation,
   OperationNode,
+  OperationNodeData,
 } from '../types';
 import { exhaustiveCheck } from './exhaustive-check';
 
@@ -326,9 +327,8 @@ export function isOperationNode(
   return !node.id.startsWith('builtin:');
 }
 
-export function extractOperation(node: OperationNode): DiagramOperation {
-  const op: DiagramOperation = { ...node.data };
-  const opIdKey = 'opId';
-  delete op[opIdKey];
-  return op;
+export function isSectionBuilder(
+  nodeData: OperationNodeData<'section'>,
+): nodeData is OperationNodeData<'section'> & { builder: string } {
+  return 'builder' in nodeData;
 }
