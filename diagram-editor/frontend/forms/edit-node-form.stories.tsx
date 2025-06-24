@@ -19,9 +19,13 @@ export const Node: Story = {
       type: 'node',
       position: { x: 0, y: 0 },
       data: {
-        type: 'node',
-        builder: 'builder',
-        next: { builtin: 'dispose' },
+        namespace: '',
+        opId: 'testOpId',
+        op: {
+          type: 'node',
+          builder: 'builder',
+          next: { builtin: 'dispose' },
+        },
       },
     },
   },
@@ -45,8 +49,12 @@ export const Buffer: Story = {
       type: 'buffer',
       position: { x: 0, y: 0 },
       data: {
-        type: 'buffer',
-        serialize: false,
+        namespace: '',
+        opId: 'testOpId',
+        op: {
+          type: 'buffer',
+          serialize: false,
+        },
       },
     },
   },
@@ -70,9 +78,13 @@ export const Transform: Story = {
       type: 'transform',
       position: { x: 0, y: 0 },
       data: {
-        type: 'transform',
-        cel: '',
-        next: { builtin: 'dispose' },
+        namespace: '',
+        opId: 'testOpId',
+        op: {
+          type: 'transform',
+          cel: '',
+          next: { builtin: 'dispose' },
+        },
       },
     },
   },

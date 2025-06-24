@@ -1,253 +1,435 @@
+import { v4 as uuidv4 } from 'uuid';
+
+import { NodeManager } from '../node-manager';
 import { TERMINATE_ID } from '../nodes';
-import type { Diagram, DiagramEditorEdge, DiagramOperation } from '../types';
-import { syncEdge } from './connection';
+import type {
+  Diagram,
+  DiagramEditorEdge,
+  DiagramEditorNode,
+  DiagramOperation,
+} from '../types';
+import { loadDiagram } from './load-diagram';
+
+function createNode(op: DiagramOperation): DiagramEditorNode {
+  return {
+    id: uuidv4(),
+    position: { x: 0, y: 0 },
+    type: op.type,
+    data: {
+      op,
+      opId: uuidv4(),
+      namespace: '',
+    },
+  };
+}
 
 describe('syncEdge', () => {
-  let diagram: Diagram;
-  let testOp1: DiagramOperation;
-  let edge: DiagramEditorEdge;
+  let nodes: DiagramEditorNode[];
 
   beforeEach(() => {
-    testOp1 = {
-      type: 'node',
-      builder: 'testBuilder',
-      next: { builtin: 'dispose' },
-    };
-    diagram = {
-      start: 'testOp1',
+    const emptyDiagram = {
+      start: { builtin: 'dispose' },
       version: '0.1.0',
-      ops: {
-        testOp1,
-        testOp2: {
-          type: 'node',
-          builder: 'testBuilder',
-          next: { builtin: 'terminate' },
-        },
-      },
-    };
-    edge = {
-      id: 'testEdge',
-      source: 'testOp1',
-      target: 'testOp2',
-      type: 'default',
-      data: {},
-    };
+      ops: {},
+    } satisfies Diagram;
+    nodes = loadDiagram(emptyDiagram).nodes;
   });
 
   it('should throw an error if source is "terminate"', () => {
-    edge.source = TERMINATE_ID;
-    expect(() => syncEdge(diagram, edge)).toThrow();
+    const edge: DiagramEditorEdge = {
+      id: 'testEdge',
+      source: TERMINATE_ID,
+      target: TERMINATE_ID,
+      type: 'default',
+      data: {},
+    };
+    const nodeManager = new NodeManager(nodes);
+    expect(() => nodeManager.syncEdge(edge)).toThrow();
   });
 
   // Test cases for 'node', 'join', 'serialized_join', 'transform', 'buffer_access', 'listen'
-  for (const type of [
-    'node',
-    'join',
-    'serialized_join',
-    'transform',
-    'buffer_access',
-    'listen',
-  ] as DiagramOperation['type'][]) {
-    it(`should set next for "${type}" node type`, () => {
-      testOp1.type = type;
-      syncEdge(diagram, edge);
-      expect(testOp1.next).toBe('testOp2');
-      syncEdge(diagram, edge);
-      expect(testOp1.next).toBe('testOp2');
+  for (const op of [
+    {
+      type: 'node',
+      builder: '',
+      next: { builtin: 'terminate' },
+    },
+    {
+      type: 'join',
+      buffers: [],
+      next: { builtin: 'terminate' },
+    },
+    {
+      type: 'serialized_join',
+      buffers: [],
+      next: { builtin: 'terminate' },
+    },
+    {
+      type: 'transform',
+      cel: '',
+      next: { builtin: 'terminate' },
+    },
+    {
+      type: 'buffer_access',
+      buffers: [],
+      next: { builtin: 'terminate' },
+    },
+    {
+      type: 'listen',
+      buffers: [],
+      next: { builtin: 'terminate' },
+    },
+  ] satisfies DiagramOperation[]) {
+    it(`should set next for "${op.type}"`, () => {
+      const node = createNode(op);
+      nodes.push(node);
+      const edge: DiagramEditorEdge = {
+        id: uuidv4(),
+        type: 'default',
+        source: node.id,
+        target: TERMINATE_ID,
+        data: {},
+      };
+      const nodeManager = new NodeManager(nodes);
+      nodeManager.syncEdge(edge);
+      expect(node.data.op.next).toEqual({ builtin: 'terminate' });
     });
   }
 
   describe('fork_clone', () => {
+    let forkCloneNode: DiagramEditorNode;
+    let forkCloneOp: DiagramOperation & { type: 'fork_clone' };
+    let nodeManager: NodeManager;
+
     beforeEach(() => {
-      testOp1 = { type: 'fork_clone', next: [] };
-      diagram.ops.testOp1 = testOp1;
+      forkCloneOp = {
+        type: 'fork_clone',
+        next: [],
+      };
+      forkCloneNode = createNode(forkCloneOp);
+      nodes.push(forkCloneNode);
+
+      nodeManager = new NodeManager(nodes);
     });
 
     it('should add target to next array if not present', () => {
-      syncEdge(diagram, edge);
-      expect(testOp1.next).toEqual(['testOp2']);
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'default',
+        source: forkCloneNode.id,
+        target: TERMINATE_ID,
+        data: {},
+      });
+      expect(forkCloneOp.next).toEqual([{ builtin: 'terminate' }]);
     });
 
     it('should not add target if already present', () => {
-      testOp1.next = ['testOp2'];
-      syncEdge(diagram, edge);
-      expect(testOp1.next).toEqual(['testOp2']);
+      forkCloneOp.next = [{ builtin: 'terminate' }];
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'default',
+        source: forkCloneNode.id,
+        target: TERMINATE_ID,
+        data: {},
+      });
+      expect(forkCloneOp.next).toEqual([{ builtin: 'terminate' }]);
     });
 
     it('should add a different target', () => {
-      testOp1.next = ['node3'];
-      syncEdge(diagram, edge);
-      expect(testOp1.next).toEqual(['node3', 'testOp2']);
+      forkCloneOp.next = [{ builtin: 'dispose' }];
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'default',
+        source: forkCloneNode.id,
+        target: TERMINATE_ID,
+        data: {},
+      });
+      expect(forkCloneOp.next).toEqual([
+        { builtin: 'dispose' },
+        { builtin: 'terminate' },
+      ]);
     });
 
     it('should throw for other edge data types', () => {
-      edge.type = 'forkResultOk';
-      expect(() => syncEdge(diagram, edge)).toThrow();
+      expect(() =>
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'forkResultOk',
+          source: forkCloneNode.id,
+          target: TERMINATE_ID,
+          data: {},
+        }),
+      ).toThrow();
     });
   });
 
   describe('unzip', () => {
-    let testOp1: Extract<DiagramOperation, { type: 'unzip' }>;
+    let unzipNode: DiagramEditorNode;
+    let unzipOp: DiagramOperation & { type: 'unzip' };
+    let nodeManager: NodeManager;
 
     beforeEach(() => {
-      edge.type = 'unzip';
-      testOp1 = { type: 'unzip', next: [] };
-      diagram.ops.testOp1 = testOp1;
+      unzipOp = {
+        type: 'unzip',
+        next: [],
+      };
+      unzipNode = createNode(unzipOp);
+      nodes.push(unzipNode);
+
+      nodeManager = new NodeManager(nodes);
     });
 
     it('should set target at specified sequence in next array for "unzip" edge data type', () => {
-      edge.data = { seq: 1 };
-      syncEdge(diagram, edge);
-      expect(testOp1.next[1]).toBe('testOp2');
-      expect(testOp1.next.length).toBe(2); // JS allows sparse arrays
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'unzip',
+        source: unzipNode.id,
+        target: TERMINATE_ID,
+        data: { seq: 1 },
+      });
+      expect(unzipOp.next[1]).toEqual({ builtin: 'terminate' });
     });
 
     it('should overwrite target at specified sequence', () => {
-      testOp1.next[1] = 'oldNode';
-      edge.data = { seq: 1 };
-      syncEdge(diagram, edge);
-      expect(testOp1.next[1]).toBe('testOp2');
+      unzipOp.next[1] = 'oldNode';
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'unzip',
+        source: unzipNode.id,
+        target: TERMINATE_ID,
+        data: { seq: 1 },
+      });
+      expect(unzipOp.next[1]).toEqual({ builtin: 'terminate' });
     });
 
     it('should throw for other edge data types', () => {
-      edge.type = 'default';
-      expect(() => syncEdge(diagram, edge)).toThrow();
+      expect(() =>
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'forkResultOk',
+          source: unzipNode.id,
+          target: TERMINATE_ID,
+          data: {},
+        }),
+      ).toThrow();
     });
   });
 
   describe('fork_result', () => {
-    let testOp1: Extract<DiagramOperation, { type: 'fork_result' }>;
+    let forkResultNode: DiagramEditorNode;
+    let forkResultOp: DiagramOperation & { type: 'fork_result' };
+    let nodeManager: NodeManager;
 
     beforeEach(() => {
-      testOp1 = {
+      forkResultOp = {
         type: 'fork_result',
         ok: { builtin: 'dispose' },
         err: { builtin: 'dispose' },
       };
-      diagram.ops.testOp1 = testOp1;
+      forkResultNode = createNode(forkResultOp);
+      nodes.push(forkResultNode);
+
+      nodeManager = new NodeManager(nodes);
     });
 
     it('should set "ok" target for "ok" edge data type', () => {
-      edge.type = 'forkResultOk';
-      syncEdge(diagram, edge);
-      expect(testOp1.ok).toBe('testOp2');
-      expect(testOp1.err).toEqual({ builtin: 'dispose' });
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'forkResultOk',
+        source: forkResultNode.id,
+        target: TERMINATE_ID,
+        data: {},
+      });
+      expect(forkResultOp.ok).toEqual({ builtin: 'terminate' });
+      expect(forkResultOp.err).toEqual({ builtin: 'dispose' });
     });
 
     it('should set "err" target for "err" edge data type', () => {
-      edge.type = 'forkResultErr';
-      syncEdge(diagram, edge);
-      expect(testOp1.err).toBe('testOp2');
-      expect(testOp1.ok).toEqual({ builtin: 'dispose' });
+      nodeManager.syncEdge({
+        id: uuidv4(),
+        type: 'forkResultErr',
+        source: forkResultNode.id,
+        target: TERMINATE_ID,
+        data: {},
+      });
+      expect(forkResultOp.ok).toEqual({ builtin: 'dispose' });
+      expect(forkResultOp.err).toEqual({ builtin: 'terminate' });
     });
 
     it('should throw error for other edge data types', () => {
-      edge.type = 'default';
-      expect(() => syncEdge(diagram, edge)).toThrow();
+      expect(() =>
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'default',
+          source: forkResultNode.id,
+          target: TERMINATE_ID,
+          data: {},
+        }),
+      ).toThrow();
     });
   });
 
   describe('split', () => {
-    let testOp1: Extract<DiagramOperation, { type: 'split' }>;
+    let splitNode: DiagramEditorNode;
+    let splitOp: DiagramOperation & { type: 'split' };
+    let nodeManager: NodeManager;
 
     beforeEach(() => {
-      testOp1 = {
+      splitOp = {
         type: 'split',
       };
-      diagram.ops.testOp1 = testOp1;
+      splitNode = createNode(splitOp);
+      nodes.push(splitNode);
+
+      nodeManager = new NodeManager(nodes);
     });
 
     describe('splitKey', () => {
-      beforeEach(() => {
-        edge.type = 'splitKey';
-      });
-
       it('should initialize keyed and set target for "splitKey" edge data type', () => {
-        edge.data = { key: 'myKey' };
-        syncEdge(diagram, edge);
-        expect(testOp1.keyed).toEqual({ myKey: 'testOp2' });
-        expect(testOp1.sequential).toBeUndefined();
-        expect(testOp1.remaining).toBeUndefined();
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitKey',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { key: 'testKey' },
+        });
+        expect(splitOp.keyed).toEqual({ testKey: { builtin: 'terminate' } });
+        expect(splitOp.sequential).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
 
       it('should add to existing keyed object for "splitKey"', () => {
-        testOp1.keyed = { existingKey: 'node0' };
-        edge.data = { key: 'myKey' };
-        syncEdge(diagram, edge);
-        expect(testOp1.keyed).toEqual({
-          existingKey: 'node0',
-          myKey: 'testOp2',
+        splitOp.keyed = { existingKey: { builtin: 'terminate' } };
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitKey',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { key: 'testKey' },
         });
+        expect(splitOp.keyed).toEqual({
+          existingKey: { builtin: 'terminate' },
+          testKey: { builtin: 'terminate' },
+        });
+        expect(splitOp.sequential).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
 
       it('should overwrite existing key for "splitKey"', () => {
-        testOp1.keyed = { myKey: 'oldNode' };
-        edge.data = { key: 'myKey' };
-        syncEdge(diagram, edge);
-        expect(testOp1.keyed).toEqual({ myKey: 'testOp2' });
+        splitOp.keyed = { testKey: { builtin: 'dispose' } };
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitKey',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { key: 'testKey' },
+        });
+        expect(splitOp.keyed).toEqual({
+          testKey: { builtin: 'terminate' },
+        });
+        expect(splitOp.sequential).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
     });
 
     describe('splitSeq', () => {
-      beforeEach(() => {
-        edge.type = 'splitSeq';
-      });
-
       it('should initialize sequential and set target for "splitSequential" edge data type', () => {
-        edge.data = { seq: 0 };
-        syncEdge(diagram, edge);
-        expect(testOp1.sequential?.[0]).toBe('testOp2');
-        expect(testOp1.keyed).toBeUndefined();
-        expect(testOp1.remaining).toBeUndefined();
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitSeq',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { seq: 0 },
+        });
+        expect(splitOp.sequential?.[0]).toEqual({ builtin: 'terminate' });
+        expect(splitOp.keyed).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
 
       it('should add to existing sequential array for "splitSequential"', () => {
-        testOp1.sequential = ['node0'];
-        edge.data = { seq: 1 };
-        syncEdge(diagram, edge);
-        expect(testOp1.sequential?.[0]).toBe('node0');
-        expect(testOp1.sequential?.[1]).toBe('testOp2');
+        splitOp.sequential = [{ builtin: 'terminate' }];
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitSeq',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { seq: 1 },
+        });
+        expect(splitOp.sequential?.length).toBe(2);
+        expect(splitOp.sequential?.[0]).toEqual({ builtin: 'terminate' });
+        expect(splitOp.sequential?.[1]).toEqual({ builtin: 'terminate' });
+        expect(splitOp.keyed).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
 
       it('should overwrite existing sequence for "splitSequential"', () => {
-        testOp1.sequential = ['node0', 'oldNode'];
-        edge.data = { seq: 1 };
-        syncEdge(diagram, edge);
-        expect(testOp1.sequential?.[1]).toBe('testOp2');
+        splitOp.sequential = [{ builtin: 'dispose' }];
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitSeq',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { seq: 0 },
+        });
+        expect(splitOp.sequential?.[0]).toEqual({ builtin: 'terminate' });
+        expect(splitOp.keyed).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
 
       it('should handle non-sequential array indices for "splitSequential"', () => {
-        edge.data = { seq: 2 };
-        syncEdge(diagram, edge);
-        expect(testOp1.sequential?.[2]).toBe('testOp2');
-        expect(testOp1.sequential?.length).toBe(3); // JS allows sparse arrays
+        splitOp.sequential = [];
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitSeq',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: { seq: 2 },
+        });
+        expect(splitOp.sequential?.[2]).toEqual({ builtin: 'terminate' });
+        expect(splitOp.keyed).toBeUndefined();
+        expect(splitOp.remaining).toBeUndefined();
       });
     });
 
     describe('splitRemaining', () => {
-      beforeEach(() => {
-        edge.type = 'splitRemaining';
-      });
-
       it('should set remaining target for "splitRemaining" edge data type', () => {
-        edge.type = 'splitRemaining';
-        syncEdge(diagram, edge);
-        expect(testOp1.remaining).toBe('testOp2');
-        expect(testOp1.keyed).toBeUndefined();
-        expect(testOp1.sequential).toBeUndefined();
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitRemaining',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: {},
+        });
+        expect(splitOp.remaining).toEqual({ builtin: 'terminate' });
+        expect(splitOp.sequential).toBeUndefined();
+        expect(splitOp.keyed).toBeUndefined();
       });
 
       it('should overwrite existing remaining target', () => {
-        testOp1.remaining = 'oldNode';
-        edge.type = 'splitRemaining';
-        syncEdge(diagram, edge);
-        expect(testOp1.remaining).toBe('testOp2');
+        splitOp.remaining = { builtin: 'dispose' };
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'splitRemaining',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: {},
+        });
+        expect(splitOp.remaining).toEqual({ builtin: 'terminate' });
+        expect(splitOp.sequential).toBeUndefined();
+        expect(splitOp.keyed).toBeUndefined();
       });
     });
 
     it('should throw for other edge data types', () => {
-      edge.type = 'default';
-      expect(() => syncEdge(diagram, edge)).toThrow();
+      expect(() =>
+        nodeManager.syncEdge({
+          id: uuidv4(),
+          type: 'default',
+          source: splitNode.id,
+          target: TERMINATE_ID,
+          data: {},
+        }),
+      ).toThrow();
     });
   });
 });

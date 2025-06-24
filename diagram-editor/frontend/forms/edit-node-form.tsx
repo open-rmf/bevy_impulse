@@ -15,7 +15,7 @@ export interface EditNodeFormProps {
 }
 
 function EditNodeForm(props: EditOperationFormProps) {
-  switch (props.node.data.type) {
+  switch (props.node.data.op.type) {
     case 'node': {
       return <NodeForm {...(props as EditOperationFormProps<'node'>)} />;
     }

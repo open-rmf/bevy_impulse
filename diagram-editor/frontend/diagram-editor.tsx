@@ -13,6 +13,7 @@ import {
   styled,
 } from '@mui/material';
 import {
+  type EdgeRemoveChange,
   Panel,
   ReactFlow,
   type ReactFlowInstance,
@@ -27,6 +28,7 @@ import AddOperation from './add-operation';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { EditEdgeForm, EditNodeForm, defaultEdgeData } from './forms';
+import { NodeManager } from './node-manager';
 import { NODE_TYPES, START_ID } from './nodes';
 import type {
   DiagramEditorEdge,
@@ -68,6 +70,7 @@ const DiagramEditor = () => {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
+  const nodeManager = React.useMemo(() => new NodeManager(nodes), [nodes]);
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
 
   const [openAddOpPopover, setOpenAddOpPopover] = React.useState(false);
@@ -202,9 +205,9 @@ const DiagramEditor = () => {
         onInit={(instance) => {
           reactFlowInstance.current = instance;
         }}
-        onNodesChange={(changes) =>
-          setNodes((prev) => applyNodeChanges(changes, prev))
-        }
+        onNodesChange={(changes) => {
+          setNodes((prev) => applyNodeChanges(changes, prev));
+        }}
         onNodesDelete={() => {
           closeAllPopovers();
         }}
@@ -394,6 +397,16 @@ const DiagramEditor = () => {
             }}
             onDelete={(change) => {
               setNodes((prev) => applyNodeChanges([change], prev));
+              const edgeChanges: EdgeRemoveChange[] = [];
+              for (const edge of edges) {
+                if (edge.source === change.id || edge.target === change.id) {
+                  edgeChanges.push({
+                    type: 'remove',
+                    id: edge.id,
+                  });
+                }
+              }
+              setEdges((prev) => applyEdgeChanges(edgeChanges, prev));
               closeAllPopovers();
             }}
           />
@@ -432,7 +445,7 @@ const DiagramEditor = () => {
       <ExportDiagramDialog
         open={openExportDiagramDialog}
         onClose={() => setOpenExportDiagramDialog(false)}
-        nodes={nodes}
+        nodes={nodeManager}
         edges={edges}
       />
     </>

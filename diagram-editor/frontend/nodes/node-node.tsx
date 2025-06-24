@@ -8,7 +8,7 @@ function NodeNode(props: NodeProps<OperationNode<'node'>>) {
     <BaseNode
       {...props}
       icon={<NodeIcon />}
-      label={props.data.builder}
+      label={props.data.op.builder}
       variant="inputOutput"
     />
   );

@@ -10,13 +10,15 @@ function TransformForm(props: EditOperationFormProps<'transform'>) {
         label="CEL"
         multiline
         fullWidth
-        defaultValue={props.node.data.cel}
+        defaultValue={props.node.data.op.cel}
         onChange={(ev) => {
-          props.node.data.cel = ev.target.value;
+          const updatedNode = { ...props.node };
+          updatedNode.data.op.cel = ev.target.value;
+          props.node.data.op.cel = ev.target.value;
           props.onChange?.({
             type: 'replace',
             id: props.node.id,
-            item: { ...props.node },
+            item: updatedNode,
           });
         }}
       />

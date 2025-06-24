@@ -9,13 +9,14 @@ function NodeForm(props: EditOperationFormProps<'node'>) {
       <TextField
         required
         label="builder"
-        defaultValue={props.node.data.builder}
+        defaultValue={props.node.data.op.builder}
         onChange={(ev) => {
-          props.node.data.builder = ev.target.value;
+          const updatedNode = { ...props.node };
+          updatedNode.data.op.builder = ev.target.value;
           props.onChange?.({
             type: 'replace',
             id: props.node.id,
-            item: { ...props.node },
+            item: updatedNode,
           });
         }}
       />

@@ -31,9 +31,13 @@ export const Default: Story = {
       type: 'transform',
       position: { x: 0, y: 0 },
       data: {
-        type: 'transform',
-        cel: 'request + 1',
-        next: '',
+        namespace: '',
+        opId: 'testOpId',
+        op: {
+          type: 'transform',
+          cel: 'request + 1',
+          next: '',
+        },
       },
     },
   },

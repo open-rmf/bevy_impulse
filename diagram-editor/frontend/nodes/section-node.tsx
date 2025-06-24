@@ -5,9 +5,9 @@ import BaseNode from './base-node';
 import { SectionIcon } from './icons';
 
 function SectionNode(props: NodeProps<OperationNode<'section'>>) {
-  const label = isSectionBuilder(props.data)
-    ? props.data.builder
-    : props.data.template;
+  const label = isSectionBuilder(props.data.op)
+    ? props.data.op.builder
+    : props.data.op.template;
   return (
     <BaseNode
       {...props}

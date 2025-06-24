@@ -28,11 +28,11 @@ export function autoLayout(
 ): NodePositionChange[] {
   interface WorkingData {
     node: DiagramEditorNode;
-    nextIds: string[];
+    outEdges: DiagramEditorEdge[];
   }
 
   const map = new Map(
-    nodes.map((node) => [node.id, { node, nextIds: [] } as WorkingData]),
+    nodes.map((node) => [node.id, { node, outEdges: [] } as WorkingData]),
   );
 
   const getWorkingData = (id: string) => {
@@ -44,12 +44,12 @@ export function autoLayout(
   };
 
   for (const edge of edges) {
-    const source = getWorkingData(edge.source);
-    source.nextIds.push(edge.target);
+    const data = getWorkingData(edge.source);
+    data.outEdges.push(edge);
   }
 
   const getNode = (id: string) => getWorkingData(id).node;
-  const getNextIds = (id: string) => getWorkingData(id).nextIds;
+  const getOutEdges = (id: string) => getWorkingData(id).outEdges;
 
   const rootNode = getNode(start);
   const rootPosition = { ...rootNode.position };
@@ -58,10 +58,10 @@ export function autoLayout(
   let maxX = rootNode.position.x;
   for (let ctx = fifo.shift(); ctx; ctx = fifo.shift()) {
     const { node, depth } = ctx;
-    const nextNodeIds = getNextIds(node.id);
-    let currentX = node.position.x - ((nextNodeIds.length - 1) * cellWidth) / 2;
-    for (const nextNodeId of nextNodeIds) {
-      const nextNode = getNode(nextNodeId);
+    const outEdges = getOutEdges(node.id);
+    let currentX = node.position.x - ((outEdges.length - 1) * cellWidth) / 2;
+    for (const edge of outEdges) {
+      const nextNode = getNode(edge.target);
       const position = { x: currentX, y: depth * cellHeight };
       // If it is not in the initial position, that means that the node has multiple parents,
       // in that case, move it to the center of its parents.

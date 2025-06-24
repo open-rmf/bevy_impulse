@@ -1,9 +1,10 @@
-import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
+import type { NodeManager } from '../node-manager';
+import { START_ID } from '../nodes';
+import type { Diagram, DiagramEditorEdge } from '../types';
 import { isOperationNode } from '../utils';
-import { syncEdge } from './connection';
 
 export function exportDiagram(
-  nodes: DiagramEditorNode[],
+  nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
 ): Diagram {
   const diagram: Diagram = {
@@ -14,14 +15,17 @@ export function exportDiagram(
     ops: {},
   };
 
-  for (const node of nodes) {
+  for (const node of nodeManager.nodes) {
     if (isOperationNode(node)) {
-      diagram.ops[node.id] = node.data;
+      diagram.ops[node.data.opId] = node.data.op;
     }
   }
 
   for (const edge of edges) {
-    syncEdge(diagram, edge);
+    if (edge.source === START_ID) {
+      diagram.start = nodeManager.getNode(edge.target).data.opId;
+    }
+    nodeManager.syncEdge(edge);
   }
 
   return diagram;

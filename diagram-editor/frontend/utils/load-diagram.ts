@@ -1,14 +1,20 @@
 import addFormats from 'ajv-formats';
 import Ajv from 'ajv/dist/2020';
+import { v4 as uuidv4 } from 'uuid';
 
 import diagramSchema from '../diagram.preprocessed.schema.json';
 import { START_ID, TERMINATE_ID } from '../nodes';
 import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
-import { buildEdges, nextOperationToNodeId } from './operation';
+import { buildEdges } from './operation';
 
 export interface Graph {
   nodes: DiagramEditorNode[];
   edges: DiagramEditorEdge[];
+}
+
+export function loadDiagram(diagram: Diagram): Graph {
+  const graph = buildGraph(diagram);
+  return graph;
 }
 
 export function loadDiagramJson(jsonStr: string): Graph {
@@ -18,8 +24,7 @@ export function loadDiagramJson(jsonStr: string): Graph {
     throw validate.errors;
   }
 
-  const graph = buildGraph(diagram);
-  return graph;
+  return loadDiagram(diagram);
 }
 
 export function loadEmpty(): Graph {
@@ -51,27 +56,26 @@ function buildGraph(diagram: Diagram): Graph {
     ...Object.entries(diagram.ops).map(
       ([opId, op]) =>
         ({
-          id: opId,
+          id: uuidv4(),
           type: op.type,
           position: { x: 0, y: 0 },
-          data: op,
+          // TODO: Support sections
+          data: { namespace: '', opId, op },
         }) satisfies DiagramEditorNode,
     ),
   );
   const edges = graph.edges;
-  const startNodeId = nextOperationToNodeId(diagram.start);
-  if (startNodeId) {
+  const startNode = nodes.find((n) => n.data.opId === diagram.start);
+  if (startNode) {
     edges.push({
-      id: `${START_ID}->${startNodeId}`,
+      id: uuidv4(),
       type: 'default',
       source: START_ID,
-      target: startNodeId,
+      target: startNode.id,
       data: {},
     });
   }
-  for (const [opId, op] of Object.entries(diagram.ops)) {
-    edges.push(...buildEdges(op, opId));
-  }
+  edges.push(...buildEdges(diagram, graph.nodes));
 
   return graph;
 }

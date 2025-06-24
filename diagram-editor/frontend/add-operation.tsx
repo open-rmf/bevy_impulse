@@ -14,7 +14,7 @@ import {
   TransformIcon,
   UnzipIcon,
 } from './nodes/icons';
-import type { DiagramEditorNode } from './types';
+import type { DiagramEditorNode, DiagramOperation } from './types';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',
@@ -22,6 +22,24 @@ const StyledOperationButton = styled(Button)({
 
 export interface AddOperationProps {
   onAdd?: (change: NodeAddChange<DiagramEditorNode>) => void;
+}
+
+function createNodeChange(
+  op: DiagramOperation,
+): NodeAddChange<DiagramEditorNode> {
+  return {
+    type: 'add',
+    item: {
+      id: uuidv4(),
+      type: op.type,
+      position: { x: 0, y: 0 },
+      data: {
+        namespace: '',
+        opId: uuidv4(),
+        op,
+      },
+    },
+  };
 }
 
 function AddOperation({ onAdd }: AddOperationProps) {
@@ -35,19 +53,13 @@ function AddOperation({ onAdd }: AddOperationProps) {
       <StyledOperationButton
         startIcon={<NodeIcon />}
         onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+          onAdd?.(
+            createNodeChange({
               type: 'node',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'node',
-                builder: '',
-                next: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
+              builder: '',
+              next: { builtin: 'dispose' },
+            }),
+          );
         }}
       >
         Node
@@ -55,195 +67,111 @@ function AddOperation({ onAdd }: AddOperationProps) {
       {/* <Button>Section</Button> */}
       <StyledOperationButton
         startIcon={<ForkCloneIcon />}
-        onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
-              type: 'fork_clone',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'fork_clone',
-                next: [],
-              },
-            },
-            type: 'add',
-          });
-        }}
+        onClick={() =>
+          onAdd?.(createNodeChange({ type: 'fork_clone', next: [] }))
+        }
       >
         Fork Clone
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<UnzipIcon />}
-        onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
-              type: 'unzip',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'unzip',
-                next: [],
-              },
-            },
-            type: 'add',
-          });
-        }}
+        onClick={() => onAdd?.(createNodeChange({ type: 'unzip', next: [] }))}
       >
         Unzip
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<ForkResultIcon />}
         onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+          onAdd?.(
+            createNodeChange({
               type: 'fork_result',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'fork_result',
-                err: { builtin: 'dispose' },
-                ok: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
+              err: { builtin: 'dispose' },
+              ok: { builtin: 'dispose' },
+            }),
+          );
         }}
       >
         Fork Result
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<SplitIcon />}
-        onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
-              type: 'split',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'split',
-              },
-            },
-            type: 'add',
-          });
-        }}
+        onClick={() => onAdd?.(createNodeChange({ type: 'split' }))}
       >
         Split
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<JoinIcon />}
         onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+          onAdd?.(
+            createNodeChange({
               type: 'join',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'join',
-                buffers: [],
-                next: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
+              buffers: [],
+              next: { builtin: 'dispose' },
+            }),
+          );
         }}
       >
         Join
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<SerializedJoinIcon />}
-        onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+        onClick={() =>
+          onAdd?.(
+            createNodeChange({
               type: 'serialized_join',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'serialized_join',
-                buffers: [],
-                next: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
-        }}
+              buffers: [],
+              next: { builtin: 'dispose' },
+            }),
+          )
+        }
       >
         Serialized Join
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<TransformIcon />}
         onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+          onAdd?.(
+            createNodeChange({
               type: 'transform',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'transform',
-                cel: '',
-                next: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
+              cel: '',
+              next: { builtin: 'dispose' },
+            }),
+          );
         }}
       >
         Transform
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<BufferIcon />}
-        onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
-              type: 'buffer',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'buffer',
-              },
-            },
-            type: 'add',
-          });
-        }}
+        onClick={() => onAdd?.(createNodeChange({ type: 'buffer' }))}
       >
         Buffer
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<BufferAccessIcon />}
         onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+          onAdd?.(
+            createNodeChange({
               type: 'buffer_access',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'buffer_access',
-                buffers: [],
-                next: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
+              buffers: [],
+              next: { builtin: 'dispose' },
+            }),
+          );
         }}
       >
         Buffer Access
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<ListenIcon />}
-        onClick={() => {
-          onAdd?.({
-            item: {
-              id: uuidv4(),
+        onClick={() =>
+          onAdd?.(
+            createNodeChange({
               type: 'listen',
-              position: { x: 0, y: 0 },
-              data: {
-                type: 'listen',
-                buffers: [],
-                next: { builtin: 'dispose' },
-              },
-            },
-            type: 'add',
-          });
-        }}
+              buffers: [],
+              next: { builtin: 'dispose' },
+            }),
+          )
+        }
       >
         Listen
       </StyledOperationButton>

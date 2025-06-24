@@ -43,12 +43,14 @@ function EditOperationForm({
           <TextField
             required
             label="id"
-            defaultValue={node.id}
+            value={node.data.opId}
             onChange={(ev) => {
+              const updatedNode = { ...node };
+              updatedNode.data.opId = ev.target.value;
               onChange?.({
                 type: 'replace',
                 id: node.id,
-                item: { ...node, id: ev.target.value },
+                item: updatedNode,
               });
             }}
           />

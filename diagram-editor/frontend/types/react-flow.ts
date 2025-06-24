@@ -1,4 +1,7 @@
-import type { Node as ReactFlowNode } from '@xyflow/react';
+import type {
+  Edge as ReactFlowEdge,
+  Node as ReactFlowNode,
+} from '@xyflow/react';
 import type { DiagramOperation } from './diagram';
 
 export type BuiltinNodeTypes = 'start' | 'terminate';
@@ -10,20 +13,22 @@ export type NodeTypes = BuiltinNodeTypes | OperationNodeTypes;
 export type Node<
   D extends Record<string, unknown>,
   T extends NodeTypes,
-> = ReactFlowNode<D, T>;
+> = ReactFlowNode<D, T> & { type: T };
 
 export type BuiltinNode = Node<Record<string, never>, BuiltinNodeTypes>;
 
 export type OperationNodeData<
-  K extends OperationNodeTypes = OperationNodeTypes,
-> = Extract<DiagramOperation, { type: K }>;
+  out K extends OperationNodeTypes = OperationNodeTypes,
+> = {
+  namespace: string;
+  opId: string;
+  op: DiagramOperation & { type: K };
+};
 
 export type OperationNode<K extends OperationNodeTypes = OperationNodeTypes> =
   Node<OperationNodeData<K>, K>;
 
 export type DiagramEditorNode = BuiltinNode | OperationNode;
-
-import type { Edge as ReactFlowEdge } from '@xyflow/react';
 
 export type Edge<
   D extends Record<string, unknown>,

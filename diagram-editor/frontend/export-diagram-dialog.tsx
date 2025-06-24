@@ -14,13 +14,14 @@ import {
 } from '@mui/material';
 import { deflateSync, strToU8 } from 'fflate';
 import React from 'react';
-import type { DiagramEditorEdge, DiagramEditorNode } from './types';
+import type { NodeManager } from './node-manager';
+import type { DiagramEditorEdge } from './types';
 import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {
   open: boolean;
   onClose: () => void;
-  nodes: DiagramEditorNode[];
+  nodes: NodeManager;
   edges: DiagramEditorEdge[];
 }
 

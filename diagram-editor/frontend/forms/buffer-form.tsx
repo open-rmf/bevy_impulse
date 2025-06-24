@@ -9,13 +9,14 @@ export function BufferForm(props: EditOperationFormProps<'buffer'>) {
       <FormControlLabel
         control={
           <Switch
-            checked={props.node.data.serialize ?? false}
+            checked={props.node.data.op.serialize ?? false}
             onChange={(_, checked) => {
-              props.node.data.serialize = checked;
+              const updatedNode = { ...props.node };
+              updatedNode.data.op.serialize = checked;
               props.onChange?.({
                 type: 'replace',
                 id: props.node.id,
-                item: { ...props.node },
+                item: updatedNode,
               });
             }}
           />
