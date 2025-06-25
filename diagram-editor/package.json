@@ -41,7 +41,6 @@
     "json-schema-to-typescript": "15.0.4",
     "storybook": "^9.0.9",
     "storybook-react-rsbuild": "^2.0.1",
-    "ts-jest": "^29.3.4",
-    "typescript": "^5.8.3"
+    "ts-jest": "^29.3.4"
   }
 }

@@ -3,7 +3,7 @@ import '@fontsource/roboto/400.css';
 import '@fontsource/roboto/500.css';
 import '@fontsource/roboto/700.css';
 import '@xyflow/react/dist/style.css';
-import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { CssBaseline, createTheme, ThemeProvider } from '@mui/material';
 
 import './app.css';
 import DiagramEditor from './diagram-editor';

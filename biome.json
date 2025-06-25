@@ -1,12 +1,16 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.0.5/schema.json",
   "files": {
-    "include": ["*.tsx", "*.ts", "*.mjs", "*.cjs", "*.json"],
-    "ignore": ["*.schema.json"]
+    "includes": [
+      "**/*.tsx",
+      "**/*.ts",
+      "**/*.mjs",
+      "**/*.cjs",
+      "**/*.json",
+      "!**/*.schema.json"
+    ]
   },
-  "organizeImports": {
-    "enabled": true
-  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -33,7 +37,7 @@
   },
   "overrides": [
     {
-      "include": ["*.test.ts", "*.test.tsx"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {
           "style": {

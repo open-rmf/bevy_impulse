@@ -47,7 +47,6 @@ while (workingSet.length > 0) {
     const copy = {
       ...schema,
     };
-    // biome-ignore lint/performance/noDelete:
     delete copy.$ref;
 
     for (const k of Object.keys(schema)) {

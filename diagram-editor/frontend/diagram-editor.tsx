@@ -9,17 +9,17 @@ import {
   type PopoverPosition,
   type PopoverProps,
   Snackbar,
-  Tooltip,
   styled,
+  Tooltip,
 } from '@mui/material';
 import {
+  addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
   type EdgeRemoveChange,
   Panel,
   ReactFlow,
   type ReactFlowInstance,
-  addEdge,
-  applyEdgeChanges,
-  applyNodeChanges,
   reconnectEdge,
 } from '@xyflow/react';
 import { inflateSync, strFromU8 } from 'fflate';
@@ -27,7 +27,7 @@ import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
-import { EditEdgeForm, EditNodeForm, defaultEdgeData } from './forms';
+import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import { NodeManager } from './node-manager';
 import { NODE_TYPES, START_ID } from './nodes';
 import type {
@@ -53,7 +53,9 @@ const VisuallyHiddenInput = styled('input')({
 
 const NonCapturingPopoverContainer = ({
   children,
-}: { children: React.ReactNode }) => <>{children}</>;
+}: {
+  children: React.ReactNode;
+}) => <>{children}</>;
 
 interface SelectedEdge {
   sourceNode: DiagramEditorNode;
@@ -189,7 +191,7 @@ const DiagramEditor = () => {
     React.useState(false);
 
   const handleMouseDown = React.useCallback(() => {
-    mouseDownTime.current = new Date().getTime();
+    mouseDownTime.current = Date.now();
   }, []);
 
   return (
@@ -283,7 +285,7 @@ const DiagramEditor = () => {
           }
 
           // filter out erroneous click after connecting an edge
-          const now = new Date().getTime();
+          const now = Date.now();
           if (now - mouseDownTime.current > 200) {
             return;
           }

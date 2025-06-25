@@ -90,6 +90,8 @@ function EditEdgeForm({
     }
   }, [edge, onChange]);
 
+  const typeLabelId = React.useId();
+
   return (
     <Card sx={{ minWidth: 250 }}>
       <CardHeader
@@ -106,9 +108,9 @@ function EditEdgeForm({
       <CardContent>
         <Stack spacing={2}>
           <FormControl>
-            <InputLabel id="edge-type-label">Type</InputLabel>
+            <InputLabel id={typeLabelId}>Type</InputLabel>
             <Select
-              labelId="edge-type-label"
+              labelId={typeLabelId}
               label="Type"
               value={edge.type}
               onChange={(ev) => {

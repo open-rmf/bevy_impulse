@@ -1,5 +1,5 @@
-import addFormats from 'ajv-formats';
 import Ajv from 'ajv/dist/2020';
+import addFormats from 'ajv-formats';
 import { v4 as uuidv4 } from 'uuid';
 
 import diagramSchema from '../diagram.preprocessed.schema.json';
