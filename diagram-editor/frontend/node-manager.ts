@@ -14,6 +14,7 @@ import {
   isBuiltin,
   isBuiltinNode,
   isKeyedBufferSelection,
+  isOperationNode,
 } from './utils';
 
 function joinNamespaceOpId(a: string, b: string) {
@@ -53,16 +54,32 @@ function setBufferSelection(
 }
 
 export class NodeManager {
-  constructor(public nodes: DiagramEditorNode[]) {
-    // TODO: build a lookup map to improve performance
+  private nodeIdMap: Map<string, DiagramEditorNode> = new Map();
+  private namespacedOpIdMap: Map<string, DiagramEditorNode> = new Map();
+
+  constructor(nodes: DiagramEditorNode[]) {
+    for (const node of nodes) {
+      this.nodeIdMap.set(node.id, node);
+      if (isOperationNode(node)) {
+        const namespacedOpId = joinNamespaceOpId(
+          node.data.namespace,
+          node.data.opId,
+        );
+        this.namespacedOpIdMap.set(namespacedOpId, node);
+      }
+    }
   }
 
   getNode(nodeId: string): DiagramEditorNode {
-    const node = this.nodes.find((n) => n.id === nodeId);
+    const node = this.nodeIdMap.get(nodeId);
     if (!node) {
       throw new Error(`cannot find node "${nodeId}"`);
     }
     return node;
+  }
+
+  iterNodes(): MapIterator<DiagramEditorNode> {
+    return this.nodeIdMap.values();
   }
 
   hasNode(nodeId: string): boolean {
@@ -75,13 +92,10 @@ export class NodeManager {
   }
 
   getNodeFromNamespaceOpId(namespace: string, opId: string): DiagramEditorNode {
-    const node = this.nodes.find(
-      (n) => n.data.namespace === namespace && n.data.opId === opId,
-    );
+    const namespacedOpId = joinNamespaceOpId(namespace, opId);
+    const node = this.namespacedOpIdMap.get(namespacedOpId);
     if (!node) {
-      throw new Error(
-        `cannot find node for operation "${joinNamespaceOpId(namespace, opId)}"`,
-      );
+      throw new Error(`cannot find node for operation "${namespacedOpId}"`);
     }
     return node;
   }
@@ -112,9 +126,8 @@ export class NodeManager {
       return [fromNode.data.namespace, nextOp];
     })();
 
-    const node = this.nodes.find(
-      (n) => n.data.namespace === namespace && n.data.opId === opId,
-    );
+    const namespacedOpId = joinNamespaceOpId(namespace, opId);
+    const node = this.namespacedOpIdMap.get(namespacedOpId);
     if (!node) {
       throw new Error(
         `cannot find operation ${joinNamespaceOpId(namespace, opId)}`,

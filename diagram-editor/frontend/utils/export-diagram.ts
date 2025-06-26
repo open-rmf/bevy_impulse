@@ -15,7 +15,7 @@ export function exportDiagram(
     ops: {},
   };
 
-  for (const node of nodeManager.nodes) {
+  for (const node of nodeManager.iterNodes()) {
     if (isOperationNode(node)) {
       diagram.ops[node.data.opId] = node.data.op;
     }
