@@ -13,7 +13,7 @@ use tar::Archive;
 
 // This will include the bytes of the dist.tar.gz file from the OUT_DIR
 // The path is constructed at compile time.
-const DIST_TAR_GZ: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/dist.tar.gz"));
+const DIST_TAR_GZ: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/dist.tar.gz"));
 
 /// Create a new [`axum::Router`] with routes for the diagram editor.
 pub fn new_router() -> Router {

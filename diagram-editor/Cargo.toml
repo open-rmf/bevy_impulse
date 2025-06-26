@@ -14,6 +14,9 @@ categories = [
   "concurrency",
   "game-development",
 ]
+exclude = [
+  "/build.rs"
+]
 
 [lib]
 path = "server/lib.rs"

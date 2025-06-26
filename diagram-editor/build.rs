@@ -1,7 +1,8 @@
 /// Builds the frontend and packages it into a tar.gz archive.
 /// This requires `pnpm` and all the js dependencies to be available.
 ///
-/// TODO: When publishing, this build script should be excluded. Include a prebuilt tarball instead.
+/// This build script is excluded from the crate, the output tarball is included instead.
+/// This allows downstream to build the crate without any of the js stack.
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::fs::File;
@@ -14,7 +15,7 @@ fn main() {
     println!("cargo:rerun-if-changed=package.json");
     println!("cargo:rerun-if-changed=pnpm-lock.yaml");
     println!("cargo:rerun-if-changed=rsbuild.config.ts");
-    println!("cargo:rerun-if-changed=src/");
+    println!("cargo:rerun-if-changed=frontend");
 
     let status = Command::new("pnpm")
         .arg("build")
@@ -26,12 +27,15 @@ fn main() {
     }
 
     let dist_dir_path = "dist";
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
+    // We put the output in `CARGO_MANIFEST_DIR` instead of `OUT_DIR` because we want to include
+    // it in the crate.
+    let out_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let output_tar_gz_path = out_dir.join("dist.tar.gz");
 
     if std::path::Path::new(dist_dir_path).exists() {
         let tar_gz_file = File::create(&output_tar_gz_path)
-            .expect("Failed to create output tar.gz file in OUT_DIR");
+            .expect("Failed to create output tar.gz file in CARGO_MANIFEST_DIR");
         let enc = GzEncoder::new(tar_gz_file, Compression::default());
         let mut tar_builder = Builder::new(enc);
 

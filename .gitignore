@@ -8,6 +8,7 @@ node_modules
 
 # diagram-editor
 /diagram-editor/dist
+/diagram-editor/dist.tar.gz
 
 # storybook
 *storybook.log
