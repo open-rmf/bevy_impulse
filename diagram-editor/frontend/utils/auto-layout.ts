@@ -59,6 +59,7 @@ export function autoLayout(
   for (let ctx = fifo.shift(); ctx; ctx = fifo.shift()) {
     const { node, depth } = ctx;
     const outEdges = getOutEdges(node.id);
+    console.log(node.id, outEdges);
     let currentX = node.position.x - ((outEdges.length - 1) * cellWidth) / 2;
     for (const edge of outEdges) {
       const nextNode = getNode(edge.target);

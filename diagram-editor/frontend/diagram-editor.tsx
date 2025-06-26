@@ -316,7 +316,7 @@ const DiagramEditor = () => {
 
                   const startEdge = edges.find((e) => e.source === START_ID);
                   if (startEdge) {
-                    const changes = autoLayout(startEdge.target, nodes, edges, {
+                    const changes = autoLayout(START_ID, nodes, edges, {
                       rootPosition: startNode.position,
                     });
                     setNodes((prev) => applyNodeChanges(changes, prev));
