@@ -1,23 +1,15 @@
-import AutoLayoutIcon from '@mui/icons-material/Dashboard';
-import DownloadIcon from '@mui/icons-material/Download';
-import UploadIcon from '@mui/icons-material/UploadFile';
 import {
   Alert,
-  Button,
-  ButtonGroup,
   Popover,
   type PopoverPosition,
   type PopoverProps,
   Snackbar,
-  styled,
-  Tooltip,
 } from '@mui/material';
 import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   type EdgeRemoveChange,
-  Panel,
   ReactFlow,
   type ReactFlowInstance,
   reconnectEdge,
@@ -25,10 +17,10 @@ import {
 import { inflateSync, strFromU8 } from 'fflate';
 import React, { useEffect } from 'react';
 import AddOperation from './add-operation';
+import CommandPanel from './command-panel';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
-import { NodeManager } from './node-manager';
 import { NODE_TYPES, START_ID } from './nodes';
 import type {
   DiagramEditorEdge,
@@ -38,18 +30,6 @@ import type {
 import { allowEdges as getAllowEdges, isOperationNode } from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
-
-const VisuallyHiddenInput = styled('input')({
-  clip: 'rect(0 0 0 0)',
-  clipPath: 'inset(50%)',
-  height: 1,
-  overflow: 'hidden',
-  position: 'absolute',
-  bottom: 0,
-  left: 0,
-  whiteSpace: 'nowrap',
-  width: 1,
-});
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -72,7 +52,6 @@ const DiagramEditor = () => {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
-  const nodeManager = React.useMemo(() => new NodeManager(nodes), [nodes]);
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
 
   const [openAddOpPopover, setOpenAddOpPopover] = React.useState(false);
@@ -159,6 +138,13 @@ const DiagramEditor = () => {
     [closeAllPopovers],
   );
 
+  const [errorToast, setErrorToast] = React.useState<string | null>(null);
+  const [openErrorToast, setOpenErrorToast] = React.useState(false);
+  const showErrorToast = React.useCallback((message: string) => {
+    setErrorToast(message);
+    setOpenErrorToast(true);
+  }, []);
+
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     const diagramParam = queryParams.get('diagram');
@@ -177,16 +163,13 @@ const DiagramEditor = () => {
       loadDiagram(diagramJson);
     } catch (e) {
       if (e instanceof Error) {
-        setErrorToast(`failed to load diagram: ${e.message}`);
-        setOpenErrorToast(true);
+        showErrorToast(`failed to load diagram: ${e.message}`);
       } else {
         throw e;
       }
     }
-  }, [loadDiagram]);
+  }, [loadDiagram, showErrorToast]);
 
-  const [errorToast, setErrorToast] = React.useState<string | null>(null);
-  const [openErrorToast, setOpenErrorToast] = React.useState(false);
   const [openExportDiagramDialog, setOpenExportDiagramDialog] =
     React.useState(false);
 
@@ -228,6 +211,9 @@ const DiagramEditor = () => {
 
           const allowedEdges = getAllowEdges(sourceNode, targetNode);
           if (allowedEdges.length === 0) {
+            showErrorToast(
+              `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
+            );
             return;
           }
 
@@ -297,66 +283,17 @@ const DiagramEditor = () => {
         colorMode="dark"
         deleteKeyCode={'Delete'}
       >
-        <Panel position="top-center">
-          <ButtonGroup variant="contained">
-            <Tooltip title="Auto Layout">
-              <Button
-                onClick={() => {
-                  const startNode = nodes.find((n) => n.id === START_ID);
-                  if (!startNode) {
-                    console.error(
-                      'error applying auto layout: cannot find start node',
-                    );
-                    return;
-                  }
-                  // reset all positions
-                  for (const n of nodes) {
-                    n.position = { ...startNode.position };
-                  }
-
-                  const startEdge = edges.find((e) => e.source === START_ID);
-                  if (startEdge) {
-                    const changes = autoLayout(START_ID, nodes, edges, {
-                      rootPosition: startNode.position,
-                    });
-                    setNodes((prev) => applyNodeChanges(changes, prev));
-                  }
-                }}
-              >
-                <AutoLayoutIcon />
-              </Button>
-            </Tooltip>
-            <Tooltip title="Export Diagram">
-              <Button
-                onClick={() => {
-                  setOpenExportDiagramDialog(true);
-                }}
-              >
-                <DownloadIcon />
-              </Button>
-            </Tooltip>
-            <Tooltip title="Load Diagram">
-              {/* biome-ignore lint/a11y/useValidAriaRole: button used as a label, should have no role */}
-              <Button component="label" role={undefined}>
-                <UploadIcon />
-                <VisuallyHiddenInput
-                  type="file"
-                  accept="application/json"
-                  aria-label="load diagram"
-                  onChange={async (ev) => {
-                    if (ev.target.files) {
-                      loadDiagram(await ev.target.files[0].text());
-                    }
-                  }}
-                  onClick={(ev) => {
-                    // Reset the input value so that the same file can be loaded multiple times
-                    (ev.target as HTMLInputElement).value = '';
-                  }}
-                />
-              </Button>
-            </Tooltip>
-          </ButtonGroup>
-        </Panel>
+        <CommandPanel
+          onNodeChanges={React.useCallback(
+            (changes) => setNodes((prev) => applyNodeChanges(changes, prev)),
+            [],
+          )}
+          onExportClick={React.useCallback(
+            () => setOpenExportDiagramDialog(true),
+            [],
+          )}
+          onLoadDiagram={loadDiagram}
+        />
       </ReactFlow>
       <Popover
         open={openAddOpPopover}
@@ -447,7 +384,7 @@ const DiagramEditor = () => {
       <ExportDiagramDialog
         open={openExportDiagramDialog}
         onClose={() => setOpenExportDiagramDialog(false)}
-        nodes={nodeManager}
+        nodes={nodes}
         edges={edges}
       />
     </>

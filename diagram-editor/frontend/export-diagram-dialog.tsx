@@ -14,14 +14,14 @@ import {
 } from '@mui/material';
 import { deflateSync, strToU8 } from 'fflate';
 import React from 'react';
-import type { NodeManager } from './node-manager';
-import type { DiagramEditorEdge } from './types';
+import { NodeManager } from './node-manager';
+import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {
   open: boolean;
   onClose: () => void;
-  nodes: NodeManager;
+  nodes: DiagramEditorNode[];
   edges: DiagramEditorEdge[];
 }
 
@@ -45,7 +45,8 @@ function ExportDiagramDialog({
       return;
     }
 
-    const diagram = exportDiagram(nodes, edges);
+    const nodeManager = new NodeManager(nodes);
+    const diagram = exportDiagram(nodeManager, edges);
     const diagramJsonMin = JSON.stringify(diagram);
     // Compress the JSON string to Uint8Array
     const compressedData = deflateSync(strToU8(diagramJsonMin));
