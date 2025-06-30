@@ -2,7 +2,7 @@ import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
 
-import type React from 'react';
+import React from 'react';
 
 export interface BaseNodeProps extends NodeProps {
   icon?: React.JSX.Element | string;
@@ -35,10 +35,15 @@ function BaseNode({
         />
       )}
       <Button
-        fullWidth
         startIcon={icon}
         variant={selected ? 'contained' : 'outlined'}
-        sx={{ textTransform: 'none' }}
+        sx={{
+          textTransform: 'none',
+          // The "contained" and "outlined" variant has a 1px size difference, causing ReactFlow
+          // to recompute the node's dimensions. Set a fixed height to prevent that
+          // from happening.
+          height: '3em',
+        }}
       >
         {label}
       </Button>
