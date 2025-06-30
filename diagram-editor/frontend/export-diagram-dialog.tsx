@@ -1,6 +1,3 @@
-import CheckIcon from '@mui/icons-material/Check';
-import CopyIcon from '@mui/icons-material/ContentCopy';
-import DownloadIcon from '@mui/icons-material/Download';
 import {
   Button,
   ButtonGroup,
@@ -15,6 +12,7 @@ import {
 import { deflateSync, strToU8 } from 'fflate';
 import React from 'react';
 import { NodeManager } from './node-manager';
+import { MaterialSymbol } from './nodes/icons';
 import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { exportDiagram } from './utils/export-diagram';
 
@@ -119,7 +117,11 @@ function ExportDiagramDialog({
                 setCopiedShareLink(true);
               }}
             >
-              {copiedShareLink ? <CheckIcon /> : <CopyIcon />}
+              {copiedShareLink ? (
+                <MaterialSymbol symbol="check" />
+              ) : (
+                <MaterialSymbol symbol="content_copy" />
+              )}
             </Button>
           </ButtonGroup>
           <Stack direction="row" justifyContent="space-between">
@@ -127,7 +129,7 @@ function ExportDiagramDialog({
             <Button
               variant="contained"
               onClick={handleDownload}
-              startIcon={<DownloadIcon />}
+              startIcon={<MaterialSymbol symbol="download" />}
             >
               Download
             </Button>

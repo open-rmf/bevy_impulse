@@ -1,25 +1,76 @@
-import TransformIcon from '@mui/icons-material/ChangeCircleOutlined';
-import {
-  default as BufferAccessIcon,
-  default as BufferIcon,
-} from '@mui/icons-material/CloudOutlined';
-import ForkCloneIcon from '@mui/icons-material/ContentCopyOutlined';
-import NodeIcon from '@mui/icons-material/ExtensionOutlined';
-import SplitIcon from '@mui/icons-material/ForkLeftOutlined';
-import ForkResult from '@mui/icons-material/ForkRightOutlined';
-import ListenIcon from '@mui/icons-material/HearingOutlined';
-import {
-  default as JoinIcon,
-  default as SerializedJoinIcon,
-} from '@mui/icons-material/Merge';
-import StreamOutIcon from '@mui/icons-material/Notes';
-import ScopeIcon from '@mui/icons-material/Rectangle';
-import SectionIcon from '@mui/icons-material/SelectAllOutlined';
-import UnzipIcon from '@mui/icons-material/UnarchiveOutlined';
+import { Box, type BoxProps } from '@mui/material';
 import type React from 'react';
-
 import type { DiagramOperation } from '../types';
 import { exhaustiveCheck } from '../utils';
+
+export interface MaterialSymbolProps extends BoxProps {
+  symbol: string;
+}
+
+export function MaterialSymbol({
+  symbol,
+  ...otherProps
+}: MaterialSymbolProps): React.JSX.Element {
+  return (
+    <Box component="span" className="material-symbols-outlined" {...otherProps}>
+      {symbol}
+    </Box>
+  );
+}
+
+export function NodeIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="line_start_circle" />;
+}
+
+export function ForkCloneIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="content_copy" />;
+}
+
+export function TransformIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="change_circle" />;
+}
+
+export function BufferIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="database" />;
+}
+
+export function BufferAccessIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="database_upload" />;
+}
+
+export function SplitIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="call_split" />;
+}
+
+export function ForkResultIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="alt_route" />;
+}
+
+export function ListenIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="hearing" />;
+}
+
+export function JoinIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="arrow_and_edge" />;
+}
+
+export const SerializedJoinIcon = JoinIcon;
+
+export function StreamOutIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="notes" />;
+}
+
+export function ScopeIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="rectangle" />;
+}
+
+export function SectionIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="select_all" />;
+}
+
+export function UnzipIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="format_list_numbered" />;
+}
 
 export function getIcon(op: DiagramOperation): React.ComponentType {
   switch (op.type) {
@@ -32,7 +83,7 @@ export function getIcon(op: DiagramOperation): React.ComponentType {
     case 'unzip':
       return UnzipIcon;
     case 'fork_result':
-      return ForkResult;
+      return ForkResultIcon;
     case 'split':
       return SplitIcon;
     case 'join':
@@ -56,22 +107,3 @@ export function getIcon(op: DiagramOperation): React.ComponentType {
       throw new Error('unknown op');
   }
 }
-
-export { default as TransformIcon } from '@mui/icons-material/ChangeCircleOutlined';
-export {
-  default as BufferAccessIcon,
-  default as BufferIcon,
-} from '@mui/icons-material/CloudOutlined';
-export { default as ForkCloneIcon } from '@mui/icons-material/ContentCopyOutlined';
-export { default as NodeIcon } from '@mui/icons-material/ExtensionOutlined';
-export { default as SplitIcon } from '@mui/icons-material/ForkLeftOutlined';
-export { default as ForkResultIcon } from '@mui/icons-material/ForkRightOutlined';
-export { default as ListenIcon } from '@mui/icons-material/HearingOutlined';
-export {
-  default as JoinIcon,
-  default as SerializedJoinIcon,
-} from '@mui/icons-material/MergeOutlined';
-export { default as StreamOutIcon } from '@mui/icons-material/Notes';
-export { default as ScopeIcon } from '@mui/icons-material/Rectangle';
-export { default as SectionIcon } from '@mui/icons-material/SelectAllOutlined';
-export { default as UnzipIcon } from '@mui/icons-material/UnarchiveOutlined';

@@ -1,4 +1,3 @@
-import DeleteIcon from '@mui/icons-material/Delete';
 import {
   Card,
   CardContent,
@@ -9,6 +8,7 @@ import {
 } from '@mui/material';
 import type { NodeRemoveChange, NodeReplaceChange } from '@xyflow/react';
 import type React from 'react';
+import { MaterialSymbol } from '../nodes/icons';
 import type { OperationNode, OperationNodeTypes } from '../types';
 
 export interface EditOperationFormProps<
@@ -34,7 +34,7 @@ function EditOperationForm({
             color="error"
             onClick={() => onDelete?.({ type: 'remove', id: node.id })}
           >
-            <DeleteIcon />
+            <MaterialSymbol symbol="delete" />
           </IconButton>
         }
       />

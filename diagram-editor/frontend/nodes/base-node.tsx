@@ -5,13 +5,13 @@ import { Handle, Position } from '@xyflow/react';
 import type React from 'react';
 
 export interface BaseNodeProps extends NodeProps {
-  icon?: React.JSX.Element;
+  icon?: React.JSX.Element | string;
   label: string;
   variant: 'input' | 'output' | 'inputOutput';
 }
 
 function BaseNode({
-  icon,
+  icon: materialIconOrSymbol,
   label,
   variant,
   isConnectable,
@@ -19,6 +19,12 @@ function BaseNode({
   sourcePosition = Position.Bottom,
   targetPosition = Position.Top,
 }: BaseNodeProps) {
+  const icon =
+    typeof materialIconOrSymbol === 'string' ? (
+      <span className={`material-symbols-${materialIconOrSymbol}`} />
+    ) : (
+      materialIconOrSymbol
+    );
   return (
     <Paper sx={{ minWidth: 100 }}>
       {(variant === 'input' || variant === 'inputOutput') && (

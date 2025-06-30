@@ -1,9 +1,8 @@
-import DownloadIcon from '@mui/icons-material/Download';
-import UploadIcon from '@mui/icons-material/UploadFile';
 import { Button, ButtonGroup, styled, Tooltip } from '@mui/material';
 import { type NodeChange, Panel } from '@xyflow/react';
 import React from 'react';
 import AutoLayoutButton from './auto-layout-button';
+import { MaterialSymbol } from './nodes/icons';
 import type { DiagramEditorNode } from './types';
 
 export interface CommandPanelProps {
@@ -35,13 +34,13 @@ function CommandPanel({
         <AutoLayoutButton onNodeChanges={onNodeChanges} />
         <Tooltip title="Export Diagram">
           <Button onClick={onExportClick}>
-            <DownloadIcon />
+            <MaterialSymbol symbol="download" />
           </Button>
         </Tooltip>
         <Tooltip title="Load Diagram">
           {/* biome-ignore lint/a11y/useValidAriaRole: button used as a label, should have no role */}
           <Button component="label" role={undefined}>
-            <UploadIcon />
+            <MaterialSymbol symbol="upload_file" />
             <VisuallyHiddenInput
               type="file"
               accept="application/json"

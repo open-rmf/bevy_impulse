@@ -1,8 +1,8 @@
-import AutoLayoutIcon from '@mui/icons-material/Dashboard';
 import { Button, Tooltip } from '@mui/material';
 import { type NodeChange, type ReactFlowState, useStore } from '@xyflow/react';
 import React from 'react';
 import { START_ID } from './nodes';
+import { MaterialSymbol } from './nodes/icons';
 import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { autoLayout } from './utils';
 
@@ -37,7 +37,7 @@ function AutoLayoutButton({ onNodeChanges }: AutoLayoutButtonProps) {
           onNodeChanges(changes);
         }}
       >
-        <AutoLayoutIcon />
+        <MaterialSymbol symbol="dashboard" />
       </Button>
     </Tooltip>
   );

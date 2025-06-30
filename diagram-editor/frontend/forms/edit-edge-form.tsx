@@ -1,4 +1,3 @@
-import DeleteIcon from '@mui/icons-material/Delete';
 import {
   Card,
   CardContent,
@@ -13,6 +12,7 @@ import {
 import type { EdgeRemoveChange, EdgeReplaceChange } from '@xyflow/react';
 import React from 'react';
 
+import { MaterialSymbol } from '../nodes/icons';
 import type {
   DiagramEditorEdge,
   EdgeData,
@@ -101,7 +101,7 @@ function EditEdgeForm({
             color="error"
             onClick={() => onDelete?.({ type: 'remove', id: edge.id })}
           >
-            <DeleteIcon />
+            <MaterialSymbol symbol="delete" />
           </IconButton>
         }
       />

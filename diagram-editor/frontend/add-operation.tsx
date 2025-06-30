@@ -56,7 +56,7 @@ function AddOperation({ onAdd }: AddOperationProps) {
           onAdd?.(
             createNodeChange({
               type: 'node',
-              builder: '',
+              builder: 'new_node',
               next: { builtin: 'dispose' },
             }),
           );
