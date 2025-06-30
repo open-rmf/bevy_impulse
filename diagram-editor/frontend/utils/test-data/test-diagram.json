@@ -5,7 +5,16 @@
   "ops": {
     "fork_clone": {
       "type": "fork_clone",
-      "next": ["mul3", "mul4"]
+      "next": [
+        "mul3",
+        "mul4",
+        "mul5",
+        "mul6",
+        "mul7",
+        "mul8",
+        "mul9",
+        "mul10"
+      ]
     },
     "mul3": {
       "type": "node",
@@ -25,9 +34,72 @@
     "mul4_buffer": {
       "type": "buffer"
     },
+    "mul5": {
+      "type": "node",
+      "builder": "mul",
+      "config": 5,
+      "next": "mul5_buffer"
+    },
+    "mul5_buffer": {
+      "type": "buffer"
+    },
+    "mul6": {
+      "type": "node",
+      "builder": "mul",
+      "config": 6,
+      "next": "mul6_buffer"
+    },
+    "mul6_buffer": {
+      "type": "buffer"
+    },
+    "mul7": {
+      "type": "node",
+      "builder": "mul",
+      "config": 7,
+      "next": "mul7_buffer"
+    },
+    "mul7_buffer": {
+      "type": "buffer"
+    },
+    "mul8": {
+      "type": "node",
+      "builder": "mul",
+      "config": 8,
+      "next": "mul8_buffer"
+    },
+    "mul8_buffer": {
+      "type": "buffer"
+    },
+    "mul9": {
+      "type": "node",
+      "builder": "mul",
+      "config": 9,
+      "next": "mul9_buffer"
+    },
+    "mul9_buffer": {
+      "type": "buffer"
+    },
+    "mul10": {
+      "type": "node",
+      "builder": "mul",
+      "config": 10,
+      "next": "mul10_buffer"
+    },
+    "mul10_buffer": {
+      "type": "buffer"
+    },
     "join": {
       "type": "join",
-      "buffers": ["mul3_buffer", "mul4_buffer"],
+      "buffers": [
+        "mul3_buffer",
+        "mul4_buffer",
+        "mul5_buffer",
+        "mul6_buffer",
+        "mul7_buffer",
+        "mul8_buffer",
+        "mul9_buffer",
+        "mul10_buffer"
+      ],
       "next": { "builtin": "terminate" }
     }
   }

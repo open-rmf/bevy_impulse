@@ -26,10 +26,6 @@ function AutoLayoutButton({ onNodeChanges }: AutoLayoutButtonProps) {
             console.error('error applying auto layout: cannot find start node');
             return;
           }
-          // reset all positions
-          for (const n of nodes) {
-            n.position = { ...startNode.position };
-          }
 
           const changes = autoLayout(START_ID, nodes, edges, {
             rootPosition: startNode.position,

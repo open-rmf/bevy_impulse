@@ -14,6 +14,8 @@ const DEFAULT_OPTIONS: AutoLayoutOptions = {
   cellHeight: 100,
 };
 
+type Position = { x: number; y: number };
+
 /**
  * Layout an array of diagram nodes so that they don't overlap.
  */
@@ -28,65 +30,77 @@ export function autoLayout(
 ): NodePositionChange[] {
   interface WorkingData {
     node: DiagramEditorNode;
+    position: Position;
     outEdges: DiagramEditorEdge[];
   }
 
-  const map = new Map(
-    nodes.map((node) => [node.id, { node, outEdges: [] } as WorkingData]),
+  const workingSet = new Map(
+    nodes.map((node) => [
+      node.id,
+      {
+        node,
+        position: { x: 0, y: 0 },
+        outEdges: [],
+      } as WorkingData,
+    ]),
   );
 
-  const getWorkingData = (id: string) => {
-    const workingData = map.get(id);
-    if (!workingData) {
+  const getData = (id: string) => {
+    const data = workingSet.get(id);
+    if (!data) {
       throw new Error(`node ${id} not found`);
     }
-    return workingData;
+    return data;
   };
 
   for (const edge of edges) {
-    const data = getWorkingData(edge.source);
+    const data = getData(edge.source);
     data.outEdges.push(edge);
   }
 
-  const getNode = (id: string) => getWorkingData(id).node;
-  const getOutEdges = (id: string) => getWorkingData(id).outEdges;
+  const fifo = [{ id: start, depth: 1 }];
+  const visited = new Set<string>();
 
-  const rootNode = getNode(start);
-  const rootPosition = { ...rootNode.position };
-  const changes: NodePositionChange[] = [];
-  const fifo = [{ node: getNode(start), depth: 1 }];
-  let maxX = rootNode.position.x;
   for (let ctx = fifo.shift(); ctx; ctx = fifo.shift()) {
-    const { node, depth } = ctx;
-    const outEdges = getOutEdges(node.id);
-    let currentX = node.position.x - ((outEdges.length - 1) * cellWidth) / 2;
+    const { id: parentId, depth } = ctx;
+    if (visited.has(parentId)) {
+      continue;
+    }
+    visited.add(parentId);
+
+    const parentData = getData(parentId);
+    const { position: parentPosition, outEdges } = parentData;
+    let offsetX = -((outEdges.length - 1) * cellWidth) / 2;
+
     for (const edge of outEdges) {
-      const nextNode = getNode(edge.target);
-      const position = { x: currentX, y: depth * cellHeight };
-      // If it is not in the initial position, that means that the node has multiple parents,
-      // in that case, move it to the center of its parents.
-      if (nextNode.position.x !== rootPosition.x) {
-        position.x = (nextNode.position.x + currentX) / 2;
-      }
-      currentX += cellWidth;
-      if (currentX > maxX) {
-        maxX = position.x;
-      }
+      const { position } = getData(edge.target);
+      position.x = parentPosition.x + position.x + offsetX;
+      position.y = depth * cellHeight;
+      offsetX += cellWidth;
 
-      changes.push({
-        id: nextNode.id,
-        type: 'position',
-        position,
-      });
-      nextNode.position = position;
-
-      const existing = fifo.findIndex((ctx) => ctx.node.id === nextNode.id);
+      // if it is already queued, move it to the back of the queue
+      const existing = fifo.findIndex((ctx) => ctx.id === edge.target);
       if (existing > -1) {
         fifo.splice(existing, 1);
       }
-      fifo.push({ node: nextNode, depth: depth + 1 });
+      fifo.push({ id: edge.target, depth: depth + 1 });
     }
   }
 
+  // `node.position` contains the original position
+  const startPosition = getData(start).node.position;
+  const changes: NodePositionChange[] = [];
+  // only make changes for visited node, meaning that unconnected nodes will not be affected.
+  for (const id of visited.values()) {
+    const { position } = getData(id);
+    changes.push({
+      id,
+      type: 'position',
+      position: {
+        x: startPosition.x + position.x,
+        y: startPosition.y + position.y,
+      },
+    });
+  }
   return changes;
 }
