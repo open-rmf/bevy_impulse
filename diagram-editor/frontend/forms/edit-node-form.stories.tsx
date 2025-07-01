@@ -34,7 +34,7 @@ export const Node: Story = {
     return (
       <EditNodeForm
         {...args}
-        onChange={(change) => {
+        onChanges={(change) => {
           updateArgs({ node: change.item });
         }}
       />
@@ -63,7 +63,7 @@ export const Buffer: Story = {
     return (
       <EditNodeForm
         {...args}
-        onChange={(change) => {
+        onChanges={(change) => {
           updateArgs({ node: change.item });
         }}
       />
@@ -93,7 +93,7 @@ export const Transform: Story = {
     return (
       <EditNodeForm
         {...args}
-        onChange={(change) => {
+        onChanges={(change) => {
           updateArgs({ node: change.item });
         }}
       />

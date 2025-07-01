@@ -38,7 +38,7 @@ function TransformForm(props: EditOperationFormProps<'transform'>) {
               },
             },
           };
-          props.onChange?.({
+          props.onChanges?.({
             type: 'replace',
             id: props.node.id,
             item: updatedNode,

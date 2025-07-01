@@ -1,4 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
+import { memo } from 'react';
 import type { SplitRemainingEdge } from '../types';
 
 export type SplitRemainingEdgeProps = Exclude<
@@ -10,4 +11,4 @@ function SplitRemainingEdgeComp(props: SplitRemainingEdgeProps) {
   return <StepEdge {...props} label="*" />;
 }
 
-export default SplitRemainingEdgeComp;
+export default memo(SplitRemainingEdgeComp);

@@ -5,16 +5,7 @@
   "ops": {
     "fork_clone": {
       "type": "fork_clone",
-      "next": [
-        "mul3",
-        "mul4",
-        "mul5",
-        "mul6",
-        "mul7",
-        "mul8",
-        "mul9",
-        "mul10"
-      ]
+      "next": ["mul3", "mul4", "mul5", "mul6", "mul7", "mul8", "mul9", "mul10"]
     },
     "mul3": {
       "type": "node",

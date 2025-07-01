@@ -17,7 +17,7 @@ const render: Story['render'] = (args) => {
   return (
     <EditEdgeForm
       {...args}
-      onChange={(change) => {
+      onChanges={(change) => {
         updateArgs({ edge: change.item });
       }}
     />

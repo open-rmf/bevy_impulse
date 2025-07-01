@@ -1,33 +1,37 @@
 import { TextField } from '@mui/material';
-import type { EdgeReplaceChange } from '@xyflow/react';
+import type { EdgeChange } from '@xyflow/react';
 import type { BufferKeyEdge, BufferSeqEdge } from '../types';
 
 export type BufferEdge = BufferKeyEdge | BufferSeqEdge;
 
 export interface BufferEdgeFormProps {
   edge: BufferEdge;
-  onChange?: (change: EdgeReplaceChange<BufferEdge>) => void;
+  onChanges?: (changes: EdgeChange<BufferEdge>[]) => void;
 }
 
-function BufferEdgeForm({ edge, onChange }: BufferEdgeFormProps) {
+function BufferEdgeForm({ edge, onChanges }: BufferEdgeFormProps) {
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     if (edge.type === 'bufferKey') {
       const newKey = event.target.value;
-      onChange?.({
-        type: 'replace',
-        id: edge.id,
-        item: { ...edge, data: { key: newKey } },
-      });
+      onChanges?.([
+        {
+          type: 'replace',
+          id: edge.id,
+          item: { ...edge, data: { key: newKey } },
+        },
+      ]);
     } else if (edge.type === 'bufferSeq') {
       const newSeq = Number.parseInt(event.target.value, 10);
       if (!Number.isNaN(newSeq)) {
-        onChange?.({
-          type: 'replace',
-          id: edge.id,
-          item: { ...edge, data: { seq: newSeq } },
-        });
+        onChanges?.([
+          {
+            type: 'replace',
+            id: edge.id,
+            item: { ...edge, data: { seq: newSeq } },
+          },
+        ]);
       }
     }
   };

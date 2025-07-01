@@ -6,7 +6,7 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import type { NodeRemoveChange, NodeReplaceChange } from '@xyflow/react';
+import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
 import type React from 'react';
 import { MaterialSymbol } from '../nodes/icons';
 import type { OperationNode, OperationNodeTypes } from '../types';
@@ -15,13 +15,13 @@ export interface EditOperationFormProps<
   NodeType extends OperationNodeTypes = OperationNodeTypes,
 > {
   node: OperationNode<NodeType>;
-  onChange?: (change: NodeReplaceChange<OperationNode>) => void;
+  onChanges?: (changes: NodeChange<OperationNode>[]) => void;
   onDelete?: (change: NodeRemoveChange) => void;
 }
 
 function EditOperationForm({
   node,
-  onChange,
+  onChanges,
   onDelete,
   children,
 }: React.PropsWithChildren<EditOperationFormProps>) {
@@ -47,11 +47,13 @@ function EditOperationForm({
             onChange={(ev) => {
               const updatedNode = { ...node };
               updatedNode.data.opId = ev.target.value;
-              onChange?.({
-                type: 'replace',
-                id: node.id,
-                item: updatedNode,
-              });
+              onChanges?.([
+                {
+                  type: 'replace',
+                  id: node.id,
+                  item: updatedNode,
+                },
+              ]);
             }}
           />
           {children}

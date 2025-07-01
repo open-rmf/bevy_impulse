@@ -9,7 +9,7 @@ import {
   Select,
   Stack,
 } from '@mui/material';
-import type { EdgeRemoveChange, EdgeReplaceChange } from '@xyflow/react';
+import type { EdgeChange, EdgeRemoveChange } from '@xyflow/react';
 import React from 'react';
 
 import { MaterialSymbol } from '../nodes/icons';
@@ -56,21 +56,23 @@ export function defaultEdgeData(type: EdgeTypes): EdgeData[EdgeTypes] {
 export interface EditEdgeFormProps {
   edge: DiagramEditorEdge;
   allowedEdgeTypes: EdgeTypes[];
-  onChange?: (change: EdgeReplaceChange<DiagramEditorEdge>) => void;
+  onChanges?: (changes: EdgeChange<DiagramEditorEdge>[]) => void;
   onDelete?: (change: EdgeRemoveChange) => void;
 }
 
 function EditEdgeForm({
   edge,
   allowedEdgeTypes,
-  onChange,
+  onChanges,
   onDelete,
 }: EditEdgeFormProps) {
   const subForm = React.useMemo(() => {
     switch (edge.type) {
       case 'bufferKey':
       case 'bufferSeq': {
-        return <BufferEdgeForm edge={edge as BufferEdge} onChange={onChange} />;
+        return (
+          <BufferEdgeForm edge={edge as BufferEdge} onChanges={onChanges} />
+        );
       }
       case 'forkResultOk':
       case 'forkResultErr': {
@@ -79,16 +81,16 @@ function EditEdgeForm({
       case 'splitKey':
       case 'splitRemaining':
       case 'splitSeq': {
-        return <SplitEdgeForm edge={edge as SplitEdge} onChange={onChange} />;
+        return <SplitEdgeForm edge={edge as SplitEdge} onChanges={onChanges} />;
       }
       case 'unzip': {
-        return <UnzipEdgeForm edge={edge as UnzipEdge} onChange={onChange} />;
+        return <UnzipEdgeForm edge={edge as UnzipEdge} onChanges={onChanges} />;
       }
       default: {
         return null;
       }
     }
-  }, [edge, onChange]);
+  }, [edge, onChanges]);
 
   const typeLabelId = React.useId();
 
@@ -117,11 +119,13 @@ function EditEdgeForm({
                 const newEdge = { ...edge };
                 newEdge.type = ev.target.value;
                 newEdge.data = defaultEdgeData(newEdge.type);
-                onChange?.({
-                  type: 'replace',
-                  id: edge.id,
-                  item: newEdge,
-                });
+                onChanges?.([
+                  {
+                    type: 'replace',
+                    id: edge.id,
+                    item: newEdge,
+                  },
+                ]);
               }}
             >
               {allowedEdgeTypes.map((t) => (

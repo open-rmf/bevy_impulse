@@ -1,4 +1,5 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
+import { memo } from 'react';
 import type { ForkResultOkEdge } from '../types';
 
 export type ForkResultOkEdgeProps = Exclude<
@@ -10,4 +11,4 @@ function ForkResultOkEdgeComp(props: ForkResultOkEdgeProps) {
   return <StepEdge {...props} label="ok" />;
 }
 
-export default ForkResultOkEdgeComp;
+export default memo(ForkResultOkEdgeComp);

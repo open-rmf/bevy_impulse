@@ -13,7 +13,7 @@ export function BufferForm(props: EditOperationFormProps<'buffer'>) {
             onChange={(_, checked) => {
               const updatedNode = { ...props.node };
               updatedNode.data.op.serialize = checked;
-              props.onChange?.({
+              props.onChanges?.({
                 type: 'replace',
                 id: props.node.id,
                 item: updatedNode,

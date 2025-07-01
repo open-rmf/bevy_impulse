@@ -1,4 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
+import React from 'react';
 import type { OperationNode } from '../types';
 import BaseNode from './base-node';
 import { NodeIcon } from './icons';
@@ -14,4 +15,4 @@ function NodeNode(props: NodeProps<OperationNode<'node'>>) {
   );
 }
 
-export default NodeNode;
+export default React.memo(NodeNode);

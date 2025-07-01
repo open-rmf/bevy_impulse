@@ -1,33 +1,37 @@
 import { TextField } from '@mui/material';
-import type { EdgeReplaceChange } from '@xyflow/react';
+import type { EdgeChange, EdgeReplaceChange } from '@xyflow/react';
 import type { SplitKeyEdge, SplitRemainingEdge, SplitSeqEdge } from '../types';
 
 export type SplitEdge = SplitKeyEdge | SplitSeqEdge | SplitRemainingEdge;
 
 export interface SplitEdgeFormProps {
   edge: SplitEdge;
-  onChange?: (change: EdgeReplaceChange<SplitEdge>) => void;
+  onChanges?: (change: EdgeChange<SplitEdge>[]) => void;
 }
 
-function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
+function SplitEdgeForm({ edge, onChanges }: SplitEdgeFormProps) {
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     if (edge.type === 'splitKey') {
       const newKey = event.target.value;
-      onChange?.({
-        type: 'replace',
-        id: edge.id,
-        item: { ...edge, data: { key: newKey } },
-      });
+      onChanges?.([
+        {
+          type: 'replace',
+          id: edge.id,
+          item: { ...edge, data: { key: newKey } },
+        },
+      ]);
     } else if (edge.type === 'splitSeq') {
       const newSeq = Number.parseInt(event.target.value, 10);
       if (!Number.isNaN(newSeq)) {
-        onChange?.({
-          type: 'replace',
-          id: edge.id,
-          item: { ...edge, data: { seq: newSeq } },
-        });
+        onChanges?.([
+          {
+            type: 'replace',
+            id: edge.id,
+            item: { ...edge, data: { seq: newSeq } },
+          },
+        ]);
       }
     }
   };

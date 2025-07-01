@@ -1,13 +1,13 @@
 import { TextField } from '@mui/material';
-import type { EdgeReplaceChange } from '@xyflow/react';
+import type { EdgeChange } from '@xyflow/react';
 import type { UnzipEdge } from '../types';
 
 export interface UnzipEdgeFormProps {
   edge: UnzipEdge;
-  onChange?: (change: EdgeReplaceChange<UnzipEdge>) => void;
+  onChanges?: (change: EdgeChange<UnzipEdge>[]) => void;
 }
 
-function UnzipEdgeForm({ edge, onChange }: UnzipEdgeFormProps) {
+function UnzipEdgeForm({ edge, onChanges }: UnzipEdgeFormProps) {
   return (
     <>
       <TextField
@@ -18,11 +18,13 @@ function UnzipEdgeForm({ edge, onChange }: UnzipEdgeFormProps) {
           const value = Number.parseInt(ev.target.value, 10);
           if (!Number.isNaN(value) && edge.data) {
             edge.data.seq = value;
-            onChange?.({
-              type: 'replace',
-              id: edge.id,
-              item: edge,
-            });
+            onChanges?.([
+              {
+                type: 'replace',
+                id: edge.id,
+                item: edge,
+              },
+            ]);
           }
         }}
       />

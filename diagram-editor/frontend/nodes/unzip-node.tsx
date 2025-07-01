@@ -1,4 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
+import React from 'react';
 import type { DiagramEditorNode } from '../types';
 import BaseNode from './base-node';
 import { UnzipIcon } from './icons';
@@ -14,4 +15,4 @@ function UnzipNode(props: NodeProps<DiagramEditorNode>) {
   );
 }
 
-export default UnzipNode;
+export default React.memo(UnzipNode);

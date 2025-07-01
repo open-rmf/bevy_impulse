@@ -9,7 +9,9 @@ import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  type EdgeChange,
   type EdgeRemoveChange,
+  type NodeChange,
   ReactFlow,
   type ReactFlowInstance,
   reconnectEdge,
@@ -52,7 +54,20 @@ const DiagramEditor = () => {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
+  const handleNodeChanges = React.useCallback(
+    (changes: NodeChange<DiagramEditorNode>[]) => {
+      setNodes((prev) => applyNodeChanges(changes, prev));
+    },
+    [],
+  );
+
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
+  const handleEdgeChanges = React.useCallback(
+    (changes: EdgeChange<DiagramEditorEdge>[]) => {
+      setEdges((prev) => applyEdgeChanges(changes, prev));
+    },
+    [],
+  );
 
   const [openAddOpPopover, setOpenAddOpPopover] = React.useState(false);
   const [addOpAnchorPos, setAddOpAnchorPos] = React.useState<PopoverPosition>({
@@ -190,15 +205,11 @@ const DiagramEditor = () => {
         onInit={(instance) => {
           reactFlowInstance.current = instance;
         }}
-        onNodesChange={(changes) => {
-          setNodes((prev) => applyNodeChanges(changes, prev));
-        }}
+        onNodesChange={handleNodeChanges}
         onNodesDelete={() => {
           closeAllPopovers();
         }}
-        onEdgesChange={(changes) => {
-          setEdges((prev) => applyEdgeChanges(changes, prev));
-        }}
+        onEdgesChange={handleEdgeChanges}
         onEdgesDelete={() => {
           closeAllPopovers();
         }}
@@ -284,10 +295,7 @@ const DiagramEditor = () => {
         deleteKeyCode={'Delete'}
       >
         <CommandPanel
-          onNodeChanges={React.useCallback(
-            (changes) => setNodes((prev) => applyNodeChanges(changes, prev)),
-            [],
-          )}
+          onNodeChanges={handleNodeChanges}
           onExportClick={React.useCallback(
             () => setOpenExportDiagramDialog(true),
             [],
@@ -316,7 +324,7 @@ const DiagramEditor = () => {
               );
             }
             newNode.position = newPos;
-            setNodes((prev) => applyNodeChanges([change], prev));
+            handleNodeChanges([change]);
             setOpenAddOpPopover(false);
           }}
         />
@@ -331,11 +339,9 @@ const DiagramEditor = () => {
         {selectedNode && (
           <EditNodeForm
             node={selectedNode}
-            onChange={(change) => {
-              setNodes((prev) => applyNodeChanges([change], prev));
-            }}
+            onChanges={handleNodeChanges}
             onDelete={(change) => {
-              setNodes((prev) => applyNodeChanges([change], prev));
+              handleNodeChanges([change]);
               const edgeChanges: EdgeRemoveChange[] = [];
               for (const edge of edges) {
                 if (edge.source === change.id || edge.target === change.id) {
@@ -345,7 +351,7 @@ const DiagramEditor = () => {
                   });
                 }
               }
-              setEdges((prev) => applyEdgeChanges(edgeChanges, prev));
+              handleEdgeChanges(edgeChanges);
               closeAllPopovers();
             }}
           />
@@ -357,11 +363,9 @@ const DiagramEditor = () => {
               selectedEdge.sourceNode,
               selectedEdge.targetNode,
             )}
-            onChange={(change) => {
-              setEdges((prev) => applyEdgeChanges([change], prev));
-            }}
-            onDelete={(change) => {
-              setEdges((prev) => applyEdgeChanges([change], prev));
+            onChanges={handleEdgeChanges}
+            onDelete={(changes) => {
+              setEdges((prev) => applyEdgeChanges([changes], prev));
               closeAllPopovers();
             }}
           />

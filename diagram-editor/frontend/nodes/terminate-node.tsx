@@ -1,6 +1,7 @@
 import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
+import React from 'react';
 import type { DiagramEditorNode } from '../types';
 
 function TerminateNode({
@@ -21,4 +22,4 @@ function TerminateNode({
   );
 }
 
-export default TerminateNode;
+export default React.memo(TerminateNode);

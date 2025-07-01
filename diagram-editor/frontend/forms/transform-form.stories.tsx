@@ -17,7 +17,7 @@ const render: Story['render'] = (args) => {
   return (
     <TransformForm
       {...args}
-      onChange={(change) => {
+      onChanges={(change) => {
         updateArgs({ node: change.item });
       }}
     />

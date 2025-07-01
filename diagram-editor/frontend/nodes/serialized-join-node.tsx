@@ -1,4 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
+import React from 'react';
 import type { DiagramEditorNode } from '../types';
 import BaseNode from './base-node';
 import { SerializedJoinIcon } from './icons';
@@ -14,4 +15,4 @@ function SerializedJoinNode(props: NodeProps<DiagramEditorNode>) {
   );
 }
 
-export default SerializedJoinNode;
+export default React.memo(SerializedJoinNode);
