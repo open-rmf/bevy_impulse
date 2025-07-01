@@ -34,6 +34,7 @@ function BaseNode({
         />
       )}
       <Button
+        fullWidth
         startIcon={icon}
         variant={selected ? 'contained' : 'outlined'}
         sx={{
