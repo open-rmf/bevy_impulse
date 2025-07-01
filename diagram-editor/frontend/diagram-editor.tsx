@@ -9,6 +9,7 @@ import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  Background,
   type EdgeChange,
   type EdgeRemoveChange,
   type NodeChange,
@@ -294,6 +295,7 @@ const DiagramEditor = () => {
         colorMode="dark"
         deleteKeyCode={'Delete'}
       >
+        <Background style={{ opacity: 0.5 }} />
         <CommandPanel
           onNodeChanges={handleNodeChanges}
           onExportClick={React.useCallback(
