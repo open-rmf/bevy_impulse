@@ -6,17 +6,22 @@ use axum::{
     routing::get,
     Router,
 };
+use bevy_impulse::DiagramElementRegistry;
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::io::Read;
 use tar::Archive;
+
+use crate::api::api_router;
+
+mod api;
 
 // This will include the bytes of the dist.tar.gz file from the OUT_DIR
 // The path is constructed at compile time.
 const DIST_TAR_GZ: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/dist.tar.gz"));
 
 /// Create a new [`axum::Router`] with routes for the diagram editor.
-pub fn new_router() -> Router {
+pub fn new_router(registry: &DiagramElementRegistry) -> Router {
     let dist = load_dist();
     let index_html = dist
         .get(std::path::Path::new("index.html"))
@@ -25,6 +30,7 @@ pub fn new_router() -> Router {
     Router::new()
         .route("/", get(move || handle_text_html(index_html)))
         .route("/{*path}", get(move |path| handle_asset(dist, path)))
+        .nest("/api", api_router(registry))
 }
 
 async fn handle_text_html(html: Vec<u8>) -> impl IntoResponse {
@@ -105,7 +111,7 @@ mod tests {
     };
     use tower::Service;
 
-    fn assert_index_respoonse_headers(response: &Response) {
+    fn assert_index_response_headers(response: &Response) {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response
@@ -120,22 +126,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_serves_index_html_with_root_url() {
-        let mut app = new_router();
+        let mut app = new_router(&DiagramElementRegistry::new());
         let response = app
             .call(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_index_respoonse_headers(&response);
+        assert_index_response_headers(&response);
     }
 
     #[tokio::test]
     async fn test_serves_index_html_with_direct_path() {
         let path = "/index.html";
-        let mut app = new_router();
+        let mut app = new_router(&DiagramElementRegistry::new());
         let response = app
             .call(Request::builder().uri(path).body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_index_respoonse_headers(&response);
+        assert_index_response_headers(&response);
     }
 }

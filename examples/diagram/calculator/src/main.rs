@@ -55,25 +55,7 @@ struct RunArgs {
 #[derive(Parser, Debug)]
 struct ServeArgs {}
 
-fn run(args: RunArgs) -> Result<(), Box<dyn Error>> {
-    let mut registry = DiagramElementRegistry::new();
-    registry.register_node_builder(
-        NodeBuilderOptions::new("add").with_name("Add"),
-        |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
-    );
-    registry.register_node_builder(
-        NodeBuilderOptions::new("sub").with_name("Subtract"),
-        |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
-    );
-    registry.register_node_builder(
-        NodeBuilderOptions::new("mul").with_name("Multiply"),
-        |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
-    );
-    registry.register_node_builder(
-        NodeBuilderOptions::new("div").with_name("Divide"),
-        |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
-    );
-
+fn run(args: RunArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     let mut app = bevy_app::App::new();
     app.add_plugins(ImpulsePlugin::default());
     let file = File::open(args.diagram).unwrap();
@@ -95,15 +77,36 @@ fn run(args: RunArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn serve(_args: ServeArgs) -> Result<(), Box<dyn Error>> {
+async fn serve(_args: ServeArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:3000");
 
-    let router = new_router();
+    let router = new_router(registry);
     let listener = tokio::net::TcpListener::bind("localhost:3000")
         .await
         .unwrap();
     axum::serve(listener, router).await?;
     Ok(())
+}
+
+fn create_registry() -> DiagramElementRegistry {
+    let mut registry = DiagramElementRegistry::new();
+    registry.register_node_builder(
+        NodeBuilderOptions::new("add").with_name("Add"),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
+    );
+    registry.register_node_builder(
+        NodeBuilderOptions::new("sub").with_name("Subtract"),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
+    );
+    registry.register_node_builder(
+        NodeBuilderOptions::new("mul").with_name("Multiply"),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
+    );
+    registry.register_node_builder(
+        NodeBuilderOptions::new("div").with_name("Divide"),
+        |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
+    );
+    registry
 }
 
 #[tokio::main]
@@ -112,8 +115,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     tracing_subscriber::fmt::init();
 
+    let registry = create_registry();
+
     match cli.command {
-        Commands::Run(args) => run(args),
-        Commands::Serve(args) => serve(args).await,
+        Commands::Run(args) => run(args, &registry),
+        Commands::Serve(args) => serve(args, &registry).await,
     }
 }
