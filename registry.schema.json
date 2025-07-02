@@ -111,9 +111,6 @@
     "NodeRegistration": {
       "type": "object",
       "properties": {
-        "$key$": {
-          "type": "string"
-        },
         "config_schema": {
           "$ref": "#/$defs/Schema"
         },
@@ -128,7 +125,6 @@
         }
       },
       "required": [
-        "$key$",
         "name",
         "request",
         "response",
