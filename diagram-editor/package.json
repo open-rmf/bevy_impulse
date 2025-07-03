@@ -9,6 +9,7 @@
     "test": "jest --watch",
     "check": "biome check --write",
     "dev": "rsbuild dev --open",
+    "dev:backend": "cargo run --manifest-path ../examples/diagram/calculator/Cargo.toml --no-default-features -F api -- serve --port 3001",
     "format": "biome format --write",
     "preview": "rsbuild preview",
     "storybook": "storybook dev -p 6006",
