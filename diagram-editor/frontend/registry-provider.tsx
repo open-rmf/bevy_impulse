@@ -14,17 +14,10 @@ import ajv from './utils/ajv';
 
 const validateRegistry = ajv.compile<DiagramElementRegistry>(registrySchema);
 
-type RegistryContextValue = {
-  registry: DiagramElementRegistry | null;
-  loading: boolean;
-  error: Error | null;
-};
-
-const RegistryContext = createContext<RegistryContextValue | null>(null);
+const RegistryContext = createContext<DiagramElementRegistry | null>(null);
 
 export const RegistryProvider = ({ children }: PropsWithChildren) => {
   const [registry, setRegistry] = useState<DiagramElementRegistry | null>(null);
-  const [loading, setLoading] = useState(true);
   const [showLoading, setShowLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -55,9 +48,6 @@ export const RegistryProvider = ({ children }: PropsWithChildren) => {
         console.error(err);
         setError(err as Error);
       },
-      complete: () => {
-        setLoading(false);
-      },
     });
 
     return () => {
@@ -81,7 +71,7 @@ export const RegistryProvider = ({ children }: PropsWithChildren) => {
     );
   }
 
-  if (loading) {
+  if (!registry) {
     if (showLoading) {
       return (
         <Box
@@ -100,7 +90,7 @@ export const RegistryProvider = ({ children }: PropsWithChildren) => {
   }
 
   return (
-    <RegistryContext.Provider value={{ registry, loading, error }}>
+    <RegistryContext.Provider value={registry}>
       {children}
     </RegistryContext.Provider>
   );
