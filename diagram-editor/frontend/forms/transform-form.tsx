@@ -38,11 +38,13 @@ function TransformForm(props: EditOperationFormProps<'transform'>) {
               },
             },
           };
-          props.onChanges?.({
-            type: 'replace',
-            id: props.node.id,
-            item: updatedNode,
-          });
+          props.onChanges?.([
+            {
+              type: 'replace',
+              id: props.node.id,
+              item: updatedNode,
+            },
+          ]);
         }}
       />
     </EditOperationForm>

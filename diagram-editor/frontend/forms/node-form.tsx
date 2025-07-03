@@ -13,11 +13,13 @@ function NodeForm(props: EditOperationFormProps<'node'>) {
         onChange={(ev) => {
           const updatedNode = { ...props.node };
           updatedNode.data.op.builder = ev.target.value;
-          props.onChanges?.({
-            type: 'replace',
-            id: props.node.id,
-            item: updatedNode,
-          });
+          props.onChanges?.([
+            {
+              type: 'replace',
+              id: props.node.id,
+              item: updatedNode,
+            },
+          ]);
         }}
       />
     </EditOperationForm>

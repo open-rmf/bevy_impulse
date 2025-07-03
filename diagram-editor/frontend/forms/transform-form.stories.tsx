@@ -17,8 +17,10 @@ const render: Story['render'] = (args) => {
   return (
     <TransformForm
       {...args}
-      onChanges={(change) => {
-        updateArgs({ node: change.item });
+      onChanges={(changes) => {
+        if (changes.length > 0 && changes[0].type === 'replace') {
+          updateArgs({ node: changes[0].item });
+        }
       }}
     />
   );
