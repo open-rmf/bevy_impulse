@@ -53,7 +53,10 @@ struct RunArgs {
 }
 
 #[derive(Parser, Debug)]
-struct ServeArgs {}
+struct ServeArgs {
+    #[arg(short, long, default_value_t = 3000)]
+    port: u16,
+}
 
 fn run(args: RunArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     let mut app = bevy_app::App::new();
@@ -77,11 +80,11 @@ fn run(args: RunArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn E
     Ok(())
 }
 
-async fn serve(_args: ServeArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
-    println!("Serving diagram editor at http://localhost:3000");
+async fn serve(args: ServeArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
+    println!("Serving diagram editor at http://localhost:{}", args.port);
 
     let router = new_router(registry);
-    let listener = tokio::net::TcpListener::bind("localhost:3000")
+    let listener = tokio::net::TcpListener::bind(("localhost", args.port))
         .await
         .unwrap();
     axum::serve(listener, router).await?;

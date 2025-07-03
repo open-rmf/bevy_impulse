@@ -1,8 +1,8 @@
-import { compile } from 'json-schema-to-typescript';
 import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs, { writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { compile } from 'json-schema-to-typescript';
 
 async function generate(
   name,
@@ -93,7 +93,7 @@ await generate(
   'frontend/diagram.preprocessed.schema.json',
 );
 await generate(
-  'Registry',
+  'DiagramElementRegistry',
   '../registry.schema.json',
   'frontend/types/registry.d.ts',
   'frontend/registry.preprocessed.schema.json',

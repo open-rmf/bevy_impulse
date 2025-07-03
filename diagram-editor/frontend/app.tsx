@@ -7,6 +7,7 @@ import { CssBaseline, createTheme, ThemeProvider } from '@mui/material';
 
 import './app.css';
 import DiagramEditor from './diagram-editor';
+import { RegistryProvider } from './registry-provider';
 
 const theme = createTheme({
   palette: {
@@ -19,7 +20,9 @@ const App = () => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <div style={{ width: '100vw', height: '100vh' }}>
-        <DiagramEditor />
+        <RegistryProvider>
+          <DiagramEditor />
+        </RegistryProvider>
       </div>
     </ThemeProvider>
   );

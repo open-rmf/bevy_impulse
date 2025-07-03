@@ -24,16 +24,20 @@ path = "server/lib.rs"
 [dependencies]
 axum = "0.8.4"
 bevy_impulse = { version = "0.0.2", path = "..", features = ["diagram"] }
-flate2 = "1.1.1"
+flate2 = { version = "1.1.1", optional = true }
 mime_guess = "2.0.5"
 serde = "1.0.219"
 serde_json = "1.0.140"
-tar = "0.4.44"
+tar = { version = "0.4.44", optional = true }
 
 [build-dependencies]
-flate2 = "1.1.1"
-tar = "0.4.44"
+flate2 = { version = "1.1.1", optional = true }
+tar = { version = "0.4.44", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
 tower = "0.5.2"
+
+[features]
+default = ["frontend"]
+frontend = ["dep:flate2", "dep:tar"]

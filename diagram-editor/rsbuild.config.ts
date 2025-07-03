@@ -2,6 +2,11 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 
 export default defineConfig({
+  server: {
+    proxy: {
+      '/api': 'http://localhost:3001',
+    },
+  },
   source: {
     entry: {
       index: './frontend/index.tsx',

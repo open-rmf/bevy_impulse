@@ -1,10 +1,8 @@
-import Ajv from 'ajv/dist/2020';
-import addFormats from 'ajv-formats';
 import { v4 as uuidv4 } from 'uuid';
-
 import diagramSchema from '../diagram.preprocessed.schema.json';
 import { START_ID, TERMINATE_ID } from '../nodes';
 import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
+import ajv from './ajv';
 import { buildEdges } from './operation';
 
 export interface Graph {
@@ -80,7 +78,4 @@ function buildGraph(diagram: Diagram): Graph {
   return graph;
 }
 
-const ajv = new Ajv();
-addFormats(ajv);
-ajv.addFormat('uint', /^[0-9]+$/);
 const validate = ajv.compile<Diagram>(diagramSchema);
