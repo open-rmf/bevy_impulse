@@ -35,11 +35,7 @@ use crate::{
 };
 
 use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
-use serde::{
-    de::DeserializeOwned,
-    ser::{SerializeMap, SerializeStruct},
-    Deserialize, Serialize,
-};
+use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
 use serde_json::json;
 use tracing::debug;
 
@@ -72,7 +68,8 @@ impl NodeRegistration {
         builder: &mut Builder,
         config: serde_json::Value,
     ) -> Result<DynNode, DiagramErrorCode> {
-        let n = (self.create_node_impl.borrow_mut())(builder, config)?;
+        let mut create_node_impl = self.create_node_impl.borrow_mut();
+        let n = create_node_impl(builder, config)?;
         debug!(
             "created node of {}, output: {:?}, input: {:?}",
             self.id, n.output, n.input
@@ -82,7 +79,7 @@ impl NodeRegistration {
 }
 
 type CreateNodeFn =
-    RefCell<Box<dyn FnMut(&mut Builder, JsonMessage) -> Result<DynNode, DiagramErrorCode>>>;
+    RefCell<Box<dyn FnMut(&mut Builder, JsonMessage) -> Result<DynNode, DiagramErrorCode> + Send>>;
 type DeserializeFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type SerializeFn = fn(&mut Builder) -> Result<DynForkResult, DiagramErrorCode>;
 type ForkCloneFn = fn(&mut Builder) -> Result<DynForkClone, DiagramErrorCode>;
@@ -155,7 +152,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     pub fn register_node_builder<Config, Request, Response, Streams>(
         mut self,
         options: NodeBuilderOptions,
-        mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
+        mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + Send + 'static,
     ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
@@ -588,7 +585,7 @@ pub trait IntoNodeRegistration {
     ) -> NodeRegistration;
 }
 
-type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section>;
+type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Section> + Send;
 
 #[derive(Serialize, JsonSchema)]
 pub struct SectionRegistration {
@@ -606,7 +603,8 @@ impl SectionRegistration {
         builder: &mut Builder,
         config: serde_json::Value,
     ) -> Result<Box<dyn Section>, DiagramErrorCode> {
-        let section = (self.create_section_impl.borrow_mut())(builder, config);
+        let mut create_section_impl = self.create_section_impl.borrow_mut();
+        let section = create_section_impl(builder, config);
         Ok(section)
     }
 }
@@ -624,8 +622,8 @@ where
 
 impl<F, SectionT, Config> IntoSectionRegistration<SectionT, Config> for F
 where
-    F: 'static + FnMut(&mut Builder, Config) -> SectionT,
-    SectionT: 'static + Section + SectionMetadataProvider,
+    F: FnMut(&mut Builder, Config) -> SectionT + Send + 'static,
+    SectionT: Section + SectionMetadataProvider + 'static,
     Config: DeserializeOwned + JsonSchema,
 {
     fn into_section_registration(
@@ -658,7 +656,7 @@ pub(super) struct MessageOperation {
     pub(super) deserialize_impl: Option<DeserializeFn>,
     pub(super) serialize_impl: Option<SerializeFn>,
     pub(super) fork_clone_impl: Option<ForkCloneFn>,
-    pub(super) unzip_impl: Option<Box<dyn PerformUnzip>>,
+    pub(super) unzip_impl: Option<Box<dyn PerformUnzip + Send>>,
     pub(super) fork_result_impl: Option<ForkResultFn>,
     pub(super) split_impl: Option<SplitFn>,
     pub(super) join_impl: Option<JoinFn>,
@@ -789,7 +787,7 @@ impl JsonSchema for MessageOperation {
     }
 }
 
-#[derive(JsonSchema)]
+#[derive(Serialize, JsonSchema)]
 pub struct MessageRegistration {
     pub(super) type_name: &'static str,
     pub(super) schema: Option<Schema>,
@@ -806,18 +804,6 @@ impl MessageRegistration {
             schema: None,
             operations: MessageOperation::new::<T>(),
         }
-    }
-}
-
-impl Serialize for MessageRegistration {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut s = serializer.serialize_struct("MessageRegistration", 3)?;
-        s.serialize_field("schema", &self.schema)?;
-        s.serialize_field("operations", &self.operations)?;
-        s.end()
     }
 }
 
@@ -1339,7 +1325,7 @@ impl DiagramElementRegistry {
     pub fn register_node_builder<Config, Request, Response, Streams: StreamPack>(
         &mut self,
         options: NodeBuilderOptions,
-        builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + 'static,
+        builder: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + Send + 'static,
     ) -> NodeRegistrationBuilder<Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
