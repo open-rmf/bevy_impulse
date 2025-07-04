@@ -1,5 +1,4 @@
 import type { NodeProps } from '@xyflow/react';
-import React from 'react';
 import type { DiagramEditorNode } from '../types';
 import BaseNode from './base-node';
 import { TransformIcon } from './icons';
@@ -15,4 +14,4 @@ function TransformNode(props: NodeProps<DiagramEditorNode>) {
   );
 }
 
-export default React.memo(TransformNode);
+export default TransformNode;

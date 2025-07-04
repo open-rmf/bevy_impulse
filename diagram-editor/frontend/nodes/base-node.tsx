@@ -1,7 +1,7 @@
 import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
-import type React from 'react';
+import React from 'react';
 
 export interface BaseNodeProps extends NodeProps {
   icon?: React.JSX.Element | string;
@@ -58,4 +58,4 @@ function BaseNode({
   );
 }
 
-export default BaseNode;
+export default React.memo(BaseNode);

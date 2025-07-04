@@ -1,18 +1,23 @@
-import { TextField } from '@mui/material';
+import { Autocomplete, TextField } from '@mui/material';
+import { useRegistry } from '../registry-provider';
 import EditOperationForm, {
   type EditOperationFormProps,
 } from './edit-operation-form';
 
 function NodeForm(props: EditOperationFormProps<'node'>) {
+  const registry = useRegistry();
+  const nodes = Object.keys(registry.nodes);
   return (
     <EditOperationForm {...props}>
-      <TextField
-        required
-        label="builder"
-        defaultValue={props.node.data.op.builder}
-        onChange={(ev) => {
+      <Autocomplete
+        freeSolo
+        autoSelect
+        options={nodes}
+        getOptionLabel={(option) => option}
+        value={props.node.data.op.builder}
+        onChange={(_, value) => {
           const updatedNode = { ...props.node };
-          updatedNode.data.op.builder = ev.target.value;
+          updatedNode.data.op.builder = value ?? '';
           props.onChanges?.([
             {
               type: 'replace',
@@ -21,6 +26,9 @@ function NodeForm(props: EditOperationFormProps<'node'>) {
             },
           ]);
         }}
+        renderInput={(params) => (
+          <TextField {...params} required label="builder" />
+        )}
       />
     </EditOperationForm>
   );

@@ -1,5 +1,4 @@
 import type { NodeProps } from '@xyflow/react';
-import React from 'react';
 import type { OperationNode } from '../types';
 import { isSectionBuilder } from '../utils';
 import BaseNode from './base-node';
@@ -19,4 +18,4 @@ function SectionNode(props: NodeProps<OperationNode<'section'>>) {
   );
 }
 
-export default React.memo(SectionNode);
+export default SectionNode;
