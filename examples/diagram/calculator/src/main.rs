@@ -15,8 +15,9 @@
  *
 */
 
+use bevy_app;
 use bevy_impulse::{
-    Diagram, DiagramElementRegistry, DiagramError, ImpulsePlugin, NodeBuilderOptions, Promise,
+    Diagram, DiagramElementRegistry, DiagramError, ImpulseAppPlugin, NodeBuilderOptions, Promise,
     RequestExt, RunCommandsOnWorldExt,
 };
 use bevy_impulse_diagram_editor::new_router;
@@ -58,9 +59,9 @@ struct ServeArgs {
     port: u16,
 }
 
-fn run(args: RunArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
+fn run(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     let mut app = bevy_app::App::new();
-    app.add_plugins(ImpulsePlugin::default());
+    app.add_plugins(ImpulseAppPlugin::default());
     let file = File::open(args.diagram).unwrap();
     let diagram = Diagram::from_reader(file)?;
 
@@ -80,7 +81,7 @@ fn run(args: RunArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn E
     Ok(())
 }
 
-async fn serve(args: ServeArgs, registry: &DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
+async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:{}", args.port);
 
     let router = new_router(registry);
@@ -121,7 +122,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let registry = create_registry();
 
     match cli.command {
-        Commands::Run(args) => run(args, &registry),
-        Commands::Serve(args) => serve(args, &registry).await,
+        Commands::Run(args) => run(args, registry),
+        Commands::Serve(args) => serve(args, registry).await,
     }
 }

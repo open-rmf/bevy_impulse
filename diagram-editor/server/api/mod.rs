@@ -1,13 +1,17 @@
 use axum::{routing::get, Router};
 use bevy_impulse::DiagramElementRegistry;
 
-pub fn api_router(registry: &DiagramElementRegistry) -> Router {
-    Router::new().route(
-        "/registry",
-        get(axum::Json(
-            serde_json::to_value(registry).expect("failed to serialize registry"),
-        )),
-    )
+mod executor;
+
+pub fn api_router(registry: DiagramElementRegistry) -> Router {
+    Router::new()
+        .route(
+            "/registry",
+            get(axum::Json(
+                serde_json::to_value(&registry).expect("failed to serialize registry"),
+            )),
+        )
+        .nest("/executor", executor::router(registry))
 }
 
 #[cfg(test)]
@@ -28,7 +32,7 @@ mod tests {
         registry.register_node_builder(NodeBuilderOptions::new("x2"), |builder, _config: ()| {
             builder.create_map_block(|req: f64| req * 2.0)
         });
-        let mut app = api_router(&registry);
+        let mut app = api_router(registry);
 
         let path = "/registry";
         let response = app
