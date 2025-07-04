@@ -15,7 +15,7 @@ mod frontend {
     pub fn build_frontend() {
         println!("cargo:rerun-if-changed=build.rs");
         println!("cargo:rerun-if-changed=package.json");
-        println!("cargo:rerun-if-changed=pnpm-lock.yaml");
+        println!("cargo:rerun-if-changed=../pnpm-lock.yaml");
         println!("cargo:rerun-if-changed=rsbuild.config.ts");
         println!("cargo:rerun-if-changed=frontend");
 
