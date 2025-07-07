@@ -20,7 +20,7 @@ use bevy_impulse::{
     Diagram, DiagramElementRegistry, DiagramError, ImpulseAppPlugin, NodeBuilderOptions, Promise,
     RequestExt, RunCommandsOnWorldExt,
 };
-use bevy_impulse_diagram_editor::new_router;
+use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use clap::Parser;
 use std::{error::Error, fs::File, str::FromStr};
 
@@ -84,7 +84,7 @@ fn run(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Er
 async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:{}", args.port);
 
-    let router = new_router(registry);
+    let router = new_router(registry, ServerOptions::default());
     let listener = tokio::net::TcpListener::bind(("localhost", args.port))
         .await
         .unwrap();

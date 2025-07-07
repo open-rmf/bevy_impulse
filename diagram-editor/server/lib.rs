@@ -1,20 +1,26 @@
 use axum::Router;
 use bevy_impulse::DiagramElementRegistry;
 
-use crate::api::api_router;
+use crate::api::{api_router, ApiOptions};
 
-mod api;
+pub mod api;
 #[cfg(feature = "frontend")]
 mod frontend;
 
+#[derive(Default)]
+#[non_exhaustive]
+pub struct ServerOptions {
+    pub api: ApiOptions,
+}
+
 /// Create a new [`axum::Router`] with routes for the diagram editor.
-pub fn new_router(registry: DiagramElementRegistry) -> Router {
+pub fn new_router(registry: DiagramElementRegistry, options: ServerOptions) -> Router {
     let router = Router::new();
 
     #[cfg(feature = "frontend")]
     let router = frontend::add_frontend_routes(router);
 
-    router.nest("/api", api_router(registry))
+    router.nest("/api", api_router(registry, options.api))
 }
 
 #[cfg(test)]
@@ -42,7 +48,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_serves_index_html_with_root_url() {
-        let mut app = new_router(DiagramElementRegistry::new());
+        let mut app = new_router(DiagramElementRegistry::new(), ServerOptions::default());
         let response = app
             .call(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
@@ -53,7 +59,7 @@ mod tests {
     #[tokio::test]
     async fn test_serves_index_html_with_direct_path() {
         let path = "/index.html";
-        let mut app = new_router(DiagramElementRegistry::new());
+        let mut app = new_router(DiagramElementRegistry::new(), ServerOptions::default());
         let response = app
             .call(Request::builder().uri(path).body(Body::empty()).unwrap())
             .await
