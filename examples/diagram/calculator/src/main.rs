@@ -84,7 +84,9 @@ fn run(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Er
 async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:{}", args.port);
 
-    let router = new_router(registry, ServerOptions::default());
+    let mut app = bevy_app::App::new();
+    app.add_plugins(ImpulseAppPlugin::default());
+    let router = new_router(&mut app, registry, ServerOptions::default());
     let listener = tokio::net::TcpListener::bind(("localhost", args.port))
         .await
         .unwrap();

@@ -83,7 +83,7 @@ fn internal_server_error_response() -> Response {
         .unwrap() // Should not fail
 }
 
-pub fn add_frontend_routes(router: Router) -> Router {
+pub fn with_frontend_routes(router: Router) -> Router {
     let dist = load_dist();
     let index_html = dist
         .get(std::path::Path::new("index.html"))
@@ -93,4 +93,49 @@ pub fn add_frontend_routes(router: Router) -> Router {
     router
         .route("/", get(move || handle_text_html(index_html)))
         .route("/{*path}", get(move |path| handle_asset(dist, path)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{header, Request, StatusCode},
+        response::Response,
+    };
+    use tower::Service;
+
+    fn assert_index_response_headers(response: &Response) {
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .expect("Content-Type header missing")
+                .to_str()
+                .unwrap(),
+            "text/html"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_serves_index_html_with_root_url() {
+        let mut router = with_frontend_routes(Router::new());
+        let response = router
+            .call(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_index_response_headers(&response);
+    }
+
+    #[tokio::test]
+    async fn test_serves_index_html_with_direct_path() {
+        let path = "/index.html";
+        let mut router = with_frontend_routes(Router::new());
+        let response = router
+            .call(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_index_response_headers(&response);
+    }
 }

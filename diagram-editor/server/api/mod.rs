@@ -9,7 +9,11 @@ pub struct ApiOptions {
     pub executor: executor::ExecutorOptions,
 }
 
-pub fn api_router(registry: DiagramElementRegistry, options: ApiOptions) -> Router {
+pub fn api_router(
+    app: &mut bevy_app::App,
+    registry: DiagramElementRegistry,
+    options: ApiOptions,
+) -> Router {
     Router::new()
         .route(
             "/registry",
@@ -19,7 +23,7 @@ pub fn api_router(registry: DiagramElementRegistry, options: ApiOptions) -> Rout
         )
         .nest(
             "/executor",
-            executor::new_router(registry, options.executor),
+            executor::new_router(app, registry, options.executor),
         )
 }
 
@@ -37,11 +41,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_serves_registry() {
+        let mut app = bevy_app::App::new();
         let mut registry = DiagramElementRegistry::new();
         registry.register_node_builder(NodeBuilderOptions::new("x2"), |builder, _config: ()| {
             builder.create_map_block(|req: f64| req * 2.0)
         });
-        let mut router = api_router(registry, ApiOptions::default());
+        let mut router = api_router(&mut app, registry, ApiOptions::default());
 
         let path = "/registry";
         let response = router

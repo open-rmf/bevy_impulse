@@ -1,19 +1,17 @@
 use std::{
     sync::{Arc, Mutex},
-    thread,
     time::Duration,
 };
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
-use bevy_app::{AppExit, Update};
 use bevy_ecs::{
     event::EventWriter,
     system::{ResMut, Resource},
 };
-use bevy_impulse::{Diagram, DiagramElementRegistry, ImpulseAppPlugin, Promise, RequestExt};
+use bevy_impulse::{Diagram, DiagramElementRegistry, Promise, RequestExt};
 use serde::Deserialize;
 use tokio::sync::mpsc::error::TryRecvError;
-use tracing::{debug, error};
+use tracing::error;
 
 struct Context {
     diagram: Diagram,
@@ -82,7 +80,7 @@ struct RequestReceiver(tokio::sync::mpsc::Receiver<Context>);
 fn execute_requests(
     mut rx: ResMut<RequestReceiver>,
     mut cmds: bevy_ecs::system::Commands,
-    mut app_exit_events: EventWriter<AppExit>,
+    mut app_exit_events: EventWriter<bevy_app::AppExit>,
 ) {
     let rx = &mut rx.0;
     match rx.try_recv() {
@@ -120,18 +118,15 @@ impl Default for ExecutorOptions {
     }
 }
 
-pub(super) fn new_router(registry: DiagramElementRegistry, options: ExecutorOptions) -> Router {
+pub(super) fn new_router(
+    app: &mut bevy_app::App,
+    registry: DiagramElementRegistry,
+    options: ExecutorOptions,
+) -> Router {
     let (tx, rx) = tokio::sync::mpsc::channel::<Context>(10);
 
-    let mut app = bevy_app::App::new();
-    app.add_plugins(ImpulseAppPlugin::default());
     app.insert_resource(RequestReceiver(rx));
-    app.add_systems(Update, execute_requests);
-    thread::spawn(move || {
-        debug!("bevy app started");
-        app.run();
-        debug!("bevy app exited");
-    });
+    app.add_systems(bevy_app::Update, execute_requests);
 
     Router::new()
         .route("/run", post(post_run))
@@ -144,12 +139,14 @@ pub(super) fn new_router(registry: DiagramElementRegistry, options: ExecutorOpti
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use super::*;
     use axum::{
         body,
         http::{header, Request},
     };
-    use bevy_impulse::NodeBuilderOptions;
+    use bevy_impulse::{ImpulseAppPlugin, NodeBuilderOptions};
     use mime_guess::mime;
     use serde_json::json;
     use tower::Service;
@@ -175,7 +172,23 @@ mod tests {
         }))
         .unwrap();
 
-        let mut router = new_router(registry, ExecutorOptions::default());
+        let mut app = bevy_app::App::new();
+        app.add_plugins(ImpulseAppPlugin::default());
+        let (send_stop, mut recv_stop) = tokio::sync::oneshot::channel();
+        app.add_systems(
+            bevy_app::Update,
+            move |mut app_exit: EventWriter<bevy_app::AppExit>| {
+                if let Ok(_) = recv_stop.try_recv() {
+                    app_exit.send_default();
+                }
+            },
+        );
+
+        let mut router = new_router(&mut app, registry, ExecutorOptions::default());
+        let join_handle = thread::spawn(move || {
+            app.run();
+        });
+
         let request_body = PostRunRequest {
             diagram,
             request: serde_json::Value::from(5),
@@ -205,5 +218,8 @@ mod tests {
         let resp_str = str::from_utf8(&resp_bytes).unwrap();
         let resp: i32 = serde_json::from_str(resp_str).unwrap();
         assert_eq!(resp, 12);
+
+        send_stop.send(()).unwrap();
+        join_handle.join().unwrap();
     }
 }
