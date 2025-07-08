@@ -1,12 +1,7 @@
-use std::{
-    fmt::Display,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
+use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
 use axum::{
     extract::{
-        ws::{self, Utf8Bytes},
+        ws::{self},
         State,
     },
     http::StatusCode,
@@ -18,10 +13,14 @@ use bevy_ecs::{
     system::{ResMut, Resource},
 };
 use bevy_impulse::{Diagram, DiagramElementRegistry, Promise, RequestExt};
-use futures_util::{Sink, SinkExt, Stream, StreamExt};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::mpsc::error::TryRecvError;
-use tracing::{debug, error};
+use tracing::error;
 
 struct Context {
     diagram: Diagram,
@@ -37,9 +36,10 @@ struct ExecutorState {
     response_timeout: Duration,
 }
 
+#[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Deserialize)]
-struct PostRunRequest {
+pub struct PostRunRequest {
     diagram: Diagram,
     request: serde_json::Value,
 }
@@ -83,69 +83,10 @@ async fn post_run(
     Ok(Json(response))
 }
 
-async fn recv_text<R>(read: &mut R) -> Option<Utf8Bytes>
-where
-    R: Stream<Item = Result<ws::Message, axum::Error>> + Unpin,
-{
-    let msg = if let Some(msg) = read.next().await {
-        match msg {
-            Ok(msg) => msg,
-            Err(err) => {
-                debug!("{}", err);
-                return None;
-            }
-        }
-    } else {
-        return None;
-    };
-    let msg_text = match msg.into_text() {
-        Ok(text) => text,
-        Err(err) => {
-            debug!("{}", err);
-            return None;
-        }
-    };
-    Some(msg_text)
-}
-
-async fn recv_json<T: DeserializeOwned, R>(read: &mut R) -> Option<T>
-where
-    R: Stream<Item = Result<ws::Message, axum::Error>> + Unpin,
-{
-    let text = recv_text(read).await?;
-    match serde_json::from_slice(text.as_bytes()) {
-        Ok(value) => Some(value),
-        Err(err) => {
-            debug!("{}", err);
-            None
-        }
-    }
-}
-
-async fn send_json<T: Serialize, W>(write: &mut W, value: &T) -> Option<()>
-where
-    W: Sink<ws::Message> + Unpin,
-    W::Error: Display,
-{
-    let json_str = match serde_json::to_string(value).into() {
-        Ok(json_str) => json_str,
-        Err(err) => {
-            debug!("{}", err);
-            return None;
-        }
-    };
-    match write.send(ws::Message::Text(json_str.into())).await {
-        Ok(_) => Some(()),
-        Err(err) => {
-            debug!("{}", err);
-            None
-        }
-    }
-}
-
+#[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
 #[cfg_attr(test, derive(serde::Deserialize))]
 #[derive(Serialize)]
-enum DebugSessionEnd {
+pub enum DebugSessionEnd {
     Ok(serde_json::Value),
     Err(String),
 }
@@ -153,11 +94,10 @@ enum DebugSessionEnd {
 /// Start a debug session.
 async fn ws_debug<W, R>(mut write: W, mut read: R, state: State<ExecutorState>)
 where
-    W: Sink<ws::Message> + Unpin,
-    W::Error: Display,
-    R: Stream<Item = Result<ws::Message, axum::Error>> + Unpin,
+    W: WebsocketSinkExt,
+    R: WebsocketStreamExt,
 {
-    let req: PostRunRequest = if let Some(req) = recv_json(&mut read).await {
+    let req: PostRunRequest = if let Some(req) = read.next_json().await {
         req
     } else {
         return;
@@ -167,11 +107,13 @@ where
     let response = post_run(state, Json(req)).await;
     match response {
         Ok(resp) => {
-            send_json(&mut write, &DebugSessionEnd::Ok(resp.0)).await;
+            write.send_json(&DebugSessionEnd::Ok(resp.0)).await;
             return;
         }
         Err(status_code) => {
-            send_json(&mut write, &DebugSessionEnd::Err(status_code.to_string())).await;
+            write
+                .send_json(&DebugSessionEnd::Err(status_code.to_string()))
+                .await;
             return;
         }
     }
@@ -270,6 +212,7 @@ mod tests {
         http::{header, Request},
     };
     use bevy_impulse::{ImpulseAppPlugin, NodeBuilderOptions};
+    use futures_util::SinkExt;
     use mime_guess::mime;
     use serde_json::json;
     use tower::ServiceExt;

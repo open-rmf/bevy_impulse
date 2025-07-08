@@ -28,7 +28,9 @@ bevy_ecs = "0.12.1"
 bevy_impulse = { version = "0.0.2", path = "..", features = ["diagram"] }
 flate2 = { version = "1.1.1", optional = true }
 futures-util = "0.3.31"
+indexmap = { version = "2.10.0", optional = true, features = ["serde"] }
 mime_guess = "2.0.5"
+schemars = { version = "0.9", optional = true }
 serde = "1.0.219"
 serde_json = "1.0.140"
 tar = { version = "0.4.44", optional = true }
@@ -48,3 +50,10 @@ tower = "0.5.2"
 [features]
 default = ["frontend"]
 frontend = ["dep:flate2", "dep:tar"]
+json_schema = ["dep:schemars", "dep:indexmap"]
+
+[[bin]]
+name = "print_schema"
+path = "server/bin/print_schema.rs"
+required-features = ["json_schema"]
+
