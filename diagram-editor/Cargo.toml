@@ -22,11 +22,12 @@ exclude = [
 path = "server/lib.rs"
 
 [dependencies]
-axum = "0.8.4"
+axum = { version = "0.8.4", features = ["ws"] }
 bevy_app = "0.12.1"
 bevy_ecs = "0.12.1"
 bevy_impulse = { version = "0.0.2", path = "..", features = ["diagram"] }
 flate2 = { version = "1.1.1", optional = true }
+futures-util = "0.3.31"
 mime_guess = "2.0.5"
 serde = "1.0.219"
 serde_json = "1.0.140"
@@ -39,6 +40,7 @@ flate2 = { version = "1.1.1", optional = true }
 tar = { version = "0.4.44", optional = true }
 
 [dev-dependencies]
+futures-channel = "0.3.31"
 test-log = "0.2.18"
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
 tower = "0.5.2"
