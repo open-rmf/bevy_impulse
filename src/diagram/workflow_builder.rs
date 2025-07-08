@@ -27,275 +27,13 @@ use crate::{
 };
 
 use super::{
-    BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
+    BufferSelection, Diagram, DiagramElementRegistry, DiagramError,
     DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
-    ImplicitSerialization, ImplicitStringify, NamespacedOperation, NextOperation, OperationName,
-    Operations, Templates, TypeInfo,
+    ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList,
+    NextOperation, OperationName, Operations, OperationRef, StreamOutRef, Templates, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
-
-use smallvec::{smallvec, SmallVec};
-
-type NamespaceList = SmallVec<[OperationName; 4]>;
-
-/// This key is used so we can do a clone-free .get(&NextOperation) of a hashmap
-/// that uses this as a key.
-//
-// TODO(@mxgrey): With this struct we could apply a lifetime to
-// DiagramConstruction and then borrow all the names used in this struct instead
-// of using Cow.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum OperationRef {
-    Named(NamedOperationRef),
-    Terminate(NamespaceList),
-    Dispose,
-    Cancel(NamespaceList),
-    StreamOut(StreamOutRef),
-}
-
-impl OperationRef {
-    fn in_namespaces(self, parent_namespaces: &[Arc<str>]) -> Self {
-        match self {
-            Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
-            Self::Terminate(namespaces) => {
-                Self::Terminate(with_parent_namespaces(parent_namespaces, namespaces))
-            }
-            Self::Dispose => Self::Dispose,
-            Self::Cancel(namespaces) => {
-                Self::Cancel(with_parent_namespaces(parent_namespaces, namespaces))
-            }
-            Self::StreamOut(stream_out) => {
-                Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
-            }
-        }
-    }
-
-    pub fn terminate_for(namespace: Arc<str>) -> Self {
-        Self::Terminate(smallvec![namespace])
-    }
-}
-
-impl<'a> From<&'a NextOperation> for OperationRef {
-    fn from(value: &'a NextOperation) -> Self {
-        match value {
-            NextOperation::Name(name) => OperationRef::Named(name.into()),
-            NextOperation::Namespace(id) => OperationRef::Named(id.into()),
-            NextOperation::Builtin { builtin } => match builtin {
-                BuiltinTarget::Terminate => OperationRef::Terminate(NamespaceList::new()),
-                BuiltinTarget::Dispose => OperationRef::Dispose,
-                BuiltinTarget::Cancel => OperationRef::Cancel(NamespaceList::new()),
-            },
-        }
-    }
-}
-
-impl<'a> From<&'a OperationName> for OperationRef {
-    fn from(value: &'a OperationName) -> Self {
-        OperationRef::Named(value.into())
-    }
-}
-
-impl From<NamedOperationRef> for OperationRef {
-    fn from(value: NamedOperationRef) -> Self {
-        OperationRef::Named(value)
-    }
-}
-
-impl std::fmt::Display for OperationRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Named(named) => write!(f, "{named}"),
-            Self::Terminate(namespaces) => {
-                write!(f, "{}(terminate)", DisplayNamespaces(namespaces))
-            }
-            Self::Cancel(namespaces) => write!(f, "{}(cancel)", DisplayNamespaces(namespaces)),
-            Self::Dispose => write!(f, "(dispose)"),
-            Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
-        }
-    }
-}
-
-struct DisplayNamespaces<'a>(&'a NamespaceList);
-
-impl std::fmt::Display for DisplayNamespaces<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for namespace in self.0 {
-            write!(f, "{namespace}:")?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NamedOperationRef {
-    pub namespaces: NamespaceList,
-    /// If this references an exposed operation, such as an exposed input or
-    /// output of a session, this will contain the session name. Suppose we have
-    /// a section named `sec` and it has an exposed output named `out`. Then
-    /// there are two values of `NamedOperationRef` to consider:
-    ///
-    /// ```
-    /// # use bevy_impulse::diagram::NamedOperationRef;
-    /// # use smallvec::smallvec;
-    ///
-    /// let op_id = NamedOperationRef {
-    ///     namespaces: smallvec!["sec".into()],
-    ///     exposed_namespace: None,
-    ///     name: "out".into(),
-    /// };
-    /// ```
-    ///
-    /// is the internal reference to `sec:out` that will be used by other
-    /// operations inside of `sec`. On the other hand, operations that are
-    /// siblings of `sec` would instead connect to
-    ///
-    /// ```
-    /// # use bevy_impulse::diagram::NamedOperationRef;
-    /// # use smallvec::smallvec;
-    ///
-    /// let op_id = NamedOperationRef {
-    ///     namespaces: smallvec![],
-    ///     exposed_namespace: Some("sec".into()),
-    ///     name: "out".into(),
-    /// };
-    /// ```
-    ///
-    /// We need to make this distinction because operations inside `sec` do not
-    /// know which of their siblings are exposed, and we don't want operations
-    /// outside of `sec` to accidentally connect to operations that are supposed
-    /// to be internal to `sec`.
-    pub exposed_namespace: Option<Arc<str>>,
-    pub name: Arc<str>,
-}
-
-impl NamedOperationRef {
-    fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
-        apply_parent_namespaces(parent_namespaces, &mut self.namespaces);
-        self
-    }
-}
-
-impl<'a> From<&'a OperationName> for NamedOperationRef {
-    fn from(name: &'a OperationName) -> Self {
-        NamedOperationRef {
-            namespaces: SmallVec::new(),
-            exposed_namespace: None,
-            name: Arc::clone(name),
-        }
-    }
-}
-
-impl From<OperationName> for NamedOperationRef {
-    fn from(name: OperationName) -> Self {
-        NamedOperationRef {
-            namespaces: SmallVec::new(),
-            exposed_namespace: None,
-            name,
-        }
-    }
-}
-
-impl<'a> From<&'a NamespacedOperation> for NamedOperationRef {
-    fn from(id: &'a NamespacedOperation) -> Self {
-        NamedOperationRef {
-            namespaces: SmallVec::new(),
-            // This is referring to an exposed operation, so the namespace
-            // mentioned in the operation goes into the exposed_namespace field
-            exposed_namespace: Some(Arc::clone(&id.namespace)),
-            name: Arc::clone(&id.operation),
-        }
-    }
-}
-
-impl<'a> From<&'a NamespacedOperation> for OperationRef {
-    fn from(value: &'a NamespacedOperation) -> Self {
-        OperationRef::Named(value.into())
-    }
-}
-
-impl std::fmt::Display for NamedOperationRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for namespace in &self.namespaces {
-            write!(f, "{namespace}:")?;
-        }
-
-        if let Some(exposed) = &self.exposed_namespace {
-            write!(f, "{exposed}:(exposed):")?;
-        }
-
-        f.write_str(&self.name)
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StreamOutRef {
-    /// The namespace of the scope is being streamed out of
-    pub namespaces: NamespaceList,
-    /// The name of the stream (within its scope) that is being referred to
-    pub name: Arc<str>,
-}
-
-impl StreamOutRef {
-    pub fn new_for_root(stream_name: impl Into<Arc<str>>) -> Self {
-        Self {
-            namespaces: NamespaceList::new(),
-            name: stream_name.into(),
-        }
-    }
-
-    pub fn new_for_scope(
-        scope_name: impl Into<Arc<str>>,
-        stream_name: impl Into<Arc<str>>,
-    ) -> Self {
-        Self {
-            namespaces: smallvec![scope_name.into()],
-            name: stream_name.into(),
-        }
-    }
-
-    fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
-        apply_parent_namespaces(parent_namespaces, &mut self.namespaces);
-        self
-    }
-}
-
-impl std::fmt::Display for StreamOutRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for namespace in &self.namespaces {
-            write!(f, "{namespace}:")?;
-        }
-
-        write!(f, "(stream_out:{})", self.name)
-    }
-}
-
-impl From<StreamOutRef> for OperationRef {
-    fn from(value: StreamOutRef) -> Self {
-        OperationRef::StreamOut(value)
-    }
-}
-
-fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut NamespaceList) {
-    // Put the parent namespaces at the front and append the operation's
-    // existing namespaces at the back.
-    let new_namespaces = parent_namespaces
-        .iter()
-        .cloned()
-        .chain(namespaces.drain(..))
-        .collect();
-
-    *namespaces = new_namespaces;
-}
-
-fn with_parent_namespaces(
-    parent_namespaces: &[Arc<str>],
-    mut namespaces: NamespaceList,
-) -> NamespaceList {
-    apply_parent_namespaces(parent_namespaces, &mut namespaces);
-    namespaces
-}
 
 #[derive(Default)]
 struct DiagramConstruction {
@@ -704,7 +442,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         // This is the slot that operations inside of the section will direct
         // their outputs to. It will receive the outputs and then redirect them.
         let internal: OperationRef = NamedOperationRef {
-            namespaces: SmallVec::from_iter([Arc::clone(section_id)]),
+            namespaces: NamespaceList::for_child_of(Arc::clone(section_id)),
             exposed_namespace: None,
             name: Arc::clone(output_id),
         }
@@ -874,7 +612,7 @@ where
 
     let mut construction = DiagramConstruction::default();
 
-    let default_on_implicit_error = OperationRef::Cancel(NamespaceList::new());
+    let default_on_implicit_error = OperationRef::Cancel(NamespaceList::default());
     let opt_on_implicit_error: Option<OperationRef> =
         diagram.on_implicit_error.as_ref().map(Into::into);
 
@@ -892,7 +630,7 @@ where
             operations: diagram.ops.clone(),
             templates: &diagram.templates,
             on_implicit_error,
-            namespaces: NamespaceList::new(),
+            namespaces: NamespaceList::default(),
             scope: builder.context,
         },
     )?;
@@ -1136,7 +874,7 @@ where
 
     // Add the terminate operation
     ctx.impl_connect_into_target(
-        OperationRef::Terminate(NamespaceList::new()),
+        OperationRef::Terminate(NamespaceList::default()),
         standard_input_connection(scope.terminate.into(), &ctx.registry)?,
     )?;
 
@@ -1151,7 +889,7 @@ where
 
     // Add the cancel operation
     ctx.set_connect_into_target(
-        OperationRef::Cancel(NamespaceList::new()),
+        OperationRef::Cancel(NamespaceList::default()),
         ConnectToCancel::new(builder)?,
     )?;
 

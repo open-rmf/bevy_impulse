@@ -24,12 +24,11 @@ use std::{
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use smallvec::smallvec;
 
 use crate::{
     standard_input_connection, BuildDiagramOperation, BuildStatus, Builder, ConnectIntoTarget,
     DiagramContext, DiagramErrorCode, DynOutput, IncrementalScopeBuilder, IncrementalScopeRequest,
-    IncrementalScopeResponse, InferMessageType, NextOperation, OperationName, OperationRef,
+    IncrementalScopeResponse, InferMessageType, NamespaceList, NextOperation, OperationName, OperationRef,
     Operations, ScopeSettings, StreamOutRef,
 };
 
@@ -107,7 +106,7 @@ impl BuildDiagramOperation for ScopeSchema {
         )?;
 
         ctx.set_connect_into_target(
-            OperationRef::Terminate(smallvec![Arc::clone(id)]),
+            OperationRef::Terminate(NamespaceList::for_child_of(Arc::clone(id))),
             ConnectScopeResponse {
                 scope,
                 next: ctx.into_operation_ref(&self.next),

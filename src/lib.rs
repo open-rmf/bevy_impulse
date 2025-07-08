@@ -144,6 +144,11 @@ pub use workflow::*;
 
 pub mod testing;
 
+#[cfg(feature = "trace")]
+pub mod trace;
+#[cfg(feature = "trace")]
+pub use trace::*;
+
 pub mod trim;
 pub use trim::*;
 
