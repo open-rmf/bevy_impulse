@@ -35,11 +35,7 @@ use crate::{
 };
 
 use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
-use serde::{
-    de::DeserializeOwned,
-    ser::{SerializeMap, SerializeStruct},
-    Deserialize, Serialize,
-};
+use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
 use serde_json::json;
 
 use super::{
@@ -781,7 +777,7 @@ impl JsonSchema for MessageOperation {
     }
 }
 
-#[derive(JsonSchema)]
+#[derive(Serialize, JsonSchema)]
 pub struct MessageRegistration {
     pub(super) type_name: &'static str,
     pub(super) schema: Option<Schema>,
@@ -798,18 +794,6 @@ impl MessageRegistration {
             schema: None,
             operations: MessageOperation::new::<T>(),
         }
-    }
-}
-
-impl Serialize for MessageRegistration {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut s = serializer.serialize_struct("MessageRegistration", 3)?;
-        s.serialize_field("schema", &self.schema)?;
-        s.serialize_field("operations", &self.operations)?;
-        s.end()
     }
 }
 
