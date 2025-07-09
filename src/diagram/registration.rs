@@ -50,7 +50,7 @@ use super::{
 
 #[derive(Serialize, JsonSchema)]
 pub struct NodeRegistration {
-    #[serde(rename = "$key$")]
+    #[serde(skip)]
     pub(super) id: BuilderId,
     pub(super) name: Arc<str>,
     pub(super) request: TypeInfo,
