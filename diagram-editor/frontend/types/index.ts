@@ -1,3 +1,2 @@
-export * from './diagram';
+export * from './api';
 export * from './react-flow';
-export * from './registry';

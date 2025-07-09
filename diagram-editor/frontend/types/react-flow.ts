@@ -2,7 +2,7 @@ import type {
   Edge as ReactFlowEdge,
   Node as ReactFlowNode,
 } from '@xyflow/react';
-import type { DiagramOperation } from './diagram';
+import type { DiagramOperation } from './api';
 
 export type BuiltinNodeTypes = 'start' | 'terminate';
 

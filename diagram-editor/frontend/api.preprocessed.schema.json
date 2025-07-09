@@ -1,0 +1,1109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "BufferAccessSchema": {
+      "properties": {
+        "buffers": {
+          "$ref": "#/$defs/BufferSelection"
+        },
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        }
+      },
+      "required": [
+        "next",
+        "buffers"
+      ],
+      "type": "object"
+    },
+    "BufferSchema": {
+      "properties": {
+        "serialize": {
+          "description": "If true, messages will be serialized before sending into the buffer.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "settings": {
+          "allOf": [
+            {
+              "default": {
+                "retention": {
+                  "keep_last": 1
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/BufferSettings"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "BufferSelection": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "type": "object"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "type": "array"
+        }
+      ]
+    },
+    "BufferSettings": {
+      "description": "Settings to describe the behavior of a buffer.",
+      "properties": {
+        "retention": {
+          "$ref": "#/$defs/RetentionPolicy"
+        }
+      },
+      "required": [
+        "retention"
+      ],
+      "type": "object"
+    },
+    "BuiltinTarget": {
+      "oneOf": [
+        {
+          "const": "terminate",
+          "description": "Use the output to terminate the current scope. The value passed into\n this operation will be the return value of the scope.",
+          "type": "string"
+        },
+        {
+          "const": "dispose",
+          "description": "Dispose of the output.",
+          "type": "string"
+        },
+        {
+          "const": "cancel",
+          "description": "When triggered, cancel the current scope. If this is an inner scope of a\n workflow then the parent scope will see a disposal happen. If this is\n the root scope of a workflow then the whole workflow will cancel.",
+          "type": "string"
+        }
+      ]
+    },
+    "DebugSessionEnd": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Ok": true
+          },
+          "required": [
+            "Ok"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Err": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Err"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Diagram": {
+      "properties": {
+        "on_implicit_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "To simplify diagram definitions, the diagram workflow builder will\n sometimes insert implicit operations into the workflow, such as implicit\n serializing and deserializing. These implicit operations may be fallible.\n\n This field indicates how a failed implicit operation should be handled.\n If left unspecified, an implicit error will cause the entire workflow to\n be cancelled."
+        },
+        "ops": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DiagramOperation"
+          },
+          "description": "Operations that define the workflow",
+          "type": "object"
+        },
+        "start": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "templates": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SectionTemplate"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "version": {
+          "description": "Version of the diagram, should always be `0.1.0`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "start",
+        "ops"
+      ],
+      "type": "object"
+    },
+    "DiagramElementRegistry": {
+      "properties": {
+        "messages": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MessageRegistration"
+          },
+          "type": "object"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NodeRegistration"
+          },
+          "type": "object"
+        },
+        "schemas": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "sections": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SectionRegistration"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "nodes",
+        "sections",
+        "messages",
+        "schemas"
+      ],
+      "type": "object"
+    },
+    "DiagramOperation": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "description": "Create an operation that that takes an input message and produces an\n output message.\n\n The behavior is determined by the choice of node `builder` and\n optioanlly the `config` that you provide. Each type of node builder has\n its own schema for the config.\n\n The output message will be sent to the operation specified by `next`.\n\n TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"cutting_board\",\n     \"ops\": {\n         \"cutting_board\": {\n             \"type\": \"node\",\n             \"builder\": \"chop\",\n             \"config\": \"diced\",\n             \"next\": \"bowl\"\n         },\n         \"bowl\": {\n             \"type\": \"node\",\n             \"builder\": \"stir\",\n             \"next\": \"oven\"\n         },\n         \"oven\": {\n             \"type\": \"node\",\n             \"builder\": \"bake\",\n             \"config\": {\n                 \"temperature\": 200,\n                 \"duration\": 120\n             },\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())",
+              "properties": {
+                "type": {
+                  "const": "node",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/NodeSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Connect the request to a registered section.\n\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"section_op\",\n     \"ops\": {\n         \"section_op\": {\n             \"type\": \"section\",\n             \"builder\": \"my_section_builder\",\n             \"connect\": {\n                 \"my_section_output\": { \"builtin\": \"terminate\" }\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```\n\n Custom sections can also be created via templates\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"templates\": {\n         \"my_template\": {\n             \"inputs\": [\"section_input\"],\n             \"outputs\": [\"section_output\"],\n             \"buffers\": [],\n             \"ops\": {\n                 \"section_input\": {\n                     \"type\": \"node\",\n                     \"builder\": \"my_node\",\n                     \"next\": \"section_output\"\n                 }\n             }\n         }\n     },\n     \"start\": \"section_op\",\n     \"ops\": {\n         \"section_op\": {\n             \"type\": \"section\",\n             \"template\": \"my_template\",\n             \"connect\": {\n                 \"section_output\": { \"builtin\": \"terminate\" }\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "section",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/SectionSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Create a scope which will function like its own encapsulated workflow\n within the paren workflow. Each message that enters a scope will trigger\n a new independent session for that scope to begin running with the incoming\n message itself being the input message of the scope. When multiple sessions\n for the same scope are running, they cannot see or interfere with each other.\n\n Once a session terminates, the scope will send the terminating message as\n its output. Scopes can use the `stream_out` operation to stream messages out\n to the parent workflow while running.\n\n Scopes have two common uses:\n * isolate - Prevent simultaneous runs of the same workflow components\n   (especially buffers) from interfering with each other.\n * race - Run multiple branches simultaneously inside the scope and race\n   them against each ohter. The first branch that reaches the scope's\n   terminate operation \"wins\" the race, and only its output will continue\n   on in the parent workflow. All other branches will be disposed.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"approach_door\",\n     \"ops\": {\n         \"approach_door\": {\n             \"type\": \"scope\",\n             \"start\": \"begin\",\n             \"ops\": {\n                 \"begin\": {\n                     \"type\": \"fork_clone\",\n                     \"next\": [\n                         \"move_to_door\",\n                         \"detect_door_proximity\"\n                     ]\n                 },\n                 \"move_to_door\": {\n                     \"type\": \"node\",\n                     \"builder\": \"move\",\n                     \"config\": {\n                         \"place\": \"L1_north_lobby_outside\"\n                     },\n                     \"next\": { \"builtin\" : \"terminate\" }\n                 },\n                 \"detect_proximity\": {\n                     \"type\": \"node\",\n                     \"builder\": \"detect_proximity\",\n                     \"config\": {\n                         \"type\": \"door\",\n                         \"name\": \"L1_north_lobby\"\n                     },\n                     \"next\": { \"builtin\" : \"terminate\" }\n                 }\n             },\n             \"next\": { \"builtin\" : \"try_open_door\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "scope",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/ScopeSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Declare a stream output for the current scope. Outputs that you connect\n to this operation will be streamed out of the scope that this operation\n is declared in.\n\n For the root-level scope, make sure you use a stream pack that is\n compatible with all stream out operations that you declare, otherwise\n you may get a connection error at runtime.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"plan\",\n     \"ops\": {\n         \"progress_stream\": {\n             \"type\": \"stream_out\",\n             \"name\": \"progress\"\n         },\n         \"plan\": {\n             \"type\": \"node\",\n             \"builder\": \"planner\",\n             \"next\": \"drive\",\n             \"stream_out\" : {\n                 \"progress\": \"progress_stream\"\n             }\n         },\n         \"drive\": {\n             \"type\": \"node\",\n             \"builder\": \"navigation\",\n             \"next\": { \"builtin\": \"terminate\" },\n             \"stream_out\": {\n                 \"progress\": \"progress_stream\"\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "stream_out",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/StreamOutSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "If the request is cloneable, clone it into multiple responses that can\n each be sent to a different operation. The `next` property is an array.\n\n This creates multiple simultaneous branches of execution within the\n workflow. Usually when you have multiple branches you will either\n * race - connect all branches to `terminate` and the first branch to\n   finish \"wins\" the race and gets to the be output\n * join - connect each branch into a buffer and then use the `join`\n   operation to reunite them\n * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"begin_race\",\n     \"ops\": {\n         \"begin_race\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\n                 \"ferrari\",\n                 \"mustang\"\n             ]\n         },\n         \"ferrari\": {\n             \"type\": \"node\",\n             \"builder\": \"drive\",\n             \"config\": \"ferrari\",\n             \"next\": { \"builtin\": \"terminate\" }\n         },\n         \"mustang\": {\n             \"type\": \"node\",\n             \"builder\": \"drive\",\n             \"config\": \"mustang\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())",
+              "properties": {
+                "type": {
+                  "const": "fork_clone",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/ForkCloneSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "If the input message is a tuple of (T1, T2, T3, ...), unzip it into\n multiple output messages of T1, T2, T3, ...\n\n Each output message may have a different type and can be sent to a\n different operation. This creates multiple simultaneous branches of\n execution within the workflow. See [`DiagramOperation::ForkClone`] for\n more information on parallel branches.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"name_phone_address\",\n     \"ops\": {\n         \"name_phone_address\": {\n             \"type\": \"unzip\",\n             \"next\": [\n                 \"process_name\",\n                 \"process_phone_number\",\n                 \"process_address\"\n             ]\n         },\n         \"process_name\": {\n             \"type\": \"node\",\n             \"builder\": \"process_name\",\n             \"next\": \"name_processed\"\n         },\n         \"process_phone_number\": {\n             \"type\": \"node\",\n             \"builder\": \"process_phone_number\",\n             \"next\": \"phone_number_processed\"\n         },\n         \"process_address\": {\n             \"type\": \"node\",\n             \"builder\": \"process_address\",\n             \"next\": \"address_processed\"\n         },\n         \"name_processed\": { \"type\": \"buffer\" },\n         \"phone_number_processed\": { \"type\": \"buffer\" },\n         \"address_processed\": { \"type\": \"buffer\" },\n         \"finished\": {\n             \"type\": \"join\",\n             \"buffers\": [\n                 \"name_processed\",\n                 \"phone_number_processed\",\n                 \"address_processed\"\n             ],\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "unzip",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/UnzipSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "If the request is a [`Result<T, E>`], send the output message down an\n `ok` branch or down an `err` branch depending on whether the result has\n an [`Ok`] or [`Err`] value. The `ok` branch will receive a `T` while the\n `err` branch will receive an `E`.\n\n Only one branch will be activated by each input message that enters the\n operation.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"fork_result\",\n     \"ops\": {\n         \"fork_result\": {\n             \"type\": \"fork_result\",\n             \"ok\": { \"builtin\": \"terminate\" },\n             \"err\": { \"builtin\": \"dispose\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "fork_result",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/ForkResultSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "If the input message is a list-like or map-like object, split it into\n multiple output messages.\n\n Note that the type of output message from the split depends on how the\n input message implements the [`Splittable`][1] trait. In many cases this\n will be a tuple of `(key, value)`.\n\n There are three ways to specify where the split output messages should\n go, and all can be used at the same time:\n * `sequential` - For array-like collections, send the \"first\" element of\n   the collection to the first operation listed in the `sequential` array.\n   The \"second\" element of the collection goes to the second operation\n   listed in the `sequential` array. And so on for all elements in the\n   collection. If one of the elements in the collection is mentioned in\n   the `keyed` set, then the sequence will pass over it as if the element\n   does not exist at all.\n * `keyed` - For map-like collections, send the split element associated\n   with the specified key to its associated output.\n * `remaining` - Any elements that are were not captured by `sequential`\n   or by `keyed` will be sent to this.\n\n [1]: crate::Splittable\n\n # Examples\n\n Suppose I am an animal rescuer sorting through a new collection of\n animals that need recuing. My home has space for three exotic animals\n plus any number of dogs and cats.\n\n I have a custom `SpeciesCollection` data structure that implements\n [`Splittable`][1] by allowing you to key on the type of animal.\n\n In the workflow below, we send all cats and dogs to `home`, and we also\n send the first three non-dog and non-cat species to `home`. All\n remaining animals go to the zoo.\n\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"select_animals\",\n     \"ops\": {\n         \"select_animals\": {\n             \"type\": \"split\",\n             \"sequential\": [\n                 \"home\",\n                 \"home\",\n                 \"home\"\n             ],\n             \"keyed\": {\n                 \"cat\": \"home\",\n                 \"dog\": \"home\"\n             },\n             \"remaining\": \"zoo\"\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```\n\n If we input `[\"frog\", \"cat\", \"bear\", \"beaver\", \"dog\", \"rabbit\", \"dog\", \"monkey\"]`\n then `frog`, `bear`, and `beaver` will be sent to `home` since those are\n the first three animals that are not `dog` or `cat`, and we will also\n send one `cat` and two `dog` home. `rabbit` and `monkey` will be sent to the zoo.",
+              "properties": {
+                "type": {
+                  "const": "split",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/SplitSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Wait for exactly one item to be available in each buffer listed in\n `buffers`, then join each of those items into a single output message\n that gets sent to `next`.\n\n If the `next` operation is not a `node` type (e.g. `fork_clone`) then\n you must specify a `target_node` so that the diagram knows what data\n structure to join the values into.\n\n The output message type must be registered as joinable at compile time.\n If you want to join into a dynamic data structure then you should use\n [`DiagramOperation::SerializedJoin`] instead.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"begin_measuring\",\n     \"ops\": {\n         \"begin_measuring\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"localize\", \"imu\"]\n         },\n         \"localize\": {\n             \"type\": \"node\",\n             \"builder\": \"localize\",\n             \"next\": \"estimated_position\"\n         },\n         \"imu\": {\n             \"type\": \"node\",\n             \"builder\": \"imu\",\n             \"config\": \"velocity\",\n             \"next\": \"estimated_velocity\"\n         },\n         \"estimated_position\": { \"type\": \"buffer\" },\n         \"estimated_velocity\": { \"type\": \"buffer\" },\n         \"gather_state\": {\n             \"type\": \"join\",\n             \"buffers\": {\n                 \"position\": \"estimate_position\",\n                 \"velocity\": \"estimate_velocity\"\n             },\n             \"next\": \"report_state\"\n         },\n         \"report_state\": {\n             \"type\": \"node\",\n             \"builder\": \"publish_state\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "join",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/JoinSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Same as [`DiagramOperation::Join`] but all input messages must be\n serializable, and the output message will always be [`serde_json::Value`].\n\n If you use an array for `buffers` then the output message will be a\n [`serde_json::Value::Array`]. If you use a map for `buffers` then the\n output message will be a [`serde_json::Value::Object`].\n\n Unlike [`DiagramOperation::Join`], the `target_node` property does not\n exist for this schema.",
+              "properties": {
+                "type": {
+                  "const": "serialized_join",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/SerializedJoinSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.\n The context includes a \"request\" variable which contains the input message.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"transform\",\n     \"ops\": {\n         \"transform\": {\n             \"type\": \"transform\",\n             \"cel\": \"request.name\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```\n\n Note that due to how `serde_json` performs serialization, positive integers are always\n serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so\n it is recommended to always perform explicit casts.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"transform\",\n     \"ops\": {\n         \"transform\": {\n             \"type\": \"transform\",\n             \"cel\": \"int(request.score) * 3\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "transform",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/TransformSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Create a [`Buffer`][1] which can be used to store and pull data within\n a scope.\n\n By default the [`BufferSettings`][2] will keep the single last message\n pushed to the buffer. You can change that with the optional `settings`\n property.\n\n Use the `\"serialize\": true` option to serialize the messages into\n [`JsonMessage`] before they are inserted into the buffer. This\n allows any serializable message type to be pushed into the buffer. If\n left unspecified, the buffer will store the specific data type that gets\n pushed into it. If the buffer inputs are not being serialized, then all\n incoming messages being pushed into the buffer must have the same type.\n\n [1]: crate::Buffer\n [2]: crate::BufferSettings\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"fork_clone\",\n     \"ops\": {\n         \"fork_clone\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"num_output\", \"string_output\", \"all_num_buffer\", \"serialized_num_buffer\"]\n         },\n         \"num_output\": {\n             \"type\": \"node\",\n             \"builder\": \"num_output\",\n             \"next\": \"buffer_access\"\n         },\n         \"string_output\": {\n             \"type\": \"node\",\n             \"builder\": \"string_output\",\n             \"next\": \"string_buffer\"\n         },\n         \"string_buffer\": {\n             \"type\": \"buffer\",\n             \"settings\": {\n                 \"retention\": { \"keep_last\": 10 }\n             }\n         },\n         \"all_num_buffer\": {\n             \"type\": \"buffer\",\n             \"settings\": {\n                 \"retention\": \"keep_all\"\n             }\n         },\n         \"serialized_num_buffer\": {\n             \"type\": \"buffer\",\n             \"serialize\": true\n         },\n         \"buffer_access\": {\n             \"type\": \"buffer_access\",\n             \"buffers\": [\"string_buffer\"],\n             \"target_node\": \"with_buffer_access\",\n             \"next\": \"with_buffer_access\"\n         },\n         \"with_buffer_access\": {\n             \"type\": \"node\",\n             \"builder\": \"with_buffer_access\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "buffer",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/BufferSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Zip a message together with access to one or more buffers.\n\n The receiving node must have an input type of `(Message, Keys)`\n where `Keys` implements the [`Accessor`][1] trait.\n\n [1]: crate::Accessor\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"fork_clone\",\n     \"ops\": {\n         \"fork_clone\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"num_output\", \"string_output\"]\n         },\n         \"num_output\": {\n             \"type\": \"node\",\n             \"builder\": \"num_output\",\n             \"next\": \"buffer_access\"\n         },\n         \"string_output\": {\n             \"type\": \"node\",\n             \"builder\": \"string_output\",\n             \"next\": \"string_buffer\"\n         },\n         \"string_buffer\": {\n             \"type\": \"buffer\"\n         },\n         \"buffer_access\": {\n             \"type\": \"buffer_access\",\n             \"buffers\": [\"string_buffer\"],\n             \"target_node\": \"with_buffer_access\",\n             \"next\": \"with_buffer_access\"\n         },\n         \"with_buffer_access\": {\n             \"type\": \"node\",\n             \"builder\": \"with_buffer_access\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+              "properties": {
+                "type": {
+                  "const": "buffer_access",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/BufferAccessSchema"
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "description": "Listen on a buffer.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"num_output\",\n     \"ops\": {\n         \"buffer\": {\n             \"type\": \"buffer\"\n         },\n         \"num_output\": {\n             \"type\": \"node\",\n             \"builder\": \"num_output\",\n             \"next\": \"buffer\"\n         },\n         \"listen\": {\n             \"type\": \"listen\",\n             \"buffers\": [\"buffer\"],\n             \"target_node\": \"listen_buffer\",\n             \"next\": \"listen_buffer\"\n         },\n         \"listen_buffer\": {\n             \"type\": \"node\",\n             \"builder\": \"listen_buffer\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())",
+              "properties": {
+                "type": {
+                  "const": "listen",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/ListenSchema"
+            }
+          ]
+        }
+      ]
+    },
+    "ForkCloneSchema": {
+      "properties": {
+        "next": {
+          "items": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "next"
+      ],
+      "type": "object"
+    },
+    "ForkResultSchema": {
+      "properties": {
+        "err": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "ok": {
+          "$ref": "#/$defs/NextOperation"
+        }
+      },
+      "required": [
+        "ok",
+        "err"
+      ],
+      "type": "object"
+    },
+    "InputRemapping": {
+      "anyOf": [
+        {
+          "description": "Do a simple 1:1 forwarding of the names listed in the array",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "description": "Rename an operation inside the section to expose it externally. The key\n of the map is what siblings of the section can connect to, and the value\n of the entry is the identifier of the input inside the section that is\n being exposed.\n\n This allows a section to expose inputs and buffers that are provided\n by inner sections.",
+          "type": "object"
+        }
+      ],
+      "description": "This defines how sections remap their inner operations (inputs and buffers)\n to expose them to operations that are siblings to the section."
+    },
+    "JoinSchema": {
+      "properties": {
+        "buffers": {
+          "$ref": "#/$defs/BufferSelection"
+        },
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        }
+      },
+      "required": [
+        "next",
+        "buffers"
+      ],
+      "type": "object"
+    },
+    "ListenSchema": {
+      "properties": {
+        "buffers": {
+          "$ref": "#/$defs/BufferSelection"
+        },
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "target_node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation."
+        }
+      },
+      "required": [
+        "next",
+        "buffers"
+      ],
+      "type": "object"
+    },
+    "MessageOperation": {
+      "properties": {
+        "deserialize": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "fork_clone": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "fork_result": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "join": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "serialize": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "split": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "unzip": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MessageRegistration": {
+      "properties": {
+        "operations": {
+          "$ref": "#/$defs/MessageOperation"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schema"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type_name",
+        "operations"
+      ],
+      "type": "object"
+    },
+    "NamespacedOperation": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Refer to an operation inside of a namespace, e.g. { \"<namespace>\": \"<operation>\"",
+      "maxProperties": 1,
+      "minProperties": 1,
+      "title": "NamespacedOperation",
+      "type": "object"
+    },
+    "NextOperation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "builtin": {
+              "$ref": "#/$defs/BuiltinTarget"
+            }
+          },
+          "required": [
+            "builtin"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/NamespacedOperation"
+        }
+      ]
+    },
+    "NodeRegistration": {
+      "properties": {
+        "config_schema": {
+          "$ref": "#/$defs/Schema"
+        },
+        "name": {
+          "type": "string"
+        },
+        "request": {
+          "type": "string"
+        },
+        "response": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "request",
+        "response",
+        "config_schema"
+      ],
+      "type": "object"
+    },
+    "NodeSchema": {
+      "properties": {
+        "builder": {
+          "type": "string"
+        },
+        "config": true,
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "stream_out": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "builder",
+        "next"
+      ],
+      "type": "object"
+    },
+    "PostRunRequest": {
+      "properties": {
+        "diagram": {
+          "$ref": "#/$defs/Diagram"
+        },
+        "request": true
+      },
+      "required": [
+        "diagram",
+        "request"
+      ],
+      "type": "object"
+    },
+    "RetentionPolicy": {
+      "description": "Describe how data within a buffer gets retained. Most mechanisms that pull\n data from a buffer will remove the oldest item in the buffer, so this policy\n is for dealing with situations where items are being stored faster than they\n are being pulled.\n\n The default value is KeepLast(1).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Keep the last N items that were stored into the buffer. Once the limit\n is reached, the oldest item will be removed any time a new item arrives.",
+          "properties": {
+            "keep_last": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "keep_last"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Keep the first N items that are stored into the buffer. Once the limit\n is reached, any new item that arrives will be discarded.",
+          "properties": {
+            "keep_first": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "keep_first"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "keep_all",
+          "description": "Do not limit how many items can be stored in the buffer.",
+          "type": "string"
+        }
+      ]
+    },
+    "Schema": {
+      "type": [
+        "object",
+        "boolean"
+      ]
+    },
+    "ScopeSchema": {
+      "description": "The schema to define a scope within a diagram.",
+      "properties": {
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "on_implicit_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "To simplify diagram definitions, the diagram workflow builder will\n sometimes insert implicit operations into the workflow, such as implicit\n serializing and deserializing. These implicit operations may be fallible.\n\n This field indicates how a failed implicit operation should be handled.\n If left unspecified, an implicit error will cause the entire workflow to\n be cancelled."
+        },
+        "ops": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DiagramOperation"
+          },
+          "description": "Operations that exist inside this scope.",
+          "type": "object"
+        },
+        "settings": {
+          "allOf": [
+            {
+              "default": {
+                "uninterruptible": false
+              },
+              "description": "Settings specific to the scope, e.g. whether it is interruptible."
+            },
+            {
+              "$ref": "#/$defs/ScopeSettings"
+            }
+          ]
+        },
+        "start": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "stream_out": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "default": {},
+          "description": "Where to connect streams that are coming out of this scope.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "start",
+        "ops",
+        "next"
+      ],
+      "type": "object"
+    },
+    "ScopeSettings": {
+      "description": "Settings which determine how the top-level scope of the workflow behaves.",
+      "properties": {
+        "uninterruptible": {
+          "description": "Should we prevent the scope from being interrupted (e.g. cancelled)?\n False by default, meaning by default scopes can be cancelled or\n interrupted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "uninterruptible"
+      ],
+      "type": "object"
+    },
+    "SectionBuffer": {
+      "properties": {
+        "item_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SectionInput": {
+      "properties": {
+        "message_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_type"
+      ],
+      "type": "object"
+    },
+    "SectionMetadata": {
+      "properties": {
+        "buffers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SectionBuffer"
+          },
+          "type": "object"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SectionInput"
+          },
+          "type": "object"
+        },
+        "outputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SectionOutput"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "inputs",
+        "outputs",
+        "buffers"
+      ],
+      "type": "object"
+    },
+    "SectionOutput": {
+      "properties": {
+        "message_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_type"
+      ],
+      "type": "object"
+    },
+    "SectionRegistration": {
+      "properties": {
+        "config_schema": {
+          "$ref": "#/$defs/Schema"
+        },
+        "metadata": {
+          "$ref": "#/$defs/SectionMetadata"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "metadata",
+        "config_schema"
+      ],
+      "type": "object"
+    },
+    "SectionSchema": {
+      "oneOf": [
+        {
+          "properties": {
+            "builder": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "builder"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "template": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "template"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "config": {
+          "default": null
+        },
+        "connect": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SectionTemplate": {
+      "properties": {
+        "buffers": {
+          "allOf": [
+            {
+              "default": [],
+              "description": "These are the buffers that the section is exposing for you to read,\n write, join, or listen to."
+            },
+            {
+              "$ref": "#/$defs/InputRemapping"
+            }
+          ]
+        },
+        "inputs": {
+          "allOf": [
+            {
+              "default": [],
+              "description": "These are the inputs that the section is exposing for its sibling\n operations to send outputs into."
+            },
+            {
+              "$ref": "#/$defs/InputRemapping"
+            }
+          ]
+        },
+        "ops": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DiagramOperation"
+          },
+          "description": "Operations that define the behavior of the section.",
+          "type": "object"
+        },
+        "outputs": {
+          "default": [],
+          "description": "These are the outputs that the section is exposing so you can connect\n them into siblings of the section.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ops"
+      ],
+      "type": "object"
+    },
+    "SerializedJoinSchema": {
+      "properties": {
+        "buffers": {
+          "$ref": "#/$defs/BufferSelection"
+        },
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        }
+      },
+      "required": [
+        "next",
+        "buffers"
+      ],
+      "type": "object"
+    },
+    "SplitSchema": {
+      "properties": {
+        "keyed": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "remaining": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sequential": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "StreamOutSchema": {
+      "properties": {
+        "name": {
+          "description": "The name of the stream exiting the workflow or scope.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "TransformSchema": {
+      "properties": {
+        "cel": {
+          "type": "string"
+        },
+        "next": {
+          "$ref": "#/$defs/NextOperation"
+        },
+        "on_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Specify what happens if an error occurs during the transformation. If\n you specify a target for on_error, then an error message will be sent to\n that target. You can set this to `{ \"builtin\": \"dispose\" }` to simply\n ignore errors.\n\n If left unspecified, a failure will be treated like an implicit operation\n failure and behave according to `on_implicit_error`."
+        }
+      },
+      "required": [
+        "cel",
+        "next"
+      ],
+      "type": "object"
+    },
+    "UnzipSchema": {
+      "properties": {
+        "next": {
+          "items": {
+            "$ref": "#/$defs/NextOperation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "next"
+      ],
+      "type": "object"
+    }
+  }
+}
