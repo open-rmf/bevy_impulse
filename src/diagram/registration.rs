@@ -40,7 +40,6 @@ use crate::Trace;
 use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
 use serde_json::json;
-use tracing::debug;
 
 use super::{
     buffer_schema::BufferAccessRequest, fork_clone_schema::PerformForkClone,
@@ -53,8 +52,6 @@ use super::{
 
 #[derive(Serialize, JsonSchema)]
 pub struct NodeRegistration {
-    #[serde(rename = "$key$")]
-    pub(super) id: BuilderId,
     pub(super) name: Arc<str>,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
@@ -73,10 +70,6 @@ impl NodeRegistration {
     ) -> Result<DynNode, DiagramErrorCode> {
         let mut create_node_impl = self.create_node_impl.borrow_mut();
         let n = create_node_impl(builder, config)?;
-        debug!(
-            "created node of {}, output: {:?}, input: {:?}",
-            self.id, n.output, n.input
-        );
         Ok(n)
     }
 }
@@ -178,7 +171,6 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Response>();
 
         let registration = NodeRegistration {
-            id: options.id.clone(),
             name: options.name.unwrap_or(options.id.clone()),
             request: TypeInfo::of::<Request>(),
             response: TypeInfo::of::<Response>(),
