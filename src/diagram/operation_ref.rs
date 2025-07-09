@@ -22,7 +22,10 @@ use std::{
     sync::Arc
 };
 
-use super::{BuiltinTarget, NamespacedOperation, NextOperation, OperationName};
+use super::{
+    BuilderId, BuiltinTarget, DisplayText, JsonMessage, NamespacedOperation,
+    NextOperation, OperationName,
+};
 
 use smallvec::{smallvec, SmallVec};
 
@@ -30,13 +33,10 @@ use serde::{Serialize, Deserialize};
 
 use schemars::{JsonSchema, json_schema};
 
-/// This key is used so we can do a clone-free .get(&NextOperation) of a hashmap
-/// that uses this as a key.
-//
-// TODO(@mxgrey): With this struct we could apply a lifetime to
-// DiagramConstruction and then borrow all the names used in this struct instead
-// of using Cow.
+/// This enum allows every operation within a workflow to have a unique key,
+/// even if it is nested inside other operations.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum OperationRef {
     Named(NamedOperationRef),
     Terminate(NamespaceList),
@@ -335,5 +335,47 @@ impl JsonSchema for NamespaceList {
                 "type": "string"
             }
         })
+    }
+}
+
+/// Information about how an operation was constructed.
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+pub struct ConstructionInfo {
+    /// What kind of operation is this, e.g. node, fork_clone, section.
+    pub kind: Option<Cow<'static, str>>,
+    /// What builder was used (only applicable if the operation was a node or
+    /// section).
+    pub builder: Option<BuilderId>,
+    /// What configuration was used for the builder (only applicable if the
+    /// operation was a node or section).
+    pub config: Option<Arc<JsonMessage>>,
+    /// What is the display text for the operation.
+    pub display_text: Option<DisplayText>,
+}
+
+impl ConstructionInfo {
+    pub fn for_node(
+        builder: &BuilderId,
+        config: &Arc<JsonMessage>,
+        display_text: &DisplayText,
+    ) -> ConstructionInfo {
+        ConstructionInfo {
+            kind: Some(Cow::Borrowed("node")),
+            builder: Some(Arc::clone(builder)),
+            config: Some(Arc::clone(config)),
+            display_text: Some(Arc::clone(display_text)),
+        }
+    }
+
+    pub fn for_basic_op(
+        kind: &'static str,
+        display_text: &Option<DisplayText>,
+    ) -> ConstructionInfo {
+        ConstructionInfo {
+            kind: Some(Cow::Borrowed(kind)),
+            builder: None,
+            config: None,
+            display_text: display_text.clone(),
+        }
     }
 }

@@ -34,6 +34,9 @@ use crate::{
     StreamPack,
 };
 
+#[cfg(feature = "trace")]
+use crate::Trace;
+
 use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
 use serde_json::json;
@@ -66,7 +69,7 @@ impl NodeRegistration {
     pub(super) fn create_node(
         &self,
         builder: &mut Builder,
-        config: serde_json::Value,
+        config: JsonMessage,
     ) -> Result<DynNode, DiagramErrorCode> {
         let mut create_node_impl = self.create_node_impl.borrow_mut();
         let n = create_node_impl(builder, config)?;
@@ -91,6 +94,9 @@ type ListenFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCo
 type CreateBufferFn = fn(BufferSettings, &mut Builder) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;
+
+#[cfg(feature = "trace")]
+type EnableTraceSerializeFn = fn(&mut Trace);
 
 struct BuildScope {
     set_request: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeRequestResult,
@@ -666,6 +672,9 @@ pub(super) struct MessageOperation {
     pub(super) create_buffer_impl: CreateBufferFn,
     pub(super) create_trigger_impl: CreateTriggerFn,
     build_scope: BuildScope,
+
+    #[cfg(feature = "trace")]
+    pub(super) enable_trace_serialization: Option<EnableTraceSerializeFn>,
 }
 
 impl MessageOperation {
@@ -689,6 +698,9 @@ impl MessageOperation {
             },
             create_trigger_impl: |builder| builder.create_map_block(|_: T| ()).into(),
             build_scope: BuildScope::new::<T>(),
+
+            #[cfg(feature = "trace")]
+            enable_trace_serialization: None,
         }
     }
 }

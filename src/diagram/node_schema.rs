@@ -22,19 +22,24 @@ use std::{collections::HashMap, sync::Arc};
 use crate::Builder;
 
 use super::{
-    is_default, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode,
-    MissingStream, NextOperation, OperationName,
+    is_default, BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo,
+    DiagramContext, DiagramErrorCode, DisplayText, MissingStream, NextOperation,
+    OperationName, JsonMessage, TraceInfo, TraceSettings,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeSchema {
-    pub(super) builder: BuilderId,
+    pub builder: BuilderId,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub(super) config: serde_json::Value,
-    pub(super) next: NextOperation,
+    pub config: Arc<JsonMessage>,
+    pub next: NextOperation,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub(super) stream_out: HashMap<OperationName, NextOperation>,
+    pub stream_out: HashMap<OperationName, NextOperation>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub display_text: Option<DisplayText>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub trace: Option<TraceSettings>,
 }
 
 impl BuildDiagramOperation for NodeSchema {
@@ -45,9 +50,15 @@ impl BuildDiagramOperation for NodeSchema {
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
-        let mut node = node_registration.create_node(builder, self.config.clone())?;
+        let mut node = node_registration.create_node(builder, (*self.config).clone())?;
 
-        ctx.set_input_for_target(id, node.input.into())?;
+        let display_text = self.display_text.as_ref().unwrap_or(&node_registration.name);
+        let trace = TraceInfo::new(
+            ConstructionInfo::for_node(&self.builder, &self.config, display_text),
+            self.trace,
+        );
+
+        ctx.set_input_for_target(id, node.input.into(), trace)?;
         ctx.add_output_into_target(&self.next, node.output);
 
         let available_names = node

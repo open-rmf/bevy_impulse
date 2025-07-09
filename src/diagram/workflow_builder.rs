@@ -27,10 +27,10 @@ use crate::{
 };
 
 use super::{
-    BufferSelection, Diagram, DiagramElementRegistry, DiagramError,
-    DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
-    ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList,
-    NextOperation, OperationName, Operations, OperationRef, StreamOutRef, Templates, TypeInfo,
+    BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,
+    DiagramErrorCode, DisplayText, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
+    ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList, NextOperation,
+    OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -84,6 +84,7 @@ pub struct DiagramContext<'a, 'c> {
     pub operations: Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
+    default_trace: TraceSettings,
     scope: BuilderScopeContext,
     namespaces: NamespaceList,
 }
@@ -192,9 +193,24 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         &mut self,
         operation: impl Into<OperationRef>,
         input: DynInputSlot,
+        info: TraceInfo,
     ) -> Result<(), DiagramErrorCode> {
         let operation = self.into_operation_ref(operation);
         let connect = standard_input_connection(input, &self.registry)?;
+
+        let trace = info.trace.unwrap_or(self.default_trace);
+        #[cfg(feature = "trace")]
+        {
+
+        }
+
+        #[cfg(not(feature = "trace"))]
+        {
+            if trace.is_on() {
+                return Err(DiagramErrorCode::TraceFeatureDisabled);
+            }
+        }
+
         self.impl_connect_into_target(operation, connect)
     }
 
@@ -250,9 +266,10 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         &mut self,
         operation: impl Into<OperationRef> + Clone,
         buffer: AnyBuffer,
+        trace: TraceInfo,
     ) -> Result<(), DiagramErrorCode> {
         let input: DynInputSlot = buffer.into();
-        self.set_input_for_target(operation.clone(), input)?;
+        self.set_input_for_target(operation.clone(), input, trace)?;
 
         let operation = self.into_operation_ref(operation);
         match self.construction.buffers.entry(operation.clone()) {
@@ -629,6 +646,7 @@ where
             registry,
             operations: diagram.ops.clone(),
             templates: &diagram.templates,
+            default_trace: diagram.default_trace,
             on_implicit_error,
             namespaces: NamespaceList::default(),
             scope: builder.context,
@@ -665,6 +683,7 @@ where
                 registry,
                 operations: unfinished.sibling_ops.clone(),
                 templates: &diagram.templates,
+                default_trace: diagram.default_trace,
                 on_implicit_error,
                 namespaces: unfinished.namespaces.clone(),
                 scope: unfinished.scope,
@@ -716,6 +735,7 @@ where
                     registry,
                     operations: diagram.ops.clone(),
                     templates: &diagram.templates,
+                    default_trace: diagram.default_trace,
                     on_implicit_error,
                     // TODO(@mxgrey): The namespace while connecting into targets
                     // is always empty since the ConnectIntoTargets implementation
@@ -869,6 +889,8 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
+    let default_trace = ctx.default_trace;
+
     // Put the input message into the diagram
     ctx.add_output_into_target(&start, scope.input.into());
 
@@ -881,7 +903,10 @@ where
     let mut streams = DynStreamInputPack::default();
     Streams::into_dyn_stream_input_pack(&mut streams, scope.streams);
     for (name, input) in streams.named {
-        ctx.set_input_for_target(StreamOutRef::new_for_root(name), input)?;
+        // TODO(@mxgrey): The trace settings for stream_out are not properly
+        // based on whatever the user sets in the StreamOutSchema.
+        let trace = TraceInfo::for_basic_op("stream_out", &None, Some(default_trace));
+        ctx.set_input_for_target(StreamOutRef::new_for_root(name), input, trace)?;
     }
 
     // Add the dispose operation
@@ -1207,5 +1232,33 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'd> {
         }
 
         debug.finish()
+    }
+}
+
+/// Information for how an operation should be traced.
+pub struct TraceInfo {
+    /// Information about how the operation was constructed.
+    pub construction: ConstructionInfo,
+    /// Whether or not tracing should be enabled for this operation.
+    pub trace: Option<TraceSettings>,
+}
+
+impl TraceInfo {
+    pub fn new(
+        construction: ConstructionInfo,
+        trace: Option<TraceSettings>,
+    ) -> Self {
+        Self { construction, trace }
+    }
+
+    pub fn for_basic_op(
+        kind: &'static str,
+        display_text: &Option<DisplayText>,
+        trace: Option<TraceSettings>,
+    ) -> Self {
+        Self {
+            construction: ConstructionInfo::for_basic_op(kind, display_text),
+            trace,
+        }
     }
 }

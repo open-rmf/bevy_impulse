@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    NextOperation, OperationName, TypeInfo,
+    is_default, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DisplayText, NextOperation, OperationName, TraceSettings, TraceInfo, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -32,6 +32,11 @@ pub struct BufferSchema {
 
     /// If true, messages will be serialized before sending into the buffer.
     pub(super) serialize: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub display_text: Option<DisplayText>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub trace: Option<TraceSettings>,
 }
 
 impl BuildDiagramOperation for BufferSchema {
@@ -61,7 +66,9 @@ impl BuildDiagramOperation for BufferSchema {
             ctx.registry
                 .messages
                 .create_buffer(&message_info, self.settings.clone(), builder)?;
-        ctx.set_buffer_for_operation(id, buffer)?;
+
+        let trace = TraceInfo::for_basic_op("buffer", &self.display_text, self.trace);
+        ctx.set_buffer_for_operation(id, buffer, trace)?;
         Ok(BuildStatus::Finished)
     }
 }
@@ -73,6 +80,11 @@ pub struct BufferAccessSchema {
 
     /// Map of buffer keys and buffers.
     pub(super) buffers: BufferSelection,
+
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub display_text: Option<DisplayText>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub trace: Option<TraceSettings>,
 }
 
 impl BuildDiagramOperation for BufferAccessSchema {
@@ -97,7 +109,9 @@ impl BuildDiagramOperation for BufferAccessSchema {
             .registry
             .messages
             .with_buffer_access(&target_type, &buffer_map, builder)?;
-        ctx.set_input_for_target(id, node.input)?;
+
+        let trace = TraceInfo::for_basic_op("buffer_access", &self.display_text, self.trace);
+        ctx.set_input_for_target(id, node.input, trace)?;
         ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)
     }
@@ -136,6 +150,8 @@ impl BuildDiagramOperation for ListenSchema {
         builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        // TODO(@mxgrey): Figure out how to enable tracing for listen operations
+
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
             return Ok(BuildStatus::defer(
                 "waiting to find out target message type",

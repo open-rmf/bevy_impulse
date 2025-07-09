@@ -30,6 +30,9 @@ use super::{
 };
 use crate::{Builder, JsonBuffer};
 
+#[cfg(feature = "trace")]
+use crate::Trace;
+
 pub trait DynType {
     /// Returns the type name of the request. Note that the type name must be unique.
     fn type_name() -> Cow<'static, str>;
@@ -85,6 +88,11 @@ where
                 err: err.into(),
             })
         });
+
+        #[cfg(feature = "trace")]
+        {
+            reg.operations.enable_trace_serialization = Some(Trace::enable_value_serialization::<T>);
+        }
 
         // Serialize and deserialize both generate the schema, so check before
         // generating it.

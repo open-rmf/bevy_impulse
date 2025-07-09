@@ -15,12 +15,16 @@
  *
 */
 
-use crate::{OperationName, OperationRef, BuilderId, JsonMessage, TypeInfo};
+use crate::{ConstructionInfo, OperationRef, JsonMessage, TypeInfo};
 
 use bevy_ecs::prelude::{Component, Entity, Event};
 use schemars::JsonSchema;
 use serde::{Serialize, Deserialize};
-use std::{any::Any, sync::Arc};
+use std::{
+    any::Any,
+    borrow::Cow,
+    sync::Arc,
+};
 use thiserror::Error as ThisError;
 
 /// A component attached to workflow operation entities in order to trace their
@@ -95,16 +99,20 @@ pub struct OperationStarted {
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 pub struct OperationInfo {
-    op_id: Option<OperationRef>,
+    id: Option<OperationRef>,
+    message_type: Option<Cow<'static, str>>,
     construction: Option<ConstructionInfo>,
-    op_label: Option<OperationName>,
 }
-
 
 impl OperationInfo {
     /// The unique identifier for this operation within the workflow.
-    pub fn op_id(&self) -> &Option<OperationRef> {
-        &self.op_id
+    pub fn id(&self) -> &Option<OperationRef> {
+        &self.id
+    }
+
+    /// Get the message type that this operation uses, if one is available.
+    pub fn message_type(&self) -> &Option<Cow<'static, str>> {
+        &self.message_type
     }
 
     /// If this operation was created by a builder, this is the ID of that
@@ -112,15 +120,4 @@ impl OperationInfo {
     pub fn construction(&self) -> &Option<ConstructionInfo> {
         &self.construction
     }
-
-    pub fn op_label(&self) -> &Option<Arc<str>> {
-        &self.op_label
-    }
-}
-
-#[derive(Serialize, Deserialize, JsonSchema, Debug)]
-pub enum ConstructionInfo {
-    NodeBuilder(BuilderId),
-    SectionBuilder(BuilderId),
-    Template(OperationName),
 }

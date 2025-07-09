@@ -21,9 +21,10 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
-    PerformForkClone, SerializeMessage, TypeInfo,
+    is_default, supported::*, BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, DisplayText, DynInputSlot, DynOutput, MessageRegistration,
+    MessageRegistry, NextOperation, OperationName, PerformForkClone, SerializeMessage,
+    TraceInfo, TraceSettings, TypeInfo,
 };
 
 pub struct DynForkResult {
@@ -37,6 +38,10 @@ pub struct DynForkResult {
 pub struct ForkResultSchema {
     pub(super) ok: NextOperation,
     pub(super) err: NextOperation,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub display_text: Option<DisplayText>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub trace: Option<TraceSettings>,
 }
 
 impl BuildDiagramOperation for ForkResultSchema {
@@ -57,7 +62,10 @@ impl BuildDiagramOperation for ForkResultSchema {
         };
 
         let fork = ctx.registry.messages.fork_result(&inferred_type, builder)?;
-        ctx.set_input_for_target(id, fork.input)?;
+
+        let trace = TraceInfo::for_basic_op("fork_result", &self.display_text, self.trace);
+        ctx.set_input_for_target(id, fork.input, trace)?;
+
         ctx.add_output_into_target(&self.ok, fork.ok);
         ctx.add_output_into_target(&self.err, fork.err);
         Ok(BuildStatus::Finished)

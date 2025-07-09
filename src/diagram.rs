@@ -82,6 +82,7 @@ const RESERVED_OPERATION_NAMES: [&'static str; 2] = ["", "builtin"];
 
 pub type BuilderId = Arc<str>;
 pub type OperationName = Arc<str>;
+pub type DisplayText = Arc<str>;
 
 #[derive(
     Debug, Clone, Serialize, Deserialize, JsonSchema, Hash, PartialEq, Eq, PartialOrd, Ord,
@@ -1035,6 +1036,40 @@ pub struct Diagram {
 
     /// Operations that define the workflow
     pub ops: Operations,
+
+    /// Whether the operations in the workflow should be traced by default.
+    /// Being traced means each operation will emit an event each time it is
+    /// triggered. You can decide whether that event contains the serialized
+    /// message data that triggered the operation.
+    ///
+    /// If bevy_impulse is not compiled with the "trace" feature then any attempt
+    /// to turn tracing on will result in a [`DiagramErrorCode::TraceFeatureDisabled`].
+    pub default_trace: TraceSettings,
+}
+
+#[derive(Default, Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceSettings {
+    /// Do not emit any signal when the operation is activated.
+    #[default]
+    Off,
+    /// Emit a minimal signal with just the operation information when the
+    /// operation is activated.
+    On,
+    /// Emit a signal that includes a serialized copy of the message when the
+    /// operation is activated. This may substantially increase the overhead of
+    /// triggering operations depending on the size and frequency of the messages,
+    /// so it is recommended only for high-level workflows or for debugging.
+    ///
+    /// If the message is not serializable then it will simply not be included
+    /// in the event information.
+    Messages,
+}
+
+impl TraceSettings {
+    pub fn is_on(&self) -> bool {
+        !matches!(self, Self::Off)
+    }
 }
 
 impl Diagram {
@@ -1046,6 +1081,7 @@ impl Diagram {
             templates: Default::default(),
             on_implicit_error: Default::default(),
             ops: Default::default(),
+            default_trace: Default::default(),
         }
     }
 
@@ -1478,7 +1514,8 @@ pub enum DiagramErrorCode {
         reasons: HashMap<OperationRef, Cow<'static, str>>,
     },
 
-    #[error("The workflow building process has had an excessive number of iterations. This may indicate an implementation bug or an extraordinarily complex diagram.")]
+    #[error("The workflow building process has had an excessive number of iterations. \
+    This may indicate an implementation bug or an extraordinarily complex diagram.")]
     ExcessiveIterations,
 
     #[error("An operation was given a reserved name [{0}]")]
@@ -1498,6 +1535,10 @@ pub enum DiagramErrorCode {
 
     #[error("An error occurred while creating a scope: {0}")]
     IncrementalScopeError(#[from] IncrementalScopeError),
+
+    #[error("Workflow tracing was requested but the executor was not compiled with the trace feature. \
+    Compile bevy_impulse with features = [\"trace\"] to enable tracing.")]
+    TraceFeatureDisabled,
 }
 
 fn format_list<T: std::fmt::Display>(list: &[T]) -> String {
