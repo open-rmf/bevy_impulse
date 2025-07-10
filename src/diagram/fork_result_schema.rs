@@ -19,10 +19,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
-    MessageRegistry, NextOperation, OperationName, PerformForkClone, SerializeMessage,
-    TraceInfo, TraceSettings, TypeInfo,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
+    PerformForkClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
 pub struct DynForkResult {
@@ -56,7 +55,10 @@ impl BuildDiagramOperation for ForkResultSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_result(&inferred_type, ctx.builder)?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_result(&inferred_type, ctx.builder)?;
 
         let trace = TraceInfo::for_basic_op("fork_result", &self.trace_settings);
         ctx.set_input_for_target(id, fork.input, trace)?;

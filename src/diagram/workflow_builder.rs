@@ -30,8 +30,8 @@ use super::{
     BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,
     DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
     ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList, NextOperation,
-    OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings,
-    TraceToggle, TypeInfo,
+    OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings, TraceToggle,
+    TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -916,7 +916,10 @@ where
         scope.terminate.into(),
         TraceInfo::for_basic_op(
             "terminate",
-            &TraceSettings { display_text: None, trace: None },
+            &TraceSettings {
+                display_text: None,
+                trace: None,
+            },
         ),
     )?;
 
@@ -927,7 +930,10 @@ where
         // based on whatever the user sets in the StreamOutSchema.
         let trace = TraceInfo::for_basic_op(
             "stream_out",
-            &TraceSettings { display_text: None, trace: None },
+            &TraceSettings {
+                display_text: None,
+                trace: None,
+            },
         );
         ctx.set_input_for_target(StreamOutRef::new_for_root(name), input, trace)?;
     }
@@ -1263,16 +1269,19 @@ pub struct TraceInfo {
 }
 
 impl TraceInfo {
-    pub fn new(
-        construction: ConstructionInfo,
-        trace: Option<TraceToggle>,
-    ) -> Self {
-        Self { construction, trace }
+    pub fn new(construction: ConstructionInfo, trace: Option<TraceToggle>) -> Self {
+        Self {
+            construction,
+            trace,
+        }
     }
 
     pub fn for_basic_op(
         kind: &'static str,
-        TraceSettings { display_text, trace }: &TraceSettings,
+        TraceSettings {
+            display_text,
+            trace,
+        }: &TraceSettings,
     ) -> Self {
         Self {
             construction: ConstructionInfo::for_basic_op(kind, display_text),

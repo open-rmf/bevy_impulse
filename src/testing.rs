@@ -30,12 +30,12 @@ pub use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use crate::{
-    Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput,
-    BlockingMap, BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable,
-    Buffering, Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, Joining, OperationError, OperationResult, OperationRoster, Promise,
-    RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf, StreamPack, UnhandledErrors,
-    WorkflowSettings, ImpulseAppPlugin,
+    Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput, BlockingMap,
+    BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable, Buffering, Builder,
+    ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
+    GetBufferedSessionsFn, ImpulseAppPlugin, Joining, OperationError, OperationResult,
+    OperationRoster, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf,
+    StreamPack, UnhandledErrors, WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -47,10 +47,7 @@ impl TestingContext {
     /// to work properly.
     pub fn minimal_plugins() -> Self {
         let mut app = App::new();
-        app.add_plugins((
-            ImpulseAppPlugin::default(),
-            TimePlugin,
-        ));
+        app.add_plugins((ImpulseAppPlugin::default(), TimePlugin));
 
         TestingContext { app }
     }

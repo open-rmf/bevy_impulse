@@ -91,7 +91,8 @@ where
 
         #[cfg(feature = "trace")]
         {
-            reg.operations.enable_trace_serialization = Some(Trace::enable_value_serialization::<T>);
+            reg.operations.enable_trace_serialization =
+                Some(Trace::enable_value_serialization::<T>);
         }
 
         // Serialize and deserialize both generate the schema, so check before
@@ -251,7 +252,9 @@ impl ImplicitSerialization {
                     return Ok(Err(incoming));
                 };
 
-                serialize.ok.connect_to(&self.serialized_input, ctx.builder)?;
+                serialize
+                    .ok
+                    .connect_to(&self.serialized_input, ctx.builder)?;
 
                 let error_target = ctx.get_implicit_error_target();
                 ctx.add_output_into_target(error_target, serialize.err);
@@ -403,7 +406,9 @@ impl ImplicitStringify {
                     return Ok(Err(incoming));
                 };
 
-                stringify.output.connect_to(&self.string_input, ctx.builder)?;
+                stringify
+                    .output
+                    .connect_to(&self.string_input, ctx.builder)?;
                 vacant.insert(stringify.input).clone()
             }
         };

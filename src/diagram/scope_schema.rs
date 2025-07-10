@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     standard_input_connection, BuildDiagramOperation, BuildStatus, ConnectIntoTarget,
     DiagramContext, DiagramErrorCode, DynOutput, IncrementalScopeBuilder, IncrementalScopeRequest,
-    IncrementalScopeResponse, InferMessageType, NamespaceList, NextOperation, OperationName, OperationRef,
-    Operations, ScopeSettings, StreamOutRef,
+    IncrementalScopeResponse, InferMessageType, NamespaceList, NextOperation, OperationName,
+    OperationRef, Operations, ScopeSettings, StreamOutRef,
 };
 
 /// The schema to define a scope within a diagram.

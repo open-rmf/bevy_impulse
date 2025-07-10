@@ -21,9 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Builder, ForkCloneOutput};
 
 use super::{
-    supported::*, BuildDiagramOperation, BuildStatus,
-    DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput,
-    NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    DynInputSlot, DynOutput, NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -57,7 +56,10 @@ impl BuildDiagramOperation for ForkCloneSchema {
             }
         };
 
-        let fork = ctx.registry.messages.fork_clone(&inferred_type, ctx.builder)?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_clone(&inferred_type, ctx.builder)?;
         let trace = TraceInfo::for_basic_op("fork_clone", &self.trace_settings);
         ctx.set_input_for_target(id, fork.input, trace)?;
         for target in &self.next {

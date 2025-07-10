@@ -22,7 +22,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{JsonMessage, ForkResultOutput};
+use crate::{ForkResultOutput, JsonMessage};
 
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, NextOperation,

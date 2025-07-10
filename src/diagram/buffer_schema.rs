@@ -22,7 +22,7 @@ use crate::{Accessor, BufferSettings, JsonMessage};
 
 use super::{
     BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    NextOperation, OperationName, TraceSettings, TraceInfo, TypeInfo,
+    NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -59,10 +59,11 @@ impl BuildDiagramOperation for BufferSchema {
             inferred_type
         };
 
-        let buffer =
-            ctx.registry
-                .messages
-                .create_buffer(&message_info, self.settings.clone(), ctx.builder)?;
+        let buffer = ctx.registry.messages.create_buffer(
+            &message_info,
+            self.settings.clone(),
+            ctx.builder,
+        )?;
 
         let trace = TraceInfo::for_basic_op("buffer", &self.trace_settings);
         ctx.set_buffer_for_operation(id, buffer, trace)?;
@@ -99,10 +100,10 @@ impl BuildDiagramOperation for BufferAccessSchema {
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let node = ctx
-            .registry
-            .messages
-            .with_buffer_access(&target_type, &buffer_map, ctx.builder)?;
+        let node =
+            ctx.registry
+                .messages
+                .with_buffer_access(&target_type, &buffer_map, ctx.builder)?;
 
         let trace = TraceInfo::for_basic_op("buffer_access", &self.trace_settings);
         ctx.set_input_for_target(id, node.input, trace)?;

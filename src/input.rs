@@ -28,9 +28,9 @@ use std::sync::Arc;
 use backtrace::Backtrace;
 
 use crate::{
-    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster,
-    Detached, MiscellaneousFailure, OperationError, OperationRoster, OperationStarted,
-    OrBroken, SessionStatus, UnhandledErrors, UnusedTarget,
+    Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, Detached,
+    MiscellaneousFailure, OperationError, OperationRoster, OperationStarted, OrBroken,
+    SessionStatus, UnhandledErrors, UnusedTarget,
 };
 
 #[cfg(feature = "trace")]
@@ -285,12 +285,12 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                             Err(err) => {
                                 self.world_scope(|world| {
                                     world
-                                    .get_resource_or_insert_with(UnhandledErrors::default)
-                                    .miscellaneous
-                                    .push(MiscellaneousFailure {
-                                        error: Arc::new(err.into()),
-                                        backtrace: Some(Backtrace::new()),
-                                    });
+                                        .get_resource_or_insert_with(UnhandledErrors::default)
+                                        .miscellaneous
+                                        .push(MiscellaneousFailure {
+                                            error: Arc::new(err.into()),
+                                            backtrace: Some(Backtrace::new()),
+                                        });
                                 });
                                 return Err(OperationError::Broken(Some(Backtrace::new())));
                             }

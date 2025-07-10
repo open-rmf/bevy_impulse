@@ -20,9 +20,7 @@ use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    AnyBuffer, AnyMessageBox, Buffer, InputSlot, JsonBuffer, JsonMessage, Output,
-};
+use crate::{AnyBuffer, AnyMessageBox, Buffer, InputSlot, JsonBuffer, JsonMessage, Output};
 
 use super::{
     BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo, DiagramContext,
@@ -61,9 +59,8 @@ impl BuildDiagramOperation for SectionSchema {
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match &self.provider {
             SectionProvider::Builder(section_builder) => {
-                let section_registration = ctx
-                    .registry
-                    .get_section_registration(section_builder)?;
+                let section_registration =
+                    ctx.registry.get_section_registration(section_builder)?;
 
                 let section = section_registration
                     .create_section(ctx.builder, (*self.config).clone())?
@@ -78,11 +75,7 @@ impl BuildDiagramOperation for SectionSchema {
                 // TODO(@mxgrey): Figure out how to automatically trace operations
                 // that are built by the section builder.
                 let trace = TraceInfo::new(
-                    ConstructionInfo::for_section(
-                        section_builder,
-                        &self.config,
-                        display_text,
-                    ),
+                    ConstructionInfo::for_section(section_builder, &self.config, display_text),
                     self.trace_settings.trace,
                 );
 

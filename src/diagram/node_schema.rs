@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use super::{
-    is_default, BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo,
-    DiagramContext, DiagramErrorCode, MissingStream, NextOperation,
-    OperationName, JsonMessage, TraceInfo, TraceSettings,
+    is_default, BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo, DiagramContext,
+    DiagramErrorCode, JsonMessage, MissingStream, NextOperation, OperationName, TraceInfo,
+    TraceSettings,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

@@ -29,8 +29,8 @@ pub use crate::dyn_node::*;
 use crate::{
     Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
     IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
-    IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer,
-    JsonMessage, NamedStream, Node, StreamOf, StreamPack,
+    IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage,
+    NamedStream, Node, StreamOf, StreamPack,
 };
 
 #[cfg(feature = "trace")]
@@ -1374,7 +1374,9 @@ impl DiagramElementRegistry {
         SectionT: Section,
     {
         let reg = section_builder.into_section_registration(
-            options.default_display_text.unwrap_or_else(|| options.id.clone()),
+            options
+                .default_display_text
+                .unwrap_or_else(|| options.id.clone()),
             &mut self.messages.schema_generator,
         );
         self.sections.insert(options.id, reg);
@@ -1620,7 +1622,8 @@ mod tests {
             .opt_out()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("multiply3_uncloneable").with_default_display_text("Test Name"),
+                NodeBuilderOptions::new("multiply3_uncloneable")
+                    .with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
             )
             .with_unzip();
@@ -1708,7 +1711,8 @@ mod tests {
             .no_deserializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_request_map").with_default_display_text("Test Name"),
+                NodeBuilderOptions::new("opaque_request_map")
+                    .with_default_display_text("Test Name"),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             )
             .with_serialize_response();
@@ -1729,7 +1733,8 @@ mod tests {
             .no_deserializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_response_map").with_default_display_text("Test Name"),
+                NodeBuilderOptions::new("opaque_response_map")
+                    .with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_response_map)
                 },
@@ -1754,7 +1759,8 @@ mod tests {
             .no_serializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_req_resp_map").with_default_display_text("Test Name"),
+                NodeBuilderOptions::new("opaque_req_resp_map")
+                    .with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_req_resp_map)
                 },

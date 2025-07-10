@@ -15,16 +15,12 @@
  *
 */
 
-use crate::{ConstructionInfo, OperationRef, JsonMessage, TypeInfo, TraceToggle};
+use crate::{ConstructionInfo, JsonMessage, OperationRef, TraceToggle, TypeInfo};
 
 use bevy_ecs::prelude::{Component, Entity, Event};
 use schemars::JsonSchema;
-use serde::{Serialize, Deserialize};
-use std::{
-    any::Any,
-    borrow::Cow,
-    sync::Arc,
-};
+use serde::{Deserialize, Serialize};
+use std::{any::Any, borrow::Cow, sync::Arc};
 use thiserror::Error as ThisError;
 
 /// A component attached to workflow operation entities in order to trace their
@@ -39,11 +35,12 @@ pub struct Trace {
 impl Trace {
     /// Create trace information for an entity. By default this will not serialize
     /// the messages passing through.
-    pub fn new(
-        toggle: TraceToggle,
-        info: Arc<OperationInfo>,
-    ) -> Self {
-        Trace { toggle, info, serialize_value: None }
+    pub fn new(toggle: TraceToggle, info: Arc<OperationInfo>) -> Self {
+        Trace {
+            toggle,
+            info,
+            serialize_value: None,
+        }
     }
 
     /// Enable the trace for this operation to also send out the data of the
@@ -80,8 +77,7 @@ fn get_serialize_value<T: Any + Serialize>(value: &dyn Any) -> Result<JsonMessag
         });
     };
 
-    serde_json::to_value(value_ref)
-    .map_err(GetValueError::FailedSerialization)
+    serde_json::to_value(value_ref).map_err(GetValueError::FailedSerialization)
 }
 
 #[derive(ThisError, Debug)]
@@ -124,7 +120,11 @@ impl OperationInfo {
         message_type: Option<Cow<'static, str>>,
         construction: Option<ConstructionInfo>,
     ) -> Self {
-        Self { id, message_type, construction }
+        Self {
+            id,
+            message_type,
+            construction,
+        }
     }
 
     /// The unique identifier for this operation within the workflow.
@@ -152,13 +152,10 @@ mod tests {
         prelude::*,
         trace::OperationStarted,
     };
-    use serde_json::json;
-    use std::{
-        sync::Arc,
-        time::Duration,
-    };
-    use bevy_ecs::prelude::{EventReader, Resource, ResMut};
     use bevy_app::{App, PostUpdate};
+    use bevy_ecs::prelude::{EventReader, ResMut, Resource};
+    use serde_json::json;
+    use std::{sync::Arc, time::Duration};
 
     #[derive(Resource, Default, Debug)]
     struct TraceRecorder {
@@ -175,9 +172,8 @@ mod tests {
     }
 
     fn enable_trace_recording(app: &mut App) {
-        app
-        .init_resource::<TraceRecorder>()
-        .add_systems(PostUpdate, record_traces);
+        app.init_resource::<TraceRecorder>()
+            .add_systems(PostUpdate, record_traces);
     }
 
     #[test]
@@ -185,26 +181,27 @@ mod tests {
         let mut fixture = DiagramTestFixture::new();
         enable_trace_recording(&mut fixture.context.app);
 
-        fixture.registry.register_node_builder(
-            NodeBuilderOptions::new("less_than"),
-            |builder, config: i64| {
-                builder.create_map_block(move |value: i64| {
-                    if value < config {
-                        Ok(value)
-                    } else {
-                        Err(value)
-                    }
-                })
-            },
-        )
-        .with_fork_result();
+        fixture
+            .registry
+            .register_node_builder(
+                NodeBuilderOptions::new("less_than"),
+                |builder, config: i64| {
+                    builder.create_map_block(move |value: i64| {
+                        if value < config {
+                            Ok(value)
+                        } else {
+                            Err(value)
+                        }
+                    })
+                },
+            )
+            .with_fork_result();
 
-        fixture.registry.register_node_builder(
-            NodeBuilderOptions::new("noop"),
-            |builder, _config: ()| {
+        fixture
+            .registry
+            .register_node_builder(NodeBuilderOptions::new("noop"), |builder, _config: ()| {
                 builder.create_map_block(|value: i64| value)
-            }
-        );
+            });
 
         let diagram = Diagram::from_json(json!({
             "version": "0.1.0",
@@ -326,29 +323,25 @@ mod tests {
         fixture: &mut DiagramTestFixture,
         route: &[&str],
     ) {
-        let mut promise = fixture.context.command(|commands| {
-            commands.request(value, panchinko).take_response()
-        });
+        let mut promise = fixture
+            .context
+            .command(|commands| commands.request(value, panchinko).take_response());
 
-        fixture.context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        fixture
+            .context
+            .run_with_conditions(&mut promise, Duration::from_secs(2));
         assert!(fixture.context.no_unhandled_errors());
         let result = promise.take().available().unwrap();
         assert_eq!(value, result);
 
         let mut recorder = fixture.context.app.world.resource_mut::<TraceRecorder>();
-        confirm_trace(
-            &*recorder,
-            route,
-        );
+        confirm_trace(&*recorder, route);
 
         // Clear the record so these results do not interfere with the next test
         recorder.record.clear();
     }
 
-    fn confirm_trace(
-        recorder: &TraceRecorder,
-        expectation: &[&str],
-    ) {
+    fn confirm_trace(recorder: &TraceRecorder, expectation: &[&str]) {
         let mut actual = recorder.record.clone();
         for next in expectation {
             let name: Arc<str> = (*next).into();

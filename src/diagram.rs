@@ -1532,8 +1532,10 @@ pub enum DiagramErrorCode {
         reasons: HashMap<OperationRef, Cow<'static, str>>,
     },
 
-    #[error("The workflow building process has had an excessive number of iterations. \
-    This may indicate an implementation bug or an extraordinarily complex diagram.")]
+    #[error(
+        "The workflow building process has had an excessive number of iterations. \
+    This may indicate an implementation bug or an extraordinarily complex diagram."
+    )]
     ExcessiveIterations,
 
     #[error("An operation was given a reserved name [{0}]")]
@@ -1554,8 +1556,10 @@ pub enum DiagramErrorCode {
     #[error("An error occurred while creating a scope: {0}")]
     IncrementalScopeError(#[from] IncrementalScopeError),
 
-    #[error("Workflow tracing was requested but the executor was not compiled with the trace feature. \
-    Compile bevy_impulse with features = [\"trace\"] to enable tracing.")]
+    #[error(
+        "Workflow tracing was requested but the executor was not compiled with the trace feature. \
+    Compile bevy_impulse with features = [\"trace\"] to enable tracing."
+    )]
     TraceFeatureDisabled,
 }
 

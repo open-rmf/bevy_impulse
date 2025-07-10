@@ -17,25 +17,24 @@
 
 use bevy_derive::{Deref, DerefMut};
 
-use std::{
-    borrow::Cow,
-    sync::Arc
-};
+use std::{borrow::Cow, sync::Arc};
 
 use super::{
-    BuilderId, BuiltinTarget, DisplayText, JsonMessage, NamespacedOperation,
-    NextOperation, OperationName,
+    BuilderId, BuiltinTarget, DisplayText, JsonMessage, NamespacedOperation, NextOperation,
+    OperationName,
 };
 
 use smallvec::{smallvec, SmallVec};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use schemars::{JsonSchema, json_schema};
+use schemars::{json_schema, JsonSchema};
 
 /// This enum allows every operation within a workflow to have a unique key,
 /// even if it is nested inside other operations.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationRef {
     Named(NamedOperationRef),
@@ -107,7 +106,9 @@ impl std::fmt::Display for OperationRef {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 pub struct NamedOperationRef {
     pub namespaces: NamespaceList,
     /// If this references an exposed operation, such as an exposed input or
@@ -208,7 +209,9 @@ impl std::fmt::Display for NamedOperationRef {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 pub struct StreamOutRef {
     /// The namespace of the scope is being streamed out of
     pub namespaces: NamespaceList,
@@ -261,10 +264,10 @@ fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut Name
     // existing namespaces at the back.
     let new_namespaces = NamespaceList(
         parent_namespaces
-        .iter()
-        .cloned()
-        .chain(namespaces.drain(..))
-        .collect()
+            .iter()
+            .cloned()
+            .chain(namespaces.drain(..))
+            .collect(),
     );
 
     *namespaces = new_namespaces;
@@ -278,7 +281,20 @@ fn with_parent_namespaces(
     namespaces
 }
 
-#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Deref, DerefMut, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deref,
+    DerefMut,
+    Serialize,
+    Deserialize,
+)]
 #[serde(transparent)]
 pub struct NamespaceList(pub SmallVec<[OperationName; 4]>);
 
@@ -290,7 +306,6 @@ impl NamespaceList {
     pub fn iter(&self) -> std::slice::Iter<'_, Arc<str>> {
         self.0.iter()
     }
-
 }
 
 impl std::fmt::Display for &'_ NamespaceList {
