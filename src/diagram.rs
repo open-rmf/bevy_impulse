@@ -1534,7 +1534,7 @@ pub enum DiagramErrorCode {
 
     #[error(
         "The workflow building process has had an excessive number of iterations. \
-    This may indicate an implementation bug or an extraordinarily complex diagram."
+        This may indicate an implementation bug or an extraordinarily complex diagram."
     )]
     ExcessiveIterations,
 
@@ -1558,7 +1558,7 @@ pub enum DiagramErrorCode {
 
     #[error(
         "Workflow tracing was requested but the executor was not compiled with the trace feature. \
-    Compile bevy_impulse with features = [\"trace\"] to enable tracing."
+        Compile bevy_impulse with features = [\"trace\"] to enable tracing."
     )]
     TraceFeatureDisabled,
 }
