@@ -1511,8 +1511,8 @@ impl NodeBuilderOptions {
         }
     }
 
-    pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string().into());
+    pub fn with_default_display_text(mut self, text: impl ToString) -> Self {
+        self.name = Some(text.to_string().into());
         self
     }
 }
@@ -1531,8 +1531,8 @@ impl SectionBuilderOptions {
         }
     }
 
-    pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.default_display_text = Some(name.to_string().into());
+    pub fn with_default_display_text(mut self, text: impl ToString) -> Self {
+        self.default_display_text = Some(text.to_string().into());
         self
     }
 }
@@ -1584,7 +1584,7 @@ mod tests {
     fn test_register_node_builder() {
         let mut registry = DiagramElementRegistry::new();
         registry.opt_out().register_node_builder(
-            NodeBuilderOptions::new("multiply3").with_name("Test Name"),
+            NodeBuilderOptions::new("multiply3").with_default_display_text("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
         let req_ops = &registry.messages.get::<i64>().unwrap().operations;
@@ -1602,7 +1602,7 @@ mod tests {
     fn test_register_cloneable_node() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_node_builder(
-            NodeBuilderOptions::new("multiply3").with_name("Test Name"),
+            NodeBuilderOptions::new("multiply3").with_default_display_text("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
         let req_ops = &registry.messages.get::<i64>().unwrap().operations;
@@ -1620,7 +1620,7 @@ mod tests {
             .opt_out()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("multiply3_uncloneable").with_name("Test Name"),
+                NodeBuilderOptions::new("multiply3_uncloneable").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
             )
             .with_unzip();
@@ -1638,7 +1638,7 @@ mod tests {
 
         registry
             .register_node_builder(
-                NodeBuilderOptions::new("vec_resp").with_name("Test Name"),
+                NodeBuilderOptions::new("vec_resp").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(vec_resp),
             )
             .with_split();
@@ -1652,7 +1652,7 @@ mod tests {
         let map_resp = |_: ()| -> HashMap<String, i64> { HashMap::new() };
         registry
             .register_node_builder(
-                NodeBuilderOptions::new("map_resp").with_name("Test Name"),
+                NodeBuilderOptions::new("map_resp").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
             )
             .with_split();
@@ -1664,7 +1664,7 @@ mod tests {
             .splittable());
 
         registry.register_node_builder(
-            NodeBuilderOptions::new("not_splittable").with_name("Test Name"),
+            NodeBuilderOptions::new("not_splittable").with_default_display_text("Test Name"),
             move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
         );
         // even though we didn't register with `with_split`, it is still splittable because we
@@ -1687,7 +1687,7 @@ mod tests {
         }
 
         registry.register_node_builder(
-            NodeBuilderOptions::new("multiply").with_name("Test Name"),
+            NodeBuilderOptions::new("multiply").with_default_display_text("Test Name"),
             move |builder: &mut Builder, config: TestConfig| {
                 builder.create_map_block(move |operand: i64| operand * config.by)
             },
@@ -1708,7 +1708,7 @@ mod tests {
             .no_deserializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_request_map").with_name("Test Name"),
+                NodeBuilderOptions::new("opaque_request_map").with_default_display_text("Test Name"),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             )
             .with_serialize_response();
@@ -1729,7 +1729,7 @@ mod tests {
             .no_deserializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_response_map").with_name("Test Name"),
+                NodeBuilderOptions::new("opaque_response_map").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_response_map)
                 },
@@ -1754,7 +1754,7 @@ mod tests {
             .no_serializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_req_resp_map").with_name("Test Name"),
+                NodeBuilderOptions::new("opaque_req_resp_map").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_req_resp_map)
                 },

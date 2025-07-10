@@ -430,7 +430,7 @@ mod tests {
     fn test_register_section() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: i64| 1_f64);
                 let buffer = builder.create_buffer(BufferSettings::default());
@@ -476,7 +476,7 @@ mod tests {
     fn test_section_unzip() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: ()| (1, 2));
                 TestSectionUnzip {
@@ -500,7 +500,7 @@ mod tests {
     fn test_section_fork_result() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: ()| Ok(1));
                 TestSectionForkResult {
@@ -526,7 +526,7 @@ mod tests {
     fn test_section_split() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: ()| vec![]);
                 TestSectionSplit {
@@ -550,7 +550,7 @@ mod tests {
     fn test_section_join() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: Vec<i64>| {});
                 TestSectionJoin {
@@ -574,7 +574,7 @@ mod tests {
     fn test_section_buffer_access() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: (i64, Vec<BufferKey<i64>>)| {});
                 TestSectionBufferAccess {
@@ -600,7 +600,7 @@ mod tests {
     fn test_section_listen() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: Vec<BufferKey<i64>>| {});
                 TestSectionListen {
