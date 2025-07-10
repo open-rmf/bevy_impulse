@@ -26,7 +26,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    standard_input_connection, BuildDiagramOperation, BuildStatus, Builder, ConnectIntoTarget,
+    standard_input_connection, BuildDiagramOperation, BuildStatus, ConnectIntoTarget,
     DiagramContext, DiagramErrorCode, DynOutput, IncrementalScopeBuilder, IncrementalScopeRequest,
     IncrementalScopeResponse, InferMessageType, NamespaceList, NextOperation, OperationName, OperationRef,
     Operations, ScopeSettings, StreamOutRef,

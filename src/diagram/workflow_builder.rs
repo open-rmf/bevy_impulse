@@ -202,32 +202,28 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
         let trace_toggle = trace_info.trace.unwrap_or(self.default_trace);
         #[cfg(feature = "trace")]
         {
-            if trace_toggle.is_on() {
-                let operation_info = OperationInfo::new(
-                    Some(operation.clone()),
-                    Some(input.message_info().type_name.into()),
-                    Some(trace_info.construction),
-                );
+            let operation_info = OperationInfo::new(
+                Some(operation.clone()),
+                Some(input.message_info().type_name.into()),
+                Some(trace_info.construction),
+            );
 
-                let mut trace = Trace::new(Arc::new(operation_info));
+            let mut trace = Trace::new(trace_toggle, Arc::new(operation_info));
 
-                if trace_toggle.with_messages() {
-                    let enable_trace_serialization = self
-                        .registry
-                        .messages
-                        .messages
-                        .get(input.message_info())
-                        .ok_or_else(|| DiagramErrorCode::UnregisteredType(*input.message_info()))?
-                        .operations
-                        .enable_trace_serialization;
+            let enable_trace_serialization = self
+                .registry
+                .messages
+                .messages
+                .get(input.message_info())
+                .ok_or_else(|| DiagramErrorCode::UnregisteredType(*input.message_info()))?
+                .operations
+                .enable_trace_serialization;
 
-                    if let Some(enable) = enable_trace_serialization {
-                        enable(&mut trace);
-                    }
-                }
-
-                self.builder.commands().entity(input.id()).insert(trace);
+            if let Some(enable) = enable_trace_serialization {
+                enable(&mut trace);
             }
+
+            self.builder.commands().entity(input.id()).insert(trace);
         }
 
         #[cfg(not(feature = "trace"))]

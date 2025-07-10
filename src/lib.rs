@@ -341,6 +341,11 @@ pub struct ImpulsePlugin {}
 impl Plugin for ImpulsePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, flush_impulses());
+
+        #[cfg(feature = "trace")]
+        {
+            app.add_event::<OperationStarted>();
+        }
     }
 }
 

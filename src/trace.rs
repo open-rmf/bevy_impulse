@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{ConstructionInfo, OperationRef, JsonMessage, TypeInfo};
+use crate::{ConstructionInfo, OperationRef, JsonMessage, TypeInfo, TraceToggle};
 
 use bevy_ecs::prelude::{Component, Entity, Event};
 use schemars::JsonSchema;
@@ -31,6 +31,7 @@ use thiserror::Error as ThisError;
 /// activities.
 #[derive(Component)]
 pub struct Trace {
+    toggle: TraceToggle,
     info: Arc<OperationInfo>,
     serialize_value: Option<fn(&dyn Any) -> Result<JsonMessage, GetValueError>>,
 }
@@ -38,14 +39,25 @@ pub struct Trace {
 impl Trace {
     /// Create trace information for an entity. By default this will not serialize
     /// the messages passing through.
-    pub fn new(info: Arc<OperationInfo>) -> Self {
-        Trace { info, serialize_value: None }
+    pub fn new(
+        toggle: TraceToggle,
+        info: Arc<OperationInfo>,
+    ) -> Self {
+        Trace { toggle, info, serialize_value: None }
     }
 
     /// Enable the trace for this operation to also send out the data of the
     /// messages that are passing through.
     pub fn enable_value_serialization<T: Any + Serialize>(&mut self) {
         self.serialize_value = Some(get_serialize_value::<T>);
+    }
+
+    pub fn set_toggle(&mut self, toggle: TraceToggle) {
+        self.toggle = toggle;
+    }
+
+    pub fn toggle(&self) -> TraceToggle {
+        self.toggle
     }
 
     /// Get the information for this workflow operation.
