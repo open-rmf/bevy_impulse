@@ -23,8 +23,11 @@ use std::{
 
 use crate::{
     dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder,
-    BuilderScopeContext, JsonMessage, OperationInfo, Scope, StreamPack, Trace,
+    BuilderScopeContext, JsonMessage, Scope, StreamPack,
 };
+
+#[cfg(feature = "trace")]
+use crate::{Trace, OperationInfo};
 
 use super::{
     BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,
@@ -228,7 +231,7 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
 
         #[cfg(not(feature = "trace"))]
         {
-            if trace.is_on() {
+            if trace_toggle.is_on() {
                 return Err(DiagramErrorCode::TraceFeatureDisabled);
             }
         }

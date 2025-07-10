@@ -23,18 +23,19 @@ use bevy_ecs::{
 
 use smallvec::SmallVec;
 
+#[cfg(feature = "trace")]
 use std::sync::Arc;
 
 use backtrace::Backtrace;
 
 use crate::{
     Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, Detached,
-    MiscellaneousFailure, OperationError, OperationRoster, OperationStarted, OrBroken,
+    MiscellaneousFailure, OperationError, OperationRoster, OrBroken,
     SessionStatus, UnhandledErrors, UnusedTarget,
 };
 
 #[cfg(feature = "trace")]
-use crate::Trace;
+use crate::{Trace, OperationStarted};
 
 /// This contains data that has been provided as input into an operation, along
 /// with an indication of what session the data belongs to.
