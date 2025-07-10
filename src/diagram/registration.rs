@@ -28,10 +28,10 @@ use bevy_ecs::prelude::{Commands, Entity};
 
 pub use crate::dyn_node::*;
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, IncrementalScopeBuilder,
-    IncrementalScopeRequest, IncrementalScopeRequestResult, IncrementalScopeResponse,
-    IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage, NamedStream, Node, StreamOf,
-    StreamPack,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
+    IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
+    IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer,
+    JsonMessage, NamedStream, Node, StreamOf, StreamPack,
 };
 
 #[cfg(feature = "trace")]
@@ -52,7 +52,7 @@ use super::{
 
 #[derive(Serialize, JsonSchema)]
 pub struct NodeRegistration {
-    pub(super) name: Arc<str>,
+    pub(super) default_display_text: DisplayText,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
     pub(super) config_schema: Schema,
@@ -171,7 +171,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Response>();
 
         let registration = NodeRegistration {
-            name: options.name.unwrap_or(options.id.clone()),
+            default_display_text: options.name.unwrap_or(options.id.clone()),
             request: TypeInfo::of::<Request>(),
             response: TypeInfo::of::<Response>(),
             config_schema: self
@@ -587,7 +587,7 @@ type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Sec
 
 #[derive(Serialize, JsonSchema)]
 pub struct SectionRegistration {
-    pub(super) name: BuilderId,
+    pub(super) default_display_text: DisplayText,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
 
@@ -630,7 +630,7 @@ where
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration {
         SectionRegistration {
-            name,
+            default_display_text: name,
             metadata: SectionT::metadata().clone(),
             config_schema: schema_generator.subschema_for::<()>(),
             create_section_impl: RefCell::new(Box::new(move |builder, config| {
@@ -1375,7 +1375,7 @@ impl DiagramElementRegistry {
         SectionT: Section,
     {
         let reg = section_builder.into_section_registration(
-            options.name.unwrap_or_else(|| options.id.clone()),
+            options.default_display_text.unwrap_or_else(|| options.id.clone()),
             &mut self.messages.schema_generator,
         );
         self.sections.insert(options.id, reg);
@@ -1521,19 +1521,19 @@ impl NodeBuilderOptions {
 #[non_exhaustive]
 pub struct SectionBuilderOptions {
     pub id: BuilderId,
-    pub name: Option<BuilderId>,
+    pub default_display_text: Option<BuilderId>,
 }
 
 impl SectionBuilderOptions {
     pub fn new(id: impl ToString) -> Self {
         Self {
             id: id.to_string().into(),
-            name: None,
+            default_display_text: None,
         }
     }
 
     pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string().into());
+        self.default_display_text = Some(name.to_string().into());
         self
     }
 }

@@ -25,9 +25,10 @@ use crate::{
 };
 
 use super::{
-    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramElementRegistry,
-    DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
-    OperationRef, Operations, RedirectConnection, TypeInfo,
+    BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo, DiagramContext,
+    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
+    NextOperation, OperationName, OperationRef, Operations, RedirectConnection, TraceInfo,
+    TraceSettings, TypeInfo,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -43,27 +44,47 @@ pub enum SectionProvider {
 #[serde(rename_all = "snake_case")]
 pub struct SectionSchema {
     #[serde(flatten)]
-    pub(super) provider: SectionProvider,
+    pub provider: SectionProvider,
     #[serde(default)]
-    pub(super) config: serde_json::Value,
+    pub config: Arc<JsonMessage>,
     #[serde(default)]
-    pub(super) connect: HashMap<Arc<str>, NextOperation>,
+    pub connect: HashMap<Arc<str>, NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for SectionSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match &self.provider {
             SectionProvider::Builder(section_builder) => {
-                let section = ctx
+                let section_registration = ctx
                     .registry
-                    .get_section_registration(section_builder)?
-                    .create_section(builder, self.config.clone())?
+                    .get_section_registration(section_builder)?;
+
+                let section = section_registration
+                    .create_section(ctx.builder, (*self.config).clone())?
                     .into_slots();
+
+                let display_text = self
+                    .trace_settings
+                    .display_text
+                    .as_ref()
+                    .unwrap_or(&section_registration.default_display_text);
+
+                // TODO(@mxgrey): Figure out how to automatically trace operations
+                // that are built by the section builder.
+                let trace = TraceInfo::new(
+                    ConstructionInfo::for_section(
+                        section_builder,
+                        &self.config,
+                        display_text,
+                    ),
+                    self.trace_settings.trace,
+                );
 
                 for (op, input) in section.inputs {
                     ctx.set_input_for_target(
@@ -72,6 +93,7 @@ impl BuildDiagramOperation for SectionSchema {
                             operation: op.clone(),
                         }),
                         input,
+                        trace.clone(),
                     )?;
                 }
 
@@ -94,6 +116,7 @@ impl BuildDiagramOperation for SectionSchema {
                             operation: op.clone(),
                         }),
                         buffer,
+                        trace.clone(),
                     )?;
                 }
             }
@@ -419,7 +442,7 @@ mod tests {
         );
 
         let reg = registry.get_section_registration("test_section").unwrap();
-        assert_eq!(reg.name.as_ref(), "TestSection");
+        assert_eq!(reg.default_display_text.as_ref(), "TestSection");
         let metadata = &reg.metadata;
         assert_eq!(metadata.inputs.len(), 1);
         assert_eq!(metadata.inputs["foo"].message_type, TypeInfo::of::<i64>());

@@ -89,7 +89,9 @@ pub enum GetValueError {
 #[derive(Event)]
 pub struct OperationStarted {
     /// The entity of the operation that was triggered.
-    pub entity: Entity,
+    pub operation: Entity,
+    /// The entity of the workflow session that triggered the operation.
+    pub session: Entity,
     /// Information about the operation that was triggered.
     pub info: Arc<OperationInfo>,
     /// The message that triggered the operation, if serialization is enabled

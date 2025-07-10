@@ -24,20 +24,20 @@ use crate::Builder;
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistry, NextOperation, OperationName, PerformForkClone,
-    SerializeMessage, TypeInfo,
+    SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UnzipSchema {
-    pub(super) next: Vec<NextOperation>,
+    pub next: Vec<NextOperation>,
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for UnzipSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
@@ -56,9 +56,10 @@ impl BuildDiagramOperation for UnzipSchema {
             });
         }
 
-        let unzip = unzip.perform_unzip(builder)?;
+        let unzip = unzip.perform_unzip(ctx.builder)?;
+        let trace = TraceInfo::for_basic_op("unzip", &self.trace_settings);
 
-        ctx.set_input_for_target(id, unzip.input)?;
+        ctx.set_input_for_target(id, unzip.input, trace)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
             ctx.add_output_into_target(target, output);
         }

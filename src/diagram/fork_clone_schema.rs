@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::{Builder, ForkCloneOutput};
 
 use super::{
-    is_default, supported::*, BuildDiagramOperation, BuildStatus,
-    DiagramContext, DiagramErrorCode, DisplayText, DynInputSlot, DynOutput,
+    supported::*, BuildDiagramOperation, BuildStatus,
+    DiagramContext, DiagramErrorCode, DynInputSlot, DynOutput,
     NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
@@ -30,17 +30,14 @@ use super::{
 #[serde(rename_all = "snake_case")]
 pub struct ForkCloneSchema {
     pub next: Vec<NextOperation>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub display_text: Option<DisplayText>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub trace: Option<TraceSettings>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for ForkCloneSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let inferred_type = 'inferred: {
@@ -60,11 +57,11 @@ impl BuildDiagramOperation for ForkCloneSchema {
             }
         };
 
-        let fork = ctx.registry.messages.fork_clone(&inferred_type, builder)?;
-        let trace = TraceInfo::for_basic_op("fork_clone", &self.display_text, self.trace);
+        let fork = ctx.registry.messages.fork_clone(&inferred_type, ctx.builder)?;
+        let trace = TraceInfo::for_basic_op("fork_clone", &self.trace_settings);
         ctx.set_input_for_target(id, fork.input, trace)?;
         for target in &self.next {
-            ctx.add_output_into_target(target, fork.outputs.clone_output(builder));
+            ctx.add_output_into_target(target, fork.outputs.clone_output(ctx.builder));
         }
 
         Ok(BuildStatus::Finished)

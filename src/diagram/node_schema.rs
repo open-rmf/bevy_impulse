@@ -36,26 +36,28 @@ pub struct NodeSchema {
     pub next: NextOperation,
     #[serde(default, skip_serializing_if = "is_default")]
     pub stream_out: HashMap<OperationName, NextOperation>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub display_text: Option<DisplayText>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub trace: Option<TraceSettings>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for NodeSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
-        let mut node = node_registration.create_node(builder, (*self.config).clone())?;
+        let mut node = node_registration.create_node(ctx.builder, (*self.config).clone())?;
 
-        let display_text = self.display_text.as_ref().unwrap_or(&node_registration.name);
+        let display_text = self
+            .trace_settings
+            .display_text
+            .as_ref()
+            .unwrap_or(&node_registration.default_display_text);
+
         let trace = TraceInfo::new(
             ConstructionInfo::for_node(&self.builder, &self.config, display_text),
-            self.trace,
+            self.trace_settings.trace,
         );
 
         ctx.set_input_for_target(id, node.input.into(), trace)?;

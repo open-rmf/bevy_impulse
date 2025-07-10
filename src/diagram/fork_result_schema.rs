@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::Builder;
 
 use super::{
-    is_default, supported::*, BuildDiagramOperation, BuildStatus, DiagramContext,
-    DiagramErrorCode, DisplayText, DynInputSlot, DynOutput, MessageRegistration,
+    supported::*, BuildDiagramOperation, BuildStatus, DiagramContext,
+    DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,
     MessageRegistry, NextOperation, OperationName, PerformForkClone, SerializeMessage,
     TraceInfo, TraceSettings, TypeInfo,
 };
@@ -36,19 +36,16 @@ pub struct DynForkResult {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkResultSchema {
-    pub(super) ok: NextOperation,
-    pub(super) err: NextOperation,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub display_text: Option<DisplayText>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub trace: Option<TraceSettings>,
+    pub ok: NextOperation,
+    pub err: NextOperation,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for ForkResultSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
@@ -61,9 +58,9 @@ impl BuildDiagramOperation for ForkResultSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_result(&inferred_type, builder)?;
+        let fork = ctx.registry.messages.fork_result(&inferred_type, ctx.builder)?;
 
-        let trace = TraceInfo::for_basic_op("fork_result", &self.display_text, self.trace);
+        let trace = TraceInfo::for_basic_op("fork_result", &self.trace_settings);
         ctx.set_input_for_target(id, fork.input, trace)?;
 
         ctx.add_output_into_target(&self.ok, fork.ok);

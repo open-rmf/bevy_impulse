@@ -29,26 +29,25 @@ use crate::{
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
-    PerformForkClone, SerializeMessage, TypeInfo,
+    PerformForkClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SplitSchema {
     #[serde(default)]
-    pub(super) sequential: Vec<NextOperation>,
-
+    pub sequential: Vec<NextOperation>,
     #[serde(default)]
-    pub(super) keyed: HashMap<String, NextOperation>,
-
-    pub(super) remaining: Option<NextOperation>,
+    pub keyed: HashMap<String, NextOperation>,
+    pub remaining: Option<NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for SplitSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(sample_input) = ctx.infer_input_type_into_target(id)? else {
@@ -57,8 +56,9 @@ impl BuildDiagramOperation for SplitSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let split = ctx.registry.messages.split(&sample_input, self, builder)?;
-        ctx.set_input_for_target(id, split.input)?;
+        let split = ctx.registry.messages.split(&sample_input, self, ctx.builder)?;
+        let trace = TraceInfo::for_basic_op("split", &self.trace_settings);
+        ctx.set_input_for_target(id, split.input, trace)?;
         for (target, output) in split.outputs {
             ctx.add_output_into_target(&target, output);
         }

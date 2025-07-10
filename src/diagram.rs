@@ -1044,12 +1044,12 @@ pub struct Diagram {
     ///
     /// If bevy_impulse is not compiled with the "trace" feature then any attempt
     /// to turn tracing on will result in a [`DiagramErrorCode::TraceFeatureDisabled`].
-    pub default_trace: TraceSettings,
+    pub default_trace: TraceToggle,
 }
 
 #[derive(Default, Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum TraceSettings {
+pub enum TraceToggle {
     /// Do not emit any signal when the operation is activated.
     #[default]
     Off,
@@ -1066,10 +1066,24 @@ pub enum TraceSettings {
     Messages,
 }
 
-impl TraceSettings {
+impl TraceToggle {
     pub fn is_on(&self) -> bool {
         !matches!(self, Self::Off)
     }
+}
+
+/// Settings that describe how an operation should be traced. It is recommended
+/// to add this to each operation with #[serde(flatten)].
+#[derive(Default, Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct TraceSettings {
+    /// Override for text that should be displayed for an operation within an
+    /// editor.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub display_text: Option<DisplayText>,
+    /// Set what the tracing behavior should be for this operation. If this is
+    /// `None` then [`Diagram::default_trace`] will be used.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub trace: Option<TraceToggle>,
 }
 
 impl Diagram {

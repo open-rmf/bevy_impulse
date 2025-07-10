@@ -26,7 +26,7 @@ use crate::{Builder, JsonMessage};
 
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, NextOperation,
-    OperationName,
+    OperationName, TraceInfo, TraceSettings,
 };
 
 #[derive(Error, Debug)]
@@ -44,8 +44,8 @@ pub enum TransformError {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct TransformSchema {
-    pub(super) cel: String,
-    pub(super) next: NextOperation,
+    pub cel: String,
+    pub next: NextOperation,
     /// Specify what happens if an error occurs during the transformation. If
     /// you specify a target for on_error, then an error message will be sent to
     /// that target. You can set this to `{ "builtin": "dispose" }` to simply
@@ -54,18 +54,19 @@ pub struct TransformSchema {
     /// If left unspecified, a failure will be treated like an implicit operation
     /// failure and behave according to `on_implicit_error`.
     #[serde(default)]
-    pub(super) on_error: Option<NextOperation>,
+    pub on_error: Option<NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for TransformSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let program = Program::compile(&self.cel).map_err(TransformError::Parse)?;
-        let node = builder.create_map_block(
+        let node = ctx.builder.create_map_block(
             move |req: JsonMessage| -> Result<JsonMessage, TransformError> {
                 let mut context = Context::default();
                 context
@@ -90,14 +91,15 @@ impl BuildDiagramOperation for TransformSchema {
                 ctx.get_implicit_error_target(),
             );
 
-        let (ok, _) = node.output.chain(builder).fork_result(
+        let (ok, _) = node.output.chain(ctx.builder).fork_result(
             |ok| ok.output(),
             |err| {
                 ctx.add_output_into_target(error_target.clone(), err.output().into());
             },
         );
 
-        ctx.set_input_for_target(id, node.input.into())?;
+        let trace = TraceInfo::for_basic_op("transform", &self.trace_settings);
+        ctx.set_input_for_target(id, node.input.into(), trace)?;
         ctx.add_output_into_target(&self.next, ok.into());
         Ok(BuildStatus::Finished)
     }

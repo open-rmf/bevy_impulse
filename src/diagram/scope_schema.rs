@@ -69,17 +69,16 @@ impl BuildDiagramOperation for ScopeSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let scope = IncrementalScopeBuilder::begin(self.settings.clone(), builder);
+        let scope = IncrementalScopeBuilder::begin(self.settings.clone(), ctx.builder);
 
         for (stream_in_id, stream_out_target) in &self.stream_out {
             ctx.set_connect_into_target(
                 StreamOutRef::new_for_scope(id.clone(), stream_in_id.clone()),
                 ConnectScopeStream {
                     scope_id: scope.builder_scope_context().scope,
-                    parent_scope_id: builder.scope(),
+                    parent_scope_id: ctx.builder.scope(),
                     stream_out_target: ctx.into_operation_ref(stream_out_target),
                     connection: None,
                 },
@@ -128,11 +127,10 @@ impl ConnectIntoTarget for ConnectScopeRequest {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if let Some(connection) = &mut self.connection {
-            return connection.connect_into_target(output, builder, ctx);
+            return connection.connect_into_target(output, ctx);
         } else {
             let IncrementalScopeRequest {
                 external_input,

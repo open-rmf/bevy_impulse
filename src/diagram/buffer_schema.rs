@@ -21,29 +21,26 @@ use serde::{Deserialize, Serialize};
 use crate::{Accessor, BufferSettings, Builder, JsonMessage};
 
 use super::{
-    is_default, BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DisplayText, NextOperation, OperationName, TraceSettings, TraceInfo, TypeInfo,
+    BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
+    NextOperation, OperationName, TraceSettings, TraceInfo, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BufferSchema {
     #[serde(default)]
-    pub(super) settings: BufferSettings,
+    pub settings: BufferSettings,
 
     /// If true, messages will be serialized before sending into the buffer.
-    pub(super) serialize: Option<bool>,
+    pub serialize: Option<bool>,
 
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub display_text: Option<DisplayText>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub trace: Option<TraceSettings>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for BufferSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let message_info = if self.serialize.is_some_and(|v| v) {
@@ -65,9 +62,9 @@ impl BuildDiagramOperation for BufferSchema {
         let buffer =
             ctx.registry
                 .messages
-                .create_buffer(&message_info, self.settings.clone(), builder)?;
+                .create_buffer(&message_info, self.settings.clone(), ctx.builder)?;
 
-        let trace = TraceInfo::for_basic_op("buffer", &self.display_text, self.trace);
+        let trace = TraceInfo::for_basic_op("buffer", &self.trace_settings);
         ctx.set_buffer_for_operation(id, buffer, trace)?;
         Ok(BuildStatus::Finished)
     }
@@ -76,22 +73,19 @@ impl BuildDiagramOperation for BufferSchema {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct BufferAccessSchema {
-    pub(super) next: NextOperation,
+    pub next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferSelection,
+    pub buffers: BufferSelection,
 
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub display_text: Option<DisplayText>,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub trace: Option<TraceSettings>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for BufferAccessSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
@@ -108,9 +102,9 @@ impl BuildDiagramOperation for BufferAccessSchema {
         let node = ctx
             .registry
             .messages
-            .with_buffer_access(&target_type, &buffer_map, builder)?;
+            .with_buffer_access(&target_type, &buffer_map, ctx.builder)?;
 
-        let trace = TraceInfo::for_basic_op("buffer_access", &self.display_text, self.trace);
+        let trace = TraceInfo::for_basic_op("buffer_access", &self.trace_settings);
         ctx.set_input_for_target(id, node.input, trace)?;
         ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)
@@ -147,7 +141,6 @@ impl BuildDiagramOperation for ListenSchema {
     fn build_diagram_operation(
         &self,
         _: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         // TODO(@mxgrey): Figure out how to enable tracing for listen operations
@@ -166,7 +159,7 @@ impl BuildDiagramOperation for ListenSchema {
         let output = ctx
             .registry
             .messages
-            .listen(&target_type, &buffer_map, builder)?;
+            .listen(&target_type, &buffer_map, ctx.builder)?;
         ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }

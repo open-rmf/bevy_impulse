@@ -30,7 +30,8 @@ use super::{
     BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,
     DiagramErrorCode, DisplayText, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
     ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList, NextOperation,
-    OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings, TypeInfo,
+    OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings,
+    TraceToggle, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
@@ -80,12 +81,12 @@ impl DiagramConstruction {
 
 pub struct DiagramContext<'a, 'c> {
     construction: &'c mut DiagramConstruction,
+    pub builder: &'c mut Builder<'a, 'a, 'a>,
     pub registry: &'a DiagramElementRegistry,
     pub operations: Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
-    default_trace: TraceSettings,
-    scope: BuilderScopeContext,
+    default_trace: TraceToggle,
     namespaces: NamespaceList,
 }
 
@@ -253,7 +254,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
             Entry::Vacant(vacant) => {
                 vacant.insert(Target {
                     connector,
-                    scope: self.scope,
+                    scope: self.builder.context,
                 });
             }
         }
@@ -570,7 +571,6 @@ pub trait BuildDiagramOperation {
     fn build_diagram_operation<'a, 'c>(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode>;
 }
@@ -584,7 +584,6 @@ pub trait ConnectIntoTarget {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode>;
 
@@ -640,9 +639,9 @@ where
     initialize_builtin_operations(
         diagram.start.clone(),
         scope,
-        builder,
         &mut DiagramContext {
             construction: &mut construction,
+            builder,
             registry,
             operations: diagram.ops.clone(),
             templates: &diagram.templates,
@@ -680,6 +679,7 @@ where
         for unfinished in unfinished_operations.drain(..) {
             let mut ctx = DiagramContext {
                 construction: &mut construction,
+                builder,
                 registry,
                 operations: unfinished.sibling_ops.clone(),
                 templates: &diagram.templates,
@@ -697,7 +697,7 @@ where
             // Attempt to build this operation
             let status = unfinished
                 .op
-                .build_diagram_operation(&unfinished.id, &mut builder, &mut ctx)
+                .build_diagram_operation(&unfinished.id, &mut ctx)
                 .map_err(|code| code.in_operation(unfinished.as_operation_ref()))?;
 
             ctx.construction
@@ -732,6 +732,7 @@ where
 
                 let mut ctx = DiagramContext {
                     construction: &mut connector_construction,
+                    builder,
                     registry,
                     operations: diagram.ops.clone(),
                     templates: &diagram.templates,
@@ -761,7 +762,7 @@ where
                     made_progress = true;
                     target
                         .connector
-                        .connect_into_target(output, &mut builder, &mut ctx)
+                        .connect_into_target(output, &mut ctx)
                         .map_err(|code| code.in_operation(id.clone()))?;
                 }
             }
@@ -881,7 +882,6 @@ impl UnfinishedOperation {
 fn initialize_builtin_operations<Request, Response, Streams>(
     start: NextOperation,
     scope: Scope<Request, Response, Streams>,
-    builder: &mut Builder,
     ctx: &mut DiagramContext,
 ) -> Result<(), DiagramError>
 where
@@ -889,8 +889,6 @@ where
     Response: 'static + Send + Sync,
     Streams: StreamPack,
 {
-    let default_trace = ctx.default_trace;
-
     // Put the input message into the diagram
     ctx.add_output_into_target(&start, scope.input.into());
 
@@ -905,7 +903,10 @@ where
     for (name, input) in streams.named {
         // TODO(@mxgrey): The trace settings for stream_out are not properly
         // based on whatever the user sets in the StreamOutSchema.
-        let trace = TraceInfo::for_basic_op("stream_out", &None, Some(default_trace));
+        let trace = TraceInfo::for_basic_op(
+            "stream_out",
+            &TraceSettings { display_text: None, trace: None },
+        );
         ctx.set_input_for_target(StreamOutRef::new_for_root(name), input, trace)?;
     }
 
@@ -1236,29 +1237,29 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'd> {
 }
 
 /// Information for how an operation should be traced.
+#[derive(Clone)]
 pub struct TraceInfo {
     /// Information about how the operation was constructed.
     pub construction: ConstructionInfo,
     /// Whether or not tracing should be enabled for this operation.
-    pub trace: Option<TraceSettings>,
+    pub trace: Option<TraceToggle>,
 }
 
 impl TraceInfo {
     pub fn new(
         construction: ConstructionInfo,
-        trace: Option<TraceSettings>,
+        trace: Option<TraceToggle>,
     ) -> Self {
         Self { construction, trace }
     }
 
     pub fn for_basic_op(
         kind: &'static str,
-        display_text: &Option<DisplayText>,
-        trace: Option<TraceSettings>,
+        TraceSettings { display_text, trace }: &TraceSettings,
     ) -> Self {
         Self {
             construction: ConstructionInfo::for_basic_op(kind, display_text),
-            trace,
+            trace: *trace,
         }
     }
 }

@@ -37,7 +37,6 @@ impl BuildDiagramOperation for StreamOutSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let redirect_to =

@@ -339,7 +339,7 @@ impl JsonSchema for NamespaceList {
 }
 
 /// Information about how an operation was constructed.
-#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema, Debug)]
 pub struct ConstructionInfo {
     /// What kind of operation is this, e.g. node, fork_clone, section.
     pub kind: Option<Cow<'static, str>>,
@@ -361,6 +361,19 @@ impl ConstructionInfo {
     ) -> ConstructionInfo {
         ConstructionInfo {
             kind: Some(Cow::Borrowed("node")),
+            builder: Some(Arc::clone(builder)),
+            config: Some(Arc::clone(config)),
+            display_text: Some(Arc::clone(display_text)),
+        }
+    }
+
+    pub fn for_section(
+        builder: &BuilderId,
+        config: &Arc<JsonMessage>,
+        display_text: &DisplayText,
+    ) -> ConstructionInfo {
+        ConstructionInfo {
+            kind: Some(Cow::Borrowed("section")),
             builder: Some(Arc::clone(builder)),
             config: Some(Arc::clone(config)),
             display_text: Some(Arc::clone(display_text)),
