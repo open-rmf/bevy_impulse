@@ -18,8 +18,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::Builder;
-
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext,
     DiagramErrorCode, DynInputSlot, DynOutput, MessageRegistration,

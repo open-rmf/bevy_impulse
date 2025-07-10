@@ -21,7 +21,6 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     marker::PhantomData,
-    sync::Arc,
 };
 
 use bevy_ecs::prelude::{Commands, Entity};

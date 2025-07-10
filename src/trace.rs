@@ -107,6 +107,14 @@ pub struct OperationInfo {
 }
 
 impl OperationInfo {
+    pub fn new(
+        id: Option<OperationRef>,
+        message_type: Option<Cow<'static, str>>,
+        construction: Option<ConstructionInfo>,
+    ) -> Self {
+        Self { id, message_type, construction }
+    }
+
     /// The unique identifier for this operation within the workflow.
     pub fn id(&self) -> &Option<OperationRef> {
         &self.id

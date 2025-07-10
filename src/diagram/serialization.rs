@@ -28,7 +28,7 @@ use super::{
     supported::*, DiagramContext, DiagramErrorCode, DynForkResult, DynInputSlot, DynOutput,
     JsonMessage, MessageRegistration, MessageRegistry, TypeInfo, TypeMismatch,
 };
-use crate::{Builder, JsonBuffer};
+use crate::JsonBuffer;
 
 #[cfg(feature = "trace")]
 use crate::Trace;

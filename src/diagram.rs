@@ -1070,6 +1070,10 @@ impl TraceToggle {
     pub fn is_on(&self) -> bool {
         !matches!(self, Self::Off)
     }
+
+    pub fn with_messages(&self) -> bool {
+        matches!(self, Self::Messages)
+    }
 }
 
 /// Settings that describe how an operation should be traced. It is recommended

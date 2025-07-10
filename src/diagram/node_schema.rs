@@ -19,11 +19,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
-use crate::Builder;
-
 use super::{
     is_default, BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo,
-    DiagramContext, DiagramErrorCode, DisplayText, MissingStream, NextOperation,
+    DiagramContext, DiagramErrorCode, MissingStream, NextOperation,
     OperationName, JsonMessage, TraceInfo, TraceSettings,
 };
 

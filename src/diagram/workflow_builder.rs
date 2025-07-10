@@ -23,12 +23,12 @@ use std::{
 
 use crate::{
     dyn_node::DynStreamInputPack, AnyBuffer, BufferIdentifier, BufferMap, Builder,
-    BuilderScopeContext, JsonMessage, Scope, StreamPack,
+    BuilderScopeContext, JsonMessage, OperationInfo, Scope, StreamPack, Trace,
 };
 
 use super::{
     BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,
-    DiagramErrorCode, DisplayText, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
+    DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
     ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList, NextOperation,
     OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings,
     TraceToggle, TypeInfo,
@@ -194,15 +194,40 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
         &mut self,
         operation: impl Into<OperationRef>,
         input: DynInputSlot,
-        info: TraceInfo,
+        trace_info: TraceInfo,
     ) -> Result<(), DiagramErrorCode> {
         let operation = self.into_operation_ref(operation);
         let connect = standard_input_connection(input, &self.registry)?;
 
-        let trace = info.trace.unwrap_or(self.default_trace);
+        let trace_toggle = trace_info.trace.unwrap_or(self.default_trace);
         #[cfg(feature = "trace")]
         {
+            if trace_toggle.is_on() {
+                let operation_info = OperationInfo::new(
+                    Some(operation.clone()),
+                    Some(input.message_info().type_name.into()),
+                    Some(trace_info.construction),
+                );
 
+                let mut trace = Trace::new(Arc::new(operation_info));
+
+                if trace_toggle.with_messages() {
+                    let enable_trace_serialization = self
+                        .registry
+                        .messages
+                        .messages
+                        .get(input.message_info())
+                        .ok_or_else(|| DiagramErrorCode::UnregisteredType(*input.message_info()))?
+                        .operations
+                        .enable_trace_serialization;
+
+                    if let Some(enable) = enable_trace_serialization {
+                        enable(&mut trace);
+                    }
+                }
+
+                self.builder.commands().entity(input.id()).insert(trace);
+            }
         }
 
         #[cfg(not(feature = "trace"))]

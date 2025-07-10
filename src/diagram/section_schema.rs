@@ -21,7 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output,
+    AnyBuffer, AnyMessageBox, Buffer, InputSlot, JsonBuffer, JsonMessage, Output,
 };
 
 use super::{
@@ -412,8 +412,9 @@ mod tests {
 
     use crate::{
         diagram::testing::DiagramTestFixture, testing::TestingContext, BufferAccess,
-        BufferAccessMut, BufferKey, BufferSettings, Diagram, IntoBlockingCallback, JsonMessage,
-        Node, NodeBuilderOptions, RequestExt, RunCommandsOnWorldExt, SectionBuilderOptions,
+        BufferAccessMut, BufferKey, BufferSettings, Builder, Diagram, IntoBlockingCallback,
+        JsonMessage, Node, NodeBuilderOptions, RequestExt, RunCommandsOnWorldExt,
+        SectionBuilderOptions,
     };
 
     use super::*;

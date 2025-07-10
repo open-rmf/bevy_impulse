@@ -19,8 +19,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::Builder;
-
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, OperationName,
     RedirectConnection, StreamOutRef,
