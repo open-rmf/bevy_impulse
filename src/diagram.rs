@@ -952,24 +952,23 @@ impl BuildDiagramOperation for DiagramOperation {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match self {
-            Self::Buffer(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::BufferAccess(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::ForkClone(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::ForkResult(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Join(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Listen(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Node(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Scope(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Section(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::SerializedJoin(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Split(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::StreamOut(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Transform(op) => op.build_diagram_operation(id, builder, ctx),
-            Self::Unzip(op) => op.build_diagram_operation(id, builder, ctx),
+            Self::Buffer(op) => op.build_diagram_operation(id, ctx),
+            Self::BufferAccess(op) => op.build_diagram_operation(id, ctx),
+            Self::ForkClone(op) => op.build_diagram_operation(id, ctx),
+            Self::ForkResult(op) => op.build_diagram_operation(id, ctx),
+            Self::Join(op) => op.build_diagram_operation(id, ctx),
+            Self::Listen(op) => op.build_diagram_operation(id, ctx),
+            Self::Node(op) => op.build_diagram_operation(id, ctx),
+            Self::Scope(op) => op.build_diagram_operation(id, ctx),
+            Self::Section(op) => op.build_diagram_operation(id, ctx),
+            Self::SerializedJoin(op) => op.build_diagram_operation(id, ctx),
+            Self::Split(op) => op.build_diagram_operation(id, ctx),
+            Self::StreamOut(op) => op.build_diagram_operation(id, ctx),
+            Self::Transform(op) => op.build_diagram_operation(id, ctx),
+            Self::Unzip(op) => op.build_diagram_operation(id, ctx),
         }
     }
 }
@@ -1044,6 +1043,7 @@ pub struct Diagram {
     ///
     /// If bevy_impulse is not compiled with the "trace" feature then any attempt
     /// to turn tracing on will result in a [`DiagramErrorCode::TraceFeatureDisabled`].
+    #[serde(default, skip_serializing_if = "is_default")]
     pub default_trace: TraceToggle,
 }
 

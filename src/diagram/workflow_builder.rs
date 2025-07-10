@@ -79,9 +79,9 @@ impl DiagramConstruction {
     }
 }
 
-pub struct DiagramContext<'a, 'c> {
+pub struct DiagramContext<'a, 'c, 'w, 's, 'b> {
     construction: &'c mut DiagramConstruction,
-    pub builder: &'c mut Builder<'a, 'a, 'a>,
+    pub builder: &'c mut Builder<'w, 's, 'b>,
     pub registry: &'a DiagramElementRegistry,
     pub operations: Operations,
     pub templates: &'a Templates,
@@ -90,7 +90,7 @@ pub struct DiagramContext<'a, 'c> {
     namespaces: NamespaceList,
 }
 
-impl<'a, 'c> DiagramContext<'a, 'c> {
+impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
     /// Infer the [`TypeInfo`] for the input messages into the specified operation.
     ///
     /// If this returns [`None`] then not enough of the diagram has been built
@@ -381,7 +381,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 namespaces,
                 op: op.into(),
                 sibling_ops: sibling_ops.clone(),
-                scope: scope.unwrap_or(self.scope),
+                scope: scope.unwrap_or(self.builder.context),
             });
     }
 
@@ -648,7 +648,6 @@ where
             default_trace: diagram.default_trace,
             on_implicit_error,
             namespaces: NamespaceList::default(),
-            scope: builder.context,
         },
     )?;
 
@@ -677,21 +676,20 @@ where
     while !unfinished_operations.is_empty() || construction.has_outputs() {
         let mut made_progress = false;
         for unfinished in unfinished_operations.drain(..) {
+            let mut builder = Builder {
+                context: unfinished.scope,
+                commands: builder.commands,
+            };
+
             let mut ctx = DiagramContext {
                 construction: &mut construction,
-                builder,
+                builder: &mut builder,
                 registry,
                 operations: unfinished.sibling_ops.clone(),
                 templates: &diagram.templates,
                 default_trace: diagram.default_trace,
                 on_implicit_error,
                 namespaces: unfinished.namespaces.clone(),
-                scope: unfinished.scope,
-            };
-
-            let mut builder = Builder {
-                context: unfinished.scope,
-                commands: builder.commands(),
             };
 
             // Attempt to build this operation
@@ -730,9 +728,14 @@ where
                     }
                 };
 
+                let mut builder = Builder {
+                    context: target.scope,
+                    commands: builder.commands,
+                };
+
                 let mut ctx = DiagramContext {
                     construction: &mut connector_construction,
-                    builder,
+                    builder: &mut builder,
                     registry,
                     operations: diagram.ops.clone(),
                     templates: &diagram.templates,
@@ -750,12 +753,6 @@ where
                     // differently between NextOperation vs OperationRef. Then
                     // we also store namespace information per Target.
                     namespaces: Default::default(),
-                    scope: target.scope,
-                };
-
-                let mut builder = Builder {
-                    context: target.scope,
-                    commands: builder.commands(),
                 };
 
                 for output in outputs {
@@ -914,9 +911,10 @@ where
     ctx.set_connect_into_target(OperationRef::Dispose, ConnectToDispose)?;
 
     // Add the cancel operation
+    let connect_to_cancel = ConnectToCancel::new(ctx.builder)?;
     ctx.set_connect_into_target(
         OperationRef::Cancel(NamespaceList::default()),
-        ConnectToCancel::new(builder)?,
+        connect_to_cancel,
     )?;
 
     Ok(())
@@ -928,7 +926,6 @@ impl ConnectIntoTarget for ConnectToDispose {
     fn connect_into_target(
         &mut self,
         _output: DynOutput,
-        _builder: &mut Builder,
         _ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         Ok(())
@@ -976,10 +973,9 @@ impl ConnectIntoTarget for ImplicitSerialization {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        self.implicit_serialize(output, builder, ctx)
+        self.implicit_serialize(output, ctx)
     }
 
     fn infer_input_type(
@@ -996,10 +992,9 @@ impl ConnectIntoTarget for ImplicitDeserialization {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        self.implicit_deserialize(output, builder, ctx)
+        self.implicit_deserialize(output, ctx)
     }
 
     fn infer_input_type(
@@ -1020,11 +1015,10 @@ impl ConnectIntoTarget for BasicConnect {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
-        _: &mut DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         output
-            .connect_to(&self.input_slot, builder)
+            .connect_to(&self.input_slot, ctx.builder)
             .map_err(Into::into)
     }
 
@@ -1062,12 +1056,11 @@ impl ConnectIntoTarget for ConnectToCancel {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         let Err(output) = self
             .implicit_stringify
-            .try_implicit_stringify(output, builder, ctx)?
+            .try_implicit_stringify(output, ctx)?
         else {
             // We successfully converted the output into a string, so we are done.
             return Ok(());
@@ -1078,7 +1071,7 @@ impl ConnectIntoTarget for ConnectToCancel {
         // cancel operation.
         let Err(output) = self
             .implicit_serialization
-            .try_implicit_serialize(output, builder, ctx)?
+            .try_implicit_serialize(output, ctx)?
         else {
             // We successfully converted the output into a json, so we are done.
             return Ok(());
@@ -1093,13 +1086,13 @@ impl ConnectIntoTarget for ConnectToCancel {
                 let trigger = ctx
                     .registry
                     .messages
-                    .trigger(output.message_info(), builder)?;
-                trigger.output.connect_to(&self.quiet_cancel, builder)?;
+                    .trigger(output.message_info(), ctx.builder)?;
+                trigger.output.connect_to(&self.quiet_cancel, ctx.builder)?;
                 vacant.insert(trigger.input).clone()
             }
         };
 
-        output.connect_to(&input_slot, builder)?;
+        output.connect_to(&input_slot, ctx.builder)?;
 
         Ok(())
     }
@@ -1140,7 +1133,6 @@ impl ConnectIntoTarget for RedirectConnection {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if self.redirected.insert(output.id()) {
@@ -1167,7 +1159,7 @@ impl ConnectIntoTarget for RedirectConnection {
     }
 }
 
-impl<'a, 'c> std::fmt::Debug for DiagramContext<'a, 'c> {
+impl<'a, 'c, 'w, 's, 'b> std::fmt::Debug for DiagramContext<'a, 'c, 'w, 's, 'b> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiagramContext")
             .field("construction", &DebugDiagramConstruction(self))
@@ -1175,9 +1167,9 @@ impl<'a, 'c> std::fmt::Debug for DiagramContext<'a, 'c> {
     }
 }
 
-struct DebugDiagramConstruction<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
+struct DebugDiagramConstruction<'a, 'c, 'w, 's, 'b, 'd>(&'d DiagramContext<'a, 'c, 'w, 's, 'b>);
 
-impl<'a, 'c, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'd> {
+impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'w, 's, 'b, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiagramConstruction")
             .field("connect_into_target", &DebugConnections(self.0))
@@ -1194,9 +1186,9 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'd> {
     }
 }
 
-struct DebugConnections<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
+struct DebugConnections<'a, 'c, 'w, 's, 'b, 'd>(&'d DiagramContext<'a, 'c, 'w, 's, 'b>);
 
-impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
+impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'w, 's, 'b, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_map();
         for (op, target) in &self.0.construction.connect_into_target {
@@ -1213,12 +1205,12 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
     }
 }
 
-struct DebugConnection<'a, 'c, 'd> {
+struct DebugConnection<'a, 'c, 'w, 's, 'b, 'd> {
     connect: &'d Box<dyn ConnectIntoTarget>,
-    context: &'d DiagramContext<'a, 'c>,
+    context: &'d DiagramContext<'a, 'c, 'w, 's, 'b>,
 }
 
-impl<'a, 'c, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'd> {
+impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'w, 's, 'b, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut visited = HashSet::new();
         let mut debug = f.debug_struct("ConnectIntoTarget");

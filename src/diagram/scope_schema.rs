@@ -138,7 +138,7 @@ impl ConnectIntoTarget for ConnectScopeRequest {
             } = ctx.registry.messages.set_scope_request(
                 output.message_info(),
                 &mut self.scope,
-                builder.commands(),
+                ctx.builder.commands(),
             )?;
 
             if let Some(begin_scope) = begin_scope {
@@ -146,7 +146,7 @@ impl ConnectIntoTarget for ConnectScopeRequest {
             }
 
             let mut connection = standard_input_connection(external_input, &ctx.registry)?;
-            connection.connect_into_target(output, builder, ctx)?;
+            connection.connect_into_target(output, ctx)?;
             self.connection = Some(connection);
         }
 
@@ -180,11 +180,10 @@ impl ConnectIntoTarget for ConnectScopeResponse {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if let Some(connection) = &mut self.connection {
-            return connection.connect_into_target(output, builder, ctx);
+            return connection.connect_into_target(output, ctx);
         } else {
             let IncrementalScopeResponse {
                 terminate,
@@ -192,7 +191,7 @@ impl ConnectIntoTarget for ConnectScopeResponse {
             } = ctx.registry.messages.set_scope_response(
                 output.message_info(),
                 &mut self.scope,
-                builder.commands(),
+                ctx.builder.commands(),
             )?;
 
             if let Some(external_output) = external_output {
@@ -200,7 +199,7 @@ impl ConnectIntoTarget for ConnectScopeResponse {
             }
 
             let mut connection = standard_input_connection(terminate, ctx.registry)?;
-            connection.connect_into_target(output, builder, ctx)?;
+            connection.connect_into_target(output, ctx)?;
             self.connection = Some(connection);
         }
 
@@ -235,22 +234,21 @@ impl ConnectIntoTarget for ConnectScopeStream {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if let Some(connection) = &mut self.connection {
-            return connection.connect_into_target(output, builder, ctx);
+            return connection.connect_into_target(output, ctx);
         } else {
             let (stream_input, stream_output) = ctx.registry.messages.spawn_basic_scope_stream(
                 output.message_info(),
                 self.scope_id,
                 self.parent_scope_id,
-                builder.commands(),
+                ctx.builder.commands(),
             )?;
 
             ctx.add_output_into_target(self.stream_out_target.clone(), stream_output);
             let mut connection = standard_input_connection(stream_input, ctx.registry)?;
-            connection.connect_into_target(output, builder, ctx)?;
+            connection.connect_into_target(output, ctx)?;
             self.connection = Some(connection);
         }
 

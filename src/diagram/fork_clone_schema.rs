@@ -61,7 +61,8 @@ impl BuildDiagramOperation for ForkCloneSchema {
         let trace = TraceInfo::for_basic_op("fork_clone", &self.trace_settings);
         ctx.set_input_for_target(id, fork.input, trace)?;
         for target in &self.next {
-            ctx.add_output_into_target(target, fork.outputs.clone_output(ctx.builder));
+            let output = fork.outputs.clone_output(ctx.builder);
+            ctx.add_output_into_target(target, output);
         }
 
         Ok(BuildStatus::Finished)

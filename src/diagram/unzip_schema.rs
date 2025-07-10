@@ -31,6 +31,7 @@ use super::{
 #[serde(rename_all = "snake_case")]
 pub struct UnzipSchema {
     pub next: Vec<NextOperation>,
+    #[serde(flatten)]
     pub trace_settings: TraceSettings,
 }
 

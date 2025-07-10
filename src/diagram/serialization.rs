@@ -232,11 +232,10 @@ impl ImplicitSerialization {
     pub fn try_implicit_serialize(
         &mut self,
         incoming: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<Result<(), DynOutput>, DiagramErrorCode> {
         if incoming.message_info() == &TypeInfo::of::<JsonMessage>() {
-            incoming.connect_to(&self.serialized_input, builder)?;
+            incoming.connect_to(&self.serialized_input, ctx.builder)?;
             return Ok(Ok(()));
         }
 
@@ -246,13 +245,13 @@ impl ImplicitSerialization {
                 let Some(serialize) = ctx
                     .registry
                     .messages
-                    .try_serialize(incoming.message_info(), builder)?
+                    .try_serialize(incoming.message_info(), ctx.builder)?
                 else {
                     // We are unable to serialize this type.
                     return Ok(Err(incoming));
                 };
 
-                serialize.ok.connect_to(&self.serialized_input, builder)?;
+                serialize.ok.connect_to(&self.serialized_input, ctx.builder)?;
 
                 let error_target = ctx.get_implicit_error_target();
                 ctx.add_output_into_target(error_target, serialize.err);
@@ -261,7 +260,7 @@ impl ImplicitSerialization {
             }
         };
 
-        incoming.connect_to(&input, builder)?;
+        incoming.connect_to(&input, ctx.builder)?;
 
         Ok(Ok(()))
     }
@@ -271,10 +270,9 @@ impl ImplicitSerialization {
     pub fn implicit_serialize(
         &mut self,
         incoming: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        self.try_implicit_serialize(incoming, builder, ctx)?
+        self.try_implicit_serialize(incoming, ctx)?
             .map_err(|incoming| DiagramErrorCode::NotSerializable(*incoming.message_info()))
     }
 
@@ -314,13 +312,12 @@ impl ImplicitDeserialization {
     pub fn implicit_deserialize(
         &mut self,
         incoming: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if incoming.message_info() == self.deserialized_input.message_info() {
             // Connect them directly because they match
             return incoming
-                .connect_to(&self.deserialized_input, builder)
+                .connect_to(&self.deserialized_input, ctx.builder)
                 .map_err(Into::into);
         }
 
@@ -332,11 +329,11 @@ impl ImplicitDeserialization {
                     let deserialize = ctx
                         .registry
                         .messages
-                        .deserialize(self.deserialized_input.message_info(), builder)?;
+                        .deserialize(self.deserialized_input.message_info(), ctx.builder)?;
 
                     deserialize
                         .ok
-                        .connect_to(&self.deserialized_input, builder)?;
+                        .connect_to(&self.deserialized_input, ctx.builder)?;
 
                     let error_target = ctx.get_implicit_error_target();
                     ctx.add_output_into_target(error_target, deserialize.err);
@@ -347,7 +344,7 @@ impl ImplicitDeserialization {
             };
 
             return incoming
-                .connect_to(&serialized_input, builder)
+                .connect_to(&serialized_input, ctx.builder)
                 .map_err(Into::into);
         }
 
@@ -387,11 +384,10 @@ impl ImplicitStringify {
     pub fn try_implicit_stringify(
         &mut self,
         incoming: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<Result<(), DynOutput>, DiagramErrorCode> {
         if incoming.message_info() == &TypeInfo::of::<String>() {
-            incoming.connect_to(&self.string_input, builder)?;
+            incoming.connect_to(&self.string_input, ctx.builder)?;
             return Ok(Ok(()));
         }
 
@@ -401,18 +397,18 @@ impl ImplicitStringify {
                 let Some(stringify) = ctx
                     .registry
                     .messages
-                    .try_to_string(incoming.message_info(), builder)?
+                    .try_to_string(incoming.message_info(), ctx.builder)?
                 else {
                     // We are unable to stringify this type.
                     return Ok(Err(incoming));
                 };
 
-                stringify.output.connect_to(&self.string_input, builder)?;
+                stringify.output.connect_to(&self.string_input, ctx.builder)?;
                 vacant.insert(stringify.input).clone()
             }
         };
 
-        incoming.connect_to(&input, builder)?;
+        incoming.connect_to(&input, ctx.builder)?;
 
         Ok(Ok(()))
     }

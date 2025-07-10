@@ -22,7 +22,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Builder, JsonMessage};
+use crate::{JsonMessage, ForkResultOutput};
 
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, NextOperation,
@@ -91,12 +91,9 @@ impl BuildDiagramOperation for TransformSchema {
                 ctx.get_implicit_error_target(),
             );
 
-        let (ok, _) = node.output.chain(ctx.builder).fork_result(
-            |ok| ok.output(),
-            |err| {
-                ctx.add_output_into_target(error_target.clone(), err.output().into());
-            },
-        );
+        let (fork_input, ForkResultOutput { ok, err }) = ctx.builder.create_fork_result();
+        ctx.builder.connect(node.output, fork_input);
+        ctx.add_output_into_target(error_target.clone(), err.into());
 
         let trace = TraceInfo::for_basic_op("transform", &self.trace_settings);
         ctx.set_input_for_target(id, node.input.into(), trace)?;
