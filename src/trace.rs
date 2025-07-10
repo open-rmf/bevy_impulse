@@ -98,7 +98,7 @@ pub enum GetValueError {
 /// An event that gets transmitted whenever an operation receives an input or is
 /// activated some other way while tracing is on (meaning the operation entity
 /// has a [`Trace`] component).
-#[derive(Event)]
+#[derive(Event, Clone, Debug)]
 pub struct OperationStarted {
     /// The entity of the operation that was triggered.
     pub operation: Entity,
@@ -141,5 +141,228 @@ impl OperationInfo {
     /// builder
     pub fn construction(&self) -> &Option<ConstructionInfo> {
         &self.construction
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        diagram::{testing::*, *},
+        prelude::*,
+        trace::OperationStarted,
+    };
+    use serde_json::json;
+    use std::{
+        sync::Arc,
+        time::Duration,
+    };
+    use bevy_ecs::prelude::{EventReader, Resource, ResMut};
+    use bevy_app::{App, PostUpdate};
+
+    #[derive(Resource, Default, Debug)]
+    struct TraceRecorder {
+        record: Vec<OperationStarted>,
+    }
+
+    fn record_traces(
+        mut trace_reader: EventReader<OperationStarted>,
+        mut recorder: ResMut<TraceRecorder>,
+    ) {
+        for trace in trace_reader.read() {
+            recorder.record.push(trace.clone());
+        }
+    }
+
+    fn enable_trace_recording(app: &mut App) {
+        app
+        .init_resource::<TraceRecorder>()
+        .add_systems(PostUpdate, record_traces);
+    }
+
+    #[test]
+    fn test_tracing_pachinko() {
+        let mut fixture = DiagramTestFixture::new();
+        enable_trace_recording(&mut fixture.context.app);
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("less_than"),
+            |builder, config: i64| {
+                builder.create_map_block(move |value: i64| {
+                    if value < config {
+                        Ok(value)
+                    } else {
+                        Err(value)
+                    }
+                })
+            },
+        )
+        .with_fork_result();
+
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("noop"),
+            |builder, _config: ()| {
+                builder.create_map_block(|value: i64| value)
+            }
+        );
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "default_trace": "messages",
+            "start": "less_than_60",
+            "ops": {
+                "less_than_60": {
+                    "type": "node",
+                    "builder": "less_than",
+                    "config": 60,
+                    "next": "fork_60",
+                    "display_text": "Evaluate 60",
+                },
+                "fork_60": {
+                    "type": "fork_result",
+                    "ok": "less_than_30",
+                    "err": "less_than_90",
+                    "display_text": "Fork 60",
+                },
+                "less_than_30": {
+                    "type": "node",
+                    "builder": "less_than",
+                    "config": 30,
+                    "next": "fork_30",
+                    "display_text": "Evaluate 30",
+                },
+                "fork_30": {
+                    "type": "fork_result",
+                    "ok": "towards_15",
+                    "err": "towards_45",
+                    "display_text": "Fork 30",
+                },
+                "towards_15": {
+                    "type": "node",
+                    "builder": "noop",
+                    "next": { "builtin": "terminate" },
+                    "display_text": "Towards 15",
+                },
+                "towards_45": {
+                    "type": "node",
+                    "builder": "noop",
+                    "next": { "builtin": "terminate" },
+                    "display_text": "Towards 45",
+                },
+                "less_than_90": {
+                    "type": "node",
+                    "builder": "less_than",
+                    "config": 90,
+                    "next": "fork_90",
+                    "display_text": "Evaluate 90",
+                },
+                "fork_90": {
+                    "type": "fork_result",
+                    "ok": "towards_75",
+                    "err": "towards_105",
+                    "display_text": "Fork 90",
+                },
+                "towards_75": {
+                    "type": "node",
+                    "builder": "noop",
+                    "next": { "builtin": "terminate" },
+                    "display_text": "Towards 75",
+                },
+                "towards_105": {
+                    "type": "node",
+                    "builder": "noop",
+                    "next": { "builtin": "terminate" },
+                    "display_text": "Towards 105",
+                },
+            }
+        }))
+        .unwrap();
+
+        let panchinko = fixture.spawn_io_workflow::<i64, i64>(&diagram).unwrap();
+
+        confirm_panchinko_route(
+            10,
+            panchinko,
+            &mut fixture,
+            &[
+                "less_than_60",
+                "fork_60",
+                "less_than_30",
+                "fork_30",
+                "towards_15",
+            ],
+        );
+
+        confirm_panchinko_route(
+            70,
+            panchinko,
+            &mut fixture,
+            &[
+                "less_than_60",
+                "fork_60",
+                "less_than_90",
+                "fork_90",
+                "towards_75",
+            ],
+        );
+
+        confirm_panchinko_route(
+            50,
+            panchinko,
+            &mut fixture,
+            &[
+                "less_than_60",
+                "fork_60",
+                "less_than_30",
+                "fork_30",
+                "towards_45",
+            ],
+        );
+    }
+
+    fn confirm_panchinko_route(
+        value: i64,
+        panchinko: Service<i64, i64>,
+        fixture: &mut DiagramTestFixture,
+        route: &[&str],
+    ) {
+        let mut promise = fixture.context.command(|commands| {
+            commands.request(value, panchinko).take_response()
+        });
+
+        fixture.context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(fixture.context.no_unhandled_errors());
+        let result = promise.take().available().unwrap();
+        assert_eq!(value, result);
+
+        let mut recorder = fixture.context.app.world.resource_mut::<TraceRecorder>();
+        confirm_trace(
+            &*recorder,
+            route,
+        );
+
+        // Clear the record so these results do not interfere with the next test
+        recorder.record.clear();
+    }
+
+    fn confirm_trace(
+        recorder: &TraceRecorder,
+        expectation: &[&str],
+    ) {
+        let mut actual = recorder.record.clone();
+        for next in expectation {
+            let name: Arc<str> = (*next).into();
+            let expected_op = OperationRef::Named((&name).into());
+            let actual_op = actual.first().unwrap().info.id.as_ref().unwrap();
+            assert_eq!(expected_op, *actual_op);
+            actual.remove(0);
+        }
+
+        let expected_op = OperationRef::Terminate(NamespaceList::default());
+        let actual_op = actual.first().unwrap().info.id.as_ref().unwrap();
+        assert_eq!(expected_op, *actual_op);
+        actual.remove(0);
+
+        assert!(actual.is_empty());
     }
 }

@@ -1623,7 +1623,7 @@ impl std::fmt::Display for FinishingErrors {
 }
 
 #[cfg(test)]
-mod testing;
+pub(crate) mod testing;
 
 #[cfg(test)]
 mod tests {

@@ -911,9 +911,13 @@ where
     ctx.add_output_into_target(&start, scope.input.into());
 
     // Add the terminate operation
-    ctx.impl_connect_into_target(
+    ctx.set_input_for_target(
         OperationRef::Terminate(NamespaceList::default()),
-        standard_input_connection(scope.terminate.into(), &ctx.registry)?,
+        scope.terminate.into(),
+        TraceInfo::for_basic_op(
+            "terminate",
+            &TraceSettings { display_text: None, trace: None },
+        ),
     )?;
 
     let mut streams = DynStreamInputPack::default();
