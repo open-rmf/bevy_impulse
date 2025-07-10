@@ -27,7 +27,7 @@ use crate::{
 };
 
 #[cfg(feature = "trace")]
-use crate::{Trace, OperationInfo};
+use crate::{OperationInfo, Trace};
 
 use super::{
     BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,

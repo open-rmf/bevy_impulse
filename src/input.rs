@@ -30,12 +30,12 @@ use backtrace::Backtrace;
 
 use crate::{
     Broken, BufferStorage, Cancel, Cancellation, CancellationCause, DeferredRoster, Detached,
-    MiscellaneousFailure, OperationError, OperationRoster, OrBroken,
-    SessionStatus, UnhandledErrors, UnusedTarget,
+    MiscellaneousFailure, OperationError, OperationRoster, OrBroken, SessionStatus,
+    UnhandledErrors, UnusedTarget,
 };
 
 #[cfg(feature = "trace")]
-use crate::{Trace, OperationStarted};
+use crate::{OperationStarted, Trace};
 
 /// This contains data that has been provided as input into an operation, along
 /// with an indication of what session the data belongs to.
