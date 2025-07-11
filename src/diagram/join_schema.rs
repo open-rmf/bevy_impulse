@@ -19,11 +19,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::{Builder, JsonMessage};
-
 use super::{
     BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    NextOperation, OperationName,
+    JsonMessage, NextOperation, OperationName,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -39,7 +37,6 @@ impl BuildDiagramOperation for JoinSchema {
     fn build_diagram_operation(
         &self,
         _: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
@@ -60,7 +57,7 @@ impl BuildDiagramOperation for JoinSchema {
         let output = ctx
             .registry
             .messages
-            .join(&target_type, &buffer_map, builder)?;
+            .join(&target_type, &buffer_map, ctx.builder)?;
         ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }
@@ -79,7 +76,6 @@ impl BuildDiagramOperation for SerializedJoinSchema {
     fn build_diagram_operation(
         &self,
         _: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         if self.buffers.is_empty() {
@@ -91,7 +87,7 @@ impl BuildDiagramOperation for SerializedJoinSchema {
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let output = builder.try_join::<JsonMessage>(&buffer_map)?.output();
+        let output = ctx.builder.try_join::<JsonMessage>(&buffer_map)?.output();
         ctx.add_output_into_target(&self.next, output.into());
 
         Ok(BuildStatus::Finished)

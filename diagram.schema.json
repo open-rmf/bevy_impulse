@@ -3,6 +3,10 @@
   "title": "Diagram",
   "type": "object",
   "properties": {
+    "default_trace": {
+      "description": "Whether the operations in the workflow should be traced by default.\n Being traced means each operation will emit an event each time it is\n triggered. You can decide whether that event contains the serialized\n message data that triggered the operation.\n\n If bevy_impulse is not compiled with the \"trace\" feature then any attempt\n to turn tracing on will result in a [`DiagramErrorCode::TraceFeatureDisabled`].",
+      "$ref": "#/$defs/TraceToggle"
+    },
     "on_implicit_error": {
       "description": "To simplify diagram definitions, the diagram workflow builder will\n sometimes insert implicit operations into the workflow, such as implicit\n serializing and deserializing. These implicit operations may be fallible.\n\n This field indicates how a failed implicit operation should be handled.\n If left unspecified, an implicit error will cause the entire workflow to\n be cancelled.",
       "anyOf": [
@@ -45,14 +49,33 @@
   ],
   "$defs": {
     "BufferAccessSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
         "buffers": {
           "description": "Map of buffer keys and buffers.",
           "$ref": "#/$defs/BufferSelection"
         },
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "next": {
           "$ref": "#/$defs/NextOperation"
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -61,8 +84,16 @@
       ]
     },
     "BufferSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "serialize": {
           "description": "If true, messages will be serialized before sending into the buffer.",
           "type": [
@@ -77,6 +108,17 @@
               "keep_last": 1
             }
           }
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -328,13 +370,32 @@
       ]
     },
     "ForkCloneSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "next": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/NextOperation"
           }
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -342,13 +403,32 @@
       ]
     },
     "ForkResultSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "err": {
           "$ref": "#/$defs/NextOperation"
         },
         "ok": {
           "$ref": "#/$defs/NextOperation"
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -451,12 +531,20 @@
       ]
     },
     "NodeSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
         "builder": {
           "type": "string"
         },
         "config": true,
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "next": {
           "$ref": "#/$defs/NextOperation"
         },
@@ -465,6 +553,17 @@
           "additionalProperties": {
             "$ref": "#/$defs/NextOperation"
           }
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -579,6 +678,7 @@
       ]
     },
     "SectionSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
         "config": {
@@ -590,6 +690,24 @@
             "$ref": "#/$defs/NextOperation"
           },
           "default": {}
+        },
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "oneOf": [
@@ -667,8 +785,16 @@
       ]
     },
     "SplitSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "keyed": {
           "type": "object",
           "additionalProperties": {
@@ -692,6 +818,17 @@
           "items": {
             "$ref": "#/$defs/NextOperation"
           }
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -707,11 +844,38 @@
         "name"
       ]
     },
+    "TraceToggle": {
+      "oneOf": [
+        {
+          "description": "Do not emit any signal when the operation is activated.",
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "description": "Emit a minimal signal with just the operation information when the\n operation is activated.",
+          "type": "string",
+          "const": "on"
+        },
+        {
+          "description": "Emit a signal that includes a serialized copy of the message when the\n operation is activated. This may substantially increase the overhead of\n triggering operations depending on the size and frequency of the messages,\n so it is recommended only for high-level workflows or for debugging.\n\n If the message is not serializable then it will simply not be included\n in the event information.",
+          "type": "string",
+          "const": "messages"
+        }
+      ]
+    },
     "TransformSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
         "cel": {
           "type": "string"
+        },
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "next": {
           "$ref": "#/$defs/NextOperation"
@@ -727,6 +891,17 @@
             }
           ],
           "default": null
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -735,13 +910,32 @@
       ]
     },
     "UnzipSchema": {
+      "description": "Settings that describe how an operation should be traced. It is recommended\n to add this to each operation with #[serde(flatten)].",
       "type": "object",
       "properties": {
+        "display_text": {
+          "description": "Override for text that should be displayed for an operation within an\n editor.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "next": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/NextOperation"
           }
+        },
+        "trace": {
+          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

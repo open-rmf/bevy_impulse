@@ -22,20 +22,21 @@ use crate::{Builder, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationName, TypeInfo,
+    DynInputSlot, DynOutput, NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkCloneSchema {
-    pub(super) next: Vec<NextOperation>,
+    pub next: Vec<NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for ForkCloneSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let inferred_type = 'inferred: {
@@ -55,10 +56,15 @@ impl BuildDiagramOperation for ForkCloneSchema {
             }
         };
 
-        let fork = ctx.registry.messages.fork_clone(&inferred_type, builder)?;
-        ctx.set_input_for_target(id, fork.input)?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_clone(&inferred_type, ctx.builder)?;
+        let trace = TraceInfo::for_basic_op("fork_clone", &self.trace_settings);
+        ctx.set_input_for_target(id, fork.input, trace)?;
         for target in &self.next {
-            ctx.add_output_into_target(target, fork.outputs.clone_output(builder));
+            let output = fork.outputs.clone_output(ctx.builder);
+            ctx.add_output_into_target(target, output);
         }
 
         Ok(BuildStatus::Finished)

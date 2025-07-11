@@ -144,6 +144,11 @@ pub use workflow::*;
 
 pub mod testing;
 
+#[cfg(feature = "trace")]
+pub mod trace;
+#[cfg(feature = "trace")]
+pub use trace::*;
+
 pub mod trim;
 pub use trim::*;
 
@@ -336,6 +341,11 @@ pub struct ImpulsePlugin {}
 impl Plugin for ImpulsePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, flush_impulses());
+
+        #[cfg(feature = "trace")]
+        {
+            app.add_event::<OperationStarted>();
+        }
     }
 }
 

@@ -40,19 +40,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut registry = DiagramElementRegistry::new();
     registry.register_node_builder(
-        NodeBuilderOptions::new("add").with_name("Add"),
+        NodeBuilderOptions::new("add").with_default_display_text("Add"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req + config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::new("sub").with_name("Subtract"),
+        NodeBuilderOptions::new("sub").with_default_display_text("Subtract"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req - config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::new("mul").with_name("Multiply"),
+        NodeBuilderOptions::new("mul").with_default_display_text("Multiply"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req * config),
     );
     registry.register_node_builder(
-        NodeBuilderOptions::new("div").with_name("Divide"),
+        NodeBuilderOptions::new("div").with_default_display_text("Divide"),
         |builder, config: f64| builder.create_map_block(move |req: f64| req / config),
     );
 

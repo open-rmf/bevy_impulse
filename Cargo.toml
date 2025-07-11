@@ -31,7 +31,7 @@ async-task = { version = "4.7.1", optional = true }
 bevy_tasks = { version = "0.12", features = ["multi-threaded"] }
 
 itertools = "0.13"
-smallvec = "1.13"
+smallvec = { version = "1.13", features = ["serde"] }
 tokio = { version = "1.39", features = ["sync"] }
 futures = "0.3"
 backtrace = "0.3"
@@ -68,6 +68,7 @@ diagram = [
   "dep:serde_json",
   "dep:strum",
 ]
+trace = ["diagram"]
 
 [dev-dependencies]
 async-std = { version = "1.12" }

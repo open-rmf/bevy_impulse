@@ -39,6 +39,9 @@ jobs:
     - name: Test diagram
       run: cargo test --workspace -F=diagram
 
+    - name: Test trace
+      run: cargo test --workspace -F=trace
+
     - name: Build single_threaded_async
       run: cargo build --features single_threaded_async
     - name: Test single_threaded_async

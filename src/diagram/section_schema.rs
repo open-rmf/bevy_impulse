@@ -20,14 +20,13 @@ use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    AnyBuffer, AnyMessageBox, Buffer, Builder, InputSlot, JsonBuffer, JsonMessage, Output,
-};
+use crate::{AnyBuffer, AnyMessageBox, Buffer, InputSlot, JsonBuffer, JsonMessage, Output};
 
 use super::{
-    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramElementRegistry,
-    DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
-    OperationRef, Operations, RedirectConnection, TypeInfo,
+    BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo, DiagramContext,
+    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
+    NextOperation, OperationName, OperationRef, Operations, RedirectConnection, TraceInfo,
+    TraceSettings, TypeInfo,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -43,27 +42,42 @@ pub enum SectionProvider {
 #[serde(rename_all = "snake_case")]
 pub struct SectionSchema {
     #[serde(flatten)]
-    pub(super) provider: SectionProvider,
+    pub provider: SectionProvider,
     #[serde(default)]
-    pub(super) config: serde_json::Value,
+    pub config: Arc<JsonMessage>,
     #[serde(default)]
-    pub(super) connect: HashMap<Arc<str>, NextOperation>,
+    pub connect: HashMap<Arc<str>, NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for SectionSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         match &self.provider {
             SectionProvider::Builder(section_builder) => {
-                let section = ctx
-                    .registry
-                    .get_section_registration(section_builder)?
-                    .create_section(builder, self.config.clone())?
+                let section_registration =
+                    ctx.registry.get_section_registration(section_builder)?;
+
+                let section = section_registration
+                    .create_section(ctx.builder, (*self.config).clone())?
                     .into_slots();
+
+                let display_text = self
+                    .trace_settings
+                    .display_text
+                    .as_ref()
+                    .unwrap_or(&section_registration.default_display_text);
+
+                // TODO(@mxgrey): Figure out how to automatically trace operations
+                // that are built by the section builder.
+                let trace = TraceInfo::new(
+                    ConstructionInfo::for_section(section_builder, &self.config, display_text),
+                    self.trace_settings.trace,
+                );
 
                 for (op, input) in section.inputs {
                     ctx.set_input_for_target(
@@ -72,6 +86,7 @@ impl BuildDiagramOperation for SectionSchema {
                             operation: op.clone(),
                         }),
                         input,
+                        trace.clone(),
                     )?;
                 }
 
@@ -94,6 +109,7 @@ impl BuildDiagramOperation for SectionSchema {
                             operation: op.clone(),
                         }),
                         buffer,
+                        trace.clone(),
                     )?;
                 }
             }
@@ -389,8 +405,9 @@ mod tests {
 
     use crate::{
         diagram::testing::DiagramTestFixture, testing::TestingContext, BufferAccess,
-        BufferAccessMut, BufferKey, BufferSettings, Diagram, IntoBlockingCallback, JsonMessage,
-        Node, NodeBuilderOptions, RequestExt, RunCommandsOnWorldExt, SectionBuilderOptions,
+        BufferAccessMut, BufferKey, BufferSettings, Builder, Diagram, IntoBlockingCallback,
+        JsonMessage, Node, NodeBuilderOptions, RequestExt, RunCommandsOnWorldExt,
+        SectionBuilderOptions,
     };
 
     use super::*;
@@ -406,7 +423,7 @@ mod tests {
     fn test_register_section() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: i64| 1_f64);
                 let buffer = builder.create_buffer(BufferSettings::default());
@@ -419,7 +436,7 @@ mod tests {
         );
 
         let reg = registry.get_section_registration("test_section").unwrap();
-        assert_eq!(reg.name.as_ref(), "TestSection");
+        assert_eq!(reg.default_display_text.as_ref(), "TestSection");
         let metadata = &reg.metadata;
         assert_eq!(metadata.inputs.len(), 1);
         assert_eq!(metadata.inputs["foo"].message_type, TypeInfo::of::<i64>());
@@ -452,7 +469,7 @@ mod tests {
     fn test_section_unzip() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: ()| (1, 2));
                 TestSectionUnzip {
@@ -476,7 +493,7 @@ mod tests {
     fn test_section_fork_result() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: ()| Ok(1));
                 TestSectionForkResult {
@@ -502,7 +519,7 @@ mod tests {
     fn test_section_split() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: ()| vec![]);
                 TestSectionSplit {
@@ -526,7 +543,7 @@ mod tests {
     fn test_section_join() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: Vec<i64>| {});
                 TestSectionJoin {
@@ -550,7 +567,7 @@ mod tests {
     fn test_section_buffer_access() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: (i64, Vec<BufferKey<i64>>)| {});
                 TestSectionBufferAccess {
@@ -576,7 +593,7 @@ mod tests {
     fn test_section_listen() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_section_builder(
-            SectionBuilderOptions::new("test_section").with_name("TestSection"),
+            SectionBuilderOptions::new("test_section").with_default_display_text("TestSection"),
             |builder: &mut Builder, _config: ()| {
                 let node = builder.create_map_block(|_: Vec<BufferKey<i64>>| {});
                 TestSectionListen {

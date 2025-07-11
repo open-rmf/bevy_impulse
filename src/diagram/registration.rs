@@ -21,18 +21,20 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     marker::PhantomData,
-    sync::Arc,
 };
 
 use bevy_ecs::prelude::{Commands, Entity};
 
 pub use crate::dyn_node::*;
 use crate::{
-    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, IncrementalScopeBuilder,
-    IncrementalScopeRequest, IncrementalScopeRequestResult, IncrementalScopeResponse,
-    IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage, NamedStream, Node, StreamOf,
-    StreamPack,
+    Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
+    IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
+    IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage,
+    NamedStream, Node, StreamOf, StreamPack,
 };
+
+#[cfg(feature = "trace")]
+use crate::Trace;
 
 use schemars::{generate::SchemaSettings, json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{de::DeserializeOwned, ser::SerializeMap, Deserialize, Serialize};
@@ -49,7 +51,7 @@ use super::{
 
 #[derive(Serialize, JsonSchema)]
 pub struct NodeRegistration {
-    pub(super) name: Arc<str>,
+    pub(super) default_display_text: DisplayText,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
     pub(super) config_schema: Schema,
@@ -63,7 +65,7 @@ impl NodeRegistration {
     pub(super) fn create_node(
         &self,
         builder: &mut Builder,
-        config: serde_json::Value,
+        config: JsonMessage,
     ) -> Result<DynNode, DiagramErrorCode> {
         let mut create_node_impl = self.create_node_impl.borrow_mut();
         let n = create_node_impl(builder, config)?;
@@ -84,6 +86,9 @@ type ListenFn = fn(&BufferMap, &mut Builder) -> Result<DynOutput, DiagramErrorCo
 type CreateBufferFn = fn(BufferSettings, &mut Builder) -> AnyBuffer;
 type CreateTriggerFn = fn(&mut Builder) -> DynNode;
 type ToStringFn = fn(&mut Builder) -> DynNode;
+
+#[cfg(feature = "trace")]
+type EnableTraceSerializeFn = fn(&mut Trace);
 
 struct BuildScope {
     set_request: fn(&mut IncrementalScopeBuilder, &mut Commands) -> IncrementalScopeRequestResult,
@@ -165,7 +170,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Response>();
 
         let registration = NodeRegistration {
-            name: options.name.unwrap_or(options.id.clone()),
+            default_display_text: options.name.unwrap_or(options.id.clone()),
             request: TypeInfo::of::<Request>(),
             response: TypeInfo::of::<Response>(),
             config_schema: self
@@ -581,7 +586,7 @@ type CreateSectionFn = dyn FnMut(&mut Builder, serde_json::Value) -> Box<dyn Sec
 
 #[derive(Serialize, JsonSchema)]
 pub struct SectionRegistration {
-    pub(super) name: BuilderId,
+    pub(super) default_display_text: DisplayText,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
 
@@ -624,7 +629,7 @@ where
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration {
         SectionRegistration {
-            name,
+            default_display_text: name,
             metadata: SectionT::metadata().clone(),
             config_schema: schema_generator.subschema_for::<()>(),
             create_section_impl: RefCell::new(Box::new(move |builder, config| {
@@ -658,6 +663,9 @@ pub(super) struct MessageOperation {
     pub(super) create_buffer_impl: CreateBufferFn,
     pub(super) create_trigger_impl: CreateTriggerFn,
     build_scope: BuildScope,
+
+    #[cfg(feature = "trace")]
+    pub(super) enable_trace_serialization: Option<EnableTraceSerializeFn>,
 }
 
 impl MessageOperation {
@@ -681,6 +689,9 @@ impl MessageOperation {
             },
             create_trigger_impl: |builder| builder.create_map_block(|_: T| ()).into(),
             build_scope: BuildScope::new::<T>(),
+
+            #[cfg(feature = "trace")]
+            enable_trace_serialization: None,
         }
     }
 }
@@ -1363,7 +1374,9 @@ impl DiagramElementRegistry {
         SectionT: Section,
     {
         let reg = section_builder.into_section_registration(
-            options.name.unwrap_or_else(|| options.id.clone()),
+            options
+                .default_display_text
+                .unwrap_or_else(|| options.id.clone()),
             &mut self.messages.schema_generator,
         );
         self.sections.insert(options.id, reg);
@@ -1500,8 +1513,8 @@ impl NodeBuilderOptions {
         }
     }
 
-    pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string().into());
+    pub fn with_default_display_text(mut self, text: impl ToString) -> Self {
+        self.name = Some(text.to_string().into());
         self
     }
 }
@@ -1509,19 +1522,19 @@ impl NodeBuilderOptions {
 #[non_exhaustive]
 pub struct SectionBuilderOptions {
     pub id: BuilderId,
-    pub name: Option<BuilderId>,
+    pub default_display_text: Option<BuilderId>,
 }
 
 impl SectionBuilderOptions {
     pub fn new(id: impl ToString) -> Self {
         Self {
             id: id.to_string().into(),
-            name: None,
+            default_display_text: None,
         }
     }
 
-    pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string().into());
+    pub fn with_default_display_text(mut self, text: impl ToString) -> Self {
+        self.default_display_text = Some(text.to_string().into());
         self
     }
 }
@@ -1573,7 +1586,7 @@ mod tests {
     fn test_register_node_builder() {
         let mut registry = DiagramElementRegistry::new();
         registry.opt_out().register_node_builder(
-            NodeBuilderOptions::new("multiply3").with_name("Test Name"),
+            NodeBuilderOptions::new("multiply3").with_default_display_text("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
         let req_ops = &registry.messages.get::<i64>().unwrap().operations;
@@ -1591,7 +1604,7 @@ mod tests {
     fn test_register_cloneable_node() {
         let mut registry = DiagramElementRegistry::new();
         registry.register_node_builder(
-            NodeBuilderOptions::new("multiply3").with_name("Test Name"),
+            NodeBuilderOptions::new("multiply3").with_default_display_text("Test Name"),
             |builder, _config: ()| builder.create_map_block(multiply3),
         );
         let req_ops = &registry.messages.get::<i64>().unwrap().operations;
@@ -1609,7 +1622,8 @@ mod tests {
             .opt_out()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("multiply3_uncloneable").with_name("Test Name"),
+                NodeBuilderOptions::new("multiply3_uncloneable")
+                    .with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(tuple_resp),
             )
             .with_unzip();
@@ -1627,7 +1641,7 @@ mod tests {
 
         registry
             .register_node_builder(
-                NodeBuilderOptions::new("vec_resp").with_name("Test Name"),
+                NodeBuilderOptions::new("vec_resp").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(vec_resp),
             )
             .with_split();
@@ -1641,7 +1655,7 @@ mod tests {
         let map_resp = |_: ()| -> HashMap<String, i64> { HashMap::new() };
         registry
             .register_node_builder(
-                NodeBuilderOptions::new("map_resp").with_name("Test Name"),
+                NodeBuilderOptions::new("map_resp").with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
             )
             .with_split();
@@ -1653,7 +1667,7 @@ mod tests {
             .splittable());
 
         registry.register_node_builder(
-            NodeBuilderOptions::new("not_splittable").with_name("Test Name"),
+            NodeBuilderOptions::new("not_splittable").with_default_display_text("Test Name"),
             move |builder: &mut Builder, _config: ()| builder.create_map_block(map_resp),
         );
         // even though we didn't register with `with_split`, it is still splittable because we
@@ -1676,7 +1690,7 @@ mod tests {
         }
 
         registry.register_node_builder(
-            NodeBuilderOptions::new("multiply").with_name("Test Name"),
+            NodeBuilderOptions::new("multiply").with_default_display_text("Test Name"),
             move |builder: &mut Builder, config: TestConfig| {
                 builder.create_map_block(move |operand: i64| operand * config.by)
             },
@@ -1697,7 +1711,8 @@ mod tests {
             .no_deserializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_request_map").with_name("Test Name"),
+                NodeBuilderOptions::new("opaque_request_map")
+                    .with_default_display_text("Test Name"),
                 move |builder, _config: ()| builder.create_map_block(opaque_request_map),
             )
             .with_serialize_response();
@@ -1718,7 +1733,8 @@ mod tests {
             .no_deserializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_response_map").with_name("Test Name"),
+                NodeBuilderOptions::new("opaque_response_map")
+                    .with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_response_map)
                 },
@@ -1743,7 +1759,8 @@ mod tests {
             .no_serializing()
             .no_cloning()
             .register_node_builder(
-                NodeBuilderOptions::new("opaque_req_resp_map").with_name("Test Name"),
+                NodeBuilderOptions::new("opaque_req_resp_map")
+                    .with_default_display_text("Test Name"),
                 move |builder: &mut Builder, _config: ()| {
                     builder.create_map_block(opaque_req_resp_map)
                 },
