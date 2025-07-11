@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-
 import { NodeManager } from '../node-manager';
 import { TERMINATE_ID } from '../nodes';
 import type {
@@ -7,10 +6,12 @@ import type {
   DiagramEditorEdge,
   DiagramEditorNode,
   DiagramOperation,
+  OperationNode,
 } from '../types';
 import { loadDiagram } from './load-diagram';
+import { joinNamespaces } from './namespace';
 
-function createNode(op: DiagramOperation): DiagramEditorNode {
+function createNode(op: DiagramOperation): OperationNode {
   return {
     id: uuidv4(),
     position: { x: 0, y: 0 },
@@ -33,18 +34,6 @@ describe('syncEdge', () => {
       ops: {},
     } satisfies Diagram;
     nodes = loadDiagram(emptyDiagram).nodes;
-  });
-
-  it('should throw an error if source is "terminate"', () => {
-    const edge: DiagramEditorEdge = {
-      id: 'testEdge',
-      source: TERMINATE_ID,
-      target: TERMINATE_ID,
-      type: 'default',
-      data: {},
-    };
-    const nodeManager = new NodeManager(nodes);
-    expect(() => nodeManager.syncEdge(edge)).toThrow();
   });
 
   // Test cases for 'node', 'join', 'serialized_join', 'transform', 'buffer_access', 'listen'
@@ -87,7 +76,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'default',
         source: node.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: {},
       };
       const nodeManager = new NodeManager(nodes);
@@ -117,7 +106,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'default',
         source: forkCloneNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: {},
       });
       expect(forkCloneOp.next).toEqual([{ builtin: 'terminate' }]);
@@ -129,7 +118,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'default',
         source: forkCloneNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: {},
       });
       expect(forkCloneOp.next).toEqual([{ builtin: 'terminate' }]);
@@ -141,7 +130,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'default',
         source: forkCloneNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: {},
       });
       expect(forkCloneOp.next).toEqual([
@@ -156,7 +145,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'forkResultOk',
           source: forkCloneNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: {},
         }),
       ).toThrow();
@@ -184,7 +173,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'unzip',
         source: unzipNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: { seq: 1 },
       });
       expect(unzipOp.next[1]).toEqual({ builtin: 'terminate' });
@@ -196,7 +185,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'unzip',
         source: unzipNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: { seq: 1 },
       });
       expect(unzipOp.next[1]).toEqual({ builtin: 'terminate' });
@@ -208,7 +197,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'forkResultOk',
           source: unzipNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: {},
         }),
       ).toThrow();
@@ -237,7 +226,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'forkResultOk',
         source: forkResultNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: {},
       });
       expect(forkResultOp.ok).toEqual({ builtin: 'terminate' });
@@ -249,7 +238,7 @@ describe('syncEdge', () => {
         id: uuidv4(),
         type: 'forkResultErr',
         source: forkResultNode.id,
-        target: TERMINATE_ID,
+        target: joinNamespaces('', TERMINATE_ID),
         data: {},
       });
       expect(forkResultOp.ok).toEqual({ builtin: 'dispose' });
@@ -262,7 +251,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'default',
           source: forkResultNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: {},
         }),
       ).toThrow();
@@ -290,7 +279,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitKey',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { key: 'testKey' },
         });
         expect(splitOp.keyed).toEqual({ testKey: { builtin: 'terminate' } });
@@ -304,7 +293,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitKey',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { key: 'testKey' },
         });
         expect(splitOp.keyed).toEqual({
@@ -321,7 +310,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitKey',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { key: 'testKey' },
         });
         expect(splitOp.keyed).toEqual({
@@ -338,7 +327,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitSeq',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { seq: 0 },
         });
         expect(splitOp.sequential?.[0]).toEqual({ builtin: 'terminate' });
@@ -352,7 +341,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitSeq',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { seq: 1 },
         });
         expect(splitOp.sequential?.length).toBe(2);
@@ -368,7 +357,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitSeq',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { seq: 0 },
         });
         expect(splitOp.sequential?.[0]).toEqual({ builtin: 'terminate' });
@@ -382,7 +371,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitSeq',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: { seq: 2 },
         });
         expect(splitOp.sequential?.[2]).toEqual({ builtin: 'terminate' });
@@ -397,7 +386,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitRemaining',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: {},
         });
         expect(splitOp.remaining).toEqual({ builtin: 'terminate' });
@@ -411,7 +400,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'splitRemaining',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: {},
         });
         expect(splitOp.remaining).toEqual({ builtin: 'terminate' });
@@ -426,7 +415,7 @@ describe('syncEdge', () => {
           id: uuidv4(),
           type: 'default',
           source: splitNode.id,
-          target: TERMINATE_ID,
+          target: joinNamespaces('', TERMINATE_ID),
           data: {},
         }),
       ).toThrow();

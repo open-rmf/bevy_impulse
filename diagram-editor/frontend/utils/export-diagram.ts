@@ -1,7 +1,12 @@
 import type { NodeManager } from '../node-manager';
 import { START_ID } from '../nodes';
 import type { Diagram, DiagramEditorEdge } from '../types';
-import { isBuiltinNode, isOperationNode, splitNamespaces } from '../utils';
+import {
+  isBuiltinNode,
+  isOperationNode,
+  joinNamespaces,
+  splitNamespaces,
+} from '../utils';
 
 export function exportDiagram(
   nodeManager: NodeManager,
@@ -31,7 +36,7 @@ export function exportDiagram(
   }
 
   for (const edge of edges) {
-    if (edge.source === START_ID) {
+    if (edge.source === joinNamespaces('', START_ID)) {
       const node = nodeManager.getNode(edge.target);
       if (isOperationNode(node)) {
         diagram.start = node.data.opId;
