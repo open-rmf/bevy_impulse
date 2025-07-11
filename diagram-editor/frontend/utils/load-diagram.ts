@@ -82,14 +82,12 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace, opId, op },
         parentId,
-        extent: 'parent',
       });
       nodes.push({
         id: joinNamespaces(namespace, opId, START_ID),
         type: 'start',
         position: { x: 0, y: 0 },
         data: { namespace: opId },
-        extent: 'parent',
         parentId: id,
       });
       nodes.push({
@@ -97,7 +95,6 @@ function buildGraph(diagram: Diagram): Graph {
         type: 'terminate',
         position: { x: 0, y: 0 },
         data: { namespace: opId },
-        extent: 'parent',
         parentId: id,
       });
 
@@ -115,7 +112,6 @@ function buildGraph(diagram: Diagram): Graph {
         type: op.type,
         position: { x: 0, y: 0 },
         data: { namespace, opId, op },
-        extent: 'parent',
         parentId,
       });
     }
