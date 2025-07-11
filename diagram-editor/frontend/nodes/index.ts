@@ -16,8 +16,8 @@ import TerminateNode from './terminate-node';
 import TransformNode from './transform-node';
 import UnzipNode from './unzip-node';
 
-export const START_ID = 'builtin:start';
-export const TERMINATE_ID = 'builtin:terminate';
+export const START_ID = '__builtin_start__';
+export const TERMINATE_ID = '__builtin_terminate__';
 
 export const NODE_TYPES = {
   start: StartNode,

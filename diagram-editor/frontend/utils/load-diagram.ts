@@ -1,9 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
 import diagramSchema from '../diagram.preprocessed.schema.json';
 import { START_ID, TERMINATE_ID } from '../nodes';
-import type { Diagram, DiagramEditorEdge, DiagramEditorNode } from '../types';
+import type {
+  Diagram,
+  DiagramEditorEdge,
+  DiagramEditorNode,
+  DiagramOperation,
+} from '../types';
 import ajv from './ajv';
-import { buildEdges } from './operation';
+import { joinNamespaces } from './namespace';
+import { buildEdges, isBuiltin, isOperationNode } from './operation';
 
 export interface Graph {
   nodes: DiagramEditorNode[];
@@ -29,18 +35,18 @@ export function loadEmpty(): Graph {
   return {
     nodes: [
       {
-        id: START_ID,
+        id: joinNamespaces('', START_ID),
         type: 'start',
         position: { x: 0, y: 0 },
         selectable: false,
-        data: {},
+        data: { namespace: '' },
       },
       {
-        id: TERMINATE_ID,
+        id: joinNamespaces('', TERMINATE_ID),
         type: 'terminate',
         position: { x: 0, y: 400 },
         selectable: false,
-        data: {},
+        data: { namespace: '' },
       },
     ],
     edges: [],
@@ -50,25 +56,86 @@ export function loadEmpty(): Graph {
 function buildGraph(diagram: Diagram): Graph {
   const graph = loadEmpty();
   const nodes = graph.nodes;
-  nodes.push(
+
+  interface State {
+    parentId?: string;
+    namespace: string;
+    opId: string;
+    op: DiagramOperation;
+  }
+
+  const stack = [
     ...Object.entries(diagram.ops).map(
       ([opId, op]) =>
-        ({
-          id: uuidv4(),
-          type: op.type,
-          position: { x: 0, y: 0 },
-          // TODO: Support sections
-          data: { namespace: '', opId, op },
-        }) satisfies DiagramEditorNode,
+        ({ parentId: undefined, namespace: '', opId, op }) as State,
     ),
-  );
+  ];
+
+  for (let state = stack.pop(); state !== undefined; state = stack.pop()) {
+    const { parentId, namespace, opId, op } = state;
+
+    if (op.type === 'scope') {
+      const id = uuidv4();
+      nodes.push({
+        id,
+        type: 'scope',
+        position: { x: 0, y: 0 },
+        data: { namespace, opId, op },
+        parentId,
+        extent: 'parent',
+      });
+      nodes.push({
+        id: joinNamespaces(namespace, opId, START_ID),
+        type: 'start',
+        position: { x: 0, y: 0 },
+        data: { namespace: opId },
+        extent: 'parent',
+        parentId: id,
+      });
+      nodes.push({
+        id: joinNamespaces(namespace, opId, TERMINATE_ID),
+        type: 'terminate',
+        position: { x: 0, y: 0 },
+        data: { namespace: opId },
+        extent: 'parent',
+        parentId: id,
+      });
+
+      for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
+        stack.push({
+          parentId: id,
+          namespace: joinNamespaces(namespace, opId),
+          opId: innerOpId,
+          op: innerOp,
+        });
+      }
+    } else {
+      nodes.push({
+        id: uuidv4(),
+        type: op.type,
+        position: { x: 0, y: 0 },
+        data: { namespace, opId, op },
+        extent: 'parent',
+        parentId,
+      });
+    }
+  }
+
   const edges = graph.edges;
-  const startNode = nodes.find((n) => n.data.opId === diagram.start);
+  const diagramStart = diagram.start;
+  const startNode = isBuiltin(diagramStart)
+    ? nodes.find((n) => n.type === diagramStart.builtin)
+    : nodes.find(
+        (n) =>
+          isOperationNode(n) &&
+          n.data.namespace === '' &&
+          n.data.opId === diagramStart,
+      );
   if (startNode) {
     edges.push({
       id: uuidv4(),
       type: 'default',
-      source: START_ID,
+      source: joinNamespaces('', START_ID),
       target: startNode.id,
       data: {},
     });

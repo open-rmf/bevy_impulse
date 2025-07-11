@@ -15,7 +15,7 @@ export type Node<
   T extends NodeTypes,
 > = ReactFlowNode<D, T> & { type: T };
 
-export type BuiltinNode = Node<Record<string, never>, BuiltinNodeTypes>;
+export type BuiltinNode = Node<{ namespace: string }, BuiltinNodeTypes>;
 
 export type OperationNodeData<
   out K extends OperationNodeTypes = OperationNodeTypes,

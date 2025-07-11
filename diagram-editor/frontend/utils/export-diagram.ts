@@ -1,7 +1,7 @@
 import type { NodeManager } from '../node-manager';
 import { START_ID } from '../nodes';
 import type { Diagram, DiagramEditorEdge } from '../types';
-import { isOperationNode } from '../utils';
+import { isBuiltinNode, isOperationNode, splitNamespaces } from '../utils';
 
 export function exportDiagram(
   nodeManager: NodeManager,
@@ -17,13 +17,29 @@ export function exportDiagram(
 
   for (const node of nodeManager.iterNodes()) {
     if (isOperationNode(node)) {
-      diagram.ops[node.data.opId] = node.data.op;
+      const namespaces = splitNamespaces(node.data.namespace);
+      let ops = diagram.ops;
+      for (const namespace of namespaces.slice(1)) {
+        const scopeOp = ops[namespace];
+        if (!scopeOp || scopeOp.type !== 'scope') {
+          throw new Error(`expected ${namespace} to be a scope operation`);
+        }
+        ops = scopeOp.ops;
+      }
+      ops[node.data.opId] = node.data.op;
     }
   }
 
   for (const edge of edges) {
     if (edge.source === START_ID) {
-      diagram.start = nodeManager.getNode(edge.target).data.opId;
+      const node = nodeManager.getNode(edge.target);
+      if (isOperationNode(node)) {
+        diagram.start = node.data.opId;
+      } else if (isBuiltinNode(node)) {
+        diagram.start = { builtin: node.type };
+      } else {
+        throw new Error('unknown node');
+      }
     }
     nodeManager.syncEdge(edge);
   }

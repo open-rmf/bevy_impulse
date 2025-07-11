@@ -18,13 +18,13 @@ import {
   reconnectEdge,
 } from '@xyflow/react';
 import { inflateSync, strFromU8 } from 'fflate';
-import React, { useEffect } from 'react';
+import React from 'react';
 import AddOperation from './add-operation';
 import CommandPanel from './command-panel';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
-import { NODE_TYPES, START_ID } from './nodes';
+import { NODE_TYPES } from './nodes';
 import type {
   DiagramEditorEdge,
   DiagramEditorNode,
@@ -145,7 +145,7 @@ const DiagramEditor = () => {
   const loadDiagram = React.useCallback(
     (jsonStr: string) => {
       const graph = loadDiagramJson(jsonStr);
-      const changes = autoLayout(START_ID, graph.nodes, graph.edges);
+      const changes = autoLayout(graph.nodes, graph.edges);
       setNodes(applyNodeChanges(changes, graph.nodes));
       setEdges(graph.edges);
       reactFlowInstance.current?.fitView();
@@ -161,7 +161,7 @@ const DiagramEditor = () => {
     setOpenErrorToast(true);
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     const diagramParam = queryParams.get('diagram');
 

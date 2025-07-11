@@ -15,11 +15,8 @@ import {
   isBuiltinNode,
   isKeyedBufferSelection,
   isOperationNode,
+  joinNamespaces,
 } from './utils';
-
-function joinNamespaceOpId(a: string, b: string) {
-  return `${a}:${b}`;
-}
 
 function getBufferSelection(targetOp: DiagramOperation): BufferSelection {
   switch (targetOp.type) {
@@ -61,11 +58,13 @@ export class NodeManager {
     for (const node of nodes) {
       this.nodeIdMap.set(node.id, node);
       if (isOperationNode(node)) {
-        const namespacedOpId = joinNamespaceOpId(
+        const namespacedOpId = joinNamespaces(
           node.data.namespace,
           node.data.opId,
         );
         this.namespacedOpIdMap.set(namespacedOpId, node);
+      } else if (isBuiltinNode(node)) {
+        this.namespacedOpIdMap.set(node.id, node);
       }
     }
   }
@@ -92,7 +91,7 @@ export class NodeManager {
   }
 
   getNodeFromNamespaceOpId(namespace: string, opId: string): DiagramEditorNode {
-    const namespacedOpId = joinNamespaceOpId(namespace, opId);
+    const namespacedOpId = joinNamespaces(namespace, opId);
     const node = this.namespacedOpIdMap.get(namespacedOpId);
     if (!node) {
       throw new Error(`cannot find node for operation "${namespacedOpId}"`);
@@ -105,7 +104,7 @@ export class NodeManager {
   }
 
   getNodeFromNextOp(
-    fromNode: DiagramEditorNode,
+    namespace: string,
     nextOp: NextOperation,
   ): DiagramEditorNode | null {
     if (isBuiltin(nextOp)) {
@@ -114,23 +113,22 @@ export class NodeManager {
         case 'cancel':
           return null;
         case 'terminate':
-          return this.getNode(TERMINATE_ID);
+          return this.getNode(joinNamespaces(namespace, TERMINATE_ID));
       }
     }
 
-    const [namespace, opId] = (() => {
+    const opId = (() => {
       if (typeof nextOp === 'object') {
-        const [namespace, opId] = Object.entries(nextOp)[0];
-        return [joinNamespaceOpId(fromNode.data.namespace, namespace), opId];
+        return Object.keys(nextOp)[0];
       }
-      return [fromNode.data.namespace, nextOp];
+      return nextOp;
     })();
 
-    const namespacedOpId = joinNamespaceOpId(namespace, opId);
+    const namespacedOpId = joinNamespaces(namespace, opId);
     const node = this.namespacedOpIdMap.get(namespacedOpId);
     if (!node) {
       throw new Error(
-        `cannot find operation ${joinNamespaceOpId(namespace, opId)}`,
+        `cannot find operation ${joinNamespaces(namespace, opId)}`,
       );
     }
     return node;
@@ -153,7 +151,10 @@ export class NodeManager {
         if (isBuiltinNode(target)) {
           return { builtin: target.type };
         }
-        return target.data.opId;
+        if (isOperationNode(target)) {
+          return target.data.opId;
+        }
+        throw new Error('unknown node type');
       }
       // TODO: For section edges, return a `{ [target.data.opId]: edge.data.input }`
       default: {
@@ -174,6 +175,9 @@ export class NodeManager {
   private syncBufferSelection(edge: DiagramEditorEdge) {
     if (edge.type === 'bufferKey' || edge.type === 'bufferSeq') {
       const targetNode = this.getNode(edge.target);
+      if (!isOperationNode(targetNode)) {
+        throw new Error('expected operation node');
+      }
       const targetOp = targetNode.data.op;
       if (!targetOp) {
         throw new Error(`target operation "${edge.target}" not found`);
@@ -197,6 +201,9 @@ export class NodeManager {
       }
 
       const sourceNode = this.getNode(edge.source);
+      if (sourceNode.type !== 'buffer') {
+        throw new Error('expected source to be a buffer node');
+      }
       // check that the buffer selection is compatible
       if (edge.type === 'bufferSeq') {
         if (!isArrayBufferSelection(bufferSelection)) {
@@ -234,7 +241,7 @@ export class NodeManager {
     }
 
     const sourceNode = this.getNode(edge.source);
-    if (isBuiltinNode(sourceNode)) {
+    if (!isOperationNode(sourceNode)) {
       return;
     }
     const sourceOp = sourceNode.data.op;

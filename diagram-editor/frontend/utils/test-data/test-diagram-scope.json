@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "start": "scope",
+  "ops": {
+    "scope": {
+      "type": "scope",
+      "start": "mul3",
+      "ops": {
+        "mul3": {
+          "type": "node",
+          "builder": "mul",
+          "config": 3,
+          "next": { "builtin": "terminate" }
+        }
+      },
+      "next": "add4"
+    },
+    "add4": {
+      "type": "node",
+      "builder": "add",
+      "config": 4,
+      "next": { "builtin": "terminate" }
+    }
+  }
+}
