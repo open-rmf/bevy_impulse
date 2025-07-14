@@ -1,7 +1,6 @@
 import { Button, Tooltip } from '@mui/material';
 import { type NodeChange, type ReactFlowState, useStore } from '@xyflow/react';
 import React from 'react';
-import { START_ID } from './nodes';
 import { MaterialSymbol } from './nodes/icons';
 import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { autoLayout } from './utils';
@@ -21,15 +20,7 @@ function AutoLayoutButton({ onNodeChanges }: AutoLayoutButtonProps) {
     <Tooltip title="Auto Layout">
       <Button
         onClick={() => {
-          const startNode = nodes.find((n) => n.id === START_ID);
-          if (!startNode) {
-            console.error('error applying auto layout: cannot find start node');
-            return;
-          }
-
-          const changes = autoLayout(START_ID, nodes, edges, {
-            rootPosition: startNode.position,
-          });
+          const changes = autoLayout(nodes, edges);
           onNodeChanges(changes);
         }}
       >

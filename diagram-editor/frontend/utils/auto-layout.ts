@@ -10,15 +10,21 @@ import type {
 import { joinNamespaces } from './namespace';
 
 export interface AutoLayoutOptions {
-  rootPosition: { x: number; y: number };
   cellWidth: number;
   cellHeight: number;
+  scopePadding: {
+    leftRight: number;
+    topBottom: number;
+  };
 }
 
 const DEFAULT_OPTIONS: AutoLayoutOptions = {
-  rootPosition: { x: 0, y: 0 },
   cellWidth: 200,
   cellHeight: 50,
+  scopePadding: {
+    leftRight: 100,
+    topBottom: 50,
+  },
 };
 
 function isScopeNode(node: DiagramEditorNode): node is OperationNode<'scope'> {
@@ -28,7 +34,9 @@ function isScopeNode(node: DiagramEditorNode): node is OperationNode<'scope'> {
 export function autoLayout(
   nodes: DiagramEditorNode[],
   edges: DiagramEditorEdge[],
+  options?: Partial<AutoLayoutOptions>,
 ): NodeChange<DiagramEditorNode>[] {
+  const mergedOptions = { ...DEFAULT_OPTIONS, ...options };
   const nodeManager = new NodeManager(nodes);
   const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({ rankdir: 'TB' });
@@ -48,8 +56,8 @@ export function autoLayout(
     // exclude scope node from auto layout
     if (!isScopeNode(node)) {
       dagreGraph.setNode(node.id, {
-        width: DEFAULT_OPTIONS.cellWidth,
-        height: DEFAULT_OPTIONS.cellHeight,
+        width: mergedOptions.cellWidth,
+        height: mergedOptions.cellHeight,
       });
     }
   }
@@ -83,20 +91,38 @@ export function autoLayout(
 
   dagre.layout(dagreGraph);
 
-  const scopePositions: Record<string, { x: number; y: number }> = {};
+  interface ScopeState {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+  const scopePositions: Record<string, ScopeState> = {};
   for (const [scopeNodeId, children] of Object.entries(scopeChildrens)) {
-    // place the scope node in the middle of it's children.
-    const positionSum = children.reduce(
-      (prev, curr) => {
-        prev.x += dagreGraph.node(curr.id).x;
-        prev.y += dagreGraph.node(curr.id).y;
-        return prev;
-      },
-      { x: 0, y: 0 },
-    );
+    let sumX = 0;
+    let sumY = 0;
+    const firstChild = dagreGraph.node(children[0].id);
+    let minX = firstChild.x;
+    let maxX = firstChild.x;
+    let minY = firstChild.y;
+    let maxY = firstChild.y;
+
+    for (const node of children) {
+      const nodePosition = dagreGraph.node(node.id);
+      sumX += nodePosition.x;
+      sumY += nodePosition.y;
+      minX = Math.min(minX, nodePosition.x);
+      maxX = Math.max(maxX, nodePosition.x);
+      minY = Math.min(minY, nodePosition.y);
+      maxY = Math.max(maxY, nodePosition.y);
+    }
+
     scopePositions[scopeNodeId] = {
-      x: positionSum.x / children.length,
-      y: positionSum.y / children.length,
+      // place the scope node in the middle of it's children.
+      x: sumX / children.length,
+      y: sumY / children.length,
+      width: maxX - minX + mergedOptions.scopePadding.leftRight * 2,
+      height: maxY - minY + mergedOptions.scopePadding.topBottom * 2,
     };
   }
 
@@ -108,12 +134,21 @@ export function autoLayout(
     }
 
     if (node.parentId) {
+      const scopePosition = scopePositions[node.parentId];
       changes.push({
         type: 'position',
         id: node.id,
         position: {
-          x: nodePosition.x - scopePositions[node.parentId].x + 300,
-          y: nodePosition.y - scopePositions[node.parentId].y + 200,
+          x:
+            nodePosition.x -
+            // convert position relative to parent
+            scopePosition.x +
+            scopePosition.width / 2,
+          y:
+            nodePosition.y -
+            // convert position relative to parent
+            scopePosition.y +
+            scopePosition.height / 2,
         },
       });
     } else {
@@ -131,15 +166,17 @@ export function autoLayout(
     changes.push({
       type: 'position',
       id: scopeNodeId,
-      position,
+      position: {
+        x: position.x,
+        y: position.y,
+      },
     });
     changes.push({
       type: 'dimensions',
       id: scopeNodeId,
       dimensions: {
-        // TODO: calculate width and height based on children
-        width: 600,
-        height: 400,
+        width: position.width,
+        height: position.height,
       },
     });
   }
