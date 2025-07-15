@@ -1,6 +1,7 @@
 import { Button, Tooltip } from '@mui/material';
 import { type NodeChange, type ReactFlowState, useStore } from '@xyflow/react';
 import React from 'react';
+import { LAYOUT_OPTIONS } from './utils/layout';
 import { MaterialSymbol } from './nodes/icons';
 import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { autoLayout } from './utils';
@@ -20,7 +21,7 @@ function AutoLayoutButton({ onNodeChanges }: AutoLayoutButtonProps) {
     <Tooltip title="Auto Layout">
       <Button
         onClick={() => {
-          const changes = autoLayout(nodes, edges);
+          const changes = autoLayout(nodes, edges, LAYOUT_OPTIONS);
           onNodeChanges(changes);
         }}
       >

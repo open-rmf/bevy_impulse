@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 
 import { NodeManager } from '../node-manager';
+import { START_ID } from '../nodes';
 import type {
   BufferSelection,
   BuiltinTarget,
@@ -13,7 +14,6 @@ import type {
 } from '../types';
 import { exhaustiveCheck } from './exhaustive-check';
 import { joinNamespaces } from './namespace';
-import { START_ID } from '../nodes';
 
 export function isKeyedBufferSelection(
   bufferSelection: BufferSelection,

@@ -17,6 +17,8 @@ function BaseNode({
   selected,
   sourcePosition = Position.Bottom,
   targetPosition = Position.Top,
+  width,
+  height,
 }: BaseNodeProps) {
   const icon =
     typeof materialIconOrSymbol === 'string' ? (
@@ -39,10 +41,8 @@ function BaseNode({
         variant={selected ? 'contained' : 'outlined'}
         sx={{
           textTransform: 'none',
-          // The "contained" and "outlined" variant has a 1px size difference, causing ReactFlow
-          // to recompute the node's dimensions. Set a fixed height to prevent that
-          // from happening.
-          height: '3em',
+          width,
+          height,
         }}
       >
         {label}

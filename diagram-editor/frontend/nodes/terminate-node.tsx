@@ -6,6 +6,8 @@ import type { DiagramEditorNode } from '../types';
 function TerminateNode({
   isConnectable,
   targetPosition = Position.Top,
+  width,
+  height,
 }: NodeProps<DiagramEditorNode>) {
   return (
     <Paper>
@@ -14,7 +16,15 @@ function TerminateNode({
         position={targetPosition}
         isConnectable={isConnectable}
       />
-      <Button fullWidth variant="outlined" disabled>
+      <Button
+        fullWidth
+        variant="outlined"
+        disabled
+        sx={{
+          width,
+          height,
+        }}
+      >
         Terminate
       </Button>
     </Paper>

@@ -22,8 +22,11 @@ function ScopeNode({
         sx={{
           opacity: 0.2,
           backgroundColor: theme.palette.secondary.main,
+          borderRadius: 4,
+          borderColor: 'red',
           width,
           height,
+          cursor: 'pointer',
         }}
       ></Box>
       <Handle

@@ -10,6 +10,7 @@ import type {
 import ajv from './ajv';
 import { joinNamespaces } from './namespace';
 import { buildEdges, isBuiltin, isOperationNode } from './operation';
+import { LAYOUT_OPTIONS } from './layout';
 
 export interface Graph {
   nodes: DiagramEditorNode[];
@@ -40,6 +41,8 @@ export function loadEmpty(): Graph {
         position: { x: 0, y: 0 },
         selectable: false,
         data: { namespace: '' },
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
       },
       {
         id: joinNamespaces('', TERMINATE_ID),
@@ -47,6 +50,8 @@ export function loadEmpty(): Graph {
         position: { x: 0, y: 400 },
         selectable: false,
         data: { namespace: '' },
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
       },
     ],
     edges: [],
@@ -82,6 +87,8 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace, opId, op },
         parentId,
+        width: 0,
+        height: 0,
       });
       nodes.push({
         id: joinNamespaces(namespace, opId, START_ID),
@@ -89,6 +96,8 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace: opId },
         parentId: id,
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
       });
       nodes.push({
         id: joinNamespaces(namespace, opId, TERMINATE_ID),
@@ -96,6 +105,8 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace: opId },
         parentId: id,
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
       });
 
       for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
@@ -113,6 +124,8 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace, opId, op },
         parentId,
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
       });
     }
   }

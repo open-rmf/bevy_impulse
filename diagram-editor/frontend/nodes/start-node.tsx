@@ -7,10 +7,20 @@ import type { DiagramEditorNode } from '../types';
 function StartNode({
   isConnectable,
   sourcePosition = Position.Bottom,
+  width,
+  height,
 }: NodeProps<DiagramEditorNode>) {
   return (
     <Paper sx={{ minWidth: 100 }}>
-      <Button fullWidth variant="outlined" disabled>
+      <Button
+        fullWidth
+        variant="outlined"
+        disabled
+        sx={{
+          width,
+          height,
+        }}
+      >
         Start
       </Button>
       <Handle

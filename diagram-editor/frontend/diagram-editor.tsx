@@ -16,6 +16,7 @@ import {
   ReactFlow,
   type ReactFlowInstance,
   reconnectEdge,
+  type XYPosition,
 } from '@xyflow/react';
 import { inflateSync, strFromU8 } from 'fflate';
 import React from 'react';
@@ -32,6 +33,7 @@ import type {
 } from './types';
 import { allowEdges as getAllowEdges, isOperationNode } from './utils';
 import { autoLayout } from './utils/auto-layout';
+import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
 
 const NonCapturingPopoverContainer = ({
@@ -46,6 +48,38 @@ interface SelectedEdge {
   edge: DiagramEditorEdge;
 }
 
+/**
+ * Given a node change, get the parent id and the new position if the change would be applied.
+ * Returns null if the change does not result in any position changes.
+ */
+function getChangeParentIdAndPosition(
+  reactFlow: ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
+  change: NodeChange<DiagramEditorNode>,
+): [string, string | null, XYPosition] | null {
+  switch (change.type) {
+    case 'position': {
+      const changedNode = reactFlow.getNode(change.id);
+      if (!changedNode) {
+        return null;
+      }
+      return change.position
+        ? [change.id, changedNode.parentId || null, change.position]
+        : null;
+    }
+    case 'add':
+    case 'replace': {
+      return [
+        change.item.id,
+        change.item.parentId || null,
+        change.item.position,
+      ];
+    }
+    default: {
+      return null;
+    }
+  }
+}
+
 const DiagramEditor = () => {
   const reactFlowInstance = React.useRef<ReactFlowInstance<
     DiagramEditorNode,
@@ -55,9 +89,113 @@ const DiagramEditor = () => {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
+
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<DiagramEditorNode>[]) => {
-      setNodes((prev) => applyNodeChanges(changes, prev));
+      const reactFlow = reactFlowInstance.current;
+      if (!reactFlow) {
+        return;
+      }
+
+      setNodes((prev) => {
+        const scopeChanges: NodeChange<DiagramEditorNode>[] = [];
+        for (const change of changes) {
+          const changeIdPos = getChangeParentIdAndPosition(reactFlow, change);
+          if (!changeIdPos) {
+            continue;
+          }
+          const [changeId, changeParentId, changePosition] = changeIdPos;
+          if (!changeParentId) {
+            continue;
+          }
+
+          const scopeNode = prev.find((n) => n.id === changeParentId);
+          if (!scopeNode) {
+            continue;
+          }
+          const scopeChildren = prev.filter(
+            (n) => n.parentId === changeParentId && n.id !== changeId,
+          );
+          const calculatedBounds = calculateScopeBounds([
+            ...scopeChildren.map((n) => n.position),
+            changePosition,
+          ]);
+
+          const newScopeBounds = {
+            x: scopeNode.position.x,
+            y: scopeNode.position.y,
+            width: scopeNode.width ?? calculatedBounds.width,
+            height: scopeNode.height ?? calculatedBounds.height,
+          };
+          // React Flow cannot handle fast changing of a parent's position while changing the
+          // children's position as well (some kind of race condition that causes the node positions to jump around).
+          // Workaround by resizing the scope only if it hits a certain threshold.
+          if (
+            Math.abs(calculatedBounds.x) >
+              LAYOUT_OPTIONS.scopePadding.leftRight ||
+            Math.abs(calculatedBounds.y) >
+              LAYOUT_OPTIONS.scopePadding.topBottom ||
+            (scopeNode.width &&
+              Math.abs(calculatedBounds.width - scopeNode.width) >
+                LAYOUT_OPTIONS.scopePadding.leftRight) ||
+            (scopeNode.height &&
+              Math.abs(calculatedBounds.height - scopeNode.height) >
+                LAYOUT_OPTIONS.scopePadding.topBottom)
+          ) {
+            newScopeBounds.x += calculatedBounds.x;
+            newScopeBounds.width = calculatedBounds.width;
+            newScopeBounds.y += calculatedBounds.y;
+            newScopeBounds.height = calculatedBounds.height;
+          }
+
+          if (
+            newScopeBounds.x !== scopeNode.position.x ||
+            newScopeBounds.y !== scopeNode.position.y ||
+            newScopeBounds.width !== scopeNode.width ||
+            newScopeBounds.height !== scopeNode.height
+          ) {
+            scopeChanges.push({
+              type: 'position',
+              id: changeParentId,
+              position: {
+                x: newScopeBounds.x,
+                y: newScopeBounds.y,
+              },
+            });
+            scopeChanges.push({
+              type: 'dimensions',
+              id: changeParentId,
+              dimensions: {
+                width: newScopeBounds.width,
+                height: newScopeBounds.height,
+              },
+              setAttributes: true,
+            });
+            // when the scope is moved, the relative position of the nodes will change so we
+            // need to update them to keep them in place.
+            for (const child of scopeChildren) {
+              scopeChanges.push({
+                type: 'position',
+                id: child.id,
+                position: {
+                  x: child.position.x - calculatedBounds.x,
+                  y: child.position.y - calculatedBounds.y,
+                },
+              });
+            }
+            scopeChanges.push({
+              type: 'position',
+              id: changeId,
+              position: {
+                x: changePosition.x - newScopeBounds.x,
+                y: changePosition.y - newScopeBounds.y,
+              },
+            });
+          }
+        }
+
+        return applyNodeChanges([...changes, ...scopeChanges], prev);
+      });
     },
     [],
   );
@@ -144,8 +282,12 @@ const DiagramEditor = () => {
 
   const loadDiagram = React.useCallback(
     (jsonStr: string) => {
+      if (!reactFlowInstance.current) {
+        return;
+      }
+
       const graph = loadDiagramJson(jsonStr);
-      const changes = autoLayout(graph.nodes, graph.edges);
+      const changes = autoLayout(graph.nodes, graph.edges, LAYOUT_OPTIONS);
       setNodes(applyNodeChanges(changes, graph.nodes));
       setEdges(graph.edges);
       reactFlowInstance.current?.fitView();
@@ -161,31 +303,6 @@ const DiagramEditor = () => {
     setOpenErrorToast(true);
   }, []);
 
-  React.useEffect(() => {
-    const queryParams = new URLSearchParams(window.location.search);
-    const diagramParam = queryParams.get('diagram');
-
-    if (!diagramParam) {
-      return;
-    }
-
-    try {
-      const binaryString = atob(diagramParam);
-      const byteArray = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        byteArray[i] = binaryString.charCodeAt(i);
-      }
-      const diagramJson = strFromU8(inflateSync(byteArray));
-      loadDiagram(diagramJson);
-    } catch (e) {
-      if (e instanceof Error) {
-        showErrorToast(`failed to load diagram: ${e.message}`);
-      } else {
-        throw e;
-      }
-    }
-  }, [loadDiagram, showErrorToast]);
-
   const [openExportDiagramDialog, setOpenExportDiagramDialog] =
     React.useState(false);
 
@@ -198,13 +315,35 @@ const DiagramEditor = () => {
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeOrigin={[0.5, 0.5]}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
         onInit={(instance) => {
           reactFlowInstance.current = instance;
+
+          const queryParams = new URLSearchParams(window.location.search);
+          const diagramParam = queryParams.get('diagram');
+
+          if (!diagramParam) {
+            return;
+          }
+
+          try {
+            const binaryString = atob(diagramParam);
+            const byteArray = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              byteArray[i] = binaryString.charCodeAt(i);
+            }
+            const diagramJson = strFromU8(inflateSync(byteArray));
+            loadDiagram(diagramJson);
+          } catch (e) {
+            if (e instanceof Error) {
+              showErrorToast(`failed to load diagram: ${e.message}`);
+            } else {
+              throw e;
+            }
+          }
         }}
         onNodesChange={handleNodeChanges}
         onNodesDelete={() => {
@@ -254,8 +393,8 @@ const DiagramEditor = () => {
 
           setEditOpFormPopoverProps({
             open: true,
-            anchorReference: 'anchorEl',
-            anchorEl: ev.currentTarget,
+            anchorReference: 'anchorPosition',
+            anchorPosition: { left: ev.clientX, top: ev.clientY },
           });
         }}
         onEdgeClick={(ev, edge) => {

@@ -1,4 +1,4 @@
-import type { NodeChange } from '@xyflow/react';
+import type { NodeChange, Rect } from '@xyflow/react';
 import * as dagre from 'dagre';
 import { NodeManager } from '../node-manager';
 import { START_ID, TERMINATE_ID } from '../nodes';
@@ -7,25 +7,8 @@ import type {
   DiagramEditorNode,
   OperationNode,
 } from '../types';
+import { calculateScopeBounds, type LayoutOptions } from './layout';
 import { joinNamespaces } from './namespace';
-
-export interface AutoLayoutOptions {
-  cellWidth: number;
-  cellHeight: number;
-  scopePadding: {
-    leftRight: number;
-    topBottom: number;
-  };
-}
-
-const DEFAULT_OPTIONS: AutoLayoutOptions = {
-  cellWidth: 200,
-  cellHeight: 50,
-  scopePadding: {
-    leftRight: 100,
-    topBottom: 50,
-  },
-};
 
 function isScopeNode(node: DiagramEditorNode): node is OperationNode<'scope'> {
   return node.type === 'scope';
@@ -34,12 +17,15 @@ function isScopeNode(node: DiagramEditorNode): node is OperationNode<'scope'> {
 export function autoLayout(
   nodes: DiagramEditorNode[],
   edges: DiagramEditorEdge[],
-  options?: Partial<AutoLayoutOptions>,
+  options: LayoutOptions,
 ): NodeChange<DiagramEditorNode>[] {
-  const mergedOptions = { ...DEFAULT_OPTIONS, ...options };
   const nodeManager = new NodeManager(nodes);
   const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  dagreGraph.setGraph({ rankdir: 'TB' });
+  dagreGraph.setGraph({
+    rankdir: 'TB',
+    marginx: options.nodeWidth / 2,
+    marginy: options.nodeHeight / 2,
+  });
 
   const scopeChildrens: Record<string, DiagramEditorNode[]> = {};
   for (const node of nodes) {
@@ -56,8 +42,8 @@ export function autoLayout(
     // exclude scope node from auto layout
     if (!isScopeNode(node)) {
       dagreGraph.setNode(node.id, {
-        width: mergedOptions.cellWidth,
-        height: mergedOptions.cellHeight,
+        width: options.nodeWidth,
+        height: options.nodeHeight,
       });
     }
   }
@@ -91,39 +77,11 @@ export function autoLayout(
 
   dagre.layout(dagreGraph);
 
-  interface ScopeState {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  }
-  const scopePositions: Record<string, ScopeState> = {};
+  const scopeBounds: Record<string, Rect> = {};
   for (const [scopeNodeId, children] of Object.entries(scopeChildrens)) {
-    let sumX = 0;
-    let sumY = 0;
-    const firstChild = dagreGraph.node(children[0].id);
-    let minX = firstChild.x;
-    let maxX = firstChild.x;
-    let minY = firstChild.y;
-    let maxY = firstChild.y;
-
-    for (const node of children) {
-      const nodePosition = dagreGraph.node(node.id);
-      sumX += nodePosition.x;
-      sumY += nodePosition.y;
-      minX = Math.min(minX, nodePosition.x);
-      maxX = Math.max(maxX, nodePosition.x);
-      minY = Math.min(minY, nodePosition.y);
-      maxY = Math.max(maxY, nodePosition.y);
-    }
-
-    scopePositions[scopeNodeId] = {
-      // place the scope node in the middle of it's children.
-      x: sumX / children.length,
-      y: sumY / children.length,
-      width: maxX - minX + mergedOptions.scopePadding.leftRight * 2,
-      height: maxY - minY + mergedOptions.scopePadding.topBottom * 2,
-    };
+    scopeBounds[scopeNodeId] = calculateScopeBounds(
+      children.map((n) => dagreGraph.node(n.id)),
+    );
   }
 
   const changes: NodeChange<DiagramEditorNode>[] = [];
@@ -134,21 +92,19 @@ export function autoLayout(
     }
 
     if (node.parentId) {
-      const scopePosition = scopePositions[node.parentId];
+      const scope = scopeBounds[node.parentId];
       changes.push({
         type: 'position',
         id: node.id,
         position: {
           x:
             nodePosition.x -
-            // convert position relative to parent
-            scopePosition.x +
-            scopePosition.width / 2,
+            // convert position to be relative to scope
+            scope.x,
           y:
             nodePosition.y -
-            // convert position relative to parent
-            scopePosition.y +
-            scopePosition.height / 2,
+            // convert position to be relative to scope
+            scope.y,
         },
       });
     } else {
@@ -162,22 +118,23 @@ export function autoLayout(
       });
     }
   }
-  for (const [scopeNodeId, position] of Object.entries(scopePositions)) {
+  for (const [scopeNodeId, bounds] of Object.entries(scopeBounds)) {
     changes.push({
       type: 'position',
       id: scopeNodeId,
       position: {
-        x: position.x,
-        y: position.y,
+        x: bounds.x,
+        y: bounds.y,
       },
     });
     changes.push({
       type: 'dimensions',
       id: scopeNodeId,
       dimensions: {
-        width: position.width,
-        height: position.height,
+        width: bounds.width,
+        height: bounds.height,
       },
+      setAttributes: true,
     });
   }
 
