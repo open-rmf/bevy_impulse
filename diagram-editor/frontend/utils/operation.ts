@@ -13,7 +13,7 @@ import type {
   OperationNode,
 } from '../types';
 import { exhaustiveCheck } from './exhaustive-check';
-import { joinNamespaces } from './namespace';
+import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 
 export function isKeyedBufferSelection(
   bufferSelection: BufferSelection,
@@ -122,7 +122,7 @@ export function buildEdges(
   }
   const stack = [
     ...Object.entries(diagram.ops).map(
-      ([opId, op]) => ({ namespace: '', opId, op }) as State,
+      ([opId, op]) => ({ namespace: ROOT_NAMESPACE, opId, op }) as State,
     ),
   ];
 

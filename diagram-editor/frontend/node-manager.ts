@@ -16,6 +16,7 @@ import {
   isKeyedBufferSelection,
   isOperationNode,
   joinNamespaces,
+  ROOT_NAMESPACE,
 } from './utils';
 
 function getBufferSelection(targetOp: DiagramOperation): BufferSelection {
@@ -100,7 +101,7 @@ export class NodeManager {
   }
 
   getNodeFromRootOpId(opId: string): DiagramEditorNode {
-    return this.getNodeFromNamespaceOpId('', opId);
+    return this.getNodeFromNamespaceOpId(ROOT_NAMESPACE, opId);
   }
 
   getNodeFromNextOp(

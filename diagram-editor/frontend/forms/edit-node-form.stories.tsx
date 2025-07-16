@@ -1,6 +1,6 @@
 import { useArgs } from '@storybook/preview-api';
 import type { Meta, StoryObj } from 'storybook-react-rsbuild';
-
+import { ROOT_NAMESPACE } from '../utils';
 import EditNodeForm from './edit-node-form';
 
 const meta: Meta<typeof EditNodeForm> = {
@@ -19,7 +19,7 @@ export const Node: Story = {
       type: 'node',
       position: { x: 0, y: 0 },
       data: {
-        namespace: '',
+        namespace: ROOT_NAMESPACE,
         opId: 'testOpId',
         op: {
           type: 'node',
@@ -51,7 +51,7 @@ export const Buffer: Story = {
       type: 'buffer',
       position: { x: 0, y: 0 },
       data: {
-        namespace: '',
+        namespace: ROOT_NAMESPACE,
         opId: 'testOpId',
         op: {
           type: 'buffer',
@@ -82,7 +82,7 @@ export const Transform: Story = {
       type: 'transform',
       position: { x: 0, y: 0 },
       data: {
-        namespace: '',
+        namespace: ROOT_NAMESPACE,
         opId: 'testOpId',
         op: {
           type: 'transform',

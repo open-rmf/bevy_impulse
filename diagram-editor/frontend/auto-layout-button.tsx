@@ -1,10 +1,10 @@
 import { Button, Tooltip } from '@mui/material';
 import { type NodeChange, type ReactFlowState, useStore } from '@xyflow/react';
 import React from 'react';
-import { LAYOUT_OPTIONS } from './utils/layout';
 import { MaterialSymbol } from './nodes/icons';
 import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { autoLayout } from './utils';
+import { LAYOUT_OPTIONS } from './utils/layout';
 
 export interface AutoLayoutButtonProps {
   onNodeChanges: (changes: NodeChange<DiagramEditorNode>[]) => void;

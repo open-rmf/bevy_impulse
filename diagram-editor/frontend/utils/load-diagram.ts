@@ -8,9 +8,9 @@ import type {
   DiagramOperation,
 } from '../types';
 import ajv from './ajv';
-import { joinNamespaces } from './namespace';
-import { buildEdges, isBuiltin, isOperationNode } from './operation';
 import { LAYOUT_OPTIONS } from './layout';
+import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
+import { buildEdges, isBuiltin, isOperationNode } from './operation';
 
 export interface Graph {
   nodes: DiagramEditorNode[];
@@ -36,20 +36,20 @@ export function loadEmpty(): Graph {
   return {
     nodes: [
       {
-        id: joinNamespaces('', START_ID),
+        id: joinNamespaces(ROOT_NAMESPACE, START_ID),
         type: 'start',
         position: { x: 0, y: 0 },
         selectable: false,
-        data: { namespace: '' },
+        data: { namespace: ROOT_NAMESPACE },
         width: LAYOUT_OPTIONS.nodeWidth,
         height: LAYOUT_OPTIONS.nodeHeight,
       },
       {
-        id: joinNamespaces('', TERMINATE_ID),
+        id: joinNamespaces(ROOT_NAMESPACE, TERMINATE_ID),
         type: 'terminate',
         position: { x: 0, y: 400 },
         selectable: false,
-        data: { namespace: '' },
+        data: { namespace: ROOT_NAMESPACE },
         width: LAYOUT_OPTIONS.nodeWidth,
         height: LAYOUT_OPTIONS.nodeHeight,
       },
@@ -72,7 +72,7 @@ function buildGraph(diagram: Diagram): Graph {
   const stack = [
     ...Object.entries(diagram.ops).map(
       ([opId, op]) =>
-        ({ parentId: undefined, namespace: '', opId, op }) as State,
+        ({ parentId: undefined, namespace: ROOT_NAMESPACE, opId, op }) as State,
     ),
   ];
 
@@ -137,14 +137,14 @@ function buildGraph(diagram: Diagram): Graph {
     : nodes.find(
         (n) =>
           isOperationNode(n) &&
-          n.data.namespace === '' &&
+          n.data.namespace === ROOT_NAMESPACE &&
           n.data.opId === diagramStart,
       );
   if (startNode) {
     edges.push({
       id: uuidv4(),
       type: 'default',
-      source: joinNamespaces('', START_ID),
+      source: joinNamespaces(ROOT_NAMESPACE, START_ID),
       target: startNode.id,
       data: {},
     });

@@ -33,7 +33,12 @@ import type {
   DiagramEditorNode,
   OperationNode,
 } from './types';
-import { allowEdges as getAllowEdges, isOperationNode } from './utils';
+import {
+  allowEdges as getAllowEdges,
+  isOperationNode,
+  joinNamespaces,
+  ROOT_NAMESPACE,
+} from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
@@ -226,7 +231,13 @@ const DiagramEditor = () => {
     open: boolean;
     popOverPosition: PopoverPosition;
     parentId: string | null;
-  }>({ open: false, popOverPosition: { left: 0, top: 0 }, parentId: null });
+    namespace: string;
+  }>({
+    open: false,
+    popOverPosition: { left: 0, top: 0 },
+    parentId: null,
+    namespace: ROOT_NAMESPACE,
+  });
 
   const [editingNodeId, setEditingNodeId] = React.useState<string | null>(null);
 
@@ -299,6 +310,7 @@ const DiagramEditor = () => {
                 open: true,
                 popOverPosition: { left: ev.clientX, top: ev.clientY },
                 parentId: node.id,
+                namespace: joinNamespaces(node.data.namespace, node.data.opId),
               });
             }}
           />
@@ -467,6 +479,7 @@ const DiagramEditor = () => {
             open: true,
             popOverPosition: { left: ev.clientX, top: ev.clientY },
             parentId: null,
+            namespace: ROOT_NAMESPACE,
           });
         }}
         onMouseDownCapture={handleMouseDown}
@@ -495,6 +508,7 @@ const DiagramEditor = () => {
         component={NonCapturingPopoverContainer}
       >
         <AddOperation
+          namespace={addOperationPopover.namespace}
           onAdd={(change) => {
             const newNode = change.item;
             newNode.parentId = addOperationPopover.parentId || undefined;

@@ -5,6 +5,7 @@ import {
   isBuiltinNode,
   isOperationNode,
   joinNamespaces,
+  ROOT_NAMESPACE,
   splitNamespaces,
 } from '../utils';
 
@@ -36,7 +37,7 @@ export function exportDiagram(
   }
 
   for (const edge of edges) {
-    if (edge.source === joinNamespaces('', START_ID)) {
+    if (edge.source === joinNamespaces(ROOT_NAMESPACE, START_ID)) {
       const node = nodeManager.getNode(edge.target);
       if (isOperationNode(node)) {
         diagram.start = node.data.opId;
