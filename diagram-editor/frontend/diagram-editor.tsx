@@ -183,14 +183,8 @@ const DiagramEditor = () => {
                 },
               });
             }
-            scopeChanges.push({
-              type: 'position',
-              id: changeId,
-              position: {
-                x: changePosition.x - newScopeBounds.x,
-                y: changePosition.y - newScopeBounds.y,
-              },
-            });
+            changePosition.x -= calculatedBounds.x;
+            changePosition.y -= calculatedBounds.y;
           }
         }
 
