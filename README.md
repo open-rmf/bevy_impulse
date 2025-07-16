@@ -46,3 +46,42 @@ versions of bevy when we judge that enough of the ecosystem has finished migrati
 forward that there is no longer value in supporting old versions. In the future
 we may come up with a more concrete policy for this, and we are open to input on
 the matter.
+
+# Dependencies
+
+This is a Rust project that often uses the latest language features. We recommend
+installing `rustup` and `cargo` using the installation instructions from the Rust
+website: https://www.rust-lang.org/tools/install
+
+## Ubuntu Dependencies
+
+For Ubuntu specifically you can run these commands to get the dependencies you need:
+
+* To install `rustup` and `cargo`
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+* Make sure you have basic compilation tools installed
+```bash
+sudo apt-get install build-essential
+```
+
+# Build
+
+Once dependencies are installed you can run the tests:
+
+```bash
+cargo test
+```
+
+You can find some illustrative examples for building workflows out of diagrams:
+* [Calculator](examples/diagram/calculator)
+* [Door manager that uses zenoh and protobuf](examples/zenoh-examples)
+* [Mock navigation system using ROS](https://github.com/open-rmf/ros2-impulse-examples)
+
+To use `bevy_impulse` in your own Rust project, you can run
+
+```bash
+cargo add bevy_impulse
+```
