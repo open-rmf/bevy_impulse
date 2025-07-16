@@ -1506,7 +1506,11 @@ impl DiagramElementRegistry {
 
 #[non_exhaustive]
 pub struct NodeBuilderOptions {
+    /// The unique identifier for this node builder. Diagrams will use this ID
+    /// to refer to this node builder.
     pub id: BuilderId,
+    /// If this is not specified, the id field will be used as the default
+    /// display text.
     pub default_display_text: Option<BuilderId>,
 }
 
@@ -1526,7 +1530,11 @@ impl NodeBuilderOptions {
 
 #[non_exhaustive]
 pub struct SectionBuilderOptions {
+    /// The unique identifier for this section builder. Diagrams will use this
+    /// ID to refer to this section builder.
     pub id: BuilderId,
+    /// If this is not specified, the id field will be used as the default
+    /// display text.
     pub default_display_text: Option<BuilderId>,
 }
 
