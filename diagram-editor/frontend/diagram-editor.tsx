@@ -13,6 +13,7 @@ import {
   type EdgeChange,
   type EdgeRemoveChange,
   type NodeChange,
+  type NodeRemoveChange,
   ReactFlow,
   type ReactFlowInstance,
   reconnectEdge,
@@ -25,6 +26,7 @@ import CommandPanel from './command-panel';
 import { EDGE_TYPES } from './edges';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
+import EditScopeForm from './forms/edit-scope-form';
 import { NODE_TYPES } from './nodes';
 import type {
   DiagramEditorEdge,
@@ -42,7 +44,7 @@ const NonCapturingPopoverContainer = ({
   children: React.ReactNode;
 }) => <>{children}</>;
 
-interface SelectedEdge {
+interface EditingEdge {
   sourceNode: DiagramEditorNode;
   targetNode: DiagramEditorNode;
   edge: DiagramEditorEdge;
@@ -88,6 +90,14 @@ const DiagramEditor = () => {
 
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
+  );
+
+  const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
+  const handleEdgeChanges = React.useCallback(
+    (changes: EdgeChange<DiagramEditorEdge>[]) => {
+      setEdges((prev) => applyEdgeChanges(changes, prev));
+    },
+    [],
   );
 
   const handleNodeChanges = React.useCallback(
@@ -190,69 +200,54 @@ const DiagramEditor = () => {
 
         return applyNodeChanges([...changes, ...scopeChanges], prev);
       });
+
+      // clean up dangling edges when a node is removed.
+      for (const change of changes) {
+        if (change.type !== 'remove') {
+          continue;
+        }
+
+        const edgeChanges: EdgeRemoveChange[] = [];
+        for (const edge of reactFlowInstance.current?.getEdges() || []) {
+          if (edge.source === change.id || edge.target === change.id) {
+            edgeChanges.push({
+              type: 'remove',
+              id: edge.id,
+            });
+          }
+        }
+        handleEdgeChanges(edgeChanges);
+      }
     },
-    [],
+    [handleEdgeChanges],
   );
 
-  const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
-  const handleEdgeChanges = React.useCallback(
-    (changes: EdgeChange<DiagramEditorEdge>[]) => {
-      setEdges((prev) => applyEdgeChanges(changes, prev));
-    },
-    [],
-  );
+  const [addOperationPopover, setAddOperationPopover] = React.useState<{
+    open: boolean;
+    popOverPosition: PopoverPosition;
+    parentId: string | null;
+  }>({ open: false, popOverPosition: { left: 0, top: 0 }, parentId: null });
 
-  const [openAddOpPopover, setOpenAddOpPopover] = React.useState(false);
-  const [addOpAnchorPos, setAddOpAnchorPos] = React.useState<PopoverPosition>({
-    left: 0,
-    top: 0,
-  });
+  const [editingNodeId, setEditingNodeId] = React.useState<string | null>(null);
 
-  const [editOpFormPopoverProps, setEditOpFormPopoverProps] = React.useState<
-    Pick<
-      PopoverProps,
-      'open' | 'anchorReference' | 'anchorEl' | 'anchorPosition'
-    >
-  >({ open: false });
-
-  const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(
-    null,
-  );
-  const selectedNode = React.useMemo<OperationNode | null>(() => {
-    if (!selectedNodeId) {
-      return null;
-    }
-    const node = nodes.find((n) => n.id === selectedNodeId);
-    if (!node) {
-      console.error(`cannot find node ${selectedNodeId}`);
-      return null;
-    }
-    if (!isOperationNode(node)) {
-      return null;
-    }
-    return node;
-  }, [selectedNodeId, nodes]);
-
-  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(
-    null,
-  );
-  const selectedEdge = React.useMemo<SelectedEdge | null>(() => {
-    if (!selectedEdgeId) {
+  const [editingEdgeId, setEditingEdgeId] = React.useState<string | null>(null);
+  const editingEdge = React.useMemo<EditingEdge | null>(() => {
+    if (!reactFlowInstance.current || !editingEdgeId) {
       return null;
     }
 
-    const edge = edges.find((e) => e.id === selectedEdgeId);
+    const edge = reactFlowInstance.current.getEdge(editingEdgeId);
     if (!edge) {
-      console.error(`cannot find edge ${selectedEdgeId}`);
+      console.error(`cannot find edge ${editingEdgeId}`);
       return null;
     }
 
-    const sourceNode = nodes.find((n) => n.id === edge.source);
+    const sourceNode = reactFlowInstance.current.getNode(edge.source);
     if (!sourceNode) {
       console.error(`cannot find node ${edge.source}`);
       return null;
     }
-    const targetNode = nodes.find((n) => n.id === edge.target);
+    const targetNode = reactFlowInstance.current.getNode(edge.target);
     if (!targetNode) {
       console.error(`cannot find node ${edge.target}`);
       return null;
@@ -263,14 +258,62 @@ const DiagramEditor = () => {
       sourceNode,
       targetNode,
     };
-  }, [selectedEdgeId, nodes, edges]);
+  }, [editingEdgeId]);
 
   const closeAllPopovers = React.useCallback(() => {
-    setSelectedNodeId(null);
-    setSelectedEdgeId(null);
-    setOpenAddOpPopover(false);
+    setEditingNodeId(null);
+    setEditingEdgeId(null);
+    setAddOperationPopover((prev) => ({ ...prev, open: false }));
     setEditOpFormPopoverProps({ open: false });
   }, []);
+
+  const [editOpFormPopoverProps, setEditOpFormPopoverProps] = React.useState<
+    Pick<
+      PopoverProps,
+      'open' | 'anchorReference' | 'anchorEl' | 'anchorPosition'
+    >
+  >({ open: false });
+  const renderEditForm = React.useCallback(
+    (nodeId: string) => {
+      if (!reactFlowInstance.current) {
+        return null;
+      }
+      const node = reactFlowInstance.current.getNode(nodeId);
+      if (!node || !isOperationNode(node)) {
+        return null;
+      }
+
+      const handleDelete = (change: NodeRemoveChange) => {
+        handleNodeChanges([change]);
+        closeAllPopovers();
+      };
+
+      if (node.type === 'scope') {
+        return (
+          <EditScopeForm
+            node={node as OperationNode<'scope'>}
+            onChanges={handleNodeChanges}
+            onDelete={handleDelete}
+            onAddOperationClick={(ev) => {
+              setAddOperationPopover({
+                open: true,
+                popOverPosition: { left: ev.clientX, top: ev.clientY },
+                parentId: node.id,
+              });
+            }}
+          />
+        );
+      }
+      return (
+        <EditNodeForm
+          node={node}
+          onChanges={handleNodeChanges}
+          onDelete={handleDelete}
+        />
+      );
+    },
+    [handleNodeChanges, closeAllPopovers],
+  );
 
   const mouseDownTime = React.useRef(0);
 
@@ -383,7 +426,7 @@ const DiagramEditor = () => {
           if (!isOperationNode(node)) {
             return;
           }
-          setSelectedNodeId(node.id);
+          setEditingNodeId(node.id);
 
           setEditOpFormPopoverProps({
             open: true,
@@ -401,7 +444,7 @@ const DiagramEditor = () => {
             throw new Error('unable to find source or target node');
           }
 
-          setSelectedEdgeId(edge.id);
+          setEditingEdgeId(edge.id);
 
           setEditOpFormPopoverProps({
             open: true,
@@ -410,7 +453,7 @@ const DiagramEditor = () => {
           });
         }}
         onPaneClick={(ev) => {
-          if (openAddOpPopover || editOpFormPopoverProps.open) {
+          if (addOperationPopover.open || editOpFormPopoverProps.open) {
             closeAllPopovers();
             return;
           }
@@ -420,8 +463,11 @@ const DiagramEditor = () => {
           if (now - mouseDownTime.current > 200) {
             return;
           }
-          setAddOpAnchorPos({ left: ev.clientX, top: ev.clientY });
-          setOpenAddOpPopover(true);
+          setAddOperationPopover({
+            open: true,
+            popOverPosition: { left: ev.clientX, top: ev.clientY },
+            parentId: null,
+          });
         }}
         onMouseDownCapture={handleMouseDown}
         onTouchStartCapture={handleMouseDown}
@@ -439,28 +485,41 @@ const DiagramEditor = () => {
         />
       </ReactFlow>
       <Popover
-        open={openAddOpPopover}
-        onClose={() => setOpenAddOpPopover(false)}
+        open={addOperationPopover.open}
+        onClose={() =>
+          setAddOperationPopover((prev) => ({ ...prev, open: false }))
+        }
         anchorReference="anchorPosition"
-        anchorPosition={addOpAnchorPos}
+        anchorPosition={addOperationPopover.popOverPosition}
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
         component={NonCapturingPopoverContainer}
       >
         <AddOperation
           onAdd={(change) => {
             const newNode = change.item;
+            newNode.parentId = addOperationPopover.parentId || undefined;
             const newPos = reactFlowInstance.current?.screenToFlowPosition({
-              x: addOpAnchorPos.left,
-              y: addOpAnchorPos.top,
+              x: addOperationPopover.popOverPosition.left,
+              y: addOperationPopover.popOverPosition.top,
             });
             if (!newPos) {
               throw new Error(
                 'failed to add operation: cannot determine position',
               );
             }
+
+            const parentNode = newNode.parentId
+              ? reactFlowInstance.current?.getNode(newNode.parentId)
+              : null;
+            const parentPosition = parentNode?.position
+              ? parentNode.position
+              : { x: 0, y: 0 };
+            newPos.x -= parentPosition.x;
+            newPos.y -= parentPosition.y;
+
             newNode.position = newPos;
             handleNodeChanges([change]);
-            setOpenAddOpPopover(false);
+            closeAllPopovers();
           }}
         />
       </Popover>
@@ -471,32 +530,13 @@ const DiagramEditor = () => {
         // use a custom component to prevent the popover from creating an invisible element that blocks clicks
         component={NonCapturingPopoverContainer}
       >
-        {selectedNode && (
-          <EditNodeForm
-            node={selectedNode}
-            onChanges={handleNodeChanges}
-            onDelete={(change) => {
-              handleNodeChanges([change]);
-              const edgeChanges: EdgeRemoveChange[] = [];
-              for (const edge of edges) {
-                if (edge.source === change.id || edge.target === change.id) {
-                  edgeChanges.push({
-                    type: 'remove',
-                    id: edge.id,
-                  });
-                }
-              }
-              handleEdgeChanges(edgeChanges);
-              closeAllPopovers();
-            }}
-          />
-        )}
-        {selectedEdge && (
+        {editingNodeId && renderEditForm(editingNodeId)}
+        {editingEdge && (
           <EditEdgeForm
-            edge={selectedEdge.edge}
+            edge={editingEdge.edge}
             allowedEdgeTypes={getAllowEdges(
-              selectedEdge.sourceNode,
-              selectedEdge.targetNode,
+              editingEdge.sourceNode,
+              editingEdge.targetNode,
             )}
             onChanges={handleEdgeChanges}
             onDelete={(changes) => {

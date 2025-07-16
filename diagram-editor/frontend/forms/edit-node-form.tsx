@@ -1,16 +1,16 @@
-import type { NodeRemoveChange, NodeReplaceChange } from '@xyflow/react';
-
+import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
 import type { DiagramEditorNode } from '../types';
 import BufferForm from './buffer-form';
 import EditOperationForm, {
   type EditOperationFormProps,
 } from './edit-operation-form';
+import EditScopeForm from './edit-scope-form';
 import NodeForm from './node-form';
 import TransformForm from './transform-form';
 
 export interface EditNodeFormProps {
   node: DiagramEditorNode;
-  onChange?: (change: NodeReplaceChange<DiagramEditorNode>) => void;
+  onChange?: (change: NodeChange<DiagramEditorNode>) => void;
   onDelete?: (change: NodeRemoveChange) => void;
 }
 
@@ -21,6 +21,9 @@ function EditNodeForm(props: EditOperationFormProps) {
     }
     case 'buffer': {
       return <BufferForm {...(props as EditOperationFormProps<'buffer'>)} />;
+    }
+    case 'scope': {
+      return <EditScopeForm {...(props as EditOperationFormProps<'scope'>)} />;
     }
     case 'transform': {
       return (

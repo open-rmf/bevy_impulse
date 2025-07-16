@@ -15,6 +15,7 @@ import {
   UnzipIcon,
 } from './nodes/icons';
 import type { DiagramEditorNode, DiagramOperation } from './types';
+import { LAYOUT_OPTIONS } from './utils/layout';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',
@@ -38,6 +39,8 @@ function createNodeChange(
         opId: uuidv4(),
         op,
       },
+      width: LAYOUT_OPTIONS.nodeWidth,
+      height: LAYOUT_OPTIONS.nodeHeight,
     },
   };
 }
