@@ -149,6 +149,16 @@ pub mod trace;
 #[cfg(feature = "trace")]
 pub use trace::*;
 
+#[cfg(feature = "trace")]
+pub const fn trace_supported() -> bool {
+    true
+}
+
+#[cfg(not(feature = "trace"))]
+pub const fn trace_supported() -> bool {
+    false
+}
+
 pub mod trim;
 pub use trim::*;
 

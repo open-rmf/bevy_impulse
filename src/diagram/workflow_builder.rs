@@ -89,7 +89,7 @@ pub struct DiagramContext<'a, 'c, 'w, 's, 'b> {
     pub operations: Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
-    default_trace: TraceToggle,
+    #[allow(unused)] default_trace: TraceToggle,
     namespaces: NamespaceList,
 }
 
@@ -197,14 +197,14 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
         &mut self,
         operation: impl Into<OperationRef>,
         input: DynInputSlot,
-        trace_info: TraceInfo,
+        #[allow(unused)] trace_info: TraceInfo,
     ) -> Result<(), DiagramErrorCode> {
         let operation = self.into_operation_ref(operation);
         let connect = standard_input_connection(input, &self.registry)?;
 
-        let trace_toggle = trace_info.trace.unwrap_or(self.default_trace);
         #[cfg(feature = "trace")]
         {
+            let trace_toggle = trace_info.trace.unwrap_or(self.default_trace);
             let operation_info = OperationInfo::new(
                 Some(operation.clone()),
                 Some(input.message_info().type_name.into()),
@@ -227,13 +227,6 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
             }
 
             self.builder.commands().entity(input.id()).insert(trace);
-        }
-
-        #[cfg(not(feature = "trace"))]
-        {
-            if trace_toggle.is_on() {
-                return Err(DiagramErrorCode::TraceFeatureDisabled);
-            }
         }
 
         self.impl_connect_into_target(operation, connect)

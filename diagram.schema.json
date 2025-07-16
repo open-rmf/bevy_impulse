@@ -4,7 +4,7 @@
   "type": "object",
   "properties": {
     "default_trace": {
-      "description": "Whether the operations in the workflow should be traced by default.\n Being traced means each operation will emit an event each time it is\n triggered. You can decide whether that event contains the serialized\n message data that triggered the operation.\n\n If bevy_impulse is not compiled with the \"trace\" feature then any attempt\n to turn tracing on will result in a [`DiagramErrorCode::TraceFeatureDisabled`].",
+      "description": "Whether the operations in the workflow should be traced by default.\n Being traced means each operation will emit an event each time it is\n triggered. You can decide whether that event contains the serialized\n message data that triggered the operation.\n\n If bevy_impulse is not compiled with the \"trace\" feature then this\n setting will have no effect.",
       "$ref": "#/$defs/TraceToggle"
     },
     "on_implicit_error": {
@@ -67,7 +67,7 @@
           "$ref": "#/$defs/NextOperation"
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -110,7 +110,7 @@
           }
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -387,7 +387,7 @@
           }
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -420,7 +420,7 @@
           "$ref": "#/$defs/NextOperation"
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -555,7 +555,7 @@
           }
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -699,7 +699,7 @@
           ]
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -820,7 +820,7 @@
           }
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -893,7 +893,7 @@
           "default": null
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"
@@ -927,7 +927,7 @@
           }
         },
         "trace": {
-          "description": "Set what the tracing behavior should be for this operation. If this is\n `None` then [`Diagram::default_trace`] will be used.",
+          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used.",
           "anyOf": [
             {
               "$ref": "#/$defs/TraceToggle"

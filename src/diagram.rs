@@ -1041,8 +1041,8 @@ pub struct Diagram {
     /// triggered. You can decide whether that event contains the serialized
     /// message data that triggered the operation.
     ///
-    /// If bevy_impulse is not compiled with the "trace" feature then any attempt
-    /// to turn tracing on will result in a [`DiagramErrorCode::TraceFeatureDisabled`].
+    /// If bevy_impulse is not compiled with the "trace" feature then this
+    /// setting will have no effect.
     #[serde(default, skip_serializing_if = "is_default")]
     pub default_trace: TraceToggle,
 }
@@ -1085,7 +1085,8 @@ pub struct TraceSettings {
     #[serde(default, skip_serializing_if = "is_default")]
     pub display_text: Option<DisplayText>,
     /// Set what the tracing behavior should be for this operation. If this is
-    /// `None` then [`Diagram::default_trace`] will be used.
+    /// left unspecified then the default trace setting of the diagram will be
+    /// used.
     #[serde(default, skip_serializing_if = "is_default")]
     pub trace: Option<TraceToggle>,
 }
@@ -1555,12 +1556,6 @@ pub enum DiagramErrorCode {
 
     #[error("An error occurred while creating a scope: {0}")]
     IncrementalScopeError(#[from] IncrementalScopeError),
-
-    #[error(
-        "Workflow tracing was requested but the executor was not compiled with the trace feature. \
-        Compile bevy_impulse with features = [\"trace\"] to enable tracing."
-    )]
-    TraceFeatureDisabled,
 }
 
 fn format_list<T: std::fmt::Display>(list: &[T]) -> String {

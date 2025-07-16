@@ -24,11 +24,15 @@
       "additionalProperties": {
         "$ref": "#/$defs/SectionRegistration"
       }
+    },
+    "trace_supported": {
+      "type": "boolean"
     }
   },
   "required": [
     "nodes",
     "sections",
+    "trace_supported",
     "messages",
     "schemas"
   ],

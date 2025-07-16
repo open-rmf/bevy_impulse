@@ -644,6 +644,7 @@ where
 pub struct DiagramElementRegistry {
     pub(super) nodes: HashMap<BuilderId, NodeRegistration>,
     pub(super) sections: HashMap<BuilderId, SectionRegistration>,
+    pub(super) trace_supported: bool,
 
     #[serde(flatten)]
     pub(super) messages: MessageRegistry,
@@ -1278,6 +1279,7 @@ impl Default for DiagramElementRegistry {
             nodes: Default::default(),
             sections: Default::default(),
             messages: MessageRegistry::new(),
+            trace_supported: crate::trace_supported(),
         };
 
         registry.register_builtin_messages();
@@ -1299,6 +1301,7 @@ impl DiagramElementRegistry {
             nodes: Default::default(),
             sections: Default::default(),
             messages: MessageRegistry::new(),
+            trace_supported: crate::trace_supported(),
         }
     }
 
