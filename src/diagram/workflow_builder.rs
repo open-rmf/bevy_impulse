@@ -89,7 +89,8 @@ pub struct DiagramContext<'a, 'c, 'w, 's, 'b> {
     pub operations: Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
-    #[allow(unused)] default_trace: TraceToggle,
+    #[allow(unused)]
+    default_trace: TraceToggle,
     namespaces: NamespaceList,
 }
 

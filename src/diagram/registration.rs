@@ -51,6 +51,8 @@ use super::{
 
 #[derive(Serialize, JsonSchema)]
 pub struct NodeRegistration {
+    /// If the user does not specify a default display text, the node ID will
+    /// be used here.
     pub(super) default_display_text: DisplayText,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
@@ -170,7 +172,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Response>();
 
         let registration = NodeRegistration {
-            default_display_text: options.name.unwrap_or(options.id.clone()),
+            default_display_text: options.default_display_text.unwrap_or(options.id.clone()),
             request: TypeInfo::of::<Request>(),
             response: TypeInfo::of::<Response>(),
             config_schema: self
@@ -1505,19 +1507,19 @@ impl DiagramElementRegistry {
 #[non_exhaustive]
 pub struct NodeBuilderOptions {
     pub id: BuilderId,
-    pub name: Option<BuilderId>,
+    pub default_display_text: Option<BuilderId>,
 }
 
 impl NodeBuilderOptions {
-    pub fn new(id: impl ToString) -> Self {
+    pub fn new(id: impl Into<BuilderId>) -> Self {
         Self {
-            id: id.to_string().into(),
-            name: None,
+            id: id.into(),
+            default_display_text: None,
         }
     }
 
-    pub fn with_default_display_text(mut self, text: impl ToString) -> Self {
-        self.name = Some(text.to_string().into());
+    pub fn with_default_display_text(mut self, text: impl Into<DisplayText>) -> Self {
+        self.default_display_text = Some(text.into());
         self
     }
 }
@@ -1529,15 +1531,15 @@ pub struct SectionBuilderOptions {
 }
 
 impl SectionBuilderOptions {
-    pub fn new(id: impl ToString) -> Self {
+    pub fn new(id: impl Into<BuilderId>) -> Self {
         Self {
-            id: id.to_string().into(),
+            id: id.into(),
             default_display_text: None,
         }
     }
 
-    pub fn with_default_display_text(mut self, text: impl ToString) -> Self {
-        self.default_display_text = Some(text.to_string().into());
+    pub fn with_default_display_text(mut self, text: impl Into<DisplayText>) -> Self {
+        self.default_display_text = Some(text.into());
         self
     }
 }
