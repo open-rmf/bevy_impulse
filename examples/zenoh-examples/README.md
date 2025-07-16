@@ -1,11 +1,21 @@
+## Dependencies
+
+This example uses protobuf, so you will need to install the protobuf-compiler if you don't have it already.
+
+On Ubuntu, run the following:
+
+```bash
+sudo apt-get install protobuf-compiler
+```
+
 ## Building workflows with Zenoh nodes
 
 The examples in this directory showcase how to incorporate Zenoh subscribers and publishers into a workflow. We model interactions between a mobile robot and an automated door.
 
-To run this demo, first run the following command to begin a mock "door manager" for a door named "lobby":
+To run this demo, open a terminal for this directory and then run the following command to begin a mock "door manager" for a door named "lobby":
 
 ```bash
-cargo run -p zenoh-examples --bin door-manager -- --names lobby
+cargo run --bin door-manager -- --names lobby
 ```
 
 The `door-manager` application will pretend to be a driver for a smart door that can take requests to open from multiple agents at the same time. It will monitor these requests and drive the door towards an open state while at least one agent is asking for its door to be open. Once all agents have released their requests, the mock door will be driven towards a closed state.
@@ -22,10 +32,10 @@ Here is a diagram of the `door-manager`:
 
 ---
 
-While the door manager is running, you can open another terminal and run:
+While the door manager is running, you can open another terminal for this directory and run:
 
 ```bash
-cargo run -p zenoh-examples --bin use-door -- --door lobby
+cargo run --bin use-door -- --door lobby
 ```
 
 If the `door-manager` is running, you will see each application take turns printing different updates to the terminal as they talk to each other. Each step of the workflow that represents a physical process has been given an intentional delay to roughly approximate the time it takes for physical events to happen.
