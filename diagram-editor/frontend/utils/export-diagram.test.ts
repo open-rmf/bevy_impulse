@@ -3,8 +3,8 @@ import { START_ID } from '../nodes';
 import { exportDiagram } from './export-diagram';
 import { loadDiagramJson } from './load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
-import testDiagramScope from './test-data/test-diagram-scope.json';
 import testDiagram from './test-data/test-diagram.json';
+import testDiagramScope from './test-data/test-diagram-scope.json';
 
 test('export diagram', () => {
   const { nodes, edges } = loadDiagramJson(JSON.stringify(testDiagram));

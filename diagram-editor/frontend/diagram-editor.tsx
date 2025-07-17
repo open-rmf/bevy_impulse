@@ -133,7 +133,13 @@ const DiagramEditor = () => {
           );
           const calculatedBounds = calculateScopeBounds([
             ...scopeChildren.map((n) => n.position),
-            changePosition,
+            {
+              // react flow does some kind of rounding (or maybe it is due to floating point accuracies)
+              // that results in gitches when resizing a scope quickly. This rounding reduces the
+              // impact of the glitches.
+              x: Math.round(changePosition.x),
+              y: Math.round(changePosition.y),
+            },
           ]);
 
           const newScopeBounds = {
@@ -198,8 +204,8 @@ const DiagramEditor = () => {
                 },
               });
             }
-            changePosition.x -= calculatedBounds.x;
-            changePosition.y -= calculatedBounds.y;
+            // changePosition.x -= Math.round(calculatedBounds.x);
+            // changePosition.y -= Math.round(calculatedBounds.y);
           }
         }
 
