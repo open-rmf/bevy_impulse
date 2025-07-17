@@ -15,9 +15,7 @@
  *
 */
 
-use bevy_app::ScheduleRunnerPlugin;
 pub use bevy_app::{App, Update};
-use bevy_core::{FrameCountPlugin, TaskPoolPlugin, TypeRegistrationPlugin};
 pub use bevy_ecs::{
     prelude::{Commands, Component, Entity, In, Local, Query, ResMut, Resource, World},
     system::{CommandQueue, IntoSystem},
@@ -32,12 +30,12 @@ pub use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use crate::{
-    flush_impulses, Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput,
-    BlockingMap, BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable,
-    Buffering, Builder, ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
-    GetBufferedSessionsFn, Joining, OperationError, OperationResult, OperationRoster, Promise,
-    RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf, StreamPack, UnhandledErrors,
-    WorkflowSettings,
+    Accessing, AddContinuousServicesExt, AnyBuffer, AsAnyBuffer, AsyncServiceInput, BlockingMap,
+    BlockingServiceInput, Buffer, BufferKey, BufferKeyLifecycle, Bufferable, Buffering, Builder,
+    ContinuousQuery, ContinuousQueueView, ContinuousService, FlushParameters,
+    GetBufferedSessionsFn, ImpulseAppPlugin, Joining, OperationError, OperationResult,
+    OperationRoster, Promise, RunCommandsOnWorldExt, Scope, Service, SpawnWorkflowExt, StreamOf,
+    StreamPack, UnhandledErrors, WorkflowSettings,
 };
 
 pub struct TestingContext {
@@ -49,14 +47,7 @@ impl TestingContext {
     /// to work properly.
     pub fn minimal_plugins() -> Self {
         let mut app = App::new();
-        app.add_plugins((
-            TaskPoolPlugin::default(),
-            TypeRegistrationPlugin,
-            FrameCountPlugin,
-            TimePlugin,
-            ScheduleRunnerPlugin::default(),
-        ))
-        .add_systems(Update, flush_impulses());
+        app.add_plugins((ImpulseAppPlugin::default(), TimePlugin));
 
         TestingContext { app }
     }

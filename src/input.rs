@@ -23,6 +23,9 @@ use bevy_ecs::{
 
 use smallvec::SmallVec;
 
+#[cfg(feature = "trace")]
+use std::sync::Arc;
+
 use backtrace::Backtrace;
 
 use crate::{
@@ -30,6 +33,9 @@ use crate::{
     MiscellaneousFailure, OperationError, OperationRoster, OrBroken, SessionStatus,
     UnhandledErrors, UnusedTarget,
 };
+
+#[cfg(feature = "trace")]
+use crate::{OperationStarted, Trace};
 
 /// This contains data that has been provided as input into an operation, along
 /// with an indication of what session the data belongs to.
@@ -261,7 +267,52 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         &mut self,
     ) -> Result<Option<Input<T>>, OperationError> {
         let mut storage = self.get_mut::<InputStorage<T>>().or_broken()?;
-        Ok(storage.reverse_queue.pop())
+        let input = storage.reverse_queue.pop();
+
+        #[cfg(feature = "trace")]
+        {
+            if let Some(input) = &input {
+                if let Some(trace) = self.get::<Trace>() {
+                    if trace.toggle().is_on() {
+                        let message = trace
+                            .toggle()
+                            .with_messages()
+                            .then(|| trace.serialize_value(&input.data))
+                            .flatten()
+                            .transpose();
+
+                        let message = match message {
+                            Ok(message) => message,
+                            Err(err) => {
+                                self.world_scope(|world| {
+                                    world
+                                        .get_resource_or_insert_with(UnhandledErrors::default)
+                                        .miscellaneous
+                                        .push(MiscellaneousFailure {
+                                            error: Arc::new(err.into()),
+                                            backtrace: Some(Backtrace::new()),
+                                        });
+                                });
+                                return Err(OperationError::Broken(Some(Backtrace::new())));
+                            }
+                        };
+
+                        let started = OperationStarted {
+                            operation: self.id(),
+                            session: input.session,
+                            info: Arc::clone(trace.info()),
+                            message,
+                        };
+
+                        self.world_scope(|world| {
+                            world.send_event(started);
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(input)
     }
 
     fn cleanup_inputs<T: 'static + Send + Sync>(&mut self, session: Entity) {

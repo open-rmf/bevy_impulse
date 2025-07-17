@@ -18,12 +18,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::Builder;
-
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
     DynInputSlot, DynOutput, MessageRegistration, MessageRegistry, NextOperation, OperationName,
-    PerformForkClone, SerializeMessage, TypeInfo,
+    PerformForkClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
 pub struct DynForkResult {
@@ -32,18 +30,44 @@ pub struct DynForkResult {
     pub err: DynOutput,
 }
 
+/// If the request is a [`Result<T, E>`], send the output message down an
+/// `ok` branch or down an `err` branch depending on whether the result has
+/// an [`Ok`] or [`Err`] value. The `ok` branch will receive a `T` while the
+/// `err` branch will receive an `E`.
+///
+/// Only one branch will be activated by each input message that enters the
+/// operation.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "fork_result",
+///     "ops": {
+///         "fork_result": {
+///             "type": "fork_result",
+///             "ok": { "builtin": "terminate" },
+///             "err": { "builtin": "dispose" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkResultSchema {
-    pub(super) ok: NextOperation,
-    pub(super) err: NextOperation,
+    pub ok: NextOperation,
+    pub err: NextOperation,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for ForkResultSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(inferred_type) = ctx.infer_input_type_into_target(id)? else {
@@ -56,8 +80,14 @@ impl BuildDiagramOperation for ForkResultSchema {
             return Ok(BuildStatus::defer("waiting for an input"));
         };
 
-        let fork = ctx.registry.messages.fork_result(&inferred_type, builder)?;
-        ctx.set_input_for_target(id, fork.input)?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_result(&inferred_type, ctx.builder)?;
+
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
+        ctx.set_input_for_target(id, fork.input, trace)?;
+
         ctx.add_output_into_target(&self.ok, fork.ok);
         ctx.add_output_into_target(&self.err, fork.err);
         Ok(BuildStatus::Finished)

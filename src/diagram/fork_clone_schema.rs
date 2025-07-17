@@ -22,20 +22,62 @@ use crate::{Builder, ForkCloneOutput};
 
 use super::{
     supported::*, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    DynInputSlot, DynOutput, NextOperation, OperationName, TypeInfo,
+    DynInputSlot, DynOutput, NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
+/// If the request is cloneable, clone it into multiple responses that can
+/// each be sent to a different operation. The `next` property is an array.
+///
+/// This creates multiple simultaneous branches of execution within the
+/// workflow. Usually when you have multiple branches you will either
+/// * race - connect all branches to `terminate` and the first branch to
+///   finish "wins" the race and gets to the be output
+/// * join - connect each branch into a buffer and then use the `join`
+///   operation to reunite them
+/// * collect - TODO(@mxgrey): [add the collect operation](https://github.com/open-rmf/bevy_impulse/issues/59)
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "begin_race",
+///     "ops": {
+///         "begin_race": {
+///             "type": "fork_clone",
+///             "next": [
+///                 "ferrari",
+///                 "mustang"
+///             ]
+///         },
+///         "ferrari": {
+///             "type": "node",
+///             "builder": "drive",
+///             "config": "ferrari",
+///             "next": { "builtin": "terminate" }
+///         },
+///         "mustang": {
+///             "type": "node",
+///             "builder": "drive",
+///             "config": "mustang",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkCloneSchema {
-    pub(super) next: Vec<NextOperation>,
+    pub next: Vec<NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for ForkCloneSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let inferred_type = 'inferred: {
@@ -55,10 +97,15 @@ impl BuildDiagramOperation for ForkCloneSchema {
             }
         };
 
-        let fork = ctx.registry.messages.fork_clone(&inferred_type, builder)?;
-        ctx.set_input_for_target(id, fork.input)?;
+        let fork = ctx
+            .registry
+            .messages
+            .fork_clone(&inferred_type, ctx.builder)?;
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
+        ctx.set_input_for_target(id, fork.input, trace)?;
         for target in &self.next {
-            ctx.add_output_into_target(target, fork.outputs.clone_output(builder));
+            let output = fork.outputs.clone_output(ctx.builder);
+            ctx.add_output_into_target(target, output);
         }
 
         Ok(BuildStatus::Finished)

@@ -19,35 +19,77 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
-use crate::Builder;
-
 use super::{
     is_default, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode,
-    MissingStream, NextOperation, OperationName,
+    JsonMessage, MissingStream, NextOperation, OperationName, TraceInfo, TraceSettings,
 };
 
+/// Create an operation that that takes an input message and produces an
+/// output message.
+///
+/// The behavior is determined by the choice of node `builder` and
+/// optioanlly the `config` that you provide. Each type of node builder has
+/// its own schema for the config.
+///
+/// The output message will be sent to the operation specified by `next`.
+///
+/// TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "cutting_board",
+///     "ops": {
+///         "cutting_board": {
+///             "type": "node",
+///             "builder": "chop",
+///             "config": "diced",
+///             "next": "bowl"
+///         },
+///         "bowl": {
+///             "type": "node",
+///             "builder": "stir",
+///             "next": "oven"
+///         },
+///         "oven": {
+///             "type": "node",
+///             "builder": "bake",
+///             "config": {
+///                 "temperature": 200,
+///                 "duration": 120
+///             },
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeSchema {
-    pub(super) builder: BuilderId,
+    pub builder: BuilderId,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub(super) config: serde_json::Value,
-    pub(super) next: NextOperation,
+    pub config: Arc<JsonMessage>,
+    pub next: NextOperation,
     #[serde(default, skip_serializing_if = "is_default")]
-    pub(super) stream_out: HashMap<OperationName, NextOperation>,
+    pub stream_out: HashMap<OperationName, NextOperation>,
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for NodeSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
-        let mut node = node_registration.create_node(builder, self.config.clone())?;
+        let mut node = node_registration.create_node(ctx.builder, (*self.config).clone())?;
 
-        ctx.set_input_for_target(id, node.input.into())?;
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
+        ctx.set_input_for_target(id, node.input.into(), trace)?;
         ctx.add_output_into_target(&self.next, node.output);
 
         let available_names = node

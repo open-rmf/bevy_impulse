@@ -19,13 +19,51 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::Builder;
-
 use super::{
     BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode, OperationName,
     RedirectConnection, StreamOutRef,
 };
 
+/// Declare a stream output for the current scope. Outputs that you connect
+/// to this operation will be streamed out of the scope that this operation
+/// is declared in.
+///
+/// For the root-level scope, make sure you use a stream pack that is
+/// compatible with all stream out operations that you declare, otherwise
+/// you may get a connection error at runtime.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "plan",
+///     "ops": {
+///         "progress_stream": {
+///             "type": "stream_out",
+///             "name": "progress"
+///         },
+///         "plan": {
+///             "type": "node",
+///             "builder": "planner",
+///             "next": "drive",
+///             "stream_out" : {
+///                 "progress": "progress_stream"
+///             }
+///         },
+///         "drive": {
+///             "type": "node",
+///             "builder": "navigation",
+///             "next": { "builtin": "terminate" },
+///             "stream_out": {
+///                 "progress": "progress_stream"
+///             }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct StreamOutSchema {
@@ -37,7 +75,6 @@ impl BuildDiagramOperation for StreamOutSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let redirect_to =

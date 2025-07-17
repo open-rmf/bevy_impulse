@@ -26,276 +26,19 @@ use crate::{
     BuilderScopeContext, JsonMessage, Scope, StreamPack,
 };
 
+#[cfg(feature = "trace")]
+use crate::{OperationInfo, Trace};
+
 use super::{
-    BufferSelection, BuiltinTarget, Diagram, DiagramElementRegistry, DiagramError,
-    DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
-    ImplicitSerialization, ImplicitStringify, NamespacedOperation, NextOperation, OperationName,
-    Operations, Templates, TypeInfo,
+    BufferSelection, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DynInputSlot,
+    DynOutput, FinishingErrors, ImplicitDeserialization, ImplicitSerialization, ImplicitStringify,
+    NamedOperationRef, NamespaceList, NextOperation, OperationName, OperationRef, Operations,
+    StreamOutRef, Templates, TraceToggle, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
 
-use smallvec::{smallvec, SmallVec};
-
-type NamespaceList = SmallVec<[OperationName; 4]>;
-
-/// This key is used so we can do a clone-free .get(&NextOperation) of a hashmap
-/// that uses this as a key.
-//
-// TODO(@mxgrey): With this struct we could apply a lifetime to
-// DiagramConstruction and then borrow all the names used in this struct instead
-// of using Cow.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum OperationRef {
-    Named(NamedOperationRef),
-    Terminate(NamespaceList),
-    Dispose,
-    Cancel(NamespaceList),
-    StreamOut(StreamOutRef),
-}
-
-impl OperationRef {
-    fn in_namespaces(self, parent_namespaces: &[Arc<str>]) -> Self {
-        match self {
-            Self::Named(named) => Self::Named(named.in_namespaces(parent_namespaces)),
-            Self::Terminate(namespaces) => {
-                Self::Terminate(with_parent_namespaces(parent_namespaces, namespaces))
-            }
-            Self::Dispose => Self::Dispose,
-            Self::Cancel(namespaces) => {
-                Self::Cancel(with_parent_namespaces(parent_namespaces, namespaces))
-            }
-            Self::StreamOut(stream_out) => {
-                Self::StreamOut(stream_out.in_namespaces(parent_namespaces))
-            }
-        }
-    }
-
-    pub fn terminate_for(namespace: Arc<str>) -> Self {
-        Self::Terminate(smallvec![namespace])
-    }
-}
-
-impl<'a> From<&'a NextOperation> for OperationRef {
-    fn from(value: &'a NextOperation) -> Self {
-        match value {
-            NextOperation::Name(name) => OperationRef::Named(name.into()),
-            NextOperation::Namespace(id) => OperationRef::Named(id.into()),
-            NextOperation::Builtin { builtin } => match builtin {
-                BuiltinTarget::Terminate => OperationRef::Terminate(NamespaceList::new()),
-                BuiltinTarget::Dispose => OperationRef::Dispose,
-                BuiltinTarget::Cancel => OperationRef::Cancel(NamespaceList::new()),
-            },
-        }
-    }
-}
-
-impl<'a> From<&'a OperationName> for OperationRef {
-    fn from(value: &'a OperationName) -> Self {
-        OperationRef::Named(value.into())
-    }
-}
-
-impl From<NamedOperationRef> for OperationRef {
-    fn from(value: NamedOperationRef) -> Self {
-        OperationRef::Named(value)
-    }
-}
-
-impl std::fmt::Display for OperationRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Named(named) => write!(f, "{named}"),
-            Self::Terminate(namespaces) => {
-                write!(f, "{}(terminate)", DisplayNamespaces(namespaces))
-            }
-            Self::Cancel(namespaces) => write!(f, "{}(cancel)", DisplayNamespaces(namespaces)),
-            Self::Dispose => write!(f, "(dispose)"),
-            Self::StreamOut(stream_out) => write!(f, "{stream_out}"),
-        }
-    }
-}
-
-struct DisplayNamespaces<'a>(&'a NamespaceList);
-
-impl std::fmt::Display for DisplayNamespaces<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for namespace in self.0 {
-            write!(f, "{namespace}:")?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NamedOperationRef {
-    pub namespaces: NamespaceList,
-    /// If this references an exposed operation, such as an exposed input or
-    /// output of a session, this will contain the session name. Suppose we have
-    /// a section named `sec` and it has an exposed output named `out`. Then
-    /// there are two values of `NamedOperationRef` to consider:
-    ///
-    /// ```
-    /// # use bevy_impulse::diagram::NamedOperationRef;
-    /// # use smallvec::smallvec;
-    ///
-    /// let op_id = NamedOperationRef {
-    ///     namespaces: smallvec!["sec".into()],
-    ///     exposed_namespace: None,
-    ///     name: "out".into(),
-    /// };
-    /// ```
-    ///
-    /// is the internal reference to `sec:out` that will be used by other
-    /// operations inside of `sec`. On the other hand, operations that are
-    /// siblings of `sec` would instead connect to
-    ///
-    /// ```
-    /// # use bevy_impulse::diagram::NamedOperationRef;
-    /// # use smallvec::smallvec;
-    ///
-    /// let op_id = NamedOperationRef {
-    ///     namespaces: smallvec![],
-    ///     exposed_namespace: Some("sec".into()),
-    ///     name: "out".into(),
-    /// };
-    /// ```
-    ///
-    /// We need to make this distinction because operations inside `sec` do not
-    /// know which of their siblings are exposed, and we don't want operations
-    /// outside of `sec` to accidentally connect to operations that are supposed
-    /// to be internal to `sec`.
-    pub exposed_namespace: Option<Arc<str>>,
-    pub name: Arc<str>,
-}
-
-impl NamedOperationRef {
-    fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
-        apply_parent_namespaces(parent_namespaces, &mut self.namespaces);
-        self
-    }
-}
-
-impl<'a> From<&'a OperationName> for NamedOperationRef {
-    fn from(name: &'a OperationName) -> Self {
-        NamedOperationRef {
-            namespaces: SmallVec::new(),
-            exposed_namespace: None,
-            name: Arc::clone(name),
-        }
-    }
-}
-
-impl From<OperationName> for NamedOperationRef {
-    fn from(name: OperationName) -> Self {
-        NamedOperationRef {
-            namespaces: SmallVec::new(),
-            exposed_namespace: None,
-            name,
-        }
-    }
-}
-
-impl<'a> From<&'a NamespacedOperation> for NamedOperationRef {
-    fn from(id: &'a NamespacedOperation) -> Self {
-        NamedOperationRef {
-            namespaces: SmallVec::new(),
-            // This is referring to an exposed operation, so the namespace
-            // mentioned in the operation goes into the exposed_namespace field
-            exposed_namespace: Some(Arc::clone(&id.namespace)),
-            name: Arc::clone(&id.operation),
-        }
-    }
-}
-
-impl<'a> From<&'a NamespacedOperation> for OperationRef {
-    fn from(value: &'a NamespacedOperation) -> Self {
-        OperationRef::Named(value.into())
-    }
-}
-
-impl std::fmt::Display for NamedOperationRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for namespace in &self.namespaces {
-            write!(f, "{namespace}:")?;
-        }
-
-        if let Some(exposed) = &self.exposed_namespace {
-            write!(f, "{exposed}:(exposed):")?;
-        }
-
-        f.write_str(&self.name)
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StreamOutRef {
-    /// The namespace of the scope is being streamed out of
-    pub namespaces: NamespaceList,
-    /// The name of the stream (within its scope) that is being referred to
-    pub name: Arc<str>,
-}
-
-impl StreamOutRef {
-    pub fn new_for_root(stream_name: impl Into<Arc<str>>) -> Self {
-        Self {
-            namespaces: NamespaceList::new(),
-            name: stream_name.into(),
-        }
-    }
-
-    pub fn new_for_scope(
-        scope_name: impl Into<Arc<str>>,
-        stream_name: impl Into<Arc<str>>,
-    ) -> Self {
-        Self {
-            namespaces: smallvec![scope_name.into()],
-            name: stream_name.into(),
-        }
-    }
-
-    fn in_namespaces(mut self, parent_namespaces: &[Arc<str>]) -> Self {
-        apply_parent_namespaces(parent_namespaces, &mut self.namespaces);
-        self
-    }
-}
-
-impl std::fmt::Display for StreamOutRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for namespace in &self.namespaces {
-            write!(f, "{namespace}:")?;
-        }
-
-        write!(f, "(stream_out:{})", self.name)
-    }
-}
-
-impl From<StreamOutRef> for OperationRef {
-    fn from(value: StreamOutRef) -> Self {
-        OperationRef::StreamOut(value)
-    }
-}
-
-fn apply_parent_namespaces(parent_namespaces: &[Arc<str>], namespaces: &mut NamespaceList) {
-    // Put the parent namespaces at the front and append the operation's
-    // existing namespaces at the back.
-    let new_namespaces = parent_namespaces
-        .iter()
-        .cloned()
-        .chain(namespaces.drain(..))
-        .collect();
-
-    *namespaces = new_namespaces;
-}
-
-fn with_parent_namespaces(
-    parent_namespaces: &[Arc<str>],
-    mut namespaces: NamespaceList,
-) -> NamespaceList {
-    apply_parent_namespaces(parent_namespaces, &mut namespaces);
-    namespaces
-}
+use serde::Serialize;
 
 #[derive(Default)]
 struct DiagramConstruction {
@@ -340,17 +83,19 @@ impl DiagramConstruction {
     }
 }
 
-pub struct DiagramContext<'a, 'c> {
+pub struct DiagramContext<'a, 'c, 'w, 's, 'b> {
     construction: &'c mut DiagramConstruction,
+    pub builder: &'c mut Builder<'w, 's, 'b>,
     pub registry: &'a DiagramElementRegistry,
     pub operations: Operations,
     pub templates: &'a Templates,
     pub on_implicit_error: &'a OperationRef,
-    scope: BuilderScopeContext,
+    #[allow(unused)]
+    default_trace: TraceToggle,
     namespaces: NamespaceList,
 }
 
-impl<'a, 'c> DiagramContext<'a, 'c> {
+impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
     /// Infer the [`TypeInfo`] for the input messages into the specified operation.
     ///
     /// If this returns [`None`] then not enough of the diagram has been built
@@ -454,9 +199,38 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         &mut self,
         operation: impl Into<OperationRef>,
         input: DynInputSlot,
+        #[allow(unused)] trace_info: TraceInfo,
     ) -> Result<(), DiagramErrorCode> {
         let operation = self.into_operation_ref(operation);
         let connect = standard_input_connection(input, &self.registry)?;
+
+        #[cfg(feature = "trace")]
+        {
+            let trace_toggle = trace_info.trace.unwrap_or(self.default_trace);
+            let operation_info = OperationInfo::new(
+                Some(operation.clone()),
+                Some(input.message_info().type_name.into()),
+                trace_info.construction,
+            );
+
+            let mut trace = Trace::new(trace_toggle, Arc::new(operation_info));
+
+            let enable_trace_serialization = self
+                .registry
+                .messages
+                .messages
+                .get(input.message_info())
+                .ok_or_else(|| DiagramErrorCode::UnregisteredType(*input.message_info()))?
+                .operations
+                .enable_trace_serialization;
+
+            if let Some(enable) = enable_trace_serialization {
+                enable(&mut trace);
+            }
+
+            self.builder.commands().entity(input.id()).insert(trace);
+        }
+
         self.impl_connect_into_target(operation, connect)
     }
 
@@ -499,7 +273,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
             Entry::Vacant(vacant) => {
                 vacant.insert(Target {
                     connector,
-                    scope: self.scope,
+                    scope: self.builder.context,
                 });
             }
         }
@@ -512,9 +286,10 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         &mut self,
         operation: impl Into<OperationRef> + Clone,
         buffer: AnyBuffer,
+        trace: TraceInfo,
     ) -> Result<(), DiagramErrorCode> {
         let input: DynInputSlot = buffer.into();
-        self.set_input_for_target(operation.clone(), input)?;
+        self.set_input_for_target(operation.clone(), input, trace)?;
 
         let operation = self.into_operation_ref(operation);
         match self.construction.buffers.entry(operation.clone()) {
@@ -625,7 +400,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
                 namespaces,
                 op: op.into(),
                 sibling_ops: sibling_ops.clone(),
-                scope: scope.unwrap_or(self.scope),
+                scope: scope.unwrap_or(self.builder.context),
             });
     }
 
@@ -704,7 +479,7 @@ impl<'a, 'c> DiagramContext<'a, 'c> {
         // This is the slot that operations inside of the section will direct
         // their outputs to. It will receive the outputs and then redirect them.
         let internal: OperationRef = NamedOperationRef {
-            namespaces: SmallVec::from_iter([Arc::clone(section_id)]),
+            namespaces: NamespaceList::for_child_of(Arc::clone(section_id)),
             exposed_namespace: None,
             name: Arc::clone(output_id),
         }
@@ -815,7 +590,6 @@ pub trait BuildDiagramOperation {
     fn build_diagram_operation<'a, 'c>(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode>;
 }
@@ -829,7 +603,6 @@ pub trait ConnectIntoTarget {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode>;
 
@@ -874,7 +647,7 @@ where
 
     let mut construction = DiagramConstruction::default();
 
-    let default_on_implicit_error = OperationRef::Cancel(NamespaceList::new());
+    let default_on_implicit_error = OperationRef::Cancel(NamespaceList::default());
     let opt_on_implicit_error: Option<OperationRef> =
         diagram.on_implicit_error.as_ref().map(Into::into);
 
@@ -885,15 +658,15 @@ where
     initialize_builtin_operations(
         diagram.start.clone(),
         scope,
-        builder,
         &mut DiagramContext {
             construction: &mut construction,
+            builder,
             registry,
             operations: diagram.ops.clone(),
             templates: &diagram.templates,
+            default_trace: diagram.default_trace,
             on_implicit_error,
-            namespaces: NamespaceList::new(),
-            scope: builder.context,
+            namespaces: NamespaceList::default(),
         },
     )?;
 
@@ -922,25 +695,26 @@ where
     while !unfinished_operations.is_empty() || construction.has_outputs() {
         let mut made_progress = false;
         for unfinished in unfinished_operations.drain(..) {
+            let mut builder = Builder {
+                context: unfinished.scope,
+                commands: builder.commands,
+            };
+
             let mut ctx = DiagramContext {
                 construction: &mut construction,
+                builder: &mut builder,
                 registry,
                 operations: unfinished.sibling_ops.clone(),
                 templates: &diagram.templates,
+                default_trace: diagram.default_trace,
                 on_implicit_error,
                 namespaces: unfinished.namespaces.clone(),
-                scope: unfinished.scope,
-            };
-
-            let mut builder = Builder {
-                context: unfinished.scope,
-                commands: builder.commands(),
             };
 
             // Attempt to build this operation
             let status = unfinished
                 .op
-                .build_diagram_operation(&unfinished.id, &mut builder, &mut ctx)
+                .build_diagram_operation(&unfinished.id, &mut ctx)
                 .map_err(|code| code.in_operation(unfinished.as_operation_ref()))?;
 
             ctx.construction
@@ -973,11 +747,18 @@ where
                     }
                 };
 
+                let mut builder = Builder {
+                    context: target.scope,
+                    commands: builder.commands,
+                };
+
                 let mut ctx = DiagramContext {
                     construction: &mut connector_construction,
+                    builder: &mut builder,
                     registry,
                     operations: diagram.ops.clone(),
                     templates: &diagram.templates,
+                    default_trace: diagram.default_trace,
                     on_implicit_error,
                     // TODO(@mxgrey): The namespace while connecting into targets
                     // is always empty since the ConnectIntoTargets implementation
@@ -991,19 +772,13 @@ where
                     // differently between NextOperation vs OperationRef. Then
                     // we also store namespace information per Target.
                     namespaces: Default::default(),
-                    scope: target.scope,
-                };
-
-                let mut builder = Builder {
-                    context: target.scope,
-                    commands: builder.commands(),
                 };
 
                 for output in outputs {
                     made_progress = true;
                     target
                         .connector
-                        .connect_into_target(output, &mut builder, &mut ctx)
+                        .connect_into_target(output, &mut ctx)
                         .map_err(|code| code.in_operation(id.clone()))?;
                 }
             }
@@ -1123,7 +898,6 @@ impl UnfinishedOperation {
 fn initialize_builtin_operations<Request, Response, Streams>(
     start: NextOperation,
     scope: Scope<Request, Response, Streams>,
-    builder: &mut Builder,
     ctx: &mut DiagramContext,
 ) -> Result<(), DiagramError>
 where
@@ -1135,24 +909,32 @@ where
     ctx.add_output_into_target(&start, scope.input.into());
 
     // Add the terminate operation
-    ctx.impl_connect_into_target(
-        OperationRef::Terminate(NamespaceList::new()),
-        standard_input_connection(scope.terminate.into(), &ctx.registry)?,
+    ctx.set_input_for_target(
+        OperationRef::Terminate(NamespaceList::default()),
+        scope.terminate.into(),
+        TraceInfo::default(),
     )?;
 
     let mut streams = DynStreamInputPack::default();
     Streams::into_dyn_stream_input_pack(&mut streams, scope.streams);
     for (name, input) in streams.named {
-        ctx.set_input_for_target(StreamOutRef::new_for_root(name), input)?;
+        // TODO(@mxgrey): The trace settings for stream_out are not properly
+        // based on whatever the user sets in the StreamOutSchema.
+        ctx.set_input_for_target(
+            StreamOutRef::new_for_root(name),
+            input,
+            TraceInfo::default(),
+        )?;
     }
 
     // Add the dispose operation
     ctx.set_connect_into_target(OperationRef::Dispose, ConnectToDispose)?;
 
     // Add the cancel operation
+    let connect_to_cancel = ConnectToCancel::new(ctx.builder)?;
     ctx.set_connect_into_target(
-        OperationRef::Cancel(NamespaceList::new()),
-        ConnectToCancel::new(builder)?,
+        OperationRef::Cancel(NamespaceList::default()),
+        connect_to_cancel,
     )?;
 
     Ok(())
@@ -1164,7 +946,6 @@ impl ConnectIntoTarget for ConnectToDispose {
     fn connect_into_target(
         &mut self,
         _output: DynOutput,
-        _builder: &mut Builder,
         _ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         Ok(())
@@ -1212,10 +993,9 @@ impl ConnectIntoTarget for ImplicitSerialization {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        self.implicit_serialize(output, builder, ctx)
+        self.implicit_serialize(output, ctx)
     }
 
     fn infer_input_type(
@@ -1232,10 +1012,9 @@ impl ConnectIntoTarget for ImplicitDeserialization {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
-        self.implicit_deserialize(output, builder, ctx)
+        self.implicit_deserialize(output, ctx)
     }
 
     fn infer_input_type(
@@ -1256,11 +1035,10 @@ impl ConnectIntoTarget for BasicConnect {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
-        _: &mut DiagramContext,
+        ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         output
-            .connect_to(&self.input_slot, builder)
+            .connect_to(&self.input_slot, ctx.builder)
             .map_err(Into::into)
     }
 
@@ -1298,12 +1076,11 @@ impl ConnectIntoTarget for ConnectToCancel {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         let Err(output) = self
             .implicit_stringify
-            .try_implicit_stringify(output, builder, ctx)?
+            .try_implicit_stringify(output, ctx)?
         else {
             // We successfully converted the output into a string, so we are done.
             return Ok(());
@@ -1314,7 +1091,7 @@ impl ConnectIntoTarget for ConnectToCancel {
         // cancel operation.
         let Err(output) = self
             .implicit_serialization
-            .try_implicit_serialize(output, builder, ctx)?
+            .try_implicit_serialize(output, ctx)?
         else {
             // We successfully converted the output into a json, so we are done.
             return Ok(());
@@ -1329,13 +1106,13 @@ impl ConnectIntoTarget for ConnectToCancel {
                 let trigger = ctx
                     .registry
                     .messages
-                    .trigger(output.message_info(), builder)?;
-                trigger.output.connect_to(&self.quiet_cancel, builder)?;
+                    .trigger(output.message_info(), ctx.builder)?;
+                trigger.output.connect_to(&self.quiet_cancel, ctx.builder)?;
                 vacant.insert(trigger.input).clone()
             }
         };
 
-        output.connect_to(&input_slot, builder)?;
+        output.connect_to(&input_slot, ctx.builder)?;
 
         Ok(())
     }
@@ -1376,7 +1153,6 @@ impl ConnectIntoTarget for RedirectConnection {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        _builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if self.redirected.insert(output.id()) {
@@ -1403,7 +1179,7 @@ impl ConnectIntoTarget for RedirectConnection {
     }
 }
 
-impl<'a, 'c> std::fmt::Debug for DiagramContext<'a, 'c> {
+impl<'a, 'c, 'w, 's, 'b> std::fmt::Debug for DiagramContext<'a, 'c, 'w, 's, 'b> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiagramContext")
             .field("construction", &DebugDiagramConstruction(self))
@@ -1411,9 +1187,9 @@ impl<'a, 'c> std::fmt::Debug for DiagramContext<'a, 'c> {
     }
 }
 
-struct DebugDiagramConstruction<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
+struct DebugDiagramConstruction<'a, 'c, 'w, 's, 'b, 'd>(&'d DiagramContext<'a, 'c, 'w, 's, 'b>);
 
-impl<'a, 'c, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'd> {
+impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'w, 's, 'b, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiagramConstruction")
             .field("connect_into_target", &DebugConnections(self.0))
@@ -1430,9 +1206,9 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugDiagramConstruction<'a, 'c, 'd> {
     }
 }
 
-struct DebugConnections<'a, 'c, 'd>(&'d DiagramContext<'a, 'c>);
+struct DebugConnections<'a, 'c, 'w, 's, 'b, 'd>(&'d DiagramContext<'a, 'c, 'w, 's, 'b>);
 
-impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
+impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'w, 's, 'b, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_map();
         for (op, target) in &self.0.construction.connect_into_target {
@@ -1449,12 +1225,12 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugConnections<'a, 'c, 'd> {
     }
 }
 
-struct DebugConnection<'a, 'c, 'd> {
+struct DebugConnection<'a, 'c, 'w, 's, 'b, 'd> {
     connect: &'d Box<dyn ConnectIntoTarget>,
-    context: &'d DiagramContext<'a, 'c>,
+    context: &'d DiagramContext<'a, 'c, 'w, 's, 'b>,
 }
 
-impl<'a, 'c, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'd> {
+impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'w, 's, 'b, 'd> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut visited = HashSet::new();
         let mut debug = f.debug_struct("ConnectIntoTarget");
@@ -1469,5 +1245,26 @@ impl<'a, 'c, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'd> {
         }
 
         debug.finish()
+    }
+}
+
+/// Information for how an operation should be traced.
+#[derive(Clone, Default)]
+pub struct TraceInfo {
+    /// Information about how the operation was constructed.
+    pub construction: Option<Arc<JsonMessage>>,
+    /// Whether or not tracing should be enabled for this operation.
+    pub trace: Option<TraceToggle>,
+}
+
+impl TraceInfo {
+    pub fn new(
+        construction: impl Serialize,
+        trace: Option<TraceToggle>,
+    ) -> Result<Self, DiagramErrorCode> {
+        Ok(Self {
+            construction: Some(Arc::new(serde_json::to_value(construction)?)),
+            trace,
+        })
     }
 }

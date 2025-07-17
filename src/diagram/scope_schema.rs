@@ -24,16 +24,77 @@ use std::{
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use smallvec::smallvec;
 
 use crate::{
-    standard_input_connection, BuildDiagramOperation, BuildStatus, Builder, ConnectIntoTarget,
+    standard_input_connection, BuildDiagramOperation, BuildStatus, ConnectIntoTarget,
     DiagramContext, DiagramErrorCode, DynOutput, IncrementalScopeBuilder, IncrementalScopeRequest,
-    IncrementalScopeResponse, InferMessageType, NextOperation, OperationName, OperationRef,
-    Operations, ScopeSettings, StreamOutRef,
+    IncrementalScopeResponse, InferMessageType, NamespaceList, NextOperation, OperationName,
+    OperationRef, Operations, ScopeSettings, StreamOutRef,
 };
 
-/// The schema to define a scope within a diagram.
+/// Create a scope which will function like its own encapsulated workflow
+/// within the paren workflow. Each message that enters a scope will trigger
+/// a new independent session for that scope to begin running with the incoming
+/// message itself being the input message of the scope. When multiple sessions
+/// for the same scope are running, they cannot see or interfere with each other.
+///
+/// Once a session terminates, the scope will send the terminating message as
+/// its output. Scopes can use the `stream_out` operation to stream messages out
+/// to the parent workflow while running.
+///
+/// Scopes have two common uses:
+/// * isolate - Prevent simultaneous runs of the same workflow components
+///   (especially buffers) from interfering with each other.
+/// * race - Run multiple branches simultaneously inside the scope and race
+///   them against each ohter. The first branch that reaches the scope's
+///   terminate operation "wins" the race, and only its output will continue
+///   on in the parent workflow. All other branches will be disposed.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "approach_door",
+///     "ops": {
+///         "approach_door": {
+///             "type": "scope",
+///             "start": "begin",
+///             "ops": {
+///                 "begin": {
+///                     "type": "fork_clone",
+///                     "next": [
+///                         "move_to_door",
+///                         "detect_door_proximity"
+///                     ]
+///                 },
+///                 "move_to_door": {
+///                     "type": "node",
+///                     "builder": "move",
+///                     "config": {
+///                         "place": "L1_north_lobby_outside"
+///                     },
+///                     "next": { "builtin" : "terminate" }
+///                 },
+///                 "detect_proximity": {
+///                     "type": "node",
+///                     "builder": "detect_proximity",
+///                     "config": {
+///                         "type": "door",
+///                         "name": "L1_north_lobby"
+///                     },
+///                     "next": { "builtin" : "terminate" }
+///                 }
+///             },
+///             "next": { "builtin" : "try_open_door" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
+//
+// TODO(@mxgrey): Add an example of streaming out of a scope
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ScopeSchema {
@@ -70,17 +131,16 @@ impl BuildDiagramOperation for ScopeSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
-        let scope = IncrementalScopeBuilder::begin(self.settings.clone(), builder);
+        let scope = IncrementalScopeBuilder::begin(self.settings.clone(), ctx.builder);
 
         for (stream_in_id, stream_out_target) in &self.stream_out {
             ctx.set_connect_into_target(
                 StreamOutRef::new_for_scope(id.clone(), stream_in_id.clone()),
                 ConnectScopeStream {
                     scope_id: scope.builder_scope_context().scope,
-                    parent_scope_id: builder.scope(),
+                    parent_scope_id: ctx.builder.scope(),
                     stream_out_target: ctx.into_operation_ref(stream_out_target),
                     connection: None,
                 },
@@ -107,7 +167,7 @@ impl BuildDiagramOperation for ScopeSchema {
         )?;
 
         ctx.set_connect_into_target(
-            OperationRef::Terminate(smallvec![Arc::clone(id)]),
+            OperationRef::Terminate(NamespaceList::for_child_of(Arc::clone(id))),
             ConnectScopeResponse {
                 scope,
                 next: ctx.into_operation_ref(&self.next),
@@ -129,11 +189,10 @@ impl ConnectIntoTarget for ConnectScopeRequest {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if let Some(connection) = &mut self.connection {
-            return connection.connect_into_target(output, builder, ctx);
+            return connection.connect_into_target(output, ctx);
         } else {
             let IncrementalScopeRequest {
                 external_input,
@@ -141,7 +200,7 @@ impl ConnectIntoTarget for ConnectScopeRequest {
             } = ctx.registry.messages.set_scope_request(
                 output.message_info(),
                 &mut self.scope,
-                builder.commands(),
+                ctx.builder.commands(),
             )?;
 
             if let Some(begin_scope) = begin_scope {
@@ -149,7 +208,7 @@ impl ConnectIntoTarget for ConnectScopeRequest {
             }
 
             let mut connection = standard_input_connection(external_input, &ctx.registry)?;
-            connection.connect_into_target(output, builder, ctx)?;
+            connection.connect_into_target(output, ctx)?;
             self.connection = Some(connection);
         }
 
@@ -183,11 +242,10 @@ impl ConnectIntoTarget for ConnectScopeResponse {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if let Some(connection) = &mut self.connection {
-            return connection.connect_into_target(output, builder, ctx);
+            return connection.connect_into_target(output, ctx);
         } else {
             let IncrementalScopeResponse {
                 terminate,
@@ -195,7 +253,7 @@ impl ConnectIntoTarget for ConnectScopeResponse {
             } = ctx.registry.messages.set_scope_response(
                 output.message_info(),
                 &mut self.scope,
-                builder.commands(),
+                ctx.builder.commands(),
             )?;
 
             if let Some(external_output) = external_output {
@@ -203,7 +261,7 @@ impl ConnectIntoTarget for ConnectScopeResponse {
             }
 
             let mut connection = standard_input_connection(terminate, ctx.registry)?;
-            connection.connect_into_target(output, builder, ctx)?;
+            connection.connect_into_target(output, ctx)?;
             self.connection = Some(connection);
         }
 
@@ -238,22 +296,21 @@ impl ConnectIntoTarget for ConnectScopeStream {
     fn connect_into_target(
         &mut self,
         output: DynOutput,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<(), DiagramErrorCode> {
         if let Some(connection) = &mut self.connection {
-            return connection.connect_into_target(output, builder, ctx);
+            return connection.connect_into_target(output, ctx);
         } else {
             let (stream_input, stream_output) = ctx.registry.messages.spawn_basic_scope_stream(
                 output.message_info(),
                 self.scope_id,
                 self.parent_scope_id,
-                builder.commands(),
+                ctx.builder.commands(),
             )?;
 
             ctx.add_output_into_target(self.stream_out_target.clone(), stream_output);
             let mut connection = standard_input_connection(stream_input, ctx.registry)?;
-            connection.connect_into_target(output, builder, ctx)?;
+            connection.connect_into_target(output, ctx)?;
             self.connection = Some(connection);
         }
 
