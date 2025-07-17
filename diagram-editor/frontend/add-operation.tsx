@@ -1,5 +1,5 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
-import type { NodeAddChange } from '@xyflow/react';
+import type { NodeAddChange, XYPosition } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
 import {
   BufferAccessIcon,
@@ -9,13 +9,15 @@ import {
   JoinIcon,
   ListenIcon,
   NodeIcon,
+  ScopeIcon,
   SerializedJoinIcon,
   SplitIcon,
   TransformIcon,
   UnzipIcon,
 } from './nodes/icons';
 import type { DiagramEditorNode, DiagramOperation } from './types';
-import { LAYOUT_OPTIONS } from './utils/layout';
+import { joinNamespaces } from './utils';
+import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',
@@ -23,32 +25,109 @@ const StyledOperationButton = styled(Button)({
 
 export interface AddOperationProps {
   namespace: string;
-  onAdd?: (change: NodeAddChange<DiagramEditorNode>) => void;
+  parentId?: string;
+  newNodePosition: XYPosition;
+  onAdd?: (change: NodeAddChange<DiagramEditorNode>[]) => void;
 }
 
 function createNodeChange(
   namespace: string,
+  parentId: string | undefined,
+  newNodePosition: XYPosition,
   op: DiagramOperation,
-): NodeAddChange<DiagramEditorNode> {
-  return {
-    type: 'add',
-    item: {
-      id: uuidv4(),
-      type: op.type,
-      position: { x: 0, y: 0 },
-      data: {
-        namespace,
-        opId: uuidv4(),
-        op,
+): NodeAddChange<DiagramEditorNode>[] {
+  if (op.type === 'scope') {
+    const scopeId = uuidv4();
+    const children: NodeAddChange<DiagramEditorNode>[] = [
+      {
+        type: 'add',
+        item: {
+          id: uuidv4(),
+          type: 'start',
+          position: {
+            x: LAYOUT_OPTIONS.scopePadding.leftRight,
+            y: LAYOUT_OPTIONS.scopePadding.topBottom,
+          },
+          data: {
+            namespace: joinNamespaces(namespace, scopeId),
+          },
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
+          parentId: scopeId,
+        },
       },
-      width: LAYOUT_OPTIONS.nodeWidth,
-      height: LAYOUT_OPTIONS.nodeHeight,
-      zIndex: op.type === 'scope' ? -1 : undefined,
+      {
+        type: 'add',
+        item: {
+          id: uuidv4(),
+          type: 'terminate',
+          position: {
+            x: LAYOUT_OPTIONS.scopePadding.leftRight,
+            y: LAYOUT_OPTIONS.scopePadding.topBottom * 5,
+          },
+          data: {
+            namespace: joinNamespaces(namespace, scopeId),
+          },
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
+          parentId: scopeId,
+        },
+      },
+    ];
+    const scopeBounds = calculateScopeBounds(
+      children.map((c) => c.item.position),
+    );
+    return [
+      {
+        type: 'add',
+        item: {
+          id: scopeId,
+          type: 'scope',
+          position: {
+            x: newNodePosition.x + scopeBounds.x,
+            y: newNodePosition.y + scopeBounds.y,
+          },
+          data: {
+            namespace,
+            opId: uuidv4(),
+            op,
+          },
+          width: scopeBounds.width,
+          height: scopeBounds.height,
+          zIndex: -1,
+          parentId,
+        },
+      },
+      ...children,
+    ];
+  }
+
+  return [
+    {
+      type: 'add',
+      item: {
+        id: uuidv4(),
+        type: op.type,
+        position: newNodePosition,
+        data: {
+          namespace,
+          opId: uuidv4(),
+          op,
+        },
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
+        parentId,
+      },
     },
-  };
+  ];
 }
 
-function AddOperation({ namespace, onAdd }: AddOperationProps) {
+function AddOperation({
+  namespace,
+  parentId,
+  newNodePosition,
+  onAdd,
+}: AddOperationProps) {
   return (
     <ButtonGroup
       orientation="vertical"
@@ -60,7 +139,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<NodeIcon />}
         onClick={() => {
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'node',
               builder: 'new_node',
               next: { builtin: 'dispose' },
@@ -74,7 +153,12 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
       <StyledOperationButton
         startIcon={<ForkCloneIcon />}
         onClick={() =>
-          onAdd?.(createNodeChange(namespace, { type: 'fork_clone', next: [] }))
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'fork_clone',
+              next: [],
+            }),
+          )
         }
       >
         Fork Clone
@@ -82,7 +166,12 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
       <StyledOperationButton
         startIcon={<UnzipIcon />}
         onClick={() =>
-          onAdd?.(createNodeChange(namespace, { type: 'unzip', next: [] }))
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'unzip',
+              next: [],
+            }),
+          )
         }
       >
         Unzip
@@ -91,7 +180,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<ForkResultIcon />}
         onClick={() => {
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'fork_result',
               err: { builtin: 'dispose' },
               ok: { builtin: 'dispose' },
@@ -103,7 +192,13 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<SplitIcon />}
-        onClick={() => onAdd?.(createNodeChange(namespace, { type: 'split' }))}
+        onClick={() =>
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'split',
+            }),
+          )
+        }
       >
         Split
       </StyledOperationButton>
@@ -111,7 +206,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<JoinIcon />}
         onClick={() => {
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'join',
               buffers: [],
               next: { builtin: 'dispose' },
@@ -125,7 +220,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<SerializedJoinIcon />}
         onClick={() =>
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'serialized_join',
               buffers: [],
               next: { builtin: 'dispose' },
@@ -139,7 +234,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<TransformIcon />}
         onClick={() => {
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'transform',
               cel: '',
               next: { builtin: 'dispose' },
@@ -151,7 +246,13 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<BufferIcon />}
-        onClick={() => onAdd?.(createNodeChange(namespace, { type: 'buffer' }))}
+        onClick={() =>
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'buffer',
+            }),
+          )
+        }
       >
         Buffer
       </StyledOperationButton>
@@ -159,7 +260,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<BufferAccessIcon />}
         onClick={() => {
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'buffer_access',
               buffers: [],
               next: { builtin: 'dispose' },
@@ -173,7 +274,7 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         startIcon={<ListenIcon />}
         onClick={() =>
           onAdd?.(
-            createNodeChange(namespace, {
+            createNodeChange(namespace, parentId, newNodePosition, {
               type: 'listen',
               buffers: [],
               next: { builtin: 'dispose' },
@@ -182,6 +283,21 @@ function AddOperation({ namespace, onAdd }: AddOperationProps) {
         }
       >
         Listen
+      </StyledOperationButton>
+      <StyledOperationButton
+        startIcon={<ScopeIcon />}
+        onClick={() =>
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'scope',
+              start: { builtin: 'dispose' },
+              ops: {},
+              next: { builtin: 'dispose' },
+            }),
+          )
+        }
+      >
+        Scope
       </StyledOperationButton>
     </ButtonGroup>
   );

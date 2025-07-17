@@ -266,6 +266,24 @@ const DiagramEditor = () => {
     parentId: null,
     namespace: ROOT_NAMESPACE,
   });
+  const addOperationNewNodePosition = React.useMemo<XYPosition>(() => {
+    if (!reactFlowInstance.current) {
+      return { x: 0, y: 0 };
+    }
+    const parentNode = addOperationPopover.parentId
+      ? reactFlowInstance.current.getNode(addOperationPopover.parentId)
+      : null;
+
+    const parentPosition = parentNode?.position
+      ? parentNode.position
+      : { x: 0, y: 0 };
+    return (
+      reactFlowInstance.current?.screenToFlowPosition({
+        x: addOperationPopover.popOverPosition.left - parentPosition.x,
+        y: addOperationPopover.popOverPosition.top - parentPosition.y,
+      }) || { x: 0, y: 0 }
+    );
+  }, [addOperationPopover.parentId, addOperationPopover.popOverPosition]);
 
   const [editingNodeId, setEditingNodeId] = React.useState<string | null>(null);
 
@@ -537,30 +555,10 @@ const DiagramEditor = () => {
       >
         <AddOperation
           namespace={addOperationPopover.namespace}
-          onAdd={(change) => {
-            const newNode = change.item;
-            newNode.parentId = addOperationPopover.parentId || undefined;
-            const newPos = reactFlowInstance.current?.screenToFlowPosition({
-              x: addOperationPopover.popOverPosition.left,
-              y: addOperationPopover.popOverPosition.top,
-            });
-            if (!newPos) {
-              throw new Error(
-                'failed to add operation: cannot determine position',
-              );
-            }
-
-            const parentNode = newNode.parentId
-              ? reactFlowInstance.current?.getNode(newNode.parentId)
-              : null;
-            const parentPosition = parentNode?.position
-              ? parentNode.position
-              : { x: 0, y: 0 };
-            newPos.x -= parentPosition.x;
-            newPos.y -= parentPosition.y;
-
-            newNode.position = newPos;
-            handleNodeChanges([change]);
+          parentId={addOperationPopover.parentId || undefined}
+          newNodePosition={addOperationNewNodePosition}
+          onAdd={(changes) => {
+            handleNodeChanges(changes);
             closeAllPopovers();
           }}
         />
