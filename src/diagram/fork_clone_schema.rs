@@ -101,7 +101,7 @@ impl BuildDiagramOperation for ForkCloneSchema {
             .registry
             .messages
             .fork_clone(&inferred_type, ctx.builder)?;
-        let trace = TraceInfo::for_basic_op("fork_clone", &self.trace_settings);
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_input_for_target(id, fork.input, trace)?;
         for target in &self.next {
             let output = fork.outputs.clone_output(ctx.builder);

@@ -15,7 +15,7 @@
  *
 */
 
-use crate::{ConstructionInfo, JsonMessage, OperationRef, TraceToggle, TypeInfo};
+use crate::{JsonMessage, OperationRef, TraceToggle, TypeInfo};
 
 use bevy_ecs::prelude::{Component, Entity, Event};
 use schemars::JsonSchema;
@@ -107,18 +107,26 @@ pub struct OperationStarted {
     pub message: Option<JsonMessage>,
 }
 
+/// Information about an operation.
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 pub struct OperationInfo {
+    /// The identifier of this operation which is unique within the workflow
     id: Option<OperationRef>,
+    /// The input message type
     message_type: Option<Cow<'static, str>>,
-    construction: Option<ConstructionInfo>,
+    /// Information about how the operation was constructed. For operations
+    /// built by the diagram workflow builder, this will be the contents of the
+    /// operation definition.
+    ///
+    /// For manually inserted traces, the content of this is user-defined.
+    construction: Option<Arc<JsonMessage>>,
 }
 
 impl OperationInfo {
     pub fn new(
         id: Option<OperationRef>,
         message_type: Option<Cow<'static, str>>,
-        construction: Option<ConstructionInfo>,
+        construction: Option<Arc<JsonMessage>>,
     ) -> Self {
         Self {
             id,
@@ -139,7 +147,7 @@ impl OperationInfo {
 
     /// If this operation was created by a builder, this is the ID of that
     /// builder
-    pub fn construction(&self) -> &Option<ConstructionInfo> {
+    pub fn construction(&self) -> &Option<Arc<JsonMessage>> {
         &self.construction
     }
 }

@@ -20,9 +20,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use super::{
-    is_default, BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo, DiagramContext,
-    DiagramErrorCode, JsonMessage, MissingStream, NextOperation, OperationName, TraceInfo,
-    TraceSettings,
+    is_default, BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramErrorCode,
+    JsonMessage, MissingStream, NextOperation, OperationName, TraceInfo, TraceSettings,
 };
 
 /// Create an operation that that takes an input message and produces an
@@ -89,17 +88,7 @@ impl BuildDiagramOperation for NodeSchema {
         let node_registration = ctx.registry.get_node_registration(&self.builder)?;
         let mut node = node_registration.create_node(ctx.builder, (*self.config).clone())?;
 
-        let display_text = self
-            .trace_settings
-            .display_text
-            .as_ref()
-            .unwrap_or(&node_registration.default_display_text);
-
-        let trace = TraceInfo::new(
-            ConstructionInfo::for_node(&self.builder, &self.config, display_text),
-            self.trace_settings.trace,
-        );
-
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_input_for_target(id, node.input.into(), trace)?;
         ctx.add_output_into_target(&self.next, node.output);
 

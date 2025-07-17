@@ -135,7 +135,7 @@ impl BuildDiagramOperation for BufferSchema {
             ctx.builder,
         )?;
 
-        let trace = TraceInfo::for_basic_op("buffer", &self.trace_settings);
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_buffer_for_operation(id, buffer, trace)?;
         Ok(BuildStatus::Finished)
     }
@@ -222,7 +222,7 @@ impl BuildDiagramOperation for BufferAccessSchema {
                 .messages
                 .with_buffer_access(&target_type, &buffer_map, ctx.builder)?;
 
-        let trace = TraceInfo::for_basic_op("buffer_access", &self.trace_settings);
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_input_for_target(id, node.input, trace)?;
         ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)

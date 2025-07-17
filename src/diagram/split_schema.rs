@@ -125,7 +125,7 @@ impl BuildDiagramOperation for SplitSchema {
             .registry
             .messages
             .split(&sample_input, self, ctx.builder)?;
-        let trace = TraceInfo::for_basic_op("split", &self.trace_settings);
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_input_for_target(id, split.input, trace)?;
         for (target, output) in split.outputs {
             ctx.add_output_into_target(&target, output);

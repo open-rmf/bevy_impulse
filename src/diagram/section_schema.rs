@@ -23,10 +23,9 @@ use serde::{Deserialize, Serialize};
 use crate::{AnyBuffer, AnyMessageBox, Buffer, InputSlot, JsonBuffer, JsonMessage, Output};
 
 use super::{
-    BuildDiagramOperation, BuildStatus, BuilderId, ConstructionInfo, DiagramContext,
-    DiagramElementRegistry, DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation,
-    NextOperation, OperationName, OperationRef, Operations, RedirectConnection, TraceInfo,
-    TraceSettings, TypeInfo,
+    BuildDiagramOperation, BuildStatus, BuilderId, DiagramContext, DiagramElementRegistry,
+    DiagramErrorCode, DynInputSlot, DynOutput, NamespacedOperation, NextOperation, OperationName,
+    OperationRef, Operations, RedirectConnection, TraceInfo, TraceSettings, TypeInfo,
 };
 
 pub use bevy_impulse_derive::Section;
@@ -120,19 +119,9 @@ impl BuildDiagramOperation for SectionSchema {
                     .create_section(ctx.builder, (*self.config).clone())?
                     .into_slots();
 
-                let display_text = self
-                    .trace_settings
-                    .display_text
-                    .as_ref()
-                    .unwrap_or(&section_registration.default_display_text);
-
                 // TODO(@mxgrey): Figure out how to automatically trace operations
                 // that are built by the section builder.
-                let trace = TraceInfo::new(
-                    ConstructionInfo::for_section(section_builder, &self.config, display_text),
-                    self.trace_settings.trace,
-                );
-
+                let trace = TraceInfo::new(self, self.trace_settings.trace)?;
                 for (op, input) in section.inputs {
                     ctx.set_input_for_target(
                         &NextOperation::Namespace(NamespacedOperation {

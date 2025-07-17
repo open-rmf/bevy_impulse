@@ -30,14 +30,15 @@ use crate::{
 use crate::{OperationInfo, Trace};
 
 use super::{
-    BufferSelection, ConstructionInfo, Diagram, DiagramElementRegistry, DiagramError,
-    DiagramErrorCode, DynInputSlot, DynOutput, FinishingErrors, ImplicitDeserialization,
-    ImplicitSerialization, ImplicitStringify, NamedOperationRef, NamespaceList, NextOperation,
-    OperationName, OperationRef, Operations, StreamOutRef, Templates, TraceSettings, TraceToggle,
-    TypeInfo,
+    BufferSelection, Diagram, DiagramElementRegistry, DiagramError, DiagramErrorCode, DynInputSlot,
+    DynOutput, FinishingErrors, ImplicitDeserialization, ImplicitSerialization, ImplicitStringify,
+    NamedOperationRef, NamespaceList, NextOperation, OperationName, OperationRef, Operations,
+    StreamOutRef, Templates, TraceToggle, TypeInfo,
 };
 
 use bevy_ecs::prelude::Entity;
+
+use serde::Serialize;
 
 #[derive(Default)]
 struct DiagramConstruction {
@@ -209,7 +210,7 @@ impl<'a, 'c, 'w, 's, 'b> DiagramContext<'a, 'c, 'w, 's, 'b> {
             let operation_info = OperationInfo::new(
                 Some(operation.clone()),
                 Some(input.message_info().type_name.into()),
-                Some(trace_info.construction),
+                trace_info.construction,
             );
 
             let mut trace = Trace::new(trace_toggle, Arc::new(operation_info));
@@ -911,13 +912,7 @@ where
     ctx.set_input_for_target(
         OperationRef::Terminate(NamespaceList::default()),
         scope.terminate.into(),
-        TraceInfo::for_basic_op(
-            "terminate",
-            &TraceSettings {
-                display_text: None,
-                trace: None,
-            },
-        ),
+        TraceInfo::default(),
     )?;
 
     let mut streams = DynStreamInputPack::default();
@@ -925,14 +920,11 @@ where
     for (name, input) in streams.named {
         // TODO(@mxgrey): The trace settings for stream_out are not properly
         // based on whatever the user sets in the StreamOutSchema.
-        let trace = TraceInfo::for_basic_op(
-            "stream_out",
-            &TraceSettings {
-                display_text: None,
-                trace: None,
-            },
-        );
-        ctx.set_input_for_target(StreamOutRef::new_for_root(name), input, trace)?;
+        ctx.set_input_for_target(
+            StreamOutRef::new_for_root(name),
+            input,
+            TraceInfo::default(),
+        )?;
     }
 
     // Add the dispose operation
@@ -1257,32 +1249,22 @@ impl<'a, 'c, 'w, 's, 'b, 'd> std::fmt::Debug for DebugConnection<'a, 'c, 'w, 's,
 }
 
 /// Information for how an operation should be traced.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TraceInfo {
     /// Information about how the operation was constructed.
-    pub construction: ConstructionInfo,
+    pub construction: Option<Arc<JsonMessage>>,
     /// Whether or not tracing should be enabled for this operation.
     pub trace: Option<TraceToggle>,
 }
 
 impl TraceInfo {
-    pub fn new(construction: ConstructionInfo, trace: Option<TraceToggle>) -> Self {
-        Self {
-            construction,
+    pub fn new(
+        construction: impl Serialize,
+        trace: Option<TraceToggle>,
+    ) -> Result<Self, DiagramErrorCode> {
+        Ok(Self {
+            construction: Some(Arc::new(serde_json::to_value(construction)?)),
             trace,
-        }
-    }
-
-    pub fn for_basic_op(
-        kind: &'static str,
-        TraceSettings {
-            display_text,
-            trace,
-        }: &TraceSettings,
-    ) -> Self {
-        Self {
-            construction: ConstructionInfo::for_basic_op(kind, display_text),
-            trace: *trace,
-        }
+        })
     }
 }

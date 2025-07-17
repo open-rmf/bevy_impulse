@@ -137,7 +137,7 @@ impl BuildDiagramOperation for TransformSchema {
         ctx.builder.connect(node.output, fork_input);
         ctx.add_output_into_target(error_target.clone(), err.into());
 
-        let trace = TraceInfo::for_basic_op("transform", &self.trace_settings);
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_input_for_target(id, node.input.into(), trace)?;
         ctx.add_output_into_target(&self.next, ok.into());
         Ok(BuildStatus::Finished)

@@ -113,8 +113,8 @@ impl BuildDiagramOperation for UnzipSchema {
         }
 
         let unzip = unzip.perform_unzip(ctx.builder)?;
-        let trace = TraceInfo::for_basic_op("unzip", &self.trace_settings);
 
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
         ctx.set_input_for_target(id, unzip.input, trace)?;
         for (target, output) in self.next.iter().zip(unzip.outputs) {
             ctx.add_output_into_target(target, output);
