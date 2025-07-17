@@ -402,6 +402,12 @@ export function isOperationNode(
   return !['start', 'terminate'].includes(node.type);
 }
 
+export function isScopeNode(
+  node: DiagramEditorNode,
+): node is OperationNode<'scope'> {
+  return node.type === 'scope';
+}
+
 export function isSectionBuilder(
   nodeData: Extract<DiagramOperation, { type: 'section' }>,
 ): nodeData is Extract<DiagramOperation, { type: 'section' }> & {

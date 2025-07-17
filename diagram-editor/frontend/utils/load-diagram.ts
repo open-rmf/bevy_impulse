@@ -89,12 +89,13 @@ function buildGraph(diagram: Diagram): Graph {
         parentId,
         width: 0,
         height: 0,
+        zIndex: -10,
       });
       nodes.push({
         id: joinNamespaces(namespace, opId, START_ID),
         type: 'start',
         position: { x: 0, y: 0 },
-        data: { namespace: opId },
+        data: { namespace: joinNamespaces(namespace, opId) },
         parentId: id,
         width: LAYOUT_OPTIONS.nodeWidth,
         height: LAYOUT_OPTIONS.nodeHeight,
@@ -103,7 +104,7 @@ function buildGraph(diagram: Diagram): Graph {
         id: joinNamespaces(namespace, opId, TERMINATE_ID),
         type: 'terminate',
         position: { x: 0, y: 0 },
-        data: { namespace: opId },
+        data: { namespace: joinNamespaces(namespace, opId) },
         parentId: id,
         width: LAYOUT_OPTIONS.nodeWidth,
         height: LAYOUT_OPTIONS.nodeHeight,

@@ -12,6 +12,12 @@
           "builder": "mul",
           "config": 3,
           "next": { "builtin": "terminate" }
+        },
+        "mul4": {
+          "type": "node",
+          "builder": "mul",
+          "config": 4,
+          "next": { "builtin": "terminate" }
         }
       },
       "next": "add4"

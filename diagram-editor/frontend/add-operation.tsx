@@ -43,6 +43,7 @@ function createNodeChange(
       },
       width: LAYOUT_OPTIONS.nodeWidth,
       height: LAYOUT_OPTIONS.nodeHeight,
+      zIndex: op.type === 'scope' ? -1 : undefined,
     },
   };
 }

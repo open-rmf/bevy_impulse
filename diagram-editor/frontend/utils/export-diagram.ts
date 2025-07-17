@@ -1,13 +1,29 @@
 import type { NodeManager } from '../node-manager';
-import { START_ID } from '../nodes';
-import type { Diagram, DiagramEditorEdge } from '../types';
-import {
-  isBuiltinNode,
-  isOperationNode,
-  joinNamespaces,
-  ROOT_NAMESPACE,
-  splitNamespaces,
-} from '../utils';
+import type {
+  Diagram,
+  DiagramEditorEdge,
+  DiagramOperation,
+  NextOperation,
+} from '../types';
+import { isBuiltinNode, isOperationNode, splitNamespaces } from '../utils';
+
+interface SubOperations {
+  start: NextOperation;
+  ops: Record<string, DiagramOperation>;
+}
+
+function getSubOperations(diagram: Diagram, namespace: string): SubOperations {
+  const namespaces = splitNamespaces(namespace);
+  let subOps: SubOperations = diagram;
+  for (const namespace of namespaces.slice(1)) {
+    const scopeOp = subOps.ops[namespace];
+    if (!scopeOp || scopeOp.type !== 'scope') {
+      throw new Error(`expected ${namespace} to be a scope operation`);
+    }
+    subOps = scopeOp;
+  }
+  return subOps;
+}
 
 export function exportDiagram(
   nodeManager: NodeManager,
@@ -22,27 +38,22 @@ export function exportDiagram(
   };
 
   for (const node of nodeManager.iterNodes()) {
+    const subOps = getSubOperations(diagram, node.data.namespace);
+
     if (isOperationNode(node)) {
-      const namespaces = splitNamespaces(node.data.namespace);
-      let ops = diagram.ops;
-      for (const namespace of namespaces.slice(1)) {
-        const scopeOp = ops[namespace];
-        if (!scopeOp || scopeOp.type !== 'scope') {
-          throw new Error(`expected ${namespace} to be a scope operation`);
-        }
-        ops = scopeOp.ops;
-      }
-      ops[node.data.opId] = node.data.op;
+      subOps.ops[node.data.opId] = node.data.op;
     }
   }
 
   for (const edge of edges) {
-    if (edge.source === joinNamespaces(ROOT_NAMESPACE, START_ID)) {
-      const node = nodeManager.getNode(edge.target);
-      if (isOperationNode(node)) {
-        diagram.start = node.data.opId;
-      } else if (isBuiltinNode(node)) {
-        diagram.start = { builtin: node.type };
+    const source = nodeManager.getNode(edge.source);
+    if (source.type === 'start') {
+      const subOps = getSubOperations(diagram, source.data.namespace);
+      const target = nodeManager.getNode(edge.target);
+      if (isOperationNode(target)) {
+        subOps.start = target.data.opId;
+      } else if (isBuiltinNode(target)) {
+        subOps.start = { builtin: target.type };
       } else {
         throw new Error('unknown node');
       }
