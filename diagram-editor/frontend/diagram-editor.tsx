@@ -111,124 +111,146 @@ const DiagramEditor = () => {
       if (!reactFlow) {
         return;
       }
+      const transitiveChanges: NodeChange<DiagramEditorNode>[] = [];
 
-      setNodes((prev) => {
-        const scopeChanges: NodeChange<DiagramEditorNode>[] = [];
-        for (const change of changes) {
-          const changeIdPos = getChangeParentIdAndPosition(reactFlow, change);
-          if (!changeIdPos) {
-            continue;
-          }
-          const [changeId, changeParentId, changePosition] = changeIdPos;
-          if (!changeParentId) {
-            continue;
-          }
-
-          const scopeNode = prev.find((n) => n.id === changeParentId);
-          if (!scopeNode) {
-            continue;
-          }
-          const scopeChildren = prev.filter(
-            (n) => n.parentId === changeParentId && n.id !== changeId,
-          );
-          const calculatedBounds = calculateScopeBounds([
-            ...scopeChildren.map((n) => n.position),
-            {
-              // react flow does some kind of rounding (or maybe it is due to floating point accuracies)
-              // that results in gitches when resizing a scope quickly. This rounding reduces the
-              // impact of the glitches.
-              x: Math.round(changePosition.x),
-              y: Math.round(changePosition.y),
-            },
-          ]);
-
-          const newScopeBounds = {
-            x: scopeNode.position.x,
-            y: scopeNode.position.y,
-            width: scopeNode.width ?? calculatedBounds.width,
-            height: scopeNode.height ?? calculatedBounds.height,
-          };
-          // React Flow cannot handle fast changing of a parent's position while changing the
-          // children's position as well (some kind of race condition that causes the node positions to jump around).
-          // Workaround by resizing the scope only if it hits a certain threshold.
-          if (
-            Math.abs(calculatedBounds.x) >
-              LAYOUT_OPTIONS.scopePadding.leftRight ||
-            Math.abs(calculatedBounds.y) >
-              LAYOUT_OPTIONS.scopePadding.topBottom ||
-            (scopeNode.width &&
-              Math.abs(calculatedBounds.width - scopeNode.width) >
-                LAYOUT_OPTIONS.scopePadding.leftRight) ||
-            (scopeNode.height &&
-              Math.abs(calculatedBounds.height - scopeNode.height) >
-                LAYOUT_OPTIONS.scopePadding.topBottom)
-          ) {
-            newScopeBounds.x += calculatedBounds.x;
-            newScopeBounds.width = calculatedBounds.width;
-            newScopeBounds.y += calculatedBounds.y;
-            newScopeBounds.height = calculatedBounds.height;
-          }
-
-          if (
-            newScopeBounds.x !== scopeNode.position.x ||
-            newScopeBounds.y !== scopeNode.position.y ||
-            newScopeBounds.width !== scopeNode.width ||
-            newScopeBounds.height !== scopeNode.height
-          ) {
-            scopeChanges.push({
-              type: 'position',
-              id: changeParentId,
-              position: {
-                x: newScopeBounds.x,
-                y: newScopeBounds.y,
-              },
-            });
-            scopeChanges.push({
-              type: 'dimensions',
-              id: changeParentId,
-              dimensions: {
-                width: newScopeBounds.width,
-                height: newScopeBounds.height,
-              },
-              setAttributes: true,
-            });
-            // when the scope is moved, the relative position of the nodes will change so we
-            // need to update them to keep them in place.
-            for (const child of scopeChildren) {
-              scopeChanges.push({
-                type: 'position',
-                id: child.id,
-                position: {
-                  x: child.position.x - calculatedBounds.x,
-                  y: child.position.y - calculatedBounds.y,
-                },
-              });
-            }
-            // changePosition.x -= Math.round(calculatedBounds.x);
-            // changePosition.y -= Math.round(calculatedBounds.y);
-          }
-        }
-
-        return applyNodeChanges([...changes, ...scopeChanges], prev);
-      });
-
-      // clean up dangling edges when a node is removed.
+      // resize and reposition scope
       for (const change of changes) {
-        if (change.type !== 'remove') {
+        const changeIdPos = getChangeParentIdAndPosition(reactFlow, change);
+        if (!changeIdPos) {
+          continue;
+        }
+        const [changeId, changeParentId, changePosition] = changeIdPos;
+        if (!changeParentId) {
           continue;
         }
 
-        const edgeChanges: EdgeRemoveChange[] = [];
-        for (const edge of reactFlowInstance.current?.getEdges() || []) {
-          if (edge.source === change.id || edge.target === change.id) {
-            edgeChanges.push({
-              type: 'remove',
-              id: edge.id,
+        const scopeNode = reactFlow.getNode(changeParentId);
+        if (!scopeNode) {
+          continue;
+        }
+        const scopeChildren = reactFlow
+          .getNodes()
+          .filter((n) => n.parentId === changeParentId && n.id !== changeId);
+        const calculatedBounds = calculateScopeBounds([
+          ...scopeChildren.map((n) => n.position),
+          {
+            // react flow does some kind of rounding (or maybe it is due to floating point accuracies)
+            // that results in gitches when resizing a scope quickly. This rounding reduces the
+            // impact of the glitches.
+            x: Math.round(changePosition.x),
+            y: Math.round(changePosition.y),
+          },
+        ]);
+
+        const newScopeBounds = {
+          x: scopeNode.position.x,
+          y: scopeNode.position.y,
+          width: scopeNode.width ?? calculatedBounds.width,
+          height: scopeNode.height ?? calculatedBounds.height,
+        };
+        // React Flow cannot handle fast changing of a parent's position while changing the
+        // children's position as well (some kind of race condition that causes the node positions to jump around).
+        // Workaround by resizing the scope only if it hits a certain threshold.
+        if (
+          Math.abs(calculatedBounds.x) >
+            LAYOUT_OPTIONS.scopePadding.leftRight ||
+          Math.abs(calculatedBounds.y) >
+            LAYOUT_OPTIONS.scopePadding.topBottom ||
+          (scopeNode.width &&
+            Math.abs(calculatedBounds.width - scopeNode.width) >
+              LAYOUT_OPTIONS.scopePadding.leftRight) ||
+          (scopeNode.height &&
+            Math.abs(calculatedBounds.height - scopeNode.height) >
+              LAYOUT_OPTIONS.scopePadding.topBottom)
+        ) {
+          newScopeBounds.x += calculatedBounds.x;
+          newScopeBounds.width = calculatedBounds.width;
+          newScopeBounds.y += calculatedBounds.y;
+          newScopeBounds.height = calculatedBounds.height;
+        }
+
+        if (
+          newScopeBounds.x !== scopeNode.position.x ||
+          newScopeBounds.y !== scopeNode.position.y ||
+          newScopeBounds.width !== scopeNode.width ||
+          newScopeBounds.height !== scopeNode.height
+        ) {
+          transitiveChanges.push({
+            type: 'position',
+            id: changeParentId,
+            position: {
+              x: newScopeBounds.x,
+              y: newScopeBounds.y,
+            },
+          });
+          transitiveChanges.push({
+            type: 'dimensions',
+            id: changeParentId,
+            dimensions: {
+              width: newScopeBounds.width,
+              height: newScopeBounds.height,
+            },
+            setAttributes: true,
+          });
+          // when the scope is moved, the relative position of the nodes will change so we
+          // need to update them to keep them in place.
+          for (const child of scopeChildren) {
+            transitiveChanges.push({
+              type: 'position',
+              id: child.id,
+              position: {
+                x: child.position.x - calculatedBounds.x,
+                y: child.position.y - calculatedBounds.y,
+              },
             });
           }
+          // changePosition.x -= Math.round(calculatedBounds.x);
+          // changePosition.y -= Math.round(calculatedBounds.y);
         }
-        handleEdgeChanges(edgeChanges);
       }
+
+      // remove children nodes of a removed parent
+      const removedNodes = new Set(
+        changes
+          .filter((change) => change.type === 'remove')
+          .map((change) => change.id),
+      );
+      while (true) {
+        let newChanges = false;
+        for (const node of reactFlow.getNodes()) {
+          if (
+            node.parentId &&
+            removedNodes.has(node.parentId) &&
+            !removedNodes.has(node.id)
+          ) {
+            transitiveChanges.push({
+              type: 'remove',
+              id: node.id,
+            });
+            removedNodes.add(node.id);
+            newChanges = true;
+          }
+        }
+        if (!newChanges) {
+          break;
+        }
+      }
+
+      // clean up dangling edges when a node is removed.
+      const edgeChanges: EdgeRemoveChange[] = [];
+      for (const edge of reactFlowInstance.current?.getEdges() || []) {
+        if (removedNodes.has(edge.source) || removedNodes.has(edge.target)) {
+          edgeChanges.push({
+            type: 'remove',
+            id: edge.id,
+          });
+        }
+      }
+      handleEdgeChanges(edgeChanges);
+
+      setNodes((prev) =>
+        applyNodeChanges([...changes, ...transitiveChanges], prev),
+      );
     },
     [handleEdgeChanges],
   );
