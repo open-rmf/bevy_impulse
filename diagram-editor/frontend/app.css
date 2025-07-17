@@ -8,3 +8,16 @@
 .react-flow__pane.dragging {
   cursor: grabbing;
 }
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  z-index: 10;
+}
+.react-flow__handle::before {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  left: -150%;
+  top: -100%;
+}
