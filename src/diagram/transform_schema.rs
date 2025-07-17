@@ -41,6 +41,48 @@ pub enum TransformError {
     Other(#[from] Box<dyn Error + Send + Sync + 'static>),
 }
 
+/// If the request is serializable, transform it by running it through a [CEL](https://cel.dev/) program.
+/// The context includes a "request" variable which contains the input message.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "transform",
+///     "ops": {
+///         "transform": {
+///             "type": "transform",
+///             "cel": "request.name",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
+///
+/// Note that due to how `serde_json` performs serialization, positive integers are always
+/// serialized as unsigned. In CEL, You can't do an operation between unsigned and signed so
+/// it is recommended to always perform explicit casts.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "transform",
+///     "ops": {
+///         "transform": {
+///             "type": "transform",
+///             "cel": "int(request.score) * 3",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct TransformSchema {

@@ -30,6 +30,31 @@ pub struct DynForkResult {
     pub err: DynOutput,
 }
 
+/// If the request is a [`Result<T, E>`], send the output message down an
+/// `ok` branch or down an `err` branch depending on whether the result has
+/// an [`Ok`] or [`Err`] value. The `ok` branch will receive a `T` while the
+/// `err` branch will receive an `E`.
+///
+/// Only one branch will be activated by each input message that enters the
+/// operation.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "fork_result",
+///     "ops": {
+///         "fork_result": {
+///             "type": "fork_result",
+///             "ok": { "builtin": "terminate" },
+///             "err": { "builtin": "dispose" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ForkResultSchema {

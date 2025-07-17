@@ -25,6 +25,76 @@ use super::{
     NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
+/// Create a [`Buffer`][1] which can be used to store and pull data within
+/// a scope.
+///
+/// By default the [`BufferSettings`][2] will keep the single last message
+/// pushed to the buffer. You can change that with the optional `settings`
+/// property.
+///
+/// Use the `"serialize": true` option to serialize the messages into
+/// [`JsonMessage`] before they are inserted into the buffer. This
+/// allows any serializable message type to be pushed into the buffer. If
+/// left unspecified, the buffer will store the specific data type that gets
+/// pushed into it. If the buffer inputs are not being serialized, then all
+/// incoming messages being pushed into the buffer must have the same type.
+///
+/// [1]: crate::Buffer
+/// [2]: crate::BufferSettings
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "fork_clone",
+///     "ops": {
+///         "fork_clone": {
+///             "type": "fork_clone",
+///             "next": ["num_output", "string_output", "all_num_buffer", "serialized_num_buffer"]
+///         },
+///         "num_output": {
+///             "type": "node",
+///             "builder": "num_output",
+///             "next": "buffer_access"
+///         },
+///         "string_output": {
+///             "type": "node",
+///             "builder": "string_output",
+///             "next": "string_buffer"
+///         },
+///         "string_buffer": {
+///             "type": "buffer",
+///             "settings": {
+///                 "retention": { "keep_last": 10 }
+///             }
+///         },
+///         "all_num_buffer": {
+///             "type": "buffer",
+///             "settings": {
+///                 "retention": "keep_all"
+///             }
+///         },
+///         "serialized_num_buffer": {
+///             "type": "buffer",
+///             "serialize": true
+///         },
+///         "buffer_access": {
+///             "type": "buffer_access",
+///             "buffers": ["string_buffer"],
+///             "target_node": "with_buffer_access",
+///             "next": "with_buffer_access"
+///         },
+///         "with_buffer_access": {
+///             "type": "node",
+///             "builder": "with_buffer_access",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BufferSchema {
     #[serde(default)]
@@ -71,6 +141,53 @@ impl BuildDiagramOperation for BufferSchema {
     }
 }
 
+/// Zip a message together with access to one or more buffers.
+///
+/// The receiving node must have an input type of `(Message, Keys)`
+/// where `Keys` implements the [`Accessor`][1] trait.
+///
+/// [1]: crate::Accessor
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "fork_clone",
+///     "ops": {
+///         "fork_clone": {
+///             "type": "fork_clone",
+///             "next": ["num_output", "string_output"]
+///         },
+///         "num_output": {
+///             "type": "node",
+///             "builder": "num_output",
+///             "next": "buffer_access"
+///         },
+///         "string_output": {
+///             "type": "node",
+///             "builder": "string_output",
+///             "next": "string_buffer"
+///         },
+///         "string_buffer": {
+///             "type": "buffer"
+///         },
+///         "buffer_access": {
+///             "type": "buffer_access",
+///             "buffers": ["string_buffer"],
+///             "target_node": "with_buffer_access",
+///             "next": "with_buffer_access"
+///         },
+///         "with_buffer_access": {
+///             "type": "node",
+///             "builder": "with_buffer_access",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct BufferAccessSchema {
@@ -126,6 +243,38 @@ where
     type BufferKeys = B;
 }
 
+/// Listen on a buffer.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "num_output",
+///     "ops": {
+///         "buffer": {
+///             "type": "buffer"
+///         },
+///         "num_output": {
+///             "type": "node",
+///             "builder": "num_output",
+///             "next": "buffer"
+///         },
+///         "listen": {
+///             "type": "listen",
+///             "buffers": ["buffer"],
+///             "target_node": "listen_buffer",
+///             "next": "listen_buffer"
+///         },
+///         "listen_buffer": {
+///             "type": "node",
+///             "builder": "listen_buffer",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ListenSchema {

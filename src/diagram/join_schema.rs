@@ -24,6 +24,60 @@ use super::{
     JsonMessage, NextOperation, OperationName,
 };
 
+/// Wait for exactly one item to be available in each buffer listed in
+/// `buffers`, then join each of those items into a single output message
+/// that gets sent to `next`.
+///
+/// If the `next` operation is not a `node` type (e.g. `fork_clone`) then
+/// you must specify a `target_node` so that the diagram knows what data
+/// structure to join the values into.
+///
+/// The output message type must be registered as joinable at compile time.
+/// If you want to join into a dynamic data structure then you should use
+/// [`DiagramOperation::SerializedJoin`] instead.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "begin_measuring",
+///     "ops": {
+///         "begin_measuring": {
+///             "type": "fork_clone",
+///             "next": ["localize", "imu"]
+///         },
+///         "localize": {
+///             "type": "node",
+///             "builder": "localize",
+///             "next": "estimated_position"
+///         },
+///         "imu": {
+///             "type": "node",
+///             "builder": "imu",
+///             "config": "velocity",
+///             "next": "estimated_velocity"
+///         },
+///         "estimated_position": { "type": "buffer" },
+///         "estimated_velocity": { "type": "buffer" },
+///         "gather_state": {
+///             "type": "join",
+///             "buffers": {
+///                 "position": "estimate_position",
+///                 "velocity": "estimate_velocity"
+///             },
+///             "next": "report_state"
+///         },
+///         "report_state": {
+///             "type": "node",
+///             "builder": "publish_state",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct JoinSchema {
@@ -63,6 +117,15 @@ impl BuildDiagramOperation for JoinSchema {
     }
 }
 
+/// Same as [`DiagramOperation::Join`] but all input messages must be
+/// serializable, and the output message will always be [`serde_json::Value`].
+///
+/// If you use an array for `buffers` then the output message will be a
+/// [`serde_json::Value::Array`]. If you use a map for `buffers` then the
+/// output message will be a [`serde_json::Value::Object`].
+///
+/// Unlike [`DiagramOperation::Join`], the `target_node` property does not
+/// exist for this schema.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SerializedJoinSchema {

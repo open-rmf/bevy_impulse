@@ -25,6 +25,48 @@ use super::{
     TraceSettings,
 };
 
+/// Create an operation that that takes an input message and produces an
+/// output message.
+///
+/// The behavior is determined by the choice of node `builder` and
+/// optioanlly the `config` that you provide. Each type of node builder has
+/// its own schema for the config.
+///
+/// The output message will be sent to the operation specified by `next`.
+///
+/// TODO(@mxgrey): [Support stream outputs](https://github.com/open-rmf/bevy_impulse/issues/43)
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "cutting_board",
+///     "ops": {
+///         "cutting_board": {
+///             "type": "node",
+///             "builder": "chop",
+///             "config": "diced",
+///             "next": "bowl"
+///         },
+///         "bowl": {
+///             "type": "node",
+///             "builder": "stir",
+///             "next": "oven"
+///         },
+///         "oven": {
+///             "type": "node",
+///             "builder": "bake",
+///             "config": {
+///                 "temperature": 200,
+///                 "duration": 120
+///             },
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NodeSchema {

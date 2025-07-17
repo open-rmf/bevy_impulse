@@ -32,6 +32,71 @@ use super::{
     PerformForkClone, SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
+/// If the input message is a list-like or map-like object, split it into
+/// multiple output messages.
+///
+/// Note that the type of output message from the split depends on how the
+/// input message implements the [`Splittable`][1] trait. In many cases this
+/// will be a tuple of `(key, value)`.
+///
+/// There are three ways to specify where the split output messages should
+/// go, and all can be used at the same time:
+/// * `sequential` - For array-like collections, send the "first" element of
+///   the collection to the first operation listed in the `sequential` array.
+///   The "second" element of the collection goes to the second operation
+///   listed in the `sequential` array. And so on for all elements in the
+///   collection. If one of the elements in the collection is mentioned in
+///   the `keyed` set, then the sequence will pass over it as if the element
+///   does not exist at all.
+/// * `keyed` - For map-like collections, send the split element associated
+///   with the specified key to its associated output.
+/// * `remaining` - Any elements that are were not captured by `sequential`
+///   or by `keyed` will be sent to this.
+///
+/// [1]: crate::Splittable
+///
+/// # Examples
+///
+/// Suppose I am an animal rescuer sorting through a new collection of
+/// animals that need recuing. My home has space for three exotic animals
+/// plus any number of dogs and cats.
+///
+/// I have a custom `SpeciesCollection` data structure that implements
+/// [`Splittable`][1] by allowing you to key on the type of animal.
+///
+/// In the workflow below, we send all cats and dogs to `home`, and we also
+/// send the first three non-dog and non-cat species to `home`. All
+/// remaining animals go to the zoo.
+///
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "select_animals",
+///     "ops": {
+///         "select_animals": {
+///             "type": "split",
+///             "sequential": [
+///                 "home",
+///                 "home",
+///                 "home"
+///             ],
+///             "keyed": {
+///                 "cat": "home",
+///                 "dog": "home"
+///             },
+///             "remaining": "zoo"
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
+///
+/// If we input `["frog", "cat", "bear", "beaver", "dog", "rabbit", "dog", "monkey"]`
+/// then `frog`, `bear`, and `beaver` will be sent to `home` since those are
+/// the first three animals that are not `dog` or `cat`, and we will also
+/// send one `cat` and two `dog` home. `rabbit` and `monkey` will be sent to the zoo.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SplitSchema {

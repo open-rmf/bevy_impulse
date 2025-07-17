@@ -38,6 +38,60 @@ pub enum SectionProvider {
     Template(OperationName),
 }
 
+/// Connect the request to a registered section.
+///
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "section_op",
+///     "ops": {
+///         "section_op": {
+///             "type": "section",
+///             "builder": "my_section_builder",
+///             "connect": {
+///                 "my_section_output": { "builtin": "terminate" }
+///             }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
+///
+/// Custom sections can also be created via templates
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "templates": {
+///         "my_template": {
+///             "inputs": ["section_input"],
+///             "outputs": ["section_output"],
+///             "buffers": [],
+///             "ops": {
+///                 "section_input": {
+///                     "type": "node",
+///                     "builder": "my_node",
+///                     "next": "section_output"
+///                 }
+///             }
+///         }
+///     },
+///     "start": "section_op",
+///     "ops": {
+///         "section_op": {
+///             "type": "section",
+///             "template": "my_template",
+///             "connect": {
+///                 "section_output": { "builtin": "terminate" }
+///             }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SectionSchema {

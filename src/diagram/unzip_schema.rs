@@ -27,6 +27,61 @@ use super::{
     SerializeMessage, TraceInfo, TraceSettings, TypeInfo,
 };
 
+/// If the input message is a tuple of (T1, T2, T3, ...), unzip it into
+/// multiple output messages of T1, T2, T3, ...
+///
+/// Each output message may have a different type and can be sent to a
+/// different operation. This creates multiple simultaneous branches of
+/// execution within the workflow. See [`DiagramOperation::ForkClone`] for
+/// more information on parallel branches.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "name_phone_address",
+///     "ops": {
+///         "name_phone_address": {
+///             "type": "unzip",
+///             "next": [
+///                 "process_name",
+///                 "process_phone_number",
+///                 "process_address"
+///             ]
+///         },
+///         "process_name": {
+///             "type": "node",
+///             "builder": "process_name",
+///             "next": "name_processed"
+///         },
+///         "process_phone_number": {
+///             "type": "node",
+///             "builder": "process_phone_number",
+///             "next": "phone_number_processed"
+///         },
+///         "process_address": {
+///             "type": "node",
+///             "builder": "process_address",
+///             "next": "address_processed"
+///         },
+///         "name_processed": { "type": "buffer" },
+///         "phone_number_processed": { "type": "buffer" },
+///         "address_processed": { "type": "buffer" },
+///         "finished": {
+///             "type": "join",
+///             "buffers": [
+///                 "name_processed",
+///                 "phone_number_processed",
+///                 "address_processed"
+///             ],
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UnzipSchema {
