@@ -10,20 +10,20 @@ use crate::{
 
 use super::{Diagram, DiagramElementRegistry, DiagramError, NodeBuilderOptions};
 
-pub(super) struct DiagramTestFixture {
-    pub(super) context: TestingContext,
-    pub(super) registry: DiagramElementRegistry,
+pub(crate) struct DiagramTestFixture {
+    pub(crate) context: TestingContext,
+    pub(crate) registry: DiagramElementRegistry,
 }
 
 impl DiagramTestFixture {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             context: TestingContext::minimal_plugins(),
             registry: new_registry_with_basic_nodes(),
         }
     }
 
-    pub(super) fn spawn_json_io_workflow(
+    pub(crate) fn spawn_json_io_workflow(
         &mut self,
         diagram: &Diagram,
     ) -> Result<Service<JsonMessage, JsonMessage>, DiagramError> {
@@ -31,7 +31,7 @@ impl DiagramTestFixture {
     }
 
     /// Equivalent to `self.spawn_workflow::<JsonMessage, JsonMessage>(diagram)`
-    pub(super) fn spawn_io_workflow<Request, Response>(
+    pub(crate) fn spawn_io_workflow<Request, Response>(
         &mut self,
         diagram: &Diagram,
     ) -> Result<Service<Request, Response, ()>, DiagramError>

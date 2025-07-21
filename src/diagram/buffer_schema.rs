@@ -18,27 +18,99 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Accessor, BufferSettings, Builder, JsonMessage};
+use crate::{Accessor, BufferSettings, JsonMessage};
 
 use super::{
     BufferSelection, BuildDiagramOperation, BuildStatus, DiagramContext, DiagramErrorCode,
-    NextOperation, OperationName, TypeInfo,
+    NextOperation, OperationName, TraceInfo, TraceSettings, TypeInfo,
 };
 
+/// Create a [`Buffer`][1] which can be used to store and pull data within
+/// a scope.
+///
+/// By default the [`BufferSettings`][2] will keep the single last message
+/// pushed to the buffer. You can change that with the optional `settings`
+/// property.
+///
+/// Use the `"serialize": true` option to serialize the messages into
+/// [`JsonMessage`] before they are inserted into the buffer. This
+/// allows any serializable message type to be pushed into the buffer. If
+/// left unspecified, the buffer will store the specific data type that gets
+/// pushed into it. If the buffer inputs are not being serialized, then all
+/// incoming messages being pushed into the buffer must have the same type.
+///
+/// [1]: crate::Buffer
+/// [2]: crate::BufferSettings
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "fork_clone",
+///     "ops": {
+///         "fork_clone": {
+///             "type": "fork_clone",
+///             "next": ["num_output", "string_output", "all_num_buffer", "serialized_num_buffer"]
+///         },
+///         "num_output": {
+///             "type": "node",
+///             "builder": "num_output",
+///             "next": "buffer_access"
+///         },
+///         "string_output": {
+///             "type": "node",
+///             "builder": "string_output",
+///             "next": "string_buffer"
+///         },
+///         "string_buffer": {
+///             "type": "buffer",
+///             "settings": {
+///                 "retention": { "keep_last": 10 }
+///             }
+///         },
+///         "all_num_buffer": {
+///             "type": "buffer",
+///             "settings": {
+///                 "retention": "keep_all"
+///             }
+///         },
+///         "serialized_num_buffer": {
+///             "type": "buffer",
+///             "serialize": true
+///         },
+///         "buffer_access": {
+///             "type": "buffer_access",
+///             "buffers": ["string_buffer"],
+///             "target_node": "with_buffer_access",
+///             "next": "with_buffer_access"
+///         },
+///         "with_buffer_access": {
+///             "type": "node",
+///             "builder": "with_buffer_access",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct BufferSchema {
     #[serde(default)]
-    pub(super) settings: BufferSettings,
+    pub settings: BufferSettings,
 
     /// If true, messages will be serialized before sending into the buffer.
-    pub(super) serialize: Option<bool>,
+    pub serialize: Option<bool>,
+
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for BufferSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let message_info = if self.serialize.is_some_and(|v| v) {
@@ -57,29 +129,81 @@ impl BuildDiagramOperation for BufferSchema {
             inferred_type
         };
 
-        let buffer =
-            ctx.registry
-                .messages
-                .create_buffer(&message_info, self.settings.clone(), builder)?;
-        ctx.set_buffer_for_operation(id, buffer)?;
+        let buffer = ctx.registry.messages.create_buffer(
+            &message_info,
+            self.settings.clone(),
+            ctx.builder,
+        )?;
+
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
+        ctx.set_buffer_for_operation(id, buffer, trace)?;
         Ok(BuildStatus::Finished)
     }
 }
 
+/// Zip a message together with access to one or more buffers.
+///
+/// The receiving node must have an input type of `(Message, Keys)`
+/// where `Keys` implements the [`Accessor`][1] trait.
+///
+/// [1]: crate::Accessor
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "fork_clone",
+///     "ops": {
+///         "fork_clone": {
+///             "type": "fork_clone",
+///             "next": ["num_output", "string_output"]
+///         },
+///         "num_output": {
+///             "type": "node",
+///             "builder": "num_output",
+///             "next": "buffer_access"
+///         },
+///         "string_output": {
+///             "type": "node",
+///             "builder": "string_output",
+///             "next": "string_buffer"
+///         },
+///         "string_buffer": {
+///             "type": "buffer"
+///         },
+///         "buffer_access": {
+///             "type": "buffer_access",
+///             "buffers": ["string_buffer"],
+///             "target_node": "with_buffer_access",
+///             "next": "with_buffer_access"
+///         },
+///         "with_buffer_access": {
+///             "type": "node",
+///             "builder": "with_buffer_access",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct BufferAccessSchema {
-    pub(super) next: NextOperation,
+    pub next: NextOperation,
 
     /// Map of buffer keys and buffers.
-    pub(super) buffers: BufferSelection,
+    pub buffers: BufferSelection,
+
+    #[serde(flatten)]
+    pub trace_settings: TraceSettings,
 }
 
 impl BuildDiagramOperation for BufferAccessSchema {
     fn build_diagram_operation(
         &self,
         id: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
@@ -93,11 +217,13 @@ impl BuildDiagramOperation for BufferAccessSchema {
             Err(reason) => return Ok(BuildStatus::defer(reason)),
         };
 
-        let node = ctx
-            .registry
-            .messages
-            .with_buffer_access(&target_type, &buffer_map, builder)?;
-        ctx.set_input_for_target(id, node.input)?;
+        let node =
+            ctx.registry
+                .messages
+                .with_buffer_access(&target_type, &buffer_map, ctx.builder)?;
+
+        let trace = TraceInfo::new(self, self.trace_settings.trace)?;
+        ctx.set_input_for_target(id, node.input, trace)?;
         ctx.add_output_into_target(&self.next, node.output);
         Ok(BuildStatus::Finished)
     }
@@ -117,6 +243,38 @@ where
     type BufferKeys = B;
 }
 
+/// Listen on a buffer.
+///
+/// # Examples
+/// ```
+/// # bevy_impulse::Diagram::from_json_str(r#"
+/// {
+///     "version": "0.1.0",
+///     "start": "num_output",
+///     "ops": {
+///         "buffer": {
+///             "type": "buffer"
+///         },
+///         "num_output": {
+///             "type": "node",
+///             "builder": "num_output",
+///             "next": "buffer"
+///         },
+///         "listen": {
+///             "type": "listen",
+///             "buffers": ["buffer"],
+///             "target_node": "listen_buffer",
+///             "next": "listen_buffer"
+///         },
+///         "listen_buffer": {
+///             "type": "node",
+///             "builder": "listen_buffer",
+///             "next": { "builtin": "terminate" }
+///         }
+///     }
+/// }
+/// # "#)?;
+/// # Ok::<_, serde_json::Error>(())
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ListenSchema {
@@ -133,9 +291,10 @@ impl BuildDiagramOperation for ListenSchema {
     fn build_diagram_operation(
         &self,
         _: &OperationName,
-        builder: &mut Builder,
         ctx: &mut DiagramContext,
     ) -> Result<BuildStatus, DiagramErrorCode> {
+        // TODO(@mxgrey): Figure out how to enable tracing for listen operations
+
         let Some(target_type) = ctx.infer_input_type_into_target(&self.next)? else {
             return Ok(BuildStatus::defer(
                 "waiting to find out target message type",
@@ -150,7 +309,7 @@ impl BuildDiagramOperation for ListenSchema {
         let output = ctx
             .registry
             .messages
-            .listen(&target_type, &buffer_map, builder)?;
+            .listen(&target_type, &buffer_map, ctx.builder)?;
         ctx.add_output_into_target(&self.next, output);
         Ok(BuildStatus::Finished)
     }

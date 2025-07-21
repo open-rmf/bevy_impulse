@@ -24,11 +24,15 @@
       "additionalProperties": {
         "$ref": "#/$defs/SectionRegistration"
       }
+    },
+    "trace_supported": {
+      "type": "boolean"
     }
   },
   "required": [
     "nodes",
     "sections",
+    "trace_supported",
     "messages",
     "schemas"
   ],
@@ -114,7 +118,8 @@
         "config_schema": {
           "$ref": "#/$defs/Schema"
         },
-        "name": {
+        "default_display_text": {
+          "description": "If the user does not specify a default display text, the node ID will\n be used here.",
           "type": "string"
         },
         "request": {
@@ -125,7 +130,7 @@
         }
       },
       "required": [
-        "name",
+        "default_display_text",
         "request",
         "response",
         "config_schema"
@@ -204,15 +209,15 @@
         "config_schema": {
           "$ref": "#/$defs/Schema"
         },
+        "default_display_text": {
+          "type": "string"
+        },
         "metadata": {
           "$ref": "#/$defs/SectionMetadata"
-        },
-        "name": {
-          "type": "string"
         }
       },
       "required": [
-        "name",
+        "default_display_text",
         "metadata",
         "config_schema"
       ]
