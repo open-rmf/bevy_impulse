@@ -8,11 +8,12 @@ import {
 } from 'react';
 import { from, timer } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import registrySchema from './registry.preprocessed.schema.json';
 import type { DiagramElementRegistry } from './types';
-import ajv from './utils/ajv';
+import { getSchema } from './utils/ajv';
 
-const validateRegistry = ajv.compile<DiagramElementRegistry>(registrySchema);
+const validateRegistry = getSchema<DiagramElementRegistry>(
+  'DiagramElementRegistry',
+);
 
 const RegistryContext = createContext<DiagramElementRegistry | null>(null);
 

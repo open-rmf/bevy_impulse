@@ -1,2 +1,6 @@
 packages:
-  - "diagram-editor"
+  - diagram-editor
+
+onlyBuiltDependencies:
+  - core-js
+  - esbuild

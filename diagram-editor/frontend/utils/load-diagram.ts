@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import diagramSchema from '../diagram.preprocessed.schema.json';
 import { START_ID, TERMINATE_ID } from '../nodes';
 import type {
   Diagram,
@@ -7,7 +6,7 @@ import type {
   DiagramEditorNode,
   DiagramOperation,
 } from '../types';
-import ajv from './ajv';
+import { getSchema } from './ajv';
 import { LAYOUT_OPTIONS } from './layout';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import { buildEdges, isBuiltin, isOperationNode } from './operation';
@@ -155,4 +154,4 @@ function buildGraph(diagram: Diagram): Graph {
   return graph;
 }
 
-const validate = ajv.compile<Diagram>(diagramSchema);
+const validate = getSchema<Diagram>('Diagram');
