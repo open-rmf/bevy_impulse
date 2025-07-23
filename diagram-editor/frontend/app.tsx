@@ -18,7 +18,7 @@ const theme = createTheme({
 const App = () => {
   return (
     <ThemeProvider theme={theme}>
-      <CssBaseline />
+      <CssBaseline enableColorScheme />
       <div style={{ width: '100vw', height: '100vh' }}>
         <RegistryProvider>
           <DiagramEditor />
