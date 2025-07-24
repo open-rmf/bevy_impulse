@@ -1,9 +1,12 @@
 import {
   Alert,
+  alpha,
+  darken,
   Popover,
   type PopoverPosition,
   type PopoverProps,
   Snackbar,
+  useTheme,
 } from '@mui/material';
 import {
   addEdge,
@@ -24,16 +27,19 @@ import React from 'react';
 import AddOperation from './add-operation';
 import CommandPanel from './command-panel';
 import { EDGE_TYPES } from './edges';
+import { EditorMode, useEditorMode } from './editor-mode';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
 import { NODE_TYPES } from './nodes';
+import { useTemplates } from './templates-provider';
 import type {
   DiagramEditorEdge,
   DiagramEditorNode,
   OperationNode,
 } from './types';
 import {
+  exhaustiveCheck,
   allowEdges as getAllowEdges,
   isOperationNode,
   joinNamespaces,
@@ -42,7 +48,6 @@ import {
 import { autoLayout } from './utils/auto-layout';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
-import { useTemplates } from './templates-provider';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -94,11 +99,40 @@ const DiagramEditor = () => {
     DiagramEditorEdge
   > | null>(null);
 
+  const [editorMode] = useEditorMode();
+
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
+  const [templateNodes, setTemplateNodes] =
+    React.useState<DiagramEditorNode[]>();
+  const renderedNodes = React.useMemo(() => {
+    switch (editorMode.mode) {
+      case EditorMode.Normal:
+        return nodes;
+      case EditorMode.Template:
+        return templateNodes;
+      default:
+        exhaustiveCheck(editorMode);
+        throw new Error('unknown editor mode');
+    }
+  }, [editorMode, nodes, templateNodes]);
 
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
+  const [templateEdges, setTemplateEdges] =
+    React.useState<DiagramEditorEdge[]>();
+  const renderedEdges = React.useMemo(() => {
+    switch (editorMode.mode) {
+      case EditorMode.Normal:
+        return edges;
+      case EditorMode.Template:
+        return templateEdges;
+      default:
+        exhaustiveCheck(editorMode);
+        throw new Error('unknown editor mode');
+    }
+  }, [editorMode, edges, templateEdges]);
+
   const handleEdgeChanges = React.useCallback(
     (changes: EdgeChange<DiagramEditorEdge>[]) => {
       setEdges((prev) => applyEdgeChanges(changes, prev));
@@ -107,6 +141,20 @@ const DiagramEditor = () => {
   );
 
   const [_, setTemplates] = useTemplates();
+
+  const theme = useTheme();
+
+  const backgroundColor = React.useMemo(() => {
+    switch (editorMode.mode) {
+      case EditorMode.Normal:
+        return theme.palette.background.default;
+      case EditorMode.Template:
+        return darken(theme.palette.primary.main, 0.8);
+      default:
+        exhaustiveCheck(editorMode);
+        throw new Error('unknown editor mode');
+    }
+  }, [editorMode, theme]);
 
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<DiagramEditorNode>[]) => {
@@ -416,8 +464,8 @@ const DiagramEditor = () => {
   return (
     <>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={renderedNodes}
+        edges={renderedEdges}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         nodeTypes={NODE_TYPES}
@@ -541,7 +589,11 @@ const DiagramEditor = () => {
         colorMode="dark"
         deleteKeyCode={'Delete'}
       >
-        <Background style={{ opacity: 0.5 }} />
+        <Background
+          bgColor={backgroundColor}
+          color={alpha(theme.palette.text.primary, 0.3)}
+          gap={30}
+        />
         <CommandPanel
           onNodeChanges={handleNodeChanges}
           onExportClick={React.useCallback(

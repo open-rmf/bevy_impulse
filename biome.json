@@ -38,7 +38,10 @@
         "useExhaustiveDependencies": {
           "level": "error",
           "options": {
-            "hooks": [{ "name": "useTemplates", "stableResult": [1] }]
+            "hooks": [
+              { "name": "useEditorMode", "stableResult": [1] },
+              { "name": "useTemplates", "stableResult": [1] }
+            ]
           }
         }
       }

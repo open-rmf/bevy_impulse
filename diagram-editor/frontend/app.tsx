@@ -7,6 +7,7 @@ import { CssBaseline, createTheme, ThemeProvider } from '@mui/material';
 
 import './app.css';
 import DiagramEditor from './diagram-editor';
+import { EditorModeProvider } from './editor-mode';
 import { RegistryProvider } from './registry-provider';
 import { TemplatesProvider } from './templates-provider';
 
@@ -23,7 +24,9 @@ const App = () => {
       <div style={{ width: '100vw', height: '100vh' }}>
         <RegistryProvider>
           <TemplatesProvider>
-            <DiagramEditor />
+            <EditorModeProvider>
+              <DiagramEditor />
+            </EditorModeProvider>
           </TemplatesProvider>
         </RegistryProvider>
       </div>
