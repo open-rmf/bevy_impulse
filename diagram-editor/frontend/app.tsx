@@ -8,6 +8,7 @@ import { CssBaseline, createTheme, ThemeProvider } from '@mui/material';
 import './app.css';
 import DiagramEditor from './diagram-editor';
 import { RegistryProvider } from './registry-provider';
+import { TemplatesProvider } from './templates-provider';
 
 const theme = createTheme({
   palette: {
@@ -21,7 +22,9 @@ const App = () => {
       <CssBaseline enableColorScheme />
       <div style={{ width: '100vw', height: '100vh' }}>
         <RegistryProvider>
-          <DiagramEditor />
+          <TemplatesProvider>
+            <DiagramEditor />
+          </TemplatesProvider>
         </RegistryProvider>
       </div>
     </ThemeProvider>

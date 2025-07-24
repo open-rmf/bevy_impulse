@@ -5,6 +5,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   List,
   ListItem,
   ListItemText,
@@ -16,30 +17,56 @@ import {
 } from '@mui/material';
 import React from 'react';
 import { MaterialSymbol } from './nodes/icons';
-import { useTemplates } from './registry-provider';
-import { SectionRegistration } from './types';
+import { useTemplates } from './templates-provider';
+import type { SectionTemplate } from './types';
 
 export interface EditTemplatesDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
+interface RenamingState {
+  target: string;
+  selectAll?: boolean;
+  scrollTo?: boolean;
+}
+
 function EditTemplatesDialog({ open, onClose }: EditTemplatesDialogProps) {
   const theme = useTheme();
-  const { templates, setTemplates } = useTemplates();
+  const [templates, setTemplates] = useTemplates();
   const templateKeys = Object.keys(templates);
-  templateKeys.push('test');
-  const [renaming, setRenaming] = React.useState<string | null>(null);
+  const [renaming, setRenaming] = React.useState<RenamingState | null>(null);
   const [newId, setNewId] = React.useState('');
-  const renamingRef = React.useRef<HTMLElement>(null);
+  const renamingRef = React.useRef<HTMLInputElement>(null);
 
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     if (!renamingRef.current || !renaming) {
       return;
     }
 
     renamingRef.current.focus();
+    if (renaming.selectAll) {
+      renamingRef.current.select();
+    }
+    if (renaming.scrollTo) {
+      renamingRef.current.scrollTo({ behavior: 'smooth' });
+    }
   }, [renaming]);
+
+  const handleSubmitRenaming = () => {
+    const newTemplates: Record<string, SectionTemplate> = {};
+    // rebuild the templates in a way that keeps ordering
+    for (const [id, template] of Object.entries(templates)) {
+      if (id === renaming?.target) {
+        newTemplates[newId] = template;
+      } else {
+        newTemplates[id] = template;
+      }
+    }
+    setRenaming(null);
+    setNewId('');
+    setTemplates(newTemplates);
+  };
 
   return (
     <Dialog
@@ -62,51 +89,34 @@ function EditTemplatesDialog({ open, onClose }: EditTemplatesDialogProps) {
                     width="100%"
                     height="3em"
                   >
-                    {renaming === id ? (
+                    {renaming?.target === id ? (
                       <ListItemText>
-                        <TextField
-                          size="small"
-                          fullWidth
-                          value={newId}
-                          onChange={(ev) => {
-                            setNewId(ev.target.value);
-                          }}
-                          inputRef={renamingRef}
-                        />
+                        <form onSubmit={handleSubmitRenaming}>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={newId}
+                            onChange={(ev) => {
+                              setNewId(ev.target.value);
+                            }}
+                            inputRef={renamingRef}
+                            onSubmit={handleSubmitRenaming}
+                          />
+                        </form>
                       </ListItemText>
                     ) : (
                       <ListItemText>{id}</ListItemText>
                     )}
                     <ButtonGroup variant="contained">
-                      {renaming === id ? (
-                        <Button
-                          onClick={() => {
-                            const newTemplates: Record<
-                              string,
-                              SectionRegistration
-                            > = {};
-                            // rebuild the templates in a way that keeps ordering
-                            for (const [id, template] of Object.entries(
-                              templates,
-                            )) {
-                              if (id === renaming) {
-                                newTemplates[newId] = template;
-                              } else {
-                                newTemplates[id] = template;
-                              }
-                            }
-                            setRenaming(null);
-                            setNewId('');
-                            setTemplates(newTemplates);
-                          }}
-                        >
+                      {renaming?.target === id ? (
+                        <Button onClick={handleSubmitRenaming}>
                           <MaterialSymbol symbol="check" />
                         </Button>
                       ) : (
                         <Tooltip title="Rename">
                           <Button
                             onClick={() => {
-                              setRenaming(id);
+                              setRenaming({ target: id });
                               setNewId(id);
                             }}
                           >
@@ -122,7 +132,17 @@ function EditTemplatesDialog({ open, onClose }: EditTemplatesDialogProps) {
                       {/* MUI has a 1px alignment error when displaying buttons of different color side by side in a ButtonGroup.
                       Using a different variant hides the error and also puts less focus on the "Delete" button. */}
                       <Tooltip title="Delete">
-                        <Button variant="outlined" color="error">
+                        <Button
+                          variant="outlined"
+                          color="error"
+                          onClick={() =>
+                            setTemplates((prev) => {
+                              const newTemplates = { ...prev };
+                              delete newTemplates[id];
+                              return newTemplates;
+                            })
+                          }
+                        >
                           <MaterialSymbol symbol="delete" />
                         </Button>
                       </Tooltip>
@@ -141,14 +161,42 @@ function EditTemplatesDialog({ open, onClose }: EditTemplatesDialogProps) {
                 </ListItemText>
               </ListItem>
             )}
-            <ListItem>
-              <Stack justifyContent="center" width="100%">
-                <Button>
-                  <MaterialSymbol symbol="add" />
-                </Button>
-              </Stack>
-            </ListItem>
           </List>
+          <Divider />
+          <ListItem>
+            <Stack justifyContent="center" width="100%">
+              <Button
+                onClick={() => {
+                  const baseId = 'new_template';
+                  let newId = baseId;
+                  let i = 0;
+                  while (newId in templates) {
+                    newId = `${baseId}_${++i}`;
+                  }
+                  setNewId(newId);
+
+                  setTemplates((prev) => {
+                    return {
+                      ...prev,
+                      [newId]: {
+                        inputs: {},
+                        outputs: [],
+                        buffers: {},
+                        ops: {},
+                      },
+                    };
+                  });
+                  setRenaming({
+                    target: newId,
+                    selectAll: true,
+                    scrollTo: true,
+                  });
+                }}
+              >
+                <MaterialSymbol symbol="add" />
+              </Button>
+            </Stack>
+          </ListItem>
         </Paper>
       </DialogContent>
       <DialogActions>

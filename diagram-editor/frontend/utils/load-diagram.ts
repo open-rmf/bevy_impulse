@@ -21,14 +21,18 @@ export function loadDiagram(diagram: Diagram): Graph {
   return graph;
 }
 
-export function loadDiagramJson(jsonStr: string): Graph {
+export function loadDiagramJson(jsonStr: string): [Diagram, Graph] {
   const diagram = JSON.parse(jsonStr);
   const valid = validate(diagram);
   if (!valid) {
-    throw validate.errors;
+    const error = validate.errors?.[0];
+    if (!error) {
+      throw 'unknown error';
+    }
+    throw `${error.instancePath} ${error.message}`;
   }
 
-  return loadDiagram(diagram);
+  return [diagram, loadDiagram(diagram)];
 }
 
 export function loadEmpty(): Graph {

@@ -42,6 +42,7 @@ import {
 import { autoLayout } from './utils/auto-layout';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
+import { useTemplates } from './templates-provider';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -104,6 +105,8 @@ const DiagramEditor = () => {
     },
     [],
   );
+
+  const [_, setTemplates] = useTemplates();
 
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<DiagramEditorNode>[]) => {
@@ -375,28 +378,33 @@ const DiagramEditor = () => {
 
   const mouseDownTime = React.useRef(0);
 
-  const loadDiagram = React.useCallback(
-    (jsonStr: string) => {
-      if (!reactFlowInstance.current) {
-        return;
-      }
-
-      const graph = loadDiagramJson(jsonStr);
-      const changes = autoLayout(graph.nodes, graph.edges, LAYOUT_OPTIONS);
-      setNodes(applyNodeChanges(changes, graph.nodes));
-      setEdges(graph.edges);
-      reactFlowInstance.current?.fitView();
-      closeAllPopovers();
-    },
-    [closeAllPopovers],
-  );
-
   const [errorToast, setErrorToast] = React.useState<string | null>(null);
   const [openErrorToast, setOpenErrorToast] = React.useState(false);
   const showErrorToast = React.useCallback((message: string) => {
     setErrorToast(message);
     setOpenErrorToast(true);
   }, []);
+
+  const loadDiagram = React.useCallback(
+    (jsonStr: string) => {
+      if (!reactFlowInstance.current) {
+        return;
+      }
+
+      try {
+        const [diagram, graph] = loadDiagramJson(jsonStr);
+        const changes = autoLayout(graph.nodes, graph.edges, LAYOUT_OPTIONS);
+        setNodes(applyNodeChanges(changes, graph.nodes));
+        setEdges(graph.edges);
+        setTemplates(diagram.templates || {});
+        reactFlowInstance.current?.fitView();
+        closeAllPopovers();
+      } catch (e) {
+        showErrorToast(`failed to load diagram: ${e}`);
+      }
+    },
+    [closeAllPopovers, showErrorToast],
+  );
 
   const [openExportDiagramDialog, setOpenExportDiagramDialog] =
     React.useState(false);
