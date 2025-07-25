@@ -1,14 +1,13 @@
 import { Button, Paper } from '@mui/material';
-import type { NodeProps } from '@xyflow/react';
-import { Handle, Position } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import { Handle, type NodeProps, Position } from '@xyflow/react';
+import type { BuiltinNode } from '.';
 
 function TerminateNode({
   isConnectable,
   targetPosition = Position.Top,
   width,
   height,
-}: NodeProps<DiagramEditorNode>) {
+}: NodeProps<BuiltinNode>) {
   return (
     <Paper>
       <Handle

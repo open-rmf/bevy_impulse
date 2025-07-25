@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { from, timer } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import type { DiagramElementRegistry } from './types';
+import type { DiagramElementRegistry } from './types/api';
 import { getSchema } from './utils/ajv';
 
 const validateRegistry = getSchema<DiagramElementRegistry>(

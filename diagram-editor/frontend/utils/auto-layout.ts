@@ -1,12 +1,13 @@
 import type { NodeChange, Rect } from '@xyflow/react';
 import * as dagre from 'dagre';
+import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import { START_ID, TERMINATE_ID } from '../nodes';
-import type {
-  DiagramEditorEdge,
-  DiagramEditorNode,
-  OperationNode,
-} from '../types';
+import {
+  type DiagramEditorNode,
+  type OperationNode,
+  START_ID,
+  TERMINATE_ID,
+} from '../nodes';
 import { calculateScopeBounds, type LayoutOptions } from './layout';
 import { joinNamespaces } from './namespace';
 

@@ -31,17 +31,17 @@ import { EditorMode, useEditorMode } from './editor-mode';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
-import { NODE_TYPES } from './nodes';
+import {
+  type DiagramEditorNode,
+  isOperationNode,
+  NODE_TYPES,
+  type OperationNode,
+} from './nodes';
 import { useTemplates } from './templates-provider';
-import type {
-  DiagramEditorEdge,
-  DiagramEditorNode,
-  OperationNode,
-} from './types';
+import type { DiagramEditorEdge } from './edges';
 import {
   exhaustiveCheck,
   allowEdges as getAllowEdges,
-  isOperationNode,
   joinNamespaces,
   ROOT_NAMESPACE,
 } from './utils';

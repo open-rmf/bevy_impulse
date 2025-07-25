@@ -1,15 +1,14 @@
 import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
-
-import type { DiagramEditorNode } from '../types';
+import type { BuiltinNode } from '.';
 
 function StartNode({
   isConnectable,
   sourcePosition = Position.Bottom,
   width,
   height,
-}: NodeProps<DiagramEditorNode>) {
+}: NodeProps<BuiltinNode>) {
   return (
     <Paper sx={{ minWidth: 100 }}>
       <Button

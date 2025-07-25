@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { ForkResultIcon } from './icons';
 
-function ForkResultNode(props: NodeProps<DiagramEditorNode>) {
+function ForkResultNode(props: NodeProps<OperationNode<'fork_result'>>) {
   return (
     <BaseNode
       {...props}

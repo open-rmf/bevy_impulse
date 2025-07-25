@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { SplitIcon } from './icons';
 
-function SplitNode(props: NodeProps<DiagramEditorNode>) {
+function SplitNode(props: NodeProps<OperationNode<'split'>>) {
   return (
     <BaseNode
       {...props}

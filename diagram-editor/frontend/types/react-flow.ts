@@ -2,104 +2,13 @@ import type {
   Edge as ReactFlowEdge,
   Node as ReactFlowNode,
 } from '@xyflow/react';
-import type { DiagramOperation } from './api';
-
-export type BuiltinNodeTypes = 'start' | 'terminate';
-
-export type OperationNodeTypes = DiagramOperation['type'];
-
-export type NodeTypes = BuiltinNodeTypes | OperationNodeTypes;
 
 export type Node<
   D extends Record<string, unknown>,
-  T extends NodeTypes,
-> = ReactFlowNode<D, T> & { type: T };
-
-export type BuiltinNode = Node<{ namespace: string }, BuiltinNodeTypes>;
-
-export type OperationNodeData<
-  out K extends OperationNodeTypes = OperationNodeTypes,
-> = {
-  namespace: string;
-  opId: string;
-  op: DiagramOperation & { type: K };
-};
-
-export type OperationNode<K extends OperationNodeTypes = OperationNodeTypes> =
-  Node<OperationNodeData<K>, K>;
-
-export type DiagramEditorNode = BuiltinNode | OperationNode;
+  T extends string,
+> = ReactFlowNode<D, T> & Pick<Required<ReactFlowNode>, 'type' | 'data'>;
 
 export type Edge<
   D extends Record<string, unknown>,
-  T extends EdgeTypes,
+  T extends string,
 > = ReactFlowEdge<D, T> & Pick<Required<ReactFlowEdge>, 'type' | 'data'>;
-
-export type DefaultEdgeData = Record<string, never>;
-export type DefaultEdge = Edge<DefaultEdgeData, 'default'>;
-
-export type BufferKeyEdgeData = {
-  key: string;
-};
-export type BufferKeyEdge = Edge<BufferKeyEdgeData, 'bufferKey'>;
-
-export type BufferSeqEdgeData = {
-  seq: number;
-};
-export type BufferSeqEdge = Edge<BufferSeqEdgeData, 'bufferSeq'>;
-
-export type ForkResultErrEdgeData = Record<string, never>;
-export type ForkResultErrEdge = Edge<ForkResultErrEdgeData, 'forkResultErr'>;
-
-export type ForkResultOkEdgeData = Record<string, never>;
-export type ForkResultOkEdge = Edge<ForkResultOkEdgeData, 'forkResultOk'>;
-
-export type SplitKeyEdgeData = {
-  key: string;
-};
-export type SplitKeyEdge = Edge<SplitKeyEdgeData, 'splitKey'>;
-
-export type SplitRemainingEdgeData = Record<string, never>;
-export type SplitRemainingEdge = Edge<SplitRemainingEdgeData, 'splitRemaining'>;
-
-export type SplitSeqEdgeData = {
-  seq: number;
-};
-export type SplitSeqEdge = Edge<SplitSeqEdgeData, 'splitSeq'>;
-
-export type StreamOutEdgeData = {
-  name: string;
-};
-export type StreamOutEdge = Edge<StreamOutEdgeData, 'streamOut'>;
-
-export type UnzipEdgeData = {
-  seq: number;
-};
-export type UnzipEdge = Edge<UnzipEdgeData, 'unzip'>;
-
-export type EdgeData = {
-  default: DefaultEdgeData;
-  unzip: UnzipEdgeData;
-  forkResultOk: ForkResultOkEdgeData;
-  forkResultErr: ForkResultErrEdgeData;
-  splitKey: SplitKeyEdgeData;
-  splitSeq: SplitSeqEdgeData;
-  splitRemaining: SplitRemainingEdgeData;
-  bufferKey: BufferKeyEdgeData;
-  bufferSeq: BufferSeqEdgeData;
-  streamOut: StreamOutEdgeData;
-};
-
-export type EdgeTypes = keyof EdgeData;
-
-export type DiagramEditorEdge =
-  | DefaultEdge
-  | UnzipEdge
-  | ForkResultOkEdge
-  | ForkResultErrEdge
-  | SplitKeyEdge
-  | SplitSeqEdge
-  | SplitRemainingEdge
-  | BufferKeyEdge
-  | BufferSeqEdge
-  | StreamOutEdge;

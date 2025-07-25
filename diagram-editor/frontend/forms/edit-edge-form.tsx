@@ -11,14 +11,13 @@ import {
 } from '@mui/material';
 import type { EdgeChange, EdgeRemoveChange } from '@xyflow/react';
 import React from 'react';
-
-import { MaterialSymbol } from '../nodes/icons';
 import type {
   DiagramEditorEdge,
   EdgeData,
   EdgeTypes,
   UnzipEdge,
-} from '../types';
+} from '../edges';
+import { MaterialSymbol } from '../nodes/icons';
 import BufferEdgeForm, { type BufferEdge } from './buffer-edge-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';
 import UnzipEdgeForm from './unzip-edge-form';

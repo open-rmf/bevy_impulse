@@ -11,9 +11,10 @@ import {
 } from '@mui/material';
 import { deflateSync, strToU8 } from 'fflate';
 import React from 'react';
+import type { DiagramEditorEdge } from './edges';
 import { NodeManager } from './node-manager';
+import type { DiagramEditorNode } from './nodes';
 import { MaterialSymbol } from './nodes/icons';
-import type { DiagramEditorEdge, DiagramEditorNode } from './types';
 import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {

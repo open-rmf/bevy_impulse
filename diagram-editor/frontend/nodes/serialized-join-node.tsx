@@ -1,9 +1,11 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { SerializedJoinIcon } from './icons';
 
-function SerializedJoinNode(props: NodeProps<DiagramEditorNode>) {
+function SerializedJoinNode(
+  props: NodeProps<OperationNode<'serialized_join'>>,
+) {
   return (
     <BaseNode
       {...props}

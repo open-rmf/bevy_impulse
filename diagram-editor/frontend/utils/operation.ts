@@ -1,17 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
-
+import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import { START_ID } from '../nodes';
+import { type DiagramEditorNode, type OperationNode, START_ID } from '../nodes';
 import type {
   BufferSelection,
   BuiltinTarget,
   Diagram,
-  DiagramEditorEdge,
-  DiagramEditorNode,
   DiagramOperation,
   NextOperation,
-  OperationNode,
-} from '../types';
+} from '../types/api';
 import { exhaustiveCheck } from './exhaustive-check';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 
@@ -390,16 +387,6 @@ export function buildEdges(
 
 export function isBuiltin(next: unknown): next is { builtin: BuiltinTarget } {
   return next !== null && typeof next === 'object' && 'builtin' in next;
-}
-
-export function isBuiltinNode(node: DiagramEditorNode) {
-  return ['start', 'terminate'].includes(node.type);
-}
-
-export function isOperationNode(
-  node: DiagramEditorNode,
-): node is OperationNode {
-  return !['start', 'terminate'].includes(node.type);
 }
 
 export function isScopeNode(

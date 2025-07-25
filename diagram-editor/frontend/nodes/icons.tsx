@@ -1,6 +1,6 @@
 import { Box, type BoxProps } from '@mui/material';
 import type React from 'react';
-import type { DiagramOperation } from '../types';
+import type { DiagramOperation } from '../types/api';
 import { exhaustiveCheck } from '../utils';
 
 export interface MaterialSymbolProps extends BoxProps {
@@ -66,6 +66,18 @@ export function ScopeIcon(): React.JSX.Element {
 
 export function SectionIcon(): React.JSX.Element {
   return <MaterialSymbol symbol="select_all" />;
+}
+
+export function SectionInputIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="input" />;
+}
+
+export function SectionOutputIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="output" />;
+}
+
+export function SectionBufferIcon(): React.JSX.Element {
+  return <MaterialSymbol symbol="database" />;
 }
 
 export function UnzipIcon(): React.JSX.Element {

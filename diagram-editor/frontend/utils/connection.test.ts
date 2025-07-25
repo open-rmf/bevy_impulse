@@ -1,13 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
+import type { DiagramEditorNode, OperationNode } from '../nodes';
 import { TERMINATE_ID } from '../nodes';
-import type {
-  Diagram,
-  DiagramEditorEdge,
-  DiagramEditorNode,
-  DiagramOperation,
-  OperationNode,
-} from '../types';
+import type { Diagram, DiagramOperation } from '../types/api';
 import { loadDiagram } from './load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 

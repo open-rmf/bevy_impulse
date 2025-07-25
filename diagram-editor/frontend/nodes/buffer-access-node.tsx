@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { BufferAccessIcon } from './icons';
 
-function BufferAccessNode(props: NodeProps<DiagramEditorNode>) {
+function BufferAccessNode(props: NodeProps<OperationNode<'buffer_access'>>) {
   return (
     <BaseNode
       {...props}

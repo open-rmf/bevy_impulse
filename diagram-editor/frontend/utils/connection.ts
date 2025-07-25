@@ -1,4 +1,5 @@
-import type { DiagramEditorNode, EdgeTypes, NodeTypes } from '../types';
+import type { EdgeTypes } from '../edges';
+import type { DiagramEditorNode, NodeTypes } from '../nodes';
 
 const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, Set<EdgeTypes>> = {
   buffer: new Set<EdgeTypes>(['bufferKey', 'bufferSeq']),
@@ -10,6 +11,9 @@ const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, Set<EdgeTypes>> = {
   node: new Set<EdgeTypes>(['default', 'streamOut']),
   scope: new Set<EdgeTypes>(['default', 'streamOut']),
   section: new Set<EdgeTypes>(['default']),
+  sectionInput: new Set<EdgeTypes>(['default']),
+  sectionOutput: new Set<EdgeTypes>([]),
+  sectionBuffer: new Set<EdgeTypes>(['default']),
   serialized_join: new Set<EdgeTypes>(['default']),
   split: new Set<EdgeTypes>(['splitKey', 'splitSeq', 'splitRemaining']),
   start: new Set<EdgeTypes>(['default']),
@@ -29,6 +33,9 @@ const ALLOWED_INPUT_EDGES: Record<NodeTypes, Set<EdgeTypes>> = {
   node: new Set<EdgeTypes>(['default']),
   scope: new Set<EdgeTypes>(['default']),
   section: new Set<EdgeTypes>(['default']),
+  sectionInput: new Set<EdgeTypes>([]),
+  sectionOutput: new Set<EdgeTypes>(['default']),
+  sectionBuffer: new Set<EdgeTypes>([]),
   serialized_join: new Set<EdgeTypes>(['bufferKey', 'bufferSeq']),
   split: new Set<EdgeTypes>(['default']),
   start: new Set<EdgeTypes>([]),

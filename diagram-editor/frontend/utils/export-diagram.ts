@@ -1,11 +1,8 @@
+import type { DiagramEditorEdge } from '../edges';
 import type { NodeManager } from '../node-manager';
-import type {
-  Diagram,
-  DiagramEditorEdge,
-  DiagramOperation,
-  NextOperation,
-} from '../types';
-import { isBuiltinNode, isOperationNode, splitNamespaces } from '../utils';
+import { isBuiltinNode, isOperationNode } from '../nodes';
+import type { Diagram, DiagramOperation, NextOperation } from '../types/api';
+import { splitNamespaces } from '../utils';
 
 interface SubOperations {
   start: NextOperation;

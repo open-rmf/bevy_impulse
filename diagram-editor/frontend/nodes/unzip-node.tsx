@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { UnzipIcon } from './icons';
 
-function UnzipNode(props: NodeProps<DiagramEditorNode>) {
+function UnzipNode(props: NodeProps<OperationNode<'unzip'>>) {
   return (
     <BaseNode
       {...props}

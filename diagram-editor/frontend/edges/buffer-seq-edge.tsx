@@ -1,6 +1,11 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
-import type { BufferSeqEdge } from '../types';
+import type { Edge } from '../types/react-flow';
+
+export type BufferSeqEdgeData = {
+  seq: number;
+};
+export type BufferSeqEdge = Edge<BufferSeqEdgeData, 'bufferSeq'>;
 
 export type BufferSeqEdgeProps = Exclude<EdgeProps<BufferSeqEdge>, 'label'>;
 

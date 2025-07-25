@@ -4,8 +4,8 @@ import React from 'react';
 import AutoLayoutButton from './auto-layout-button';
 import EditTemplatesDialog from './edit-templates-dialog';
 import { EditorMode, useEditorMode } from './editor-mode';
+import type { DiagramEditorNode } from './nodes';
 import { MaterialSymbol } from './nodes/icons';
-import type { DiagramEditorNode } from './types';
 
 export interface CommandPanelProps {
   onNodeChanges: (changes: NodeChange<DiagramEditorNode>[]) => void;

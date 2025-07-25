@@ -18,7 +18,7 @@ import {
 import React from 'react';
 import { MaterialSymbol } from './nodes/icons';
 import { useTemplates } from './templates-provider';
-import type { SectionTemplate } from './types';
+import type { SectionTemplate } from './types/api';
 
 export interface EditTemplatesDialogProps {
   open: boolean;

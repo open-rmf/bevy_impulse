@@ -1,5 +1,5 @@
 import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { DiagramEditorNode } from '../nodes';
 import BufferForm from './buffer-form';
 import EditOperationForm, {
   type EditOperationFormProps,

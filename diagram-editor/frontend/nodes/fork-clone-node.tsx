@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { ForkCloneIcon } from './icons';
 
-function ForkCloneNode(props: NodeProps<DiagramEditorNode>) {
+function ForkCloneNode(props: NodeProps<OperationNode<'fork_clone'>>) {
   return (
     <BaseNode
       {...props}

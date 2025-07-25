@@ -1,6 +1,11 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
-import type { UnzipEdge } from '../types';
+import type { Edge } from '../types/react-flow';
+
+export type UnzipEdgeData = {
+  seq: number;
+};
+export type UnzipEdge = Edge<UnzipEdgeData, 'unzip'>;
 
 export type UnzipEdgeProps = Exclude<EdgeProps<UnzipEdge>, 'label'>;
 

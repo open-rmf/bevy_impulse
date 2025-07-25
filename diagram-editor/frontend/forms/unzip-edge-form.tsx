@@ -1,6 +1,6 @@
 import { TextField } from '@mui/material';
 import type { EdgeChange } from '@xyflow/react';
-import type { UnzipEdge } from '../types';
+import type { UnzipEdge } from '../edges';
 
 export interface UnzipEdgeFormProps {
   edge: UnzipEdge;

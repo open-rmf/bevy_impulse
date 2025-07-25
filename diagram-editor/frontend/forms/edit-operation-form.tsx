@@ -8,8 +8,8 @@ import {
 } from '@mui/material';
 import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
 import type React from 'react';
+import type { OperationNode, OperationNodeTypes } from '../nodes';
 import { MaterialSymbol } from '../nodes/icons';
-import type { OperationNode, OperationNodeTypes } from '../types';
 
 export interface EditOperationFormProps<
   NodeType extends OperationNodeTypes = OperationNodeTypes,

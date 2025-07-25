@@ -1,6 +1,6 @@
 import { Box, useTheme } from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import type { OperationNode } from '../types';
+import type { OperationNode } from '.';
 
 function ScopeNode({
   isConnectable,

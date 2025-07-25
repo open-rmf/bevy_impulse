@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { ListenIcon } from './icons';
 
-function ListenNode(props: NodeProps<DiagramEditorNode>) {
+function ListenNode(props: NodeProps<OperationNode<'listen'>>) {
   return (
     <BaseNode
       {...props}

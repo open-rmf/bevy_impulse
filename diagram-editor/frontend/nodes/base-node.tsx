@@ -1,15 +1,16 @@
-import { Button, Paper } from '@mui/material';
-import type { NodeProps } from '@xyflow/react';
-import { Handle, Position } from '@xyflow/react';
+import { Button, type ButtonProps, Paper } from '@mui/material';
+import { Handle, type NodeProps, Position } from '@xyflow/react';
 import React from 'react';
 
 export interface BaseNodeProps extends NodeProps {
+  color?: ButtonProps['color'];
   icon?: React.JSX.Element | string;
   label: string;
   variant: 'input' | 'output' | 'inputOutput';
 }
 
 function BaseNode({
+  color,
   icon: materialIconOrSymbol,
   label,
   variant,
@@ -36,6 +37,7 @@ function BaseNode({
         />
       )}
       <Button
+        color={color}
         fullWidth
         startIcon={icon}
         variant={selected ? 'contained' : 'outlined'}

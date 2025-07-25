@@ -6,7 +6,7 @@ import {
   useContext,
   useState,
 } from 'react';
-import type { SectionTemplate } from './types';
+import type { SectionTemplate } from './types/api';
 
 export type TemplatesContext = [
   Record<string, SectionTemplate>,

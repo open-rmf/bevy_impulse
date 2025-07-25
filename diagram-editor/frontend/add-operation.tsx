@@ -1,6 +1,7 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
 import type { NodeAddChange, XYPosition } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
+import type { DiagramEditorNode } from './nodes';
 import {
   BufferAccessIcon,
   BufferIcon,
@@ -15,7 +16,7 @@ import {
   TransformIcon,
   UnzipIcon,
 } from './nodes/icons';
-import type { DiagramEditorNode, DiagramOperation } from './types';
+import type { DiagramOperation } from './types/api';
 import { joinNamespaces } from './utils';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 

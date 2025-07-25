@@ -1,5 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
-import type { OperationNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { NodeIcon } from './icons';
 

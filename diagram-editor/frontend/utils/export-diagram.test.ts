@@ -7,13 +7,17 @@ import testDiagram from './test-data/test-diagram.json';
 import testDiagramScope from './test-data/test-diagram-scope.json';
 
 test('export diagram', () => {
-  const { nodes, edges } = loadDiagramJson(JSON.stringify(testDiagram));
+  const [_diagram, { nodes, edges }] = loadDiagramJson(
+    JSON.stringify(testDiagram),
+  );
   const diagram = exportDiagram(new NodeManager(nodes), edges);
   expect(diagram).toEqual(testDiagram);
 });
 
 test('export diagram with scope', () => {
-  const { nodes, edges } = loadDiagramJson(JSON.stringify(testDiagramScope));
+  const [_diagram, { nodes, edges }] = loadDiagramJson(
+    JSON.stringify(testDiagramScope),
+  );
   let diagram = exportDiagram(new NodeManager(nodes), edges);
   expect(diagram).toEqual(testDiagramScope);
 

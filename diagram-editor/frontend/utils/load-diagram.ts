@@ -1,15 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
-import { START_ID, TERMINATE_ID } from '../nodes';
-import type {
-  Diagram,
-  DiagramEditorEdge,
-  DiagramEditorNode,
-  DiagramOperation,
-} from '../types';
+import type { DiagramEditorEdge } from '../edges';
+import {
+  type DiagramEditorNode,
+  isOperationNode,
+  START_ID,
+  TERMINATE_ID,
+} from '../nodes';
+import type { Diagram, DiagramOperation } from '../types/api';
 import { getSchema } from './ajv';
 import { LAYOUT_OPTIONS } from './layout';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
-import { buildEdges, isBuiltin, isOperationNode } from './operation';
+import { buildEdges, isBuiltin } from './operation';
 
 export interface Graph {
   nodes: DiagramEditorNode[];

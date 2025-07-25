@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { TransformIcon } from './icons';
 
-function TransformNode(props: NodeProps<DiagramEditorNode>) {
+function TransformNode(props: NodeProps<OperationNode<'transform'>>) {
   return (
     <BaseNode
       {...props}

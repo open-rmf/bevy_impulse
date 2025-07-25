@@ -1,20 +1,21 @@
 import equal from 'fast-deep-equal';
-import { TERMINATE_ID } from './nodes';
+import type { DiagramEditorEdge, StreamOutEdge } from './edges';
+import {
+  type DiagramEditorNode,
+  isBuiltinNode,
+  isOperationNode,
+  TERMINATE_ID,
+} from './nodes';
 import type {
   BufferSelection,
-  DiagramEditorEdge,
-  DiagramEditorNode,
   DiagramOperation,
   NextOperation,
-  StreamOutEdge,
-} from './types';
+} from './types/api';
 import {
   exhaustiveCheck,
   isArrayBufferSelection,
   isBuiltin,
-  isBuiltinNode,
   isKeyedBufferSelection,
-  isOperationNode,
   joinNamespaces,
   ROOT_NAMESPACE,
 } from './utils';

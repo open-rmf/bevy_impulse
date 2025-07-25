@@ -1,9 +1,9 @@
 import type { NodeProps } from '@xyflow/react';
-import type { DiagramEditorNode } from '../types';
+import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { JoinIcon } from './icons';
 
-function JoinNode(props: NodeProps<DiagramEditorNode>) {
+function JoinNode(props: NodeProps<OperationNode<'join'>>) {
   return (
     <BaseNode
       {...props}

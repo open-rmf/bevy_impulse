@@ -1,14 +1,13 @@
 import { applyNodeChanges } from '@xyflow/react';
 import { NodeManager } from '../node-manager';
-import { START_ID, TERMINATE_ID } from '../nodes';
-import type { OperationNode } from '../types';
+import { type OperationNode, START_ID, TERMINATE_ID } from '../nodes';
 import { autoLayout } from './auto-layout';
 import { LAYOUT_OPTIONS } from './layout';
 import { loadDiagramJson } from './load-diagram';
 import testDiagram from './test-data/test-diagram.json';
 
 test('load diagram json and auto layout', () => {
-  const graph = loadDiagramJson(JSON.stringify(testDiagram));
+  const [_diagram, graph] = loadDiagramJson(JSON.stringify(testDiagram));
   const nodes = applyNodeChanges(
     autoLayout(graph.nodes, graph.edges, LAYOUT_OPTIONS),
     graph.nodes,
