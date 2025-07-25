@@ -3,7 +3,7 @@ import { type NodeChange, type ReactFlowState, useStore } from '@xyflow/react';
 import React from 'react';
 import type { DiagramEditorEdge } from './edges';
 import type { DiagramEditorNode } from './nodes';
-import { MaterialSymbol } from './nodes/icons';
+import { MaterialSymbol } from './nodes';
 import { autoLayout } from './utils';
 import { LAYOUT_OPTIONS } from './utils/layout';
 

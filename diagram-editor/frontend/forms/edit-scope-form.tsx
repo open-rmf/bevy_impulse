@@ -1,5 +1,5 @@
 import { Button } from '@mui/material';
-import { MaterialSymbol } from '../nodes/icons';
+import { MaterialSymbol } from '../nodes';
 import EditOperationForm, {
   type EditOperationFormProps,
 } from './edit-operation-form';

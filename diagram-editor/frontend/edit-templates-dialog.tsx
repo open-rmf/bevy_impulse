@@ -16,7 +16,7 @@ import {
   useTheme,
 } from '@mui/material';
 import React from 'react';
-import { MaterialSymbol } from './nodes/icons';
+import { MaterialSymbol } from './nodes';
 import { useTemplates } from './templates-provider';
 import type { SectionTemplate } from './types/api';
 

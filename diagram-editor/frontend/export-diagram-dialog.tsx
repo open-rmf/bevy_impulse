@@ -14,7 +14,7 @@ import React from 'react';
 import type { DiagramEditorEdge } from './edges';
 import { NodeManager } from './node-manager';
 import type { DiagramEditorNode } from './nodes';
-import { MaterialSymbol } from './nodes/icons';
+import { MaterialSymbol } from './nodes';
 import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {

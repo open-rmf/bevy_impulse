@@ -9,7 +9,7 @@ import {
 import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
 import type React from 'react';
 import type { OperationNode, OperationNodeTypes } from '../nodes';
-import { MaterialSymbol } from '../nodes/icons';
+import { MaterialSymbol } from '../nodes';
 
 export interface EditOperationFormProps<
   NodeType extends OperationNodeTypes = OperationNodeTypes,

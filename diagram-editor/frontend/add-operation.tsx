@@ -1,23 +1,37 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
-import type { NodeAddChange, XYPosition } from '@xyflow/react';
+import {
+  useReactFlow,
+  type NodeAddChange,
+  type XYPosition,
+} from '@xyflow/react';
+import React from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { DiagramEditorNode } from './nodes';
+import { EditorMode, useEditorMode } from './editor-mode';
+import type {
+  DiagramEditorNode,
+  SectionInterfaceNode,
+  SectionInterfaceNodeTypes,
+} from './nodes';
 import {
   BufferAccessIcon,
   BufferIcon,
   ForkCloneIcon,
   ForkResultIcon,
+  isOperationNode,
   JoinIcon,
   ListenIcon,
   NodeIcon,
   ScopeIcon,
+  SectionBufferIcon,
+  SectionInputIcon,
+  SectionOutputIcon,
   SerializedJoinIcon,
   SplitIcon,
   TransformIcon,
   UnzipIcon,
-} from './nodes/icons';
+} from './nodes';
 import type { DiagramOperation } from './types/api';
-import { joinNamespaces } from './utils';
+import { joinNamespaces, ROOT_NAMESPACE } from './utils';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 
 const StyledOperationButton = styled(Button)({
@@ -25,10 +39,25 @@ const StyledOperationButton = styled(Button)({
 });
 
 export interface AddOperationProps {
-  namespace: string;
   parentId?: string;
   newNodePosition: XYPosition;
   onAdd?: (change: NodeAddChange<DiagramEditorNode>[]) => void;
+}
+
+function createSectionInterfaceChange(
+  type: SectionInterfaceNodeTypes,
+  connectKey: string,
+  position: XYPosition,
+): NodeAddChange<SectionInterfaceNode> {
+  return {
+    type: 'add',
+    item: {
+      id: uuidv4(),
+      type,
+      data: { namespace: ROOT_NAMESPACE, connectKey },
+      position,
+    },
+  };
 }
 
 function createNodeChange(
@@ -123,12 +152,17 @@ function createNodeChange(
   ];
 }
 
-function AddOperation({
-  namespace,
-  parentId,
-  newNodePosition,
-  onAdd,
-}: AddOperationProps) {
+function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
+  const [editorMode] = useEditorMode();
+  const reactFlow = useReactFlow<DiagramEditorNode>();
+  const namespace = React.useMemo(() => {
+    const parentNode = parentId && reactFlow.getNode(parentId);
+    if (!parentNode || !isOperationNode(parentNode)) {
+      return ROOT_NAMESPACE;
+    }
+    return joinNamespaces(parentNode.data.namespace, parentNode.data.opId);
+  }, [parentId, reactFlow.getNode]);
+
   return (
     <ButtonGroup
       orientation="vertical"
@@ -136,6 +170,53 @@ function AddOperation({
       size="small"
       aria-label="Add operation button group"
     >
+      {editorMode.mode === EditorMode.Template &&
+        namespace === ROOT_NAMESPACE && (
+          <>
+            <StyledOperationButton
+              startIcon={<SectionInputIcon />}
+              onClick={() => {
+                onAdd?.([
+                  createSectionInterfaceChange(
+                    'sectionInput',
+                    'input',
+                    newNodePosition,
+                  ),
+                ]);
+              }}
+            >
+              Section Input
+            </StyledOperationButton>
+            <StyledOperationButton
+              startIcon={<SectionOutputIcon />}
+              onClick={() => {
+                onAdd?.([
+                  createSectionInterfaceChange(
+                    'sectionOutput',
+                    'output',
+                    newNodePosition,
+                  ),
+                ]);
+              }}
+            >
+              Section Output
+            </StyledOperationButton>
+            <StyledOperationButton
+              startIcon={<SectionBufferIcon />}
+              onClick={() => {
+                onAdd?.([
+                  createSectionInterfaceChange(
+                    'sectionBuffer',
+                    'buffer',
+                    newNodePosition,
+                  ),
+                ]);
+              }}
+            >
+              Section Buffer
+            </StyledOperationButton>
+          </>
+        )}
       <StyledOperationButton
         startIcon={<NodeIcon />}
         onClick={() => {

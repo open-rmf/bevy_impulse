@@ -26,6 +26,7 @@ import { inflateSync, strFromU8 } from 'fflate';
 import React from 'react';
 import AddOperation from './add-operation';
 import CommandPanel from './command-panel';
+import type { DiagramEditorEdge } from './edges';
 import { EDGE_TYPES } from './edges';
 import { EditorMode, useEditorMode } from './editor-mode';
 import ExportDiagramDialog from './export-diagram-dialog';
@@ -38,13 +39,7 @@ import {
   type OperationNode,
 } from './nodes';
 import { useTemplates } from './templates-provider';
-import type { DiagramEditorEdge } from './edges';
-import {
-  exhaustiveCheck,
-  allowEdges as getAllowEdges,
-  joinNamespaces,
-  ROOT_NAMESPACE,
-} from './utils';
+import { exhaustiveCheck, allowEdges as getAllowEdges } from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
@@ -310,12 +305,10 @@ const DiagramEditor = () => {
     open: boolean;
     popOverPosition: PopoverPosition;
     parentId: string | null;
-    namespace: string;
   }>({
     open: false,
     popOverPosition: { left: 0, top: 0 },
     parentId: null,
-    namespace: ROOT_NAMESPACE,
   });
   const addOperationNewNodePosition = React.useMemo<XYPosition>(() => {
     if (!reactFlowInstance.current) {
@@ -407,7 +400,6 @@ const DiagramEditor = () => {
                 open: true,
                 popOverPosition: { left: ev.clientX, top: ev.clientY },
                 parentId: node.id,
-                namespace: joinNamespaces(node.data.namespace, node.data.opId),
               });
             }}
           />
@@ -581,7 +573,6 @@ const DiagramEditor = () => {
             open: true,
             popOverPosition: { left: ev.clientX, top: ev.clientY },
             parentId: null,
-            namespace: ROOT_NAMESPACE,
           });
         }}
         onMouseDownCapture={handleMouseDown}
@@ -614,7 +605,6 @@ const DiagramEditor = () => {
         component={NonCapturingPopoverContainer}
       >
         <AddOperation
-          namespace={addOperationPopover.namespace}
           parentId={addOperationPopover.parentId || undefined}
           newNodePosition={addOperationNewNodePosition}
           onAdd={(changes) => {

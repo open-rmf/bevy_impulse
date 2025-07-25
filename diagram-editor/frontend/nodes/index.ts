@@ -22,7 +22,12 @@ import TerminateNode from './terminate-node';
 import TransformNode from './transform-node';
 import UnzipNode from './unzip-node';
 
-export type { SectionInterfaceData } from './section-node';
+export * from './icons';
+export type {
+  SectionInterfaceData,
+  SectionInterfaceNode,
+  SectionInterfaceNodeTypes,
+} from './section-node';
 export * from './utils';
 
 export const START_ID = '__builtin_start__';

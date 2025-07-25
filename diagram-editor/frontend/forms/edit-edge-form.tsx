@@ -17,7 +17,7 @@ import type {
   EdgeTypes,
   UnzipEdge,
 } from '../edges';
-import { MaterialSymbol } from '../nodes/icons';
+import { MaterialSymbol } from '../nodes';
 import BufferEdgeForm, { type BufferEdge } from './buffer-edge-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';
 import UnzipEdgeForm from './unzip-edge-form';
