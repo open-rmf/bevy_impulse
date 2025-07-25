@@ -2,10 +2,10 @@ import { Button, ButtonGroup, styled, Tooltip } from '@mui/material';
 import { type NodeChange, Panel } from '@xyflow/react';
 import React from 'react';
 import AutoLayoutButton from './auto-layout-button';
-import { MaterialSymbol } from './nodes/icons';
-import type { DiagramEditorNode } from './types';
 import EditTemplatesDialog from './edit-templates-dialog';
 import { EditorMode, useEditorMode } from './editor-mode';
+import { MaterialSymbol } from './nodes/icons';
+import type { DiagramEditorNode } from './types';
 
 export interface CommandPanelProps {
   onNodeChanges: (changes: NodeChange<DiagramEditorNode>[]) => void;

@@ -15,6 +15,7 @@ const theme = createTheme({
   palette: {
     mode: 'dark',
   },
+  cssVariables: true,
 });
 
 const App = () => {

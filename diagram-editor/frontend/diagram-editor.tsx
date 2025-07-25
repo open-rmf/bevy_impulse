@@ -104,7 +104,7 @@ const DiagramEditor = () => {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
-  const [templateNodes, setTemplateNodes] =
+  const [templateNodes, _setTemplateNodes] =
     React.useState<DiagramEditorNode[]>();
   const renderedNodes = React.useMemo(() => {
     switch (editorMode.mode) {
@@ -119,7 +119,7 @@ const DiagramEditor = () => {
   }, [editorMode, nodes, templateNodes]);
 
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
-  const [templateEdges, setTemplateEdges] =
+  const [templateEdges, _setTemplateEdges] =
     React.useState<DiagramEditorEdge[]>();
   const renderedEdges = React.useMemo(() => {
     switch (editorMode.mode) {
