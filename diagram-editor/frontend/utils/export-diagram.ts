@@ -1,7 +1,7 @@
 import equal from 'fast-deep-equal';
 import type { DiagramEditorEdge, StreamOutEdge } from '../edges';
 import type { NodeManager } from '../node-manager';
-import { isBuiltinNode, isOperationNode } from '../nodes';
+import { isOperationNode } from '../nodes';
 import type {
   BufferSelection,
   Diagram,
@@ -143,7 +143,7 @@ function syncBufferSelection(
  */
 function syncEdge(
   nodeManager: NodeManager,
-  diagram: Diagram,
+  root: SubOperations,
   edge: DiagramEditorEdge,
 ): void {
   if (edge.type === 'bufferKey' || edge.type === 'bufferSeq') {
@@ -156,7 +156,7 @@ function syncEdge(
   if (sourceNode.type === 'start') {
     const subOps: SubOperations = (() => {
       if (!sourceNode.parentId) {
-        return diagram;
+        return root;
       }
       const scopeNode = nodeManager.getNode(sourceNode.parentId);
       if (!isScopeNode(scopeNode)) {
@@ -285,15 +285,15 @@ function syncEdge(
 /**
  * Update the operation connections from the edges.
  *
- * @param diagram only used to update the `start` field, does not actually populate the operations.
+ * @param root only used to update the `start` field, does not actually populate the operations.
  */
 function syncEdges(
   nodeManager: NodeManager,
-  diagram: Diagram,
+  root: SubOperations,
   edges: DiagramEditorEdge[],
 ): void {
   // first clear all the connections
-  diagram.start = { builtin: 'dispose' };
+  root.start = { builtin: 'dispose' };
   for (const node of nodeManager.iterNodes()) {
     if (!isOperationNode(node)) {
       continue;
@@ -356,7 +356,7 @@ function syncEdges(
   }
 
   for (const edge of edges) {
-    syncEdge(nodeManager, diagram, edge);
+    syncEdge(nodeManager, root, edge);
   }
 }
 
@@ -395,56 +395,55 @@ export function exportDiagram(
     }
   }
 
-  for (const edge of edges) {
-    const source = nodeManager.getNode(edge.source);
-    if (source.type === 'start') {
-      const subOps = getSubOperations(diagram, source.data.namespace);
-      const target = nodeManager.getNode(edge.target);
-      if (isOperationNode(target)) {
-        subOps.start = target.data.opId;
-      } else if (isBuiltinNode(target)) {
-        subOps.start = { builtin: target.type };
-      } else {
-        throw new Error('unknown node');
-      }
-    }
-  }
-
   return diagram;
 }
 
-// export function exportTemplate(
-//   nodeManager: NodeManager,
-//   edges: DiagramEditorEdge[],
-// ): Record<string, DiagramOperation> {
-//   const root: SubOperations = {
-//     start: { builtin: 'dispose' },
-//     ops: {},
-//   };
+export function exportTemplate(
+  nodeManager: NodeManager,
+  edges: DiagramEditorEdge[],
+): SectionTemplate {
+  const template: Required<SectionTemplate> = {
+    inputs: {},
+    outputs: [],
+    buffers: {},
+    ops: {},
+  };
+  const fakeRoot: SubOperations = {
+    start: { builtin: 'dispose' },
+    ops: {},
+  };
 
-//   for (const node of nodeManager.iterNodes()) {
-//     const subOps = getSubOperations(root, node.data.namespace);
+  syncEdges(nodeManager, fakeRoot, edges);
 
-//     if (isOperationNode(node)) {
-//       subOps.ops[node.data.opId] = node.data.op;
-//     }
-//   }
+  // visit the nodes breath first to ensure that the parents exist in the diagram before
+  // populating the children.
+  const sortedNodes = Array.from(nodeManager.iterNodes()).sort(
+    (a, b) =>
+      splitNamespaces(a.data.namespace).length -
+      splitNamespaces(b.data.namespace).length,
+  );
+  for (const node of sortedNodes) {
+    const subOps = getSubOperations(fakeRoot, node.data.namespace);
 
-//   for (const edge of edges) {
-//     const source = nodeManager.getNode(edge.source);
-//     if (source.type === 'start') {
-//       const subOps = getSubOperations(root, source.data.namespace);
-//       const target = nodeManager.getNode(edge.target);
-//       if (isOperationNode(target)) {
-//         subOps.start = target.data.opId;
-//       } else if (isBuiltinNode(target)) {
-//         subOps.start = { builtin: target.type };
-//       } else {
-//         throw new Error('unknown node');
-//       }
-//     }
-//     nodeManager.syncEdge(edge);
-//   }
+    if (isOperationNode(node)) {
+      subOps.ops[node.data.opId] = { ...node.data.op };
+      if (node.data.op.type === 'scope') {
+        // do not carry over stale ops from the node data
+        subOps.ops[node.data.opId].ops = {};
+      }
+    } else if (node.type === 'sectionInput') {
+      template.inputs[node.data.remappedId] = node.data.targetId;
+    } else if (node.type === 'sectionOutput') {
+      template.outputs.push(node.data.remappedId);
+    } else if (node.type === 'sectionBuffer') {
+      template.buffers[node.data.remappedId] = node.data.targetId;
+    }
+  }
 
-//   return root.ops;
-// }
+  return {
+    inputs: {},
+    outputs: [],
+    buffers: {},
+    ops: fakeRoot.ops,
+  };
+}

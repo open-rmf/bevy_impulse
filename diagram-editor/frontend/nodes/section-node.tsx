@@ -13,7 +13,8 @@ import {
 export type SectionInterfaceData = {
   // section interfaces is always in the root namespace
   namespace: typeof ROOT_NAMESPACE;
-  connectKey: string;
+  remappedId: string;
+  targetId: string;
 };
 
 export function SectionNode(props: NodeProps<OperationNode<'section'>>) {
@@ -49,7 +50,7 @@ export function SectionInputNode(
       {...props}
       color="secondary"
       icon={<SectionInputIcon />}
-      label={props.data.connectKey}
+      label={props.data.remappedId}
       variant="output"
     />
   );
@@ -63,7 +64,7 @@ export function SectionOutputNode(
       {...props}
       color="secondary"
       icon={<SectionOutputIcon />}
-      label={props.data.connectKey}
+      label={props.data.remappedId}
       variant="input"
     />
   );
@@ -77,7 +78,7 @@ export function SectionBufferNode(
       {...props}
       color="secondary"
       icon={<SectionBufferIcon />}
-      label={props.data.connectKey}
+      label={props.data.remappedId}
       variant="output"
     />
   );

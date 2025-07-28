@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import {
   Alert,
   alpha,
@@ -43,7 +44,11 @@ import {
   type OperationNode,
 } from './nodes';
 import { useTemplates } from './templates-provider';
-import { exhaustiveCheck, allowEdges as getAllowEdges } from './utils';
+import {
+  exhaustiveCheck,
+  allowEdges as getAllowEdges,
+  ROOT_NAMESPACE,
+} from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
@@ -92,6 +97,35 @@ function getChangeParentIdAndPosition(
   }
 }
 
+function defaultTemplateNodes(): DiagramEditorNode[] {
+  return [
+    {
+      id: uuidv4(),
+      type: 'sectionInput',
+      position: { x: 0, y: 0 },
+      data: {
+        namespace: ROOT_NAMESPACE,
+        remappedId: 'input',
+        targetId: 'input',
+      },
+      width: LAYOUT_OPTIONS.nodeWidth,
+      height: LAYOUT_OPTIONS.nodeHeight,
+    },
+    {
+      id: uuidv4(),
+      type: 'sectionOutput',
+      position: { x: 0, y: 400 },
+      data: {
+        namespace: ROOT_NAMESPACE,
+        remappedId: 'output',
+        targetId: 'output',
+      },
+      width: LAYOUT_OPTIONS.nodeWidth,
+      height: LAYOUT_OPTIONS.nodeHeight,
+    },
+  ];
+}
+
 const DiagramEditor = () => {
   const reactFlowInstance = React.useRef<ReactFlowInstance<
     DiagramEditorNode,
@@ -103,8 +137,9 @@ const DiagramEditor = () => {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
-  const [templateNodes, _setTemplateNodes] =
-    React.useState<DiagramEditorNode[]>();
+  const [templateNodes, _setTemplateNodes] = React.useState<
+    DiagramEditorNode[]
+  >(() => defaultTemplateNodes());
   const renderedNodes = React.useMemo(() => {
     switch (editorMode.mode) {
       case EditorMode.Normal:

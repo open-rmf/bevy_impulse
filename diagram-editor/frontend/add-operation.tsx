@@ -1,7 +1,7 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
 import {
-  useReactFlow,
   type NodeAddChange,
+  useReactFlow,
   type XYPosition,
 } from '@xyflow/react';
 import React from 'react';
@@ -46,7 +46,8 @@ export interface AddOperationProps {
 
 function createSectionInterfaceChange(
   type: SectionInterfaceNodeTypes,
-  connectKey: string,
+  remappedId: string,
+  targetId: string,
   position: XYPosition,
 ): NodeAddChange<SectionInterfaceNode> {
   return {
@@ -54,7 +55,7 @@ function createSectionInterfaceChange(
     item: {
       id: uuidv4(),
       type,
-      data: { namespace: ROOT_NAMESPACE, connectKey },
+      data: { namespace: ROOT_NAMESPACE, remappedId, targetId },
       position,
     },
   };
@@ -172,50 +173,57 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
     >
       {editorMode.mode === EditorMode.Template &&
         namespace === ROOT_NAMESPACE && (
-          <>
-            <StyledOperationButton
-              startIcon={<SectionInputIcon />}
-              onClick={() => {
-                onAdd?.([
-                  createSectionInterfaceChange(
-                    'sectionInput',
-                    'input',
-                    newNodePosition,
-                  ),
-                ]);
-              }}
-            >
-              Section Input
-            </StyledOperationButton>
-            <StyledOperationButton
-              startIcon={<SectionOutputIcon />}
-              onClick={() => {
-                onAdd?.([
-                  createSectionInterfaceChange(
-                    'sectionOutput',
-                    'output',
-                    newNodePosition,
-                  ),
-                ]);
-              }}
-            >
-              Section Output
-            </StyledOperationButton>
-            <StyledOperationButton
-              startIcon={<SectionBufferIcon />}
-              onClick={() => {
-                onAdd?.([
-                  createSectionInterfaceChange(
-                    'sectionBuffer',
-                    'buffer',
-                    newNodePosition,
-                  ),
-                ]);
-              }}
-            >
-              Section Buffer
-            </StyledOperationButton>
-          </>
+          <StyledOperationButton
+            startIcon={<SectionInputIcon />}
+            onClick={() => {
+              onAdd?.([
+                createSectionInterfaceChange(
+                  'sectionInput',
+                  'input',
+                  'input',
+                  newNodePosition,
+                ),
+              ]);
+            }}
+          >
+            Section Input
+          </StyledOperationButton>
+        )}
+      {editorMode.mode === EditorMode.Template &&
+        namespace === ROOT_NAMESPACE && (
+          <StyledOperationButton
+            startIcon={<SectionOutputIcon />}
+            onClick={() => {
+              onAdd?.([
+                createSectionInterfaceChange(
+                  'sectionOutput',
+                  'output',
+                  'output',
+                  newNodePosition,
+                ),
+              ]);
+            }}
+          >
+            Section Output
+          </StyledOperationButton>
+        )}
+      {editorMode.mode === EditorMode.Template &&
+        namespace === ROOT_NAMESPACE && (
+          <StyledOperationButton
+            startIcon={<SectionBufferIcon />}
+            onClick={() => {
+              onAdd?.([
+                createSectionInterfaceChange(
+                  'sectionBuffer',
+                  'buffer',
+                  'buffer',
+                  newNodePosition,
+                ),
+              ]);
+            }}
+          >
+            Section Buffer
+          </StyledOperationButton>
         )}
       <StyledOperationButton
         startIcon={<NodeIcon />}
