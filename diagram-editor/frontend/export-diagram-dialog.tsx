@@ -15,6 +15,7 @@ import type { DiagramEditorEdge } from './edges';
 import { NodeManager } from './node-manager';
 import type { DiagramEditorNode } from './nodes';
 import { MaterialSymbol } from './nodes';
+import { useTemplates } from './templates-provider';
 import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {
@@ -36,6 +37,7 @@ function ExportDiagramDialog({
   edges,
 }: ExportDiagramDialogProps) {
   const [dialogData, setDialogData] = React.useState<DialogData | null>(null);
+  const [templates] = useTemplates();
 
   React.useLayoutEffect(() => {
     if (!open) {
@@ -45,7 +47,7 @@ function ExportDiagramDialog({
     }
 
     const nodeManager = new NodeManager(nodes);
-    const diagram = exportDiagram(nodeManager, edges);
+    const diagram = exportDiagram(nodeManager, edges, templates);
     const diagramJsonMin = JSON.stringify(diagram);
     // Compress the JSON string to Uint8Array
     const compressedData = deflateSync(strToU8(diagramJsonMin));
@@ -66,7 +68,7 @@ function ExportDiagramDialog({
     };
 
     setDialogData(dialogData);
-  }, [open, nodes, edges]);
+  }, [open, nodes, edges, templates]);
 
   const handleDownload = () => {
     if (!dialogData) {

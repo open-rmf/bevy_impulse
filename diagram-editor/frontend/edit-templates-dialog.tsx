@@ -16,6 +16,7 @@ import {
   useTheme,
 } from '@mui/material';
 import React from 'react';
+import { EditorMode, useEditorMode } from './editor-mode';
 import { MaterialSymbol } from './nodes';
 import { useTemplates } from './templates-provider';
 import type { SectionTemplate } from './types/api';
@@ -35,6 +36,7 @@ function EditTemplatesDialog({ open, onClose }: EditTemplatesDialogProps) {
   const theme = useTheme();
   const [templates, setTemplates] = useTemplates();
   const templateKeys = Object.keys(templates);
+  const [_editorMode, setEditorMode] = useEditorMode();
   const [renaming, setRenaming] = React.useState<RenamingState | null>(null);
   const [newId, setNewId] = React.useState('');
   const renamingRef = React.useRef<HTMLInputElement>(null);
@@ -125,7 +127,15 @@ function EditTemplatesDialog({ open, onClose }: EditTemplatesDialogProps) {
                         </Tooltip>
                       )}
                       <Tooltip title="Edit">
-                        <Button>
+                        <Button
+                          onClick={() => {
+                            setEditorMode({
+                              mode: EditorMode.Template,
+                              templateId: id,
+                            });
+                            onClose();
+                          }}
+                        >
                           <MaterialSymbol symbol="edit" />
                         </Button>
                       </Tooltip>

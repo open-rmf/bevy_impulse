@@ -10,7 +10,7 @@ test('export diagram', () => {
   const [_diagram, { nodes, edges }] = loadDiagramJson(
     JSON.stringify(testDiagram),
   );
-  const diagram = exportDiagram(new NodeManager(nodes), edges);
+  const diagram = exportDiagram(new NodeManager(nodes), edges, {});
   expect(diagram).toEqual(testDiagram);
 });
 
@@ -18,7 +18,7 @@ test('export diagram with scope', () => {
   const [_diagram, { nodes, edges }] = loadDiagramJson(
     JSON.stringify(testDiagramScope),
   );
-  let diagram = exportDiagram(new NodeManager(nodes), edges);
+  let diagram = exportDiagram(new NodeManager(nodes), edges, {});
   expect(diagram).toEqual(testDiagramScope);
 
   const nodeManager = new NodeManager(nodes);
@@ -40,6 +40,6 @@ test('export diagram with scope', () => {
     joinNamespaces(ROOT_NAMESPACE, 'scope'),
     'mul4',
   ).id;
-  diagram = exportDiagram(nodeManager, edges);
+  diagram = exportDiagram(nodeManager, edges, {});
   expect(diagram.ops.scope.start).toBe('mul4');
 });
