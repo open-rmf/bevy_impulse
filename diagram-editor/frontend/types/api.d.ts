@@ -401,9 +401,7 @@ export interface BufferSchema {
    * If true, messages will be serialized before sending into the buffer.
    */
   serialize?: boolean | null;
-  settings?: {
-    [k: string]: unknown;
-  } & BufferSettings;
+  settings?: BufferSettings;
   /**
    * Set what the tracing behavior should be for this operation. If this is
    *  left unspecified then the default trace setting of the diagram will be
@@ -605,9 +603,7 @@ export interface ScopeSchema {
   ops: {
     [k: string]: DiagramOperation;
   };
-  settings?: {
-    [k: string]: unknown;
-  } & ScopeSettings;
+  settings?: ScopeSettings;
   start: NextOperation;
   /**
    * Where to connect streams that are coming out of this scope.
@@ -1162,12 +1158,8 @@ export interface ListenSchema {
  * via the `definition` "SectionTemplate".
  */
 export interface SectionTemplate {
-  buffers?: {
-    [k: string]: unknown;
-  } & InputRemapping;
-  inputs?: {
-    [k: string]: unknown;
-  } & InputRemapping;
+  buffers?: InputRemapping;
+  inputs?: InputRemapping;
   /**
    * Operations that define the behavior of the section.
    */

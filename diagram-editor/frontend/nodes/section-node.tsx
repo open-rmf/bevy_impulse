@@ -1,4 +1,5 @@
 import type { NodeProps } from '@xyflow/react';
+import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
 import { isSectionBuilder, type ROOT_NAMESPACE } from '../utils';
 import type { OperationNode } from '.';
@@ -14,7 +15,7 @@ export type SectionInterfaceData = {
   // section interfaces is always in the root namespace
   namespace: typeof ROOT_NAMESPACE;
   remappedId: string;
-  targetId: string;
+  targetId: NextOperation;
 };
 
 export function SectionNode(props: NodeProps<OperationNode<'section'>>) {

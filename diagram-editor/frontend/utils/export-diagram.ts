@@ -402,12 +402,12 @@ export function exportTemplate(
   nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
 ): SectionTemplate {
-  const template: Required<SectionTemplate> = {
-    inputs: {},
-    outputs: [],
-    buffers: {},
+  const template = {
+    inputs: {} as Record<string, NextOperation>,
+    outputs: [] as string[],
+    buffers: {} as Record<string, NextOperation>,
     ops: {},
-  };
+  } satisfies Required<SectionTemplate>;
   const fakeRoot: SubOperations = {
     start: { builtin: 'dispose' },
     ops: {},

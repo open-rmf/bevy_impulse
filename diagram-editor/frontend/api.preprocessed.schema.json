@@ -53,18 +53,7 @@
           ]
         },
         "settings": {
-          "allOf": [
-            {
-              "default": {
-                "retention": {
-                  "keep_last": 1
-                }
-              }
-            },
-            {
-              "$ref": "#/$defs/BufferSettings"
-            }
-          ]
+          "$ref": "#/$defs/BufferSettings"
         },
         "trace": {
           "anyOf": [
@@ -891,17 +880,7 @@
           "type": "object"
         },
         "settings": {
-          "allOf": [
-            {
-              "default": {
-                "uninterruptible": false
-              },
-              "description": "Settings specific to the scope, e.g. whether it is interruptible."
-            },
-            {
-              "$ref": "#/$defs/ScopeSettings"
-            }
-          ]
+          "$ref": "#/$defs/ScopeSettings"
         },
         "start": {
           "$ref": "#/$defs/NextOperation"
@@ -1076,26 +1055,10 @@
     "SectionTemplate": {
       "properties": {
         "buffers": {
-          "allOf": [
-            {
-              "default": [],
-              "description": "These are the buffers that the section is exposing for you to read,\n write, join, or listen to."
-            },
-            {
-              "$ref": "#/$defs/InputRemapping"
-            }
-          ]
+          "$ref": "#/$defs/InputRemapping"
         },
         "inputs": {
-          "allOf": [
-            {
-              "default": [],
-              "description": "These are the inputs that the section is exposing for its sibling\n operations to send outputs into."
-            },
-            {
-              "$ref": "#/$defs/InputRemapping"
-            }
-          ]
+          "$ref": "#/$defs/InputRemapping"
         },
         "ops": {
           "additionalProperties": {

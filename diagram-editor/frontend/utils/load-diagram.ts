@@ -1,13 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge } from '../edges';
+import { NodeManager } from '../node-manager';
 import {
   type DiagramEditorNode,
   isOperationNode,
   START_ID,
   TERMINATE_ID,
 } from '../nodes';
-import type { Diagram, DiagramOperation } from '../types/api';
+import type { Diagram, DiagramOperation, SectionTemplate } from '../types/api';
 import { getSchema } from './ajv';
+import { exportDiagram } from './export-diagram';
 import { LAYOUT_OPTIONS } from './layout';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import { buildEdges, isBuiltin } from './operation';
@@ -160,3 +162,101 @@ function buildGraph(diagram: Diagram): Graph {
 }
 
 const validate = getSchema<Diagram>('Diagram');
+
+export function loadTemplate(template: SectionTemplate): Graph {
+  const stubDiagram = exportDiagram(new NodeManager([]), [], {});
+  stubDiagram.ops = template.ops;
+  const graph = buildGraph(stubDiagram);
+
+  // filter out builtin START and TERMINATE.
+  const nodes = graph.nodes.filter((node) => {
+    !node.parentId && node.type in ['start', 'terminate'];
+  });
+
+  if (template.inputs) {
+    if (Array.isArray(template.inputs)) {
+      for (const input of template.inputs) {
+        nodes.push({
+          id: uuidv4(),
+          type: 'sectionInput',
+          position: { x: 0, y: 0 },
+          data: {
+            namespace: ROOT_NAMESPACE,
+            remappedId: input,
+            targetId: input,
+          },
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
+        });
+      }
+    } else {
+      for (const [remappedId, targetId] of Object.entries(template.inputs)) {
+        nodes.push({
+          id: uuidv4(),
+          type: 'sectionInput',
+          position: { x: 0, y: 0 },
+          data: {
+            namespace: ROOT_NAMESPACE,
+            remappedId,
+            targetId,
+          },
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
+        });
+      }
+    }
+  }
+
+  if (template.buffers) {
+    if (Array.isArray(template.buffers)) {
+      for (const buffer of template.buffers) {
+        nodes.push({
+          id: uuidv4(),
+          type: 'sectionBuffer',
+          position: { x: 0, y: 0 },
+          data: {
+            namespace: ROOT_NAMESPACE,
+            remappedId: buffer,
+            targetId: buffer,
+          },
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
+        });
+      }
+    } else {
+      for (const [remappedId, targetId] of Object.entries(template.buffers)) {
+        nodes.push({
+          id: uuidv4(),
+          type: 'sectionBuffer',
+          position: { x: 0, y: 0 },
+          data: {
+            namespace: ROOT_NAMESPACE,
+            remappedId,
+            targetId,
+          },
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
+        });
+      }
+    }
+  }
+
+  if (template.outputs) {
+    for (const output of template.outputs) {
+      nodes.push({
+        id: uuidv4(),
+        type: 'sectionBuffer',
+        position: { x: 0, y: 0 },
+        data: {
+          namespace: ROOT_NAMESPACE,
+          remappedId: output,
+          targetId: output,
+        },
+        width: LAYOUT_OPTIONS.nodeWidth,
+        height: LAYOUT_OPTIONS.nodeHeight,
+      });
+    }
+  }
+
+  return { nodes, edges: graph.edges };
+}

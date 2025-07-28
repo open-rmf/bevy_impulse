@@ -40,8 +40,8 @@ import UnzipEdgeComp, {
 export type { BufferKeyEdge } from './buffer-key-edge';
 export type { BufferSeqEdge } from './buffer-seq-edge';
 export type { SplitKeyEdge } from './split-key-edge';
-export type { SplitSeqEdge } from './split-seq-edge';
 export type { SplitRemainingEdge } from './split-remaining-edge';
+export type { SplitSeqEdge } from './split-seq-edge';
 export type { StreamOutEdge } from './stream-out-edge';
 export type { UnzipEdge } from './unzip-edge';
 

@@ -1,11 +1,4 @@
-import {
-  createContext,
-  type Dispatch,
-  type PropsWithChildren,
-  type SetStateAction,
-  useContext,
-  useState,
-} from 'react';
+import React, { createContext, type Dispatch, useContext } from 'react';
 
 export enum EditorMode {
   Normal,
@@ -27,25 +20,24 @@ export type EditorModeContext =
 
 export type UseEditorModeContext = [
   EditorModeContext,
-  Dispatch<SetStateAction<EditorModeContext>>,
+  Dispatch<EditorModeContext>,
 ];
 
-const EditorModeContext = createContext<UseEditorModeContext | null>(null);
+const EditorModeContextComp = createContext<UseEditorModeContext | null>(null);
 
-export function EditorModeProvider({ children }: PropsWithChildren) {
-  const [mode, setMode] = useState<EditorModeContext>({
-    mode: EditorMode.Normal,
-  });
-
+export function EditorModeProvider({
+  value,
+  children,
+}: React.ProviderProps<UseEditorModeContext>) {
   return (
-    <EditorModeContext.Provider value={[mode, setMode]}>
+    <EditorModeContextComp.Provider value={value}>
       {children}
-    </EditorModeContext.Provider>
+    </EditorModeContextComp.Provider>
   );
 }
 
 export function useEditorMode(): UseEditorModeContext {
-  const context = useContext(EditorModeContext);
+  const context = useContext(EditorModeContextComp);
   if (!context) {
     throw new Error('useEditorMode must be used within a EditorModeProvider');
   }

@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import {
   Alert,
   alpha,
@@ -32,7 +31,11 @@ import AddOperation from './add-operation';
 import CommandPanel from './command-panel';
 import type { DiagramEditorEdge } from './edges';
 import { EDGE_TYPES } from './edges';
-import { EditorMode, useEditorMode } from './editor-mode';
+import {
+  EditorMode,
+  type EditorModeContext,
+  EditorModeProvider,
+} from './editor-mode';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
@@ -44,14 +47,10 @@ import {
   type OperationNode,
 } from './nodes';
 import { useTemplates } from './templates-provider';
-import {
-  exhaustiveCheck,
-  allowEdges as getAllowEdges,
-  ROOT_NAMESPACE,
-} from './utils';
+import { exhaustiveCheck, allowEdges as getAllowEdges } from './utils';
 import { autoLayout } from './utils/auto-layout';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
-import { loadDiagramJson, loadEmpty } from './utils/load-diagram';
+import { loadDiagramJson, loadEmpty, loadTemplate } from './utils/load-diagram';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -97,75 +96,63 @@ function getChangeParentIdAndPosition(
   }
 }
 
-function defaultTemplateNodes(): DiagramEditorNode[] {
-  return [
-    {
-      id: uuidv4(),
-      type: 'sectionInput',
-      position: { x: 0, y: 0 },
-      data: {
-        namespace: ROOT_NAMESPACE,
-        remappedId: 'input',
-        targetId: 'input',
-      },
-      width: LAYOUT_OPTIONS.nodeWidth,
-      height: LAYOUT_OPTIONS.nodeHeight,
-    },
-    {
-      id: uuidv4(),
-      type: 'sectionOutput',
-      position: { x: 0, y: 400 },
-      data: {
-        namespace: ROOT_NAMESPACE,
-        remappedId: 'output',
-        targetId: 'output',
-      },
-      width: LAYOUT_OPTIONS.nodeWidth,
-      height: LAYOUT_OPTIONS.nodeHeight,
-    },
-  ];
-}
-
-const DiagramEditor = () => {
+function DiagramEditor() {
   const reactFlowInstance = React.useRef<ReactFlowInstance<
     DiagramEditorNode,
     DiagramEditorEdge
   > | null>(null);
 
-  const [editorMode, setEditorMode] = useEditorMode();
+  const [editorMode, setEditorMode] = React.useState<EditorModeContext>({
+    mode: EditorMode.Normal,
+  });
 
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
-  const [templateNodes, _setTemplateNodes] = React.useState<
-    DiagramEditorNode[]
-  >(() => defaultTemplateNodes());
-  const renderedNodes = React.useMemo(() => {
-    switch (editorMode.mode) {
-      case EditorMode.Normal:
-        return nodes;
-      case EditorMode.Template:
-        return templateNodes;
-      default:
-        exhaustiveCheck(editorMode);
-        throw new Error('unknown editor mode');
-    }
-  }, [editorMode, nodes, templateNodes]);
+  const savedNodes = React.useRef<DiagramEditorNode[]>([]);
 
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
-  const [templateEdges, _setTemplateEdges] =
-    React.useState<DiagramEditorEdge[]>();
-  const renderedEdges = React.useMemo(() => {
-    switch (editorMode.mode) {
-      case EditorMode.Normal:
-        return edges;
-      case EditorMode.Template:
-        return templateEdges;
-      default:
-        exhaustiveCheck(editorMode);
-        throw new Error('unknown editor mode');
-    }
-  }, [editorMode, edges, templateEdges]);
+  const savedEdges = React.useRef<DiagramEditorEdge[]>([]);
+
+  const [templates] = useTemplates();
+
+  const updateEditorModeAction = React.useCallback(
+    (newMode: EditorModeContext) => {
+      switch (newMode.mode) {
+        case EditorMode.Normal: {
+          setNodes([...savedNodes.current]);
+          setEdges([...savedEdges.current]);
+          reactFlowInstance.current?.fitView();
+          break;
+        }
+        case EditorMode.Template: {
+          const template = templates[newMode.templateId];
+          if (!template) {
+            throw new Error(`template ${newMode.templateId} not found`);
+          }
+          const graph = loadTemplate(template);
+          // using callback form so that `nodes` and `edges` don't need to be part of dependencies.
+          setNodes((prev) => {
+            savedNodes.current = [...prev];
+            return graph.nodes;
+          });
+          setEdges((prev) => {
+            savedEdges.current = [...prev];
+            return graph.edges;
+          });
+          reactFlowInstance.current?.fitView();
+          break;
+        }
+        default: {
+          exhaustiveCheck(newMode);
+          throw new Error('unknown editor mode');
+        }
+      }
+
+      setEditorMode(newMode);
+    },
+    [templates],
+  );
 
   const handleEdgeChanges = React.useCallback(
     (changes: EdgeChange<DiagramEditorEdge>[]) => {
@@ -493,223 +480,225 @@ const DiagramEditor = () => {
   }, []);
 
   return (
-    <ReactFlow
-      nodes={renderedNodes}
-      edges={renderedEdges}
-      fitView
-      fitViewOptions={{ padding: 0.2 }}
-      nodeTypes={NODE_TYPES}
-      edgeTypes={EDGE_TYPES}
-      onInit={(instance) => {
-        reactFlowInstance.current = instance;
+    <EditorModeProvider value={[editorMode, updateEditorModeAction]}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
+        onInit={(instance) => {
+          reactFlowInstance.current = instance;
 
-        const queryParams = new URLSearchParams(window.location.search);
-        const diagramParam = queryParams.get('diagram');
+          const queryParams = new URLSearchParams(window.location.search);
+          const diagramParam = queryParams.get('diagram');
 
-        if (!diagramParam) {
-          return;
-        }
-
-        try {
-          const binaryString = atob(diagramParam);
-          const byteArray = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            byteArray[i] = binaryString.charCodeAt(i);
+          if (!diagramParam) {
+            return;
           }
-          const diagramJson = strFromU8(inflateSync(byteArray));
-          loadDiagram(diagramJson);
-        } catch (e) {
-          if (e instanceof Error) {
-            showErrorToast(`failed to load diagram: ${e.message}`);
-          } else {
-            throw e;
+
+          try {
+            const binaryString = atob(diagramParam);
+            const byteArray = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              byteArray[i] = binaryString.charCodeAt(i);
+            }
+            const diagramJson = strFromU8(inflateSync(byteArray));
+            loadDiagram(diagramJson);
+          } catch (e) {
+            if (e instanceof Error) {
+              showErrorToast(`failed to load diagram: ${e.message}`);
+            } else {
+              throw e;
+            }
           }
-        }
-      }}
-      onNodesChange={handleNodeChanges}
-      onNodesDelete={() => {
-        closeAllPopovers();
-      }}
-      onEdgesChange={handleEdgeChanges}
-      onEdgesDelete={() => {
-        closeAllPopovers();
-      }}
-      onConnect={(conn) => {
-        const sourceNode = nodes.find((n) => n.id === conn.source);
-        const targetNode = nodes.find((n) => n.id === conn.target);
-        if (!sourceNode || !targetNode) {
-          throw new Error('cannot find source or target node');
-        }
-
-        const allowedEdges = getAllowEdges(sourceNode, targetNode);
-        if (allowedEdges.length === 0) {
-          showErrorToast(
-            `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
-          );
-          return;
-        }
-
-        setEdges((prev) =>
-          addEdge(
-            {
-              ...conn,
-              type: allowedEdges[0],
-              data: defaultEdgeData(allowedEdges[0]),
-            },
-            prev,
-          ),
-        );
-      }}
-      onReconnect={(oldEdge, newConnection) =>
-        setEdges((prev) => reconnectEdge(oldEdge, newConnection, prev))
-      }
-      onNodeClick={(ev, node) => {
-        ev.stopPropagation();
-        closeAllPopovers();
-
-        if (!isOperationNode(node)) {
-          return;
-        }
-        setEditingNodeId(node.id);
-
-        setEditOpFormPopoverProps({
-          open: true,
-          anchorReference: 'anchorPosition',
-          anchorPosition: { left: ev.clientX, top: ev.clientY },
-        });
-      }}
-      onEdgeClick={(ev, edge) => {
-        ev.stopPropagation();
-        closeAllPopovers();
-
-        const sourceNode = nodes.find((n) => n.id === edge.source);
-        const targetNode = nodes.find((n) => n.id === edge.target);
-        if (!sourceNode || !targetNode) {
-          throw new Error('unable to find source or target node');
-        }
-
-        setEditingEdgeId(edge.id);
-
-        setEditOpFormPopoverProps({
-          open: true,
-          anchorReference: 'anchorPosition',
-          anchorPosition: { left: ev.clientX, top: ev.clientY },
-        });
-      }}
-      onPaneClick={(ev) => {
-        if (addOperationPopover.open || editOpFormPopoverProps.open) {
+        }}
+        onNodesChange={handleNodeChanges}
+        onNodesDelete={() => {
           closeAllPopovers();
-          return;
-        }
+        }}
+        onEdgesChange={handleEdgeChanges}
+        onEdgesDelete={() => {
+          closeAllPopovers();
+        }}
+        onConnect={(conn) => {
+          const sourceNode = nodes.find((n) => n.id === conn.source);
+          const targetNode = nodes.find((n) => n.id === conn.target);
+          if (!sourceNode || !targetNode) {
+            throw new Error('cannot find source or target node');
+          }
 
-        // filter out erroneous click after connecting an edge
-        const now = Date.now();
-        if (now - mouseDownTime.current > 200) {
-          return;
+          const allowedEdges = getAllowEdges(sourceNode, targetNode);
+          if (allowedEdges.length === 0) {
+            showErrorToast(
+              `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
+            );
+            return;
+          }
+
+          setEdges((prev) =>
+            addEdge(
+              {
+                ...conn,
+                type: allowedEdges[0],
+                data: defaultEdgeData(allowedEdges[0]),
+              },
+              prev,
+            ),
+          );
+        }}
+        onReconnect={(oldEdge, newConnection) =>
+          setEdges((prev) => reconnectEdge(oldEdge, newConnection, prev))
         }
-        setAddOperationPopover({
-          open: true,
-          popOverPosition: { left: ev.clientX, top: ev.clientY },
-          parentId: null,
-        });
-      }}
-      onMouseDownCapture={handleMouseDown}
-      onTouchStartCapture={handleMouseDown}
-      colorMode="dark"
-      deleteKeyCode={'Delete'}
-    >
-      <Background
-        bgColor={backgroundColor}
-        color={alpha(theme.palette.text.primary, 0.3)}
-        gap={30}
-      />
-      {editorMode.mode === EditorMode.Template && (
-        <Panel position="top-left">
-          <Typography variant="h4">{editorMode.templateId}</Typography>
-        </Panel>
-      )}
-      <CommandPanel
-        onNodeChanges={handleNodeChanges}
-        onExportClick={React.useCallback(
-          () => setOpenExportDiagramDialog(true),
-          [],
-        )}
-        onLoadDiagram={loadDiagram}
-      />
-      {editorMode.mode === EditorMode.Template && (
-        <Fab
-          color="primary"
-          aria-label="Save"
-          sx={{ position: 'absolute', right: 64, bottom: 64 }}
-          onClick={() => setEditorMode({ mode: EditorMode.Normal })}
-        >
-          <MaterialSymbol symbol="check" />
-        </Fab>
-      )}
-      <Popover
-        open={addOperationPopover.open}
-        onClose={() =>
-          setAddOperationPopover((prev) => ({ ...prev, open: false }))
-        }
-        anchorReference="anchorPosition"
-        anchorPosition={addOperationPopover.popOverPosition}
-        // use a custom component to prevent the popover from creating an invisible element that blocks clicks
-        component={NonCapturingPopoverContainer}
-      >
-        <AddOperation
-          parentId={addOperationPopover.parentId || undefined}
-          newNodePosition={addOperationNewNodePosition}
-          onAdd={(changes) => {
-            handleNodeChanges(changes);
+        onNodeClick={(ev, node) => {
+          ev.stopPropagation();
+          closeAllPopovers();
+
+          if (!isOperationNode(node)) {
+            return;
+          }
+          setEditingNodeId(node.id);
+
+          setEditOpFormPopoverProps({
+            open: true,
+            anchorReference: 'anchorPosition',
+            anchorPosition: { left: ev.clientX, top: ev.clientY },
+          });
+        }}
+        onEdgeClick={(ev, edge) => {
+          ev.stopPropagation();
+          closeAllPopovers();
+
+          const sourceNode = nodes.find((n) => n.id === edge.source);
+          const targetNode = nodes.find((n) => n.id === edge.target);
+          if (!sourceNode || !targetNode) {
+            throw new Error('unable to find source or target node');
+          }
+
+          setEditingEdgeId(edge.id);
+
+          setEditOpFormPopoverProps({
+            open: true,
+            anchorReference: 'anchorPosition',
+            anchorPosition: { left: ev.clientX, top: ev.clientY },
+          });
+        }}
+        onPaneClick={(ev) => {
+          if (addOperationPopover.open || editOpFormPopoverProps.open) {
             closeAllPopovers();
-          }}
-        />
-      </Popover>
-      <Popover
-        {...editOpFormPopoverProps}
-        onClose={() => setEditOpFormPopoverProps({ open: false })}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        // use a custom component to prevent the popover from creating an invisible element that blocks clicks
-        component={NonCapturingPopoverContainer}
+            return;
+          }
+
+          // filter out erroneous click after connecting an edge
+          const now = Date.now();
+          if (now - mouseDownTime.current > 200) {
+            return;
+          }
+          setAddOperationPopover({
+            open: true,
+            popOverPosition: { left: ev.clientX, top: ev.clientY },
+            parentId: null,
+          });
+        }}
+        onMouseDownCapture={handleMouseDown}
+        onTouchStartCapture={handleMouseDown}
+        colorMode="dark"
+        deleteKeyCode={'Delete'}
       >
-        {editingNodeId && renderEditForm(editingNodeId)}
-        {editingEdge && (
-          <EditEdgeForm
-            edge={editingEdge.edge}
-            allowedEdgeTypes={getAllowEdges(
-              editingEdge.sourceNode,
-              editingEdge.targetNode,
-            )}
-            onChanges={handleEdgeChanges}
-            onDelete={(changes) => {
-              setEdges((prev) => applyEdgeChanges([changes], prev));
+        <Background
+          bgColor={backgroundColor}
+          color={alpha(theme.palette.text.primary, 0.3)}
+          gap={30}
+        />
+        {editorMode.mode === EditorMode.Template && (
+          <Panel position="top-left">
+            <Typography variant="h4">{editorMode.templateId}</Typography>
+          </Panel>
+        )}
+        <CommandPanel
+          onNodeChanges={handleNodeChanges}
+          onExportClick={React.useCallback(
+            () => setOpenExportDiagramDialog(true),
+            [],
+          )}
+          onLoadDiagram={loadDiagram}
+        />
+        {editorMode.mode === EditorMode.Template && (
+          <Fab
+            color="primary"
+            aria-label="Save"
+            sx={{ position: 'absolute', right: 64, bottom: 64 }}
+            onClick={() => updateEditorModeAction({ mode: EditorMode.Normal })}
+          >
+            <MaterialSymbol symbol="check" />
+          </Fab>
+        )}
+        <Popover
+          open={addOperationPopover.open}
+          onClose={() =>
+            setAddOperationPopover((prev) => ({ ...prev, open: false }))
+          }
+          anchorReference="anchorPosition"
+          anchorPosition={addOperationPopover.popOverPosition}
+          // use a custom component to prevent the popover from creating an invisible element that blocks clicks
+          component={NonCapturingPopoverContainer}
+        >
+          <AddOperation
+            parentId={addOperationPopover.parentId || undefined}
+            newNodePosition={addOperationNewNodePosition}
+            onAdd={(changes) => {
+              handleNodeChanges(changes);
               closeAllPopovers();
             }}
           />
-        )}
-      </Popover>
-      <Snackbar
-        open={openErrorToast}
-        onClose={(_, reason) => {
-          if (reason === 'clickaway') {
-            return;
-          }
-          setOpenErrorToast(false);
-        }}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setOpenErrorToast(false)} severity="error">
-          {errorToast}
-        </Alert>
-      </Snackbar>
-      <ExportDiagramDialog
-        open={openExportDiagramDialog}
-        onClose={() => setOpenExportDiagramDialog(false)}
-        nodes={nodes}
-        edges={edges}
-      />
-    </ReactFlow>
+        </Popover>
+        <Popover
+          {...editOpFormPopoverProps}
+          onClose={() => setEditOpFormPopoverProps({ open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          // use a custom component to prevent the popover from creating an invisible element that blocks clicks
+          component={NonCapturingPopoverContainer}
+        >
+          {editingNodeId && renderEditForm(editingNodeId)}
+          {editingEdge && (
+            <EditEdgeForm
+              edge={editingEdge.edge}
+              allowedEdgeTypes={getAllowEdges(
+                editingEdge.sourceNode,
+                editingEdge.targetNode,
+              )}
+              onChanges={handleEdgeChanges}
+              onDelete={(changes) => {
+                setEdges((prev) => applyEdgeChanges([changes], prev));
+                closeAllPopovers();
+              }}
+            />
+          )}
+        </Popover>
+        <Snackbar
+          open={openErrorToast}
+          onClose={(_, reason) => {
+            if (reason === 'clickaway') {
+              return;
+            }
+            setOpenErrorToast(false);
+          }}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert onClose={() => setOpenErrorToast(false)} severity="error">
+            {errorToast}
+          </Alert>
+        </Snackbar>
+        <ExportDiagramDialog
+          open={openExportDiagramDialog}
+          onClose={() => setOpenExportDiagramDialog(false)}
+          nodes={nodes}
+          edges={edges}
+        />
+      </ReactFlow>
+    </EditorModeProvider>
   );
-};
+}
 
 export default DiagramEditor;

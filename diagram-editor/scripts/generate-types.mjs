@@ -39,7 +39,9 @@ async function generate(name, schema, outputPath, preprocessedOutputPath) {
       }
 
       if (
-        Object.keys(copy).some((k) => !['description', 'title'].includes(k))
+        Object.keys(copy).some(
+          (k) => !['description', 'title', 'default'].includes(k),
+        )
       ) {
         // At least one field is not metadata only field.
         const allOf = [copy, { $ref }];
