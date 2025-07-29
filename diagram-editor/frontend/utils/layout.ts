@@ -10,7 +10,7 @@ export interface LayoutOptions {
 }
 
 export const LAYOUT_OPTIONS: LayoutOptions = {
-  nodeWidth: 125,
+  nodeWidth: 200,
   nodeHeight: 50,
   scopePadding: {
     leftRight: 75,

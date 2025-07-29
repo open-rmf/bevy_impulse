@@ -24,8 +24,7 @@ export function autoLayout(
   const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({
     rankdir: 'TB',
-    marginx: options.nodeWidth / 2,
-    marginy: options.nodeHeight / 2,
+    ranksep: options.nodeHeight,
   });
 
   const scopeChildrens: Record<string, DiagramEditorNode[]> = {};
@@ -43,6 +42,15 @@ export function autoLayout(
     // exclude scope node from auto layout
     if (!isScopeNode(node)) {
       dagreGraph.setNode(node.id, {
+        // dagre requires the node dimensions to be known, the easy solution is to only use
+        // fixed size nodes. The complex alternative is to delay auto layout until ReactFlow
+        // finishes measuring the nodes, this is complex because
+        //   1. There is no hook for when ReactFlow finishes measurements
+        //   2. ReactFlow does not delay updating the DOM until the measurements are complete.
+        //     2.1. This means that when loading a new diagram, there will be a short period where the layout is not yet computed.
+        //   3. Measurements of a node may change multiple times before it "stabilizes".
+        //     3.1. This means that even if all nodes have measurements, they may not be final measurements.
+        //          If the measurements change after the layout is computed, the layout will be wrong.
         width: options.nodeWidth,
         height: options.nodeHeight,
       });

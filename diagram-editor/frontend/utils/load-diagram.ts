@@ -10,7 +10,6 @@ import {
 import type { Diagram, DiagramOperation, SectionTemplate } from '../types/api';
 import { getSchema } from './ajv';
 import { exportDiagram } from './export-diagram';
-import { LAYOUT_OPTIONS } from './layout';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import { buildEdges, isBuiltin } from './operation';
 
@@ -47,8 +46,6 @@ export function loadEmpty(): Graph {
         position: { x: 0, y: 0 },
         selectable: false,
         data: { namespace: ROOT_NAMESPACE },
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
       },
       {
         id: joinNamespaces(ROOT_NAMESPACE, TERMINATE_ID),
@@ -56,8 +53,6 @@ export function loadEmpty(): Graph {
         position: { x: 0, y: 400 },
         selectable: false,
         data: { namespace: ROOT_NAMESPACE },
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
       },
     ],
     edges: [],
@@ -103,8 +98,6 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace: joinNamespaces(namespace, opId) },
         parentId: id,
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
       });
       nodes.push({
         id: joinNamespaces(namespace, opId, TERMINATE_ID),
@@ -112,8 +105,6 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace: joinNamespaces(namespace, opId) },
         parentId: id,
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
       });
 
       for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
@@ -131,8 +122,6 @@ function buildGraph(diagram: Diagram): Graph {
         position: { x: 0, y: 0 },
         data: { namespace, opId, op },
         parentId,
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
       });
     }
   }
@@ -185,8 +174,6 @@ export function loadTemplate(template: SectionTemplate): Graph {
             remappedId: input,
             targetId: input,
           },
-          width: LAYOUT_OPTIONS.nodeWidth,
-          height: LAYOUT_OPTIONS.nodeHeight,
         });
       }
     } else {
@@ -200,8 +187,6 @@ export function loadTemplate(template: SectionTemplate): Graph {
             remappedId,
             targetId,
           },
-          width: LAYOUT_OPTIONS.nodeWidth,
-          height: LAYOUT_OPTIONS.nodeHeight,
         });
       }
     }
@@ -219,8 +204,6 @@ export function loadTemplate(template: SectionTemplate): Graph {
             remappedId: buffer,
             targetId: buffer,
           },
-          width: LAYOUT_OPTIONS.nodeWidth,
-          height: LAYOUT_OPTIONS.nodeHeight,
         });
       }
     } else {
@@ -234,8 +217,6 @@ export function loadTemplate(template: SectionTemplate): Graph {
             remappedId,
             targetId,
           },
-          width: LAYOUT_OPTIONS.nodeWidth,
-          height: LAYOUT_OPTIONS.nodeHeight,
         });
       }
     }
@@ -252,8 +233,6 @@ export function loadTemplate(template: SectionTemplate): Graph {
           remappedId: output,
           targetId: output,
         },
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
       });
     }
   }

@@ -1,6 +1,7 @@
-import { Button, type ButtonProps, Paper } from '@mui/material';
+import { Box, Button, type ButtonProps, Paper } from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import React from 'react';
+import { LAYOUT_OPTIONS } from '../utils/layout';
 
 export interface BaseNodeProps extends NodeProps {
   color?: ButtonProps['color'];
@@ -18,8 +19,6 @@ function BaseNode({
   selected,
   sourcePosition = Position.Bottom,
   targetPosition = Position.Top,
-  width,
-  height,
 }: BaseNodeProps) {
   const icon =
     typeof materialIconOrSymbol === 'string' ? (
@@ -28,7 +27,7 @@ function BaseNode({
       materialIconOrSymbol
     );
   return (
-    <Paper sx={{ minWidth: 100 }}>
+    <Paper>
       {(variant === 'input' || variant === 'inputOutput') && (
         <Handle
           type="target"
@@ -37,17 +36,28 @@ function BaseNode({
         />
       )}
       <Button
+        title={label}
         color={color}
         fullWidth
         startIcon={icon}
         variant={selected ? 'contained' : 'outlined'}
         sx={{
           textTransform: 'none',
-          width,
-          height,
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
         }}
       >
-        {label}
+        <Box
+          component="span"
+          sx={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {label}
+        </Box>
       </Button>
       {(variant === 'output' || variant === 'inputOutput') && (
         <Handle

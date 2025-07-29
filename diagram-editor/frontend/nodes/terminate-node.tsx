@@ -1,12 +1,11 @@
 import { Button, Paper } from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { LAYOUT_OPTIONS } from '../utils/layout';
 import type { BuiltinNode } from '.';
 
 function TerminateNode({
   isConnectable,
   targetPosition = Position.Top,
-  width,
-  height,
 }: NodeProps<BuiltinNode>) {
   return (
     <Paper>
@@ -20,8 +19,8 @@ function TerminateNode({
         variant="outlined"
         disabled
         sx={{
-          width,
-          height,
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
         }}
       >
         Terminate

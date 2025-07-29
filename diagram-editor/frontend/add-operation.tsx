@@ -111,8 +111,6 @@ function createNodeChange(
           data: {
             namespace: joinNamespaces(namespace, scopeId),
           },
-          width: LAYOUT_OPTIONS.nodeWidth,
-          height: LAYOUT_OPTIONS.nodeHeight,
           parentId: scopeId,
         },
       },
@@ -128,8 +126,6 @@ function createNodeChange(
           data: {
             namespace: joinNamespaces(namespace, scopeId),
           },
-          width: LAYOUT_OPTIONS.nodeWidth,
-          height: LAYOUT_OPTIONS.nodeHeight,
           parentId: scopeId,
         },
       },
@@ -174,8 +170,7 @@ function createNodeChange(
           opId: uuidv4(),
           op,
         },
-        width: LAYOUT_OPTIONS.nodeWidth,
-        height: LAYOUT_OPTIONS.nodeHeight,
+
         parentId,
       },
     },

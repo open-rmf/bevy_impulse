@@ -1,13 +1,12 @@
 import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
 import { Handle, Position } from '@xyflow/react';
+import { LAYOUT_OPTIONS } from '../utils/layout';
 import type { BuiltinNode } from '.';
 
 function StartNode({
   isConnectable,
   sourcePosition = Position.Bottom,
-  width,
-  height,
 }: NodeProps<BuiltinNode>) {
   return (
     <Paper sx={{ minWidth: 100 }}>
@@ -16,8 +15,8 @@ function StartNode({
         variant="outlined"
         disabled
         sx={{
-          width,
-          height,
+          width: LAYOUT_OPTIONS.nodeWidth,
+          height: LAYOUT_OPTIONS.nodeHeight,
         }}
       >
         Start
