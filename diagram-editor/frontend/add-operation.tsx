@@ -5,7 +5,6 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import React from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { EditorMode, useEditorMode } from './editor-mode';
 import type { DiagramEditorNode } from './nodes';
 import {
@@ -30,7 +29,13 @@ import {
   UnzipIcon,
 } from './nodes';
 import type { DiagramOperation } from './types/api';
-import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
+import {
+  createOperationNode,
+  createScopeNode,
+  createSectionBufferNode,
+  createSectionInputNode,
+  createSectionOutputNode,
+} from './utils/create-node';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
 
 const StyledOperationButton = styled(Button)({
@@ -44,18 +49,12 @@ export interface AddOperationProps {
 }
 
 function createSectionInputChange(
-  remappedId: string,
   targetId: string,
   position: XYPosition,
 ): NodeAddChange<SectionInputNode> {
   return {
     type: 'add',
-    item: {
-      id: uuidv4(),
-      type: 'sectionInput',
-      data: { remappedId, targetId },
-      position,
-    },
+    item: createSectionInputNode(targetId, position),
   };
 }
 
@@ -65,28 +64,17 @@ function createSectionOutputChange(
 ): NodeAddChange<SectionOutputNode> {
   return {
     type: 'add',
-    item: {
-      id: uuidv4(),
-      type: 'sectionOutput',
-      data: { outputId },
-      position,
-    },
+    item: createSectionOutputNode(outputId, position),
   };
 }
 
 function createSectionBufferChange(
-  remappedId: string,
   targetId: string,
   position: XYPosition,
 ): NodeAddChange<SectionBufferNode> {
   return {
     type: 'add',
-    item: {
-      id: uuidv4(),
-      type: 'sectionBuffer',
-      data: { remappedId, targetId },
-      position,
-    },
+    item: createSectionBufferNode(targetId, position),
   };
 }
 
@@ -97,82 +85,15 @@ function createNodeChange(
   op: DiagramOperation,
 ): NodeAddChange<DiagramEditorNode>[] {
   if (op.type === 'scope') {
-    const scopeId = uuidv4();
-    const children: NodeAddChange<DiagramEditorNode>[] = [
-      {
-        type: 'add',
-        item: {
-          id: uuidv4(),
-          type: 'start',
-          position: {
-            x: LAYOUT_OPTIONS.scopePadding.leftRight,
-            y: LAYOUT_OPTIONS.scopePadding.topBottom,
-          },
-          data: {
-            namespace: joinNamespaces(namespace, scopeId),
-          },
-          parentId: scopeId,
-        },
-      },
-      {
-        type: 'add',
-        item: {
-          id: uuidv4(),
-          type: 'terminate',
-          position: {
-            x: LAYOUT_OPTIONS.scopePadding.leftRight,
-            y: LAYOUT_OPTIONS.scopePadding.topBottom * 5,
-          },
-          data: {
-            namespace: joinNamespaces(namespace, scopeId),
-          },
-          parentId: scopeId,
-        },
-      },
-    ];
-    const scopeBounds = calculateScopeBounds(
-      children.map((c) => c.item.position),
+    return createScopeNode(namespace, parentId, newNodePosition, op).map(
+      (node) => ({ type: 'add', item: node }),
     );
-    return [
-      {
-        type: 'add',
-        item: {
-          id: scopeId,
-          type: 'scope',
-          position: {
-            x: newNodePosition.x + scopeBounds.x,
-            y: newNodePosition.y + scopeBounds.y,
-          },
-          data: {
-            namespace,
-            opId: uuidv4(),
-            op,
-          },
-          width: scopeBounds.width,
-          height: scopeBounds.height,
-          zIndex: -1,
-          parentId,
-        },
-      },
-      ...children,
-    ];
   }
 
   return [
     {
       type: 'add',
-      item: {
-        id: uuidv4(),
-        type: op.type,
-        position: newNodePosition,
-        data: {
-          namespace,
-          opId: uuidv4(),
-          op,
-        },
-
-        parentId,
-      },
+      item: createOperationNode(namespace, parentId, newNodePosition, op),
     },
   ];
 }
@@ -200,13 +121,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionInputIcon />}
             onClick={() => {
-              onAdd?.([
-                createSectionInputChange(
-                  'new_input',
-                  'new_input',
-                  newNodePosition,
-                ),
-              ]);
+              onAdd?.([createSectionInputChange('new_input', newNodePosition)]);
             }}
           >
             Section Input
@@ -231,11 +146,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
             startIcon={<SectionBufferIcon />}
             onClick={() => {
               onAdd?.([
-                createSectionBufferChange(
-                  'new_buffer',
-                  'new_buffer',
-                  newNodePosition,
-                ),
+                createSectionBufferChange('new_buffer', newNodePosition),
               ]);
             }}
           >
