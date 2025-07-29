@@ -4,7 +4,7 @@ import React from 'react';
 import type { DiagramEditorEdge } from './edges';
 import type { DiagramEditorNode } from './nodes';
 import { MaterialSymbol } from './nodes';
-import { autoLayout } from './utils';
+import { autoLayout } from './utils/auto-layout';
 import { LAYOUT_OPTIONS } from './utils/layout';
 
 export interface AutoLayoutButtonProps {

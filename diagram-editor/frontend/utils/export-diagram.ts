@@ -1,7 +1,12 @@
 import equal from 'fast-deep-equal';
 import type { DiagramEditorEdge, StreamOutEdge } from '../edges';
 import type { NodeManager } from '../node-manager';
-import { isOperationNode } from '../nodes';
+import {
+  type DiagramEditorNode,
+  isBuiltinNode,
+  isOperationNode,
+  isScopeNode,
+} from '../nodes';
 import type {
   BufferSelection,
   Diagram,
@@ -9,13 +14,9 @@ import type {
   NextOperation,
   SectionTemplate,
 } from '../types/api';
-import {
-  exhaustiveCheck,
-  isArrayBufferSelection,
-  isKeyedBufferSelection,
-  isScopeNode,
-  splitNamespaces,
-} from '../utils';
+import { exhaustiveCheck } from './exhaustive-check';
+import { ROOT_NAMESPACE, splitNamespaces } from './namespace';
+import { isArrayBufferSelection, isKeyedBufferSelection } from './operation';
 
 interface SubOperations {
   start: NextOperation;
@@ -278,6 +279,7 @@ function syncEdge(
     }
     default: {
       exhaustiveCheck(sourceOp);
+      throw new Error('unknown operation type');
     }
   }
 }
@@ -360,6 +362,16 @@ function syncEdges(
   }
 }
 
+/**
+ * Split the node's namespace if it has one, else return `[ROOT_NAMESPACE]`.
+ */
+function splitNodeNamespace(node: DiagramEditorNode): string[] {
+  if (isBuiltinNode(node) || isOperationNode(node)) {
+    return splitNamespaces(node.data.namespace);
+  }
+  return [ROOT_NAMESPACE];
+}
+
 export function exportDiagram(
   nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
@@ -379,19 +391,18 @@ export function exportDiagram(
   // visit the nodes breath first to ensure that the parents exist in the diagram before
   // populating the children.
   const sortedNodes = Array.from(nodeManager.iterNodes()).sort(
-    (a, b) =>
-      splitNamespaces(a.data.namespace).length -
-      splitNamespaces(b.data.namespace).length,
+    (a, b) => splitNodeNamespace(a).length - splitNodeNamespace(b).length,
   );
   for (const node of sortedNodes) {
-    const subOps = getSubOperations(diagram, node.data.namespace);
+    if (!isOperationNode(node)) {
+      continue;
+    }
 
-    if (isOperationNode(node)) {
-      subOps.ops[node.data.opId] = { ...node.data.op };
-      if (node.data.op.type === 'scope') {
-        // do not carry over stale ops from the node data
-        subOps.ops[node.data.opId].ops = {};
-      }
+    const subOps = getSubOperations(diagram, node.data.namespace);
+    subOps.ops[node.data.opId] = { ...node.data.op };
+    if (node.data.op.type === 'scope') {
+      // do not carry over stale ops from the node data
+      subOps.ops[node.data.opId].ops = {};
     }
   }
 
@@ -418,14 +429,11 @@ export function exportTemplate(
   // visit the nodes breath first to ensure that the parents exist in the diagram before
   // populating the children.
   const sortedNodes = Array.from(nodeManager.iterNodes()).sort(
-    (a, b) =>
-      splitNamespaces(a.data.namespace).length -
-      splitNamespaces(b.data.namespace).length,
+    (a, b) => splitNodeNamespace(a).length - splitNodeNamespace(b).length,
   );
   for (const node of sortedNodes) {
-    const subOps = getSubOperations(fakeRoot, node.data.namespace);
-
     if (isOperationNode(node)) {
+      const subOps = getSubOperations(fakeRoot, node.data.namespace);
       subOps.ops[node.data.opId] = { ...node.data.op };
       if (node.data.op.type === 'scope') {
         // do not carry over stale ops from the node data
@@ -434,7 +442,7 @@ export function exportTemplate(
     } else if (node.type === 'sectionInput') {
       template.inputs[node.data.remappedId] = node.data.targetId;
     } else if (node.type === 'sectionOutput') {
-      template.outputs.push(node.data.remappedId);
+      template.outputs.push(node.data.outputId);
     } else if (node.type === 'sectionBuffer') {
       template.buffers[node.data.remappedId] = node.data.targetId;
     }

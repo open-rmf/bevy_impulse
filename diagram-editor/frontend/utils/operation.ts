@@ -1,7 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import { type DiagramEditorNode, type OperationNode, START_ID } from '../nodes';
+import {
+  type DiagramEditorNode,
+  isOperationNode,
+  type OperationNode,
+  START_ID,
+} from '../nodes';
 import type {
   BufferSelection,
   BuiltinTarget,
@@ -26,7 +31,7 @@ export function isArrayBufferSelection(
 
 function createStreamOutEdges(
   streamOuts: Record<string, NextOperation>,
-  node: DiagramEditorNode,
+  node: OperationNode,
   nodeManager: NodeManager,
 ): DiagramEditorEdge[] {
   const edges: DiagramEditorEdge[] = [];
@@ -49,7 +54,7 @@ function createStreamOutEdges(
 }
 
 function createBufferEdges(
-  node: DiagramEditorNode,
+  node: OperationNode,
   buffers: BufferSelection,
   nodeManager: NodeManager,
 ): DiagramEditorEdge[] {
@@ -126,6 +131,9 @@ export function buildEdges(
   for (let state = stack.pop(); state !== undefined; state = stack.pop()) {
     const { namespace, opId, op } = state;
     const node = nodeManager.getNodeFromNamespaceOpId(namespace, opId);
+    if (!isOperationNode(node)) {
+      continue;
+    }
 
     switch (op.type) {
       case 'buffer': {
@@ -389,16 +397,21 @@ export function isBuiltin(next: unknown): next is { builtin: BuiltinTarget } {
   return next !== null && typeof next === 'object' && 'builtin' in next;
 }
 
-export function isScopeNode(
-  node: DiagramEditorNode,
-): node is OperationNode<'scope'> {
-  return node.type === 'scope';
-}
-
 export function isSectionBuilder(
   nodeData: Extract<DiagramOperation, { type: 'section' }>,
 ): nodeData is Extract<DiagramOperation, { type: 'section' }> & {
   builder: string;
 } {
   return 'builder' in nodeData;
+}
+
+export function formatNextOperation(nextOp: NextOperation): string {
+  if (isBuiltin(nextOp)) {
+    return `builtin:${nextOp.builtin}`;
+  }
+  if (typeof nextOp === 'object') {
+    const [ns, opId] = Object.entries(nextOp)[0];
+    return `${ns}:${opId}`;
+  }
+  return nextOp;
 }

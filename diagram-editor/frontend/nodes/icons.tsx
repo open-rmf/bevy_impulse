@@ -1,7 +1,7 @@
 import { Box, type BoxProps } from '@mui/material';
 import type React from 'react';
 import type { DiagramOperation } from '../types/api';
-import { exhaustiveCheck } from '../utils';
+import { exhaustiveCheck } from '../utils/exhaustive-check';
 
 export interface MaterialSymbolProps extends BoxProps {
   symbol: string;

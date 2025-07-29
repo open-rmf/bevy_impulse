@@ -1,6 +1,6 @@
 import { useArgs } from '@storybook/preview-api';
 import type { Meta, StoryObj } from 'storybook-react-rsbuild';
-import { ROOT_NAMESPACE } from '../utils';
+import { ROOT_NAMESPACE } from '../utils/namespace';
 import EditNodeForm from './edit-node-form';
 
 const meta: Meta<typeof EditNodeForm> = {

@@ -1,7 +1,7 @@
 import type { NodeProps } from '@xyflow/react';
 import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
-import { isSectionBuilder, type ROOT_NAMESPACE } from '../utils';
+import { isSectionBuilder } from '../utils/operation';
 import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import {
@@ -11,12 +11,27 @@ import {
   SectionOutputIcon,
 } from './icons';
 
-export type SectionInterfaceData = {
-  // section interfaces is always in the root namespace
-  namespace: typeof ROOT_NAMESPACE;
+export type SectionInputData = {
   remappedId: string;
   targetId: NextOperation;
 };
+
+export type SectionInputNode = Node<SectionInputData, 'sectionInput'>;
+
+export type SectionOutputData = {
+  outputId: string;
+};
+
+export type SectionOutputNode = Node<SectionOutputData, 'sectionOutput'>;
+
+export type SectionBufferData = SectionInputData;
+
+export type SectionBufferNode = Node<SectionBufferData, 'sectionBuffer'>;
+
+export type SectionInterfaceNode =
+  | SectionInputNode
+  | SectionOutputNode
+  | SectionBufferNode;
 
 export function SectionNode(props: NodeProps<OperationNode<'section'>>) {
   const label = isSectionBuilder(props.data.op)
@@ -39,13 +54,7 @@ export type SectionInterfaceNodeTypes =
   | 'sectionOutput'
   | 'sectionBuffer';
 
-export type SectionInterfaceNode<
-  K extends SectionInterfaceNodeTypes = SectionInterfaceNodeTypes,
-> = Node<SectionInterfaceData, K>;
-
-export function SectionInputNode(
-  props: NodeProps<SectionInterfaceNode<'sectionInput'>>,
-) {
+export function SectionInputNode(props: NodeProps<SectionInputNode>) {
   return (
     <BaseNode
       {...props}
@@ -57,23 +66,19 @@ export function SectionInputNode(
   );
 }
 
-export function SectionOutputNode(
-  props: NodeProps<SectionInterfaceNode<'sectionOutput'>>,
-) {
+export function SectionOutputNode(props: NodeProps<SectionOutputNode>) {
   return (
     <BaseNode
       {...props}
       color="secondary"
       icon={<SectionOutputIcon />}
-      label={props.data.remappedId}
+      label="Output"
       variant="input"
     />
   );
 }
 
-export function SectionBufferNode(
-  props: NodeProps<SectionInterfaceNode<'sectionBuffer'>>,
-) {
+export function SectionBufferNode(props: NodeProps<SectionBufferNode>) {
   return (
     <BaseNode
       {...props}

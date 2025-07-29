@@ -6,12 +6,9 @@ import {
   TERMINATE_ID,
 } from './nodes';
 import type { NextOperation } from './types/api';
-import {
-  exhaustiveCheck,
-  isBuiltin,
-  joinNamespaces,
-  ROOT_NAMESPACE,
-} from './utils';
+import { exhaustiveCheck } from './utils/exhaustive-check';
+import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
+import { isBuiltin } from './utils/operation';
 
 export class NodeManager {
   private nodeIdMap: Map<string, DiagramEditorNode> = new Map();
@@ -66,6 +63,9 @@ export class NodeManager {
     return this.getNodeFromNamespaceOpId(ROOT_NAMESPACE, opId);
   }
 
+  /**
+   * @returns returns `null` if the next operation points to a builtin node not rendered in the editor (e.g. `dispose`, `cancel`).
+   */
   getNodeFromNextOp(
     namespace: string,
     nextOp: NextOperation,

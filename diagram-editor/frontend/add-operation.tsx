@@ -7,11 +7,7 @@ import {
 import React from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { EditorMode, useEditorMode } from './editor-mode';
-import type {
-  DiagramEditorNode,
-  SectionInterfaceNode,
-  SectionInterfaceNodeTypes,
-} from './nodes';
+import type { DiagramEditorNode } from './nodes';
 import {
   BufferAccessIcon,
   BufferIcon,
@@ -23,16 +19,19 @@ import {
   NodeIcon,
   ScopeIcon,
   SectionBufferIcon,
+  type SectionBufferNode,
   SectionInputIcon,
+  type SectionInputNode,
   SectionOutputIcon,
+  type SectionOutputNode,
   SerializedJoinIcon,
   SplitIcon,
   TransformIcon,
   UnzipIcon,
 } from './nodes';
 import type { DiagramOperation } from './types/api';
-import { joinNamespaces, ROOT_NAMESPACE } from './utils';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
+import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',
@@ -44,18 +43,48 @@ export interface AddOperationProps {
   onAdd?: (change: NodeAddChange<DiagramEditorNode>[]) => void;
 }
 
-function createSectionInterfaceChange(
-  type: SectionInterfaceNodeTypes,
+function createSectionInputChange(
   remappedId: string,
   targetId: string,
   position: XYPosition,
-): NodeAddChange<SectionInterfaceNode> {
+): NodeAddChange<SectionInputNode> {
   return {
     type: 'add',
     item: {
       id: uuidv4(),
-      type,
-      data: { namespace: ROOT_NAMESPACE, remappedId, targetId },
+      type: 'sectionInput',
+      data: { remappedId, targetId },
+      position,
+    },
+  };
+}
+
+function createSectionOutputChange(
+  outputId: string,
+  position: XYPosition,
+): NodeAddChange<SectionOutputNode> {
+  return {
+    type: 'add',
+    item: {
+      id: uuidv4(),
+      type: 'sectionOutput',
+      data: { outputId },
+      position,
+    },
+  };
+}
+
+function createSectionBufferChange(
+  remappedId: string,
+  targetId: string,
+  position: XYPosition,
+): NodeAddChange<SectionBufferNode> {
+  return {
+    type: 'add',
+    item: {
+      id: uuidv4(),
+      type: 'sectionBuffer',
+      data: { remappedId, targetId },
       position,
     },
   };
@@ -177,10 +206,9 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
             startIcon={<SectionInputIcon />}
             onClick={() => {
               onAdd?.([
-                createSectionInterfaceChange(
-                  'sectionInput',
-                  'input',
-                  'input',
+                createSectionInputChange(
+                  'new_input',
+                  'new_input',
                   newNodePosition,
                 ),
               ]);
@@ -195,12 +223,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
             startIcon={<SectionOutputIcon />}
             onClick={() => {
               onAdd?.([
-                createSectionInterfaceChange(
-                  'sectionOutput',
-                  'output',
-                  'output',
-                  newNodePosition,
-                ),
+                createSectionOutputChange('new_output', newNodePosition),
               ]);
             }}
           >
@@ -213,10 +236,9 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
             startIcon={<SectionBufferIcon />}
             onClick={() => {
               onAdd?.([
-                createSectionInterfaceChange(
-                  'sectionBuffer',
-                  'buffer',
-                  'buffer',
+                createSectionBufferChange(
+                  'new_buffer',
+                  'new_buffer',
                   newNodePosition,
                 ),
               ]);

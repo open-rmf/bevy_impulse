@@ -47,8 +47,9 @@ import {
   type OperationNode,
 } from './nodes';
 import { useTemplates } from './templates-provider';
-import { exhaustiveCheck, allowEdges as getAllowEdges } from './utils';
 import { autoLayout } from './utils/auto-layout';
+import { allowEdges as getAllowEdges } from './utils/connection';
+import { exhaustiveCheck } from './utils/exhaustive-check';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty, loadTemplate } from './utils/load-diagram';
 

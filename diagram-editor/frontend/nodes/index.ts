@@ -24,9 +24,14 @@ import UnzipNode from './unzip-node';
 
 export * from './icons';
 export type {
-  SectionInterfaceData,
+  SectionBufferData,
+  SectionBufferNode,
+  SectionInputData,
+  SectionInputNode,
   SectionInterfaceNode,
   SectionInterfaceNodeTypes,
+  SectionOutputData,
+  SectionOutputNode,
 } from './section-node';
 export * from './utils';
 
