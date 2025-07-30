@@ -4,7 +4,7 @@ import { Handle, Position } from '@xyflow/react';
 import { LAYOUT_OPTIONS } from '../utils/layout';
 import type { BuiltinNode } from '.';
 
-function StartNode({
+function StartNodeComp({
   isConnectable,
   sourcePosition = Position.Bottom,
 }: NodeProps<BuiltinNode>) {
@@ -30,4 +30,4 @@ function StartNode({
   );
 }
 
-export default StartNode;
+export default StartNodeComp;

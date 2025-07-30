@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { TransformIcon } from './icons';
 
-function TransformNode(props: NodeProps<OperationNode<'transform'>>) {
+function TransformNodeComp(props: NodeProps<OperationNode<'transform'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function TransformNode(props: NodeProps<OperationNode<'transform'>>) {
   );
 }
 
-export default TransformNode;
+export default TransformNodeComp;

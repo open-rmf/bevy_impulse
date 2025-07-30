@@ -33,7 +33,7 @@ export type SectionInterfaceNode =
   | SectionOutputNode
   | SectionBufferNode;
 
-export function SectionNode(props: NodeProps<OperationNode<'section'>>) {
+export function SectionNodeComp(props: NodeProps<OperationNode<'section'>>) {
   const label = isSectionBuilder(props.data.op)
     ? props.data.op.builder
     : props.data.op.template;
@@ -47,14 +47,14 @@ export function SectionNode(props: NodeProps<OperationNode<'section'>>) {
   );
 }
 
-export default SectionNode;
+export default SectionNodeComp;
 
 export type SectionInterfaceNodeTypes =
   | 'sectionInput'
   | 'sectionOutput'
   | 'sectionBuffer';
 
-export function SectionInputNode(props: NodeProps<SectionInputNode>) {
+export function SectionInputNodeComp(props: NodeProps<SectionInputNode>) {
   return (
     <BaseNode
       {...props}
@@ -66,7 +66,7 @@ export function SectionInputNode(props: NodeProps<SectionInputNode>) {
   );
 }
 
-export function SectionOutputNode(props: NodeProps<SectionOutputNode>) {
+export function SectionOutputNodeComp(props: NodeProps<SectionOutputNode>) {
   return (
     <BaseNode
       {...props}
@@ -78,7 +78,7 @@ export function SectionOutputNode(props: NodeProps<SectionOutputNode>) {
   );
 }
 
-export function SectionBufferNode(props: NodeProps<SectionBufferNode>) {
+export function SectionBufferNodeComp(props: NodeProps<SectionBufferNode>) {
   return (
     <BaseNode
       {...props}

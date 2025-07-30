@@ -3,7 +3,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { LAYOUT_OPTIONS } from '../utils/layout';
 import type { BuiltinNode } from '.';
 
-function TerminateNode({
+function TerminateNodeComp({
   isConnectable,
   targetPosition = Position.Top,
 }: NodeProps<BuiltinNode>) {
@@ -29,4 +29,4 @@ function TerminateNode({
   );
 }
 
-export default TerminateNode;
+export default TerminateNodeComp;

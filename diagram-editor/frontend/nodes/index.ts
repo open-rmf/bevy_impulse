@@ -1,26 +1,26 @@
 import type { DiagramOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
-import BufferAccessNode from './buffer-access-node';
-import BufferNode from './buffer-node';
-import ForkCloneNode from './fork-clone-node';
-import ForkResultNode from './fork-result-node';
-import JoinNode from './join-node';
-import ListenNode from './listen-node';
-import NodeNode from './node-node';
-import ScopeNode from './scope-node';
-import SectionNode, {
-  SectionBufferNode,
-  SectionInputNode,
+import BufferAccessNodeComp from './buffer-access-node';
+import BufferNodeComp from './buffer-node';
+import ForkCloneNodeComp from './fork-clone-node';
+import ForkResultNodeComp from './fork-result-node';
+import JoinNodeComp from './join-node';
+import ListenNodeComp from './listen-node';
+import NodeNodeComp from './node-node';
+import ScopeNodeComp from './scope-node';
+import SectionNodeComp, {
+  SectionBufferNodeComp,
+  SectionInputNodeComp,
   type SectionInterfaceNode,
-  SectionOutputNode,
+  SectionOutputNodeComp,
 } from './section-node';
-import SerializedJoinNode from './serialized-join-node';
-import SplitNode from './split-node';
-import StartNode from './start-node';
-import StreamOutNode from './stream-out-node';
-import TerminateNode from './terminate-node';
-import TransformNode from './transform-node';
-import UnzipNode from './unzip-node';
+import SerializedJoinNodeComp from './serialized-join-node';
+import SplitNodeComp from './split-node';
+import StartNodeComp from './start-node';
+import StreamOutNodeComp from './stream-out-node';
+import TerminateNodeComp from './terminate-node';
+import TransformNodeComp from './transform-node';
+import UnzipNodeComp from './unzip-node';
 
 export * from './icons';
 export type {
@@ -39,25 +39,25 @@ export const START_ID = '__builtin_start__';
 export const TERMINATE_ID = '__builtin_terminate__';
 
 export const NODE_TYPES = {
-  start: StartNode,
-  terminate: TerminateNode,
-  node: NodeNode,
-  section: SectionNode,
-  sectionInput: SectionInputNode,
-  sectionOutput: SectionOutputNode,
-  sectionBuffer: SectionBufferNode,
-  fork_clone: ForkCloneNode,
-  unzip: UnzipNode,
-  fork_result: ForkResultNode,
-  split: SplitNode,
-  join: JoinNode,
-  serialized_join: SerializedJoinNode,
-  transform: TransformNode,
-  buffer: BufferNode,
-  buffer_access: BufferAccessNode,
-  listen: ListenNode,
-  scope: ScopeNode,
-  stream_out: StreamOutNode,
+  start: StartNodeComp,
+  terminate: TerminateNodeComp,
+  node: NodeNodeComp,
+  section: SectionNodeComp,
+  sectionInput: SectionInputNodeComp,
+  sectionOutput: SectionOutputNodeComp,
+  sectionBuffer: SectionBufferNodeComp,
+  fork_clone: ForkCloneNodeComp,
+  unzip: UnzipNodeComp,
+  fork_result: ForkResultNodeComp,
+  split: SplitNodeComp,
+  join: JoinNodeComp,
+  serialized_join: SerializedJoinNodeComp,
+  transform: TransformNodeComp,
+  buffer: BufferNodeComp,
+  buffer_access: BufferAccessNodeComp,
+  listen: ListenNodeComp,
+  scope: ScopeNodeComp,
+  stream_out: StreamOutNodeComp,
 };
 
 export type NodeTypes = keyof typeof NODE_TYPES;

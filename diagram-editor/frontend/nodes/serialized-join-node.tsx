@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { SerializedJoinIcon } from './icons';
 
-function SerializedJoinNode(
+function SerializedJoinNodeComp(
   props: NodeProps<OperationNode<'serialized_join'>>,
 ) {
   return (
@@ -16,4 +16,4 @@ function SerializedJoinNode(
   );
 }
 
-export default SerializedJoinNode;
+export default SerializedJoinNodeComp;

@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { StreamOutIcon } from './icons';
 
-function StreamOutNode(props: NodeProps<OperationNode<'stream_out'>>) {
+function StreamOutNodeComp(props: NodeProps<OperationNode<'stream_out'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function StreamOutNode(props: NodeProps<OperationNode<'stream_out'>>) {
   );
 }
 
-export default StreamOutNode;
+export default StreamOutNodeComp;

@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { UnzipIcon } from './icons';
 
-function UnzipNode(props: NodeProps<OperationNode<'unzip'>>) {
+function UnzipNodeComp(props: NodeProps<OperationNode<'unzip'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function UnzipNode(props: NodeProps<OperationNode<'unzip'>>) {
   );
 }
 
-export default UnzipNode;
+export default UnzipNodeComp;

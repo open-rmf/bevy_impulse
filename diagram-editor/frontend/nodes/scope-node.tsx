@@ -2,7 +2,7 @@ import { Box, useTheme } from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import type { OperationNode } from '.';
 
-function ScopeNode({
+function ScopeNodeComp({
   isConnectable,
   sourcePosition = Position.Bottom,
   targetPosition = Position.Top,
@@ -38,4 +38,4 @@ function ScopeNode({
   );
 }
 
-export default ScopeNode;
+export default ScopeNodeComp;

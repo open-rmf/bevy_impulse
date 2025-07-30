@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { ForkResultIcon } from './icons';
 
-function ForkResultNode(props: NodeProps<OperationNode<'fork_result'>>) {
+function ForkResultNodeComp(props: NodeProps<OperationNode<'fork_result'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function ForkResultNode(props: NodeProps<OperationNode<'fork_result'>>) {
   );
 }
 
-export default ForkResultNode;
+export default ForkResultNodeComp;

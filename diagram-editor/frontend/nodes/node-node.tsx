@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { NodeIcon } from './icons';
 
-function NodeNode(props: NodeProps<OperationNode<'node'>>) {
+function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function NodeNode(props: NodeProps<OperationNode<'node'>>) {
   );
 }
 
-export default NodeNode;
+export default NodeNodeComp;

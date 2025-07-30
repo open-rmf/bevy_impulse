@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { BufferIcon } from './icons';
 
-function BufferNode(props: NodeProps<OperationNode<'buffer'>>) {
+function BufferNodeComp(props: NodeProps<OperationNode<'buffer'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function BufferNode(props: NodeProps<OperationNode<'buffer'>>) {
   );
 }
 
-export default BufferNode;
+export default BufferNodeComp;

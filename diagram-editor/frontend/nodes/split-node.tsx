@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { SplitIcon } from './icons';
 
-function SplitNode(props: NodeProps<OperationNode<'split'>>) {
+function SplitNodeComp(props: NodeProps<OperationNode<'split'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function SplitNode(props: NodeProps<OperationNode<'split'>>) {
   );
 }
 
-export default SplitNode;
+export default SplitNodeComp;

@@ -3,7 +3,7 @@ import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { JoinIcon } from './icons';
 
-function JoinNode(props: NodeProps<OperationNode<'join'>>) {
+function JoinNodeComp(props: NodeProps<OperationNode<'join'>>) {
   return (
     <BaseNode
       {...props}
@@ -14,4 +14,4 @@ function JoinNode(props: NodeProps<OperationNode<'join'>>) {
   );
 }
 
-export default JoinNode;
+export default JoinNodeComp;
