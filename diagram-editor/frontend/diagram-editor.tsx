@@ -52,6 +52,8 @@ import { allowEdges as getAllowEdges } from './utils/connection';
 import { exhaustiveCheck } from './utils/exhaustive-check';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty, loadTemplate } from './utils/load-diagram';
+import { exportTemplate } from './utils/export-diagram';
+import { NodeManager } from './node-manager';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -631,7 +633,17 @@ function DiagramEditor() {
             color="primary"
             aria-label="Save"
             sx={{ position: 'absolute', right: 64, bottom: 64 }}
-            onClick={() => updateEditorModeAction({ mode: EditorMode.Normal })}
+            onClick={() => {
+              const exportedTemplate = exportTemplate(
+                new NodeManager(nodes),
+                edges,
+              );
+              setTemplates((prev) => ({
+                ...prev,
+                [editorMode.templateId]: exportedTemplate,
+              }));
+              updateEditorModeAction({ mode: EditorMode.Normal });
+            }}
           >
             <MaterialSymbol symbol="check" />
           </Fab>
