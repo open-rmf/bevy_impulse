@@ -51,8 +51,8 @@ export function loadEmpty(): Graph {
   };
 }
 
-function buildGraph(diagram: Diagram): Graph {
-  const graph = loadEmpty();
+function buildGraph(diagram: Diagram, initialGraph?: Graph): Graph {
+  const graph = initialGraph ?? loadEmpty();
   const nodes = graph.nodes;
 
   interface State {
@@ -117,7 +117,7 @@ function buildGraph(diagram: Diagram): Graph {
       data: {},
     });
   }
-  edges.push(...buildEdges(diagram, graph.nodes));
+  edges.push(...buildEdges(graph.nodes));
 
   return graph;
 }
@@ -127,21 +127,16 @@ const validate = getSchema<Diagram>('Diagram');
 export function loadTemplate(template: SectionTemplate): Graph {
   const stubDiagram = exportDiagram(new NodeManager([]), [], {});
   stubDiagram.ops = template.ops;
-  const graph = buildGraph(stubDiagram);
-
-  // filter out builtin START and TERMINATE.
-  const nodes = graph.nodes.filter((node) => {
-    !node.parentId && node.type in ['start', 'terminate'];
-  });
+  const initialNodes: DiagramEditorNode[] = [];
 
   if (template.inputs) {
     if (Array.isArray(template.inputs)) {
       for (const input of template.inputs) {
-        nodes.push(createSectionInputNode(input, input, { x: 0, y: 0 }));
+        initialNodes.push(createSectionInputNode(input, input, { x: 0, y: 0 }));
       }
     } else {
       for (const [remappedId, targetId] of Object.entries(template.inputs)) {
-        nodes.push(
+        initialNodes.push(
           createSectionInputNode(remappedId, targetId, { x: 0, y: 0 }),
         );
       }
@@ -151,11 +146,13 @@ export function loadTemplate(template: SectionTemplate): Graph {
   if (template.buffers) {
     if (Array.isArray(template.buffers)) {
       for (const buffer of template.buffers) {
-        nodes.push(createSectionBufferNode(buffer, buffer, { x: 0, y: 0 }));
+        initialNodes.push(
+          createSectionBufferNode(buffer, buffer, { x: 0, y: 0 }),
+        );
       }
     } else {
       for (const [remappedId, targetId] of Object.entries(template.buffers)) {
-        nodes.push(
+        initialNodes.push(
           createSectionBufferNode(remappedId, targetId, { x: 0, y: 0 }),
         );
       }
@@ -164,9 +161,9 @@ export function loadTemplate(template: SectionTemplate): Graph {
 
   if (template.outputs) {
     for (const output of template.outputs) {
-      nodes.push(createSectionOutputNode(output, { x: 0, y: 0 }));
+      initialNodes.push(createSectionOutputNode(output, { x: 0, y: 0 }));
     }
   }
 
-  return { nodes, edges: graph.edges };
+  return buildGraph(stubDiagram, { nodes: initialNodes, edges: [] });
 }

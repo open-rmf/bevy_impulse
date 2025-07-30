@@ -3,7 +3,7 @@ import { NodeManager } from '../node-manager';
 import { type OperationNode, START_ID, TERMINATE_ID } from '../nodes';
 import { autoLayout } from './auto-layout';
 import { LAYOUT_OPTIONS } from './layout';
-import { loadDiagramJson } from './load-diagram';
+import { loadDiagramJson, loadTemplate } from './load-diagram';
 import testDiagram from './test-data/test-diagram.json';
 
 test('load diagram json and auto layout', () => {
@@ -60,4 +60,24 @@ test('load diagram json and auto layout', () => {
   expect(terminate).toBeDefined();
   expect(terminate!.position.x).toBe(join!.position.x);
   expect(terminate!.position.y).toBeGreaterThan(join!.position.y);
+});
+
+test('load template', () => {
+  const graph = loadTemplate({
+    inputs: {
+      remapped_input: 'target_input',
+    },
+    outputs: ['output'],
+    buffers: {},
+    ops: {
+      target_input: {
+        type: 'node',
+        builder: 'add',
+        next: 'output',
+      },
+    },
+  });
+
+  expect(graph.nodes.length).toBe(3);
+  expect(graph.edges.length).toBe(2);
 });

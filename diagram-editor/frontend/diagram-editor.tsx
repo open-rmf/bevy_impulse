@@ -132,10 +132,11 @@ function DiagramEditor() {
             throw new Error(`template ${newMode.templateId} not found`);
           }
           const graph = loadTemplate(template);
+          const changes = autoLayout(graph.nodes, graph.edges, LAYOUT_OPTIONS);
           // using callback form so that `nodes` and `edges` don't need to be part of dependencies.
           setNodes((prev) => {
             savedNodes.current = [...prev];
-            return graph.nodes;
+            return applyNodeChanges(changes, graph.nodes);
           });
           setEdges((prev) => {
             savedEdges.current = [...prev];

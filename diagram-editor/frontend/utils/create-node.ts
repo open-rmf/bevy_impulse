@@ -18,6 +18,7 @@ export function createStartNode(
   position: XYPosition,
 ): DiagramEditorNode {
   return {
+    // NOTE: atm `NodeManager` relies on how the id of builtin nodes is computed to locate them.
     id: joinNamespaces(namespace, START_ID),
     type: 'start',
     position,
@@ -31,6 +32,7 @@ export function createTerminateNode(
   position: XYPosition,
 ): DiagramEditorNode {
   return {
+    // NOTE: atm `NodeManager` relies on how the id of builtin nodes is computed to locate them.
     id: joinNamespaces(namespace, TERMINATE_ID),
     type: 'terminate',
     position,

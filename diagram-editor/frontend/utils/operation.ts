@@ -10,7 +10,6 @@ import {
 import type {
   BufferSelection,
   BuiltinTarget,
-  Diagram,
   DiagramOperation,
   NextOperation,
 } from '../types/api';
@@ -110,10 +109,7 @@ function createBufferEdges(
   return edges;
 }
 
-export function buildEdges(
-  diagram: Diagram,
-  nodes: DiagramEditorNode[],
-): DiagramEditorEdge[] {
+export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
   const edges: DiagramEditorEdge[] = [];
   const nodeManager = new NodeManager(nodes);
 
@@ -123,84 +119,51 @@ export function buildEdges(
     op: DiagramOperation;
   }
   const stack = [
-    ...Object.entries(diagram.ops).map(
-      ([opId, op]) => ({ namespace: ROOT_NAMESPACE, opId, op }) as State,
+    ...nodes.map(
+      (node) =>
+        ({
+          namespace: ROOT_NAMESPACE,
+          opId: node.data.opId,
+          op: node.data.op,
+        }) as State,
     ),
   ];
 
-  for (let state = stack.pop(); state !== undefined; state = stack.pop()) {
-    const { namespace, opId, op } = state;
-    const node = nodeManager.getNodeFromNamespaceOpId(namespace, opId);
-    if (!isOperationNode(node)) {
-      continue;
-    }
+  for (const node of nodes) {
+    if (isOperationNode(node)) {
+      const op = node.data.op;
+      const opId = node.data.opId;
 
-    switch (op.type) {
-      case 'buffer': {
-        break;
-      }
-      case 'buffer_access':
-      case 'join':
-      case 'serialized_join':
-      case 'listen': {
-        edges.push(...createBufferEdges(node, op.buffers, nodeManager));
+      switch (op.type) {
+        case 'buffer': {
+          break;
+        }
+        case 'buffer_access':
+        case 'join':
+        case 'serialized_join':
+        case 'listen': {
+          edges.push(...createBufferEdges(node, op.buffers, nodeManager));
 
-        const nextNodeId = nodeManager.getNodeFromNextOp(
-          node.data.namespace,
-          op.next,
-        )?.id;
-        if (nextNodeId) {
-          edges.push({
-            id: uuidv4(),
-            type: 'default',
-            source: node.id,
-            target: nextNodeId,
-            data: {},
-          });
-        }
+          const nextNodeId = nodeManager.getNodeFromNextOp(
+            node.data.namespace,
+            op.next,
+          )?.id;
+          if (nextNodeId) {
+            edges.push({
+              id: uuidv4(),
+              type: 'default',
+              source: node.id,
+              target: nextNodeId,
+              data: {},
+            });
+          }
 
-        break;
-      }
-      case 'node': {
-        const target = nodeManager.getNodeFromNextOp(
-          node.data.namespace,
-          op.next,
-        )?.id;
-        if (target) {
-          edges.push({
-            id: uuidv4(),
-            type: 'default',
-            source: node.id,
-            target,
-            data: {},
-          });
+          break;
         }
-        if (op.stream_out) {
-          edges.push(...createStreamOutEdges(op.stream_out, node, nodeManager));
-        }
-        break;
-      }
-      case 'transform': {
-        const target = nodeManager.getNodeFromNextOp(
-          node.data.namespace,
-          op.next,
-        )?.id;
-        if (target) {
-          edges.push({
-            id: uuidv4(),
-            type: 'default',
-            source: node.id,
-            target,
-            data: {},
-          });
-        }
-        break;
-      }
-      case 'fork_clone': {
-        for (const next of op.next.values()) {
+        case 'node': {
           const target = nodeManager.getNodeFromNextOp(
             node.data.namespace,
-            next,
+            op.next,
           )?.id;
           if (target) {
             edges.push({
@@ -211,111 +174,31 @@ export function buildEdges(
               data: {},
             });
           }
+          if (op.stream_out) {
+            edges.push(
+              ...createStreamOutEdges(op.stream_out, node, nodeManager),
+            );
+          }
+          break;
         }
-        break;
-      }
-      case 'unzip': {
-        for (const [idx, next] of op.next.entries()) {
+        case 'transform': {
           const target = nodeManager.getNodeFromNextOp(
             node.data.namespace,
-            next,
+            op.next,
           )?.id;
           if (target) {
             edges.push({
               id: uuidv4(),
-              type: 'unzip',
-              source: node.id,
-              target,
-              data: { seq: idx },
-            });
-          }
-        }
-        break;
-      }
-      case 'fork_result': {
-        const okTarget = nodeManager.getNodeFromNextOp(
-          node.data.namespace,
-          op.ok,
-        )?.id;
-        const errTarget = nodeManager.getNodeFromNextOp(
-          node.data.namespace,
-          op.err,
-        )?.id;
-        if (okTarget) {
-          edges.push({
-            id: uuidv4(),
-            type: 'forkResultOk',
-            source: node.id,
-            target: okTarget,
-            data: {},
-          });
-        }
-        if (errTarget) {
-          edges.push({
-            id: uuidv4(),
-            type: 'forkResultErr',
-            source: node.id,
-            target: errTarget,
-            data: {},
-          });
-        }
-        break;
-      }
-      case 'split': {
-        if (op.keyed) {
-          for (const [key, next] of Object.entries(op.keyed)) {
-            const target = nodeManager.getNodeFromNextOp(
-              node.data.namespace,
-              next,
-            )?.id;
-            if (target) {
-              edges.push({
-                id: uuidv4(),
-                type: 'splitKey',
-                source: node.id,
-                target,
-                data: { key },
-              });
-            }
-          }
-        }
-        if (op.sequential) {
-          for (const [idx, next] of op.sequential.entries()) {
-            const target = nodeManager.getNodeFromNextOp(
-              node.data.namespace,
-              next,
-            )?.id;
-            if (target) {
-              edges.push({
-                id: uuidv4(),
-                type: 'splitSeq',
-                source: node.id,
-                target,
-                data: { seq: idx },
-              });
-            }
-          }
-        }
-        if (op.remaining) {
-          const target = nodeManager.getNodeFromNextOp(
-            node.data.namespace,
-            op.remaining,
-          )?.id;
-          if (target) {
-            edges.push({
-              id: uuidv4(),
-              type: 'splitRemaining',
+              type: 'default',
               source: node.id,
               target,
               data: {},
             });
           }
+          break;
         }
-        break;
-      }
-      case 'section': {
-        if (op.connect) {
-          for (const next of Object.values(op.connect)) {
+        case 'fork_clone': {
+          for (const next of op.next.values()) {
             const target = nodeManager.getNodeFromNextOp(
               node.data.namespace,
               next,
@@ -330,62 +213,197 @@ export function buildEdges(
               });
             }
           }
+          break;
         }
-        break;
+        case 'unzip': {
+          for (const [idx, next] of op.next.entries()) {
+            const target = nodeManager.getNodeFromNextOp(
+              node.data.namespace,
+              next,
+            )?.id;
+            if (target) {
+              edges.push({
+                id: uuidv4(),
+                type: 'unzip',
+                source: node.id,
+                target,
+                data: { seq: idx },
+              });
+            }
+          }
+          break;
+        }
+        case 'fork_result': {
+          const okTarget = nodeManager.getNodeFromNextOp(
+            node.data.namespace,
+            op.ok,
+          )?.id;
+          const errTarget = nodeManager.getNodeFromNextOp(
+            node.data.namespace,
+            op.err,
+          )?.id;
+          if (okTarget) {
+            edges.push({
+              id: uuidv4(),
+              type: 'forkResultOk',
+              source: node.id,
+              target: okTarget,
+              data: {},
+            });
+          }
+          if (errTarget) {
+            edges.push({
+              id: uuidv4(),
+              type: 'forkResultErr',
+              source: node.id,
+              target: errTarget,
+              data: {},
+            });
+          }
+          break;
+        }
+        case 'split': {
+          if (op.keyed) {
+            for (const [key, next] of Object.entries(op.keyed)) {
+              const target = nodeManager.getNodeFromNextOp(
+                node.data.namespace,
+                next,
+              )?.id;
+              if (target) {
+                edges.push({
+                  id: uuidv4(),
+                  type: 'splitKey',
+                  source: node.id,
+                  target,
+                  data: { key },
+                });
+              }
+            }
+          }
+          if (op.sequential) {
+            for (const [idx, next] of op.sequential.entries()) {
+              const target = nodeManager.getNodeFromNextOp(
+                node.data.namespace,
+                next,
+              )?.id;
+              if (target) {
+                edges.push({
+                  id: uuidv4(),
+                  type: 'splitSeq',
+                  source: node.id,
+                  target,
+                  data: { seq: idx },
+                });
+              }
+            }
+          }
+          if (op.remaining) {
+            const target = nodeManager.getNodeFromNextOp(
+              node.data.namespace,
+              op.remaining,
+            )?.id;
+            if (target) {
+              edges.push({
+                id: uuidv4(),
+                type: 'splitRemaining',
+                source: node.id,
+                target,
+                data: {},
+              });
+            }
+          }
+          break;
+        }
+        case 'section': {
+          if (op.connect) {
+            for (const next of Object.values(op.connect)) {
+              const target = nodeManager.getNodeFromNextOp(
+                node.data.namespace,
+                next,
+              )?.id;
+              if (target) {
+                edges.push({
+                  id: uuidv4(),
+                  type: 'default',
+                  source: node.id,
+                  target,
+                  data: {},
+                });
+              }
+            }
+          }
+          break;
+        }
+        case 'scope': {
+          const target = nodeManager.getNodeFromNextOp(
+            node.data.namespace,
+            op.next,
+          )?.id;
+          if (target) {
+            edges.push({
+              id: uuidv4(),
+              type: 'default',
+              source: node.id,
+              target,
+              data: {},
+            });
+          }
+
+          if (op.stream_out) {
+            edges.push(
+              ...createStreamOutEdges(op.stream_out, node, nodeManager),
+            );
+          }
+
+          const scopeStart = nodeManager.getNodeFromNamespaceOpId(
+            joinNamespaces(node.data.namespace, opId),
+            START_ID,
+          );
+          const scopeStartTarget = nodeManager.getNodeFromNextOp(
+            joinNamespaces(node.data.namespace, opId),
+            op.start,
+          );
+          if (scopeStart && scopeStartTarget) {
+            edges.push({
+              id: uuidv4(),
+              type: 'default',
+              source: scopeStart.id,
+              target: scopeStartTarget.id,
+              data: {},
+            });
+          }
+
+          for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
+            stack.push({
+              namespace: joinNamespaces(node.data.namespace, opId),
+              opId: innerOpId,
+              op: innerOp,
+            });
+          }
+
+          break;
+        }
+        case 'stream_out': {
+          break;
+        }
+        default: {
+          exhaustiveCheck(op);
+          throw new Error('unknown op');
+        }
       }
-      case 'scope': {
-        const target = nodeManager.getNodeFromNextOp(
-          node.data.namespace,
-          op.next,
-        )?.id;
-        if (target) {
-          edges.push({
-            id: uuidv4(),
-            type: 'default',
-            source: node.id,
-            target,
-            data: {},
-          });
-        }
-
-        if (op.stream_out) {
-          edges.push(...createStreamOutEdges(op.stream_out, node, nodeManager));
-        }
-
-        const scopeStart = nodeManager.getNodeFromNamespaceOpId(
-          joinNamespaces(node.data.namespace, opId),
-          START_ID,
-        );
-        const scopeStartTarget = nodeManager.getNodeFromNextOp(
-          joinNamespaces(node.data.namespace, opId),
-          op.start,
-        );
-        if (scopeStart && scopeStartTarget) {
-          edges.push({
-            id: uuidv4(),
-            type: 'default',
-            source: scopeStart.id,
-            target: scopeStartTarget.id,
-            data: {},
-          });
-        }
-
-        for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
-          stack.push({
-            namespace: joinNamespaces(node.data.namespace, opId),
-            opId: innerOpId,
-            op: innerOp,
-          });
-        }
-
-        break;
-      }
-      case 'stream_out': {
-        break;
-      }
-      default: {
-        exhaustiveCheck(op);
-        throw new Error('unknown op');
+    } else if (node.type === 'sectionInput' || node.type === 'sectionBuffer') {
+      const target = nodeManager.getNodeFromNextOp(
+        ROOT_NAMESPACE,
+        node.data.targetId,
+      )?.id;
+      if (target) {
+        edges.push({
+          id: uuidv4(),
+          type: 'default',
+          source: node.id,
+          target,
+          data: {},
+        });
       }
     }
   }
