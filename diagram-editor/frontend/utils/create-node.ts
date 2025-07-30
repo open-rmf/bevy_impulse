@@ -1,28 +1,57 @@
 import type { XYPosition } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
-import type {
-  DiagramEditorNode,
-  OperationNode,
-  SectionBufferNode,
-  SectionInputNode,
-  SectionOutputNode,
+import {
+  type DiagramEditorNode,
+  type OperationNode,
+  type SectionBufferNode,
+  type SectionInputNode,
+  type SectionOutputNode,
+  START_ID,
+  TERMINATE_ID,
 } from '../nodes';
-import type { DiagramOperation } from '../types/api';
+import type { DiagramOperation, NextOperation } from '../types/api';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './layout';
 import { joinNamespaces } from './namespace';
+
+export function createStartNode(
+  namespace: string,
+  position: XYPosition,
+): DiagramEditorNode {
+  return {
+    id: joinNamespaces(namespace, START_ID),
+    type: 'start',
+    position,
+    selectable: false,
+    data: { namespace },
+  };
+}
+
+export function createTerminateNode(
+  namespace: string,
+  position: XYPosition,
+): DiagramEditorNode {
+  return {
+    id: joinNamespaces(namespace, TERMINATE_ID),
+    type: 'terminate',
+    position,
+    selectable: false,
+    data: { namespace },
+  };
+}
 
 /**
  * Create a section input node. For simplicity, remapping the input is not supported, `targetId`
  * must point to the id of an operation in the template.
  */
 export function createSectionInputNode(
-  targetId: string,
+  remappedId: string,
+  targetId: NextOperation,
   position: XYPosition,
 ): SectionInputNode {
   return {
     id: uuidv4(),
     type: 'sectionInput',
-    data: { remappedId: targetId, targetId },
+    data: { remappedId, targetId },
     position,
   };
 }
@@ -44,13 +73,14 @@ export function createSectionOutputNode(
  * must point to the id of a `buffer` operation in the template.
  */
 export function createSectionBufferNode(
-  targetId: string,
+  remappedId: string,
+  targetId: NextOperation,
   position: XYPosition,
 ): SectionBufferNode {
   return {
     id: uuidv4(),
     type: 'sectionBuffer',
-    data: { remappedId: targetId, targetId },
+    data: { remappedId, targetId },
     position,
   };
 }
@@ -60,6 +90,7 @@ export function createOperationNode(
   parentId: string | undefined,
   position: XYPosition,
   op: Exclude<DiagramOperation, { type: 'scope' }>,
+  opId: string,
 ): OperationNode {
   return {
     id: uuidv4(),
@@ -67,7 +98,7 @@ export function createOperationNode(
     position,
     data: {
       namespace,
-      opId: uuidv4(),
+      opId,
       op,
     },
     ...(parentId && { parentId }),
@@ -79,11 +110,12 @@ export function createScopeNode(
   parentId: string | undefined,
   position: XYPosition,
   op: DiagramOperation & { type: 'scope' },
-): DiagramEditorNode[] {
+  opId: string,
+): [OperationNode<'scope'>, ...DiagramEditorNode[]] {
   const scopeId = uuidv4();
   const children: DiagramEditorNode[] = [
     {
-      id: uuidv4(),
+      id: joinNamespaces(namespace, opId, START_ID),
       type: 'start',
       position: {
         x: LAYOUT_OPTIONS.scopePadding.leftRight,
@@ -95,7 +127,7 @@ export function createScopeNode(
       parentId: scopeId,
     },
     {
-      id: uuidv4(),
+      id: joinNamespaces(namespace, opId, TERMINATE_ID),
       type: 'terminate',
       position: {
         x: LAYOUT_OPTIONS.scopePadding.leftRight,
@@ -120,7 +152,7 @@ export function createScopeNode(
       },
       data: {
         namespace,
-        opId: uuidv4(),
+        opId,
         op,
       },
       width: scopeBounds.width,

@@ -154,7 +154,122 @@ function syncEdge(
 
   const sourceNode = nodeManager.getNode(edge.source);
 
-  if (sourceNode.type === 'start') {
+  if (isOperationNode(sourceNode)) {
+    const sourceOp = sourceNode.data.op;
+
+    switch (sourceOp.type) {
+      case 'node': {
+        if (edge.type === 'streamOut') {
+          syncStreamOut(nodeManager, sourceOp, edge);
+        } else if (edge.type === 'default') {
+          sourceOp.next = nodeManager.getTargetNextOp(edge);
+        }
+        break;
+      }
+      case 'join':
+      case 'serialized_join':
+      case 'transform':
+      case 'buffer_access':
+      case 'listen': {
+        if (edge.type !== 'default') {
+          throw new Error('expected "default" edge');
+        }
+
+        sourceOp.next = nodeManager.getTargetNextOp(edge);
+        break;
+      }
+      case 'section': {
+        throw new Error('TODO');
+      }
+      case 'fork_clone': {
+        if (edge.type !== 'default') {
+          throw new Error('expected "default" edge');
+        }
+
+        const newNextOp = nodeManager.getTargetNextOp(edge);
+        if (!sourceOp.next.some((next) => equal(next, newNextOp))) {
+          sourceOp.next.push(newNextOp);
+        }
+        break;
+      }
+      case 'unzip': {
+        if (edge.type !== 'unzip') {
+          throw new Error('expected "unzip" edge');
+        }
+        sourceOp.next[edge.data.seq] = nodeManager.getTargetNextOp(edge);
+        break;
+      }
+      case 'fork_result': {
+        switch (edge.type) {
+          case 'forkResultOk': {
+            sourceOp.ok = nodeManager.getTargetNextOp(edge);
+            break;
+          }
+          case 'forkResultErr': {
+            sourceOp.err = nodeManager.getTargetNextOp(edge);
+            break;
+          }
+          default: {
+            throw new Error(
+              'fork_result operation must have "ok" or "err" edge',
+            );
+          }
+        }
+        break;
+      }
+      case 'split': {
+        switch (edge.type) {
+          case 'splitKey': {
+            if (!sourceOp.keyed) {
+              sourceOp.keyed = {};
+            }
+            sourceOp.keyed[edge.data.key] = nodeManager.getTargetNextOp(edge);
+            break;
+          }
+          case 'splitSeq': {
+            if (!sourceOp.sequential) {
+              sourceOp.sequential = [];
+            }
+            // this works because js allows non-sequential arrays
+            sourceOp.sequential[edge.data.seq] =
+              nodeManager.getTargetNextOp(edge);
+            break;
+          }
+          case 'splitRemaining': {
+            sourceOp.remaining = nodeManager.getTargetNextOp(edge);
+            break;
+          }
+          default: {
+            throw new Error(
+              'split operation must have "SplitKey", "SplitSequential", or "SplitRemaining" edge',
+            );
+          }
+        }
+        break;
+      }
+      case 'buffer': {
+        throw new Error('buffer operations cannot have connections');
+      }
+      case 'scope': {
+        if (edge.type === 'streamOut') {
+          syncStreamOut(nodeManager, sourceOp, edge);
+        } else if (edge.type !== 'default') {
+          throw new Error(
+            'scope operation must have default or streamOut edge',
+          );
+        }
+        sourceOp.next = nodeManager.getTargetNextOp(edge);
+        break;
+      }
+      case 'stream_out': {
+        break;
+      }
+      default: {
+        exhaustiveCheck(sourceOp);
+        throw new Error('unknown operation type');
+      }
+    }
+  } else if (sourceNode.type === 'start') {
     const subOps: SubOperations = (() => {
       if (!sourceNode.parentId) {
         return root;
@@ -167,120 +282,11 @@ function syncEdge(
     })();
     const target = nodeManager.getTargetNextOp(edge);
     subOps.start = target;
-  }
-
-  if (!isOperationNode(sourceNode)) {
-    return;
-  }
-  const sourceOp = sourceNode.data.op;
-
-  switch (sourceOp.type) {
-    case 'node': {
-      if (edge.type === 'streamOut') {
-        syncStreamOut(nodeManager, sourceOp, edge);
-      } else if (edge.type === 'default') {
-        sourceOp.next = nodeManager.getTargetNextOp(edge);
-      }
-      break;
-    }
-    case 'join':
-    case 'serialized_join':
-    case 'transform':
-    case 'buffer_access':
-    case 'listen': {
-      if (edge.type !== 'default') {
-        throw new Error('expected "default" edge');
-      }
-
-      sourceOp.next = nodeManager.getTargetNextOp(edge);
-      break;
-    }
-    case 'section': {
-      throw new Error('TODO');
-    }
-    case 'fork_clone': {
-      if (edge.type !== 'default') {
-        throw new Error('expected "default" edge');
-      }
-
-      const newNextOp = nodeManager.getTargetNextOp(edge);
-      if (!sourceOp.next.some((next) => equal(next, newNextOp))) {
-        sourceOp.next.push(newNextOp);
-      }
-      break;
-    }
-    case 'unzip': {
-      if (edge.type !== 'unzip') {
-        throw new Error('expected "unzip" edge');
-      }
-      sourceOp.next[edge.data.seq] = nodeManager.getTargetNextOp(edge);
-      break;
-    }
-    case 'fork_result': {
-      switch (edge.type) {
-        case 'forkResultOk': {
-          sourceOp.ok = nodeManager.getTargetNextOp(edge);
-          break;
-        }
-        case 'forkResultErr': {
-          sourceOp.err = nodeManager.getTargetNextOp(edge);
-          break;
-        }
-        default: {
-          throw new Error('fork_result operation must have "ok" or "err" edge');
-        }
-      }
-      break;
-    }
-    case 'split': {
-      switch (edge.type) {
-        case 'splitKey': {
-          if (!sourceOp.keyed) {
-            sourceOp.keyed = {};
-          }
-          sourceOp.keyed[edge.data.key] = nodeManager.getTargetNextOp(edge);
-          break;
-        }
-        case 'splitSeq': {
-          if (!sourceOp.sequential) {
-            sourceOp.sequential = [];
-          }
-          // this works because js allows non-sequential arrays
-          sourceOp.sequential[edge.data.seq] =
-            nodeManager.getTargetNextOp(edge);
-          break;
-        }
-        case 'splitRemaining': {
-          sourceOp.remaining = nodeManager.getTargetNextOp(edge);
-          break;
-        }
-        default: {
-          throw new Error(
-            'split operation must have "SplitKey", "SplitSequential", or "SplitRemaining" edge',
-          );
-        }
-      }
-      break;
-    }
-    case 'buffer': {
-      throw new Error('buffer operations cannot have connections');
-    }
-    case 'scope': {
-      if (edge.type === 'streamOut') {
-        syncStreamOut(nodeManager, sourceOp, edge);
-      } else if (edge.type !== 'default') {
-        throw new Error('scope operation must have default or streamOut edge');
-      }
-      sourceOp.next = nodeManager.getTargetNextOp(edge);
-      break;
-    }
-    case 'stream_out': {
-      break;
-    }
-    default: {
-      exhaustiveCheck(sourceOp);
-      throw new Error('unknown operation type');
-    }
+  } else if (
+    sourceNode.type === 'sectionInput' ||
+    sourceNode.type === 'sectionBuffer'
+  ) {
+    sourceNode.data.targetId = nodeManager.getTargetNextOp(edge);
   }
 }
 
@@ -297,11 +303,7 @@ function syncEdges(
   // first clear all the connections
   root.start = { builtin: 'dispose' };
   for (const node of nodeManager.iterNodes()) {
-    if (!isOperationNode(node)) {
-      continue;
-    }
-
-    switch (node.data.op.type) {
+    switch (node.type) {
       case 'node': {
         node.data.op.next = { builtin: 'dispose' };
         delete node.data.op.stream_out;
@@ -351,8 +353,17 @@ function syncEdges(
       case 'stream_out': {
         break;
       }
+      case 'sectionInput':
+      case 'sectionBuffer': {
+        node.data.targetId = { builtin: 'dispose' };
+        break;
+      }
+      case 'sectionOutput':
+      case 'start':
+      case 'terminate':
+        break;
       default: {
-        exhaustiveCheck(node.data.op);
+        exhaustiveCheck(node);
       }
     }
   }
@@ -413,16 +424,16 @@ export function exportTemplate(
   nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
 ): SectionTemplate {
-  const template = {
-    inputs: {} as Record<string, NextOperation>,
-    outputs: [] as string[],
-    buffers: {} as Record<string, NextOperation>,
-    ops: {},
-  } satisfies Required<SectionTemplate>;
   const fakeRoot: SubOperations = {
     start: { builtin: 'dispose' },
     ops: {},
   };
+  const template = {
+    inputs: {} as Record<string, NextOperation>,
+    outputs: [] as string[],
+    buffers: {} as Record<string, NextOperation>,
+    ops: fakeRoot.ops,
+  } satisfies Required<SectionTemplate>;
 
   syncEdges(nodeManager, fakeRoot, edges);
 
@@ -448,10 +459,5 @@ export function exportTemplate(
     }
   }
 
-  return {
-    inputs: {},
-    outputs: [],
-    buffers: {},
-    ops: fakeRoot.ops,
-  };
+  return template;
 }

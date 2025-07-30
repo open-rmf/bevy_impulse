@@ -117,6 +117,9 @@ export class NodeManager {
         if (isOperationNode(target)) {
           return target.data.opId;
         }
+        if (target.type === 'sectionOutput') {
+          return target.data.outputId;
+        }
         throw new Error('unknown node type');
       }
       // TODO: For section edges, return a `{ [target.data.opId]: edge.data.input }`

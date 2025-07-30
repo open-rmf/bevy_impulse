@@ -5,6 +5,7 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 import React from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { EditorMode, useEditorMode } from './editor-mode';
 import type { DiagramEditorNode } from './nodes';
 import {
@@ -54,7 +55,7 @@ function createSectionInputChange(
 ): NodeAddChange<SectionInputNode> {
   return {
     type: 'add',
-    item: createSectionInputNode(targetId, position),
+    item: createSectionInputNode(targetId, targetId, position),
   };
 }
 
@@ -74,7 +75,7 @@ function createSectionBufferChange(
 ): NodeAddChange<SectionBufferNode> {
   return {
     type: 'add',
-    item: createSectionBufferNode(targetId, position),
+    item: createSectionBufferNode(targetId, targetId, position),
   };
 }
 
@@ -85,15 +86,25 @@ function createNodeChange(
   op: DiagramOperation,
 ): NodeAddChange<DiagramEditorNode>[] {
   if (op.type === 'scope') {
-    return createScopeNode(namespace, parentId, newNodePosition, op).map(
-      (node) => ({ type: 'add', item: node }),
-    );
+    return createScopeNode(
+      namespace,
+      parentId,
+      newNodePosition,
+      op,
+      uuidv4(),
+    ).map((node) => ({ type: 'add', item: node }));
   }
 
   return [
     {
       type: 'add',
-      item: createOperationNode(namespace, parentId, newNodePosition, op),
+      item: createOperationNode(
+        namespace,
+        parentId,
+        newNodePosition,
+        op,
+        uuidv4(),
+      ),
     },
   ];
 }

@@ -1,5 +1,7 @@
+import { v4 as uuidv4 } from 'uuid';
+import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import { START_ID } from '../nodes';
+import { type DiagramEditorNode, START_ID } from '../nodes';
 import {
   createOperationNode,
   createSectionBufferNode,
@@ -51,34 +53,63 @@ test('export diagram with scope', () => {
 });
 
 test('export diagram with templates', () => {
-  const nodes = [
-    createSectionInputNode('test_input', { x: 0, y: 0 }),
+  const nodes: DiagramEditorNode[] = [
+    createSectionInputNode('test_input', { builti: 'dispose' }, { x: 0, y: 0 }),
     createSectionOutputNode('test_output', { x: 0, y: 0 }),
-    createSectionBufferNode('test_buffer', { x: 0, y: 0 }),
+    createSectionBufferNode(
+      'test_buffer',
+      { builtin: 'dispose' },
+      { x: 0, y: 0 },
+    ),
     createOperationNode(
       ROOT_NAMESPACE,
       undefined,
       { x: 0, y: 0 },
-      { type: 'node', builder: 'test', next: 'test_output' },
+      { type: 'node', builder: 'test_builder', next: { builtin: 'dispose' } },
+      'test_op_node',
     ),
     createOperationNode(
       ROOT_NAMESPACE,
       undefined,
       { x: 0, y: 0 },
       { type: 'buffer' },
+      'test_op_buffer',
     ),
   ];
-  const template = exportTemplate(new NodeManager(nodes), []);
+  const edges: DiagramEditorEdge[] = [
+    {
+      id: uuidv4(),
+      type: 'default',
+      source: nodes[0].id,
+      target: nodes[3].id,
+      data: {},
+    },
+    {
+      id: uuidv4(),
+      type: 'default',
+      source: nodes[2].id,
+      target: nodes[4].id,
+      data: {},
+    },
+    {
+      id: uuidv4(),
+      type: 'default',
+      source: nodes[3].id,
+      target: nodes[1].id,
+      data: {},
+    },
+  ];
+  const template = exportTemplate(new NodeManager(nodes), edges);
 
   if (typeof template.inputs !== 'object' || Array.isArray(template.inputs)) {
     throw new Error('expected template inputs to be a mapping');
   }
-  expect(template.inputs.test_input).toBe('test_input');
+  expect(template.inputs.test_input).toBe('test_op_node');
 
   expect(template.outputs?.[0]).toBe('test_output');
 
   if (typeof template.buffers !== 'object' || Array.isArray(template.buffers)) {
     throw new Error('expected template buffers to be a mapping');
   }
-  expect(template.buffers.test_buffer).toBe('test_buffer');
+  expect(template.buffers.test_buffer).toBe('test_op_buffer');
 });

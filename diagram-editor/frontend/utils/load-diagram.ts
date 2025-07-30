@@ -1,14 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import {
-  type DiagramEditorNode,
-  isOperationNode,
-  START_ID,
-  TERMINATE_ID,
-} from '../nodes';
+import { type DiagramEditorNode, isOperationNode, START_ID } from '../nodes';
 import type { Diagram, DiagramOperation, SectionTemplate } from '../types/api';
 import { getSchema } from './ajv';
+import {
+  createOperationNode,
+  createScopeNode,
+  createSectionBufferNode,
+  createSectionInputNode,
+  createSectionOutputNode,
+  createStartNode,
+  createTerminateNode,
+} from './create-node';
 import { exportDiagram } from './export-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import { buildEdges, isBuiltin } from './operation';
@@ -40,20 +44,8 @@ export function loadDiagramJson(jsonStr: string): [Diagram, Graph] {
 export function loadEmpty(): Graph {
   return {
     nodes: [
-      {
-        id: joinNamespaces(ROOT_NAMESPACE, START_ID),
-        type: 'start',
-        position: { x: 0, y: 0 },
-        selectable: false,
-        data: { namespace: ROOT_NAMESPACE },
-      },
-      {
-        id: joinNamespaces(ROOT_NAMESPACE, TERMINATE_ID),
-        type: 'terminate',
-        position: { x: 0, y: 400 },
-        selectable: false,
-        data: { namespace: ROOT_NAMESPACE },
-      },
+      createStartNode(ROOT_NAMESPACE, { x: 0, y: 0 }),
+      createTerminateNode(ROOT_NAMESPACE, { x: 0, y: 400 }),
     ],
     edges: [],
   };
@@ -81,48 +73,28 @@ function buildGraph(diagram: Diagram): Graph {
     const { parentId, namespace, opId, op } = state;
 
     if (op.type === 'scope') {
-      const id = uuidv4();
-      nodes.push({
-        id,
-        type: 'scope',
-        position: { x: 0, y: 0 },
-        data: { namespace, opId, op },
+      const scopeNodes = createScopeNode(
+        namespace,
         parentId,
-        width: 0,
-        height: 0,
-        zIndex: -10,
-      });
-      nodes.push({
-        id: joinNamespaces(namespace, opId, START_ID),
-        type: 'start',
-        position: { x: 0, y: 0 },
-        data: { namespace: joinNamespaces(namespace, opId) },
-        parentId: id,
-      });
-      nodes.push({
-        id: joinNamespaces(namespace, opId, TERMINATE_ID),
-        type: 'terminate',
-        position: { x: 0, y: 0 },
-        data: { namespace: joinNamespaces(namespace, opId) },
-        parentId: id,
-      });
+        { x: 0, y: 0 },
+        op,
+        opId,
+      );
+      const scopeId = scopeNodes[0].id;
+      nodes.push(...scopeNodes);
 
       for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
         stack.push({
-          parentId: id,
+          parentId: scopeId,
           namespace: joinNamespaces(namespace, opId),
           opId: innerOpId,
           op: innerOp,
         });
       }
     } else {
-      nodes.push({
-        id: uuidv4(),
-        type: op.type,
-        position: { x: 0, y: 0 },
-        data: { namespace, opId, op },
-        parentId,
-      });
+      nodes.push(
+        createOperationNode(namespace, parentId, { x: 0, y: 0 }, op, opId),
+      );
     }
   }
 
@@ -165,29 +137,13 @@ export function loadTemplate(template: SectionTemplate): Graph {
   if (template.inputs) {
     if (Array.isArray(template.inputs)) {
       for (const input of template.inputs) {
-        nodes.push({
-          id: uuidv4(),
-          type: 'sectionInput',
-          position: { x: 0, y: 0 },
-          data: {
-            namespace: ROOT_NAMESPACE,
-            remappedId: input,
-            targetId: input,
-          },
-        });
+        nodes.push(createSectionInputNode(input, input, { x: 0, y: 0 }));
       }
     } else {
       for (const [remappedId, targetId] of Object.entries(template.inputs)) {
-        nodes.push({
-          id: uuidv4(),
-          type: 'sectionInput',
-          position: { x: 0, y: 0 },
-          data: {
-            namespace: ROOT_NAMESPACE,
-            remappedId,
-            targetId,
-          },
-        });
+        nodes.push(
+          createSectionInputNode(remappedId, targetId, { x: 0, y: 0 }),
+        );
       }
     }
   }
@@ -195,45 +151,20 @@ export function loadTemplate(template: SectionTemplate): Graph {
   if (template.buffers) {
     if (Array.isArray(template.buffers)) {
       for (const buffer of template.buffers) {
-        nodes.push({
-          id: uuidv4(),
-          type: 'sectionBuffer',
-          position: { x: 0, y: 0 },
-          data: {
-            namespace: ROOT_NAMESPACE,
-            remappedId: buffer,
-            targetId: buffer,
-          },
-        });
+        nodes.push(createSectionBufferNode(buffer, buffer, { x: 0, y: 0 }));
       }
     } else {
       for (const [remappedId, targetId] of Object.entries(template.buffers)) {
-        nodes.push({
-          id: uuidv4(),
-          type: 'sectionBuffer',
-          position: { x: 0, y: 0 },
-          data: {
-            namespace: ROOT_NAMESPACE,
-            remappedId,
-            targetId,
-          },
-        });
+        nodes.push(
+          createSectionBufferNode(remappedId, targetId, { x: 0, y: 0 }),
+        );
       }
     }
   }
 
   if (template.outputs) {
     for (const output of template.outputs) {
-      nodes.push({
-        id: uuidv4(),
-        type: 'sectionBuffer',
-        position: { x: 0, y: 0 },
-        data: {
-          namespace: ROOT_NAMESPACE,
-          remappedId: output,
-          targetId: output,
-        },
-      });
+      nodes.push(createSectionOutputNode(output, { x: 0, y: 0 }));
     }
   }
 

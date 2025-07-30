@@ -60,7 +60,7 @@ export function SectionInputNodeComp(props: NodeProps<SectionInputNode>) {
       {...props}
       color="secondary"
       icon={<SectionInputIcon />}
-      label={props.data.remappedId}
+      label="Section Input"
       variant="output"
     />
   );
@@ -72,7 +72,7 @@ export function SectionOutputNodeComp(props: NodeProps<SectionOutputNode>) {
       {...props}
       color="secondary"
       icon={<SectionOutputIcon />}
-      label="Output"
+      label="Section Output"
       variant="input"
     />
   );
@@ -84,7 +84,7 @@ export function SectionBufferNodeComp(props: NodeProps<SectionBufferNode>) {
       {...props}
       color="secondary"
       icon={<SectionBufferIcon />}
-      label={props.data.remappedId}
+      label="Section Buffer"
       variant="output"
     />
   );
