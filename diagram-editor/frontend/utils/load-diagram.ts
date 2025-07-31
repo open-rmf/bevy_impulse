@@ -1,9 +1,5 @@
-import { v4 as uuidv4 } from 'uuid';
-import type { DiagramEditorEdge } from '../edges';
+import { createDefaultEdge, type DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import { type DiagramEditorNode, isOperationNode, START_ID } from '../nodes';
-import type { Diagram, DiagramOperation, SectionTemplate } from '../types/api';
-import { getSchema } from './ajv';
 import {
   createOperationNode,
   createScopeNode,
@@ -12,7 +8,12 @@ import {
   createSectionOutputNode,
   createStartNode,
   createTerminateNode,
-} from './create-node';
+  type DiagramEditorNode,
+  isOperationNode,
+  START_ID,
+} from '../nodes';
+import type { Diagram, DiagramOperation, SectionTemplate } from '../types/api';
+import { getSchema } from './ajv';
 import { exportDiagram } from './export-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import { buildEdges, isBuiltin } from './operation';
@@ -109,13 +110,9 @@ function buildGraph(diagram: Diagram, initialGraph?: Graph): Graph {
           n.data.opId === diagramStart,
       );
   if (startNode) {
-    edges.push({
-      id: uuidv4(),
-      type: 'default',
-      source: joinNamespaces(ROOT_NAMESPACE, START_ID),
-      target: startNode.id,
-      data: {},
-    });
+    edges.push(
+      createDefaultEdge(joinNamespaces(ROOT_NAMESPACE, START_ID), startNode.id),
+    );
   }
   edges.push(...buildEdges(graph.nodes));
 

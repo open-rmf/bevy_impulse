@@ -1,13 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
-import { type DiagramEditorNode, START_ID } from '../nodes';
 import {
   createOperationNode,
   createSectionBufferNode,
   createSectionInputNode,
   createSectionOutputNode,
-} from './create-node';
+  type DiagramEditorNode,
+  START_ID,
+} from '../nodes';
 import { exportDiagram, exportTemplate } from './export-diagram';
 import { loadDiagramJson } from './load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';

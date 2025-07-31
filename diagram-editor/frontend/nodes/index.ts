@@ -22,6 +22,7 @@ import TerminateNodeComp from './terminate-node';
 import TransformNodeComp from './transform-node';
 import UnzipNodeComp from './unzip-node';
 
+export * from './create-node';
 export * from './icons';
 export type {
   SectionBufferData,

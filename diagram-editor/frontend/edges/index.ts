@@ -45,6 +45,30 @@ export type { SplitSeqEdge } from './split-seq-edge';
 export type { StreamOutEdge } from './stream-out-edge';
 export type { UnzipEdge } from './unzip-edge';
 
+export * from './create-edge';
+export type DefaultEdgeData = Record<string, never>;
+export type DefaultEdge = Edge<DefaultEdgeData, 'default'>;
+
+type EdgeMapping = {
+  default: { comp: DefaultEdge; data: DefaultEdgeData };
+  unzip: { comp: UnzipEdge; data: UnzipEdgeData };
+  forkResultOk: { comp: ForkResultOkEdge; data: ForkResultOkEdgeData };
+  forkResultErr: { comp: ForkResultErrEdge; data: ForkResultErrEdgeData };
+  splitKey: { comp: SplitKeyEdge; data: SplitKeyEdgeData };
+  splitSeq: { comp: SplitSeqEdge; data: SplitSeqEdgeData };
+  splitRemaining: { comp: SplitRemainingEdge; data: SplitRemainingEdgeData };
+  bufferKey: { comp: BufferKeyEdge; data: BufferKeyEdgeData };
+  bufferSeq: { comp: BufferSeqEdge; data: BufferSeqEdgeData };
+  streamOut: { comp: StreamOutEdge; data: StreamOutEdgeData };
+};
+
+export type EdgeTypes = keyof EdgeMapping;
+
+export type DiagramEditorEdge<T extends EdgeTypes = EdgeTypes> =
+  EdgeMapping[T]['comp'];
+
+export type EdgeData<T extends EdgeTypes = EdgeTypes> = EdgeMapping[T]['data'];
+
 export const EDGE_TYPES = {
   default: StepEdge,
   unzip: UnzipEdgeComp,
@@ -56,34 +80,4 @@ export const EDGE_TYPES = {
   bufferKey: BufferKeyEdgeComp,
   bufferSeq: BufferSeqEdgeComp,
   streamOut: StreamOutEdgeComp,
-};
-
-export type EdgeTypes = keyof typeof EDGE_TYPES;
-
-export type DefaultEdgeData = Record<string, never>;
-export type DefaultEdge = Edge<DefaultEdgeData, 'default'>;
-
-export type EdgeData = {
-  default: DefaultEdgeData;
-  unzip: UnzipEdgeData;
-  forkResultOk: ForkResultOkEdgeData;
-  forkResultErr: ForkResultErrEdgeData;
-  splitKey: SplitKeyEdgeData;
-  splitSeq: SplitSeqEdgeData;
-  splitRemaining: SplitRemainingEdgeData;
-  bufferKey: BufferKeyEdgeData;
-  bufferSeq: BufferSeqEdgeData;
-  streamOut: StreamOutEdgeData;
-};
-
-export type DiagramEditorEdge =
-  | DefaultEdge
-  | UnzipEdge
-  | ForkResultOkEdge
-  | ForkResultErrEdge
-  | SplitKeyEdge
-  | SplitSeqEdge
-  | SplitRemainingEdge
-  | BufferKeyEdge
-  | BufferSeqEdge
-  | StreamOutEdge;
+} satisfies Record<EdgeTypes, unknown>;

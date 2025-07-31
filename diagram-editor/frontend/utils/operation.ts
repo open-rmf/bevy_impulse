@@ -1,5 +1,15 @@
-import { v4 as uuidv4 } from 'uuid';
-import type { DiagramEditorEdge } from '../edges';
+import {
+  createBufferKeyEdge,
+  createBufferSeqEdge,
+  createDefaultEdge,
+  createForkResultErrEdge,
+  createForkResultOkEdge,
+  createSplitKeyEdge,
+  createSplitRemainingEdge,
+  createSplitSeqEdge,
+  createUnzipEdge,
+  type DiagramEditorEdge,
+} from '../edges';
 import { NodeManager } from '../node-manager';
 import {
   type DiagramEditorNode,
@@ -40,13 +50,7 @@ function createStreamOutEdges(
       nextOp,
     )?.id;
     if (target) {
-      edges.push({
-        id: uuidv4(),
-        type: 'default',
-        source: node.id,
-        target,
-        data: {},
-      });
+      edges.push(createDefaultEdge(node.id, target));
     }
   }
   return edges;
@@ -65,13 +69,7 @@ function createBufferEdges(
         buffer,
       )?.id;
       if (source) {
-        edges.push({
-          id: uuidv4(),
-          type: 'bufferSeq',
-          source,
-          target: node.id,
-          data: { seq: idx },
-        });
+        edges.push(createBufferSeqEdge(source, node.id, { seq: idx }));
       }
     }
   } else if (isKeyedBufferSelection(buffers)) {
@@ -81,13 +79,7 @@ function createBufferEdges(
         buffer,
       )?.id;
       if (source) {
-        edges.push({
-          id: uuidv4(),
-          type: 'bufferKey',
-          source,
-          target: node.id,
-          data: { key },
-        });
+        edges.push(createBufferKeyEdge(source, node.id, { key }));
       }
     }
   } else {
@@ -96,13 +88,7 @@ function createBufferEdges(
       buffers,
     )?.id;
     if (source) {
-      edges.push({
-        id: uuidv4(),
-        type: 'bufferSeq',
-        source,
-        target: node.id,
-        data: { seq: 0 },
-      });
+      edges.push(createBufferSeqEdge(source, node.id, { seq: 0 }));
     }
   }
 
@@ -149,13 +135,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (nextNodeId) {
-            edges.push({
-              id: uuidv4(),
-              type: 'default',
-              source: node.id,
-              target: nextNodeId,
-              data: {},
-            });
+            edges.push(createDefaultEdge(node.id, nextNodeId));
           }
 
           break;
@@ -166,13 +146,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push({
-              id: uuidv4(),
-              type: 'default',
-              source: node.id,
-              target,
-              data: {},
-            });
+            edges.push(createDefaultEdge(node.id, target));
           }
           if (op.stream_out) {
             edges.push(
@@ -187,13 +161,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push({
-              id: uuidv4(),
-              type: 'default',
-              source: node.id,
-              target,
-              data: {},
-            });
+            edges.push(createDefaultEdge(node.id, target));
           }
           break;
         }
@@ -204,13 +172,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
               next,
             )?.id;
             if (target) {
-              edges.push({
-                id: uuidv4(),
-                type: 'default',
-                source: node.id,
-                target,
-                data: {},
-              });
+              edges.push(createDefaultEdge(node.id, target));
             }
           }
           break;
@@ -222,13 +184,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
               next,
             )?.id;
             if (target) {
-              edges.push({
-                id: uuidv4(),
-                type: 'unzip',
-                source: node.id,
-                target,
-                data: { seq: idx },
-              });
+              edges.push(createUnzipEdge(node.id, target, { seq: idx }));
             }
           }
           break;
@@ -243,22 +199,10 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.err,
           )?.id;
           if (okTarget) {
-            edges.push({
-              id: uuidv4(),
-              type: 'forkResultOk',
-              source: node.id,
-              target: okTarget,
-              data: {},
-            });
+            edges.push(createForkResultOkEdge(node.id, okTarget));
           }
           if (errTarget) {
-            edges.push({
-              id: uuidv4(),
-              type: 'forkResultErr',
-              source: node.id,
-              target: errTarget,
-              data: {},
-            });
+            edges.push(createForkResultErrEdge(node.id, errTarget));
           }
           break;
         }
@@ -270,13 +214,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
                 next,
               )?.id;
               if (target) {
-                edges.push({
-                  id: uuidv4(),
-                  type: 'splitKey',
-                  source: node.id,
-                  target,
-                  data: { key },
-                });
+                edges.push(createSplitKeyEdge(node.id, target, { key }));
               }
             }
           }
@@ -287,13 +225,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
                 next,
               )?.id;
               if (target) {
-                edges.push({
-                  id: uuidv4(),
-                  type: 'splitSeq',
-                  source: node.id,
-                  target,
-                  data: { seq: idx },
-                });
+                edges.push(createSplitSeqEdge(node.id, target, { seq: idx }));
               }
             }
           }
@@ -303,13 +235,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
               op.remaining,
             )?.id;
             if (target) {
-              edges.push({
-                id: uuidv4(),
-                type: 'splitRemaining',
-                source: node.id,
-                target,
-                data: {},
-              });
+              edges.push(createSplitRemainingEdge(node.id, target));
             }
           }
           break;
@@ -322,13 +248,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
                 next,
               )?.id;
               if (target) {
-                edges.push({
-                  id: uuidv4(),
-                  type: 'default',
-                  source: node.id,
-                  target,
-                  data: {},
-                });
+                edges.push(createDefaultEdge(node.id, target));
               }
             }
           }
@@ -340,13 +260,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.next,
           )?.id;
           if (target) {
-            edges.push({
-              id: uuidv4(),
-              type: 'default',
-              source: node.id,
-              target,
-              data: {},
-            });
+            edges.push(createDefaultEdge(node.id, target));
           }
 
           if (op.stream_out) {
@@ -364,13 +278,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.start,
           );
           if (scopeStart && scopeStartTarget) {
-            edges.push({
-              id: uuidv4(),
-              type: 'default',
-              source: scopeStart.id,
-              target: scopeStartTarget.id,
-              data: {},
-            });
+            edges.push(createDefaultEdge(scopeStart.id, scopeStartTarget.id));
           }
 
           for (const [innerOpId, innerOp] of Object.entries(op.ops)) {
@@ -397,13 +305,7 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
         node.data.targetId,
       )?.id;
       if (target) {
-        edges.push({
-          id: uuidv4(),
-          type: 'default',
-          source: node.id,
-          target,
-          data: {},
-        });
+        edges.push(createDefaultEdge(node.id, target));
       }
     }
   }

@@ -39,6 +39,7 @@ import {
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
+import { NodeManager } from './node-manager';
 import {
   type DiagramEditorNode,
   isOperationNode,
@@ -48,12 +49,11 @@ import {
 } from './nodes';
 import { useTemplates } from './templates-provider';
 import { autoLayout } from './utils/auto-layout';
-import { allowEdges as getAllowEdges } from './utils/connection';
+import { getValidEdgeTypes } from './utils/connection';
 import { exhaustiveCheck } from './utils/exhaustive-check';
+import { exportTemplate } from './utils/export-diagram';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
 import { loadDiagramJson, loadEmpty, loadTemplate } from './utils/load-diagram';
-import { exportTemplate } from './utils/export-diagram';
-import { NodeManager } from './node-manager';
 
 const NonCapturingPopoverContainer = ({
   children,
@@ -527,14 +527,14 @@ function DiagramEditor() {
           closeAllPopovers();
         }}
         onConnect={(conn) => {
-          const sourceNode = nodes.find((n) => n.id === conn.source);
-          const targetNode = nodes.find((n) => n.id === conn.target);
+          const sourceNode = reactFlowInstance.current?.getNode(conn.source);
+          const targetNode = reactFlowInstance.current?.getNode(conn.target);
           if (!sourceNode || !targetNode) {
             throw new Error('cannot find source or target node');
           }
 
-          const allowedEdges = getAllowEdges(sourceNode, targetNode);
-          if (allowedEdges.length === 0) {
+          const validEdges = getValidEdgeTypes(sourceNode, targetNode);
+          if (validEdges.length === 0) {
             showErrorToast(
               `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
             );
@@ -545,12 +545,22 @@ function DiagramEditor() {
             addEdge(
               {
                 ...conn,
-                type: allowedEdges[0],
-                data: defaultEdgeData(allowedEdges[0]),
+                type: validEdges[0],
+                data: defaultEdgeData(validEdges[0]),
               },
               prev,
             ),
           );
+        }}
+        isValidConnection={(conn) => {
+          const sourceNode = reactFlowInstance.current?.getNode(conn.source);
+          const targetNode = reactFlowInstance.current?.getNode(conn.target);
+          if (!sourceNode || !targetNode) {
+            throw new Error('cannot find source or target node');
+          }
+
+          const allowedEdges = getValidEdgeTypes(sourceNode, targetNode);
+          return allowedEdges.length > 0;
         }}
         onReconnect={(oldEdge, newConnection) =>
           setEdges((prev) => reconnectEdge(oldEdge, newConnection, prev))
@@ -678,7 +688,7 @@ function DiagramEditor() {
           {editingEdge && (
             <EditEdgeForm
               edge={editingEdge.edge}
-              allowedEdgeTypes={getAllowEdges(
+              allowedEdgeTypes={getValidEdgeTypes(
                 editingEdge.sourceNode,
                 editingEdge.targetNode,
               )}

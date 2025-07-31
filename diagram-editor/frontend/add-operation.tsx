@@ -11,6 +11,11 @@ import type { DiagramEditorNode } from './nodes';
 import {
   BufferAccessIcon,
   BufferIcon,
+  createOperationNode,
+  createScopeNode,
+  createSectionBufferNode,
+  createSectionInputNode,
+  createSectionOutputNode,
   ForkCloneIcon,
   ForkResultIcon,
   isOperationNode,
@@ -30,13 +35,6 @@ import {
   UnzipIcon,
 } from './nodes';
 import type { DiagramOperation } from './types/api';
-import {
-  createOperationNode,
-  createScopeNode,
-  createSectionBufferNode,
-  createSectionInputNode,
-  createSectionOutputNode,
-} from './utils/create-node';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
 
 const StyledOperationButton = styled(Button)({

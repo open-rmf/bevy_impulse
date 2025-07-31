@@ -55,15 +55,15 @@ function setIntersection<T>(a: Set<T>, b: Set<T>): Set<T> {
   return intersection;
 }
 
-export function allowEdges(
-  source: DiagramEditorNode,
-  target: DiagramEditorNode,
+export function getValidEdgeTypes(
+  sourceNode: DiagramEditorNode,
+  targetNode: DiagramEditorNode,
 ): EdgeTypes[] {
-  const allowed_output_edges = source.type
-    ? ALLOWED_OUTPUT_EDGES[source.type]
+  const allowedOutputEdges = sourceNode.type
+    ? ALLOWED_OUTPUT_EDGES[sourceNode.type]
     : new Set([]);
-  const allowed_input_edges = target.type
-    ? ALLOWED_INPUT_EDGES[target.type]
+  const allowedInputEdges = targetNode.type
+    ? ALLOWED_INPUT_EDGES[targetNode.type]
     : new Set([]);
-  return Array.from(setIntersection(allowed_output_edges, allowed_input_edges));
+  return Array.from(setIntersection(allowedOutputEdges, allowedInputEdges));
 }

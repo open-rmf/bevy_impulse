@@ -1,5 +1,8 @@
 import type { XYPosition } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
+import type { DiagramOperation, NextOperation } from '../types/api';
+import { calculateScopeBounds, LAYOUT_OPTIONS } from '../utils/layout';
+import { joinNamespaces } from '../utils/namespace';
 import {
   type DiagramEditorNode,
   type OperationNode,
@@ -8,10 +11,7 @@ import {
   type SectionOutputNode,
   START_ID,
   TERMINATE_ID,
-} from '../nodes';
-import type { DiagramOperation, NextOperation } from '../types/api';
-import { calculateScopeBounds, LAYOUT_OPTIONS } from './layout';
-import { joinNamespaces } from './namespace';
+} from '.';
 
 export function createStartNode(
   namespace: string,
