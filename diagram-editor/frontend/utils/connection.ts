@@ -166,15 +166,19 @@ export function checkValidEdgeSimple(
   const outputCardinality = getOutputCardinality(sourceNode.type);
   switch (outputCardinality) {
     case CardinalityType.Single: {
-      if (reactFlow.getEdges().some((edge) => edge.source === sourceNode.id)) {
+      if (
+        reactFlow
+          .getEdges()
+          .some((e) => e.source === sourceNode.id && edge.id !== e.id)
+      ) {
         return createValidationError('source node already has an edge');
       }
       break;
     }
     case CardinalityType.Pair: {
       let count = 0;
-      for (const edge of reactFlow.getEdges()) {
-        if (edge.source === sourceNode.id) {
+      for (const e of reactFlow.getEdges()) {
+        if (e.source === sourceNode.id && edge.id !== e.id) {
           count++;
         }
         if (count > 1) {
