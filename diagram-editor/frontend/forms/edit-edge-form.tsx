@@ -46,9 +46,9 @@ const EDGE_DEFAULT_DATA = {
   splitRemaining: {},
   streamOut: { name: '' },
   unzip: { seq: 0 },
-} satisfies { [k in EdgeTypes]: EdgeData[k] };
+} satisfies Record<EdgeTypes, EdgeData<EdgeTypes>>;
 
-export function defaultEdgeData(type: EdgeTypes): EdgeData[EdgeTypes] {
+export function defaultEdgeData(type: EdgeTypes): EdgeData<EdgeTypes> {
   return { ...EDGE_DEFAULT_DATA[type] };
 }
 

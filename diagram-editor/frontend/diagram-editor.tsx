@@ -30,7 +30,7 @@ import React from 'react';
 import AddOperation from './add-operation';
 import CommandPanel from './command-panel';
 import type { DiagramEditorEdge } from './edges';
-import { EDGE_TYPES } from './edges';
+import { createBaseEdge, EDGE_TYPES } from './edges';
 import {
   EditorMode,
   type EditorModeContext,
@@ -49,7 +49,7 @@ import {
 } from './nodes';
 import { useTemplates } from './templates-provider';
 import { autoLayout } from './utils/auto-layout';
-import { getValidEdgeTypes } from './utils/connection';
+import { checkValidEdgeSimple, getValidEdgeTypes } from './utils/connection';
 import { exhaustiveCheck } from './utils/exhaustive-check';
 import { exportTemplate } from './utils/export-diagram';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
@@ -527,6 +527,10 @@ function DiagramEditor() {
           closeAllPopovers();
         }}
         onConnect={(conn) => {
+          if (!reactFlowInstance.current) {
+            return;
+          }
+
           const sourceNode = reactFlowInstance.current?.getNode(conn.source);
           const targetNode = reactFlowInstance.current?.getNode(conn.target);
           if (!sourceNode || !targetNode) {
@@ -541,16 +545,22 @@ function DiagramEditor() {
             return;
           }
 
-          setEdges((prev) =>
-            addEdge(
-              {
-                ...conn,
-                type: validEdges[0],
-                data: defaultEdgeData(validEdges[0]),
-              },
-              prev,
-            ),
+          const newEdge = {
+            ...createBaseEdge(conn.source, conn.target),
+            type: validEdges[0],
+            data: defaultEdgeData(validEdges[0]),
+          } as DiagramEditorEdge;
+
+          const validationResult = checkValidEdgeSimple(
+            newEdge,
+            reactFlowInstance.current,
           );
+          if (!validationResult.valid) {
+            showErrorToast(validationResult.error);
+            return;
+          }
+
+          setEdges((prev) => addEdge(newEdge, prev));
         }}
         isValidConnection={(conn) => {
           const sourceNode = reactFlowInstance.current?.getNode(conn.source);

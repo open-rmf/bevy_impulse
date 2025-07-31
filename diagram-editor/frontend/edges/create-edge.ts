@@ -2,7 +2,7 @@ import { MarkerType } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge, EdgeData } from '.';
 
-function createBaseEdge(
+export function createBaseEdge(
   source: string,
   target: string,
 ): Pick<DiagramEditorEdge, 'id' | 'source' | 'target' | 'markerEnd'> {
