@@ -3,71 +3,79 @@ import type { DiagramEditorEdge, EdgeTypes } from '../edges';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
 
-const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, Set<EdgeTypes>> = {
-  buffer: new Set<EdgeTypes>(['bufferKey', 'bufferSeq']),
-  buffer_access: new Set<EdgeTypes>(['default']),
-  fork_clone: new Set<EdgeTypes>(['default']),
-  fork_result: new Set<EdgeTypes>(['forkResultOk', 'forkResultErr']),
-  join: new Set<EdgeTypes>(['default']),
-  listen: new Set<EdgeTypes>(['default']),
-  node: new Set<EdgeTypes>(['default', 'streamOut']),
-  scope: new Set<EdgeTypes>(['default', 'streamOut']),
-  section: new Set<EdgeTypes>(['default']),
-  sectionInput: new Set<EdgeTypes>(['default']),
-  sectionOutput: new Set<EdgeTypes>([]),
-  sectionBuffer: new Set<EdgeTypes>(['default']),
-  serialized_join: new Set<EdgeTypes>(['default']),
-  split: new Set<EdgeTypes>(['splitKey', 'splitSeq', 'splitRemaining']),
-  start: new Set<EdgeTypes>(['default']),
-  stream_out: new Set<EdgeTypes>([]),
-  terminate: new Set<EdgeTypes>([]),
-  transform: new Set<EdgeTypes>(['default']),
-  unzip: new Set<EdgeTypes>(['unzip']),
-};
-
-const ALLOWED_INPUT_EDGES: Record<NodeTypes, Set<EdgeTypes>> = {
-  buffer: new Set<EdgeTypes>(['default']),
-  buffer_access: new Set<EdgeTypes>(['default']),
-  fork_clone: new Set<EdgeTypes>(['default']),
-  fork_result: new Set<EdgeTypes>(['default']),
-  join: new Set<EdgeTypes>(['bufferKey', 'bufferSeq']),
-  listen: new Set<EdgeTypes>(['bufferKey', 'bufferSeq']),
-  node: new Set<EdgeTypes>(['default']),
-  scope: new Set<EdgeTypes>(['default']),
-  section: new Set<EdgeTypes>(['default']),
-  sectionInput: new Set<EdgeTypes>([]),
-  sectionOutput: new Set<EdgeTypes>(['default']),
-  sectionBuffer: new Set<EdgeTypes>([]),
-  serialized_join: new Set<EdgeTypes>(['bufferKey', 'bufferSeq']),
-  split: new Set<EdgeTypes>(['default']),
-  start: new Set<EdgeTypes>([]),
-  stream_out: new Set<EdgeTypes>(['streamOut']),
-  terminate: new Set<EdgeTypes>(['default']),
-  transform: new Set<EdgeTypes>(['default']),
-  unzip: new Set<EdgeTypes>(['default']),
-};
-
-function setIntersection<T>(a: Set<T>, b: Set<T>): Set<T> {
-  const intersection = new Set<T>();
-  for (const elem of a) {
-    if (b.has(elem)) {
-      intersection.add(elem);
-    }
-  }
-  return intersection;
+enum EdgeCategory {
+  Data,
+  Buffer,
+  Stream,
 }
+
+const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
+  bufferKey: EdgeCategory.Buffer,
+  bufferSeq: EdgeCategory.Buffer,
+  forkResultOk: EdgeCategory.Data,
+  forkResultErr: EdgeCategory.Data,
+  splitKey: EdgeCategory.Data,
+  splitSeq: EdgeCategory.Data,
+  splitRemaining: EdgeCategory.Data,
+  default: EdgeCategory.Data,
+  streamOut: EdgeCategory.Stream,
+  unzip: EdgeCategory.Data,
+};
+
+const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
+  buffer: ['bufferKey', 'bufferSeq'],
+  buffer_access: ['default'],
+  fork_clone: ['default'],
+  fork_result: ['forkResultOk', 'forkResultErr'],
+  join: ['default'],
+  listen: ['default'],
+  node: ['default', 'streamOut'],
+  scope: ['default', 'streamOut'],
+  section: ['default'],
+  sectionInput: ['default'],
+  sectionOutput: [],
+  sectionBuffer: ['default'],
+  serialized_join: ['default'],
+  split: ['splitKey', 'splitSeq', 'splitRemaining'],
+  start: ['default'],
+  stream_out: [],
+  terminate: [],
+  transform: ['default'],
+  unzip: ['unzip'],
+};
+
+const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
+  buffer: [EdgeCategory.Data],
+  buffer_access: [EdgeCategory.Data, EdgeCategory.Buffer],
+  fork_clone: [EdgeCategory.Data],
+  fork_result: [EdgeCategory.Data],
+  join: [EdgeCategory.Buffer, EdgeCategory.Data],
+  listen: [EdgeCategory.Data, EdgeCategory.Buffer],
+  node: [EdgeCategory.Data],
+  scope: [EdgeCategory.Data],
+  section: [EdgeCategory.Data],
+  sectionInput: [],
+  sectionOutput: [EdgeCategory.Data],
+  sectionBuffer: [],
+  serialized_join: [EdgeCategory.Data, EdgeCategory.Buffer],
+  split: [EdgeCategory.Data],
+  start: [],
+  stream_out: [EdgeCategory.Stream],
+  terminate: [EdgeCategory.Data],
+  transform: [EdgeCategory.Data],
+  unzip: [EdgeCategory.Data],
+};
 
 export function getValidEdgeTypes(
   sourceNode: DiagramEditorNode,
   targetNode: DiagramEditorNode,
 ): EdgeTypes[] {
-  const allowedOutputEdges = sourceNode.type
-    ? ALLOWED_OUTPUT_EDGES[sourceNode.type]
-    : new Set([]);
-  const allowedInputEdges = targetNode.type
-    ? ALLOWED_INPUT_EDGES[targetNode.type]
-    : new Set([]);
-  return Array.from(setIntersection(allowedOutputEdges, allowedInputEdges));
+  const allowedOutputEdges = [...ALLOWED_OUTPUT_EDGES[sourceNode.type]];
+  const allowedInputEdgeCategories =
+    ALLOWED_INPUT_EDGE_CATEGORIES[targetNode.type];
+  return allowedOutputEdges.filter((edgeType) =>
+    allowedInputEdgeCategories.includes(EDGE_CATEGORIES[edgeType]),
+  );
 }
 
 enum CardinalityType {
@@ -119,13 +127,23 @@ function createValidationError(error: string): EdgeValidationResult {
 }
 
 /**
+ * A minimal type for only the required accessor methods in `ReactFlowInstance`.
+ * This is mostly so that tests can be written without rendering a `ReactFlow` instance.
+ */
+export type NodesAndEdgesAccessor = Pick<
+  ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
+  'getNode' | 'getNodes' | 'getEdges'
+>;
+
+/**
  * Perform a quick check if an edge is valid.
  * This only checks if the edge type is valid, does not check for conflicting edges, data correctness etc.
+ *
  * Complexity is O(1).
  */
-export function checkValidEdgeQuick(
+export function validateEdgeQuick(
   edge: DiagramEditorEdge,
-  reactFlow: ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
+  reactFlow: NodesAndEdgesAccessor,
 ): EdgeValidationResult {
   const sourceNode = reactFlow.getNode(edge.source);
   const targetNode = reactFlow.getNode(edge.target);
@@ -144,14 +162,17 @@ export function checkValidEdgeQuick(
 
 /**
  * Perform a simple check of the validity of edges.
- * A more complete check than `checkValidEdgeQuick`, but still does not do complicated checks like type compatibility.
- * Complexity is O(numOfEdges), so it is not recommended to call this very frequently.
+ * Includes the checks in `validateEdgeQuick` and the following:
+ *   * Check that the number of output edges does not exceed what the node allows.
+ *     * Note that it does not check for conflicting edges, e.g. a `fork_result` with 2 "ok" edges is still valid.
+ *
+ * Complexity is O(numOfEdges).
  */
-export function checkValidEdgeSimple(
+export function validateEdgeSimple(
   edge: DiagramEditorEdge,
-  reactFlow: ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
+  reactFlow: NodesAndEdgesAccessor,
 ): EdgeValidationResult {
-  const quickCheck = checkValidEdgeQuick(edge, reactFlow);
+  const quickCheck = validateEdgeQuick(edge, reactFlow);
   if (!quickCheck.valid) {
     return quickCheck;
   }
@@ -201,19 +222,22 @@ export function checkValidEdgeSimple(
 
 /**
  * Perform a full check of the validity of edges.
+ * Includes the checks in `validateEdgesSimple` and the following:
+ *   * TODO: Export and send the diagram to `bevy_impulse` for complete validation.
+ *
  * This can be slow so it is not recommended to call this frequently.
  */
-export async function checkValidEdgeFull(
+export async function validateEdgeFull(
   edge: DiagramEditorEdge,
-  reactFlow: ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
+  reactFlow: NodesAndEdgesAccessor,
 ): Promise<EdgeValidationResult> {
-  const simpleCheck = checkValidEdgeSimple(edge, reactFlow);
+  const simpleCheck = validateEdgeSimple(edge, reactFlow);
   if (!simpleCheck.valid) {
     return simpleCheck;
   }
 
-  // TODO: check message type compatibility. Writing the same logic as `bevy_impulse` is hard, it might
-  // be better to introduce a validation endpoint.
+  // TODO: Writing the same logic as `bevy_impulse` to do complete validation is hard, it is
+  // be better to introduce a validation endpoint and have `bevy_impulse` do the validation.
 
   return { valid: true, validEdgeTypes: simpleCheck.validEdgeTypes };
 }

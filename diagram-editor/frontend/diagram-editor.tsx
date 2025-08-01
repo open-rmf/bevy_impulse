@@ -49,7 +49,7 @@ import {
 } from './nodes';
 import { useTemplates } from './templates-provider';
 import { autoLayout } from './utils/auto-layout';
-import { checkValidEdgeSimple, getValidEdgeTypes } from './utils/connection';
+import { getValidEdgeTypes, validateEdgeSimple } from './utils/connection';
 import { exhaustiveCheck } from './utils/exhaustive-check';
 import { exportTemplate } from './utils/export-diagram';
 import { calculateScopeBounds, LAYOUT_OPTIONS } from './utils/layout';
@@ -551,7 +551,7 @@ function DiagramEditor() {
             data: defaultEdgeData(validEdges[0]),
           } as DiagramEditorEdge;
 
-          const validationResult = checkValidEdgeSimple(
+          const validationResult = validateEdgeSimple(
             newEdge,
             reactFlowInstance.current,
           );
