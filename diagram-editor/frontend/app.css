@@ -22,3 +22,9 @@
   left: -150%;
   top: -100%;
 }
+.react-flow__handle.connectingto {
+  background: var(--mui-palette-error-main);
+}
+.react-flow__handle.valid {
+  background: var(--mui-palette-success-main);
+}
