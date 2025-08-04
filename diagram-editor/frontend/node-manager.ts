@@ -107,8 +107,7 @@ export class NodeManager {
   getTargetNextOp(edge: DiagramEditorEdge): NextOperation {
     // TODO: Validate that the edge does not traverse namespaces
     switch (edge.type) {
-      case 'bufferKey':
-      case 'bufferSeq':
+      case 'buffer':
       case 'default':
       case 'forkResultOk':
       case 'forkResultErr':

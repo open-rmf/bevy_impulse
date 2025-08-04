@@ -1,6 +1,5 @@
 import {
-  createBufferKeyEdge,
-  createBufferSeqEdge,
+  createBufferEdge,
   createDefaultEdge,
   createForkResultErrEdge,
   createForkResultOkEdge,
@@ -104,7 +103,8 @@ describe('validate edges', () => {
     }
 
     {
-      const edge = createBufferSeqEdge(buffer.id, join.id, {
+      const edge = createBufferEdge(buffer.id, join.id, {
+        type: 'bufferSeq',
         seq: 0,
       });
       const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
@@ -113,7 +113,8 @@ describe('validate edges', () => {
     }
 
     {
-      const edge = createBufferKeyEdge(buffer.id, join.id, {
+      const edge = createBufferEdge(buffer.id, join.id, {
+        type: 'bufferKey',
         key: 'test',
       });
       const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);

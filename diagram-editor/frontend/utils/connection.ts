@@ -10,8 +10,7 @@ enum EdgeCategory {
 }
 
 const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
-  bufferKey: EdgeCategory.Buffer,
-  bufferSeq: EdgeCategory.Buffer,
+  buffer: EdgeCategory.Buffer,
   forkResultOk: EdgeCategory.Data,
   forkResultErr: EdgeCategory.Data,
   splitKey: EdgeCategory.Data,
@@ -20,10 +19,11 @@ const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
   default: EdgeCategory.Data,
   streamOut: EdgeCategory.Stream,
   unzip: EdgeCategory.Data,
+  // section: EdgeCategory.Data,
 };
 
 const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
-  buffer: ['bufferKey', 'bufferSeq'],
+  buffer: ['buffer', 'buffer'],
   buffer_access: ['default'],
   fork_clone: ['default'],
   fork_result: ['forkResultOk', 'forkResultErr'],
@@ -34,7 +34,7 @@ const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
   section: ['default'],
   sectionInput: ['default'],
   sectionOutput: [],
-  sectionBuffer: ['bufferKey', 'bufferSeq'],
+  sectionBuffer: ['buffer'],
   serialized_join: ['default'],
   split: ['splitKey', 'splitSeq', 'splitRemaining'],
   start: ['default'],

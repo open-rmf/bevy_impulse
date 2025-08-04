@@ -45,7 +45,8 @@ function syncStreamOut(
   edge: StreamOutEdge,
 ) {
   sourceOp.stream_out = sourceOp.stream_out ? sourceOp.stream_out : {};
-  sourceOp.stream_out[edge.data.name] = nodeManager.getTargetNextOp(edge);
+  sourceOp.stream_out[edge.data.output.name] =
+    nodeManager.getTargetNextOp(edge);
 }
 
 function getBufferSelection(targetOp: DiagramOperation): BufferSelection {
@@ -84,7 +85,7 @@ function syncBufferSelection(
   nodeManager: NodeManager,
   edge: DiagramEditorEdge,
 ) {
-  if (edge.type === 'bufferKey' || edge.type === 'bufferSeq') {
+  if (edge.type === 'buffer') {
     const targetNode = nodeManager.getNode(edge.target);
     if (!isOperationNode(targetNode)) {
       throw new Error('expected operation node');
@@ -96,7 +97,7 @@ function syncBufferSelection(
     let bufferSelection = getBufferSelection(targetOp);
 
     if (
-      edge.type === 'bufferKey' &&
+      edge.data.input?.type === 'bufferKey' &&
       Array.isArray(bufferSelection) &&
       bufferSelection.length === 0
     ) {
@@ -104,7 +105,7 @@ function syncBufferSelection(
       bufferSelection = {};
       setBufferSelection(targetOp, bufferSelection);
     } else if (
-      edge.type === 'bufferSeq' &&
+      edge.data.input?.type === 'bufferSeq' &&
       typeof bufferSelection === 'object' &&
       !Array.isArray(bufferSelection) &&
       Object.keys(bufferSelection).length === 0
@@ -119,21 +120,21 @@ function syncBufferSelection(
       throw new Error('expected source to be a buffer node');
     }
     // check that the buffer selection is compatible
-    if (edge.type === 'bufferSeq') {
+    if (edge.type === 'buffer' && edge.data.input?.type === 'bufferSeq') {
       if (!isArrayBufferSelection(bufferSelection)) {
         throw new Error(
           'a sequential buffer edge must be assigned to an array of buffers',
         );
       }
-      bufferSelection[edge.data.seq] = sourceNode.data.opId;
+      bufferSelection[edge.data.input.seq] = sourceNode.data.opId;
     }
-    if (edge.type === 'bufferKey') {
+    if (edge.type === 'buffer' && edge.data.input?.type === 'bufferKey') {
       if (!isKeyedBufferSelection(bufferSelection)) {
         throw new Error(
           'a keyed buffer edge must be assigned to a keyed buffer selection',
         );
       }
-      bufferSelection[edge.data.key] = sourceNode.data.opId;
+      bufferSelection[edge.data.input.key] = sourceNode.data.opId;
     }
   }
 }
@@ -147,7 +148,7 @@ function syncEdge(
   root: SubOperations,
   edge: DiagramEditorEdge,
 ): void {
-  if (edge.type === 'bufferKey' || edge.type === 'bufferSeq') {
+  if (edge.type === 'buffer') {
     syncBufferSelection(nodeManager, edge);
     return;
   }
@@ -196,7 +197,7 @@ function syncEdge(
         if (edge.type !== 'unzip') {
           throw new Error('expected "unzip" edge');
         }
-        sourceOp.next[edge.data.seq] = nodeManager.getTargetNextOp(edge);
+        sourceOp.next[edge.data.output.seq] = nodeManager.getTargetNextOp(edge);
         break;
       }
       case 'fork_result': {
@@ -223,7 +224,8 @@ function syncEdge(
             if (!sourceOp.keyed) {
               sourceOp.keyed = {};
             }
-            sourceOp.keyed[edge.data.key] = nodeManager.getTargetNextOp(edge);
+            sourceOp.keyed[edge.data.output.key] =
+              nodeManager.getTargetNextOp(edge);
             break;
           }
           case 'splitSeq': {
@@ -231,7 +233,7 @@ function syncEdge(
               sourceOp.sequential = [];
             }
             // this works because js allows non-sequential arrays
-            sourceOp.sequential[edge.data.seq] =
+            sourceOp.sequential[edge.data.output.seq] =
               nodeManager.getTargetNextOp(edge);
             break;
           }

@@ -1,6 +1,7 @@
 import { MarkerType } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
-import type { DiagramEditorEdge, EdgeData } from '.';
+import type { DiagramEditorEdge, EdgeOutputData } from '.';
+import type { BufferKeySlotData, BufferSeqSlotData } from './buffer-edge';
 
 export function createBaseEdge(
   source: string,
@@ -25,19 +26,21 @@ export function createDefaultEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'default',
-    data: {},
+    data: { output: {} },
   };
 }
 
 export function createUnzipEdge(
   source: string,
   target: string,
-  data: EdgeData<'unzip'>,
+  data: EdgeOutputData<'unzip'>,
 ): DiagramEditorEdge<'unzip'> {
   return {
     ...createBaseEdge(source, target),
     type: 'unzip',
-    data,
+    data: {
+      output: data,
+    },
   };
 }
 
@@ -66,24 +69,24 @@ export function createForkResultErrEdge(
 export function createSplitKeyEdge(
   source: string,
   target: string,
-  data: EdgeData<'splitKey'>,
+  data: EdgeOutputData<'splitKey'>,
 ): DiagramEditorEdge<'splitKey'> {
   return {
     ...createBaseEdge(source, target),
     type: 'splitKey',
-    data,
+    data: { output: data },
   };
 }
 
 export function createSplitSeqEdge(
   source: string,
   target: string,
-  data: EdgeData<'splitSeq'>,
+  data: EdgeOutputData<'splitSeq'>,
 ): DiagramEditorEdge<'splitSeq'> {
   return {
     ...createBaseEdge(source, target),
     type: 'splitSeq',
-    data,
+    data: { output: data },
   };
 }
 
@@ -98,38 +101,38 @@ export function createSplitRemainingEdge(
   };
 }
 
-export function createBufferKeyEdge(
+export function createBufferEdge(
   source: string,
   target: string,
-  data: EdgeData<'bufferKey'>,
-): DiagramEditorEdge<'bufferKey'> {
+  data: BufferKeySlotData | BufferSeqSlotData,
+): DiagramEditorEdge<'buffer'> {
   return {
     ...createBaseEdge(source, target),
-    type: 'bufferKey',
-    data,
-  };
-}
-
-export function createBufferSeqEdge(
-  source: string,
-  target: string,
-  data: EdgeData<'bufferSeq'>,
-): DiagramEditorEdge<'bufferSeq'> {
-  return {
-    ...createBaseEdge(source, target),
-    type: 'bufferSeq',
-    data,
+    type: 'buffer',
+    data: { output: {}, input: data },
   };
 }
 
 export function createStreamOutEdge(
   source: string,
   target: string,
-  data: EdgeData<'streamOut'>,
+  data: EdgeOutputData<'streamOut'>,
 ): DiagramEditorEdge<'streamOut'> {
   return {
     ...createBaseEdge(source, target),
     type: 'streamOut',
-    data,
+    data: { output: data },
   };
 }
+
+// export function createSectionEdge(
+//   source: string,
+//   target: string,
+//   data: EdgeOutputData<'section'>,
+// ): DiagramEditorEdge<'section'> {
+//   return {
+//     ...createBaseEdge(source, target),
+//     type: 'section',
+//     data: { output: data },
+//   };
+// }

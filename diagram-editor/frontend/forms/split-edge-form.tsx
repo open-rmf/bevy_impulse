@@ -18,7 +18,7 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
       onChange?.({
         type: 'replace',
         id: edge.id,
-        item: { ...edge, data: { key: newKey } },
+        item: { ...edge, data: { ...edge.data, output: { key: newKey } } },
       });
     } else if (edge.type === 'splitSeq') {
       const newSeq = Number.parseInt(event.target.value, 10);
@@ -26,7 +26,7 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
         onChange?.({
           type: 'replace',
           id: edge.id,
-          item: { ...edge, data: { seq: newSeq } },
+          item: { ...edge, data: { ...edge.data, output: { seq: newSeq } } },
         });
       }
     }

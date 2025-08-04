@@ -32,12 +32,16 @@ export const BufferEdge: Story = {
       id: 'edge-1',
       source: 'a',
       target: 'b',
-      type: 'bufferKey',
+      type: 'buffer',
       data: {
-        key: 'testKey',
+        output: {},
+        input: {
+          type: 'bufferKey',
+          key: 'testKey',
+        },
       },
     },
-    allowedEdgeTypes: ['bufferKey', 'bufferSeq'],
+    allowedEdgeTypes: ['buffer'],
   },
   render,
 };
@@ -64,7 +68,9 @@ export const SplitKey: Story = {
       target: 'b',
       type: 'splitKey',
       data: {
-        key: 'splitTestKey',
+        output: {
+          key: 'splitTestKey',
+        },
       },
     },
     allowedEdgeTypes: ['splitKey', 'splitSeq', 'splitRemaining'],
@@ -80,7 +86,9 @@ export const Unzip: Story = {
       target: 'b',
       type: 'unzip',
       data: {
-        seq: 3,
+        output: {
+          seq: 3,
+        },
       },
     },
     allowedEdgeTypes: ['unzip'],
@@ -95,7 +103,7 @@ export const Default: Story = {
       source: 'a',
       target: 'b',
       type: 'default',
-      data: {},
+      data: { output: {} },
     },
     allowedEdgeTypes: ['default'],
   },

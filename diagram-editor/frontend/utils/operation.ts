@@ -1,6 +1,5 @@
 import {
-  createBufferKeyEdge,
-  createBufferSeqEdge,
+  createBufferEdge,
   createDefaultEdge,
   createForkResultErrEdge,
   createForkResultOkEdge,
@@ -69,7 +68,9 @@ function createBufferEdges(
         buffer,
       )?.id;
       if (source) {
-        edges.push(createBufferSeqEdge(source, node.id, { seq: idx }));
+        edges.push(
+          createBufferEdge(source, node.id, { type: 'bufferSeq', seq: idx }),
+        );
       }
     }
   } else if (isKeyedBufferSelection(buffers)) {
@@ -79,7 +80,9 @@ function createBufferEdges(
         buffer,
       )?.id;
       if (source) {
-        edges.push(createBufferKeyEdge(source, node.id, { key }));
+        edges.push(
+          createBufferEdge(source, node.id, { type: 'bufferKey', key }),
+        );
       }
     }
   } else {
@@ -88,7 +91,9 @@ function createBufferEdges(
       buffers,
     )?.id;
     if (source) {
-      edges.push(createBufferSeqEdge(source, node.id, { seq: 0 }));
+      edges.push(
+        createBufferEdge(source, node.id, { type: 'bufferSeq', seq: 0 }),
+      );
     }
   }
 
@@ -241,17 +246,21 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
           break;
         }
         case 'section': {
-          if (op.connect) {
-            for (const next of Object.values(op.connect)) {
-              const target = nodeManager.getNodeFromNextOp(
-                node.data.namespace,
-                next,
-              )?.id;
-              if (target) {
-                edges.push(createDefaultEdge(node.id, target));
-              }
-            }
-          }
+          // if (op.connect) {
+          //   for (const [outputId, next] of Object.entries(op.connect)) {
+          //     const target = nodeManager.getNodeFromNextOp(
+          //       node.data.namespace,
+          //       next,
+          //     )?.id;
+          //     if (target) {
+          //       edges.push(
+          //         createSectionEdge(node.id, target, {
+          //           output: outputId,
+          //         }),
+          //       );
+          //     }
+          //   }
+          // }
           break;
         }
         case 'scope': {

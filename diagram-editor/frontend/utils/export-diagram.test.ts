@@ -83,21 +83,21 @@ test('export diagram with templates', () => {
       type: 'default',
       source: nodes[0].id,
       target: nodes[3].id,
-      data: {},
+      data: { output: {} },
     },
     {
       id: uuidv4(),
       type: 'default',
       source: nodes[2].id,
       target: nodes[4].id,
-      data: {},
+      data: { output: {} },
     },
     {
       id: uuidv4(),
       type: 'default',
       source: nodes[3].id,
       target: nodes[1].id,
-      data: {},
+      data: { output: {} },
     },
   ];
   const template = exportTemplate(new NodeManager(nodes), edges);

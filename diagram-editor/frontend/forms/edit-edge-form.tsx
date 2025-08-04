@@ -12,19 +12,19 @@ import {
 import type { EdgeChange, EdgeRemoveChange } from '@xyflow/react';
 import React from 'react';
 import type {
+  BufferEdge,
   DiagramEditorEdge,
-  EdgeData,
+  EdgeOutputData,
   EdgeTypes,
   UnzipEdge,
 } from '../edges';
 import { MaterialSymbol } from '../nodes';
-import BufferEdgeForm, { type BufferEdge } from './buffer-edge-form';
+import { BufferEdgeInputForm } from './buffer-edge-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';
 import UnzipEdgeForm from './unzip-edge-form';
 
 const EDGE_TYPES_NAME = {
-  bufferKey: 'Key',
-  bufferSeq: 'Sequence',
+  buffer: 'Buffer',
   default: 'Data',
   forkResultErr: 'Error',
   forkResultOk: 'Ok',
@@ -33,12 +33,12 @@ const EDGE_TYPES_NAME = {
   splitSeq: 'Sequence',
   streamOut: 'Stream Out',
   unzip: 'Unzip',
+  // section: 'Section',
 } satisfies Record<EdgeTypes, string>;
 
 const EDGE_DEFAULT_DATA = {
   default: {},
-  bufferKey: { key: '' },
-  bufferSeq: { seq: 0 },
+  buffer: {},
   forkResultOk: {},
   forkResultErr: {},
   splitKey: { key: '' },
@@ -46,9 +46,12 @@ const EDGE_DEFAULT_DATA = {
   splitRemaining: {},
   streamOut: { name: '' },
   unzip: { seq: 0 },
-} satisfies Record<EdgeTypes, EdgeData<EdgeTypes>>;
+  // section: { output: '' },
+} satisfies Record<EdgeTypes, EdgeOutputData>;
 
-export function defaultEdgeData(type: EdgeTypes): EdgeData<EdgeTypes> {
+export function defaultEdgeOutputData(
+  type: EdgeTypes,
+): EdgeOutputData<EdgeTypes> {
   return { ...EDGE_DEFAULT_DATA[type] };
 }
 
@@ -67,9 +70,10 @@ function EditEdgeForm({
 }: EditEdgeFormProps) {
   const subForm = React.useMemo(() => {
     switch (edge.type) {
-      case 'bufferKey':
-      case 'bufferSeq': {
-        return <BufferEdgeForm edge={edge as BufferEdge} onChange={onChange} />;
+      case 'buffer': {
+        return (
+          <BufferEdgeInputForm edge={edge as BufferEdge} onChange={onChange} />
+        );
       }
       case 'forkResultOk':
       case 'forkResultErr': {
@@ -113,9 +117,14 @@ function EditEdgeForm({
               label="Type"
               value={edge.type}
               onChange={(ev) => {
-                const newEdge = { ...edge };
+                const newEdge: DiagramEditorEdge = {
+                  ...edge,
+                };
                 newEdge.type = ev.target.value;
-                newEdge.data = defaultEdgeData(newEdge.type);
+                newEdge.data = {
+                  ...edge.data,
+                  output: { ...defaultEdgeOutputData(newEdge.type) },
+                };
                 onChange?.({
                   type: 'replace',
                   id: edge.id,
@@ -130,7 +139,6 @@ function EditEdgeForm({
               ))}
             </Select>
           </FormControl>
-
           {subForm}
         </Stack>
       </CardContent>
