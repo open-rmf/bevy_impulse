@@ -8,6 +8,9 @@ import {
 } from '../edges';
 import {
   createOperationNode,
+  createSectionBufferNode,
+  createSectionInputNode,
+  createSectionOutputNode,
   createTerminateNode,
   type DiagramEditorNode,
 } from '../nodes';
@@ -54,43 +57,22 @@ class MockReactFlowAccessor implements NodesAndEdgesAccessor {
 }
 
 describe('validate edges', () => {
-  test('buffer->node is invalid', () => {
-    const sourceNode = createOperationNode(
-      ROOT_NAMESPACE,
-      undefined,
-      { x: 0, y: 0 },
-      { type: 'buffer' },
-      'test_op_buffer',
-    );
-    const targetNode = createOperationNode(
+  test('"buffer" can only connect to operations that accepts a buffer', () => {
+    const node = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
       { x: 0, y: 0 },
       { type: 'node', builder: 'test_builder', next: { builtin: 'dispose' } },
       'test_op_node',
     );
-
-    const validEdges = getValidEdgeTypes(sourceNode, targetNode);
-    expect(validEdges.length).toBe(0);
-
-    const edge = createDefaultEdge(sourceNode.id, targetNode.id);
-    const reactFlow = new MockReactFlowAccessor(
-      [sourceNode, targetNode],
-      [edge],
-    );
-    const result = validateEdgeQuick(edge, reactFlow);
-    expect(result.valid).toBe(false);
-  });
-
-  test('buffer->join is valid only for buffer edges', () => {
-    const sourceNode = createOperationNode(
+    const buffer = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
       { x: 0, y: 0 },
       { type: 'buffer' },
       'test_op_buffer',
     );
-    const targetNode = createOperationNode(
+    const join = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
       { x: 0, y: 0 },
@@ -102,47 +84,45 @@ describe('validate edges', () => {
       'test_op_join',
     );
 
-    const validEdges = getValidEdgeTypes(sourceNode, targetNode);
-    expect(validEdges.length).toBe(2);
-    expect(validEdges).toContain('bufferKey');
-    expect(validEdges).toContain('bufferSeq');
-
     {
-      const edge = createBufferSeqEdge(sourceNode.id, targetNode.id, {
-        seq: 0,
-      });
-      const reactFlow = new MockReactFlowAccessor(
-        [sourceNode, targetNode],
-        [edge],
-      );
-      const result = validateEdgeQuick(edge, reactFlow);
-      expect(result.valid).toBe(true);
-    }
+      // "node" does not accept buffer
+      const validEdges = getValidEdgeTypes(buffer, node);
+      expect(validEdges.length).toBe(0);
 
-    {
-      const edge = createBufferKeyEdge(sourceNode.id, targetNode.id, {
-        key: 'test',
-      });
-      const reactFlow = new MockReactFlowAccessor(
-        [sourceNode, targetNode],
-        [edge],
-      );
-      const result = validateEdgeQuick(edge, reactFlow);
-      expect(result.valid).toBe(true);
-    }
-
-    {
-      const edge = createDefaultEdge(sourceNode.id, targetNode.id);
-      const reactFlow = new MockReactFlowAccessor(
-        [sourceNode, targetNode],
-        [edge],
-      );
+      // "buffer" does not output data ("default" edge)
+      const edge = createDefaultEdge(buffer.id, join.id);
+      const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
       const result = validateEdgeQuick(edge, reactFlow);
       expect(result.valid).toBe(false);
     }
+
+    {
+      const validEdges = getValidEdgeTypes(buffer, join);
+      expect(validEdges.length).toBe(2);
+      expect(validEdges).toContain('bufferKey');
+      expect(validEdges).toContain('bufferSeq');
+    }
+
+    {
+      const edge = createBufferSeqEdge(buffer.id, join.id, {
+        seq: 0,
+      });
+      const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
+      const result = validateEdgeQuick(edge, reactFlow);
+      expect(result.valid).toBe(true);
+    }
+
+    {
+      const edge = createBufferKeyEdge(buffer.id, join.id, {
+        key: 'test',
+      });
+      const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
+      const result = validateEdgeQuick(edge, reactFlow);
+      expect(result.valid).toBe(true);
+    }
   });
 
-  test('node->buffer_access and buffer->buffer_access are valid', () => {
+  test('"buffer_access" accepts both data and buffer edges', () => {
     const nodeNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -178,7 +158,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('node->join and buffer->join are valid', () => {
+  test('"join" node accepts both data and buffer edges', () => {
     const nodeNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -223,7 +203,106 @@ describe('validate edges', () => {
     }
   });
 
-  test('node operation only allows 1 output', () => {
+  test('"sectionInput" can only connect to operations that accepts data', () => {
+    const sectionInput = createSectionInputNode(
+      'test_section_input',
+      'test_section_input',
+      { x: 0, y: 0 },
+    );
+    const node = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'node', builder: 'test_builder', next: { builtin: 'dispose' } },
+      'test_op_node',
+    );
+    const listen = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'listen', buffers: [], next: { builtin: 'dispose' } },
+      'test_op_listen',
+    );
+
+    {
+      const validEdges = getValidEdgeTypes(sectionInput, node);
+      expect(validEdges.length).toBe(1);
+      expect(validEdges).toContain('default');
+    }
+
+    {
+      const validEdges = getValidEdgeTypes(sectionInput, listen);
+      expect(validEdges.length).toBe(0);
+    }
+  });
+
+  test('"sectionBuffer" can only connect to operations that accepts buffer', () => {
+    const sectionBuffer = createSectionBufferNode(
+      'test_section_buffer',
+      'test_section_buffer',
+      { x: 0, y: 0 },
+    );
+    const node = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'node', builder: 'test_builder', next: { builtin: 'dispose' } },
+      'test_op_node',
+    );
+    const listen = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'listen', buffers: [], next: { builtin: 'dispose' } },
+      'test_op_listen',
+    );
+
+    {
+      const validEdges = getValidEdgeTypes(sectionBuffer, node);
+      expect(validEdges.length).toBe(0);
+    }
+
+    {
+      const validEdges = getValidEdgeTypes(sectionBuffer, listen);
+      expect(validEdges.length).toBe(2);
+      expect(validEdges).toContain('bufferKey');
+      expect(validEdges).toContain('bufferSeq');
+    }
+  });
+
+  test('"sectionOutput" only accepts data edges', () => {
+    const sectionOutput = createSectionOutputNode('test_section_output', {
+      x: 0,
+      y: 0,
+    });
+    const node = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'node', builder: 'test_builder', next: { builtin: 'dispose' } },
+      'test_op_node',
+    );
+    const buffer = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'buffer', buffers: [] },
+      'test_op_buffer',
+    );
+
+    {
+      const validEdges = getValidEdgeTypes(node, sectionOutput);
+      expect(validEdges.length).toBe(1);
+      expect(validEdges).toContain('default');
+    }
+
+    {
+      const validEdges = getValidEdgeTypes(buffer, sectionOutput);
+      expect(validEdges.length).toBe(0);
+    }
+  });
+
+  test('"node" operation only allows 1 output', () => {
     const nodeNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -262,7 +341,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('fork clone operation allows multiple outputs', () => {
+  test('"fork_clone" operation allows multiple outputs', () => {
     const forkCloneNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -288,7 +367,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('fork result operation only allows 2 outputs', () => {
+  test('"fork_result" operation only allows 2 outputs', () => {
     const forkResultNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,

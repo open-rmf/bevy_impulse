@@ -49,22 +49,22 @@ export type DefaultEdgeData = Record<string, never>;
 export type DefaultEdge = Edge<DefaultEdgeData, 'default'>;
 
 type EdgeMapping = {
-  default: { comp: DefaultEdge; data: DefaultEdgeData };
-  unzip: { comp: UnzipEdge; data: UnzipEdgeData };
-  forkResultOk: { comp: ForkResultOkEdge; data: ForkResultOkEdgeData };
-  forkResultErr: { comp: ForkResultErrEdge; data: ForkResultErrEdgeData };
-  splitKey: { comp: SplitKeyEdge; data: SplitKeyEdgeData };
-  splitSeq: { comp: SplitSeqEdge; data: SplitSeqEdgeData };
-  splitRemaining: { comp: SplitRemainingEdge; data: SplitRemainingEdgeData };
-  bufferKey: { comp: BufferKeyEdge; data: BufferKeyEdgeData };
-  bufferSeq: { comp: BufferSeqEdge; data: BufferSeqEdgeData };
-  streamOut: { comp: StreamOutEdge; data: StreamOutEdgeData };
+  default: { edge: DefaultEdge; data: DefaultEdgeData };
+  unzip: { edge: UnzipEdge; data: UnzipEdgeData };
+  forkResultOk: { edge: ForkResultOkEdge; data: ForkResultOkEdgeData };
+  forkResultErr: { edge: ForkResultErrEdge; data: ForkResultErrEdgeData };
+  splitKey: { edge: SplitKeyEdge; data: SplitKeyEdgeData };
+  splitSeq: { edge: SplitSeqEdge; data: SplitSeqEdgeData };
+  splitRemaining: { edge: SplitRemainingEdge; data: SplitRemainingEdgeData };
+  bufferKey: { edge: BufferKeyEdge; data: BufferKeyEdgeData };
+  bufferSeq: { edge: BufferSeqEdge; data: BufferSeqEdgeData };
+  streamOut: { edge: StreamOutEdge; data: StreamOutEdgeData };
 };
 
 export type EdgeTypes = keyof EdgeMapping;
 
 export type DiagramEditorEdge<T extends EdgeTypes = EdgeTypes> =
-  EdgeMapping[T]['comp'];
+  EdgeMapping[T]['edge'];
 
 export type EdgeData<T extends EdgeTypes = EdgeTypes> = EdgeMapping[T]['data'];
 
