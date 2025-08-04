@@ -25,6 +25,7 @@ import {
   ScopeIcon,
   SectionBufferIcon,
   type SectionBufferNode,
+  SectionIcon,
   SectionInputIcon,
   type SectionInputNode,
   SectionOutputIcon,
@@ -316,6 +317,19 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
               start: { builtin: 'dispose' },
               ops: {},
               next: { builtin: 'dispose' },
+            }),
+          )
+        }
+      >
+        Scope
+      </StyledOperationButton>
+      <StyledOperationButton
+        startIcon={<SectionIcon />}
+        onClick={() =>
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'section',
+              template: 'new_section',
             }),
           )
         }

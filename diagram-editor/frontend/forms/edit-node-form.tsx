@@ -11,9 +11,11 @@ import BufferForm, { type BufferFormProps } from './buffer-form';
 import EditScopeForm, { type ScopeFormProps } from './edit-scope-form';
 import NodeForm, { type NodeFormProps } from './node-form';
 import {
-  EditSectionBufferForm,
-  EditSectionInputForm,
-  EditSectionOutputForm,
+  SectionBufferForm,
+  SectionForm,
+  type SectionFormProps,
+  SectionInputForm,
+  SectionOutputForm,
 } from './section-form';
 import TransformForm, { type TransformFormProps } from './transform-form';
 
@@ -33,6 +35,9 @@ function EditOperationNodeForm(props: EditOperationNodeFormProps) {
     }
     case 'scope': {
       return <EditScopeForm {...(props as ScopeFormProps)} />;
+    }
+    case 'section': {
+      return <SectionForm {...(props as SectionFormProps)} />;
     }
     case 'transform': {
       return <TransformForm {...(props as TransformFormProps)} />;
@@ -55,11 +60,11 @@ function EditNodeForm(props: EditNodeFormProps) {
   } else if (isSectionInterfaceNode(props.node)) {
     switch (props.node.type) {
       case 'sectionInput':
-        return <EditSectionInputForm {...props} node={props.node} />;
+        return <SectionInputForm {...props} node={props.node} />;
       case 'sectionOutput':
-        return <EditSectionOutputForm {...props} node={props.node} />;
+        return <SectionOutputForm {...props} node={props.node} />;
       case 'sectionBuffer':
-        return <EditSectionBufferForm {...props} node={props.node} />;
+        return <SectionBufferForm {...props} node={props.node} />;
       default:
         exhaustiveCheck(props.node);
         throw new Error('unknown node type');

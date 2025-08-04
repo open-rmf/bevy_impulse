@@ -1,4 +1,5 @@
 import {
+  Autocomplete,
   Card,
   CardContent,
   CardHeader,
@@ -15,17 +16,22 @@ import {
   type SectionInterfaceNode,
   type SectionOutputNode,
 } from '../nodes';
+import { useRegistry } from '../registry-provider';
+import { useTemplates } from '../templates-provider';
+import BaseEditOperationForm, {
+  type BaseEditOperationFormProps,
+} from './base-edit-operation-form';
 
-export interface BaseEditSectionInterfaceFormProps {
+export interface BaseSectionInterfaceFormProps {
   node: SectionInterfaceNode;
   onDelete?: (change: NodeRemoveChange) => void;
 }
 
-function BaseEditSectionInterfaceForm({
+function BaseSectionInterfaceForm({
   node,
   onDelete,
   children,
-}: PropsWithChildren<BaseEditSectionInterfaceFormProps>) {
+}: PropsWithChildren<BaseSectionInterfaceFormProps>) {
   return (
     <Card>
       <CardHeader
@@ -44,19 +50,18 @@ function BaseEditSectionInterfaceForm({
   );
 }
 
-export interface EditSectionInputFormProps
-  extends BaseEditSectionInterfaceFormProps {
+export interface SectionInputFormProps extends BaseSectionInterfaceFormProps {
   node: SectionInputNode;
   onChange?: (change: NodeChange<SectionInputNode>) => void;
 }
 
-export function EditSectionInputForm({
+export function SectionInputForm({
   node,
   onChange,
   onDelete,
-}: EditSectionInputFormProps) {
+}: SectionInputFormProps) {
   return (
-    <BaseEditSectionInterfaceForm node={node} onDelete={onDelete}>
+    <BaseSectionInterfaceForm node={node} onDelete={onDelete}>
       <Stack spacing={2}>
         <TextField
           required
@@ -73,23 +78,22 @@ export function EditSectionInputForm({
           }}
         />
       </Stack>
-    </BaseEditSectionInterfaceForm>
+    </BaseSectionInterfaceForm>
   );
 }
 
-export interface EditSectionBufferFormProps
-  extends BaseEditSectionInterfaceFormProps {
+export interface SectionBufferFormProps extends BaseSectionInterfaceFormProps {
   node: SectionBufferNode;
   onChange?: (change: NodeChange<SectionBufferNode>) => void;
 }
 
-export function EditSectionBufferForm({
+export function SectionBufferForm({
   node,
   onChange,
   onDelete,
-}: EditSectionBufferFormProps) {
+}: SectionBufferFormProps) {
   return (
-    <BaseEditSectionInterfaceForm node={node} onDelete={onDelete}>
+    <BaseSectionInterfaceForm node={node} onDelete={onDelete}>
       <Stack spacing={2}>
         <TextField
           required
@@ -106,23 +110,22 @@ export function EditSectionBufferForm({
           }}
         />
       </Stack>
-    </BaseEditSectionInterfaceForm>
+    </BaseSectionInterfaceForm>
   );
 }
 
-export interface EditSectionOutputFormProps
-  extends BaseEditSectionInterfaceFormProps {
+export interface SectionOutputFormProps extends BaseSectionInterfaceFormProps {
   node: SectionOutputNode;
   onChange?: (change: NodeChange<SectionOutputNode>) => void;
 }
 
-export function EditSectionOutputForm({
+export function SectionOutputForm({
   node,
   onChange,
   onDelete,
-}: EditSectionOutputFormProps) {
+}: SectionOutputFormProps) {
   return (
-    <BaseEditSectionInterfaceForm node={node} onDelete={onDelete}>
+    <BaseSectionInterfaceForm node={node} onDelete={onDelete}>
       <Stack spacing={2}>
         <TextField
           required
@@ -139,6 +142,58 @@ export function EditSectionOutputForm({
           }}
         />
       </Stack>
-    </BaseEditSectionInterfaceForm>
+    </BaseSectionInterfaceForm>
+  );
+}
+
+export type SectionFormProps = BaseEditOperationFormProps<'section'>;
+
+export function SectionForm(props: SectionFormProps) {
+  const registry = useRegistry();
+  const [templates, _setTemplates] = useTemplates();
+  const sectionBuilders = Object.keys(registry.sections);
+  const sectionTemplates = Object.keys(templates);
+  const sections = [...sectionBuilders, ...sectionTemplates].sort();
+
+  return (
+    <BaseEditOperationForm {...props}>
+      <Autocomplete
+        freeSolo
+        autoSelect
+        options={sections}
+        getOptionLabel={(option) => option}
+        value={
+          (props.node.data.op.builder ||
+            props.node.data.op.template ||
+            '') as string
+        }
+        onChange={(_, value) => {
+          if (value === null) {
+            return;
+          }
+
+          const updatedNode = { ...props.node };
+          if (sectionBuilders.includes(value)) {
+            updatedNode.data.op.builder = value;
+            delete updatedNode.data.op.template;
+          } else if (sectionTemplates.includes(value)) {
+            updatedNode.data.op.template = value;
+            delete updatedNode.data.op.builder;
+          } else {
+            // unable to determine if selected option is a builder or template, assume template.
+            updatedNode.data.op.template = value;
+            delete updatedNode.data.op.builder;
+          }
+          props.onChange?.({
+            type: 'replace',
+            id: props.node.id,
+            item: updatedNode,
+          });
+        }}
+        renderInput={(params) => (
+          <TextField {...params} required label="builder/template" />
+        )}
+      />
+    </BaseEditOperationForm>
   );
 }
