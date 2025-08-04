@@ -130,7 +130,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionInputIcon />}
             onClick={() => {
-              onAdd?.([createSectionInputChange('new_input', newNodePosition)]);
+              onAdd?.([createSectionInputChange(uuidv4(), newNodePosition)]);
             }}
           >
             Section Input
@@ -141,9 +141,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionOutputIcon />}
             onClick={() => {
-              onAdd?.([
-                createSectionOutputChange('new_output', newNodePosition),
-              ]);
+              onAdd?.([createSectionOutputChange(uuidv4(), newNodePosition)]);
             }}
           >
             Section Output
@@ -154,9 +152,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionBufferIcon />}
             onClick={() => {
-              onAdd?.([
-                createSectionBufferChange('new_buffer', newNodePosition),
-              ]);
+              onAdd?.([createSectionBufferChange(uuidv4(), newNodePosition)]);
             }}
           >
             Section Buffer

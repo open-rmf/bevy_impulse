@@ -6,32 +6,28 @@ export type BufferEdge = BufferKeyEdge | BufferSeqEdge;
 
 export interface BufferEdgeFormProps {
   edge: BufferEdge;
-  onChanges?: (changes: EdgeChange<BufferEdge>[]) => void;
+  onChange?: (changes: EdgeChange<BufferEdge>) => void;
 }
 
-function BufferEdgeForm({ edge, onChanges }: BufferEdgeFormProps) {
+function BufferEdgeForm({ edge, onChange }: BufferEdgeFormProps) {
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     if (edge.type === 'bufferKey') {
       const newKey = event.target.value;
-      onChanges?.([
-        {
-          type: 'replace',
-          id: edge.id,
-          item: { ...edge, data: { key: newKey } },
-        },
-      ]);
+      onChange?.({
+        type: 'replace',
+        id: edge.id,
+        item: { ...edge, data: { key: newKey } },
+      });
     } else if (edge.type === 'bufferSeq') {
       const newSeq = Number.parseInt(event.target.value, 10);
       if (!Number.isNaN(newSeq)) {
-        onChanges?.([
-          {
-            type: 'replace',
-            id: edge.id,
-            item: { ...edge, data: { seq: newSeq } },
-          },
-        ]);
+        onChange?.({
+          type: 'replace',
+          id: edge.id,
+          item: { ...edge, data: { seq: newSeq } },
+        });
       }
     }
   };

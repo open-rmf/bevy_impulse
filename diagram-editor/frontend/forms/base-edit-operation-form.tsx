@@ -11,20 +11,20 @@ import type React from 'react';
 import type { OperationNode, OperationNodeTypes } from '../nodes';
 import { MaterialSymbol } from '../nodes';
 
-export interface EditOperationFormProps<
+export interface BaseEditOperationFormProps<
   NodeType extends OperationNodeTypes = OperationNodeTypes,
 > {
   node: OperationNode<NodeType>;
-  onChanges?: (changes: NodeChange<OperationNode>[]) => void;
+  onChange?: (changes: NodeChange<OperationNode>) => void;
   onDelete?: (change: NodeRemoveChange) => void;
 }
 
-function EditOperationForm({
+function BaseEditOperationForm({
   node,
-  onChanges,
+  onChange,
   onDelete,
   children,
-}: React.PropsWithChildren<EditOperationFormProps>) {
+}: React.PropsWithChildren<BaseEditOperationFormProps>) {
   return (
     <Card>
       <CardHeader
@@ -47,13 +47,11 @@ function EditOperationForm({
             onChange={(ev) => {
               const updatedNode = { ...node };
               updatedNode.data.opId = ev.target.value;
-              onChanges?.([
-                {
-                  type: 'replace',
-                  id: node.id,
-                  item: updatedNode,
-                },
-              ]);
+              onChange?.({
+                type: 'replace',
+                id: node.id,
+                item: updatedNode,
+              });
             }}
           />
           {children}
@@ -63,4 +61,4 @@ function EditOperationForm({
   );
 }
 
-export default EditOperationForm;
+export default BaseEditOperationForm;

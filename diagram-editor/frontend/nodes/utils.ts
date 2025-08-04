@@ -4,6 +4,7 @@ import type {
   DiagramEditorNode,
   OperationNode,
   OperationNodeTypes,
+  SectionInterfaceNode,
 } from '.';
 
 export function isOperationData(
@@ -48,4 +49,14 @@ export function isScopeNode(
   node: DiagramEditorNode,
 ): node is OperationNode<'scope'> {
   return node.type === 'scope';
+}
+
+export function isSectionInterfaceNode(
+  node: DiagramEditorNode,
+): node is SectionInterfaceNode {
+  return (
+    node.type === 'sectionInput' ||
+    node.type === 'sectionOutput' ||
+    node.type === 'sectionBuffer'
+  );
 }

@@ -1,14 +1,16 @@
 import { Autocomplete, TextField } from '@mui/material';
 import { useRegistry } from '../registry-provider';
-import EditOperationForm, {
-  type EditOperationFormProps,
-} from './edit-operation-form';
+import BaseEditOperationForm, {
+  type BaseEditOperationFormProps,
+} from './base-edit-operation-form';
 
-function NodeForm(props: EditOperationFormProps<'node'>) {
+export type NodeFormProps = BaseEditOperationFormProps<'node'>;
+
+function NodeForm(props: NodeFormProps) {
   const registry = useRegistry();
   const nodes = Object.keys(registry.nodes);
   return (
-    <EditOperationForm {...props}>
+    <BaseEditOperationForm {...props}>
       <Autocomplete
         freeSolo
         autoSelect
@@ -18,19 +20,17 @@ function NodeForm(props: EditOperationFormProps<'node'>) {
         onChange={(_, value) => {
           const updatedNode = { ...props.node };
           updatedNode.data.op.builder = value ?? '';
-          props.onChanges?.([
-            {
-              type: 'replace',
-              id: props.node.id,
-              item: updatedNode,
-            },
-          ]);
+          props.onChange?.({
+            type: 'replace',
+            id: props.node.id,
+            item: updatedNode,
+          });
         }}
         renderInput={(params) => (
           <TextField {...params} required label="builder" />
         )}
       />
-    </EditOperationForm>
+    </BaseEditOperationForm>
   );
 }
 

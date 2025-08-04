@@ -6,32 +6,28 @@ export type SplitEdge = SplitKeyEdge | SplitSeqEdge | SplitRemainingEdge;
 
 export interface SplitEdgeFormProps {
   edge: SplitEdge;
-  onChanges?: (change: EdgeChange<SplitEdge>[]) => void;
+  onChange?: (change: EdgeChange<SplitEdge>) => void;
 }
 
-function SplitEdgeForm({ edge, onChanges }: SplitEdgeFormProps) {
+function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     if (edge.type === 'splitKey') {
       const newKey = event.target.value;
-      onChanges?.([
-        {
-          type: 'replace',
-          id: edge.id,
-          item: { ...edge, data: { key: newKey } },
-        },
-      ]);
+      onChange?.({
+        type: 'replace',
+        id: edge.id,
+        item: { ...edge, data: { key: newKey } },
+      });
     } else if (edge.type === 'splitSeq') {
       const newSeq = Number.parseInt(event.target.value, 10);
       if (!Number.isNaN(newSeq)) {
-        onChanges?.([
-          {
-            type: 'replace',
-            id: edge.id,
-            item: { ...edge, data: { seq: newSeq } },
-          },
-        ]);
+        onChange?.({
+          type: 'replace',
+          id: edge.id,
+          item: { ...edge, data: { seq: newSeq } },
+        });
       }
     }
   };

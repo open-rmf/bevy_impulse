@@ -1,17 +1,19 @@
 import { TextField } from '@mui/material';
 import { parse } from 'cel-js';
 import React from 'react';
-import EditOperationForm, {
-  type EditOperationFormProps,
-} from './edit-operation-form';
+import BaseEditOperationForm, {
+  type BaseEditOperationFormProps,
+} from './base-edit-operation-form';
 
-function TransformForm(props: EditOperationFormProps<'transform'>) {
+export type TransformFormProps = BaseEditOperationFormProps<'transform'>;
+
+function TransformForm(props: TransformFormProps) {
   const celError = React.useMemo(
     () => parse(props.node.data.op.cel).isSuccess,
     [props.node.data.op.cel],
   );
   return (
-    <EditOperationForm {...props}>
+    <BaseEditOperationForm {...props}>
       <TextField
         label="CEL"
         multiline
@@ -38,16 +40,14 @@ function TransformForm(props: EditOperationFormProps<'transform'>) {
               },
             },
           };
-          props.onChanges?.([
-            {
-              type: 'replace',
-              id: props.node.id,
-              item: updatedNode,
-            },
-          ]);
+          props.onChange?.({
+            type: 'replace',
+            id: props.node.id,
+            item: updatedNode,
+          });
         }}
       />
-    </EditOperationForm>
+    </BaseEditOperationForm>
   );
 }
 

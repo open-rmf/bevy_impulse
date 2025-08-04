@@ -1,16 +1,16 @@
 import { Button } from '@mui/material';
 import { MaterialSymbol } from '../nodes';
-import EditOperationForm, {
-  type EditOperationFormProps,
-} from './edit-operation-form';
+import BaseEditOperationForm, {
+  type BaseEditOperationFormProps,
+} from './base-edit-operation-form';
 
-export interface ScopeFormProps extends EditOperationFormProps<'scope'> {
+export interface ScopeFormProps extends BaseEditOperationFormProps<'scope'> {
   onAddOperationClick?: React.MouseEventHandler;
 }
 
 function EditScopeForm({ onAddOperationClick, ...otherProps }: ScopeFormProps) {
   return (
-    <EditOperationForm {...otherProps}>
+    <BaseEditOperationForm {...otherProps}>
       <Button
         variant="contained"
         startIcon={<MaterialSymbol symbol="add" />}
@@ -18,7 +18,7 @@ function EditScopeForm({ onAddOperationClick, ...otherProps }: ScopeFormProps) {
       >
         Add Operation
       </Button>
-    </EditOperationForm>
+    </BaseEditOperationForm>
   );
 }
 

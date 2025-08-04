@@ -42,7 +42,7 @@ import EditScopeForm from './forms/edit-scope-form';
 import { NodeManager } from './node-manager';
 import {
   type DiagramEditorNode,
-  isOperationNode,
+  isBuiltinNode,
   MaterialSymbol,
   NODE_TYPES,
   type OperationNode,
@@ -163,6 +163,13 @@ function DiagramEditor() {
       setEdges((prev) => applyEdgeChanges(changes, prev));
     },
     [],
+  );
+
+  const handleEdgeChange = React.useCallback(
+    (change: EdgeChange<DiagramEditorEdge>) => {
+      handleEdgeChanges([change]);
+    },
+    [handleEdgeChanges],
   );
 
   const [_, setTemplates] = useTemplates();
@@ -331,6 +338,13 @@ function DiagramEditor() {
     [handleEdgeChanges],
   );
 
+  const handleNodeChange = React.useCallback(
+    (change: NodeChange<DiagramEditorNode>) => {
+      handleNodeChanges([change]);
+    },
+    [handleNodeChanges],
+  );
+
   const [addOperationPopover, setAddOperationPopover] = React.useState<{
     open: boolean;
     popOverPosition: PopoverPosition;
@@ -410,12 +424,12 @@ function DiagramEditor() {
         return null;
       }
       const node = reactFlowInstance.current.getNode(nodeId);
-      if (!node || !isOperationNode(node)) {
+      if (!node || isBuiltinNode(node)) {
         return null;
       }
 
       const handleDelete = (change: NodeRemoveChange) => {
-        handleNodeChanges([change]);
+        handleNodeChange(change);
         closeAllPopovers();
       };
 
@@ -423,7 +437,7 @@ function DiagramEditor() {
         return (
           <EditScopeForm
             node={node as OperationNode<'scope'>}
-            onChanges={handleNodeChanges}
+            onChange={handleNodeChange}
             onDelete={handleDelete}
             onAddOperationClick={(ev) => {
               setAddOperationPopover({
@@ -438,12 +452,12 @@ function DiagramEditor() {
       return (
         <EditNodeForm
           node={node}
-          onChanges={handleNodeChanges}
+          onChange={handleNodeChange}
           onDelete={handleDelete}
         />
       );
     },
-    [handleNodeChanges, closeAllPopovers],
+    [handleNodeChange, closeAllPopovers],
   );
 
   const mouseDownTime = React.useRef(0);
@@ -579,7 +593,7 @@ function DiagramEditor() {
           ev.stopPropagation();
           closeAllPopovers();
 
-          if (!isOperationNode(node)) {
+          if (isBuiltinNode(node)) {
             return;
           }
           setEditingNodeId(node.id);
@@ -702,7 +716,7 @@ function DiagramEditor() {
                 editingEdge.sourceNode,
                 editingEdge.targetNode,
               )}
-              onChanges={handleEdgeChanges}
+              onChange={handleEdgeChange}
               onDelete={(changes) => {
                 setEdges((prev) => applyEdgeChanges([changes], prev));
                 closeAllPopovers();

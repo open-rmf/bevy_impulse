@@ -55,23 +55,21 @@ export function defaultEdgeData(type: EdgeTypes): EdgeData<EdgeTypes> {
 export interface EditEdgeFormProps {
   edge: DiagramEditorEdge;
   allowedEdgeTypes: EdgeTypes[];
-  onChanges?: (changes: EdgeChange<DiagramEditorEdge>[]) => void;
+  onChange?: (changes: EdgeChange<DiagramEditorEdge>) => void;
   onDelete?: (change: EdgeRemoveChange) => void;
 }
 
 function EditEdgeForm({
   edge,
   allowedEdgeTypes,
-  onChanges,
+  onChange,
   onDelete,
 }: EditEdgeFormProps) {
   const subForm = React.useMemo(() => {
     switch (edge.type) {
       case 'bufferKey':
       case 'bufferSeq': {
-        return (
-          <BufferEdgeForm edge={edge as BufferEdge} onChanges={onChanges} />
-        );
+        return <BufferEdgeForm edge={edge as BufferEdge} onChange={onChange} />;
       }
       case 'forkResultOk':
       case 'forkResultErr': {
@@ -80,16 +78,16 @@ function EditEdgeForm({
       case 'splitKey':
       case 'splitRemaining':
       case 'splitSeq': {
-        return <SplitEdgeForm edge={edge as SplitEdge} onChanges={onChanges} />;
+        return <SplitEdgeForm edge={edge as SplitEdge} onChange={onChange} />;
       }
       case 'unzip': {
-        return <UnzipEdgeForm edge={edge as UnzipEdge} onChanges={onChanges} />;
+        return <UnzipEdgeForm edge={edge as UnzipEdge} onChange={onChange} />;
       }
       default: {
         return null;
       }
     }
-  }, [edge, onChanges]);
+  }, [edge, onChange]);
 
   const typeLabelId = React.useId();
 
@@ -118,13 +116,11 @@ function EditEdgeForm({
                 const newEdge = { ...edge };
                 newEdge.type = ev.target.value;
                 newEdge.data = defaultEdgeData(newEdge.type);
-                onChanges?.([
-                  {
-                    type: 'replace',
-                    id: edge.id,
-                    item: newEdge,
-                  },
-                ]);
+                onChange?.({
+                  type: 'replace',
+                  id: edge.id,
+                  item: newEdge,
+                });
               }}
             >
               {allowedEdgeTypes.map((t) => (

@@ -17,9 +17,9 @@ const render: Story['render'] = (args) => {
   return (
     <EditEdgeForm
       {...args}
-      onChanges={(changes) => {
-        if (changes.length > 0 && changes[0].type === 'replace') {
-          updateArgs({ node: changes[0].item });
+      onChange={(change) => {
+        if (change.type === 'replace') {
+          updateArgs({ node: change.item });
         }
       }}
     />

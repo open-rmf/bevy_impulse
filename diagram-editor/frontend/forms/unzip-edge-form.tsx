@@ -4,10 +4,10 @@ import type { UnzipEdge } from '../edges';
 
 export interface UnzipEdgeFormProps {
   edge: UnzipEdge;
-  onChanges?: (change: EdgeChange<UnzipEdge>[]) => void;
+  onChange?: (change: EdgeChange<UnzipEdge>) => void;
 }
 
-function UnzipEdgeForm({ edge, onChanges }: UnzipEdgeFormProps) {
+function UnzipEdgeForm({ edge, onChange }: UnzipEdgeFormProps) {
   return (
     <>
       <TextField
@@ -18,13 +18,11 @@ function UnzipEdgeForm({ edge, onChanges }: UnzipEdgeFormProps) {
           const value = Number.parseInt(ev.target.value, 10);
           if (!Number.isNaN(value) && edge.data) {
             edge.data.seq = value;
-            onChanges?.([
-              {
-                type: 'replace',
-                id: edge.id,
-                item: edge,
-              },
-            ]);
+            onChange?.({
+              type: 'replace',
+              id: edge.id,
+              item: edge,
+            });
           }
         }}
       />

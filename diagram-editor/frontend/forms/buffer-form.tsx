@@ -1,11 +1,13 @@
 import { FormControlLabel, Switch } from '@mui/material';
-import EditOperationForm, {
-  type EditOperationFormProps,
-} from './edit-operation-form';
+import BaseEditOperationForm, {
+  type BaseEditOperationFormProps,
+} from './base-edit-operation-form';
 
-export function BufferForm(props: EditOperationFormProps<'buffer'>) {
+export type BufferFormProps = BaseEditOperationFormProps<'buffer'>;
+
+function BufferForm(props: BufferFormProps) {
   return (
-    <EditOperationForm {...props}>
+    <BaseEditOperationForm {...props}>
       <FormControlLabel
         control={
           <Switch
@@ -13,19 +15,17 @@ export function BufferForm(props: EditOperationFormProps<'buffer'>) {
             onChange={(_, checked) => {
               const updatedNode = { ...props.node };
               updatedNode.data.op.serialize = checked;
-              props.onChanges?.([
-                {
-                  type: 'replace',
-                  id: props.node.id,
-                  item: updatedNode,
-                },
-              ]);
+              props.onChange?.({
+                type: 'replace',
+                id: props.node.id,
+                item: updatedNode,
+              });
             }}
           />
         }
         label="Serialize"
       />
-    </EditOperationForm>
+    </BaseEditOperationForm>
   );
 }
 
