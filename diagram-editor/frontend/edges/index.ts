@@ -1,16 +1,17 @@
 import { StepEdge } from '@xyflow/react';
 import type { Edge } from '../types/react-flow';
-import BufferEdgeComp, {
-  type BufferEdge,
-  type BufferKeySlotData,
-  type BufferSeqSlotData,
-} from './buffer-edge';
+import BufferEdgeComp, { type BufferEdge } from './buffer-edge';
 import ForkResultErrEdgeComp, {
   type ForkResultErrEdge,
 } from './fork-result-err-edge';
 import ForkResultOkEdgeComp, {
   type ForkResultOkEdge,
 } from './fork-result-ok-edge';
+import {
+  type SectionEdge,
+  type SectionInputSlotData,
+  SectionOutputEdgeComp,
+} from './section-edge';
 import SplitKeyEdgeComp, { type SplitKeyEdge } from './split-key-edge';
 import SplitRemainingEdgeComp, {
   type SplitRemainingEdge,
@@ -27,13 +28,15 @@ export type { SplitSeqEdge } from './split-seq-edge';
 export type { StreamOutEdge } from './stream-out-edge';
 export type { UnzipEdge } from './unzip-edge';
 
-export type EdgeData<O extends Record<string, unknown>> = {
-  output: O;
-  input?: BufferKeySlotData | BufferSeqSlotData;
-};
+export type DefaultOutputData = Record<string, never>;
+export type DefaultInputData = { type: 'default' };
 
-export type DefaultOutputData = { [k: string]: unknown };
-export type DefaultEdge = Edge<EdgeData<DefaultOutputData>, 'default'>;
+export type DataEdge<
+  O extends Record<string, unknown>,
+  S extends string,
+> = Edge<O, DefaultInputData | SectionInputSlotData, S>;
+
+export type DefaultEdge = DataEdge<DefaultOutputData, 'default'>;
 
 export type EdgeMapping = {
   default: DefaultEdge;
@@ -45,13 +48,15 @@ export type EdgeMapping = {
   splitRemaining: SplitRemainingEdge;
   buffer: BufferEdge;
   streamOut: StreamOutEdge;
-  // section: SectionEdge;
+  section: SectionEdge;
 };
 
 export type EdgeTypes = keyof EdgeMapping;
 
-export type EdgeOutputData<K extends keyof EdgeMapping = keyof EdgeMapping> =
-  EdgeMapping[K]['data']['output'];
+export type EdgeData<K extends EdgeTypes = EdgeTypes> = EdgeMapping[K]['data'];
+
+export type EdgeOutputData<K extends EdgeTypes = EdgeTypes> =
+  EdgeData<K>['output'];
 
 export const EDGE_TYPES = {
   default: StepEdge,
@@ -63,7 +68,7 @@ export const EDGE_TYPES = {
   splitRemaining: SplitRemainingEdgeComp,
   buffer: BufferEdgeComp,
   streamOut: StreamOutEdgeComp,
-  // section: SectionOutputEdgeComp,
+  section: SectionOutputEdgeComp,
 } satisfies Record<EdgeTypes, unknown>;
 
 export type DiagramEditorEdge<T extends EdgeTypes = EdgeTypes> = EdgeMapping[T];

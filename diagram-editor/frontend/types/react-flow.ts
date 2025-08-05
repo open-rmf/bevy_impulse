@@ -9,6 +9,8 @@ export type Node<
 > = ReactFlowNode<D, T> & Pick<Required<ReactFlowNode>, 'type' | 'data'>;
 
 export type Edge<
-  D extends Record<string, unknown>,
+  O extends Record<string, unknown>,
+  I extends { type: string },
   T extends string,
-> = ReactFlowEdge<D, T> & Pick<Required<ReactFlowEdge>, 'type' | 'data'>;
+> = ReactFlowEdge<{ output: O; input: I }, T> &
+  Pick<Required<ReactFlowEdge>, 'type' | 'data'>;

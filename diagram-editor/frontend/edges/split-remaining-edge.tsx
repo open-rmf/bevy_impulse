@@ -1,9 +1,9 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
-import type { Edge } from '../types/react-flow';
+import type { DataEdge } from '.';
 
 export type SplitRemainingOutputData = Record<string, never>;
-export type SplitRemainingEdge = Edge<
+export type SplitRemainingEdge = DataEdge<
   SplitRemainingOutputData,
   'splitRemaining'
 >;

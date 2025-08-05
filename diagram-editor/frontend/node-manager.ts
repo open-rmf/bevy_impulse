@@ -106,16 +106,10 @@ export class NodeManager {
 
   getTargetNextOp(edge: DiagramEditorEdge): NextOperation {
     // TODO: Validate that the edge does not traverse namespaces
-    switch (edge.type) {
-      case 'buffer':
-      case 'default':
-      case 'forkResultOk':
-      case 'forkResultErr':
-      case 'splitKey':
-      case 'splitSeq':
-      case 'splitRemaining':
-      case 'streamOut':
-      case 'unzip': {
+    switch (edge.data.input.type) {
+      case 'bufferKey':
+      case 'bufferSeq':
+      case 'default': {
         const target = this.getNode(edge.target);
         if (isBuiltinNode(target)) {
           return { builtin: target.type };
@@ -128,10 +122,19 @@ export class NodeManager {
         }
         throw new Error('unknown node type');
       }
-      // TODO: For section edges, return a `{ [target.data.opId]: edge.data.input }`
+      case 'sectionBuffer':
+      case 'sectionInput': {
+        const target = this.getNode(edge.target);
+        if (target.type !== 'section') {
+          throw new Error(
+            'edge is connecting to a section input slot but target is not a section',
+          );
+        }
+        return { [target.data.opId]: edge.data.input.inputId };
+      }
       default: {
-        exhaustiveCheck(edge);
-        throw new Error('unknown edge');
+        exhaustiveCheck(edge.data.input);
+        throw new Error('unknown edge input');
       }
     }
   }

@@ -37,7 +37,7 @@ import {
   EditorModeProvider,
 } from './editor-mode';
 import ExportDiagramDialog from './export-diagram-dialog';
-import { defaultEdgeOutputData, EditEdgeForm, EditNodeForm } from './forms';
+import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
 import { NodeManager } from './node-manager';
 import {
@@ -562,7 +562,7 @@ function DiagramEditor() {
           const newEdge = {
             ...createBaseEdge(conn.source, conn.target),
             type: validEdges[0],
-            data: defaultEdgeOutputData(validEdges[0]),
+            data: defaultEdgeData(validEdges[0]),
           } as DiagramEditorEdge;
 
           const validationResult = validateEdgeSimple(

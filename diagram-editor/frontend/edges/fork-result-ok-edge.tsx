@@ -1,9 +1,9 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
-import type { Edge } from '../types/react-flow';
+import type { DataEdge } from '.';
 
 export type ForkResultOkOutputData = Record<string, never>;
-export type ForkResultOkEdge = Edge<ForkResultOkOutputData, 'forkResultOk'>;
+export type ForkResultOkEdge = DataEdge<ForkResultOkOutputData, 'forkResultOk'>;
 
 export type ForkResultOkEdgeProps = Exclude<
   EdgeProps<ForkResultOkEdge>,

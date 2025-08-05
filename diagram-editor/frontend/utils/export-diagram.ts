@@ -180,7 +180,16 @@ function syncEdge(
         break;
       }
       case 'section': {
-        throw new Error('TODO');
+        if (edge.type !== 'section') {
+          throw new Error('expected section edge');
+        }
+
+        if (!sourceOp.connect) {
+          sourceOp.connect = {};
+        }
+        sourceOp.connect[edge.data.output.output] =
+          nodeManager.getTargetNextOp(edge);
+        break;
       }
       case 'fork_clone': {
         if (edge.type !== 'default') {

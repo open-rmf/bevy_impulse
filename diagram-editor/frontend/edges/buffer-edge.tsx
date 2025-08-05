@@ -1,6 +1,6 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import type { Edge } from '../types/react-flow';
-import type { EdgeData } from '.';
+import type { SectionBufferSlotData } from './section-edge';
 
 export type BufferKeySlotData = {
   type: 'bufferKey';
@@ -12,9 +12,13 @@ export type BufferSeqSlotData = {
   seq: number;
 };
 
-export type BufferOutputData = { [k: string]: unknown };
-// TODO: support section buffer
-export type BufferEdge = Edge<EdgeData<BufferOutputData>, 'buffer'>;
+export type BufferOutputData = Record<string, never>;
+
+export type BufferEdge = Edge<
+  BufferOutputData,
+  BufferKeySlotData | BufferSeqSlotData | SectionBufferSlotData,
+  'buffer'
+>;
 
 export type BufferEdgeProps = Exclude<EdgeProps<BufferEdge>, 'label'>;
 

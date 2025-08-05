@@ -26,7 +26,7 @@ export function createDefaultEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'default',
-    data: { output: {} },
+    data: { output: {}, input: { type: 'default' } },
   };
 }
 
@@ -40,6 +40,7 @@ export function createUnzipEdge(
     type: 'unzip',
     data: {
       output: data,
+      input: { type: 'default' },
     },
   };
 }
@@ -51,7 +52,7 @@ export function createForkResultOkEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'forkResultOk',
-    data: {},
+    data: { output: {}, input: { type: 'default' } },
   };
 }
 
@@ -62,7 +63,7 @@ export function createForkResultErrEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'forkResultErr',
-    data: {},
+    data: { output: {}, input: { type: 'default' } },
   };
 }
 
@@ -74,7 +75,7 @@ export function createSplitKeyEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'splitKey',
-    data: { output: data },
+    data: { output: data, input: { type: 'default' } },
   };
 }
 
@@ -86,7 +87,7 @@ export function createSplitSeqEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'splitSeq',
-    data: { output: data },
+    data: { output: data, input: { type: 'default' } },
   };
 }
 
@@ -97,7 +98,7 @@ export function createSplitRemainingEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'splitRemaining',
-    data: {},
+    data: { output: {}, input: { type: 'default' } },
   };
 }
 
@@ -121,7 +122,7 @@ export function createStreamOutEdge(
   return {
     ...createBaseEdge(source, target),
     type: 'streamOut',
-    data: { output: data },
+    data: { output: data, input: { type: 'default' } },
   };
 }
 

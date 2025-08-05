@@ -53,7 +53,7 @@ export const ForkResult: Story = {
       source: 'a',
       target: 'b',
       type: 'forkResultOk',
-      data: {},
+      data: { output: {}, input: { type: 'default' } },
     },
     allowedEdgeTypes: ['forkResultOk', 'forkResultErr'],
   },
@@ -71,6 +71,7 @@ export const SplitKey: Story = {
         output: {
           key: 'splitTestKey',
         },
+        input: { type: 'default' },
       },
     },
     allowedEdgeTypes: ['splitKey', 'splitSeq', 'splitRemaining'],
@@ -89,6 +90,7 @@ export const Unzip: Story = {
         output: {
           seq: 3,
         },
+        input: { type: 'default' },
       },
     },
     allowedEdgeTypes: ['unzip'],
@@ -103,7 +105,7 @@ export const Default: Story = {
       source: 'a',
       target: 'b',
       type: 'default',
-      data: { output: {} },
+      data: { output: {}, input: { type: 'default' } },
     },
     allowedEdgeTypes: ['default'],
   },

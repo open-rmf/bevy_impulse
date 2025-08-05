@@ -14,7 +14,7 @@ import React from 'react';
 import type {
   BufferEdge,
   DiagramEditorEdge,
-  EdgeOutputData,
+  EdgeData,
   EdgeTypes,
   UnzipEdge,
 } from '../edges';
@@ -33,26 +33,24 @@ const EDGE_TYPES_NAME = {
   splitSeq: 'Sequence',
   streamOut: 'Stream Out',
   unzip: 'Unzip',
-  // section: 'Section',
+  section: 'Section',
 } satisfies Record<EdgeTypes, string>;
 
-const EDGE_DEFAULT_DATA = {
-  default: {},
-  buffer: {},
-  forkResultOk: {},
-  forkResultErr: {},
-  splitKey: { key: '' },
-  splitSeq: { seq: 0 },
-  splitRemaining: {},
-  streamOut: { name: '' },
-  unzip: { seq: 0 },
-  // section: { output: '' },
-} satisfies Record<EdgeTypes, EdgeOutputData>;
+const EDGE_DEFAULT_OUTPUT_DATA = {
+  default: { output: {}, input: { type: 'default' } },
+  buffer: { output: {}, input: { type: 'bufferSeq', seq: 0 } },
+  forkResultOk: { output: {}, input: { type: 'default' } },
+  forkResultErr: { output: {}, input: { type: 'default' } },
+  splitKey: { output: { key: '' }, input: { type: 'default' } },
+  splitSeq: { output: { seq: 0 }, input: { type: 'default' } },
+  splitRemaining: { output: {}, input: { type: 'default' } },
+  streamOut: { output: { name: '' }, input: { type: 'default' } },
+  unzip: { output: { seq: 0 }, input: { type: 'default' } },
+  section: { output: { output: '' }, input: { type: 'default' } },
+} satisfies { [K in EdgeTypes]: EdgeData<K> };
 
-export function defaultEdgeOutputData(
-  type: EdgeTypes,
-): EdgeOutputData<EdgeTypes> {
-  return { ...EDGE_DEFAULT_DATA[type] };
+export function defaultEdgeData(type: EdgeTypes): EdgeData {
+  return { ...EDGE_DEFAULT_OUTPUT_DATA[type] };
 }
 
 export interface EditEdgeFormProps {
@@ -121,10 +119,7 @@ function EditEdgeForm({
                   ...edge,
                 };
                 newEdge.type = ev.target.value;
-                newEdge.data = {
-                  ...edge.data,
-                  output: { ...defaultEdgeOutputData(newEdge.type) },
-                };
+                newEdge.data = defaultEdgeData(newEdge.type);
                 onChange?.({
                   type: 'replace',
                   id: edge.id,

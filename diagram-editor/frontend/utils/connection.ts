@@ -19,7 +19,7 @@ const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
   default: EdgeCategory.Data,
   streamOut: EdgeCategory.Stream,
   unzip: EdgeCategory.Data,
-  // section: EdgeCategory.Data,
+  section: EdgeCategory.Data,
 };
 
 const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
