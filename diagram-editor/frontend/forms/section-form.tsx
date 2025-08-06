@@ -7,9 +7,17 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import type { NodeChange, NodeRemoveChange } from '@xyflow/react';
-import type { PropsWithChildren } from 'react';
 import {
+  type EdgeChange,
+  type NodeChange,
+  type NodeRemoveChange,
+  useReactFlow,
+} from '@xyflow/react';
+import { type PropsWithChildren, useMemo } from 'react';
+import type { DiagramEditorEdge, SectionEdge } from '../edges';
+import {
+  type DiagramEditorNode,
+  isSectionNode,
   MaterialSymbol,
   type SectionBufferNode,
   type SectionInputNode,
@@ -195,5 +203,60 @@ export function SectionForm(props: SectionFormProps) {
         )}
       />
     </BaseEditOperationForm>
+  );
+}
+
+export interface SectionEdgeFormProps {
+  edge: SectionEdge;
+  onChange?: (changes: EdgeChange<SectionEdge>) => void;
+}
+
+export function SectionEdgeForm({ edge, onChange }: SectionEdgeFormProps) {
+  const reactFlow = useReactFlow<DiagramEditorNode, DiagramEditorEdge>();
+  const registry = useRegistry();
+  const [templates, _setTemplates] = useTemplates();
+  const sourceNode = reactFlow.getNode(edge.source);
+
+  const outputs = useMemo(() => {
+    if (sourceNode && isSectionNode(sourceNode)) {
+      if (typeof sourceNode.data.op.builder === 'string') {
+        const sectionBuilder = registry.sections[sourceNode.data.op.builder];
+        return Object.keys(sectionBuilder?.metadata.outputs || {});
+      } else if (typeof sourceNode.data.op.template === 'string') {
+        const template = templates[sourceNode.data.op.template];
+        return template?.outputs || [];
+      } else {
+        return [];
+      }
+    } else {
+      console.error('source node of a section edge is not a section node');
+      return [];
+    }
+  }, [sourceNode, registry, templates]);
+
+  return (
+    <Autocomplete
+      freeSolo
+      autoSelect
+      options={outputs}
+      getOptionLabel={(option) => option}
+      value={edge.data.output.output}
+      onChange={(_, value) => {
+        onChange?.({
+          type: 'replace',
+          id: edge.id,
+          item: {
+            ...edge,
+            data: {
+              ...edge.data,
+              output: { output: value || '' },
+            },
+          },
+        });
+      }}
+      renderInput={(params) => (
+        <TextField {...params} required label="Section Output" />
+      )}
+    />
   );
 }

@@ -15,6 +15,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   Background,
+  type Connection,
   type EdgeChange,
   type EdgeRemoveChange,
   type NodeChange,
@@ -30,7 +31,12 @@ import React from 'react';
 import AddOperation from './add-operation';
 import CommandPanel from './command-panel';
 import type { DiagramEditorEdge } from './edges';
-import { createBaseEdge, EDGE_TYPES } from './edges';
+import {
+  createBaseEdge,
+  EDGE_CATEGORIES,
+  EDGE_TYPES,
+  EdgeCategory,
+} from './edges';
 import {
   EditorMode,
   type EditorModeContext,
@@ -497,6 +503,54 @@ function DiagramEditor() {
     mouseDownTime.current = Date.now();
   }, []);
 
+  const tryCreateEdge = React.useCallback(
+    (conn: Connection, id?: string): DiagramEditorEdge | null => {
+      if (!reactFlowInstance.current) {
+        return null;
+      }
+
+      const sourceNode = reactFlowInstance.current.getNode(conn.source);
+      const targetNode = reactFlowInstance.current.getNode(conn.target);
+      if (!sourceNode || !targetNode) {
+        throw new Error('cannot find source or target node');
+      }
+
+      const validEdges = getValidEdgeTypes(sourceNode, targetNode);
+      if (validEdges.length === 0) {
+        showErrorToast(
+          `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
+        );
+        return null;
+      }
+
+      const newEdge = {
+        ...createBaseEdge(conn.source, conn.target, id),
+        type: validEdges[0],
+        data: defaultEdgeData(validEdges[0]),
+      } as DiagramEditorEdge;
+
+      if (targetNode.type === 'section') {
+        if (EDGE_CATEGORIES[newEdge.type] === EdgeCategory.Buffer) {
+          newEdge.data.input = { type: 'sectionBuffer', inputId: '' };
+        } else if (EDGE_CATEGORIES[newEdge.type] === EdgeCategory.Data) {
+          newEdge.data.input = { type: 'sectionInput', inputId: '' };
+        }
+      }
+
+      const validationResult = validateEdgeSimple(
+        newEdge,
+        reactFlowInstance.current,
+      );
+      if (!validationResult.valid) {
+        showErrorToast(validationResult.error);
+        return null;
+      }
+
+      return newEdge;
+    },
+    [showErrorToast],
+  );
+
   return (
     <EditorModeProvider value={[editorMode, updateEditorModeAction]}>
       <ReactFlow
@@ -541,40 +595,10 @@ function DiagramEditor() {
           closeAllPopovers();
         }}
         onConnect={(conn) => {
-          if (!reactFlowInstance.current) {
-            return;
+          const newEdge = tryCreateEdge(conn);
+          if (newEdge) {
+            setEdges((prev) => addEdge(newEdge, prev));
           }
-
-          const sourceNode = reactFlowInstance.current?.getNode(conn.source);
-          const targetNode = reactFlowInstance.current?.getNode(conn.target);
-          if (!sourceNode || !targetNode) {
-            throw new Error('cannot find source or target node');
-          }
-
-          const validEdges = getValidEdgeTypes(sourceNode, targetNode);
-          if (validEdges.length === 0) {
-            showErrorToast(
-              `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
-            );
-            return;
-          }
-
-          const newEdge = {
-            ...createBaseEdge(conn.source, conn.target),
-            type: validEdges[0],
-            data: defaultEdgeData(validEdges[0]),
-          } as DiagramEditorEdge;
-
-          const validationResult = validateEdgeSimple(
-            newEdge,
-            reactFlowInstance.current,
-          );
-          if (!validationResult.valid) {
-            showErrorToast(validationResult.error);
-            return;
-          }
-
-          setEdges((prev) => addEdge(newEdge, prev));
         }}
         isValidConnection={(conn) => {
           const sourceNode = reactFlowInstance.current?.getNode(conn.source);
@@ -586,9 +610,14 @@ function DiagramEditor() {
           const allowedEdges = getValidEdgeTypes(sourceNode, targetNode);
           return allowedEdges.length > 0;
         }}
-        onReconnect={(oldEdge, newConnection) =>
-          setEdges((prev) => reconnectEdge(oldEdge, newConnection, prev))
-        }
+        onReconnect={(oldEdge, newConnection) => {
+          const newEdge = tryCreateEdge(newConnection, oldEdge.id);
+          if (newEdge) {
+            oldEdge.type = newEdge.type;
+            oldEdge.data = newEdge.data;
+            setEdges((prev) => reconnectEdge(oldEdge, newConnection, prev));
+          }
+        }}
         onNodeClick={(ev, node) => {
           ev.stopPropagation();
           closeAllPopovers();

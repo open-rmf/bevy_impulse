@@ -1,4 +1,5 @@
 import {
+  Autocomplete,
   FormControl,
   InputLabel,
   MenuItem,
@@ -6,10 +7,24 @@ import {
   TextField,
 } from '@mui/material';
 import { type EdgeChange, useReactFlow } from '@xyflow/react';
-import { useId } from 'react';
+import { useId, useMemo } from 'react';
 import type { BufferEdge, DiagramEditorEdge } from '../edges';
 import type { DiagramEditorNode } from '../nodes';
+import { useRegistry } from '../registry-provider';
+import { useTemplates } from '../templates-provider';
+import type { SectionTemplate } from '../types/api';
 import { exhaustiveCheck } from '../utils/exhaustive-check';
+
+function getTemplateBuffers(template: SectionTemplate): string[] {
+  if (!template.buffers) {
+    return [];
+  }
+  if (Array.isArray(template.buffers)) {
+    return template.buffers;
+  } else {
+    return Object.keys(template.buffers);
+  }
+}
 
 export interface BufferEdgeInputFormProps {
   edge: BufferEdge;
@@ -20,8 +35,6 @@ export function BufferEdgeInputForm({
   edge,
   onChange,
 }: BufferEdgeInputFormProps) {
-  // TODO: check if target is a section and add support for connection section buffer slots.
-
   const handleDataChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
@@ -79,6 +92,25 @@ export function BufferEdgeInputForm({
   const reactFlow = useReactFlow<DiagramEditorNode, DiagramEditorEdge>();
   const targetNode = reactFlow.getNode(edge.target);
   const targetIsSection = targetNode?.type === 'section';
+  const registry = useRegistry();
+  const [templates, _setTemplates] = useTemplates();
+
+  const sectionBuffers = useMemo(() => {
+    if (!targetNode || targetNode.type !== 'section') {
+      return [];
+    }
+    if (typeof targetNode.data.op.builder === 'string') {
+      const sectionRegistration = registry.sections[targetNode.data.op.builder];
+      return sectionRegistration
+        ? Object.keys(sectionRegistration.metadata.buffers)
+        : [];
+    } else if (typeof targetNode.data.op.template === 'string') {
+      const template = templates[targetNode.data.op.template];
+      return template ? getTemplateBuffers(template) : [];
+    } else {
+      return [];
+    }
+  }, [targetNode, registry, templates]);
 
   return (
     <>
@@ -111,11 +143,27 @@ export function BufferEdgeInputForm({
         />
       )}
       {edge.data.input.type === 'sectionBuffer' && (
-        <TextField
-          label="Section Buffer"
+        <Autocomplete
+          freeSolo
+          autoSelect
+          options={sectionBuffers}
           value={edge.data.input.inputId}
-          onChange={handleDataChange}
-          fullWidth
+          onChange={(_, value) => {
+            onChange?.({
+              type: 'replace',
+              id: edge.id,
+              item: {
+                ...edge,
+                data: {
+                  output: edge.data.output,
+                  input: { type: 'sectionBuffer', inputId: value || '' },
+                },
+              } as BufferEdge,
+            });
+          }}
+          renderInput={(params) => (
+            <TextField {...params} required label="Section Buffer" />
+          )}
         />
       )}
     </>

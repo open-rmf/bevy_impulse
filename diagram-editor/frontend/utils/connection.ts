@@ -1,29 +1,15 @@
 import type { ReactFlowInstance } from '@xyflow/react';
-import type { DiagramEditorEdge, EdgeTypes } from '../edges';
+import {
+  type DiagramEditorEdge,
+  EDGE_CATEGORIES,
+  EdgeCategory,
+  type EdgeTypes,
+} from '../edges';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
 
-enum EdgeCategory {
-  Data,
-  Buffer,
-  Stream,
-}
-
-const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
-  buffer: EdgeCategory.Buffer,
-  forkResultOk: EdgeCategory.Data,
-  forkResultErr: EdgeCategory.Data,
-  splitKey: EdgeCategory.Data,
-  splitSeq: EdgeCategory.Data,
-  splitRemaining: EdgeCategory.Data,
-  default: EdgeCategory.Data,
-  streamOut: EdgeCategory.Stream,
-  unzip: EdgeCategory.Data,
-  section: EdgeCategory.Data,
-};
-
 const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
-  buffer: ['buffer', 'buffer'],
+  buffer: ['buffer'],
   buffer_access: ['default'],
   fork_clone: ['default'],
   fork_result: ['forkResultOk', 'forkResultErr'],
@@ -31,7 +17,7 @@ const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
   listen: ['default'],
   node: ['default', 'streamOut'],
   scope: ['default', 'streamOut'],
-  section: ['default'],
+  section: ['section'],
   sectionInput: ['default'],
   sectionOutput: [],
   sectionBuffer: ['buffer'],
@@ -53,7 +39,7 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
   listen: [EdgeCategory.Buffer],
   node: [EdgeCategory.Data],
   scope: [EdgeCategory.Data],
-  section: [EdgeCategory.Data],
+  section: [EdgeCategory.Data, EdgeCategory.Buffer],
   sectionInput: [],
   sectionOutput: [EdgeCategory.Data],
   sectionBuffer: [],
@@ -178,8 +164,27 @@ export function validateEdgeSimple(
   }
 
   const sourceNode = reactFlow.getNode(edge.source);
-  if (!sourceNode) {
+  const targetNode = reactFlow.getNode(edge.target);
+  if (!sourceNode || !targetNode) {
     return createValidationError('cannot find source or target node');
+  }
+
+  if (targetNode.type === 'section') {
+    if (
+      EDGE_CATEGORIES[edge.type] === EdgeCategory.Buffer &&
+      edge.data.input.type !== 'sectionBuffer'
+    ) {
+      return createValidationError(
+        'target is a section but there is no input slot',
+      );
+    } else if (
+      EDGE_CATEGORIES[edge.type] === EdgeCategory.Data &&
+      edge.data.input.type !== 'sectionInput'
+    ) {
+      return createValidationError(
+        'target is a section but there is no input slot',
+      );
+    }
   }
 
   // Check if the source supports emitting multiple outputs.

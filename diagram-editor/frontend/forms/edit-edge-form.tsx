@@ -16,16 +16,20 @@ import type {
   DiagramEditorEdge,
   EdgeData,
   EdgeTypes,
+  SectionEdge,
   UnzipEdge,
 } from '../edges';
 import { MaterialSymbol } from '../nodes';
+import { exhaustiveCheck } from '../utils/exhaustive-check';
 import { BufferEdgeInputForm } from './buffer-edge-form';
+import { DataInputForm } from './data-input-form';
+import { SectionEdgeForm } from './section-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';
 import UnzipEdgeForm from './unzip-edge-form';
 
 const EDGE_TYPES_NAME = {
   buffer: 'Buffer',
-  default: 'Data',
+  default: 'Default',
   forkResultErr: 'Error',
   forkResultOk: 'Ok',
   splitKey: 'Key',
@@ -73,8 +77,11 @@ function EditEdgeForm({
           <BufferEdgeInputForm edge={edge as BufferEdge} onChange={onChange} />
         );
       }
+      case 'default':
+      case 'streamOut':
       case 'forkResultOk':
       case 'forkResultErr': {
+        // these edges have no extra options
         return null;
       }
       case 'splitKey':
@@ -85,8 +92,14 @@ function EditEdgeForm({
       case 'unzip': {
         return <UnzipEdgeForm edge={edge as UnzipEdge} onChange={onChange} />;
       }
+      case 'section': {
+        return (
+          <SectionEdgeForm edge={edge as SectionEdge} onChange={onChange} />
+        );
+      }
       default: {
-        return null;
+        exhaustiveCheck(edge);
+        throw new Error('unknown edge type');
       }
     }
   }, [edge, onChange]);
@@ -134,6 +147,7 @@ function EditEdgeForm({
               ))}
             </Select>
           </FormControl>
+          <DataInputForm edge={edge} onChange={onChange} />
           {subForm}
         </Stack>
       </CardContent>

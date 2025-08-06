@@ -11,7 +11,7 @@ export type SectionEdge = DataEdge<SectionOutputData, 'section'>;
 export type SectionOutputEdgeProps = Exclude<EdgeProps<SectionEdge>, 'label'>;
 
 export const SectionOutputEdgeComp = memo((props: SectionOutputEdgeProps) => {
-  return <StepEdge {...props} label={props.data.output.toString()} />;
+  return <StepEdge {...props} label={props.data.output.output} />;
 });
 
 export type SectionInputSlotData = {

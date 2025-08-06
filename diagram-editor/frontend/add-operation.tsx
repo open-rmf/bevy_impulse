@@ -334,7 +334,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           )
         }
       >
-        Scope
+        Section
       </StyledOperationButton>
     </ButtonGroup>
   );

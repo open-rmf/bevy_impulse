@@ -60,3 +60,9 @@ export function isSectionInterfaceNode(
     node.type === 'sectionBuffer'
   );
 }
+
+export function isSectionNode(
+  node: DiagramEditorNode,
+): node is OperationNode<'section'> {
+  return node.type === 'section';
+}

@@ -1,6 +1,7 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import type { Edge } from '../types/react-flow';
 import type { SectionBufferSlotData } from './section-edge';
+import { memo } from 'react';
 
 export type BufferKeySlotData = {
   type: 'bufferKey';
@@ -20,8 +21,17 @@ export type BufferEdge = Edge<
   'buffer'
 >;
 
-export type BufferEdgeProps = Exclude<EdgeProps<BufferEdge>, 'label'>;
+export type BufferEdgeCompProps = Exclude<EdgeProps<BufferEdge>, 'label'>;
 
-const BufferEdgeComp = StepEdge;
-
-export default BufferEdgeComp;
+export const BufferEdgeComp = memo((props: BufferEdgeCompProps) => {
+  return (
+    <StepEdge
+      {...props}
+      label={
+        props.data.input.type === 'sectionBuffer'
+          ? props.data.input.inputId
+          : undefined
+      }
+    />
+  );
+});

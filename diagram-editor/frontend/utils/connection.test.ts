@@ -97,9 +97,8 @@ describe('validate edges', () => {
 
     {
       const validEdges = getValidEdgeTypes(buffer, join);
-      expect(validEdges.length).toBe(2);
-      expect(validEdges).toContain('bufferKey');
-      expect(validEdges).toContain('bufferSeq');
+      expect(validEdges.length).toBe(1);
+      expect(validEdges).toContain('buffer');
     }
 
     {
@@ -153,9 +152,8 @@ describe('validate edges', () => {
     }
     {
       const validEdges = getValidEdgeTypes(bufferNode, bufferAccessNode);
-      expect(validEdges.length).toBe(2);
-      expect(validEdges).toContain('bufferKey');
-      expect(validEdges).toContain('bufferSeq');
+      expect(validEdges.length).toBe(1);
+      expect(validEdges).toContain('buffer');
     }
   });
 
@@ -197,9 +195,8 @@ describe('validate edges', () => {
       }
       {
         const validEdges = getValidEdgeTypes(bufferNode, targetNode);
-        expect(validEdges.length).toBe(2);
-        expect(validEdges).toContain('bufferKey');
-        expect(validEdges).toContain('bufferSeq');
+        expect(validEdges.length).toBe(1);
+        expect(validEdges).toContain('buffer');
       }
     }
   });
@@ -265,9 +262,8 @@ describe('validate edges', () => {
 
     {
       const validEdges = getValidEdgeTypes(sectionBuffer, listen);
-      expect(validEdges.length).toBe(2);
-      expect(validEdges).toContain('bufferKey');
-      expect(validEdges).toContain('bufferSeq');
+      expect(validEdges.length).toBe(1);
+      expect(validEdges).toContain('buffer');
     }
   });
 

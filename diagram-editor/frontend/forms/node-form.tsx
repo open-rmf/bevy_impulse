@@ -27,7 +27,7 @@ function NodeForm(props: NodeFormProps) {
           });
         }}
         renderInput={(params) => (
-          <TextField {...params} required label="builder" />
+          <TextField {...params} required label="Builder" />
         )}
       />
     </BaseEditOperationForm>

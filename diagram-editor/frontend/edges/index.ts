@@ -1,6 +1,6 @@
-import { StepEdge } from '@xyflow/react';
 import type { Edge } from '../types/react-flow';
-import BufferEdgeComp, { type BufferEdge } from './buffer-edge';
+import { type BufferEdge, BufferEdgeComp } from './buffer-edge';
+import { type DefaultEdge, DefaultEdgeComp } from './default-edge';
 import ForkResultErrEdgeComp, {
   type ForkResultErrEdge,
 } from './fork-result-err-edge';
@@ -22,21 +22,19 @@ import UnzipEdgeComp, { type UnzipEdge } from './unzip-edge';
 
 export type { BufferEdge } from './buffer-edge';
 export * from './create-edge';
+export type { SectionEdge } from './section-edge';
 export type { SplitKeyEdge } from './split-key-edge';
 export type { SplitRemainingEdge } from './split-remaining-edge';
 export type { SplitSeqEdge } from './split-seq-edge';
 export type { StreamOutEdge } from './stream-out-edge';
 export type { UnzipEdge } from './unzip-edge';
 
-export type DefaultOutputData = Record<string, never>;
 export type DefaultInputData = { type: 'default' };
 
 export type DataEdge<
   O extends Record<string, unknown>,
   S extends string,
 > = Edge<O, DefaultInputData | SectionInputSlotData, S>;
-
-export type DefaultEdge = DataEdge<DefaultOutputData, 'default'>;
 
 export type EdgeMapping = {
   default: DefaultEdge;
@@ -59,7 +57,7 @@ export type EdgeOutputData<K extends EdgeTypes = EdgeTypes> =
   EdgeData<K>['output'];
 
 export const EDGE_TYPES = {
-  default: StepEdge,
+  default: DefaultEdgeComp,
   unzip: UnzipEdgeComp,
   forkResultOk: ForkResultOkEdgeComp,
   forkResultErr: ForkResultErrEdgeComp,
@@ -72,3 +70,28 @@ export const EDGE_TYPES = {
 } satisfies Record<EdgeTypes, unknown>;
 
 export type DiagramEditorEdge<T extends EdgeTypes = EdgeTypes> = EdgeMapping[T];
+
+export enum EdgeCategory {
+  Data,
+  Buffer,
+  Stream,
+}
+
+export const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
+  buffer: EdgeCategory.Buffer,
+  forkResultOk: EdgeCategory.Data,
+  forkResultErr: EdgeCategory.Data,
+  splitKey: EdgeCategory.Data,
+  splitSeq: EdgeCategory.Data,
+  splitRemaining: EdgeCategory.Data,
+  default: EdgeCategory.Data,
+  streamOut: EdgeCategory.Stream,
+  unzip: EdgeCategory.Data,
+  section: EdgeCategory.Data,
+};
+
+export function isDataEdge<T extends EdgeTypes>(
+  edge: DiagramEditorEdge<T>,
+): edge is DiagramEditorEdge<T> & DataEdge<Record<string, unknown>, T> {
+  return EDGE_CATEGORIES[edge.type] === EdgeCategory.Data;
+}

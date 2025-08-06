@@ -6,9 +6,10 @@ import type { BufferKeySlotData, BufferSeqSlotData } from './buffer-edge';
 export function createBaseEdge(
   source: string,
   target: string,
+  id?: string,
 ): Pick<DiagramEditorEdge, 'id' | 'source' | 'target' | 'markerEnd'> {
   return {
-    id: uuidv4(),
+    id: id || uuidv4(),
     source,
     target,
     markerEnd: {
@@ -126,14 +127,14 @@ export function createStreamOutEdge(
   };
 }
 
-// export function createSectionEdge(
-//   source: string,
-//   target: string,
-//   data: EdgeOutputData<'section'>,
-// ): DiagramEditorEdge<'section'> {
-//   return {
-//     ...createBaseEdge(source, target),
-//     type: 'section',
-//     data: { output: data },
-//   };
-// }
+export function createSectionEdge(
+  source: string,
+  target: string,
+  data: EdgeOutputData<'section'>,
+): DiagramEditorEdge<'section'> {
+  return {
+    ...createBaseEdge(source, target),
+    type: 'section',
+    data: { output: data, input: { type: 'default' } },
+  };
+}
