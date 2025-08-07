@@ -293,8 +293,6 @@ function DiagramEditor() {
               },
             });
           }
-          // changePosition.x -= Math.round(calculatedBounds.x);
-          // changePosition.y -= Math.round(calculatedBounds.y);
         }
       }
 
