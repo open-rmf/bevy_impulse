@@ -29,12 +29,12 @@ export type { SplitSeqEdge } from './split-seq-edge';
 export type { StreamOutEdge } from './stream-out-edge';
 export type { UnzipEdge } from './unzip-edge';
 
-export type DefaultInputData = { type: 'default' };
+export type DefaultInputSlotData = { type: 'default' };
 
 export type DataEdge<
   O extends Record<string, unknown>,
   S extends string,
-> = Edge<O, DefaultInputData | SectionInputSlotData, S>;
+> = Edge<O, DefaultInputSlotData | SectionInputSlotData, S>;
 
 export type EdgeMapping = {
   default: DefaultEdge;

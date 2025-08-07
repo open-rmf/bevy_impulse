@@ -2,6 +2,8 @@ import { MarkerType } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge, EdgeOutputData } from '.';
 import type { BufferKeySlotData, BufferSeqSlotData } from './buffer-edge';
+import type { DefaultEdge } from './default-edge';
+import type { SectionBufferSlotData } from './section-edge';
 
 export function createBaseEdge(
   source: string,
@@ -14,8 +16,8 @@ export function createBaseEdge(
     target,
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      width: 24,
-      height: 24,
+      width: 20,
+      height: 20,
     },
   };
 }
@@ -23,11 +25,12 @@ export function createBaseEdge(
 export function createDefaultEdge(
   source: string,
   target: string,
+  inputSlot?: DefaultEdge['data']['input'],
 ): DiagramEditorEdge<'default'> {
   return {
     ...createBaseEdge(source, target),
     type: 'default',
-    data: { output: {}, input: { type: 'default' } },
+    data: { output: {}, input: inputSlot || { type: 'default' } },
   };
 }
 
@@ -106,7 +109,7 @@ export function createSplitRemainingEdge(
 export function createBufferEdge(
   source: string,
   target: string,
-  data: BufferKeySlotData | BufferSeqSlotData,
+  data: BufferKeySlotData | BufferSeqSlotData | SectionBufferSlotData,
 ): DiagramEditorEdge<'buffer'> {
   return {
     ...createBaseEdge(source, target),

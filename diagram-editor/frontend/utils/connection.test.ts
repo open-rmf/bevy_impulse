@@ -411,4 +411,85 @@ describe('validate edges', () => {
       expect(result.valid).toBe(false);
     }
   });
+
+  test('buffer edges connecting to a section must have "sectionBuffer" input', () => {
+    const bufferNode = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      {
+        type: 'buffer',
+      },
+      'test_op_buffer',
+    );
+    const sectionNode = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'section', builder: 'test_section' },
+      'test_op_section',
+    );
+
+    {
+      const reactFlow = new MockReactFlowAccessor(
+        [bufferNode, sectionNode],
+        [],
+      );
+      const edge = createBufferEdge(bufferNode.id, sectionNode.id, {
+        type: 'bufferSeq',
+        seq: 0,
+      });
+      const result = validateEdgeSimple(edge, reactFlow);
+      expect(result.valid).toBe(false);
+    }
+    {
+      const reactFlow = new MockReactFlowAccessor(
+        [bufferNode, sectionNode],
+        [],
+      );
+      const edge = createBufferEdge(bufferNode.id, sectionNode.id, {
+        type: 'sectionBuffer',
+        inputId: 'test',
+      });
+      const result = validateEdgeSimple(edge, reactFlow);
+      expect(result.valid).toBe(true);
+    }
+  });
+
+  test('data edges connecting to a section must have "sectionInput" input', () => {
+    const nodeNode = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      {
+        type: 'node',
+        builder: 'test_builder',
+        next: { builtin: 'dispose' },
+      },
+      'test_op_node',
+    );
+    const sectionNode = createOperationNode(
+      ROOT_NAMESPACE,
+      undefined,
+      { x: 0, y: 0 },
+      { type: 'section', builder: 'test_section' },
+      'test_op_section',
+    );
+
+    {
+      const reactFlow = new MockReactFlowAccessor([nodeNode, sectionNode], []);
+      const edge = createDefaultEdge(nodeNode.id, sectionNode.id);
+      const result = validateEdgeSimple(edge, reactFlow);
+      expect(result.valid).toBe(false);
+    }
+    {
+      const reactFlow = new MockReactFlowAccessor([nodeNode, sectionNode], []);
+      const edge = createDefaultEdge(nodeNode.id, sectionNode.id, {
+        type: 'sectionInput',
+        inputId: 'test',
+      });
+      const result = validateEdgeSimple(edge, reactFlow);
+      expect(result.valid).toBe(true);
+    }
+  });
 });

@@ -1,7 +1,7 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
+import { memo } from 'react';
 import type { Edge } from '../types/react-flow';
 import type { SectionBufferSlotData } from './section-edge';
-import { memo } from 'react';
 
 export type BufferKeySlotData = {
   type: 'bufferKey';

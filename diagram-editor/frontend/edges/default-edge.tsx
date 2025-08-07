@@ -2,9 +2,9 @@ import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
 import type { DataEdge } from '.';
 
-export type DefaultOutputData = Record<string, never>;
+export type DefaultEdgeOutputData = Record<string, never>;
 
-export type DefaultEdge = DataEdge<DefaultOutputData, 'default'>;
+export type DefaultEdge = DataEdge<DefaultEdgeOutputData, 'default'>;
 
 export type DefaultEdgeCompProps = Omit<EdgeProps<DefaultEdge>, 'label'>;
 
