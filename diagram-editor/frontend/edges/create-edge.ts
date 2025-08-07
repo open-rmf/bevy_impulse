@@ -1,9 +1,12 @@
 import { MarkerType } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
 import type { DiagramEditorEdge, EdgeOutputData } from '.';
-import type { BufferKeySlotData, BufferSeqSlotData } from './buffer-edge';
 import type { DefaultEdge } from './default-edge';
-import type { SectionBufferSlotData } from './section-edge';
+import type {
+  BufferKeyInputSlotData,
+  BufferSeqInputSlotData,
+  SectionBufferInputSlotData,
+} from './input-slots';
 
 export function createBaseEdge(
   source: string,
@@ -109,7 +112,10 @@ export function createSplitRemainingEdge(
 export function createBufferEdge(
   source: string,
   target: string,
-  data: BufferKeySlotData | BufferSeqSlotData | SectionBufferSlotData,
+  data:
+    | BufferKeyInputSlotData
+    | BufferSeqInputSlotData
+    | SectionBufferInputSlotData,
 ): DiagramEditorEdge<'buffer'> {
   return {
     ...createBaseEdge(source, target),

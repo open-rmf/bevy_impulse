@@ -1,5 +1,5 @@
-import type { Edge } from '../types/react-flow';
 import { type BufferEdge, BufferEdgeComp } from './buffer-edge';
+import type { DataEdge } from './data-edge';
 import { type DefaultEdge, DefaultEdgeComp } from './default-edge';
 import ForkResultErrEdgeComp, {
   type ForkResultErrEdge,
@@ -7,11 +7,7 @@ import ForkResultErrEdgeComp, {
 import ForkResultOkEdgeComp, {
   type ForkResultOkEdge,
 } from './fork-result-ok-edge';
-import {
-  type SectionEdge,
-  type SectionInputSlotData,
-  SectionOutputEdgeComp,
-} from './section-edge';
+import { type SectionEdge, SectionOutputEdgeComp } from './section-edge';
 import SplitKeyEdgeComp, { type SplitKeyEdge } from './split-key-edge';
 import SplitRemainingEdgeComp, {
   type SplitRemainingEdge,
@@ -22,6 +18,7 @@ import UnzipEdgeComp, { type UnzipEdge } from './unzip-edge';
 
 export type { BufferEdge } from './buffer-edge';
 export * from './create-edge';
+export type * from './input-slots';
 export type { SectionEdge } from './section-edge';
 export type { SplitKeyEdge } from './split-key-edge';
 export type { SplitRemainingEdge } from './split-remaining-edge';
@@ -29,14 +26,7 @@ export type { SplitSeqEdge } from './split-seq-edge';
 export type { StreamOutEdge } from './stream-out-edge';
 export type { UnzipEdge } from './unzip-edge';
 
-export type DefaultInputSlotData = { type: 'default' };
-
-export type DataEdge<
-  O extends Record<string, unknown>,
-  S extends string,
-> = Edge<O, DefaultInputSlotData | SectionInputSlotData, S>;
-
-export type EdgeMapping = {
+type EdgeMapping = {
   default: DefaultEdge;
   unzip: UnzipEdge;
   forkResultOk: ForkResultOkEdge;
@@ -55,6 +45,9 @@ export type EdgeData<K extends EdgeTypes = EdgeTypes> = EdgeMapping[K]['data'];
 
 export type EdgeOutputData<K extends EdgeTypes = EdgeTypes> =
   EdgeData<K>['output'];
+
+export type EdgeInputData<K extends EdgeTypes = EdgeTypes> =
+  EdgeData<K>['input'];
 
 export const EDGE_TYPES = {
   default: DefaultEdgeComp,
@@ -77,7 +70,7 @@ export enum EdgeCategory {
   Stream,
 }
 
-export const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
+export const EDGE_CATEGORIES = {
   buffer: EdgeCategory.Buffer,
   forkResultOk: EdgeCategory.Data,
   forkResultErr: EdgeCategory.Data,
@@ -88,7 +81,13 @@ export const EDGE_CATEGORIES: Record<EdgeTypes, EdgeCategory> = {
   streamOut: EdgeCategory.Stream,
   unzip: EdgeCategory.Data,
   section: EdgeCategory.Data,
-};
+} satisfies Record<EdgeTypes, EdgeCategory>;
+
+export type DataEdgeTypes = {
+  [K in EdgeTypes]: (typeof EDGE_CATEGORIES)[K] extends EdgeCategory.Data
+    ? K
+    : never;
+}[EdgeTypes];
 
 export function isDataEdge<T extends EdgeTypes>(
   edge: DiagramEditorEdge<T>,

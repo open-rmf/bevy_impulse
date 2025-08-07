@@ -1,7 +1,7 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
 import type { Edge } from '../types/react-flow';
-import type { DefaultInputSlotData } from '.';
+import type { DefaultInputSlotData } from './input-slots';
 
 export type StreamOutOutputData = {
   name: string;

@@ -1,6 +1,6 @@
 import { type EdgeProps, StepEdge } from '@xyflow/react';
 import { memo } from 'react';
-import type { DataEdge } from '.';
+import type { DataEdge } from './data-edge';
 
 export type ForkResultOkOutputData = Record<string, never>;
 export type ForkResultOkEdge = DataEdge<ForkResultOkOutputData, 'forkResultOk'>;
