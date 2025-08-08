@@ -1,6 +1,6 @@
 import type { NodeProps } from '@xyflow/react';
 import type { OperationNode } from '.';
-import BaseNode from './base-node';
+import BaseNode, { HandleType } from './base-node';
 import { BufferAccessIcon } from './icons';
 
 function BufferAccessNodeComp(
@@ -12,6 +12,7 @@ function BufferAccessNodeComp(
       icon={<BufferAccessIcon />}
       label="Buffer Access"
       variant="inputOutput"
+      inputHandleType={HandleType.DataBuffer}
     />
   );
 }

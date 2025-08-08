@@ -1,6 +1,6 @@
 import type { NodeProps } from '@xyflow/react';
 import type { OperationNode } from '.';
-import BaseNode from './base-node';
+import BaseNode, { HandleType } from './base-node';
 import { NodeIcon } from './icons';
 
 function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
@@ -10,6 +10,7 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
       icon={<NodeIcon />}
       label={props.data.op.builder ?? ''}
       variant="inputOutput"
+      outputHandleType={HandleType.DataStream}
     />
   );
 }

@@ -8,9 +8,16 @@ import {
 } from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { memo, useCallback } from 'react';
-import { EdgeCategory } from '../edges';
 import { exhaustiveCheck } from '../utils/exhaustive-check';
 import { LAYOUT_OPTIONS } from '../utils/layout';
+
+export enum HandleType {
+  Data,
+  Buffer,
+  Stream,
+  DataBuffer,
+  DataStream,
+}
 
 export interface BaseNodeProps extends NodeProps {
   color?: ButtonProps['color'];
@@ -18,13 +25,13 @@ export interface BaseNodeProps extends NodeProps {
   label: string;
   variant: 'input' | 'output' | 'inputOutput';
   /**
-   * defaults to `EdgeCateogry.Data`.
+   * defaults to `HandleType.Data`.
    */
-  inputHandleType?: EdgeCategory;
+  inputHandleType?: HandleType;
   /**
-   * defaults to `EdgeCateogry.Data`.
+   * defaults to `HandleType.Data`.
    */
-  outputHandleType?: EdgeCategory;
+  outputHandleType?: HandleType;
   caption?: string;
 }
 
@@ -33,8 +40,8 @@ function BaseNode({
   icon: materialIconOrSymbol,
   label,
   variant,
-  inputHandleType = EdgeCategory.Data,
-  outputHandleType = EdgeCategory.Data,
+  inputHandleType = HandleType.Data,
+  outputHandleType = HandleType.Data,
   caption,
   isConnectable,
   selected,
@@ -48,21 +55,27 @@ function BaseNode({
       materialIconOrSymbol
     );
 
-  const handleClassName = useCallback((handleType?: EdgeCategory) => {
+  const handleClassName = useCallback((handleType?: HandleType) => {
     if (handleType === undefined) {
       return undefined;
     }
 
     switch (handleType) {
-      case EdgeCategory.Data: {
+      case HandleType.Data: {
         // use the default style
         return undefined;
       }
-      case EdgeCategory.Buffer: {
+      case HandleType.Buffer: {
         return 'handle-buffer';
       }
-      case EdgeCategory.Stream: {
-        return undefined;
+      case HandleType.Stream: {
+        return 'handle-stream';
+      }
+      case HandleType.DataBuffer: {
+        return 'handle-data-buffer';
+      }
+      case HandleType.DataStream: {
+        return 'handle-data-stream';
       }
       default: {
         exhaustiveCheck(handleType);

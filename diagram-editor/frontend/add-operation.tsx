@@ -32,6 +32,7 @@ import {
   type SectionOutputNode,
   SerializedJoinIcon,
   SplitIcon,
+  StreamOutIcon,
   TransformIcon,
   UnzipIcon,
 } from './nodes';
@@ -307,6 +308,19 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
         }
       >
         Listen
+      </StyledOperationButton>
+      <StyledOperationButton
+        startIcon={<StreamOutIcon />}
+        onClick={() =>
+          onAdd?.(
+            createNodeChange(namespace, parentId, newNodePosition, {
+              type: 'stream_out',
+              name: '',
+            }),
+          )
+        }
+      >
+        Stream Out
       </StyledOperationButton>
       <StyledOperationButton
         startIcon={<ScopeIcon />}
