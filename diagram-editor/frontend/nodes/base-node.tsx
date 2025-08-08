@@ -1,6 +1,8 @@
 import { Box, Button, type ButtonProps, Paper } from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import React from 'react';
+import { memo, useCallback } from 'react';
+import { EdgeCategory } from '../edges';
+import { exhaustiveCheck } from '../utils/exhaustive-check';
 import { LAYOUT_OPTIONS } from '../utils/layout';
 
 export interface BaseNodeProps extends NodeProps {
@@ -8,6 +10,14 @@ export interface BaseNodeProps extends NodeProps {
   icon?: React.JSX.Element | string;
   label: string;
   variant: 'input' | 'output' | 'inputOutput';
+  /**
+   * defaults to `EdgeCateogry.Data`.
+   */
+  inputHandleType?: EdgeCategory;
+  /**
+   * defaults to `EdgeCateogry.Data`.
+   */
+  outputHandleType?: EdgeCategory;
 }
 
 function BaseNode({
@@ -15,6 +25,8 @@ function BaseNode({
   icon: materialIconOrSymbol,
   label,
   variant,
+  inputHandleType = EdgeCategory.Data,
+  outputHandleType = EdgeCategory.Data,
   isConnectable,
   selected,
   sourcePosition = Position.Bottom,
@@ -26,6 +38,30 @@ function BaseNode({
     ) : (
       materialIconOrSymbol
     );
+
+  const handleClassName = useCallback((handleType?: EdgeCategory) => {
+    if (handleType === undefined) {
+      return undefined;
+    }
+
+    switch (handleType) {
+      case EdgeCategory.Data: {
+        // use the default style
+        return undefined;
+      }
+      case EdgeCategory.Buffer: {
+        return 'handle-buffer';
+      }
+      case EdgeCategory.Stream: {
+        return undefined;
+      }
+      default: {
+        exhaustiveCheck(handleType);
+        throw new Error('unknown edge category');
+      }
+    }
+  }, []);
+
   return (
     <Paper>
       {(variant === 'input' || variant === 'inputOutput') && (
@@ -33,6 +69,7 @@ function BaseNode({
           type="target"
           position={targetPosition}
           isConnectable={isConnectable}
+          className={handleClassName(inputHandleType)}
         />
       )}
       <Button
@@ -64,10 +101,11 @@ function BaseNode({
           type="source"
           position={sourcePosition}
           isConnectable={isConnectable}
+          className={handleClassName(outputHandleType)}
         />
       )}
     </Paper>
   );
 }
 
-export default React.memo(BaseNode);
+export default memo(BaseNode);

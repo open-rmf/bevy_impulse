@@ -23,8 +23,15 @@
   top: -100%;
 }
 .react-flow__handle.connectingto {
-  background: var(--mui-palette-error-main);
+  background-color: var(--mui-palette-error-main);
 }
 .react-flow__handle.valid {
-  background: var(--mui-palette-success-main);
+  background-color: var(--mui-palette-success-main);
 }
+.react-flow__handle.handle-buffer {
+  background-color: var(--mui-palette-secondary-main);
+}
+/* Some operations can output either Data or Stream so we cannot color code Stream handles.  */
+/* .react-flow__handle.handle-stream {
+  background-color: var(--mui-palette-warning-main);
+} */

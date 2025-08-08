@@ -157,7 +157,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('"join" node accepts both data and buffer edges', () => {
+  test('"join" node only accepts buffer edges', () => {
     const nodeNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -190,8 +190,7 @@ describe('validate edges', () => {
     for (const targetNode of [joinNode, serializedJoinNode]) {
       {
         const validEdges = getValidEdgeTypes(nodeNode, targetNode);
-        expect(validEdges.length).toBe(1);
-        expect(validEdges).toContain('default');
+        expect(validEdges.length).toBe(0);
       }
       {
         const validEdges = getValidEdgeTypes(bufferNode, targetNode);
