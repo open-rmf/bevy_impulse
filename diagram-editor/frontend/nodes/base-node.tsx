@@ -1,4 +1,11 @@
-import { Box, Button, type ButtonProps, Paper } from '@mui/material';
+import {
+  Box,
+  Button,
+  type ButtonProps,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material';
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { memo, useCallback } from 'react';
 import { EdgeCategory } from '../edges';
@@ -18,6 +25,7 @@ export interface BaseNodeProps extends NodeProps {
    * defaults to `EdgeCateogry.Data`.
    */
   outputHandleType?: EdgeCategory;
+  caption?: string;
 }
 
 function BaseNode({
@@ -27,6 +35,7 @@ function BaseNode({
   variant,
   inputHandleType = EdgeCategory.Data,
   outputHandleType = EdgeCategory.Data,
+  caption,
   isConnectable,
   selected,
   sourcePosition = Position.Bottom,
@@ -84,17 +93,33 @@ function BaseNode({
           height: LAYOUT_OPTIONS.nodeHeight,
         }}
       >
-        <Box
-          component="span"
-          sx={{
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {label}
-        </Box>
+        <Stack>
+          <Box
+            component="span"
+            sx={{
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {label}
+          </Box>
+          {caption && (
+            <Typography
+              variant="caption"
+              fontSize={8}
+              sx={{
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {caption}
+            </Typography>
+          )}
+        </Stack>
       </Button>
       {(variant === 'output' || variant === 'inputOutput') && (
         <Handle
