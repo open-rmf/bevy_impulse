@@ -33,6 +33,7 @@ function ScopeNodeComp({
         type="source"
         position={sourcePosition}
         isConnectable={isConnectable}
+        className="handle-data-stream"
       />
     </>
   );

@@ -3,7 +3,7 @@ import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
 import { isSectionBuilder } from '../utils/operation';
 import type { OperationNode } from '.';
-import BaseNode from './base-node';
+import BaseNode, { HandleType } from './base-node';
 import {
   SectionBufferIcon,
   SectionIcon,
@@ -43,6 +43,7 @@ export function SectionNodeComp(props: NodeProps<OperationNode<'section'>>) {
       icon={<SectionIcon />}
       label={label}
       variant="inputOutput"
+      inputHandleType={HandleType.DataBuffer}
     />
   );
 }
@@ -89,6 +90,7 @@ export function SectionBufferNodeComp(props: NodeProps<SectionBufferNode>) {
       label="Section Buffer"
       variant="output"
       caption={props.data.remappedId}
+      outputHandleType={HandleType.Buffer}
     />
   );
 }
