@@ -20,6 +20,16 @@ mod frontend {
         println!("cargo:rerun-if-changed=frontend");
 
         let status = Command::new("pnpm")
+            .arg("install")
+            .arg("--frozen-lockfile")
+            .status()
+            .expect("Failed to execute pnpm install");
+
+        if !status.success() {
+            panic!("pnpm install failed with status: {:?}", status);
+        }
+
+        let status = Command::new("pnpm")
             .arg("build")
             .status()
             .expect("Failed to execute pnpm build");
