@@ -121,22 +121,38 @@
         {
           "additionalProperties": false,
           "properties": {
-            "Ok": true
+            "ok": true
           },
           "required": [
-            "Ok"
+            "ok"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
           "properties": {
-            "Err": {
+            "err": {
               "type": "string"
             }
           },
           "required": [
-            "Err"
+            "err"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DebugSessionFeedback": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "operationStarted": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operationStarted"
           ],
           "type": "object"
         }

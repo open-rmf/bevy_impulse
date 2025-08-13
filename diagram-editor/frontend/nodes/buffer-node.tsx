@@ -1,7 +1,6 @@
 import type { NodeProps } from '@xyflow/react';
-import { EdgeCategory } from '../edges';
 import type { OperationNode } from '.';
-import BaseNode from './base-node';
+import BaseNode, { HandleType } from './base-node';
 import { BufferIcon } from './icons';
 
 function BufferNodeComp(props: NodeProps<OperationNode<'buffer'>>) {
@@ -11,7 +10,7 @@ function BufferNodeComp(props: NodeProps<OperationNode<'buffer'>>) {
       icon={<BufferIcon />}
       label="Buffer"
       variant="inputOutput"
-      outputHandleType={EdgeCategory.Buffer}
+      outputHandleType={HandleType.Buffer}
     />
   );
 }

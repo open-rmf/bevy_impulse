@@ -5,28 +5,37 @@ use axum::{
         State,
     },
     http::StatusCode,
+    response::{self, Response},
     routing::{self, post},
     Json, Router,
 };
-use bevy_ecs::{
-    event::EventWriter,
-    system::{ResMut, Resource},
-};
-use bevy_impulse::{Diagram, DiagramElementRegistry, Promise, RequestExt};
+use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
+    error::Error,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::sync::mpsc::error::TryRecvError;
-use tracing::error;
+use tracing::{error, warn};
+
+type BroadcastRecvError = tokio::sync::broadcast::error::RecvError;
+
+type WorkflowResponseResult = Result<Promise<serde_json::Value>, Box<dyn Error + Send + Sync>>;
+type WorkflowResponseSender = tokio::sync::oneshot::Sender<WorkflowResponseResult>;
+
+type WorkflowFeedback = OperationStarted;
+
+#[derive(bevy_ecs::component::Component)]
+struct FeedbackSender(tokio::sync::broadcast::Sender<WorkflowFeedback>);
 
 struct Context {
     diagram: Diagram,
     request: serde_json::Value,
     registry: Arc<Mutex<DiagramElementRegistry>>,
-    response_tx: tokio::sync::oneshot::Sender<Promise<serde_json::Value>>,
+    response_tx: WorkflowResponseSender,
+    feedback_tx: Option<FeedbackSender>,
 }
 
 #[derive(Clone)]
@@ -48,7 +57,7 @@ pub struct PostRunRequest {
 async fn post_run(
     state: State<ExecutorState>,
     Json(body): Json<PostRunRequest>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> response::Result<Json<serde_json::Value>> {
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     if let Err(err) = state
         .send_chan
@@ -57,24 +66,35 @@ async fn post_run(
             diagram: body.diagram,
             request: body.request,
             response_tx,
+            feedback_tx: None,
         })
         .await
     {
         error!("{}", err);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
     }
 
     let response = tokio::time::timeout(
         state.response_timeout,
-        (async || {
-            let response_promise = response_rx
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        (async || -> response::Result<serde_json::Value> {
+            let workflow_response = match response_rx.await {
+                Ok(response) => response,
+                Err(err) => {
+                    error!("{}", err);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
+                }
+            };
 
-            response_promise
-                .await
-                .available()
-                .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
+            match workflow_response {
+                Ok(promise) => match promise.await.available() {
+                    Some(result) => Ok(result),
+                    None => Err(StatusCode::INTERNAL_SERVER_ERROR.into()),
+                },
+                Err(err) => Err(Response::builder()
+                    .status(StatusCode::UNPROCESSABLE_ENTITY)
+                    .body(err.to_string())
+                    .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |e| e.into())),
+            }
         })(),
     )
     .await
@@ -86,9 +106,24 @@ async fn post_run(
 #[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
 #[cfg_attr(test, derive(serde::Deserialize))]
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum DebugSessionEnd {
     Ok(serde_json::Value),
     Err(String),
+}
+
+impl DebugSessionEnd {
+    fn err_from_status_code(status_code: StatusCode) -> Self {
+        Self::Err(status_code.to_string())
+    }
+}
+
+#[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
+#[cfg_attr(test, derive(serde::Deserialize))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DebugSessionFeedback {
+    OperationStarted(String),
 }
 
 /// Start a debug session.
@@ -103,42 +138,142 @@ where
         return;
     };
 
-    // TODO: bevy_impulse does not support debugging yet, for now just run the diagram to terminate.
-    let response = post_run(state, Json(req)).await;
-    match response {
-        Ok(resp) => {
-            write.send_json(&DebugSessionEnd::Ok(resp.0)).await;
-            return;
-        }
-        Err(status_code) => {
-            write
-                .send_json(&DebugSessionEnd::Err(status_code.to_string()))
-                .await;
-            return;
-        }
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    let (feedback_tx, mut feedback_rx) = tokio::sync::broadcast::channel(10);
+    if let Err(err) = state
+        .send_chan
+        .send(Context {
+            registry: state.registry.clone(),
+            diagram: req.diagram,
+            request: req.request,
+            response_tx,
+            feedback_tx: Some(FeedbackSender(feedback_tx)),
+        })
+        .await
+    {
+        error!("{}", err);
+        write
+            .send_json(&DebugSessionEnd::err_from_status_code(
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+            .await;
+        return;
     }
+
+    let write = tokio::sync::Mutex::new(write);
+
+    let process_response = async || {
+        let response_result = response_rx.await;
+
+        let workflow_response = match response_result {
+            Ok(response) => response,
+            Err(err) => {
+                error!("{}", err);
+                write
+                    .lock()
+                    .await
+                    .send_json(&DebugSessionEnd::err_from_status_code(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+        match workflow_response {
+            // type annotations needed on `promise.await`
+            Ok(promise) => match promise.await.available() {
+                Some(result) => {
+                    write
+                        .lock()
+                        .await
+                        .send_json(&DebugSessionEnd::Ok(result))
+                        .await;
+                }
+                None => {
+                    write
+                        .lock()
+                        .await
+                        .send_json(&DebugSessionEnd::err_from_status_code(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        ))
+                        .await;
+                    return;
+                }
+            },
+            Err(err) => {
+                write
+                    .lock()
+                    .await
+                    .send_json(&DebugSessionEnd::Err(err.to_string()))
+                    .await;
+                return;
+            }
+        };
+    };
+
+    let mut process_feedback = async || loop {
+        let feedback = feedback_rx.recv().await;
+
+        match feedback {
+            Ok(feedback) => {
+                let op_id = if let Some(id) = feedback.info.id() {
+                    id.to_string()
+                } else {
+                    "[unknown]".to_string()
+                };
+
+                write
+                    .lock()
+                    .await
+                    .send_json(&DebugSessionFeedback::OperationStarted(op_id))
+                    .await;
+            }
+            Err(e) => match e {
+                BroadcastRecvError::Closed => {
+                    break;
+                }
+                BroadcastRecvError::Lagged(_) => {
+                    warn!("{}", e);
+                    break;
+                }
+            },
+        }
+    };
+
+    tokio::select! {
+        _ = process_response() => {},
+        _ = process_feedback() => {},
+    };
 }
 
-#[derive(Resource)]
+#[derive(bevy_ecs::system::Resource)]
 struct RequestReceiver(tokio::sync::mpsc::Receiver<Context>);
 
 /// Receives a request from executor service and schedules the workflow.
 fn execute_requests(
-    mut rx: ResMut<RequestReceiver>,
+    mut rx: bevy_ecs::system::ResMut<RequestReceiver>,
     mut cmds: bevy_ecs::system::Commands,
-    mut app_exit_events: EventWriter<bevy_app::AppExit>,
+    mut app_exit_events: bevy_ecs::event::EventWriter<bevy_app::AppExit>,
 ) {
     let rx = &mut rx.0;
     match rx.try_recv() {
         Ok(ctx) => {
-            let workflow = ctx
-                .diagram
-                .spawn_io_workflow(&mut cmds, &*ctx.registry.lock().unwrap())
-                .unwrap();
-            let promise: Promise<serde_json::Value> =
-                cmds.request(ctx.request, workflow).take_response();
+            let registry = &*ctx.registry.lock().unwrap();
+            let maybe_promise = match ctx.diagram.spawn_io_workflow(&mut cmds, registry) {
+                Ok(workflow) => {
+                    if let Some(feedback_tx) = ctx.feedback_tx {
+                        // FIXME: the provider id is different from the session id, there doesn't seem to be possible to get the session id
+                        cmds.entity(workflow.provider()).insert(feedback_tx);
+                    }
+                    let promise: Promise<serde_json::Value> =
+                        cmds.request(ctx.request, workflow).take_response();
+                    Ok(promise)
+                }
+                Err(err) => Err(err.into()),
+            };
             // assuming that workflows are automatically cancelled when the promise is dropped.
-            if let Err(_) = ctx.response_tx.send(promise) {
+            if let Err(_) = ctx.response_tx.send(maybe_promise) {
                 error!("failed to send response")
             }
         }
@@ -148,6 +283,24 @@ fn execute_requests(
                 app_exit_events.send_default();
             }
         },
+    }
+}
+
+fn debug_feedback(
+    mut op_started: bevy_ecs::event::EventReader<trace::OperationStarted>,
+    feedback_query: bevy_ecs::system::Query<&FeedbackSender>,
+) {
+    for ev in op_started.read() {
+        match feedback_query.get(ev.session) {
+            Ok(feedback_tx) => {
+                if let Err(e) = feedback_tx.0.send(ev.clone()) {
+                    error!("{}", e);
+                }
+            }
+            Err(_) => {
+                // the session has no feedback channel
+            }
+        }
     }
 }
 
@@ -172,6 +325,7 @@ fn setup_bevy_app(
     let (request_tx, request_rx) = tokio::sync::mpsc::channel::<Context>(10);
     app.insert_resource(RequestReceiver(request_rx));
     app.add_systems(bevy_app::Update, execute_requests);
+    app.add_systems(bevy_app::Update, debug_feedback);
     ExecutorState {
         registry: Arc::new(Mutex::new(registry)),
         send_chan: request_tx,
@@ -233,7 +387,7 @@ mod tests {
         let (send_stop, mut recv_stop) = tokio::sync::oneshot::channel::<()>();
         app.add_systems(
             bevy_app::Update,
-            move |mut app_exit: EventWriter<bevy_app::AppExit>| {
+            move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
                 if let Ok(_) = recv_stop.try_recv() {
                     app_exit.send_default();
                 }
@@ -323,7 +477,7 @@ mod tests {
         let (send_stop, mut recv_stop) = tokio::sync::oneshot::channel::<()>();
         app.add_systems(
             bevy_app::Update,
-            move |mut app_exit: EventWriter<bevy_app::AppExit>| {
+            move |mut app_exit: bevy_ecs::event::EventWriter<bevy_app::AppExit>| {
                 if let Ok(_) = recv_stop.try_recv() {
                     app_exit.send_default();
                 }
@@ -357,7 +511,8 @@ mod tests {
             cleanup_test,
         } = setup_ws_test();
 
-        let diagram = new_add7_diagram();
+        let mut diagram = new_add7_diagram();
+        diagram.default_trace = bevy_impulse::TraceToggle::On;
 
         let request_body = PostRunRequest {
             diagram,
@@ -377,6 +532,17 @@ mod tests {
             )))
             .await
             .unwrap();
+
+        // there should be 2 feedback messages
+        for _ in 0..2 {
+            let feedback_msg = test_rx.next().await.unwrap();
+            let feedback: DebugSessionFeedback =
+                serde_json::from_slice(feedback_msg.into_text().unwrap().as_bytes()).unwrap();
+            assert!(matches!(
+                feedback,
+                DebugSessionFeedback::OperationStarted(_)
+            ));
+        }
 
         let resp_msg = test_rx.next().await.unwrap();
         let resp_text = resp_msg.into_text().unwrap();

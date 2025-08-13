@@ -60,11 +60,18 @@ export type RetentionPolicy =
  */
 export type DebugSessionEnd =
   | {
-      Ok: unknown;
+      ok: unknown;
     }
   | {
-      Err: string;
+      err: string;
     };
+/**
+ * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
+ * via the `definition` "DebugSessionFeedback".
+ */
+export type DebugSessionFeedback = {
+  operationStarted: string;
+};
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "DiagramOperation".

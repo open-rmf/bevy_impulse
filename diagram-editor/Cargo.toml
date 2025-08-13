@@ -7,16 +7,22 @@ license = "Apache-2.0"
 description = "Frontend for bevy_impulse diagrams"
 readme = "README.md"
 repository = "https://github.com/open-rmf/bevy_impulse"
-keywords = ["reactive", "workflow", "behavior", "agent", "bevy", "frontend", "diagram"]
+keywords = [
+  "reactive",
+  "workflow",
+  "behavior",
+  "agent",
+  "bevy",
+  "frontend",
+  "diagram",
+]
 categories = [
   "science::robotics",
   "asynchronous",
   "concurrency",
   "game-development",
 ]
-exclude = [
-  "/build.rs"
-]
+exclude = ["/build.rs"]
 
 [lib]
 path = "server/lib.rs"
@@ -25,7 +31,10 @@ path = "server/lib.rs"
 axum = { version = "0.8.4", features = ["ws"] }
 bevy_app = "0.12.1"
 bevy_ecs = "0.12.1"
-bevy_impulse = { version = "0.0.2", path = "..", features = ["diagram"] }
+bevy_impulse = { version = "0.0.2", path = "..", features = [
+  "diagram",
+  "trace",
+] }
 flate2 = { version = "1.1.1", optional = true }
 futures-util = "0.3.31"
 indexmap = { version = "2.10.0", optional = true, features = ["serde"] }
@@ -56,4 +65,3 @@ json_schema = ["dep:schemars", "dep:indexmap"]
 name = "print_schema"
 path = "server/bin/print_schema.rs"
 required-features = ["json_schema"]
-
