@@ -1,9 +1,5 @@
 import { Button, ButtonGroup, styled } from '@mui/material';
-import {
-  type NodeAddChange,
-  useReactFlow,
-  type XYPosition,
-} from '@xyflow/react';
+import type { NodeAddChange, XYPosition } from '@xyflow/react';
 import React from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { EditorMode, useEditorMode } from './editor-mode';
@@ -37,6 +33,7 @@ import {
   UnzipIcon,
 } from './nodes';
 import type { DiagramOperation } from './types/api';
+import { useReactFlow } from './use-react-flow';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
 
 const StyledOperationButton = styled(Button)({
@@ -111,7 +108,7 @@ function createNodeChange(
 
 function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
   const [editorMode] = useEditorMode();
-  const reactFlow = useReactFlow<DiagramEditorNode>();
+  const reactFlow = useReactFlow();
   const namespace = React.useMemo(() => {
     const parentNode = parentId && reactFlow.getNode(parentId);
     if (!parentNode || !isOperationNode(parentNode)) {

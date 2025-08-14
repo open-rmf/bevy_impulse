@@ -6,14 +6,10 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { from, timer } from 'rxjs';
+import { timer } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
+import { useApiClient } from './api-client-provider';
 import type { DiagramElementRegistry } from './types/api';
-import { getSchema } from './utils/ajv';
-
-const validateRegistry = getSchema<DiagramElementRegistry>(
-  'DiagramElementRegistry',
-);
 
 const RegistryContextComp = createContext<DiagramElementRegistry | null>(null);
 
@@ -21,29 +17,20 @@ export const RegistryProvider = ({ children }: PropsWithChildren) => {
   const [registry, setRegistry] = useState<DiagramElementRegistry | null>(null);
   const [showLoading, setShowLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const apiClient = useApiClient();
 
   useEffect(() => {
-    const fetch$ = from(
-      (async () => {
-        const response = await fetch('/api/registry');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch registry: ${response.statusText}`);
-        }
-        const data = await response.json();
-        if (!validateRegistry(data)) {
-          throw validateRegistry.errors;
-        }
-        return data;
-      })(),
-    );
+    const registry$ = apiClient.getRegistry();
 
     const timer$ = timer(1000);
 
-    const timerSubscription = timer$.pipe(takeUntil(fetch$)).subscribe(() => {
-      setShowLoading(true);
-    });
+    const timerSubscription = timer$
+      .pipe(takeUntil(registry$))
+      .subscribe(() => {
+        setShowLoading(true);
+      });
 
-    const fetchSubscription = fetch$.subscribe({
+    const fetchSubscription = registry$.subscribe({
       next: setRegistry,
       error: (err) => {
         console.error(err);
@@ -55,7 +42,7 @@ export const RegistryProvider = ({ children }: PropsWithChildren) => {
       timerSubscription.unsubscribe();
       fetchSubscription.unsubscribe();
     };
-  }, []);
+  }, [apiClient]);
 
   if (error) {
     return (

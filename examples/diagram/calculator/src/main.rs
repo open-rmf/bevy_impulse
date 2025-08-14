@@ -22,7 +22,7 @@ use bevy_impulse::{
 };
 use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use clap::Parser;
-use std::{error::Error, fs::File, str::FromStr};
+use std::{error::Error, fs::File, str::FromStr, thread};
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -87,6 +87,7 @@ async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), 
     let mut app = bevy_app::App::new();
     app.add_plugins(ImpulseAppPlugin::default());
     let router = new_router(&mut app, registry, ServerOptions::default());
+    thread::spawn(move || app.run());
     let listener = tokio::net::TcpListener::bind(("localhost", args.port))
         .await
         .unwrap();

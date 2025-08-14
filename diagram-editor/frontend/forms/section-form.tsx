@@ -7,16 +7,10 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import {
-  type EdgeChange,
-  type NodeChange,
-  type NodeRemoveChange,
-  useReactFlow,
-} from '@xyflow/react';
+import type { EdgeChange, NodeChange, NodeRemoveChange } from '@xyflow/react';
 import { type PropsWithChildren, useMemo } from 'react';
-import type { DiagramEditorEdge, SectionEdge } from '../edges';
+import type { SectionEdge } from '../edges';
 import {
-  type DiagramEditorNode,
   isSectionNode,
   MaterialSymbol,
   type SectionBufferNode,
@@ -26,6 +20,7 @@ import {
 } from '../nodes';
 import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
+import { useReactFlow } from '../use-react-flow';
 import BaseEditOperationForm, {
   type BaseEditOperationFormProps,
 } from './base-edit-operation-form';
@@ -212,7 +207,7 @@ export interface SectionEdgeFormProps {
 }
 
 export function SectionEdgeForm({ edge, onChange }: SectionEdgeFormProps) {
-  const reactFlow = useReactFlow<DiagramEditorNode, DiagramEditorEdge>();
+  const reactFlow = useReactFlow();
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
   const sourceNode = reactFlow.getNode(edge.source);

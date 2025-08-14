@@ -1,3 +1,5 @@
+use crate::api::error_responses::WorkflowCancelledResponse;
+
 use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
 use axum::{
     extract::{
@@ -86,14 +88,28 @@ async fn post_run(
             };
 
             match workflow_response {
-                Ok(promise) => match promise.await.available() {
-                    Some(result) => Ok(result),
-                    None => Err(StatusCode::INTERNAL_SERVER_ERROR.into()),
-                },
+                Ok(promise) => {
+                    let promise_state = promise.await;
+                    if promise_state.is_available() {
+                        if let Some(result) = promise_state.available() {
+                            Ok(result)
+                        } else {
+                            Err(StatusCode::INTERNAL_SERVER_ERROR.into())
+                        }
+                    } else if promise_state.is_cancelled() {
+                        if let Some(cancellation) = promise_state.cancellation() {
+                            Err(WorkflowCancelledResponse(cancellation).into())
+                        } else {
+                            Err(StatusCode::INTERNAL_SERVER_ERROR.into())
+                        }
+                    } else {
+                        Err(StatusCode::INTERNAL_SERVER_ERROR.into())
+                    }
+                }
                 Err(err) => Err(Response::builder()
                     .status(StatusCode::UNPROCESSABLE_ENTITY)
                     .body(err.to_string())
-                    .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |e| e.into())),
+                    .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |resp| resp.into())),
             }
         })(),
     )

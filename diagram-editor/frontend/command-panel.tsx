@@ -6,6 +6,7 @@ import EditTemplatesDialog from './edit-templates-dialog';
 import { EditorMode, useEditorMode } from './editor-mode';
 import type { DiagramEditorNode } from './nodes';
 import { MaterialSymbol } from './nodes';
+import RunButton from './run-button';
 
 export interface CommandPanelProps {
   onNodeChanges: (changes: NodeChange<DiagramEditorNode>[]) => void;
@@ -38,6 +39,7 @@ function CommandPanel({
     <>
       <Panel position="top-center">
         <ButtonGroup variant="contained">
+          <RunButton />
           {editorMode.mode === EditorMode.Normal && (
             <Tooltip title="Templates">
               <Button onClick={() => setOpenEditTemplatesDialog(true)}>

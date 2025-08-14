@@ -7,6 +7,7 @@ use axum::{
 use bevy_impulse::DiagramElementRegistry;
 use mime_guess::mime;
 
+mod error_responses;
 pub mod executor;
 mod websocket;
 

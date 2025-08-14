@@ -1,11 +1,12 @@
 import { Autocomplete, TextField } from '@mui/material';
-import { type EdgeChange, useReactFlow } from '@xyflow/react';
+import type { EdgeChange } from '@xyflow/react';
 import { useMemo } from 'react';
 import { type DiagramEditorEdge, isDataEdge } from '../edges';
-import { type DiagramEditorNode, isSectionNode } from '../nodes';
+import { isSectionNode } from '../nodes';
 import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
 import type { SectionTemplate } from '../types/api';
+import { useReactFlow } from '../use-react-flow';
 
 function getTemplateInputs(template: SectionTemplate): string[] {
   if (!template.inputs) {
@@ -24,7 +25,7 @@ export interface DataInputEdgeFormProps {
 }
 
 export function DataInputForm({ edge, onChange }: DataInputEdgeFormProps) {
-  const reactFlow = useReactFlow<DiagramEditorNode, DiagramEditorEdge>();
+  const reactFlow = useReactFlow();
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
   const targetNode = reactFlow.getNode(edge.target);

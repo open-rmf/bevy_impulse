@@ -143,7 +143,7 @@ function ExportDiagramDialog({
             variant="outlined"
             value={dialogData?.diagramJson}
             slotProps={{
-              htmlInput: { style: { fontFamily: 'monospace' } },
+              htmlInput: { sx: { fontFamily: 'monospace' } },
             }}
           />
         </Stack>
