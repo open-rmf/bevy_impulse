@@ -519,6 +519,7 @@ mod tests {
         }
     }
 
+    #[ignore = "blocked on bevy_impulse https://github.com/open-rmf/bevy_impulse/issues/100"]
     #[tokio::test]
     #[test_log::test]
     async fn test_ws_debug() {
