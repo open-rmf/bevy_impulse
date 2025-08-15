@@ -25,7 +25,7 @@ function RunButton() {
   const [openPopover, setOpenPopover] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const theme = useTheme();
-  const [requestJson, setRequestJson] = useState('{}');
+  const [requestJson, setRequestJson] = useState('');
   const [responseContent, setResponseContent] = useState<ResponseContent>({
     raw: '',
   });
