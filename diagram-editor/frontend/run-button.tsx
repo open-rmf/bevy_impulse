@@ -161,6 +161,7 @@ function RunButton() {
             variant="contained"
             onClick={handleRunClick}
             loading={running}
+            startIcon={<MaterialSymbol symbol="play_arrow" />}
           >
             Run
           </Button>
