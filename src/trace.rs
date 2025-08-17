@@ -20,9 +20,9 @@ use crate::{JsonMessage, OperationRef, TraceToggle, TypeInfo};
 use bevy_ecs::prelude::{Component, Entity, Event};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::{any::Any, borrow::Cow, sync::Arc};
 use thiserror::Error as ThisError;
-use smallvec::SmallVec;
 
 /// A component attached to workflow operation entities in order to trace their
 /// activities.
@@ -171,7 +171,7 @@ mod tests {
         trace::OperationStarted,
     };
     use bevy_app::{App, PostUpdate};
-    use bevy_ecs::prelude::{EventReader, ResMut, Resource, Entity};
+    use bevy_ecs::prelude::{Entity, EventReader, ResMut, Resource};
     use serde_json::json;
     use std::{sync::Arc, time::Duration};
 
@@ -341,7 +341,11 @@ mod tests {
         fixture: &mut DiagramTestFixture,
         route: &[&str],
     ) {
-        let Recipient { response: mut promise, session, .. } = fixture
+        let Recipient {
+            response: mut promise,
+            session,
+            ..
+        } = fixture
             .context
             .command(|commands| commands.request(value, panchinko).take());
 
@@ -352,11 +356,22 @@ mod tests {
         let result = promise.take().available().unwrap();
         assert_eq!(value, result);
 
-        let recorder = fixture.context.app.world.resource_mut::<TraceRecorder>().clone();
+        let recorder = fixture
+            .context
+            .app
+            .world
+            .resource_mut::<TraceRecorder>()
+            .clone();
         confirm_trace(&recorder, route, session);
 
         // Clear the record so these results do not interfere with the next test
-        fixture.context.app.world.resource_mut::<TraceRecorder>().record.clear();
+        fixture
+            .context
+            .app
+            .world
+            .resource_mut::<TraceRecorder>()
+            .record
+            .clear();
     }
 
     fn confirm_trace(

@@ -218,8 +218,11 @@ where
     /// If the entity despawns then the request gets cancelled unless you used
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
-        self.commands
-            .add(AddImpulse::new(Some(self.source), self.target, Store::<Response>::new(target)));
+        self.commands.add(AddImpulse::new(
+            Some(self.source),
+            self.target,
+            Store::<Response>::new(target),
+        ));
 
         let mut map = StreamTargetMap::default();
         let stream_targets = Streams::collect_streams(self.source, target, &mut map, self.commands);
@@ -307,8 +310,11 @@ where
     ///
     /// Using this will also effectively [detach](Self::detach) the impulse.
     pub fn send_event(self) {
-        self.commands
-            .add(AddImpulse::new(Some(self.source), self.target, SendEvent::<Response>::new()));
+        self.commands.add(AddImpulse::new(
+            Some(self.source),
+            self.target,
+            SendEvent::<Response>::new(),
+        ));
     }
 }
 

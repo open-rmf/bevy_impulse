@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Component, Entity, Resource, World},
     system::Command,
 };
-use bevy_hierarchy::{DespawnRecursiveExt, BuildWorldChildren};
+use bevy_hierarchy::{BuildWorldChildren, DespawnRecursiveExt};
 
 use backtrace::Backtrace;
 
@@ -55,7 +55,11 @@ pub(crate) struct AddImpulse<I: Impulsive> {
 
 impl<I: Impulsive> AddImpulse<I> {
     pub(crate) fn new(source: Option<Entity>, target: Entity, impulse: I) -> Self {
-        Self { source, target, impulse }
+        Self {
+            source,
+            target,
+            impulse,
+        }
     }
 }
 
