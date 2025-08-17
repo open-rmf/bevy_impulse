@@ -19,7 +19,7 @@ use bevy_ecs::{
     prelude::{Component, Entity, Resource, World},
     system::Command,
 };
-use bevy_hierarchy::DespawnRecursiveExt;
+use bevy_hierarchy::{DespawnRecursiveExt, BuildWorldChildren};
 
 use backtrace::Backtrace;
 
@@ -48,38 +48,43 @@ pub(crate) trait Impulsive {
 pub(crate) struct ImpulseMarker;
 
 pub(crate) struct AddImpulse<I: Impulsive> {
-    source: Entity,
+    source: Option<Entity>,
+    target: Entity,
     impulse: I,
 }
 
 impl<I: Impulsive> AddImpulse<I> {
-    pub(crate) fn new(source: Entity, impulse: I) -> Self {
-        Self { source, impulse }
+    pub(crate) fn new(source: Option<Entity>, target: Entity, impulse: I) -> Self {
+        Self { source, target, impulse }
     }
 }
 
 impl<I: Impulsive + 'static + Sync + Send> Command for AddImpulse<I> {
     fn apply(self, world: &mut World) {
         if let Err(error) = self.impulse.setup(OperationSetup {
-            source: self.source,
+            source: self.target,
             world,
         }) {
             world
                 .get_resource_or_insert_with(UnhandledErrors::default)
                 .setup
                 .push(SetupFailure {
-                    broken_node: self.source,
+                    broken_node: self.target,
                     error,
                 });
         }
         world
-            .entity_mut(self.source)
+            .entity_mut(self.target)
             .insert((
                 OperationExecuteStorage(perform_impulse::<I>),
                 Cancellable::new(cancel_impulse),
                 ImpulseMarker,
             ))
             .remove::<UnusedTarget>();
+
+        if let Some(source) = self.source {
+            world.entity_mut(source).set_parent(self.target);
+        }
     }
 }
 

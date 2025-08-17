@@ -85,12 +85,18 @@ where
         self
     }
 
+    /// This is the session ID of the last request so far in the impulse chain.
+    pub fn session_id(&self) -> Entity {
+        self.source
+    }
+
     /// Take the data that comes out of the request, including both the response
     /// and the streams.
     #[must_use]
     pub fn take(self) -> Recipient<Response, Streams> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
+            Some(self.source),
             self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
@@ -101,6 +107,7 @@ where
         Recipient {
             response: response_promise,
             streams: stream_receivers,
+            session: self.target,
         }
     }
 
@@ -108,6 +115,7 @@ where
     pub fn take_response(self) -> Promise<Response> {
         let (response_sender, response_promise) = Promise::<Response>::new();
         self.commands.add(AddImpulse::new(
+            Some(self.source),
             self.target,
             TakenResponse::<Response>::new(response_sender),
         ));
@@ -211,7 +219,7 @@ where
     /// [`Self::detach`] before calling this.
     pub fn store(self, target: Entity) {
         self.commands
-            .add(AddImpulse::new(self.target, Store::<Response>::new(target)));
+            .add(AddImpulse::new(Some(self.source), self.target, Store::<Response>::new(target)));
 
         let mut map = StreamTargetMap::default();
         let stream_targets = Streams::collect_streams(self.source, target, &mut map, self.commands);
@@ -249,6 +257,7 @@ where
     /// [`Self::detach`] before calling this.
     pub fn push(self, target: Entity) {
         self.commands.add(AddImpulse::new(
+            Some(self.source),
             self.target,
             Push::<Response>::new(target, false),
         ));
@@ -282,6 +291,7 @@ where
     /// into a bundle using [`Self::map_block`] or [`Self::map_async`].
     pub fn insert(self, target: Entity) {
         self.commands.add(AddImpulse::new(
+            Some(self.source),
             self.target,
             Insert::<Response>::new(target),
         ));
@@ -298,7 +308,7 @@ where
     /// Using this will also effectively [detach](Self::detach) the impulse.
     pub fn send_event(self) {
         self.commands
-            .add(AddImpulse::new(self.target, SendEvent::<Response>::new()));
+            .add(AddImpulse::new(Some(self.source), self.target, SendEvent::<Response>::new()));
     }
 }
 
@@ -306,6 +316,9 @@ where
 pub struct Recipient<Response, Streams: StreamPack> {
     pub response: Promise<Response>,
     pub streams: Streams::StreamReceivers,
+    /// The root session ID of the entire impulse chain. Every session ID related
+    /// to this chain is a descendent of this entity.
+    pub session: Entity,
 }
 
 /// Used to store a response of an impulse as a component of an entity.
