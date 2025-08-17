@@ -17,13 +17,13 @@
 
 use bevy_app;
 use bevy_impulse::{
-    Diagram, DiagramElementRegistry, DiagramError, ImpulseAppPlugin, NodeBuilderOptions, Promise,
-    RequestExt, RunCommandsOnWorldExt, JsonMessage,
+    Diagram, DiagramElementRegistry, DiagramError, ImpulseAppPlugin, JsonMessage,
+    NodeBuilderOptions, Promise, RequestExt, RunCommandsOnWorldExt,
 };
 use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use clap::Parser;
+use serde_json::{Number, Value};
 use std::{error::Error, fs::File, str::FromStr, thread};
-use serde_json::{Value, Number};
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -105,7 +105,11 @@ fn create_registry() -> DiagramElementRegistry {
                 let input = match req {
                     JsonMessage::Array(array) => {
                         let mut sum: f64 = 0.0;
-                        for item in array.iter().filter_map(Value::as_number).filter_map(Number::as_f64) {
+                        for item in array
+                            .iter()
+                            .filter_map(Value::as_number)
+                            .filter_map(Number::as_f64)
+                        {
                             sum += item;
                         }
                         sum
@@ -125,7 +129,10 @@ fn create_registry() -> DiagramElementRegistry {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
                     JsonMessage::Array(array) => {
-                        let mut iter = array.iter().filter_map(Value::as_number).filter_map(Number::as_f64);
+                        let mut iter = array
+                            .iter()
+                            .filter_map(Value::as_number)
+                            .filter_map(Number::as_f64);
                         let mut input = iter.next().unwrap_or(0.0);
                         for item in iter {
                             input -= item;
@@ -147,13 +154,16 @@ fn create_registry() -> DiagramElementRegistry {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
                     JsonMessage::Array(array) => {
-                        let mut iter = array.iter().filter_map(Value::as_number).filter_map(Number::as_f64);
+                        let mut iter = array
+                            .iter()
+                            .filter_map(Value::as_number)
+                            .filter_map(Number::as_f64);
                         let mut input = iter.next().unwrap_or(0.0);
                         for item in iter {
                             input *= item;
                         }
                         input
-                    },
+                    }
                     JsonMessage::Number(number) => number.as_f64().unwrap_or(0.0),
                     _ => 0.0,
                 };
@@ -169,7 +179,10 @@ fn create_registry() -> DiagramElementRegistry {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
                     JsonMessage::Array(array) => {
-                        let mut iter = array.iter().filter_map(Value::as_number).filter_map(Number::as_f64);
+                        let mut iter = array
+                            .iter()
+                            .filter_map(Value::as_number)
+                            .filter_map(Number::as_f64);
                         let mut input = iter.next().unwrap_or(0.0);
                         for item in iter {
                             input /= item;
@@ -266,13 +279,13 @@ mod tests {
         app.add_plugins(ImpulseAppPlugin::default());
         let registry = create_registry();
 
-        let mut promise =
-            app.world
-                .command(|cmds| -> Result<Promise<JsonMessage>, DiagramError> {
-                    let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
-                    Ok(cmds.request(request, workflow).take_response())
-                })
-                .unwrap();
+        let mut promise = app
+            .world
+            .command(|cmds| -> Result<Promise<JsonMessage>, DiagramError> {
+                let workflow = diagram.spawn_io_workflow(cmds, &registry)?;
+                Ok(cmds.request(request, workflow).take_response())
+            })
+            .unwrap();
 
         while promise.peek().is_pending() {
             app.update();
