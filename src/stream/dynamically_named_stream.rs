@@ -114,7 +114,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
             .id();
 
         map.add_anonymous::<NamedValue<S::Output>>(target, commands);
-        commands.add(AddImpulse::new(target, TakenStream::new(sender)));
+        commands.add(AddImpulse::new(None, target, TakenStream::new(sender)));
 
         receiver
     }
@@ -127,6 +127,7 @@ impl<S: StreamEffect> StreamPack for DynamicallyNamedStream<S> {
     ) {
         let redirect = commands.spawn(()).set_parent(source).id();
         commands.add(AddImpulse::new(
+            None,
             redirect,
             Push::<NamedValue<S::Output>>::new(target, true),
         ));

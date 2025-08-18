@@ -20,6 +20,7 @@ use bevy_ecs::{
     system::Command,
     world::{EntityRef, EntityWorldMut, World},
 };
+use bevy_hierarchy::Parent;
 
 use smallvec::SmallVec;
 
@@ -297,9 +298,19 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                             }
                         };
 
+                        let world = self.world();
+                        let mut session_stack = SmallVec::new();
+                        session_stack.push(input.session);
+                        let mut session = input.session;
+                        while let Some(next_session) = world.get::<Parent>(session) {
+                            session = next_session.get();
+                            session_stack.push(session);
+                        }
+                        session_stack.reverse();
+
                         let started = OperationStarted {
                             operation: self.id(),
-                            session: input.session,
+                            session_stack,
                             info: Arc::clone(trace.info()),
                             message,
                         };

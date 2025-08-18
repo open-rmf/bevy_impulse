@@ -20,6 +20,7 @@ use crate::{JsonMessage, OperationRef, TraceToggle, TypeInfo};
 use bevy_ecs::prelude::{Component, Entity, Event};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::{any::Any, borrow::Cow, sync::Arc};
 use thiserror::Error as ThisError;
 
@@ -98,8 +99,17 @@ pub enum GetValueError {
 pub struct OperationStarted {
     /// The entity of the operation that was triggered.
     pub operation: Entity,
-    /// The entity of the workflow session that triggered the operation.
-    pub session: Entity,
+    /// The stack of session IDs that triggered the operation. The first entry
+    /// is the root session. Each subsequent entry is a child session of the
+    /// previous. There are two common ways to get a child session:
+    /// * In an impulse chain, earlier sessions in the chain are children of later
+    ///   sessions in the chain, so the last session of the chain is the root of
+    ///   the entire chain.
+    /// * When a scope operation is triggered, a new session is created. Its parent
+    ///   is the session of the message that triggered the scope operation. Every
+    ///   time a workflow is triggered it creates a new scope, and therefore also
+    ///   creates a child session.
+    pub session_stack: SmallVec<[Entity; 8]>,
     /// Information about the operation that was triggered.
     pub info: Arc<OperationInfo>,
     /// The message that triggered the operation, if serialization is enabled
@@ -161,11 +171,11 @@ mod tests {
         trace::OperationStarted,
     };
     use bevy_app::{App, PostUpdate};
-    use bevy_ecs::prelude::{EventReader, ResMut, Resource};
+    use bevy_ecs::prelude::{Entity, EventReader, ResMut, Resource};
     use serde_json::json;
     use std::{sync::Arc, time::Duration};
 
-    #[derive(Resource, Default, Debug)]
+    #[derive(Clone, Resource, Default, Debug)]
     struct TraceRecorder {
         record: Vec<OperationStarted>,
     }
@@ -331,9 +341,13 @@ mod tests {
         fixture: &mut DiagramTestFixture,
         route: &[&str],
     ) {
-        let mut promise = fixture
+        let Recipient {
+            response: mut promise,
+            session,
+            ..
+        } = fixture
             .context
-            .command(|commands| commands.request(value, panchinko).take_response());
+            .command(|commands| commands.request(value, panchinko).take());
 
         fixture
             .context
@@ -342,28 +356,52 @@ mod tests {
         let result = promise.take().available().unwrap();
         assert_eq!(value, result);
 
-        let mut recorder = fixture.context.app.world.resource_mut::<TraceRecorder>();
-        confirm_trace(&*recorder, route);
+        let recorder = fixture
+            .context
+            .app
+            .world
+            .resource_mut::<TraceRecorder>()
+            .clone();
+        confirm_trace(&recorder, route, session);
 
         // Clear the record so these results do not interfere with the next test
-        recorder.record.clear();
+        fixture
+            .context
+            .app
+            .world
+            .resource_mut::<TraceRecorder>()
+            .record
+            .clear();
     }
 
-    fn confirm_trace(recorder: &TraceRecorder, expectation: &[&str]) {
+    fn confirm_trace(
+        recorder: &TraceRecorder,
+        expectation: &[&str],
+        expected_root_session: Entity,
+    ) {
         let mut actual = recorder.record.clone();
-        for next in expectation {
-            let name: Arc<str> = (*next).into();
+        for next_op_name in expectation {
+            let name: Arc<str> = (*next_op_name).into();
             let expected_op = OperationRef::Named((&name).into());
-            let actual_op = actual.first().unwrap().info.id.as_ref().unwrap();
+            let next_actual = actual.first().unwrap();
+            let actual_op = next_actual.info.id.as_ref().unwrap();
             assert_eq!(expected_op, *actual_op);
+
+            let actual_root_session = *next_actual.session_stack.first().unwrap();
+            assert_eq!(expected_root_session, actual_root_session);
+
             actual.remove(0);
         }
 
         let expected_op = OperationRef::Terminate(NamespaceList::default());
-        let actual_op = actual.first().unwrap().info.id.as_ref().unwrap();
+        let next_actual = actual.first().unwrap();
+        let actual_op = next_actual.info.id.as_ref().unwrap();
         assert_eq!(expected_op, *actual_op);
-        actual.remove(0);
 
+        let actual_root_session = *next_actual.session_stack.first().unwrap();
+        assert_eq!(expected_root_session, actual_root_session);
+
+        actual.remove(0);
         assert!(actual.is_empty());
     }
 }
