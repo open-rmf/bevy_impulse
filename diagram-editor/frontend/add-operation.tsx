@@ -110,7 +110,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
   const [editorMode] = useEditorMode();
   const nodeManager = useNodeManager();
   const namespace = React.useMemo(() => {
-    const parentNode = parentId && nodeManager.getNode(parentId);
+    const parentNode = parentId && nodeManager.tryGetNode(parentId);
     if (!parentNode || !isOperationNode(parentNode)) {
       return ROOT_NAMESPACE;
     }

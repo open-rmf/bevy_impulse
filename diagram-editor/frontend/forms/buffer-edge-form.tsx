@@ -109,7 +109,7 @@ export function BufferEdgeInputForm({
   const labelId = useId();
 
   const nodeManager = useNodeManager();
-  const targetNode = nodeManager.getNode(edge.target);
+  const targetNode = nodeManager.tryGetNode(edge.target);
   const targetIsSection = targetNode?.type === 'section';
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();

@@ -37,8 +37,12 @@ export class NodeManager {
     }
   }
 
+  tryGetNode(nodeId: string): DiagramEditorNode | null {
+    return this.nodeIdMap.get(nodeId) || null;
+  }
+
   getNode(nodeId: string): DiagramEditorNode {
-    const node = this.nodeIdMap.get(nodeId);
+    const node = this.tryGetNode(nodeId);
     if (!node) {
       throw new Error(`cannot find node "${nodeId}"`);
     }

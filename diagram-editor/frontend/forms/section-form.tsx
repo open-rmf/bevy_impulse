@@ -210,7 +210,7 @@ export function SectionEdgeForm({ edge, onChange }: SectionEdgeFormProps) {
   const nodeManager = useNodeManager();
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
-  const sourceNode = nodeManager.getNode(edge.source);
+  const sourceNode = nodeManager.tryGetNode(edge.source);
 
   const outputs = useMemo(() => {
     if (sourceNode && isSectionNode(sourceNode)) {

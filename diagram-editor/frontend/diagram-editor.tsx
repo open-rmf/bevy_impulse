@@ -86,7 +86,7 @@ function getChangeParentIdAndPosition(
 ): [string, string | null, XYPosition] | null {
   switch (change.type) {
     case 'position': {
-      const changedNode = nodeManager.getNode(change.id);
+      const changedNode = nodeManager.tryGetNode(change.id);
       if (!changedNode) {
         return null;
       }
@@ -234,7 +234,7 @@ function DiagramEditor() {
           continue;
         }
 
-        const scopeNode = nodeManager.getNode(changeParentId);
+        const scopeNode = nodeManager.tryGetNode(changeParentId);
         if (!scopeNode) {
           continue;
         }
@@ -384,7 +384,7 @@ function DiagramEditor() {
       return { x: 0, y: 0 };
     }
     const parentNode = addOperationPopover.parentId
-      ? nodeManager.getNode(addOperationPopover.parentId)
+      ? nodeManager.tryGetNode(addOperationPopover.parentId)
       : null;
 
     const parentPosition = parentNode?.position
@@ -416,12 +416,12 @@ function DiagramEditor() {
       return null;
     }
 
-    const sourceNode = nodeManager.getNode(edge.source);
+    const sourceNode = nodeManager.tryGetNode(edge.source);
     if (!sourceNode) {
       console.error(`cannot find node ${edge.source}`);
       return null;
     }
-    const targetNode = nodeManager.getNode(edge.target);
+    const targetNode = nodeManager.tryGetNode(edge.target);
     if (!targetNode) {
       console.error(`cannot find node ${edge.target}`);
       return null;
@@ -449,7 +449,7 @@ function DiagramEditor() {
   >({ open: false });
   const renderEditForm = React.useCallback(
     (nodeId: string) => {
-      const node = nodeManager.getNode(nodeId);
+      const node = nodeManager.tryGetNode(nodeId);
       if (!node || isBuiltinNode(node)) {
         return null;
       }
@@ -522,8 +522,8 @@ function DiagramEditor() {
 
   const tryCreateEdge = React.useCallback(
     (conn: Connection, id?: string): DiagramEditorEdge | null => {
-      const sourceNode = nodeManager.getNode(conn.source);
-      const targetNode = nodeManager.getNode(conn.target);
+      const sourceNode = nodeManager.tryGetNode(conn.source);
+      const targetNode = nodeManager.tryGetNode(conn.target);
       if (!sourceNode || !targetNode) {
         throw new Error('cannot find source or target node');
       }
@@ -615,8 +615,8 @@ function DiagramEditor() {
           }
         }}
         isValidConnection={(conn) => {
-          const sourceNode = nodeManager.getNode(conn.source);
-          const targetNode = nodeManager.getNode(conn.target);
+          const sourceNode = nodeManager.tryGetNode(conn.source);
+          const targetNode = nodeManager.tryGetNode(conn.target);
           if (!sourceNode || !targetNode) {
             throw new Error('cannot find source or target node');
           }

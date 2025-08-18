@@ -28,7 +28,7 @@ export function DataInputForm({ edge, onChange }: DataInputEdgeFormProps) {
   const nodeManager = useNodeManager();
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
-  const targetNode = nodeManager.getNode(edge.target);
+  const targetNode = nodeManager.tryGetNode(edge.target);
 
   const inputs = useMemo(() => {
     if (!targetNode || !isSectionNode(targetNode)) {

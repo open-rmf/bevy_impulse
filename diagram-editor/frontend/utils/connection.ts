@@ -122,8 +122,8 @@ export function validateEdgeQuick(
   edge: DiagramEditorEdge,
   nodeManager: NodeManager,
 ): EdgeValidationResult {
-  const sourceNode = nodeManager.getNode(edge.source);
-  const targetNode = nodeManager.getNode(edge.target);
+  const sourceNode = nodeManager.tryGetNode(edge.source);
+  const targetNode = nodeManager.tryGetNode(edge.target);
 
   if (!sourceNode || !targetNode) {
     return createValidationError('cannot find source or target node');
@@ -155,8 +155,8 @@ export function validateEdgeSimple(
     return quickCheck;
   }
 
-  const sourceNode = nodeManager.getNode(edge.source);
-  const targetNode = nodeManager.getNode(edge.target);
+  const sourceNode = nodeManager.tryGetNode(edge.source);
+  const targetNode = nodeManager.tryGetNode(edge.target);
   if (!sourceNode || !targetNode) {
     return createValidationError('cannot find source or target node');
   }

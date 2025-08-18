@@ -30,7 +30,7 @@ export function autoLayout(
   const scopeChildrens: Record<string, DiagramEditorNode[]> = {};
   for (const node of nodes) {
     const parentNode = node.parentId
-      ? nodeManager.getNode(node.parentId)
+      ? nodeManager.tryGetNode(node.parentId)
       : null;
     if (parentNode?.id) {
       if (!scopeChildrens[parentNode.id]) {
