@@ -6,6 +6,13 @@ This contains a SPA React web app to create and edit a `bevy_impulse` diagram an
 
 ## Setup
 
+Install pnpm and nodejs:
+
+```bash
+curl -fsSL https://get.pnpm.io/install.sh | bash -
+pnpm env use --global lts
+```
+
 Install the dependencies:
 
 ```bash
