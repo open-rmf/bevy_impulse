@@ -50,7 +50,7 @@ describe('validate edges', () => {
 
     {
       // "node" does not accept buffer
-      const validEdges = getValidEdgeTypes(buffer, node);
+      const validEdges = getValidEdgeTypes(buffer, null, node, null);
       expect(validEdges.length).toBe(0);
 
       // "buffer" does not output data ("default" edge)
@@ -61,7 +61,7 @@ describe('validate edges', () => {
     }
 
     {
-      const validEdges = getValidEdgeTypes(buffer, join);
+      const validEdges = getValidEdgeTypes(buffer, null, join, null);
       expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('buffer');
     }
@@ -111,12 +111,22 @@ describe('validate edges', () => {
     );
 
     {
-      const validEdges = getValidEdgeTypes(nodeNode, bufferAccessNode);
+      const validEdges = getValidEdgeTypes(
+        nodeNode,
+        null,
+        bufferAccessNode,
+        null,
+      );
       expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
     }
     {
-      const validEdges = getValidEdgeTypes(bufferNode, bufferAccessNode);
+      const validEdges = getValidEdgeTypes(
+        bufferNode,
+        null,
+        bufferAccessNode,
+        null,
+      );
       expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('buffer');
     }
@@ -154,11 +164,16 @@ describe('validate edges', () => {
 
     for (const targetNode of [joinNode, serializedJoinNode]) {
       {
-        const validEdges = getValidEdgeTypes(nodeNode, targetNode);
+        const validEdges = getValidEdgeTypes(nodeNode, null, targetNode, null);
         expect(validEdges.length).toBe(0);
       }
       {
-        const validEdges = getValidEdgeTypes(bufferNode, targetNode);
+        const validEdges = getValidEdgeTypes(
+          bufferNode,
+          null,
+          targetNode,
+          null,
+        );
         expect(validEdges.length).toBe(1);
         expect(validEdges).toContain('buffer');
       }
@@ -187,13 +202,13 @@ describe('validate edges', () => {
     );
 
     {
-      const validEdges = getValidEdgeTypes(sectionInput, node);
+      const validEdges = getValidEdgeTypes(sectionInput, null, node, null);
       expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
     }
 
     {
-      const validEdges = getValidEdgeTypes(sectionInput, listen);
+      const validEdges = getValidEdgeTypes(sectionInput, null, listen, null);
       expect(validEdges.length).toBe(0);
     }
   });
@@ -220,12 +235,12 @@ describe('validate edges', () => {
     );
 
     {
-      const validEdges = getValidEdgeTypes(sectionBuffer, node);
+      const validEdges = getValidEdgeTypes(sectionBuffer, null, node, null);
       expect(validEdges.length).toBe(0);
     }
 
     {
-      const validEdges = getValidEdgeTypes(sectionBuffer, listen);
+      const validEdges = getValidEdgeTypes(sectionBuffer, null, listen, null);
       expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('buffer');
     }
@@ -252,13 +267,13 @@ describe('validate edges', () => {
     );
 
     {
-      const validEdges = getValidEdgeTypes(node, sectionOutput);
+      const validEdges = getValidEdgeTypes(node, null, sectionOutput, null);
       expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
     }
 
     {
-      const validEdges = getValidEdgeTypes(buffer, sectionOutput);
+      const validEdges = getValidEdgeTypes(buffer, null, sectionOutput, null);
       expect(validEdges.length).toBe(0);
     }
   });

@@ -1,6 +1,7 @@
 import type { NodeProps } from '@xyflow/react';
+import { HandleType } from '../handles';
 import type { OperationNode } from '.';
-import BaseNode, { HandleType } from './base-node';
+import BaseNode from './base-node';
 import { StreamOutIcon } from './icons';
 
 function StreamOutNodeComp(props: NodeProps<OperationNode<'stream_out'>>) {

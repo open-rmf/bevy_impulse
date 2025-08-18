@@ -1,6 +1,7 @@
 import type { NodeProps } from '@xyflow/react';
 import type { OperationNode } from '.';
-import BaseNode, { HandleType } from './base-node';
+import BaseNode from './base-node';
+import { HandleType } from '../handles';
 import { BufferIcon } from './icons';
 
 function BufferNodeComp(props: NodeProps<OperationNode<'buffer'>>) {

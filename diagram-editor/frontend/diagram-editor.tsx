@@ -46,6 +46,7 @@ import {
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
+import type { HandleId } from './handles';
 import { NodeManager, NodeManagerProvider } from './node-manager';
 import {
   type DiagramEditorNode,
@@ -528,7 +529,12 @@ function DiagramEditor() {
         throw new Error('cannot find source or target node');
       }
 
-      const validEdges = getValidEdgeTypes(sourceNode, targetNode);
+      const validEdges = getValidEdgeTypes(
+        sourceNode,
+        conn.sourceHandle as HandleId,
+        targetNode,
+        conn.targetHandle as HandleId,
+      );
       if (validEdges.length === 0) {
         showErrorToast(
           `cannot connect "${sourceNode.type}" to "${targetNode.type}"`,
@@ -621,7 +627,12 @@ function DiagramEditor() {
             throw new Error('cannot find source or target node');
           }
 
-          const allowedEdges = getValidEdgeTypes(sourceNode, targetNode);
+          const allowedEdges = getValidEdgeTypes(
+            sourceNode,
+            conn.sourceHandle as HandleId,
+            targetNode,
+            conn.targetHandle as HandleId,
+          );
           return allowedEdges.length > 0;
         }}
         onReconnect={(oldEdge, newConnection) => {
@@ -755,7 +766,9 @@ function DiagramEditor() {
               edge={editingEdge.edge}
               allowedEdgeTypes={getValidEdgeTypes(
                 editingEdge.sourceNode,
+                editingEdge.edge.sourceHandle,
                 editingEdge.targetNode,
+                editingEdge.edge.targetHandle,
               )}
               onChange={handleEdgeChange}
               onDelete={(changes) => {

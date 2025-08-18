@@ -3,7 +3,8 @@ import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
 import { isSectionBuilder } from '../utils/operation';
 import type { OperationNode } from '.';
-import BaseNode, { HandleType } from './base-node';
+import BaseNode from './base-node';
+import { HandleType } from '../handles';
 import {
   SectionBufferIcon,
   SectionIcon,

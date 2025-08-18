@@ -1,5 +1,6 @@
 import { Box, useTheme } from '@mui/material';
-import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { type NodeProps, Position } from '@xyflow/react';
+import { Handle, HandleType } from '../handles';
 import type { OperationNode } from '.';
 
 function ScopeNodeComp({
@@ -17,6 +18,7 @@ function ScopeNodeComp({
         type="target"
         position={targetPosition}
         isConnectable={isConnectable}
+        variant={HandleType.Data}
       />
       <Box
         sx={{
@@ -32,7 +34,12 @@ function ScopeNodeComp({
         type="source"
         position={sourcePosition}
         isConnectable={isConnectable}
-        className="handle-data-stream"
+        variant={HandleType.Data}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        variant={HandleType.Stream}
       />
     </>
   );

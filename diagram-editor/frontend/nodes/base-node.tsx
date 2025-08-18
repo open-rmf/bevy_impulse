@@ -6,18 +6,10 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { Handle, type NodeProps, Position } from '@xyflow/react';
-import { memo, useCallback } from 'react';
-import { exhaustiveCheck } from '../utils/exhaustive-check';
+import { type NodeProps, Position } from '@xyflow/react';
+import { memo } from 'react';
+import { Handle, type HandleProps, HandleType } from '../handles';
 import { LAYOUT_OPTIONS } from '../utils/layout';
-
-export enum HandleType {
-  Data,
-  Buffer,
-  Stream,
-  DataBuffer,
-  DataStream,
-}
 
 export interface BaseNodeProps extends NodeProps {
   color?: ButtonProps['color'];
@@ -33,6 +25,7 @@ export interface BaseNodeProps extends NodeProps {
    */
   outputHandleType?: HandleType;
   caption?: string;
+  extraHandles?: HandleProps[];
 }
 
 function BaseNode({
@@ -43,6 +36,7 @@ function BaseNode({
   inputHandleType = HandleType.Data,
   outputHandleType = HandleType.Data,
   caption,
+  extraHandles,
   isConnectable,
   selected,
   sourcePosition = Position.Bottom,
@@ -55,35 +49,6 @@ function BaseNode({
       materialIconOrSymbol
     );
 
-  const handleClassName = useCallback((handleType?: HandleType) => {
-    if (handleType === undefined) {
-      return undefined;
-    }
-
-    switch (handleType) {
-      case HandleType.Data: {
-        // use the default style
-        return undefined;
-      }
-      case HandleType.Buffer: {
-        return 'handle-buffer';
-      }
-      case HandleType.Stream: {
-        return 'handle-stream';
-      }
-      case HandleType.DataBuffer: {
-        return 'handle-data-buffer';
-      }
-      case HandleType.DataStream: {
-        return 'handle-data-stream';
-      }
-      default: {
-        exhaustiveCheck(handleType);
-        throw new Error('unknown edge category');
-      }
-    }
-  }, []);
-
   return (
     <Paper>
       {(variant === 'input' || variant === 'inputOutput') && (
@@ -91,7 +56,7 @@ function BaseNode({
           type="target"
           position={targetPosition}
           isConnectable={isConnectable}
-          className={handleClassName(inputHandleType)}
+          variant={inputHandleType}
         />
       )}
       <Button
@@ -139,9 +104,12 @@ function BaseNode({
           type="source"
           position={sourcePosition}
           isConnectable={isConnectable}
-          className={handleClassName(outputHandleType)}
+          variant={outputHandleType}
         />
       )}
+      {extraHandles?.map((handleProps, i) => (
+        <Handle key={i.toString()} {...handleProps} />
+      ))}
     </Paper>
   );
 }

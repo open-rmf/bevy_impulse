@@ -4,6 +4,7 @@ import {
   EdgeCategory,
   type EdgeTypes,
 } from '../edges';
+import type { HandleId } from '../handles';
 import type { NodeManager } from '../node-manager';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
@@ -54,8 +55,18 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
 
 export function getValidEdgeTypes(
   sourceNode: DiagramEditorNode,
+  sourceHandle: HandleId,
   targetNode: DiagramEditorNode,
+  targetHandle: HandleId,
 ): EdgeTypes[] {
+  if (sourceHandle !== targetHandle) {
+    return [];
+  }
+
+  if (sourceHandle === 'stream' || targetHandle === 'stream') {
+    return ['streamOut'];
+  }
+
   const allowedOutputEdges = [...ALLOWED_OUTPUT_EDGES[sourceNode.type]];
   const allowedInputEdgeCategories =
     ALLOWED_INPUT_EDGE_CATEGORIES[targetNode.type];
@@ -70,9 +81,15 @@ enum CardinalityType {
   Many,
 }
 
-function getOutputCardinality(type: NodeTypes): CardinalityType {
+function getOutputCardinality(
+  type: NodeTypes,
+  handleId: HandleId,
+): CardinalityType {
+  if (handleId === 'stream') {
+    return CardinalityType.Many;
+  }
+
   switch (type) {
-    case 'node':
     case 'fork_clone':
     case 'unzip':
     case 'buffer':
@@ -83,6 +100,7 @@ function getOutputCardinality(type: NodeTypes): CardinalityType {
     case 'fork_result': {
       return CardinalityType.Pair;
     }
+    case 'node':
     case 'buffer_access':
     case 'join':
     case 'serialized_join':
@@ -129,7 +147,12 @@ export function validateEdgeQuick(
     return createValidationError('cannot find source or target node');
   }
 
-  const validEdgeTypes = getValidEdgeTypes(sourceNode, targetNode);
+  const validEdgeTypes = getValidEdgeTypes(
+    sourceNode,
+    edge.sourceHandle,
+    targetNode,
+    edge.targetHandle,
+  );
   if (!validEdgeTypes.includes(edge.type)) {
     return createValidationError('invalid edge type');
   }
@@ -181,7 +204,10 @@ export function validateEdgeSimple(
 
   // Check if the source supports emitting multiple outputs.
   // NOTE: All nodes supports "Many" inputs so we don't need to check that.
-  const outputCardinality = getOutputCardinality(sourceNode.type);
+  const outputCardinality = getOutputCardinality(
+    sourceNode.type,
+    edge.sourceHandle,
+  );
   switch (outputCardinality) {
     case CardinalityType.Single: {
       if (edges.some((e) => e.source === sourceNode.id && edge.id !== e.id)) {
