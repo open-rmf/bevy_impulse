@@ -60,8 +60,8 @@ export function defaultEdgeData(type: EdgeTypes): EdgeData {
 export interface EditEdgeFormProps {
   edge: DiagramEditorEdge;
   allowedEdgeTypes: EdgeTypes[];
-  onChange?: (changes: EdgeChange<DiagramEditorEdge>) => void;
-  onDelete?: (change: EdgeRemoveChange) => void;
+  onChange: (changes: EdgeChange<DiagramEditorEdge>) => void;
+  onDelete: (change: EdgeRemoveChange) => void;
 }
 
 function EditEdgeForm({
@@ -113,7 +113,7 @@ function EditEdgeForm({
         action={
           <IconButton
             color="error"
-            onClick={() => onDelete?.({ type: 'remove', id: edge.id })}
+            onClick={() => onDelete({ type: 'remove', id: edge.id })}
           >
             <MaterialSymbol symbol="delete" />
           </IconButton>
@@ -133,7 +133,7 @@ function EditEdgeForm({
                 };
                 newEdge.type = ev.target.value;
                 newEdge.data = defaultEdgeData(newEdge.type);
-                onChange?.({
+                onChange({
                   type: 'replace',
                   id: edge.id,
                   item: newEdge,

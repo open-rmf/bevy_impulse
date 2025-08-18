@@ -18,14 +18,19 @@ export type BufferEdge = Edge<
 export type BufferEdgeCompProps = Exclude<EdgeProps<BufferEdge>, 'label'>;
 
 export const BufferEdgeComp = memo((props: BufferEdgeCompProps) => {
-  return (
-    <StepEdge
-      {...props}
-      label={
-        props.data.input.type === 'sectionBuffer'
-          ? props.data.input.inputId
-          : undefined
+  const label = (() => {
+    switch (props.data.input.type) {
+      case 'bufferKey': {
+        return props.data.input.key;
       }
-    />
-  );
+      case 'bufferSeq': {
+        return props.data.input.seq.toString();
+      }
+      case 'sectionBuffer': {
+        return props.data.input.inputId;
+      }
+    }
+  })();
+
+  return <StepEdge {...props} label={label} />;
 });

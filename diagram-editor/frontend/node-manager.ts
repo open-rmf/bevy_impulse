@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react';
 import type { DiagramEditorEdge } from './edges';
 import {
   type DiagramEditorNode,
@@ -14,7 +15,7 @@ export class NodeManager {
   private nodeIdMap: Map<string, DiagramEditorNode> = new Map();
   private namespacedOpIdMap: Map<string, DiagramEditorNode> = new Map();
 
-  constructor(nodes: DiagramEditorNode[]) {
+  constructor(public nodes: DiagramEditorNode[]) {
     for (const node of nodes) {
       this.nodeIdMap.set(node.id, node);
       if (isOperationNode(node)) {
@@ -138,4 +139,12 @@ export class NodeManager {
       }
     }
   }
+}
+
+const NodeManagerContext = createContext<NodeManager>(new NodeManager([]));
+
+export const NodeManagerProvider = NodeManagerContext.Provider;
+
+export function useNodeManager() {
+  return useContext(NodeManagerContext);
 }

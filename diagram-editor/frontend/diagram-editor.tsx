@@ -41,11 +41,12 @@ import {
   EditorMode,
   type EditorModeContext,
   EditorModeProvider,
+  type UseEditorModeContext,
 } from './editor-mode';
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
-import { NodeManager } from './node-manager';
+import { NodeManager, NodeManagerProvider } from './node-manager';
 import {
   type DiagramEditorNode,
   isBuiltinNode,
@@ -54,7 +55,9 @@ import {
   type OperationNode,
 } from './nodes';
 import { useTemplates } from './templates-provider';
+import { EdgesProvider } from './use-edges';
 import { autoLayout } from './utils/auto-layout';
+import { isRemoveChange } from './utils/change';
 import { getValidEdgeTypes, validateEdgeSimple } from './utils/connection';
 import { exhaustiveCheck } from './utils/exhaustive-check';
 import { exportTemplate } from './utils/export-diagram';
@@ -78,12 +81,12 @@ interface EditingEdge {
  * Returns null if the change does not result in any position changes.
  */
 function getChangeParentIdAndPosition(
-  reactFlow: ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
+  nodeManager: NodeManager,
   change: NodeChange<DiagramEditorNode>,
 ): [string, string | null, XYPosition] | null {
   switch (change.type) {
     case 'position': {
-      const changedNode = reactFlow.getNode(change.id);
+      const changedNode = nodeManager.getNode(change.id);
       if (!changedNode) {
         return null;
       }
@@ -105,6 +108,27 @@ function getChangeParentIdAndPosition(
   }
 }
 
+interface ProvidersProps {
+  editorModeContext: UseEditorModeContext;
+  nodeManager: NodeManager;
+  edges: DiagramEditorEdge[];
+}
+
+function Providers({
+  editorModeContext,
+  nodeManager,
+  edges,
+  children,
+}: React.PropsWithChildren<ProvidersProps>) {
+  return (
+    <EditorModeProvider value={editorModeContext}>
+      <NodeManagerProvider value={nodeManager}>
+        <EdgesProvider value={edges}>{children}</EdgesProvider>
+      </NodeManagerProvider>
+    </EditorModeProvider>
+  );
+}
+
 function DiagramEditor() {
   const reactFlowInstance = React.useRef<ReactFlowInstance<
     DiagramEditorNode,
@@ -118,6 +142,7 @@ function DiagramEditor() {
   const [nodes, setNodes] = React.useState<DiagramEditorNode[]>(
     () => loadEmpty().nodes,
   );
+  const nodeManager = React.useMemo(() => new NodeManager(nodes), [nodes]);
   const savedNodes = React.useRef<DiagramEditorNode[]>([]);
 
   const [edges, setEdges] = React.useState<DiagramEditorEdge[]>([]);
@@ -196,15 +221,11 @@ function DiagramEditor() {
 
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<DiagramEditorNode>[]) => {
-      const reactFlow = reactFlowInstance.current;
-      if (!reactFlow) {
-        return;
-      }
       const transitiveChanges: NodeChange<DiagramEditorNode>[] = [];
 
       // resize and reposition scope
       for (const change of changes) {
-        const changeIdPos = getChangeParentIdAndPosition(reactFlow, change);
+        const changeIdPos = getChangeParentIdAndPosition(nodeManager, change);
         if (!changeIdPos) {
           continue;
         }
@@ -213,13 +234,13 @@ function DiagramEditor() {
           continue;
         }
 
-        const scopeNode = reactFlow.getNode(changeParentId);
+        const scopeNode = nodeManager.getNode(changeParentId);
         if (!scopeNode) {
           continue;
         }
-        const scopeChildren = reactFlow
-          .getNodes()
-          .filter((n) => n.parentId === changeParentId && n.id !== changeId);
+        const scopeChildren = nodeManager.nodes.filter(
+          (n) => n.parentId === changeParentId && n.id !== changeId,
+        );
         const calculatedBounds = calculateScopeBounds([
           ...scopeChildren.map((n) => n.position),
           {
@@ -299,12 +320,12 @@ function DiagramEditor() {
       // remove children nodes of a removed parent
       const removedNodes = new Set(
         changes
-          .filter((change) => change.type === 'remove')
+          .filter((change) => isRemoveChange(change))
           .map((change) => change.id),
       );
       while (true) {
         let newChanges = false;
-        for (const node of reactFlow.getNodes()) {
+        for (const node of nodeManager.nodes) {
           if (
             node.parentId &&
             removedNodes.has(node.parentId) &&
@@ -325,7 +346,7 @@ function DiagramEditor() {
 
       // clean up dangling edges when a node is removed.
       const edgeChanges: EdgeRemoveChange[] = [];
-      for (const edge of reactFlowInstance.current?.getEdges() || []) {
+      for (const edge of edges) {
         if (removedNodes.has(edge.source) || removedNodes.has(edge.target)) {
           edgeChanges.push({
             type: 'remove',
@@ -339,7 +360,7 @@ function DiagramEditor() {
         applyNodeChanges([...changes, ...transitiveChanges], prev),
       );
     },
-    [handleEdgeChanges],
+    [handleEdgeChanges, nodeManager, edges],
   );
 
   const handleNodeChange = React.useCallback(
@@ -363,7 +384,7 @@ function DiagramEditor() {
       return { x: 0, y: 0 };
     }
     const parentNode = addOperationPopover.parentId
-      ? reactFlowInstance.current.getNode(addOperationPopover.parentId)
+      ? nodeManager.getNode(addOperationPopover.parentId)
       : null;
 
     const parentPosition = parentNode?.position
@@ -375,28 +396,32 @@ function DiagramEditor() {
         y: addOperationPopover.popOverPosition.top - parentPosition.y,
       }) || { x: 0, y: 0 }
     );
-  }, [addOperationPopover.parentId, addOperationPopover.popOverPosition]);
+  }, [
+    nodeManager,
+    addOperationPopover.parentId,
+    addOperationPopover.popOverPosition,
+  ]);
 
   const [editingNodeId, setEditingNodeId] = React.useState<string | null>(null);
 
   const [editingEdgeId, setEditingEdgeId] = React.useState<string | null>(null);
-  const editingEdge = React.useMemo<EditingEdge | null>(() => {
-    if (!reactFlowInstance.current || !editingEdgeId) {
+  const editingEdge: EditingEdge | null = (() => {
+    if (!editingEdgeId) {
       return null;
     }
 
-    const edge = reactFlowInstance.current.getEdge(editingEdgeId);
+    const edge = edges.find((e) => e.id === editingEdgeId);
     if (!edge) {
       console.error(`cannot find edge ${editingEdgeId}`);
       return null;
     }
 
-    const sourceNode = reactFlowInstance.current.getNode(edge.source);
+    const sourceNode = nodeManager.getNode(edge.source);
     if (!sourceNode) {
       console.error(`cannot find node ${edge.source}`);
       return null;
     }
-    const targetNode = reactFlowInstance.current.getNode(edge.target);
+    const targetNode = nodeManager.getNode(edge.target);
     if (!targetNode) {
       console.error(`cannot find node ${edge.target}`);
       return null;
@@ -407,7 +432,7 @@ function DiagramEditor() {
       sourceNode,
       targetNode,
     };
-  }, [editingEdgeId]);
+  })();
 
   const closeAllPopovers = React.useCallback(() => {
     setEditingNodeId(null);
@@ -424,10 +449,7 @@ function DiagramEditor() {
   >({ open: false });
   const renderEditForm = React.useCallback(
     (nodeId: string) => {
-      if (!reactFlowInstance.current) {
-        return null;
-      }
-      const node = reactFlowInstance.current.getNode(nodeId);
+      const node = nodeManager.getNode(nodeId);
       if (!node || isBuiltinNode(node)) {
         return null;
       }
@@ -455,13 +477,14 @@ function DiagramEditor() {
       }
       return (
         <EditNodeForm
+          key={editingNodeId}
           node={node}
           onChange={handleNodeChange}
           onDelete={handleDelete}
         />
       );
     },
-    [handleNodeChange, closeAllPopovers],
+    [nodeManager, editingNodeId, handleNodeChange, closeAllPopovers],
   );
 
   const mouseDownTime = React.useRef(0);
@@ -475,10 +498,6 @@ function DiagramEditor() {
 
   const loadDiagram = React.useCallback(
     (jsonStr: string) => {
-      if (!reactFlowInstance.current) {
-        return;
-      }
-
       try {
         const [diagram, graph] = loadDiagramJson(jsonStr);
         const changes = autoLayout(graph.nodes, graph.edges, LAYOUT_OPTIONS);
@@ -503,12 +522,8 @@ function DiagramEditor() {
 
   const tryCreateEdge = React.useCallback(
     (conn: Connection, id?: string): DiagramEditorEdge | null => {
-      if (!reactFlowInstance.current) {
-        return null;
-      }
-
-      const sourceNode = reactFlowInstance.current.getNode(conn.source);
-      const targetNode = reactFlowInstance.current.getNode(conn.target);
+      const sourceNode = nodeManager.getNode(conn.source);
+      const targetNode = nodeManager.getNode(conn.target);
       if (!sourceNode || !targetNode) {
         throw new Error('cannot find source or target node');
       }
@@ -535,10 +550,7 @@ function DiagramEditor() {
         }
       }
 
-      const validationResult = validateEdgeSimple(
-        newEdge,
-        reactFlowInstance.current,
-      );
+      const validationResult = validateEdgeSimple(newEdge, nodeManager, edges);
       if (!validationResult.valid) {
         showErrorToast(validationResult.error);
         return null;
@@ -546,11 +558,15 @@ function DiagramEditor() {
 
       return newEdge;
     },
-    [showErrorToast],
+    [showErrorToast, nodeManager, edges],
   );
 
   return (
-    <EditorModeProvider value={[editorMode, updateEditorModeAction]}>
+    <Providers
+      editorModeContext={[editorMode, updateEditorModeAction]}
+      nodeManager={nodeManager}
+      edges={edges}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -599,8 +615,8 @@ function DiagramEditor() {
           }
         }}
         isValidConnection={(conn) => {
-          const sourceNode = reactFlowInstance.current?.getNode(conn.source);
-          const targetNode = reactFlowInstance.current?.getNode(conn.target);
+          const sourceNode = nodeManager.getNode(conn.source);
+          const targetNode = nodeManager.getNode(conn.target);
           if (!sourceNode || !targetNode) {
             throw new Error('cannot find source or target node');
           }
@@ -695,10 +711,7 @@ function DiagramEditor() {
             aria-label="Save"
             sx={{ position: 'absolute', right: 64, bottom: 64 }}
             onClick={() => {
-              const exportedTemplate = exportTemplate(
-                new NodeManager(nodes),
-                edges,
-              );
+              const exportedTemplate = exportTemplate(nodeManager, edges);
               setTemplates((prev) => ({
                 ...prev,
                 [editorMode.templateId]: exportedTemplate,
@@ -738,6 +751,7 @@ function DiagramEditor() {
           {editingNodeId && renderEditForm(editingNodeId)}
           {editingEdge && (
             <EditEdgeForm
+              key={editingEdgeId}
               edge={editingEdge.edge}
               allowedEdgeTypes={getValidEdgeTypes(
                 editingEdge.sourceNode,
@@ -768,11 +782,9 @@ function DiagramEditor() {
         <ExportDiagramDialog
           open={openExportDiagramDialog}
           onClose={() => setOpenExportDiagramDialog(false)}
-          nodes={nodes}
-          edges={edges}
         />
       </ReactFlow>
-    </EditorModeProvider>
+    </Providers>
   );
 }
 

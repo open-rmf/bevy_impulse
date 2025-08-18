@@ -3,6 +3,7 @@ import type { NodeAddChange, XYPosition } from '@xyflow/react';
 import React from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { EditorMode, useEditorMode } from './editor-mode';
+import { useNodeManager } from './node-manager';
 import type { DiagramEditorNode } from './nodes';
 import {
   BufferAccessIcon,
@@ -33,7 +34,6 @@ import {
   UnzipIcon,
 } from './nodes';
 import type { DiagramOperation } from './types/api';
-import { useReactFlow } from './use-react-flow';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
 
 const StyledOperationButton = styled(Button)({
@@ -108,14 +108,14 @@ function createNodeChange(
 
 function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
   const [editorMode] = useEditorMode();
-  const reactFlow = useReactFlow();
+  const nodeManager = useNodeManager();
   const namespace = React.useMemo(() => {
-    const parentNode = parentId && reactFlow.getNode(parentId);
+    const parentNode = parentId && nodeManager.getNode(parentId);
     if (!parentNode || !isOperationNode(parentNode)) {
       return ROOT_NAMESPACE;
     }
     return joinNamespaces(parentNode.data.namespace, parentNode.data.opId);
-  }, [parentId, reactFlow.getNode]);
+  }, [parentId, nodeManager]);
 
   return (
     <ButtonGroup

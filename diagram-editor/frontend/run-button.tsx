@@ -13,15 +13,17 @@ import {
 } from '@mui/material';
 import { useMemo, useRef, useState } from 'react';
 import { useApiClient } from './api-client-provider';
-import { NodeManager } from './node-manager';
+import { useNodeManager } from './node-manager';
 import { MaterialSymbol } from './nodes';
 import { useTemplates } from './templates-provider';
-import { useReactFlow } from './use-react-flow';
+import { useEdges } from './use-edges';
 import { exportDiagram } from './utils/export-diagram';
 
 type ResponseContent = { raw: string } | { err: string };
 
-function RunButton() {
+export function RunButton() {
+  const nodeManager = useNodeManager();
+  const edges = useEdges();
   const [openPopover, setOpenPopover] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const theme = useTheme();
@@ -30,7 +32,6 @@ function RunButton() {
     raw: '',
   });
   const apiClient = useApiClient();
-  const reactFlow = useReactFlow();
   const [templates, _setTemplates] = useTemplates();
   const [running, setRunning] = useState(false);
 
@@ -58,9 +59,7 @@ function RunButton() {
   const handleRunClick = () => {
     try {
       const request = JSON.parse(requestJson);
-      const nodes = reactFlow.getNodes();
-      const edges = reactFlow.getEdges();
-      const diagram = exportDiagram(new NodeManager(nodes), edges, templates);
+      const diagram = exportDiagram(nodeManager, edges, templates);
       apiClient.postRunWorkflow(diagram, request).subscribe({
         next: (response) => {
           setResponseContent({ raw: JSON.stringify(response, null, 2) });
@@ -170,5 +169,3 @@ function RunButton() {
     </>
   );
 }
-
-export default RunButton;

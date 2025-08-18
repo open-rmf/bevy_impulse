@@ -11,18 +11,15 @@ import {
 } from '@mui/material';
 import { deflateSync, strToU8 } from 'fflate';
 import React from 'react';
-import type { DiagramEditorEdge } from './edges';
-import { NodeManager } from './node-manager';
-import type { DiagramEditorNode } from './nodes';
+import { useNodeManager } from './node-manager';
 import { MaterialSymbol } from './nodes';
 import { useTemplates } from './templates-provider';
+import { useEdges } from './use-edges';
 import { exportDiagram } from './utils/export-diagram';
 
 export interface ExportDiagramDialogProps {
   open: boolean;
   onClose: () => void;
-  nodes: DiagramEditorNode[];
-  edges: DiagramEditorEdge[];
 }
 
 interface DialogData {
@@ -30,12 +27,9 @@ interface DialogData {
   diagramJson: string;
 }
 
-function ExportDiagramDialog({
-  open,
-  onClose,
-  nodes,
-  edges,
-}: ExportDiagramDialogProps) {
+function ExportDiagramDialog({ open, onClose }: ExportDiagramDialogProps) {
+  const nodeManager = useNodeManager();
+  const edges = useEdges();
   const [dialogData, setDialogData] = React.useState<DialogData | null>(null);
   const [templates] = useTemplates();
 
@@ -46,7 +40,6 @@ function ExportDiagramDialog({
       return;
     }
 
-    const nodeManager = new NodeManager(nodes);
     const diagram = exportDiagram(nodeManager, edges, templates);
     const diagramJsonMin = JSON.stringify(diagram);
     // Compress the JSON string to Uint8Array
@@ -68,7 +61,7 @@ function ExportDiagramDialog({
     };
 
     setDialogData(dialogData);
-  }, [open, nodes, edges, templates]);
+  }, [open, nodeManager, edges, templates]);
 
   const handleDownload = () => {
     if (!dialogData) {

@@ -9,10 +9,10 @@ import {
 import type { EdgeChange } from '@xyflow/react';
 import { useId, useMemo } from 'react';
 import type { BufferEdge } from '../edges';
+import { useNodeManager } from '../node-manager';
 import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
 import type { SectionTemplate } from '../types/api';
-import { useReactFlow } from '../use-react-flow';
 import { exhaustiveCheck } from '../utils/exhaustive-check';
 
 function getTemplateBuffers(template: SectionTemplate): string[] {
@@ -89,8 +89,8 @@ export function BufferEdgeInputForm({
 
   const labelId = useId();
 
-  const reactFlow = useReactFlow();
-  const targetNode = reactFlow.getNode(edge.target);
+  const nodeManager = useNodeManager();
+  const targetNode = nodeManager.getNode(edge.target);
   const targetIsSection = targetNode?.type === 'section';
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();

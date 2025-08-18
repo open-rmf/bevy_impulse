@@ -1,10 +1,10 @@
-import type { ReactFlowInstance } from '@xyflow/react';
 import {
   type DiagramEditorEdge,
   EDGE_CATEGORIES,
   EdgeCategory,
   type EdgeTypes,
 } from '../edges';
+import type { NodeManager } from '../node-manager';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
 
@@ -113,15 +113,6 @@ function createValidationError(error: string): EdgeValidationResult {
 }
 
 /**
- * A minimal type for only the required accessor methods in `ReactFlowInstance`.
- * This is mostly so that tests can be written without rendering a `ReactFlow` instance.
- */
-export type NodesAndEdgesAccessor = Pick<
-  ReactFlowInstance<DiagramEditorNode, DiagramEditorEdge>,
-  'getNode' | 'getNodes' | 'getEdges'
->;
-
-/**
  * Perform a quick check if an edge is valid.
  * This only checks if the edge type is valid, does not check for conflicting edges, data correctness etc.
  *
@@ -129,10 +120,10 @@ export type NodesAndEdgesAccessor = Pick<
  */
 export function validateEdgeQuick(
   edge: DiagramEditorEdge,
-  reactFlow: NodesAndEdgesAccessor,
+  nodeManager: NodeManager,
 ): EdgeValidationResult {
-  const sourceNode = reactFlow.getNode(edge.source);
-  const targetNode = reactFlow.getNode(edge.target);
+  const sourceNode = nodeManager.getNode(edge.source);
+  const targetNode = nodeManager.getNode(edge.target);
 
   if (!sourceNode || !targetNode) {
     return createValidationError('cannot find source or target node');
@@ -156,15 +147,16 @@ export function validateEdgeQuick(
  */
 export function validateEdgeSimple(
   edge: DiagramEditorEdge,
-  reactFlow: NodesAndEdgesAccessor,
+  nodeManager: NodeManager,
+  edges: DiagramEditorEdge[],
 ): EdgeValidationResult {
-  const quickCheck = validateEdgeQuick(edge, reactFlow);
+  const quickCheck = validateEdgeQuick(edge, nodeManager);
   if (!quickCheck.valid) {
     return quickCheck;
   }
 
-  const sourceNode = reactFlow.getNode(edge.source);
-  const targetNode = reactFlow.getNode(edge.target);
+  const sourceNode = nodeManager.getNode(edge.source);
+  const targetNode = nodeManager.getNode(edge.target);
   if (!sourceNode || !targetNode) {
     return createValidationError('cannot find source or target node');
   }
@@ -192,18 +184,14 @@ export function validateEdgeSimple(
   const outputCardinality = getOutputCardinality(sourceNode.type);
   switch (outputCardinality) {
     case CardinalityType.Single: {
-      if (
-        reactFlow
-          .getEdges()
-          .some((e) => e.source === sourceNode.id && edge.id !== e.id)
-      ) {
+      if (edges.some((e) => e.source === sourceNode.id && edge.id !== e.id)) {
         return createValidationError('source node already has an edge');
       }
       break;
     }
     case CardinalityType.Pair: {
       let count = 0;
-      for (const e of reactFlow.getEdges()) {
+      for (const e of edges) {
         if (e.source === sourceNode.id && edge.id !== e.id) {
           count++;
         }
@@ -234,9 +222,10 @@ export function validateEdgeSimple(
  */
 export async function validateEdgeFull(
   edge: DiagramEditorEdge,
-  reactFlow: NodesAndEdgesAccessor,
+  nodeManager: NodeManager,
+  edges: DiagramEditorEdge[],
 ): Promise<EdgeValidationResult> {
-  const simpleCheck = validateEdgeSimple(edge, reactFlow);
+  const simpleCheck = validateEdgeSimple(edge, nodeManager, edges);
   if (!simpleCheck.valid) {
     return simpleCheck;
   }

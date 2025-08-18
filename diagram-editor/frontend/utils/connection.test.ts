@@ -5,55 +5,20 @@ import {
   createForkResultOkEdge,
   type DiagramEditorEdge,
 } from '../edges';
+import { NodeManager } from '../node-manager';
 import {
   createOperationNode,
   createSectionBufferNode,
   createSectionInputNode,
   createSectionOutputNode,
   createTerminateNode,
-  type DiagramEditorNode,
 } from '../nodes';
 import {
   getValidEdgeTypes,
-  type NodesAndEdgesAccessor,
   validateEdgeQuick,
   validateEdgeSimple,
 } from './connection';
 import { ROOT_NAMESPACE } from './namespace';
-
-class MockReactFlowAccessor implements NodesAndEdgesAccessor {
-  nodesMap: Record<string, DiagramEditorNode>;
-  edgesMap: Record<string, DiagramEditorEdge>;
-
-  constructor(nodes: DiagramEditorNode[], edges: DiagramEditorEdge[]) {
-    this.nodesMap = nodes.reduce(
-      (map, node) => {
-        map[node.id] = node;
-        return map;
-      },
-      {} as Record<string, DiagramEditorNode>,
-    );
-    this.edgesMap = edges.reduce(
-      (map, edge) => {
-        map[edge.id] = edge;
-        return map;
-      },
-      {} as Record<string, DiagramEditorEdge>,
-    );
-  }
-
-  getNode(id: string): DiagramEditorNode | undefined {
-    return this.nodesMap[id];
-  }
-
-  getNodes(): DiagramEditorNode[] {
-    return Object.values(this.nodesMap);
-  }
-
-  getEdges(): DiagramEditorEdge[] {
-    return Object.values(this.edgesMap);
-  }
-}
 
 describe('validate edges', () => {
   test('"buffer" can only connect to operations that accepts a buffer', () => {
@@ -90,8 +55,8 @@ describe('validate edges', () => {
 
       // "buffer" does not output data ("default" edge)
       const edge = createDefaultEdge(buffer.id, join.id);
-      const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
-      const result = validateEdgeQuick(edge, reactFlow);
+      const nodeManager = new NodeManager([buffer, join]);
+      const result = validateEdgeQuick(edge, nodeManager);
       expect(result.valid).toBe(false);
     }
 
@@ -106,8 +71,8 @@ describe('validate edges', () => {
         type: 'bufferSeq',
         seq: 0,
       });
-      const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
-      const result = validateEdgeQuick(edge, reactFlow);
+      const nodeManager = new NodeManager([buffer, join]);
+      const result = validateEdgeQuick(edge, nodeManager);
       expect(result.valid).toBe(true);
     }
 
@@ -116,8 +81,8 @@ describe('validate edges', () => {
         type: 'bufferKey',
         key: 'test',
       });
-      const reactFlow = new MockReactFlowAccessor([buffer, join], [edge]);
-      const result = validateEdgeQuick(edge, reactFlow);
+      const nodeManager = new NodeManager([buffer, join]);
+      const result = validateEdgeQuick(edge, nodeManager);
       expect(result.valid).toBe(true);
     }
   });
@@ -322,17 +287,19 @@ describe('validate edges', () => {
     );
 
     const existingEdge = createDefaultEdge(nodeNode.id, forkCloneNode.id);
-    const reactFlow = new MockReactFlowAccessor(
-      [nodeNode, forkCloneNode],
-      [existingEdge],
-    );
+    const nodeManager = new NodeManager([
+      nodeNode,
+      forkCloneNode,
+      forkCloneNode2,
+    ]);
+    const edges = [existingEdge];
     {
-      const result = validateEdgeSimple(existingEdge, reactFlow);
+      const result = validateEdgeSimple(existingEdge, nodeManager, edges);
       expect(result.valid).toBe(true);
     }
     {
       const newEdge = createDefaultEdge(nodeNode.id, forkCloneNode2.id);
-      const result = validateEdgeSimple(newEdge, reactFlow);
+      const result = validateEdgeSimple(newEdge, nodeManager, edges);
       expect(result.valid).toBe(false);
     }
   });
@@ -351,14 +318,11 @@ describe('validate edges', () => {
       createDefaultEdge(forkCloneNode.id, terminateNode.id),
       createDefaultEdge(forkCloneNode.id, terminateNode.id),
     ];
-    const reactFlow = new MockReactFlowAccessor(
-      [forkCloneNode, terminateNode],
-      edges,
-    );
+    const nodeManager = new NodeManager([forkCloneNode, terminateNode]);
 
     {
       const newEdge = createDefaultEdge(forkCloneNode.id, terminateNode.id);
-      const result = validateEdgeSimple(newEdge, reactFlow);
+      const result = validateEdgeSimple(newEdge, nodeManager, edges);
       expect(result.valid).toBe(true);
     }
   });
@@ -376,20 +340,17 @@ describe('validate edges', () => {
       'test_fork_result',
     );
     const terminateNode = createTerminateNode(ROOT_NAMESPACE, { x: 0, y: 0 });
+    const nodeManager = new NodeManager([forkResultNode, terminateNode]);
 
     {
       const existingEdges = [
         createForkResultOkEdge(forkResultNode.id, terminateNode.id),
       ];
-      const reactFlow = new MockReactFlowAccessor(
-        [forkResultNode, terminateNode],
-        existingEdges,
-      );
       const newEdge = createForkResultErrEdge(
         forkResultNode.id,
         terminateNode.id,
       );
-      const result = validateEdgeSimple(newEdge, reactFlow);
+      const result = validateEdgeSimple(newEdge, nodeManager, existingEdges);
       expect(result.valid).toBe(true);
     }
 
@@ -398,15 +359,11 @@ describe('validate edges', () => {
         createForkResultOkEdge(forkResultNode.id, terminateNode.id),
         createForkResultErrEdge(forkResultNode.id, terminateNode.id),
       ];
-      const reactFlow = new MockReactFlowAccessor(
-        [forkResultNode, terminateNode],
-        existingEdges,
-      );
       const newEdge = createForkResultErrEdge(
         forkResultNode.id,
         terminateNode.id,
       );
-      const result = validateEdgeSimple(newEdge, reactFlow);
+      const result = validateEdgeSimple(newEdge, nodeManager, existingEdges);
       expect(result.valid).toBe(false);
     }
   });
@@ -428,29 +385,22 @@ describe('validate edges', () => {
       { type: 'section', builder: 'test_section' },
       'test_op_section',
     );
+    const nodeManager = new NodeManager([bufferNode, sectionNode]);
 
     {
-      const reactFlow = new MockReactFlowAccessor(
-        [bufferNode, sectionNode],
-        [],
-      );
       const edge = createBufferEdge(bufferNode.id, sectionNode.id, {
         type: 'bufferSeq',
         seq: 0,
       });
-      const result = validateEdgeSimple(edge, reactFlow);
+      const result = validateEdgeSimple(edge, nodeManager, []);
       expect(result.valid).toBe(false);
     }
     {
-      const reactFlow = new MockReactFlowAccessor(
-        [bufferNode, sectionNode],
-        [],
-      );
       const edge = createBufferEdge(bufferNode.id, sectionNode.id, {
         type: 'sectionBuffer',
         inputId: 'test',
       });
-      const result = validateEdgeSimple(edge, reactFlow);
+      const result = validateEdgeSimple(edge, nodeManager, []);
       expect(result.valid).toBe(true);
     }
   });
@@ -476,18 +426,20 @@ describe('validate edges', () => {
     );
 
     {
-      const reactFlow = new MockReactFlowAccessor([nodeNode, sectionNode], []);
+      const nodeManager = new NodeManager([nodeNode, sectionNode]);
+      const edges: DiagramEditorEdge[] = [];
       const edge = createDefaultEdge(nodeNode.id, sectionNode.id);
-      const result = validateEdgeSimple(edge, reactFlow);
+      const result = validateEdgeSimple(edge, nodeManager, edges);
       expect(result.valid).toBe(false);
     }
     {
-      const reactFlow = new MockReactFlowAccessor([nodeNode, sectionNode], []);
+      const nodeManager = new NodeManager([nodeNode, sectionNode]);
+      const edges: DiagramEditorEdge[] = [];
       const edge = createDefaultEdge(nodeNode.id, sectionNode.id, {
         type: 'sectionInput',
         inputId: 'test',
       });
-      const result = validateEdgeSimple(edge, reactFlow);
+      const result = validateEdgeSimple(edge, nodeManager, edges);
       expect(result.valid).toBe(true);
     }
   });

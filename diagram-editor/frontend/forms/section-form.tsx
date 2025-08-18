@@ -10,6 +10,7 @@ import {
 import type { EdgeChange, NodeChange, NodeRemoveChange } from '@xyflow/react';
 import { type PropsWithChildren, useMemo } from 'react';
 import type { SectionEdge } from '../edges';
+import { useNodeManager } from '../node-manager';
 import {
   isSectionNode,
   MaterialSymbol,
@@ -20,7 +21,6 @@ import {
 } from '../nodes';
 import { useRegistry } from '../registry-provider';
 import { useTemplates } from '../templates-provider';
-import { useReactFlow } from '../use-react-flow';
 import BaseEditOperationForm, {
   type BaseEditOperationFormProps,
 } from './base-edit-operation-form';
@@ -207,10 +207,10 @@ export interface SectionEdgeFormProps {
 }
 
 export function SectionEdgeForm({ edge, onChange }: SectionEdgeFormProps) {
-  const reactFlow = useReactFlow();
+  const nodeManager = useNodeManager();
   const registry = useRegistry();
   const [templates, _setTemplates] = useTemplates();
-  const sourceNode = reactFlow.getNode(edge.source);
+  const sourceNode = nodeManager.getNode(edge.source);
 
   const outputs = useMemo(() => {
     if (sourceNode && isSectionNode(sourceNode)) {

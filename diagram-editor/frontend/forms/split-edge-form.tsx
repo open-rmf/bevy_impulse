@@ -14,6 +14,7 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     if (edge.type === 'splitKey') {
+      console.log(edge.data.output);
       const newKey = event.target.value;
       onChange?.({
         type: 'replace',
@@ -37,7 +38,7 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
       {edge.type === 'splitKey' && (
         <TextField
           label="Key"
-          value={edge.data?.key ?? ''}
+          value={edge.data.output.key ?? ''}
           onChange={handleDataChange}
           fullWidth
         />
@@ -46,7 +47,7 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
         <TextField
           label="Sequence"
           type="number"
-          value={edge.data?.seq ?? 0}
+          value={edge.data.output.seq ?? 0}
           onChange={handleDataChange}
           fullWidth
         />
