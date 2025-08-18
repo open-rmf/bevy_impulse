@@ -26,6 +26,25 @@ function getTemplateBuffers(template: SectionTemplate): string[] {
   }
 }
 
+function defaultInputData(
+  inputType: BufferEdge['data']['input']['type'],
+): BufferEdge['data']['input'] {
+  switch (inputType) {
+    case 'bufferKey': {
+      return { type: 'bufferKey', key: '' };
+    }
+    case 'bufferSeq': {
+      return { type: 'bufferSeq', seq: 0 };
+    }
+    case 'sectionBuffer': {
+      return { type: 'sectionBuffer', inputId: '' };
+    }
+    default:
+      exhaustiveCheck(inputType);
+      throw new Error('unknown buffer edge input type');
+  }
+}
+
 export interface BufferEdgeInputFormProps {
   edge: BufferEdge;
   onChange?: (changes: EdgeChange<BufferEdge>) => void;
@@ -116,7 +135,24 @@ export function BufferEdgeInputForm({
     <>
       <FormControl>
         <InputLabel id={labelId}>Slot</InputLabel>
-        <Select labelId={labelId} label="Slot" value={edge.data.input.type}>
+        <Select
+          labelId={labelId}
+          label="Slot"
+          value={edge.data.input.type}
+          onChange={(ev) => {
+            onChange?.({
+              type: 'replace',
+              id: edge.id,
+              item: {
+                ...edge,
+                data: {
+                  ...edge.data,
+                  input: defaultInputData(ev.target.value),
+                },
+              } as BufferEdge,
+            });
+          }}
+        >
           {!targetIsSection && <MenuItem value="bufferSeq">Index</MenuItem>}
           {!targetIsSection && <MenuItem value="bufferKey">Key</MenuItem>}
           {targetIsSection && (
