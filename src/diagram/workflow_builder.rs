@@ -1262,8 +1262,12 @@ impl TraceInfo {
         construction: impl Serialize,
         trace: Option<TraceToggle>,
     ) -> Result<Self, DiagramErrorCode> {
+        let construction = Some(Arc::new(
+            serde_json::to_value(construction).map_err(DiagramErrorCode::TraceInfoError)?,
+        ));
+
         Ok(Self {
-            construction: Some(Arc::new(serde_json::to_value(construction)?)),
+            construction,
             trace,
         })
     }

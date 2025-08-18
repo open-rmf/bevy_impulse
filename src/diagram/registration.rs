@@ -181,7 +181,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                 .schema_generator
                 .subschema_for::<Config>(),
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
-                let config = serde_json::from_value(config)?;
+                let config =
+                    serde_json::from_value(config).map_err(DiagramErrorCode::ConfigError)?;
                 Ok(f(builder, config).into())
             })),
         };
