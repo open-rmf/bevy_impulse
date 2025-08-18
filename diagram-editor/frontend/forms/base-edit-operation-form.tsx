@@ -43,6 +43,7 @@ function BaseEditOperationForm({
           <TextField
             required
             label="id"
+            fullWidth
             value={node.data.opId}
             onChange={(ev) => {
               const updatedNode = { ...node };

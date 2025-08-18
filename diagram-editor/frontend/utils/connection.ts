@@ -72,6 +72,7 @@ enum CardinalityType {
 
 function getOutputCardinality(type: NodeTypes): CardinalityType {
   switch (type) {
+    case 'node':
     case 'fork_clone':
     case 'unzip':
     case 'buffer':
@@ -82,7 +83,6 @@ function getOutputCardinality(type: NodeTypes): CardinalityType {
     case 'fork_result': {
       return CardinalityType.Pair;
     }
-    case 'node':
     case 'buffer_access':
     case 'join':
     case 'serialized_join':

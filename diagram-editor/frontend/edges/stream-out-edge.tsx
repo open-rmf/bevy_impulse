@@ -4,7 +4,7 @@ import type { Edge } from '../types/react-flow';
 import type { DefaultInputSlotData } from './input-slots';
 
 export type StreamOutOutputData = {
-  name: string;
+  streamId: string;
 };
 
 export type StreamOutEdge = Edge<
@@ -16,7 +16,9 @@ export type StreamOutEdge = Edge<
 export type StreamOutEdgeProps = Exclude<EdgeProps<StreamOutEdge>, 'label'>;
 
 function StreamOutEdgeComp(props: StreamOutEdgeProps) {
-  return <StepEdge {...props} label={`stream: ${props.data.name}`} />;
+  return (
+    <StepEdge {...props} label={`stream: ${props.data.output.streamId}`} />
+  );
 }
 
 export default memo(StreamOutEdgeComp);

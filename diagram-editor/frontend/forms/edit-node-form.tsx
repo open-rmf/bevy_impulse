@@ -17,6 +17,7 @@ import {
   SectionInputForm,
   SectionOutputForm,
 } from './section-form';
+import { StreamOutForm, type StreamOutFormProps } from './stream-out-form';
 import TransformForm, { type TransformFormProps } from './transform-form';
 
 interface EditOperationNodeFormProps {
@@ -41,6 +42,9 @@ function EditOperationNodeForm(props: EditOperationNodeFormProps) {
     }
     case 'transform': {
       return <TransformForm {...(props as TransformFormProps)} />;
+    }
+    case 'stream_out': {
+      return <StreamOutForm {...(props as StreamOutFormProps)} />;
     }
     default: {
       return <BaseEditOperationForm {...props} />;

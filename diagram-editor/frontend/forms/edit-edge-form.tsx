@@ -17,6 +17,7 @@ import type {
   EdgeData,
   EdgeTypes,
   SectionEdge,
+  StreamOutEdge,
   UnzipEdge,
 } from '../edges';
 import { MaterialSymbol } from '../nodes';
@@ -26,6 +27,7 @@ import { DataInputForm } from './data-input-form';
 import { SectionEdgeForm } from './section-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';
 import UnzipEdgeForm from './unzip-edge-form';
+import { StreamOutEdgeForm } from './stream-out-edge-form';
 
 const EDGE_TYPES_NAME = {
   buffer: 'Buffer',
@@ -48,7 +50,7 @@ const EDGE_DEFAULT_OUTPUT_DATA = {
   splitKey: { output: { key: '' }, input: { type: 'default' } },
   splitSeq: { output: { seq: 0 }, input: { type: 'default' } },
   splitRemaining: { output: {}, input: { type: 'default' } },
-  streamOut: { output: { name: '' }, input: { type: 'default' } },
+  streamOut: { output: { streamId: '' }, input: { type: 'default' } },
   unzip: { output: { seq: 0 }, input: { type: 'default' } },
   section: { output: { output: '' }, input: { type: 'default' } },
 } satisfies { [K in EdgeTypes]: EdgeData<K> };
@@ -77,8 +79,12 @@ function EditEdgeForm({
           <BufferEdgeInputForm edge={edge as BufferEdge} onChange={onChange} />
         );
       }
+      case 'streamOut': {
+        return (
+          <StreamOutEdgeForm edge={edge as StreamOutEdge} onChange={onChange} />
+        );
+      }
       case 'default':
-      case 'streamOut':
       case 'forkResultOk':
       case 'forkResultErr': {
         // these edges have no extra options

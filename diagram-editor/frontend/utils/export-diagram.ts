@@ -45,7 +45,7 @@ function syncStreamOut(
   edge: StreamOutEdge,
 ) {
   sourceOp.stream_out = sourceOp.stream_out ? sourceOp.stream_out : {};
-  sourceOp.stream_out[edge.data.output.name] =
+  sourceOp.stream_out[edge.data.output.streamId] =
     nodeManager.getTargetNextOp(edge);
 }
 

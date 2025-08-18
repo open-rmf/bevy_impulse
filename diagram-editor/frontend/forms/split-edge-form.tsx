@@ -14,7 +14,6 @@ function SplitEdgeForm({ edge, onChange }: SplitEdgeFormProps) {
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     if (edge.type === 'splitKey') {
-      console.log(edge.data.output);
       const newKey = event.target.value;
       onChange?.({
         type: 'replace',
