@@ -322,7 +322,13 @@ fn debug_feedback(
     feedback_query: bevy_ecs::system::Query<&FeedbackSender>,
 ) {
     for ev in op_started.read() {
-        match feedback_query.get(ev.session) {
+        let session = match ev.session_stack.last() {
+            Some(session) => session,
+            None => {
+                continue;
+            }
+        };
+        match feedback_query.get(*session) {
             Ok(feedback_tx) => {
                 if let Err(e) = feedback_tx.0.send(ev.clone()) {
                     error!("{}", e);
