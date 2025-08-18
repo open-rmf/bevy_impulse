@@ -75,6 +75,7 @@ where
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddImpulse::new(
+            None,
             source,
             ImpulseBlockingMap::new(target, self.def),
         ));
@@ -184,6 +185,7 @@ where
 
     fn connect(self, _: Option<Entity>, source: Entity, target: Entity, commands: &mut Commands) {
         commands.add(AddImpulse::new(
+            None,
             source,
             ImpulseAsyncMap::new(target, self.def),
         ));

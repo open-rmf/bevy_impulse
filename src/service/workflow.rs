@@ -25,7 +25,7 @@ use crate::{
 };
 
 use bevy_ecs::prelude::{Component, Entity, World};
-use bevy_hierarchy::prelude::DespawnRecursiveExt;
+use bevy_hierarchy::prelude::{BuildWorldChildren, DespawnRecursiveExt};
 
 pub(crate) struct WorkflowHooks {}
 
@@ -120,6 +120,7 @@ where
         } = source_mut.take_input::<Request>()?;
         let scoped_session = world
             .spawn((ParentSession::new(session), SessionStatus::Active))
+            .set_parent(session)
             .id();
 
         let result = serve_workflow_impl::<Request, Response, Streams>(

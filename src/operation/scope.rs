@@ -37,7 +37,7 @@ use bevy_ecs::{
     prelude::{Commands, Component, Entity, World},
     system::Command,
 };
-use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
+use bevy_hierarchy::{BuildChildren, BuildWorldChildren, DespawnRecursiveExt};
 
 use smallvec::SmallVec;
 
@@ -49,7 +49,9 @@ use std::{
 
 use thiserror::Error as ThisError;
 
-#[derive(Component)]
+// TODO(@mxgrey): Consider whether ParentSession is now redundant with the
+// built-in Parent since we are now using Parent to link sessions together.
+#[derive(Component, Deref)]
 pub struct ParentSession(Entity);
 
 impl ParentSession {
@@ -363,6 +365,7 @@ fn dyn_begin_scope<Request: 'static + Send + Sync>(
 
     let scoped_session = world
         .spawn((ParentSession(input.session), SessionStatus::Active))
+        .set_parent(input.session)
         .id();
 
     begin_scope(
@@ -1523,6 +1526,7 @@ where
 
         let cancellation_session = world
             .spawn((ParentSession(scoped_session), SessionStatus::Active))
+            .set_parent(scoped_session)
             .id();
         world
             .get_entity_mut(target)

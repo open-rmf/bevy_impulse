@@ -88,7 +88,7 @@ where
         let finish = world
             .spawn((InputBundle::<Response>::new(), InjectionSource(source)))
             .id();
-        AddImpulse::new(finish, InjectionFinish::<Response>::new()).apply(world);
+        AddImpulse::new(None, finish, InjectionFinish::<Response>::new()).apply(world);
 
         let task = world
             .spawn((

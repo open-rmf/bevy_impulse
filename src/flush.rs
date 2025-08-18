@@ -226,7 +226,7 @@ fn collect_from_channels(
     for e in add_finish {
         // Add a Finished impulse to the unused target of a detached impulse
         // chain.
-        AddImpulse::new(e, Finished).apply(world);
+        AddImpulse::new(None, e, Finished).apply(world);
     }
 
     for target in drop_targets.drain(..) {
