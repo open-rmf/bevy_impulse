@@ -39,11 +39,13 @@ export function BufferAccessIcon(): React.JSX.Element {
 }
 
 export function SplitIcon(): React.JSX.Element {
-  return <MaterialSymbol symbol="call_split" />;
+  return (
+    <MaterialSymbol symbol="call_split" sx={{ transform: 'scaleY(-1)' }} />
+  );
 }
 
 export function ForkResultIcon(): React.JSX.Element {
-  return <MaterialSymbol symbol="alt_route" />;
+  return <MaterialSymbol symbol="question_mark" />;
 }
 
 export function ListenIcon(): React.JSX.Element {
