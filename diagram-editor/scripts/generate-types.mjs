@@ -2,6 +2,58 @@ import { execSync } from 'node:child_process';
 import fs, { writeFileSync } from 'node:fs';
 import { compile } from 'json-schema-to-typescript';
 
+const MERGE_FIELDS = ['$ref', 'oneOf', 'allOf', 'anyOf'];
+
+/**
+ * json schema draft-07 (used by json-schema-to-typescript) does not merge certain fields like `$ref` and `oneOf`.
+ * Workaround by putting them in a `allOf`.
+ */
+function moveIntoAllOf(source) {
+  let needMove = false;
+  for (const k of MERGE_FIELDS) {
+    if (k in source) {
+      needMove = true;
+      break;
+    }
+  }
+  if (!needMove) {
+    return;
+  }
+
+  const allOf = [];
+
+  for (const k of MERGE_FIELDS) {
+    if (!(k in source)) {
+      continue;
+    }
+    const obj = {};
+    obj[k] = source[k];
+    delete source[k];
+    allOf.push(obj);
+  }
+
+  const remaining = {};
+  for (const k of Object.keys(source)) {
+    if (k === 'allOf') {
+      continue;
+    }
+    remaining[k] = source[k];
+    delete source[k];
+  }
+  if ('type' in remaining) {
+    allOf.push(remaining);
+  }
+
+  // don't need "allOf" if there is only one item in it.
+  if (allOf.length === 1) {
+    for (const k of Object.keys(allOf[0])) {
+      source[k] = allOf[0][k];
+    }
+  } else {
+    source.allOf = allOf;
+  }
+}
+
 async function generate(name, schema, outputPath, preprocessedOutputPath) {
   // preprocess the schema to workaround https://github.com/bcherny/json-schema-to-typescript/issues/637 and https://github.com/bcherny/json-schema-to-typescript/issues/613
   const workingSet = [...Object.values(schema.$defs)];
@@ -24,6 +76,8 @@ async function generate(name, schema, outputPath, preprocessedOutputPath) {
     if ('anyOf' in schema) {
       workingSet.push(...Object.values(schema.anyOf));
     }
+
+    moveIntoAllOf(schema);
 
     // json schema draft-07 (used by json-schema-to-typescript) does not merge $ref, workaround
     // by putting the $ref and other fields in a `allOf`.

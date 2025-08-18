@@ -142,11 +142,20 @@ pub enum DebugSessionFeedback {
     OperationStarted(String),
 }
 
+#[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
+#[cfg_attr(test, derive(serde::Deserialize))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum DebugSessionMessage {
+    Feedback(DebugSessionFeedback),
+    Finish(DebugSessionEnd),
+}
+
 /// Start a debug session.
 async fn ws_debug<W, R>(mut write: W, mut read: R, state: State<ExecutorState>)
 where
-    W: WebsocketSinkExt,
-    R: WebsocketStreamExt,
+    W: WebsocketSinkExt<DebugSessionMessage>,
+    R: WebsocketStreamExt<PostRunRequest>,
 {
     let req: PostRunRequest = if let Some(req) = read.next_json().await {
         req
@@ -169,8 +178,8 @@ where
     {
         error!("{}", err);
         write
-            .send_json(&DebugSessionEnd::err_from_status_code(
-                StatusCode::INTERNAL_SERVER_ERROR,
+            .send_json(&DebugSessionMessage::Finish(
+                DebugSessionEnd::err_from_status_code(StatusCode::INTERNAL_SERVER_ERROR),
             ))
             .await;
         return;
@@ -188,8 +197,8 @@ where
                 write
                     .lock()
                     .await
-                    .send_json(&DebugSessionEnd::err_from_status_code(
-                        StatusCode::INTERNAL_SERVER_ERROR,
+                    .send_json(&DebugSessionMessage::Finish(
+                        DebugSessionEnd::err_from_status_code(StatusCode::INTERNAL_SERVER_ERROR),
                     ))
                     .await;
                 return;
@@ -203,15 +212,17 @@ where
                     write
                         .lock()
                         .await
-                        .send_json(&DebugSessionEnd::Ok(result))
+                        .send_json(&DebugSessionMessage::Finish(DebugSessionEnd::Ok(result)))
                         .await;
                 }
                 None => {
                     write
                         .lock()
                         .await
-                        .send_json(&DebugSessionEnd::err_from_status_code(
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                        .send_json(&DebugSessionMessage::Finish(
+                            DebugSessionEnd::err_from_status_code(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            ),
                         ))
                         .await;
                     return;
@@ -221,7 +232,9 @@ where
                 write
                     .lock()
                     .await
-                    .send_json(&DebugSessionEnd::Err(err.to_string()))
+                    .send_json(&DebugSessionMessage::Finish(DebugSessionEnd::Err(
+                        err.to_string(),
+                    )))
                     .await;
                 return;
             }
@@ -242,7 +255,9 @@ where
                 write
                     .lock()
                     .await
-                    .send_json(&DebugSessionFeedback::OperationStarted(op_id))
+                    .send_json(&DebugSessionMessage::Feedback(
+                        DebugSessionFeedback::OperationStarted(op_id),
+                    ))
                     .await;
             }
             Err(e) => match e {

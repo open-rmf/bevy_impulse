@@ -25,8 +25,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "required": [
@@ -63,8 +62,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "type": "object"
@@ -116,45 +114,78 @@
         }
       ]
     },
-    "DebugSessionEnd": {
+    "DebugSessionMessage": {
       "oneOf": [
         {
-          "additionalProperties": false,
-          "properties": {
-            "ok": true
-          },
-          "required": [
-            "ok"
-          ],
-          "type": "object"
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "operationStarted": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "operationStarted"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "feedback",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          ]
         },
         {
-          "additionalProperties": false,
-          "properties": {
-            "err": {
-              "type": "string"
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "ok": true
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "err": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "err"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "finish",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
             }
-          },
-          "required": [
-            "err"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DebugSessionFeedback": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "operationStarted": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "operationStarted"
-          ],
-          "type": "object"
+          ]
         }
       ]
     },
@@ -171,9 +202,7 @@
             {
               "type": "null"
             }
-          ],
-          "default": null,
-          "description": "To simplify diagram definitions, the diagram workflow builder will\n sometimes insert implicit operations into the workflow, such as implicit\n serializing and deserializing. These implicit operations may be fallible.\n\n This field indicates how a failed implicit operation should be handled.\n If left unspecified, an implicit error will cause the entire workflow to\n be cancelled."
+          ]
         },
         "ops": {
           "additionalProperties": {
@@ -246,6 +275,9 @@
         {
           "allOf": [
             {
+              "$ref": "#/$defs/NodeSchema"
+            },
+            {
               "properties": {
                 "type": {
                   "const": "node",
@@ -256,14 +288,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/NodeSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/SectionSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -275,14 +307,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/SectionSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/ScopeSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -294,14 +326,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/ScopeSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/StreamOutSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -313,14 +345,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/StreamOutSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/ForkCloneSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -332,14 +364,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/ForkCloneSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/UnzipSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -351,14 +383,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/UnzipSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/ForkResultSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -370,14 +402,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/ForkResultSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/SplitSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -389,14 +421,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/SplitSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/JoinSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -408,14 +440,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/JoinSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/SerializedJoinSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -427,14 +459,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/SerializedJoinSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/TransformSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -446,14 +478,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/TransformSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/BufferSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -465,14 +497,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/BufferSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/BufferAccessSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -484,14 +516,14 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/BufferAccessSchema"
             }
           ]
         },
         {
           "allOf": [
+            {
+              "$ref": "#/$defs/ListenSchema"
+            },
             {
               "properties": {
                 "type": {
@@ -503,9 +535,6 @@
                 "type"
               ],
               "type": "object"
-            },
-            {
-              "$ref": "#/$defs/ListenSchema"
             }
           ]
         }
@@ -535,8 +564,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "required": [
@@ -568,8 +596,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "required": [
@@ -594,8 +621,7 @@
           "description": "Rename an operation inside the section to expose it externally. The key\n of the map is what siblings of the section can connect to, and the value\n of the entry is the identifier of the input inside the section that is\n being exposed.\n\n This allows a section to expose inputs and buffers that are provided\n by inner sections.",
           "type": "object"
         }
-      ],
-      "description": "This defines how sections remap their inner operations (inputs and buffers)\n to expose them to operations that are siblings to the section."
+      ]
     },
     "JoinSchema": {
       "description": "Wait for exactly one item to be available in each buffer listed in\n `buffers`, then join each of those items into a single output message\n that gets sent to `next`.\n\n If the `next` operation is not a `node` type (e.g. `fork_clone`) then\n you must specify a `target_node` so that the diagram knows what data\n structure to join the values into.\n\n The output message type must be registered as joinable at compile time.\n If you want to join into a dynamic data structure then you should use\n [`DiagramOperation::SerializedJoin`] instead.\n\n # Examples\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"begin_measuring\",\n     \"ops\": {\n         \"begin_measuring\": {\n             \"type\": \"fork_clone\",\n             \"next\": [\"localize\", \"imu\"]\n         },\n         \"localize\": {\n             \"type\": \"node\",\n             \"builder\": \"localize\",\n             \"next\": \"estimated_position\"\n         },\n         \"imu\": {\n             \"type\": \"node\",\n             \"builder\": \"imu\",\n             \"config\": \"velocity\",\n             \"next\": \"estimated_velocity\"\n         },\n         \"estimated_position\": { \"type\": \"buffer\" },\n         \"estimated_velocity\": { \"type\": \"buffer\" },\n         \"gather_state\": {\n             \"type\": \"join\",\n             \"buffers\": {\n                 \"position\": \"estimate_position\",\n                 \"velocity\": \"estimate_velocity\"\n             },\n             \"next\": \"report_state\"\n         },\n         \"report_state\": {\n             \"type\": \"node\",\n             \"builder\": \"publish_state\",\n             \"next\": { \"builtin\": \"terminate\" }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
@@ -630,8 +656,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation."
+          ]
         }
       },
       "required": [
@@ -801,8 +826,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "required": [
@@ -825,7 +849,6 @@
       "type": "object"
     },
     "RetentionPolicy": {
-      "description": "Describe how data within a buffer gets retained. Most mechanisms that pull\n data from a buffer will remove the oldest item in the buffer, so this policy\n is for dealing with situations where items are being stored faster than they\n are being pulled.\n\n The default value is KeepLast(1).",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -884,9 +907,7 @@
             {
               "type": "null"
             }
-          ],
-          "default": null,
-          "description": "To simplify diagram definitions, the diagram workflow builder will\n sometimes insert implicit operations into the workflow, such as implicit\n serializing and deserializing. These implicit operations may be fallible.\n\n This field indicates how a failed implicit operation should be handled.\n If left unspecified, an implicit error will cause the entire workflow to\n be cancelled."
+          ]
         },
         "ops": {
           "additionalProperties": {
@@ -1011,62 +1032,67 @@
       "type": "object"
     },
     "SectionSchema": {
-      "description": "Connect the request to a registered section.\n\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"section_op\",\n     \"ops\": {\n         \"section_op\": {\n             \"type\": \"section\",\n             \"builder\": \"my_section_builder\",\n             \"connect\": {\n                 \"my_section_output\": { \"builtin\": \"terminate\" }\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```\n\n Custom sections can also be created via templates\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"templates\": {\n         \"my_template\": {\n             \"inputs\": [\"section_input\"],\n             \"outputs\": [\"section_output\"],\n             \"buffers\": [],\n             \"ops\": {\n                 \"section_input\": {\n                     \"type\": \"node\",\n                     \"builder\": \"my_node\",\n                     \"next\": \"section_output\"\n                 }\n             }\n         }\n     },\n     \"start\": \"section_op\",\n     \"ops\": {\n         \"section_op\": {\n             \"type\": \"section\",\n             \"template\": \"my_template\",\n             \"connect\": {\n                 \"section_output\": { \"builtin\": \"terminate\" }\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
-      "oneOf": [
+      "allOf": [
         {
-          "properties": {
-            "builder": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "builder"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "template": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "template"
-          ],
-          "type": "object"
-        }
-      ],
-      "properties": {
-        "config": {
-          "default": null
-        },
-        "connect": {
-          "additionalProperties": {
-            "$ref": "#/$defs/NextOperation"
-          },
-          "default": {},
-          "type": "object"
-        },
-        "display_text": {
-          "description": "Override for text that should be displayed for an operation within an\n editor.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "trace": {
-          "anyOf": [
+          "oneOf": [
             {
-              "$ref": "#/$defs/TraceToggle"
+              "properties": {
+                "builder": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "builder"
+              ],
+              "type": "object"
             },
             {
-              "type": "null"
+              "properties": {
+                "template": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "template"
+              ],
+              "type": "object"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
+        },
+        {
+          "description": "Connect the request to a registered section.\n\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"start\": \"section_op\",\n     \"ops\": {\n         \"section_op\": {\n             \"type\": \"section\",\n             \"builder\": \"my_section_builder\",\n             \"connect\": {\n                 \"my_section_output\": { \"builtin\": \"terminate\" }\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```\n\n Custom sections can also be created via templates\n ```\n # bevy_impulse::Diagram::from_json_str(r#\"\n {\n     \"version\": \"0.1.0\",\n     \"templates\": {\n         \"my_template\": {\n             \"inputs\": [\"section_input\"],\n             \"outputs\": [\"section_output\"],\n             \"buffers\": [],\n             \"ops\": {\n                 \"section_input\": {\n                     \"type\": \"node\",\n                     \"builder\": \"my_node\",\n                     \"next\": \"section_output\"\n                 }\n             }\n         }\n     },\n     \"start\": \"section_op\",\n     \"ops\": {\n         \"section_op\": {\n             \"type\": \"section\",\n             \"template\": \"my_template\",\n             \"connect\": {\n                 \"section_output\": { \"builtin\": \"terminate\" }\n             }\n         }\n     }\n }\n # \"#)?;\n # Ok::<_, serde_json::Error>(())\n ```",
+          "properties": {
+            "config": {
+              "default": null
+            },
+            "connect": {
+              "additionalProperties": {
+                "$ref": "#/$defs/NextOperation"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "display_text": {
+              "description": "Override for text that should be displayed for an operation within an\n editor.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "trace": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceToggle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": "object"
         }
-      },
-      "type": "object"
+      ]
     },
     "SectionTemplate": {
       "properties": {
@@ -1155,8 +1181,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "type": "object"
@@ -1217,9 +1242,7 @@
             {
               "type": "null"
             }
-          ],
-          "default": null,
-          "description": "Specify what happens if an error occurs during the transformation. If\n you specify a target for on_error, then an error message will be sent to\n that target. You can set this to `{ \"builtin\": \"dispose\" }` to simply\n ignore errors.\n\n If left unspecified, a failure will be treated like an implicit operation\n failure and behave according to `on_implicit_error`."
+          ]
         },
         "trace": {
           "anyOf": [
@@ -1229,8 +1252,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "required": [
@@ -1263,8 +1285,7 @@
             {
               "type": "null"
             }
-          ],
-          "description": "Set what the tracing behavior should be for this operation. If this is\n left unspecified then the default trace setting of the diagram will be\n used."
+          ]
         }
       },
       "required": [

@@ -1,5 +1,5 @@
 use bevy_impulse_diagram_editor::api::{
-    executor::{DebugSessionEnd, DebugSessionFeedback, PostRunRequest},
+    executor::{DebugSessionMessage, PostRunRequest},
     RegistryResponse,
 };
 use indexmap::IndexMap;
@@ -9,8 +9,7 @@ fn main() {
     let mut schema_generator = SchemaGenerator::default();
     schema_generator.subschema_for::<PostRunRequest>();
     schema_generator.subschema_for::<RegistryResponse>();
-    schema_generator.subschema_for::<DebugSessionEnd>();
-    schema_generator.subschema_for::<DebugSessionFeedback>();
+    schema_generator.subschema_for::<DebugSessionMessage>();
 
     // using `IndexMap` to preserve ordering
     let schema: IndexMap<&'static str, serde_json::Value> = IndexMap::from_iter([

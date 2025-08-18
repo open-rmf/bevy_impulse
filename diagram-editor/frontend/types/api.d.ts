@@ -36,13 +36,6 @@ export type BuiltinTarget = 'terminate' | 'dispose' | 'cancel';
  */
 export type TraceToggle = 'off' | 'on' | 'messages';
 /**
- * Describe how data within a buffer gets retained. Most mechanisms that pull
- *  data from a buffer will remove the oldest item in the buffer, so this policy
- *  is for dealing with situations where items are being stored faster than they
- *  are being pulled.
- *
- *  The default value is KeepLast(1).
- *
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "RetentionPolicy".
  */
@@ -56,143 +49,104 @@ export type RetentionPolicy =
   | 'keep_all';
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
- * via the `definition` "DebugSessionEnd".
+ * via the `definition` "DebugSessionMessage".
  */
-export type DebugSessionEnd =
-  | {
-      ok: unknown;
-    }
-  | {
-      err: string;
-    };
-/**
- * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
- * via the `definition` "DebugSessionFeedback".
- */
-export type DebugSessionFeedback = {
-  operationStarted: string;
-};
+export type DebugSessionMessage =
+  | ({
+      operationStarted: string;
+      [k: string]: unknown;
+    } & {
+      type: 'feedback';
+      [k: string]: unknown;
+    })
+  | ((
+      | {
+          ok: unknown;
+          [k: string]: unknown;
+        }
+      | {
+          err: string;
+          [k: string]: unknown;
+        }
+    ) & {
+      type: 'finish';
+      [k: string]: unknown;
+    });
 /**
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "DiagramOperation".
  */
 export type DiagramOperation =
-  | ({
+  | (NodeSchema & {
       type: 'node';
       [k: string]: unknown;
-    } & NodeSchema)
-  | ({
+    })
+  | (SectionSchema & {
       type: 'section';
       [k: string]: unknown;
-    } & SectionSchema)
-  | ({
+    })
+  | (ScopeSchema & {
       type: 'scope';
       [k: string]: unknown;
-    } & ScopeSchema)
-  | ({
+    })
+  | (StreamOutSchema & {
       type: 'stream_out';
       [k: string]: unknown;
-    } & StreamOutSchema)
-  | ({
+    })
+  | (ForkCloneSchema & {
       type: 'fork_clone';
       [k: string]: unknown;
-    } & ForkCloneSchema)
-  | ({
+    })
+  | (UnzipSchema & {
       type: 'unzip';
       [k: string]: unknown;
-    } & UnzipSchema)
-  | ({
+    })
+  | (ForkResultSchema & {
       type: 'fork_result';
       [k: string]: unknown;
-    } & ForkResultSchema)
-  | ({
+    })
+  | (SplitSchema & {
       type: 'split';
       [k: string]: unknown;
-    } & SplitSchema)
-  | ({
+    })
+  | (JoinSchema & {
       type: 'join';
       [k: string]: unknown;
-    } & JoinSchema)
-  | ({
+    })
+  | (SerializedJoinSchema & {
       type: 'serialized_join';
       [k: string]: unknown;
-    } & SerializedJoinSchema)
-  | ({
+    })
+  | (TransformSchema & {
       type: 'transform';
       [k: string]: unknown;
-    } & TransformSchema)
-  | ({
+    })
+  | (BufferSchema & {
       type: 'buffer';
       [k: string]: unknown;
-    } & BufferSchema)
-  | ({
+    })
+  | (BufferAccessSchema & {
       type: 'buffer_access';
       [k: string]: unknown;
-    } & BufferAccessSchema)
-  | ({
+    })
+  | (ListenSchema & {
       type: 'listen';
       [k: string]: unknown;
-    } & ListenSchema);
+    });
 /**
- * Connect the request to a registered section.
- *
- *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
- *  {
- *      "version": "0.1.0",
- *      "start": "section_op",
- *      "ops": {
- *          "section_op": {
- *              "type": "section",
- *              "builder": "my_section_builder",
- *              "connect": {
- *                  "my_section_output": { "builtin": "terminate" }
- *              }
- *          }
- *      }
- *  }
- *  # "#)?;
- *  # Ok::<_, serde_json::Error>(())
- *  ```
- *
- *  Custom sections can also be created via templates
- *  ```
- *  # bevy_impulse::Diagram::from_json_str(r#"
- *  {
- *      "version": "0.1.0",
- *      "templates": {
- *          "my_template": {
- *              "inputs": ["section_input"],
- *              "outputs": ["section_output"],
- *              "buffers": [],
- *              "ops": {
- *                  "section_input": {
- *                      "type": "node",
- *                      "builder": "my_node",
- *                      "next": "section_output"
- *                  }
- *              }
- *          }
- *      },
- *      "start": "section_op",
- *      "ops": {
- *          "section_op": {
- *              "type": "section",
- *              "template": "my_template",
- *              "connect": {
- *                  "section_output": { "builtin": "terminate" }
- *              }
- *          }
- *      }
- *  }
- *  # "#)?;
- *  # Ok::<_, serde_json::Error>(())
- *  ```
- *
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "SectionSchema".
  */
-export type SectionSchema = {
+export type SectionSchema = (
+  | {
+      builder: string;
+      [k: string]: unknown;
+    }
+  | {
+      template: string;
+      [k: string]: unknown;
+    }
+) & {
   config?: {
     [k: string]: unknown;
   };
@@ -204,27 +158,10 @@ export type SectionSchema = {
    *  editor.
    */
   display_text?: string | null;
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
-} & SectionSchema1;
-export type SectionSchema1 =
-  | {
-      builder: string;
-      [k: string]: unknown;
-    }
-  | {
-      template: string;
-      [k: string]: unknown;
-    };
+};
 /**
- * This defines how sections remap their inner operations (inputs and buffers)
- *  to expose them to operations that are siblings to the section.
- *
  * This interface was referenced by `DiagramEditorApi`'s JSON-Schema
  * via the `definition` "InputRemapping".
  */
@@ -306,11 +243,6 @@ export interface BufferAccessSchema {
    */
   display_text?: string | null;
   next: NextOperation;
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -409,11 +341,6 @@ export interface BufferSchema {
    */
   serialize?: boolean | null;
   settings?: BufferSettings;
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -433,15 +360,6 @@ export interface BufferSettings {
  */
 export interface Diagram {
   default_trace?: TraceToggle;
-  /**
-   * To simplify diagram definitions, the diagram workflow builder will
-   *  sometimes insert implicit operations into the workflow, such as implicit
-   *  serializing and deserializing. These implicit operations may be fallible.
-   *
-   *  This field indicates how a failed implicit operation should be handled.
-   *  If left unspecified, an implicit error will cause the entire workflow to
-   *  be cancelled.
-   */
   on_implicit_error?: NextOperation | null;
   /**
    * Operations that define the workflow
@@ -518,11 +436,6 @@ export interface NodeSchema {
   stream_out?: {
     [k: string]: NextOperation;
   };
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -594,15 +507,6 @@ export interface NodeSchema {
  */
 export interface ScopeSchema {
   next: NextOperation;
-  /**
-   * To simplify diagram definitions, the diagram workflow builder will
-   *  sometimes insert implicit operations into the workflow, such as implicit
-   *  serializing and deserializing. These implicit operations may be fallible.
-   *
-   *  This field indicates how a failed implicit operation should be handled.
-   *  If left unspecified, an implicit error will cause the entire workflow to
-   *  be cancelled.
-   */
   on_implicit_error?: NextOperation | null;
   /**
    * Operations that exist inside this scope.
@@ -740,11 +644,6 @@ export interface ForkCloneSchema {
    */
   display_text?: string | null;
   next: NextOperation[];
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -815,11 +714,6 @@ export interface UnzipSchema {
    */
   display_text?: string | null;
   next: NextOperation[];
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -861,11 +755,6 @@ export interface ForkResultSchema {
   display_text?: string | null;
   err: NextOperation;
   ok: NextOperation;
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -950,11 +839,6 @@ export interface SplitSchema {
   };
   remaining?: NextOperation | null;
   sequential?: NextOperation[];
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -1096,21 +980,7 @@ export interface TransformSchema {
    */
   display_text?: string | null;
   next: NextOperation;
-  /**
-   * Specify what happens if an error occurs during the transformation. If
-   *  you specify a target for on_error, then an error message will be sent to
-   *  that target. You can set this to `{ "builtin": "dispose" }` to simply
-   *  ignore errors.
-   *
-   *  If left unspecified, a failure will be treated like an implicit operation
-   *  failure and behave according to `on_implicit_error`.
-   */
   on_error?: NextOperation | null;
-  /**
-   * Set what the tracing behavior should be for this operation. If this is
-   *  left unspecified then the default trace setting of the diagram will be
-   *  used.
-   */
   trace?: TraceToggle | null;
   [k: string]: unknown;
 }
@@ -1154,9 +1024,6 @@ export interface TransformSchema {
 export interface ListenSchema {
   buffers: BufferSelection;
   next: NextOperation;
-  /**
-   * The id of an operation that this operation is for. The id must be a `node` operation. Optional if `next` is a node operation.
-   */
   target_node?: NextOperation | null;
   [k: string]: unknown;
 }
