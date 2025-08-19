@@ -11,6 +11,7 @@ function StreamOutNodeComp(props: NodeProps<OperationNode<'stream_out'>>) {
       icon={<StreamOutIcon />}
       label="StreamOut"
       variant="input"
+      caption={props.data.op.name}
       inputHandleType={HandleType.Stream}
     />
   );

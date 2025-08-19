@@ -11,6 +11,7 @@ use axum::{
     routing::{self, post},
     Json, Router,
 };
+use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -293,12 +294,12 @@ fn execute_requests(
             let registry = &*ctx.registry.lock().unwrap();
             let maybe_promise = match ctx.diagram.spawn_io_workflow(&mut cmds, registry) {
                 Ok(workflow) => {
+                    let impulse = cmds.request(ctx.request, workflow);
+                    let session = impulse.session_id();
+                    let promise: Promise<serde_json::Value> = impulse.take_response();
                     if let Some(feedback_tx) = ctx.feedback_tx {
-                        // FIXME: the provider id is different from the session id, there doesn't seem to be possible to get the session id
-                        cmds.entity(workflow.provider()).insert(feedback_tx);
+                        cmds.entity(session).insert(feedback_tx);
                     }
-                    let promise: Promise<serde_json::Value> =
-                        cmds.request(ctx.request, workflow).take_response();
                     Ok(promise)
                 }
                 Err(err) => Err(err.into()),
@@ -322,7 +323,9 @@ fn debug_feedback(
     feedback_query: bevy_ecs::system::Query<&FeedbackSender>,
 ) {
     for ev in op_started.read() {
-        let session = match ev.session_stack.last() {
+        // not sure if it is working as intended, but the root session is in the 2nd last
+        // item, not the last as described in `session_stack` docs.
+        let session = match ev.session_stack.iter().rev().skip(1).next() {
             Some(session) => session,
             None => {
                 continue;
@@ -362,7 +365,7 @@ fn setup_bevy_app(
     let (request_tx, request_rx) = tokio::sync::mpsc::channel::<Context>(10);
     app.insert_resource(RequestReceiver(request_rx));
     app.add_systems(bevy_app::Update, execute_requests);
-    app.add_systems(bevy_app::Update, debug_feedback);
+    app.add_systems(bevy_app::Update, debug_feedback.after(execute_requests));
     ExecutorState {
         registry: Arc::new(Mutex::new(registry)),
         send_chan: request_tx,
@@ -540,7 +543,7 @@ mod tests {
         }
     }
 
-    #[ignore = "blocked on bevy_impulse https://github.com/open-rmf/bevy_impulse/issues/100"]
+    #[ignore = "tracing events in `bevy_impulse` is delayed"]
     #[tokio::test]
     #[test_log::test]
     async fn test_ws_debug() {
@@ -573,9 +576,15 @@ mod tests {
 
         // there should be 2 feedback messages
         for _ in 0..2 {
-            let feedback_msg = test_rx.next().await.unwrap();
-            let feedback: DebugSessionFeedback =
-                serde_json::from_slice(feedback_msg.into_text().unwrap().as_bytes()).unwrap();
+            let msg = test_rx.next().await.unwrap();
+            let feedback_msg: DebugSessionMessage =
+                serde_json::from_slice(msg.into_text().unwrap().as_bytes()).unwrap();
+            let feedback = match feedback_msg {
+                DebugSessionMessage::Feedback(feedback) => feedback,
+                _ => {
+                    panic!("expected feedback message");
+                }
+            };
             assert!(matches!(
                 feedback,
                 DebugSessionFeedback::OperationStarted(_)
