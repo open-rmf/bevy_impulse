@@ -22,10 +22,10 @@ use bevy_impulse::{
 };
 use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use clap::Parser;
-use serde_json::{Number, Value};
-use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
-use std::{error::Error, fs::File, fmt::Write, str::FromStr, thread};
+use serde::{Deserialize, Serialize};
+use serde_json::{Number, Value};
+use std::{error::Error, fmt::Write, fs::File, str::FromStr, thread};
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -203,28 +203,30 @@ fn create_registry() -> DiagramElementRegistry {
     registry.register_node_builder(
         NodeBuilderOptions::new("fibonacci").with_default_display_text("Fibonacci"),
         |builder, config: Option<u64>| {
-            builder.create_map(move |input: AsyncMap<JsonMessage, FibonacciStream>| async move {
-                let order = if let Some(order) = config {
-                    order
-                } else if let JsonMessage::Number(number) = &input.request {
-                    number.as_u64().ok_or(input.request)?
-                } else {
-                    return Err(input.request);
-                };
+            builder.create_map(
+                move |input: AsyncMap<JsonMessage, FibonacciStream>| async move {
+                    let order = if let Some(order) = config {
+                        order
+                    } else if let JsonMessage::Number(number) = &input.request {
+                        number.as_u64().ok_or(input.request)?
+                    } else {
+                        return Err(input.request);
+                    };
 
-                let mut current = 0;
-                let mut next = 1;
-                for _ in 0..=order {
-                    input.streams.sequence.send(current);
+                    let mut current = 0;
+                    let mut next = 1;
+                    for _ in 0..=order {
+                        input.streams.sequence.send(current);
 
-                    let sum = current + next;
-                    current = next;
-                    next = sum;
-                }
+                        let sum = current + next;
+                        current = next;
+                        next = sum;
+                    }
 
-                Ok(())
-            })
-        }
+                    Ok(())
+                },
+            )
+        },
     );
 
     registry
@@ -257,7 +259,7 @@ fn create_registry() -> DiagramElementRegistry {
                 builder.create_map_block(move |request: JsonMessage| {
                     compare(settings, request, |a: f64, b: f64| a < b)
                 })
-            }
+            },
         )
         .with_fork_result();
 
@@ -269,7 +271,7 @@ fn create_registry() -> DiagramElementRegistry {
                 builder.create_map_block(move |request: JsonMessage| {
                     compare(settings, request, |a: f64, b: f64| a > b)
                 })
-            }
+            },
         )
         .with_fork_result();
 
@@ -304,7 +306,7 @@ enum ComparisonConfig {
 #[serde(rename_all = "snake_case")]
 #[serde(untagged)]
 enum OrEqualTag {
-    OrEqual
+    OrEqual,
 }
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
@@ -388,7 +390,6 @@ fn compare(
 
                     previous = next;
                 }
-
             }
 
             if !at_least_one_comparison {
