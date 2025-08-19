@@ -298,7 +298,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 enum ComparisonConfig {
     None,
     OrEqual(OrEqualTag),
-    Value(f64),
+    ComparedTo(f64),
     Settings(ComparisonSettings),
 }
 
@@ -312,7 +312,7 @@ enum OrEqualTag {
 #[derive(Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
 struct ComparisonSettings {
     #[serde(default)]
-    against: Option<f64>,
+    compared_to: Option<f64>,
     #[serde(default)]
     or_equal: bool,
 }
@@ -322,8 +322,8 @@ impl From<ComparisonConfig> for ComparisonSettings {
         let mut settings = ComparisonSettings::default();
         match config {
             ComparisonConfig::None => {}
-            ComparisonConfig::Value(value) => {
-                settings.against = Some(value);
+            ComparisonConfig::ComparedTo(value) => {
+                settings.compared_to = Some(value);
             }
             ComparisonConfig::OrEqual(_) => {
                 settings.or_equal = true;
@@ -342,19 +342,19 @@ fn compare(
     request: JsonMessage,
     comparison: fn(f64, f64) -> bool,
 ) -> Result<JsonMessage, JsonMessage> {
-    let check = |rhs: f64, lhs: f64| -> bool {
-        if comparison(rhs, lhs) {
+    let check = |lhs: f64, rhs: f64| -> bool {
+        if comparison(lhs, rhs) {
             return true;
         }
 
-        settings.or_equal && (rhs == lhs)
+        settings.or_equal && (lhs == rhs)
     };
 
     match &request {
         JsonMessage::Array(array) => {
             let mut at_least_one_comparison = false;
 
-            if let Some(against) = settings.against {
+            if let Some(compared_to) = settings.compared_to {
                 // Check that every item in the array compares favorably against
                 // the fixed value.
                 for value in array.iter() {
@@ -362,7 +362,7 @@ fn compare(
                         return Err(request);
                     };
 
-                    if !check(value, against) {
+                    if !check(value, compared_to) {
                         return Err(request);
                     }
                 }
@@ -398,7 +398,7 @@ fn compare(
             return Ok(request);
         }
         JsonMessage::Number(number) => {
-            let Some(against) = settings.against else {
+            let Some(compared_to) = settings.compared_to else {
                 return Err(request);
             };
 
@@ -406,7 +406,7 @@ fn compare(
                 return Err(request);
             };
 
-            if !check(value, against) {
+            if !check(value, compared_to) {
                 return Err(request);
             }
 
