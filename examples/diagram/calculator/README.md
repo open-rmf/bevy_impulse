@@ -7,7 +7,7 @@ workflows; it is only meant to be illustrative of how to use the tools.
 To run this example, open a terminal focused on this folder and run:
 
 ```bash
-cargo run -- multiply3.json 10
+cargo run -- run diagrams/multiply_by_3.json 10
 ```
 
 You should see `30.0` printed out by the program, because `multiply3.json` is a
