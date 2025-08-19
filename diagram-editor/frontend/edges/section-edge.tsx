@@ -11,5 +11,7 @@ export type SectionEdge = DataEdge<SectionOutputData, 'section'>;
 export type SectionOutputEdgeProps = Exclude<EdgeProps<SectionEdge>, 'label'>;
 
 export const SectionOutputEdgeComp = memo((props: SectionOutputEdgeProps) => {
-  return <StepEdge {...props} label={props.data.output.output} />;
+  return (
+    <StepEdge {...props} label={props.data.output.output || 'Select Output'} />
+  );
 });

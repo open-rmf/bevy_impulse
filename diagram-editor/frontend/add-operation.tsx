@@ -16,6 +16,9 @@ import {
   ForkCloneIcon,
   ForkResultIcon,
   isOperationNode,
+  isSectionBufferNode,
+  isSectionInputNode,
+  isSectionOutputNode,
   JoinIcon,
   ListenIcon,
   NodeIcon,
@@ -33,8 +36,9 @@ import {
   TransformIcon,
   UnzipIcon,
 } from './nodes';
-import type { DiagramOperation } from './types/api';
+import type { DiagramOperation, NextOperation } from './types/api';
 import { joinNamespaces, ROOT_NAMESPACE } from './utils/namespace';
+import { addUniqueSuffix } from './utils/unique-value';
 
 const StyledOperationButton = styled(Button)({
   justifyContent: 'flex-start',
@@ -47,12 +51,13 @@ export interface AddOperationProps {
 }
 
 function createSectionInputChange(
-  targetId: string,
+  remappedId: string,
+  targetId: NextOperation,
   position: XYPosition,
 ): NodeAddChange<SectionInputNode> {
   return {
     type: 'add',
-    item: createSectionInputNode(targetId, targetId, position),
+    item: createSectionInputNode(remappedId, targetId, position),
   };
 }
 
@@ -67,12 +72,13 @@ function createSectionOutputChange(
 }
 
 function createSectionBufferChange(
-  targetId: string,
+  remappedId: string,
+  targetId: NextOperation,
   position: XYPosition,
 ): NodeAddChange<SectionBufferNode> {
   return {
     type: 'add',
-    item: createSectionBufferNode(targetId, targetId, position),
+    item: createSectionBufferNode(remappedId, targetId, position),
   };
 }
 
@@ -129,7 +135,19 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionInputIcon />}
             onClick={() => {
-              onAdd?.([createSectionInputChange(uuidv4(), newNodePosition)]);
+              const remappedId = addUniqueSuffix(
+                'new_input',
+                nodeManager.nodes
+                  .filter(isSectionInputNode)
+                  .map((n) => n.data.remappedId),
+              );
+              onAdd?.([
+                createSectionInputChange(
+                  remappedId,
+                  { builtin: 'dispose' },
+                  newNodePosition,
+                ),
+              ]);
             }}
           >
             Section Input
@@ -140,7 +158,13 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionOutputIcon />}
             onClick={() => {
-              onAdd?.([createSectionOutputChange(uuidv4(), newNodePosition)]);
+              const outputId = addUniqueSuffix(
+                'new_output',
+                nodeManager.nodes
+                  .filter(isSectionOutputNode)
+                  .map((n) => n.data.outputId),
+              );
+              onAdd?.([createSectionOutputChange(outputId, newNodePosition)]);
             }}
           >
             Section Output
@@ -151,7 +175,19 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           <StyledOperationButton
             startIcon={<SectionBufferIcon />}
             onClick={() => {
-              onAdd?.([createSectionBufferChange(uuidv4(), newNodePosition)]);
+              const remappedId = addUniqueSuffix(
+                'new_buffer',
+                nodeManager.nodes
+                  .filter(isSectionBufferNode)
+                  .map((n) => n.data.remappedId),
+              );
+              onAdd?.([
+                createSectionBufferChange(
+                  remappedId,
+                  { builtin: 'dispose' },
+                  newNodePosition,
+                ),
+              ]);
             }}
           >
             Section Buffer
@@ -163,7 +199,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           onAdd?.(
             createNodeChange(namespace, parentId, newNodePosition, {
               type: 'node',
-              builder: 'new_node',
+              builder: '',
               next: { builtin: 'dispose' },
             }),
           );
@@ -340,7 +376,7 @@ function AddOperation({ parentId, newNodePosition, onAdd }: AddOperationProps) {
           onAdd?.(
             createNodeChange(namespace, parentId, newNodePosition, {
               type: 'section',
-              template: 'new_section',
+              template: '',
             }),
           )
         }

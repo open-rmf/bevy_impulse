@@ -21,13 +21,13 @@ export const BufferEdgeComp = memo((props: BufferEdgeCompProps) => {
   const label = (() => {
     switch (props.data.input.type) {
       case 'bufferKey': {
-        return props.data.input.key;
+        return props.data.input.key || 'Select Key';
       }
       case 'bufferSeq': {
         return props.data.input.seq.toString();
       }
       case 'sectionBuffer': {
-        return props.data.input.inputId;
+        return props.data.input.inputId || 'Select Buffer';
       }
     }
   })();

@@ -4,8 +4,13 @@ import type {
   DiagramEditorNode,
   OperationNode,
   OperationNodeTypes,
-  SectionInterfaceNode,
 } from '.';
+import type {
+  SectionBufferNode,
+  SectionInputNode,
+  SectionInterfaceNode,
+  SectionOutputNode,
+} from './section-node';
 
 export function isOperationData(
   data: DiagramEditorNode['data'],
@@ -65,4 +70,22 @@ export function isSectionNode(
   node: DiagramEditorNode,
 ): node is OperationNode<'section'> {
   return node.type === 'section';
+}
+
+export function isSectionInputNode(
+  node: DiagramEditorNode,
+): node is SectionInputNode {
+  return node.type === 'sectionInput';
+}
+
+export function isSectionOutputNode(
+  node: DiagramEditorNode,
+): node is SectionOutputNode {
+  return node.type === 'sectionOutput';
+}
+
+export function isSectionBufferNode(
+  node: DiagramEditorNode,
+): node is SectionBufferNode {
+  return node.type === 'sectionBuffer';
 }

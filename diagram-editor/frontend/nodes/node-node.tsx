@@ -9,7 +9,7 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
     <BaseNode
       {...props}
       icon={<NodeIcon />}
-      label={props.data.op.builder ?? ''}
+      label={props.data.op.builder || 'Select Builder'}
       variant="inputOutput"
       outputHandleType={HandleType.Data}
       extraHandles={[

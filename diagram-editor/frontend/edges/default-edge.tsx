@@ -14,7 +14,7 @@ export const DefaultEdgeComp = memo((props: DefaultEdgeCompProps) => {
       {...props}
       label={
         props.data.input.type === 'sectionInput'
-          ? props.data.input.inputId
+          ? props.data.input.inputId || 'Select Input'
           : undefined
       }
     />

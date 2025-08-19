@@ -3,6 +3,7 @@ import {
   createDefaultEdge,
   createForkResultErrEdge,
   createForkResultOkEdge,
+  createSectionEdge,
   createSplitKeyEdge,
   createSplitRemainingEdge,
   createSplitSeqEdge,
@@ -246,21 +247,21 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
           break;
         }
         case 'section': {
-          // if (op.connect) {
-          //   for (const [outputId, next] of Object.entries(op.connect)) {
-          //     const target = nodeManager.getNodeFromNextOp(
-          //       node.data.namespace,
-          //       next,
-          //     )?.id;
-          //     if (target) {
-          //       edges.push(
-          //         createSectionEdge(node.id, target, {
-          //           output: outputId,
-          //         }),
-          //       );
-          //     }
-          //   }
-          // }
+          if (op.connect) {
+            for (const [outputId, next] of Object.entries(op.connect)) {
+              const target = nodeManager.getNodeFromNextOp(
+                node.data.namespace,
+                next,
+              )?.id;
+              if (target) {
+                edges.push(
+                  createSectionEdge(node.id, target, {
+                    output: outputId,
+                  }),
+                );
+              }
+            }
+          }
           break;
         }
         case 'scope': {

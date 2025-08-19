@@ -39,7 +39,7 @@ function CommandPanel({
     <>
       <Panel position="top-center">
         <ButtonGroup variant="contained">
-          <RunButton />
+          {editorMode.mode === EditorMode.Normal && <RunButton />}
           {editorMode.mode === EditorMode.Normal && (
             <Tooltip title="Templates">
               <Button onClick={() => setOpenEditTemplatesDialog(true)}>

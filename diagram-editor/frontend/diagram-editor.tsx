@@ -550,9 +550,15 @@ function DiagramEditor() {
 
       if (targetNode.type === 'section') {
         if (EDGE_CATEGORIES[newEdge.type] === EdgeCategory.Buffer) {
-          newEdge.data.input = { type: 'sectionBuffer', inputId: '' };
+          newEdge.data.input = {
+            type: 'sectionBuffer',
+            inputId: '',
+          };
         } else if (EDGE_CATEGORIES[newEdge.type] === EdgeCategory.Data) {
-          newEdge.data.input = { type: 'sectionInput', inputId: '' };
+          newEdge.data.input = {
+            type: 'sectionInput',
+            inputId: '',
+          };
         }
       }
 

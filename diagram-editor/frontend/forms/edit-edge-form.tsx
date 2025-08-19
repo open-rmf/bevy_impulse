@@ -50,9 +50,15 @@ const EDGE_DEFAULT_OUTPUT_DATA = {
   splitKey: { output: { key: '' }, input: { type: 'default' } },
   splitSeq: { output: { seq: 0 }, input: { type: 'default' } },
   splitRemaining: { output: {}, input: { type: 'default' } },
-  streamOut: { output: { streamId: '' }, input: { type: 'default' } },
+  streamOut: {
+    output: { streamId: '' },
+    input: { type: 'default' },
+  },
   unzip: { output: { seq: 0 }, input: { type: 'default' } },
-  section: { output: { output: '' }, input: { type: 'default' } },
+  section: {
+    output: { output: '' },
+    input: { type: 'default' },
+  },
 } satisfies { [K in EdgeTypes]: EdgeData<K> };
 
 export function defaultEdgeData(type: EdgeTypes): EdgeData {

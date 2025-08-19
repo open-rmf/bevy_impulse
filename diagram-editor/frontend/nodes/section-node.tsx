@@ -1,10 +1,10 @@
 import type { NodeProps } from '@xyflow/react';
+import { HandleType } from '../handles';
 import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
 import { isSectionBuilder } from '../utils/operation';
 import type { OperationNode } from '.';
 import BaseNode from './base-node';
-import { HandleType } from '../handles';
 import {
   SectionBufferIcon,
   SectionIcon,
@@ -42,7 +42,7 @@ export function SectionNodeComp(props: NodeProps<OperationNode<'section'>>) {
     <BaseNode
       {...props}
       icon={<SectionIcon />}
-      label={label}
+      label={label || 'Select Section'}
       variant="inputOutput"
       inputHandleType={HandleType.DataBuffer}
     />
