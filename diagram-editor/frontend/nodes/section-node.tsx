@@ -1,5 +1,6 @@
 import type { NodeProps } from '@xyflow/react';
 import { HandleType } from '../handles';
+import { useRegistry } from '../registry-provider';
 import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
 import { isSectionBuilder } from '../utils/operation';
@@ -35,14 +36,34 @@ export type SectionInterfaceNode =
   | SectionBufferNode;
 
 export function SectionNodeComp(props: NodeProps<OperationNode<'section'>>) {
-  const label = isSectionBuilder(props.data.op)
+  const registry = useRegistry();
+  const label = (() => {
+    if (props.data.op.display_text) {
+      return props.data.op.display_text;
+    }
+    if (isSectionBuilder(props.data.op)) {
+      const builderMetadata = registry.sections[props.data.op.builder];
+      if (builderMetadata) {
+        return builderMetadata.default_display_text;
+      }
+    } else {
+      if (props.data.op.template) {
+        return 'Template';
+      }
+    }
+    return 'Select Section';
+  })();
+
+  const caption = isSectionBuilder(props.data.op)
     ? props.data.op.builder
     : props.data.op.template;
+
   return (
     <BaseNode
       {...props}
       icon={<SectionIcon />}
-      label={label || 'Select Section'}
+      label={label}
+      caption={caption}
       variant="inputOutput"
       inputHandleType={HandleType.DataBuffer}
     />
