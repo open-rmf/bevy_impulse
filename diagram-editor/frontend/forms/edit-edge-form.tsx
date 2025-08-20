@@ -26,8 +26,8 @@ import { BufferEdgeInputForm } from './buffer-edge-form';
 import { DataInputForm } from './data-input-form';
 import { SectionEdgeForm } from './section-form';
 import SplitEdgeForm, { type SplitEdge } from './split-edge-form';
-import UnzipEdgeForm from './unzip-edge-form';
 import { StreamOutEdgeForm } from './stream-out-edge-form';
+import UnzipEdgeForm from './unzip-edge-form';
 
 const EDGE_TYPES_NAME = {
   buffer: 'Buffer',

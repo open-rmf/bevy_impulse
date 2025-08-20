@@ -12,7 +12,7 @@ function StreamOutNodeComp(props: NodeProps<OperationNode<'stream_out'>>) {
       label="StreamOut"
       variant="input"
       caption={props.data.op.name}
-      inputHandleType={HandleType.Stream}
+      inputHandleType={HandleType.DataStream}
     />
   );
 }

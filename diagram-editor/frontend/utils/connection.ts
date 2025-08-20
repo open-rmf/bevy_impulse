@@ -47,7 +47,7 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
   serialized_join: [EdgeCategory.Buffer],
   split: [EdgeCategory.Data],
   start: [],
-  stream_out: [EdgeCategory.Stream],
+  stream_out: [EdgeCategory.Data],
   terminate: [EdgeCategory.Data],
   transform: [EdgeCategory.Data],
   unzip: [EdgeCategory.Data],
@@ -57,17 +57,12 @@ export function getValidEdgeTypes(
   sourceNode: DiagramEditorNode,
   sourceHandle: HandleId,
   targetNode: DiagramEditorNode,
-  targetHandle: HandleId,
+  _targetHandle: HandleId,
 ): EdgeTypes[] {
-  if (sourceHandle !== targetHandle) {
-    return [];
-  }
-
-  if (sourceHandle === 'stream' || targetHandle === 'stream') {
-    return ['streamOut'];
-  }
-
-  const allowedOutputEdges = [...ALLOWED_OUTPUT_EDGES[sourceNode.type]];
+  const allowedOutputEdges: EdgeTypes[] =
+    sourceHandle === 'dataStream'
+      ? ['streamOut']
+      : [...ALLOWED_OUTPUT_EDGES[sourceNode.type]];
   const allowedInputEdgeCategories =
     ALLOWED_INPUT_EDGE_CATEGORIES[targetNode.type];
   return allowedOutputEdges.filter((edgeType) =>
@@ -85,8 +80,8 @@ function getOutputCardinality(
   type: NodeTypes,
   handleId: HandleId,
 ): CardinalityType {
-  if (handleId === 'stream') {
-    return CardinalityType.Many;
+  if (handleId === 'dataStream') {
+    return CardinalityType.Single;
   }
 
   switch (type) {
@@ -210,7 +205,14 @@ export function validateEdgeSimple(
   );
   switch (outputCardinality) {
     case CardinalityType.Single: {
-      if (edges.some((e) => e.source === sourceNode.id && edge.id !== e.id)) {
+      if (
+        edges.some(
+          (e) =>
+            e.source === sourceNode.id &&
+            edge.sourceHandle === e.sourceHandle &&
+            edge.id !== e.id,
+        )
+      ) {
         return createValidationError('source node already has an edge');
       }
       break;

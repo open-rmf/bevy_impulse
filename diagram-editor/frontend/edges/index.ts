@@ -67,7 +67,6 @@ export type DiagramEditorEdge<T extends EdgeTypes = EdgeTypes> = EdgeMapping[T];
 export enum EdgeCategory {
   Data,
   Buffer,
-  Stream,
 }
 
 export const EDGE_CATEGORIES = {
@@ -78,7 +77,7 @@ export const EDGE_CATEGORIES = {
   splitSeq: EdgeCategory.Data,
   splitRemaining: EdgeCategory.Data,
   default: EdgeCategory.Data,
-  streamOut: EdgeCategory.Stream,
+  streamOut: EdgeCategory.Data,
   unzip: EdgeCategory.Data,
   section: EdgeCategory.Data,
 } satisfies Record<EdgeTypes, EdgeCategory>;

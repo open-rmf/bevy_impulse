@@ -28,9 +28,6 @@
 .react-flow__handle.handle-buffer {
   background-color: var(--mui-palette-secondary-dark);
 }
-.react-flow__handle.handle-stream {
-  background-color: var(--mui-palette-warning-dark);
-}
 .react-flow__handle.handle-data-buffer {
   background: linear-gradient(
     -45deg,

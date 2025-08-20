@@ -4,14 +4,13 @@ import {
 } from '@xyflow/react';
 import { exhaustiveCheck } from './utils/exhaustive-check';
 
-export type HandleId = 'stream' | null | undefined;
+export type HandleId = 'dataStream' | null | undefined;
 
 export enum HandleType {
   Data,
   Buffer,
-  Stream,
-  DataBuffer,
   DataStream,
+  DataBuffer,
 }
 
 export interface HandleProps extends Omit<ReactFlowHandleProps, 'id'> {
@@ -31,9 +30,6 @@ function variantClassName(handleType?: HandleType): string | undefined {
     case HandleType.Buffer: {
       return 'handle-buffer';
     }
-    case HandleType.Stream: {
-      return 'handle-stream';
-    }
     case HandleType.DataBuffer: {
       return 'handle-data-buffer';
     }
@@ -48,7 +44,8 @@ function variantClassName(handleType?: HandleType): string | undefined {
 }
 
 export function Handle({ variant, className, ...baseProps }: HandleProps) {
-  const handleId = variant === HandleType.Stream ? 'stream' : undefined;
+  const handleId: HandleId =
+    variant === HandleType.DataStream ? 'dataStream' : undefined;
 
   const prependClassName = className
     ? `${variantClassName(variant)} ${className} `

@@ -111,7 +111,12 @@ function buildGraph(diagram: Diagram, initialGraph?: Graph): Graph {
       );
   if (startNode) {
     edges.push(
-      createDefaultEdge(joinNamespaces(ROOT_NAMESPACE, START_ID), startNode.id),
+      createDefaultEdge(
+        joinNamespaces(ROOT_NAMESPACE, START_ID),
+        null,
+        startNode.id,
+        null,
+      ),
     );
   }
   edges.push(...buildEdges(graph.nodes));

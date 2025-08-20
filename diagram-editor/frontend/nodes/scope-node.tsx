@@ -39,7 +39,7 @@ function ScopeNodeComp({
       <Handle
         type="source"
         position={Position.Right}
-        variant={HandleType.Stream}
+        variant={HandleType.DataStream}
       />
     </>
   );

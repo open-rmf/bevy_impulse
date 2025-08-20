@@ -54,7 +54,7 @@ describe('validate edges', () => {
       expect(validEdges.length).toBe(0);
 
       // "buffer" does not output data ("default" edge)
-      const edge = createDefaultEdge(buffer.id, join.id);
+      const edge = createDefaultEdge(buffer.id, null, join.id, null);
       const nodeManager = new NodeManager([buffer, join]);
       const result = validateEdgeQuick(edge, nodeManager);
       expect(result.valid).toBe(false);
@@ -67,7 +67,7 @@ describe('validate edges', () => {
     }
 
     {
-      const edge = createBufferEdge(buffer.id, join.id, {
+      const edge = createBufferEdge(buffer.id, null, join.id, null, {
         type: 'bufferSeq',
         seq: 0,
       });
@@ -77,7 +77,7 @@ describe('validate edges', () => {
     }
 
     {
-      const edge = createBufferEdge(buffer.id, join.id, {
+      const edge = createBufferEdge(buffer.id, null, join.id, null, {
         type: 'bufferKey',
         key: 'test',
       });
@@ -117,8 +117,9 @@ describe('validate edges', () => {
         bufferAccessNode,
         null,
       );
-      expect(validEdges.length).toBe(1);
+      expect(validEdges.length).toBe(2);
       expect(validEdges).toContain('default');
+      expect(validEdges).toContain('streamOut');
     }
     {
       const validEdges = getValidEdgeTypes(
@@ -268,8 +269,9 @@ describe('validate edges', () => {
 
     {
       const validEdges = getValidEdgeTypes(node, null, sectionOutput, null);
-      expect(validEdges.length).toBe(1);
+      expect(validEdges.length).toBe(2);
       expect(validEdges).toContain('default');
+      expect(validEdges).toContain('streamOut');
     }
 
     {
@@ -301,7 +303,12 @@ describe('validate edges', () => {
       'test_fork_clone2',
     );
 
-    const existingEdge = createDefaultEdge(nodeNode.id, forkCloneNode.id);
+    const existingEdge = createDefaultEdge(
+      nodeNode.id,
+      null,
+      forkCloneNode.id,
+      null,
+    );
     const nodeManager = new NodeManager([
       nodeNode,
       forkCloneNode,
@@ -313,7 +320,12 @@ describe('validate edges', () => {
       expect(result.valid).toBe(true);
     }
     {
-      const newEdge = createDefaultEdge(nodeNode.id, forkCloneNode2.id);
+      const newEdge = createDefaultEdge(
+        nodeNode.id,
+        null,
+        forkCloneNode2.id,
+        null,
+      );
       const result = validateEdgeSimple(newEdge, nodeManager, edges);
       expect(result.valid).toBe(false);
     }
@@ -330,13 +342,18 @@ describe('validate edges', () => {
     const terminateNode = createTerminateNode(ROOT_NAMESPACE, { x: 0, y: 0 });
 
     const edges = [
-      createDefaultEdge(forkCloneNode.id, terminateNode.id),
-      createDefaultEdge(forkCloneNode.id, terminateNode.id),
+      createDefaultEdge(forkCloneNode.id, null, terminateNode.id, null),
+      createDefaultEdge(forkCloneNode.id, null, terminateNode.id, null),
     ];
     const nodeManager = new NodeManager([forkCloneNode, terminateNode]);
 
     {
-      const newEdge = createDefaultEdge(forkCloneNode.id, terminateNode.id);
+      const newEdge = createDefaultEdge(
+        forkCloneNode.id,
+        null,
+        terminateNode.id,
+        null,
+      );
       const result = validateEdgeSimple(newEdge, nodeManager, edges);
       expect(result.valid).toBe(true);
     }
@@ -359,11 +376,13 @@ describe('validate edges', () => {
 
     {
       const existingEdges = [
-        createForkResultOkEdge(forkResultNode.id, terminateNode.id),
+        createForkResultOkEdge(forkResultNode.id, null, terminateNode.id, null),
       ];
       const newEdge = createForkResultErrEdge(
         forkResultNode.id,
+        null,
         terminateNode.id,
+        null,
       );
       const result = validateEdgeSimple(newEdge, nodeManager, existingEdges);
       expect(result.valid).toBe(true);
@@ -371,12 +390,19 @@ describe('validate edges', () => {
 
     {
       const existingEdges = [
-        createForkResultOkEdge(forkResultNode.id, terminateNode.id),
-        createForkResultErrEdge(forkResultNode.id, terminateNode.id),
+        createForkResultOkEdge(forkResultNode.id, null, terminateNode.id, null),
+        createForkResultErrEdge(
+          forkResultNode.id,
+          null,
+          terminateNode.id,
+          null,
+        ),
       ];
       const newEdge = createForkResultErrEdge(
         forkResultNode.id,
+        null,
         terminateNode.id,
+        null,
       );
       const result = validateEdgeSimple(newEdge, nodeManager, existingEdges);
       expect(result.valid).toBe(false);
@@ -403,7 +429,7 @@ describe('validate edges', () => {
     const nodeManager = new NodeManager([bufferNode, sectionNode]);
 
     {
-      const edge = createBufferEdge(bufferNode.id, sectionNode.id, {
+      const edge = createBufferEdge(bufferNode.id, null, sectionNode.id, null, {
         type: 'bufferSeq',
         seq: 0,
       });
@@ -411,7 +437,7 @@ describe('validate edges', () => {
       expect(result.valid).toBe(false);
     }
     {
-      const edge = createBufferEdge(bufferNode.id, sectionNode.id, {
+      const edge = createBufferEdge(bufferNode.id, null, sectionNode.id, null, {
         type: 'sectionBuffer',
         inputId: 'test',
       });
@@ -443,14 +469,14 @@ describe('validate edges', () => {
     {
       const nodeManager = new NodeManager([nodeNode, sectionNode]);
       const edges: DiagramEditorEdge[] = [];
-      const edge = createDefaultEdge(nodeNode.id, sectionNode.id);
+      const edge = createDefaultEdge(nodeNode.id, null, sectionNode.id, null);
       const result = validateEdgeSimple(edge, nodeManager, edges);
       expect(result.valid).toBe(false);
     }
     {
       const nodeManager = new NodeManager([nodeNode, sectionNode]);
       const edges: DiagramEditorEdge[] = [];
-      const edge = createDefaultEdge(nodeNode.id, sectionNode.id, {
+      const edge = createDefaultEdge(nodeNode.id, null, sectionNode.id, null, {
         type: 'sectionInput',
         inputId: 'test',
       });

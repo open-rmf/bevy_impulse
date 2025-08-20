@@ -543,7 +543,13 @@ function DiagramEditor() {
       }
 
       const newEdge = {
-        ...createBaseEdge(conn.source, conn.target, id),
+        ...createBaseEdge(
+          conn.source,
+          conn.sourceHandle as HandleId,
+          conn.target,
+          conn.targetHandle as HandleId,
+          id,
+        ),
         type: validEdges[0],
         data: defaultEdgeData(validEdges[0]),
       } as DiagramEditorEdge;

@@ -16,7 +16,7 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
         {
           position: Position.Right,
           type: 'source',
-          variant: HandleType.Stream,
+          variant: HandleType.DataStream,
         },
       ]}
     />

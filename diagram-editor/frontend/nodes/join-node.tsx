@@ -1,7 +1,7 @@
 import type { NodeProps } from '@xyflow/react';
+import { HandleType } from '../handles';
 import type { OperationNode } from '.';
 import BaseNode from './base-node';
-import { HandleType } from '../handles';
 import { JoinIcon } from './icons';
 
 function JoinNodeComp(props: NodeProps<OperationNode<'join'>>) {
