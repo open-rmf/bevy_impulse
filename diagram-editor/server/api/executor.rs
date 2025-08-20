@@ -210,6 +210,7 @@ where
             // type annotations needed on `promise.await`
             Ok(promise) => match promise.await.available() {
                 Some(result) => {
+                    println!("got workflow response");
                     write
                         .lock()
                         .await
@@ -323,6 +324,7 @@ fn debug_feedback(
     feedback_query: bevy_ecs::system::Query<&FeedbackSender>,
 ) {
     for ev in op_started.read() {
+        println!("received event");
         // not sure if it is working as intended, but the root session is in the 2nd last
         // item, not the last as described in `session_stack` docs.
         let session = match ev.session_stack.iter().rev().skip(1).next() {
@@ -338,6 +340,7 @@ fn debug_feedback(
                 }
             }
             Err(_) => {
+                println!("non existing entity or no feedback compoennt");
                 // the session has no feedback channel
             }
         }
@@ -543,7 +546,6 @@ mod tests {
         }
     }
 
-    #[ignore = "tracing events in `bevy_impulse` is delayed"]
     #[tokio::test]
     #[test_log::test]
     async fn test_ws_debug() {
