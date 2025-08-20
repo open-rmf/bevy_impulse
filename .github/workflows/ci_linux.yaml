@@ -31,6 +31,14 @@ jobs:
     - name: Setup rust
       run: rustup default ${{ matrix.rust-version }}
 
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: latest
+    
+    - name: Setup nodejs
+      run: pnpm env use --global lts
+
     - name: Build default features
       run: cargo build --workspace
     - name: Test default features

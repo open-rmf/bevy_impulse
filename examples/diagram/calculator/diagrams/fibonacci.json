@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "c87b1c70-c90c-47d9-bfa6-1b153f020943",
+  "ops": {
+    "c87b1c70-c90c-47d9-bfa6-1b153f020943": {
+      "type": "node",
+      "builder": "fibonacci",
+      "next": {
+        "builtin": "terminate"
+      },
+      "stream_out": {
+        "sequence": "481da719-55ea-4018-b382-269117ded0f0"
+      }
+    },
+    "481da719-55ea-4018-b382-269117ded0f0": {
+      "type": "node",
+      "builder": "print",
+      "next": {
+        "builtin": "dispose"
+      }
+    }
+  }
+}

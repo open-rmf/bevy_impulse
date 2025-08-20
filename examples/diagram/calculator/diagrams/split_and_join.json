@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-rmf/bevy_impulse/refs/heads/main/diagram.schema.json",
+  "version": "0.1.0",
+  "templates": {},
+  "start": "74764679-1f94-49f3-8080-259e57f78be9",
+  "ops": {
+    "78254b15-382a-4e1f-a4e9-bd1fdb49c1f2": {
+      "type": "node",
+      "builder": "mul",
+      "next": "a00aa305-9763-4602-b638-6cb190e6c452",
+      "config": 10
+    },
+    "fee7f385-2a74-4a87-b8a7-87b8bd03fdf8": {
+      "type": "node",
+      "builder": "add",
+      "next": {
+        "builtin": "terminate"
+      }
+    },
+    "31fb7423-5300-447a-b259-49c5c79654e7": {
+      "type": "join",
+      "buffers": [
+        "a00aa305-9763-4602-b638-6cb190e6c452",
+        "305f46be-cf0d-42ac-bd28-26d63746abc3"
+      ],
+      "next": "fee7f385-2a74-4a87-b8a7-87b8bd03fdf8"
+    },
+    "5a68a9f5-8872-46e6-93f4-6d0e0384aa17": {
+      "type": "node",
+      "builder": "mul",
+      "next": "305f46be-cf0d-42ac-bd28-26d63746abc3",
+      "config": 100
+    },
+    "74764679-1f94-49f3-8080-259e57f78be9": {
+      "type": "split",
+      "sequential": [
+        "78254b15-382a-4e1f-a4e9-bd1fdb49c1f2",
+        "5a68a9f5-8872-46e6-93f4-6d0e0384aa17"
+      ]
+    },
+    "a00aa305-9763-4602-b638-6cb190e6c452": {
+      "type": "buffer"
+    },
+    "305f46be-cf0d-42ac-bd28-26d63746abc3": {
+      "type": "buffer"
+    }
+  }
+}

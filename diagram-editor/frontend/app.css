@@ -1,0 +1,44 @@
+/* reactflow overrides */
+/* see node_modules/@xyflow/react/dist/style.css */
+.react-flow.dark {
+  --xy-edge-stroke-default: var(--mui-palette-grey-700);
+}
+.react-flow__pane.draggable {
+  cursor: default;
+}
+.react-flow__pane.dragging {
+  cursor: grabbing;
+}
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  z-index: 10;
+}
+.react-flow__handle::before {
+  content: "";
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  left: -150%;
+  top: -100%;
+}
+.react-flow__handle.handle-data {
+  background-color: var(--xy-handle-background-color-default);
+}
+.react-flow__handle.handle-buffer {
+  background-color: var(--mui-palette-secondary-dark);
+}
+.react-flow__handle.handle-data-buffer {
+  background: linear-gradient(
+    -45deg,
+    var(--mui-palette-secondary-dark) 50%,
+    var(--xy-handle-background-color-default) 50%
+  );
+}
+.react-flow__handle.handle-data-stream {
+  background: linear-gradient(
+    -45deg,
+    var(--mui-palette-warning-dark) 50%,
+    var(--xy-handle-background-color-default) 50%
+  );
+}
