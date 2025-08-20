@@ -30,7 +30,7 @@ use crate::{
     Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
     IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
     IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage,
-    NamedStream, Node, StreamOf, StreamPack,
+    NamedStream, Node, StreamAvailability, StreamOf, StreamPack,
 };
 
 #[cfg(feature = "trace")]
@@ -56,8 +56,8 @@ pub struct NodeRegistration {
     pub(super) default_display_text: DisplayText,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
+    pub(super) streams: HashMap<Cow<'static, str>, TypeInfo>,
     pub(super) config_schema: Schema,
-
     /// Creates an instance of the registered node.
     #[serde(skip)]
     create_node_impl: CreateNodeFn,
@@ -171,10 +171,15 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Request>();
         self.impl_register_message::<Response>();
 
+        let mut availability = StreamAvailability::default();
+        Streams::set_stream_availability(&mut availability);
+        let streams = availability.named_streams();
+
         let registration = NodeRegistration {
             default_display_text: options.default_display_text.unwrap_or(options.id.clone()),
             request: TypeInfo::of::<Request>(),
             response: TypeInfo::of::<Response>(),
+            streams,
             config_schema: self
                 .registry
                 .messages
