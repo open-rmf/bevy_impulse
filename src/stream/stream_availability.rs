@@ -90,7 +90,10 @@ impl StreamAvailability {
     }
 
     pub fn named_streams(&self) -> HashMap<Cow<'static, str>, TypeInfo> {
-        self.named.iter().map(|(k, v)| (k.clone(), v.value)).collect()
+        self.named
+            .iter()
+            .map(|(k, v)| (k.clone(), v.value))
+            .collect()
     }
 }
 

@@ -1563,8 +1563,8 @@ mod tests {
     use schemars::JsonSchema;
     use serde::Deserialize;
 
-    use crate::*;
     use super::*;
+    use crate::*;
 
     fn multiply3(i: i64) -> i64 {
         i * 3
@@ -1876,7 +1876,7 @@ mod tests {
                     input.streams.bar_stream.send(value);
                     input.streams.baz_stream.send(value.to_string());
                 })
-            }
+            },
         );
 
         // print out a pretty json for manual inspection
@@ -1894,9 +1894,18 @@ mod tests {
         let nodes = &value["nodes"];
         let stream_test_schema = &nodes["stream_test"];
         let streams = &stream_test_schema["streams"];
-        assert_eq!(streams["foo_stream"].as_str().unwrap(), TypeInfo::of::<i64>().type_name);
-        assert_eq!(streams["bar_stream"].as_str().unwrap(), TypeInfo::of::<f64>().type_name);
-        assert_eq!(streams["baz_stream"].as_str().unwrap(), TypeInfo::of::<String>().type_name);
+        assert_eq!(
+            streams["foo_stream"].as_str().unwrap(),
+            TypeInfo::of::<i64>().type_name
+        );
+        assert_eq!(
+            streams["bar_stream"].as_str().unwrap(),
+            TypeInfo::of::<f64>().type_name
+        );
+        assert_eq!(
+            streams["baz_stream"].as_str().unwrap(),
+            TypeInfo::of::<String>().type_name
+        );
     }
 
     #[test]
