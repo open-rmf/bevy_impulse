@@ -1,10 +1,10 @@
 use assert_cmd::Command;
 
 #[test]
-fn multiply3() {
+fn multiply_by_3() {
     Command::cargo_bin("calculator")
         .unwrap()
-        .args(["multiply3.json", "4"])
+        .args(["run", "diagrams/multiply_by_3.json", "4"])
         .assert()
         .stdout("12.0\n");
 }

@@ -866,8 +866,11 @@ pub enum DiagramErrorCode {
     #[error("one or more operation is missing inputs")]
     IncompleteDiagram,
 
-    #[error(transparent)]
-    JsonError(#[from] serde_json::Error),
+    #[error("the config of the operation has an error: {0}")]
+    ConfigError(serde_json::Error),
+
+    #[error("failed to create trace info for the operation: {0}")]
+    TraceInfoError(serde_json::Error),
 
     #[error(transparent)]
     ConnectionError(#[from] SplitConnectionError),
