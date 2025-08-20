@@ -11,7 +11,9 @@ function NodeForm(props: NodeFormProps) {
   const registry = useRegistry();
   const nodes = Object.keys(registry.nodes);
   const [configValue, setConfigValue] = useState(() =>
-    props.node.data.op.config ? JSON.stringify(props.node.data.op.config) : '',
+    props.node.data.op.config
+      ? JSON.stringify(props.node.data.op.config)
+      : 'null',
   );
   const configError = useMemo(() => {
     if (configValue === '') {
@@ -55,7 +57,8 @@ function NodeForm(props: NodeFormProps) {
           setConfigValue(ev.target.value);
           try {
             const updatedNode = { ...props.node };
-            updatedNode.data.op.config = JSON.parse(ev.target.value);
+            updatedNode.data.op.config =
+              ev.target.value === '' ? null : JSON.parse(ev.target.value);
             props.onChange?.({
               type: 'replace',
               id: props.node.id,
