@@ -18,6 +18,7 @@
 mod buffer_schema;
 mod fork_clone_schema;
 mod fork_result_schema;
+mod grpc;
 mod join_schema;
 mod node_schema;
 mod operation_ref;
@@ -322,8 +323,8 @@ impl BuildDiagramOperation for DiagramOperation {
 }
 
 /// Returns the schema for [`String`]
-fn schema_with_string(gen: &mut SchemaGenerator) -> Schema {
-    gen.subschema_for::<String>()
+fn schema_with_string(generator: &mut SchemaGenerator) -> Schema {
+    generator.subschema_for::<String>()
 }
 
 /// deserialize semver and validate that it has a supported version
