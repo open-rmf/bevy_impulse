@@ -1562,10 +1562,18 @@ mod tests {
     use schemars::JsonSchema;
     use serde::Deserialize;
 
+    use crate::*;
     use super::*;
 
     fn multiply3(i: i64) -> i64 {
         i * 3
+    }
+
+    #[derive(StreamPack)]
+    struct TestStreamRegistration {
+        foo_stream: i64,
+        bar_stream: f64,
+        baz_stream: String,
     }
 
     /// Some extra impl only used in tests (for now).
@@ -1858,6 +1866,18 @@ mod tests {
             })
             .with_unzip();
 
+        reg.register_node_builder(
+            NodeBuilderOptions::new("stream_test"),
+            |builder, _config: ()| {
+                builder.create_map(|input: BlockingMap<f64, TestStreamRegistration>| {
+                    let value = input.request;
+                    input.streams.foo_stream.send(value as i64);
+                    input.streams.bar_stream.send(value);
+                    input.streams.baz_stream.send(value.to_string());
+                })
+            }
+        );
+
         // print out a pretty json for manual inspection
         println!("{}", serde_json::to_string_pretty(&reg).unwrap());
 
@@ -1869,6 +1889,13 @@ mod tests {
         assert_eq!(bar_schema["$ref"].as_str().unwrap(), "#/schemas/Bar");
         assert!(schemas.get("Bar").is_some());
         assert!(schemas.get("Foo").is_some());
+
+        let nodes = &value["nodes"];
+        let stream_test_schema = &nodes["stream_test"];
+        let streams = &stream_test_schema["streams"];
+        assert_eq!(streams["foo_stream"].as_str().unwrap(), TypeInfo::of::<i64>().type_name);
+        assert_eq!(streams["bar_stream"].as_str().unwrap(), TypeInfo::of::<f64>().type_name);
+        assert_eq!(streams["baz_stream"].as_str().unwrap(), TypeInfo::of::<String>().type_name);
     }
 
     #[test]
