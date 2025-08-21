@@ -55,10 +55,14 @@ schemars = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 cel-interpreter = { version = "0.9.0", features = ["json"], optional = true }
+
 tonic = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 prost-reflect = { version = "0.16", features = ["serde"], optional = true }
 http = { version = "1.3", optional = true }
+futures-lite = { version = "2.6", features = ["std", "race"], optional = true }
+async-std = { version = "1.12", optional = true}
+
 tracing = "0.1.41"
 strum = { version = "0.26.3", optional = true, features = ["derive"] }
 semver = { version = "1.0.24", optional = true }
@@ -80,6 +84,8 @@ diagram = [
   "dep:prost",
   "dep:prost-reflect",
   "dep:http",
+  "dep:futures-lite",
+  "dep:async-std",
 ]
 trace = ["diagram"]
 
