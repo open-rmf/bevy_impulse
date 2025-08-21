@@ -1,6 +1,6 @@
 import { styled } from '@mui/material';
 import { type NodeProps, Position } from '@xyflow/react';
-import { Handle, HandleType } from '../handles';
+import { Handle, HandleId, HandleType } from '../handles';
 import type { OperationNode } from '.';
 import BaseNode from './base-node';
 import { ForkResultIcon } from './icons';
@@ -28,24 +28,20 @@ function ForkResultNodeComp(props: NodeProps<OperationNode<'fork_result'>>) {
             isConnectable={props.isConnectable}
             variant={HandleType.Data}
           />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            isConnectable={props.isConnectable}
-            variant={HandleType.Data}
-          />
-          {/* <ForkResultOkHandle
+          <ForkResultOkHandle
+            id={HandleId.ForkResultOk}
             type="source"
             position={Position.Bottom}
             isConnectable={props.isConnectable}
             variant={HandleType.Data}
           />
           <ForkResultErrHandle
+            id={HandleId.ForkResultErr}
             type="source"
             position={Position.Bottom}
             isConnectable={props.isConnectable}
             variant={HandleType.Data}
-          /> */}
+          />
         </>
       }
     />
