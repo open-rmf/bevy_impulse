@@ -15,6 +15,9 @@
  *
 */
 
+use crate::AsyncMap;
+use super::*;
+
 use std::{
     future::Future,
     pin::Pin,
@@ -22,8 +25,8 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use crate::AsyncMap;
-use super::*;
+
+use anyhow::anyhow;
 
 use tonic::{
     client::Grpc as Client,
@@ -60,11 +63,15 @@ pub struct GrpcConfig {
 }
 
 #[derive(StreamPack)]
-struct GrpcStream {
+pub struct GrpcStreams {
     out: JsonMessage,
-    stream_status: Status,
     canceller: OneShotSender<Option<String>>,
-    input: ClientStreamInput,
+}
+
+#[derive(Clone)]
+pub struct ClientStreamInput {
+    sender: UnboundedSender<DynamicMessage>,
+    descriptor: MessageDescriptor,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -75,8 +82,8 @@ pub enum NameOrIndex {
 
 impl DiagramElementRegistry {
     pub fn enable_grpc(&mut self) {
-        self.register_node_builder(
-            NodeBuilderOptions::new("grpc_client").with_default_display_text("gRPC"),
+        self.register_node_builder_fallible(
+            NodeBuilderOptions::new("grpc_request").with_default_display_text("gRPC Request"),
             move |builder, config: GrpcConfig| {
                 let descriptors = DescriptorPool::global();
                 let service = descriptors.get_service_by_name(&config.service).unwrap();
@@ -107,11 +114,14 @@ impl DiagramElementRegistry {
                     Client::new(channel)
                 }.shared();
 
-                let is_client_streaming = method.is_client_streaming();
+                if method.is_client_streaming() {
+                    return Err(anyhow!("grpc_client_single_request does not support client streaming"));
+                }
+
                 let is_server_streaming = method.is_server_streaming();
                 let path = PathAndQuery::from_maybe_shared(path.clone()).unwrap();
 
-                builder.create_map(move |input: AsyncMap<JsonMessage, GrpcStream>| {
+                let node = builder.create_map(move |input: AsyncMap<JsonMessage, GrpcStreams>| {
                     let client = client.clone();
                     let codec = codec.clone();
                     let path = path.clone();
@@ -138,62 +148,44 @@ impl DiagramElementRegistry {
                             .map_err(|e| format!("{e}"))?;
                         let request = Request::new(request);
 
-                        if !is_client_streaming && !is_server_streaming {
-                            let session = client.unary(request, path, codec);
-                            let cancellable_session = race(session, receive_cancel(receiver));
+                        let cancel = receiver.shared();
 
+                        let session = client.server_streaming(request, path, codec);
+                        let cancellable_session = race(session, receive_cancel(cancel.clone()));
+
+                        let r = if let Some(t) = config.timeout {
+                            timeout(t, cancellable_session).await.map_err(|e| format!("{e}"))?
+                        } else {
+                            cancellable_session.await
+                        };
+
+                        let mut streaming = r.map_err(|e| format!("{e}"))?.into_inner();
+                        loop {
                             let r = if let Some(t) = config.timeout {
-                                timeout(t, cancellable_session).await.map_err(|e| format!("{e}"))?
+                                timeout(t, race(streaming.message(), receive_cancel(cancel.clone())))
+                                .await
+                                .map_err(|_| "timeout waiting for new stream message".to_owned())?
                             } else {
-                                cancellable_session.await
+                                race(streaming.message(), receive_cancel(cancel.clone())).await
+                            }
+                            .map_err(|e| format!("{e}"))?;
+
+                            let Some(response) = r else {
+                                return Ok::<_, String>(());
                             };
 
-                            let response = r.map_err(|e| format!("{e}"))?.into_inner();
                             let value = serde_json::to_value(response)
                                 .map_err(|e| format!("failed to convert to json: {e}"))?;
                             input.streams.out.send(value);
 
-                        } else if !is_client_streaming && is_server_streaming {
-                            let cancel = receiver.shared();
-
-                            let session = client.server_streaming(request, path, codec);
-                            let cancellable_session = race(session, receive_cancel(cancel.clone()));
-
-                            let r = if let Some(t) = config.timeout {
-                                timeout(t, cancellable_session).await.map_err(|e| format!("{e}"))?
-                            } else {
-                                cancellable_session.await
-                            };
-
-                            let mut streaming = r.map_err(|e| format!("{e}"))?.into_inner();
-                            loop {
-                                let r = if let Some(t) = config.timeout {
-                                    timeout(t, race(streaming.message(), receive_cancel(cancel.clone())))
-                                    .await
-                                    .map_err(|_| "timeout waiting for new stream message".to_owned())?
-                                } else {
-                                    race(streaming.message(), receive_cancel(cancel.clone())).await
-                                }
-                                .map_err(|e| format!("{e}"))?;
-
-                                let Some(response) = r else {
-                                    return Ok(());
-                                };
-
-                                let value = serde_json::to_value(response)
-                                    .map_err(|e| format!("failed to convert to json: {e}"))?;
-                                input.streams.out.send(value);
+                            if !is_server_streaming {
+                                return Ok(());
                             }
-                        } else if is_client_streaming && !is_server_streaming {
-                            let (sender, receiver) = unbounded();
-
-                            let session = client.client_streaming(request, path, codec).await;
-
                         }
-
-                        Ok::<_, String>(())
                     }
-                })
+                });
+
+                Ok(node)
             }
         );
     }
@@ -220,12 +212,6 @@ async fn receive_cancel<T, E>(
             unreachable!("this future will never finish");
         }
     }
-}
-
-#[derive(Clone)]
-pub struct ClientStreamInput {
-    sender: UnboundedSender<DynamicMessage>,
-    descriptor: MessageDescriptor,
 }
 
 #[derive(Clone)]
