@@ -4,7 +4,7 @@ import {
   EdgeCategory,
   type EdgeTypes,
 } from '../edges';
-import type { HandleId } from '../handles';
+import { HandleId } from '../handles';
 import type { NodeManager } from '../node-manager';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
@@ -53,19 +53,61 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
   unzip: [EdgeCategory.Data],
 };
 
+const ALLOWED_HANDLE_OUTPUT_EDGES: Record<string, EdgeTypes[]> = {
+  dataStream: ['streamOut'],
+} satisfies Record<HandleId, EdgeTypes[]>;
+
+const ALLOWED_HANDLE_INPUT_EDGE_CATEGORIES: Record<string, EdgeCategory[]> = {
+  dataStream: [EdgeCategory.Data],
+} satisfies Record<HandleId, EdgeCategory[]>;
+
+function arrayIntersection<T>(a: T[], b: T[]): T[] {
+  const intersection = [];
+  for (const elem of a) {
+    if (b.includes(elem)) {
+      intersection.push(elem);
+    }
+  }
+  return intersection;
+}
+
 export function getValidEdgeTypes(
   sourceNode: DiagramEditorNode,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   targetNode: DiagramEditorNode,
-  _targetHandle: HandleId,
+  targetHandle: string | null | undefined,
 ): EdgeTypes[] {
-  const allowedOutputEdges: EdgeTypes[] =
-    sourceHandle === 'dataStream'
-      ? ['streamOut']
-      : [...ALLOWED_OUTPUT_EDGES[sourceNode.type]];
-  const allowedInputEdgeCategories =
+  let allowedOutputEdges: EdgeTypes[] = ALLOWED_OUTPUT_EDGES[sourceNode.type];
+  if (sourceHandle) {
+    const allowedHandleOutput = ALLOWED_HANDLE_OUTPUT_EDGES[sourceHandle];
+    if (allowedHandleOutput) {
+      // we are only dealing with very small arrays, no need to create a Set.
+      allowedOutputEdges = arrayIntersection(
+        allowedOutputEdges,
+        allowedHandleOutput,
+      );
+    } else {
+      console.error('failed to get allowed handle output edges');
+    }
+  }
+
+  let allowedInputEdgeCategories =
     ALLOWED_INPUT_EDGE_CATEGORIES[targetNode.type];
-  return allowedOutputEdges.filter((edgeType) =>
+  if (targetHandle) {
+    const allowedHandleInput =
+      ALLOWED_HANDLE_INPUT_EDGE_CATEGORIES[targetHandle];
+    if (allowedHandleInput) {
+      // we are only dealing with very small arrays, no need to create a Set.
+      allowedInputEdgeCategories = arrayIntersection(
+        allowedInputEdgeCategories,
+        allowedHandleInput,
+      );
+    } else {
+      console.error('failed to get allowed handle input edge categories');
+    }
+  }
+
+  return Array.from(allowedOutputEdges).filter((edgeType) =>
     allowedInputEdgeCategories.includes(EDGE_CATEGORIES[edgeType]),
   );
 }
@@ -78,9 +120,9 @@ enum CardinalityType {
 
 function getOutputCardinality(
   type: NodeTypes,
-  handleId: HandleId,
+  handleId: string | null | undefined,
 ): CardinalityType {
-  if (handleId === 'dataStream') {
+  if (handleId === HandleId.DataStream) {
     return CardinalityType.Single;
   }
 

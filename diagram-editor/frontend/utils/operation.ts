@@ -11,7 +11,7 @@ import {
   createUnzipEdge,
   type DiagramEditorEdge,
 } from '../edges';
-import type { HandleId } from '../handles';
+import { HandleId } from '../handles';
 import { NodeManager } from '../node-manager';
 import {
   type DiagramEditorNode,
@@ -53,10 +53,8 @@ function createStreamOutEdges(
     );
     if (targetNode) {
       const target = targetNode.id;
-      const targetHandle: HandleId =
-        targetNode.type === 'stream_out' ? 'dataStream' : null;
       edges.push(
-        createStreamOutEdge(node.id, 'dataStream', target, targetHandle, {
+        createStreamOutEdge(node.id, HandleId.DataStream, target, null, {
           streamId,
         }),
       );

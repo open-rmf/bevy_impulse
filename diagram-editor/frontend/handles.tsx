@@ -4,7 +4,9 @@ import {
 } from '@xyflow/react';
 import { exhaustiveCheck } from './utils/exhaustive-check';
 
-export type HandleId = 'dataStream' | null | undefined;
+export enum HandleId {
+  DataStream = 'dataStream',
+}
 
 export enum HandleType {
   Data,
@@ -44,8 +46,8 @@ function variantClassName(handleType?: HandleType): string | undefined {
 }
 
 export function Handle({ variant, className, ...baseProps }: HandleProps) {
-  const handleId: HandleId =
-    variant === HandleType.DataStream ? 'dataStream' : undefined;
+  const handleId: HandleId | undefined =
+    variant === HandleType.DataStream ? HandleId.DataStream : undefined;
 
   const prependClassName = className
     ? `${variantClassName(variant)} ${className} `

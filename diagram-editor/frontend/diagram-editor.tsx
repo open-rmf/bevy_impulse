@@ -46,7 +46,6 @@ import {
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
-import type { HandleId } from './handles';
 import { NodeManager, NodeManagerProvider } from './node-manager';
 import {
   type DiagramEditorNode,
@@ -531,9 +530,9 @@ function DiagramEditor() {
 
       const validEdges = getValidEdgeTypes(
         sourceNode,
-        conn.sourceHandle as HandleId,
+        conn.sourceHandle,
         targetNode,
-        conn.targetHandle as HandleId,
+        conn.targetHandle,
       );
       if (validEdges.length === 0) {
         showErrorToast(
@@ -545,9 +544,9 @@ function DiagramEditor() {
       const newEdge = {
         ...createBaseEdge(
           conn.source,
-          conn.sourceHandle as HandleId,
+          conn.sourceHandle,
           conn.target,
-          conn.targetHandle as HandleId,
+          conn.targetHandle,
           id,
         ),
         type: validEdges[0],
@@ -641,9 +640,9 @@ function DiagramEditor() {
 
           const allowedEdges = getValidEdgeTypes(
             sourceNode,
-            conn.sourceHandle as HandleId,
+            conn.sourceHandle,
             targetNode,
-            conn.targetHandle as HandleId,
+            conn.targetHandle,
           );
           return allowedEdges.length > 0;
         }}
