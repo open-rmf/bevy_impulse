@@ -1,5 +1,5 @@
-import type { NodeProps } from '@xyflow/react';
-import { HandleType } from '../handles';
+import { type NodeProps, Position } from '@xyflow/react';
+import { Handle, HandleType } from '../handles';
 import { useRegistry } from '../registry-provider';
 import type { NextOperation } from '../types/api';
 import type { Node } from '../types/react-flow';
@@ -64,8 +64,22 @@ export function SectionNodeComp(props: NodeProps<OperationNode<'section'>>) {
       icon={<SectionIcon />}
       label={label}
       caption={caption}
-      variant="inputOutput"
-      inputHandleType={HandleType.DataBuffer}
+      handles={
+        <>
+          <Handle
+            type="target"
+            position={Position.Top}
+            isConnectable={props.isConnectable}
+            variant={HandleType.DataBuffer}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            isConnectable={props.isConnectable}
+            variant={HandleType.Data}
+          />
+        </>
+      }
     />
   );
 }
@@ -84,8 +98,15 @@ export function SectionInputNodeComp(props: NodeProps<SectionInputNode>) {
       color="secondary"
       icon={<SectionInputIcon />}
       label="Section Input"
-      variant="output"
       caption={props.data.remappedId}
+      handles={
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          isConnectable={props.isConnectable}
+          variant={HandleType.Data}
+        />
+      }
     />
   );
 }
@@ -97,8 +118,15 @@ export function SectionOutputNodeComp(props: NodeProps<SectionOutputNode>) {
       color="secondary"
       icon={<SectionOutputIcon />}
       label="Section Output"
-      variant="input"
       caption={props.data.outputId}
+      handles={
+        <Handle
+          type="target"
+          position={Position.Top}
+          isConnectable={props.isConnectable}
+          variant={HandleType.Data}
+        />
+      }
     />
   );
 }
@@ -110,9 +138,15 @@ export function SectionBufferNodeComp(props: NodeProps<SectionBufferNode>) {
       color="secondary"
       icon={<SectionBufferIcon />}
       label="Section Buffer"
-      variant="output"
       caption={props.data.remappedId}
-      outputHandleType={HandleType.Buffer}
+      handles={
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          isConnectable={props.isConnectable}
+          variant={HandleType.Buffer}
+        />
+      }
     />
   );
 }

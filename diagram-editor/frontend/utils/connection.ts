@@ -55,10 +55,14 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
 
 const ALLOWED_HANDLE_OUTPUT_EDGES: Record<string, EdgeTypes[]> = {
   dataStream: ['streamOut'],
+  forkResultOk: ['forkResultOk'],
+  forkResultErr: ['forkResultErr'],
 } satisfies Record<HandleId, EdgeTypes[]>;
 
 const ALLOWED_HANDLE_INPUT_EDGE_CATEGORIES: Record<string, EdgeCategory[]> = {
   dataStream: [EdgeCategory.Data],
+  forkResultOk: [],
+  forkResultErr: [],
 } satisfies Record<HandleId, EdgeCategory[]>;
 
 function arrayIntersection<T>(a: T[], b: T[]): T[] {

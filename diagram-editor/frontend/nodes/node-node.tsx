@@ -1,5 +1,5 @@
 import { type NodeProps, Position } from '@xyflow/react';
-import { HandleType } from '../handles';
+import { Handle, HandleId, HandleType } from '../handles';
 import { useRegistry } from '../registry-provider';
 import type { OperationNode } from '.';
 import BaseNode from './base-node';
@@ -20,15 +20,29 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
       icon={<NodeIcon />}
       label={label || 'Select Builder'}
       caption={props.data.op.builder}
-      variant="inputOutput"
-      outputHandleType={HandleType.Data}
-      extraHandles={[
-        {
-          position: Position.Right,
-          type: 'source',
-          variant: HandleType.DataStream,
-        },
-      ]}
+      handles={
+        <>
+          <Handle
+            type="target"
+            position={Position.Top}
+            isConnectable={props.isConnectable}
+            variant={HandleType.Data}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            isConnectable={props.isConnectable}
+            variant={HandleType.Data}
+          />
+          <Handle
+            id={HandleId.DataStream}
+            type="source"
+            position={Position.Right}
+            isConnectable={props.isConnectable}
+            variant={HandleType.DataStream}
+          />
+        </>
+      }
     />
   );
 }

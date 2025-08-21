@@ -6,6 +6,8 @@ import { exhaustiveCheck } from './utils/exhaustive-check';
 
 export enum HandleId {
   DataStream = 'dataStream',
+  ForkResultOk = 'forkResultOk',
+  ForkResultErr = 'forkResultErr',
 }
 
 export enum HandleType {
@@ -16,6 +18,11 @@ export enum HandleType {
 }
 
 export interface HandleProps extends Omit<ReactFlowHandleProps, 'id'> {
+  /**
+   * Id of the handle, this affects how the validator determines if a connection is valid.
+   * For variants other than `HandleType.Data`, you probably want to assign an appropriate id.
+   */
+  id?: HandleId;
   variant: HandleType;
 }
 
@@ -45,19 +52,12 @@ function variantClassName(handleType?: HandleType): string | undefined {
   }
 }
 
-export function Handle({ variant, className, ...baseProps }: HandleProps) {
-  const handleId: HandleId | undefined =
-    variant === HandleType.DataStream ? HandleId.DataStream : undefined;
-
+export function Handle({ id, variant, className, ...baseProps }: HandleProps) {
   const prependClassName = className
     ? `${variantClassName(variant)} ${className} `
     : variantClassName(variant);
 
   return (
-    <ReactFlowHandle
-      {...baseProps}
-      id={handleId}
-      className={prependClassName}
-    />
+    <ReactFlowHandle {...baseProps} id={id} className={prependClassName} />
   );
 }
