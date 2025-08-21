@@ -138,9 +138,7 @@ function getOutputCardinality(
     case 'split': {
       return CardinalityType.Many;
     }
-    case 'fork_result': {
-      return CardinalityType.Pair;
-    }
+    case 'fork_result':
     case 'node':
     case 'buffer_access':
     case 'join':
