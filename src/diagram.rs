@@ -53,6 +53,8 @@ use transform_schema::{TransformError, TransformSchema};
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
 
+use anyhow::Error as Anyhow;
+
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -779,6 +781,18 @@ impl Display for DiagramErrorContext {
 pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
+
+    #[error("node builder [{builder}] encountered an error: {error}")]
+    NodeBuildingError {
+        builder: BuilderId,
+        error: Anyhow,
+    },
+
+    #[error("section builder [{builder}] encountered an error: {error}")]
+    SectionBuildingError {
+        builder: BuilderId,
+        error: Anyhow,
+    },
 
     #[error("operation [{0}] not found")]
     OperationNotFound(NextOperation),
