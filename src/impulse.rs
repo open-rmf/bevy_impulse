@@ -508,7 +508,7 @@ mod tests {
         // This is a regression test that covers a bug which existed due to
         // an incorrect handling of detached impulses when giving input.
         let mut context = TestingContext::minimal_plugins();
-        let service = context.spawn_delayed_map(Duration::from_millis(1), |n| n + 1);
+        let service = context.spawn_delayed_map(Duration::from_millis(1), |n| *n + 1);
 
         context.command(|commands| {
             commands.provide(0).then(service).detach();
