@@ -1,0 +1,37 @@
+[package]
+name = "bevy_impulse_diagram_editor_wasm"
+version = "0.0.1"
+edition = "2021"
+authors = ["Teo Koon Peng <koonpeng@intrinsic.ai>"]
+license = "Apache-2.0"
+description = "Frontend for bevy_impulse diagrams"
+readme = "README.md"
+repository = "https://github.com/open-rmf/bevy_impulse"
+keywords = [
+  "reactive",
+  "workflow",
+  "behavior",
+  "agent",
+  "bevy",
+  "frontend",
+  "diagram",
+]
+categories = [
+  "science::robotics",
+  "asynchronous",
+  "concurrency",
+  "game-development",
+]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+axum = { version = "0.8.4" }
+# bevy_impulse_diagram_editor = { version = "0.0.1", path = "..", default-features = false }
+
+[build-dependencies]
+
+[dev-dependencies]
+
+[features]

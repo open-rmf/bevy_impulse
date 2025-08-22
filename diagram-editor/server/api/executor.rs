@@ -1,11 +1,5 @@
-use crate::api::error_responses::WorkflowCancelledResponse;
-
-use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
 use axum::{
-    extract::{
-        ws::{self},
-        State,
-    },
+    extract::State,
     http::StatusCode,
     response::{self, Response},
     routing::{self, post},
@@ -17,11 +11,17 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
+    ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::sync::mpsc::error::TryRecvError;
 use tracing::{error, warn};
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+
+use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
+use crate::api::error_responses::WorkflowCancelledResponse;
 
 type BroadcastRecvError = tokio::sync::broadcast::error::RecvError;
 
@@ -33,7 +33,7 @@ type WorkflowFeedback = OperationStarted;
 #[derive(bevy_ecs::component::Component)]
 struct FeedbackSender(tokio::sync::broadcast::Sender<WorkflowFeedback>);
 
-struct Context {
+pub(super) struct Context {
     diagram: Diagram,
     request: serde_json::Value,
     registry: Arc<Mutex<DiagramElementRegistry>>,
@@ -42,10 +42,10 @@ struct Context {
 }
 
 #[derive(Clone)]
-struct ExecutorState {
-    registry: Arc<Mutex<DiagramElementRegistry>>,
-    send_chan: tokio::sync::mpsc::Sender<Context>,
-    response_timeout: Duration,
+pub(super) struct ExecutorState {
+    pub(super) registry: Arc<Mutex<DiagramElementRegistry>>,
+    pub(super) send_chan: tokio::sync::mpsc::Sender<Context>,
+    pub(super) response_timeout: Duration,
 }
 
 #[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
@@ -120,6 +120,24 @@ async fn post_run(
     Ok(Json(response))
 }
 
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub async fn post_run_wasm(request: JsValue) -> JsValue {
+    let executor_state = super::wasm::EXECUTOR_STATE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("`init_wasm` not called")
+        .clone();
+    let response = post_run(
+        State(executor_state.clone()),
+        Json(serde_wasm_bindgen::from_value(request).unwrap()),
+    )
+    .await
+    .unwrap();
+    serde_wasm_bindgen::to_value(&response.0).unwrap()
+}
+
 #[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
 #[cfg_attr(test, derive(serde::Deserialize))]
 #[derive(Serialize)]
@@ -153,10 +171,11 @@ pub enum DebugSessionMessage {
 }
 
 /// Start a debug session.
-async fn ws_debug<W, R>(mut write: W, mut read: R, state: State<ExecutorState>)
+async fn ws_debug<W, R, Text>(mut write: W, mut read: R, state: State<ExecutorState>)
 where
     W: WebsocketSinkExt<DebugSessionMessage>,
-    R: WebsocketStreamExt<PostRunRequest>,
+    R: WebsocketStreamExt<PostRunRequest, Text>,
+    Text: Deref<Target = str>,
 {
     let req: PostRunRequest = if let Some(req) = read.next_json().await {
         req
@@ -357,7 +376,7 @@ impl Default for ExecutorOptions {
     }
 }
 
-fn setup_bevy_app(
+pub(super) fn setup_bevy_app(
     app: &mut bevy_app::App,
     registry: DiagramElementRegistry,
     options: &ExecutorOptions,
@@ -373,11 +392,14 @@ fn setup_bevy_app(
     }
 }
 
+#[cfg(feature = "router")]
 pub(super) fn new_router(
     app: &mut bevy_app::App,
     registry: DiagramElementRegistry,
     options: ExecutorOptions,
 ) -> Router {
+    use axum::extract::ws;
+
     let executor_state = setup_bevy_app(app, registry, &options);
 
     Router::new()
@@ -396,20 +418,22 @@ pub(super) fn new_router(
         .with_state(executor_state)
 }
 
+#[cfg(feature = "router")]
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
-    use super::*;
     use axum::{
         body,
+        extract::ws,
         http::{header, Request},
     };
     use bevy_impulse::{ImpulseAppPlugin, NodeBuilderOptions};
     use futures_util::SinkExt;
     use mime_guess::mime;
     use serde_json::json;
+    use std::thread;
     use tower::ServiceExt;
+
+    use super::*;
 
     struct TestFixture<CleanupFn> {
         router: Router,

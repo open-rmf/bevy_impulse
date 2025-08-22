@@ -1,15 +1,19 @@
+mod error_responses;
+pub mod executor;
+#[cfg(feature = "wasm")]
+mod wasm;
+#[cfg(feature = "wasm")]
+pub use wasm::*;
+mod websocket;
+
 use axum::{
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
-    Router,
 };
+#[cfg(feature = "router")]
+use axum::{routing::get, Router};
 use bevy_impulse::DiagramElementRegistry;
 use mime_guess::mime;
-
-mod error_responses;
-pub mod executor;
-mod websocket;
 
 #[derive(Default)]
 #[non_exhaustive]
@@ -55,6 +59,7 @@ impl RegistryResponse {
     }
 }
 
+#[cfg(feature = "router")]
 pub fn api_router(
     app: &mut bevy_app::App,
     registry: DiagramElementRegistry,
@@ -67,6 +72,7 @@ pub fn api_router(
     )
 }
 
+#[cfg(feature = "router")]
 #[cfg(test)]
 mod tests {
     use axum::{

@@ -20,12 +20,15 @@ use bevy_impulse::{
     AsyncMap, Diagram, DiagramElementRegistry, DiagramError, ImpulseAppPlugin, JsonMessage,
     NodeBuilderOptions, Promise, RequestExt, RunCommandsOnWorldExt, StreamPack,
 };
+#[cfg(feature = "api")]
 use bevy_impulse_diagram_editor::{new_router, ServerOptions};
 use clap::Parser;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
-use std::{error::Error, fmt::Write, fs::File, str::FromStr, thread};
+#[cfg(feature = "api")]
+use std::thread;
+use std::{error::Error, fmt::Write, fs::File, str::FromStr};
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -44,6 +47,7 @@ enum Commands {
     Run(RunArgs),
 
     /// Starts a server to edit and run diagrams.
+    #[cfg(feature = "api")]
     Serve(ServeArgs),
 }
 
@@ -84,6 +88,7 @@ fn run(args: RunArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Er
     Ok(())
 }
 
+#[cfg(feature = "api")]
 async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), Box<dyn Error>> {
     println!("Serving diagram editor at http://localhost:{}", args.port);
 
@@ -278,7 +283,7 @@ fn create_registry() -> DiagramElementRegistry {
     registry
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
@@ -288,6 +293,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match cli.command {
         Commands::Run(args) => run(args, registry),
+        #[cfg(feature = "api")]
         Commands::Serve(args) => serve(args, registry).await,
     }
 }
