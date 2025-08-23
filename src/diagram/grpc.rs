@@ -34,7 +34,7 @@ use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     Status, Code, Request,
 };
-use prost_reflect::{DescriptorPool, MessageDescriptor, DynamicMessage};
+use prost_reflect::{DescriptorPool, MethodDescriptor, MessageDescriptor, DynamicMessage};
 use prost::Message;
 use http::uri::PathAndQuery;
 
@@ -42,17 +42,18 @@ use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
 
 use futures::{
-    FutureExt,
+    FutureExt, Stream as FutureStream,
     channel::{
         oneshot::{self, Sender as OneShotSender},
-        mpsc::{unbounded, UnboundedSender},
+        mpsc::UnboundedReceiver,
     },
     never::Never,
+    stream::once,
 };
 
 use futures_lite::future::race;
 
-use async_std::future::timeout;
+use async_std::future::timeout as until_timeout;
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GrpcConfig {
@@ -68,12 +69,6 @@ pub struct GrpcStreams {
     canceller: OneShotSender<Option<String>>,
 }
 
-#[derive(Clone)]
-pub struct ClientStreamInput {
-    sender: UnboundedSender<DynamicMessage>,
-    descriptor: MessageDescriptor,
-}
-
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub enum NameOrIndex {
     Name(Arc<str>),
@@ -83,111 +78,64 @@ pub enum NameOrIndex {
 impl DiagramElementRegistry {
     pub fn enable_grpc(&mut self) {
         self.register_node_builder_fallible(
-            NodeBuilderOptions::new("grpc_request").with_default_display_text("gRPC Request"),
+            NodeBuilderOptions::new("grpc_request")
+                .with_default_display_text("gRPC Request"),
             move |builder, config: GrpcConfig| {
-                let descriptors = DescriptorPool::global();
-                let service = descriptors.get_service_by_name(&config.service).unwrap();
-                let method = match config.method.as_ref().unwrap_or(&NameOrIndex::Index(0)) {
-                    NameOrIndex::Index(index) => {
-                        service.methods().skip(*index).next().unwrap()
-                    }
-                    NameOrIndex::Name(name) => {
-                        service.methods().find(|m| m.name() == &**name).unwrap()
-                    }
-                };
+                let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
 
-                let codec = DynamicServiceCodec {
-                    input: method.input(),
-                    output: method.output(),
-                };
-
-                let path = format!(
-                    "/{}.{}/{}",
-                    service.package_name(),
-                    service.name(),
-                    method.name(),
-                );
-
-                let uri = config.uri.clone();
-                let client = async move {
-                    let channel = Channel::from_shared(uri).unwrap().connect().await.unwrap();
-                    Client::new(channel)
-                }.shared();
-
-                if method.is_client_streaming() {
-                    return Err(anyhow!("grpc_client_single_request does not support client streaming"));
-                }
-
+                let client = make_client(config.uri.clone()).shared();
                 let is_server_streaming = method.is_server_streaming();
-                let path = PathAndQuery::from_maybe_shared(path.clone()).unwrap();
+                let path = PathAndQuery::from_maybe_shared(path.clone())?;
 
                 let node = builder.create_map(move |input: AsyncMap<JsonMessage, GrpcStreams>| {
                     let client = client.clone();
                     let codec = codec.clone();
                     let path = path.clone();
                     async move {
-                        let mut client = client.await;
+                        let client = client.await?;
 
-                        // Wait for client to be ready
-                        client.ready().await.map_err(|e| format!("{e}"))?;
-                        if let Some(t) = config.timeout {
-                            timeout(t, client.ready())
-                                .await
-                                .map_err(|_| "timeout waiting for server to be ready".to_owned())?
-                                .map_err(|e| format!("server failed to be ready: {e}"))?;
-                        } else {
-                            client.ready().await.map_err(|e| format!("server failed to be ready: {e}"))?;
-                        }
+                        // Convert the request message into a stream of a single dynamic message
+                        let request = input.request;
+                        let request = Request::new(once(async move { request }));
 
-                        // Set up cancellation channel
-                        let (sender, receiver) = oneshot::channel();
-                        input.streams.canceller.send(sender);
-
-                        // Convert the request message into the appropriate type
-                        let request = DynamicMessage::deserialize(codec.input.clone(), input.request)
-                            .map_err(|e| format!("{e}"))?;
-                        let request = Request::new(request);
-
-                        let cancel = receiver.shared();
-
-                        let session = client.server_streaming(request, path, codec);
-                        let cancellable_session = race(session, receive_cancel(cancel.clone()));
-
-                        let r = if let Some(t) = config.timeout {
-                            timeout(t, cancellable_session).await.map_err(|e| format!("{e}"))?
-                        } else {
-                            cancellable_session.await
-                        };
-
-                        let mut streaming = r.map_err(|e| format!("{e}"))?.into_inner();
-                        loop {
-                            let r = if let Some(t) = config.timeout {
-                                timeout(t, race(streaming.message(), receive_cancel(cancel.clone())))
-                                .await
-                                .map_err(|_| "timeout waiting for new stream message".to_owned())?
-                            } else {
-                                race(streaming.message(), receive_cancel(cancel.clone())).await
-                            }
-                            .map_err(|e| format!("{e}"))?;
-
-                            let Some(response) = r else {
-                                return Ok::<_, String>(());
-                            };
-
-                            let value = serde_json::to_value(response)
-                                .map_err(|e| format!("failed to convert to json: {e}"))?;
-                            input.streams.out.send(value);
-
-                            if !is_server_streaming {
-                                return Ok(());
-                            }
-                        }
+                        execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
                     }
                 });
 
                 Ok(node)
             }
         );
+
+        self
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .no_cloning()
+            .register_node_builder_fallible(
+                NodeBuilderOptions::new("grpc_client_stream")
+                    .with_default_display_text("grpc Stream"),
+                move |builder, config: GrpcConfig| {
+                    let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
+
+                    let client = make_client(config.uri.clone()).shared();
+                    let is_server_streaming = method.is_server_streaming();
+                    let path = PathAndQuery::from_maybe_shared(path.clone())?;
+
+                    let node = builder.create_map(move |input: AsyncMap<UnboundedReceiver<JsonMessage>, GrpcStreams>| {
+                        let client = client.clone();
+                        let codec = codec.clone();
+                        let path = path.clone();
+                        async move {
+                            let client = client.await?;
+
+                            let request = Request::new(input.request);
+                            execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
+                        }
+                    });
+
+                    Ok(node)
+                }
+            );
     }
 }
 
@@ -214,6 +162,121 @@ async fn receive_cancel<T, E>(
     }
 }
 
+struct GrpcDescriptions {
+    method: MethodDescriptor,
+    codec: DynamicServiceCodec,
+    path: String,
+}
+
+async fn make_client(uri: Box<[u8]>) -> Result<Client<Channel>, String> {
+    let channel = Channel::from_shared(uri)
+        .map_err(|e| format!("invalid uri for service: {e}"))?
+        .connect()
+        .await
+        .map_err(|e| format!("failed to connect: {e}"))?;
+    Ok::<_, String>(Client::new(channel))
+}
+
+fn get_descriptions(config: &GrpcConfig) -> Result<GrpcDescriptions, Anyhow> {
+    let descriptors = DescriptorPool::global();
+    let service_name = &config.service;
+    let service = descriptors.get_service_by_name(&service_name)
+        .ok_or_else(|| anyhow!("could not find service name [{}]", config.service))?;
+
+    let method = match config.method.as_ref().unwrap_or(&NameOrIndex::Index(0)) {
+        NameOrIndex::Index(index) => {
+            service
+                .methods()
+                .skip(*index)
+                .next()
+                .ok_or_else(|| anyhow!("service [{service_name}] does not have a method with index [{index}]"))?
+        }
+        NameOrIndex::Name(name) => {
+            service
+                .methods()
+                .find(|m| m.name() == &**name)
+                .ok_or_else(|| anyhow!("service [{service_name}] does not have a method with name [{name}]"))?
+        }
+    };
+
+    let codec = DynamicServiceCodec {
+        input: method.input(),
+        output: method.output(),
+    };
+
+    let path = format!(
+        "/{}.{}/{}",
+        service.package_name(),
+        service.name(),
+        method.name(),
+    );
+
+    Ok(GrpcDescriptions { method, codec, path })
+}
+
+async fn execute<S>(
+    request: Request<S>,
+    mut client: Client<Channel>,
+    codec: DynamicServiceCodec,
+    path: PathAndQuery,
+    timeout: Option<Duration>,
+    output_streams: <GrpcStreams as StreamPack>::StreamChannels,
+    is_server_streaming: bool,
+) -> Result<(), String>
+where
+    S: FutureStream<Item = JsonMessage> + Send + 'static,
+{
+    // Wait for client to be ready
+    client.ready().await.map_err(|e| format!("{e}"))?;
+    if let Some(t) = timeout {
+        until_timeout(t, client.ready())
+            .await
+            .map_err(|_| "timeout waiting for server to be ready".to_owned())?
+            .map_err(|e| format!("server failed to be ready: {e}"))?;
+    } else {
+        client.ready().await.map_err(|e| format!("server failed to be ready: {e}"))?;
+    }
+
+    // Set up cancellation channel
+    let (sender, receiver) = oneshot::channel();
+    output_streams.canceller.send(sender);
+
+    let cancel = receiver.shared();
+
+    let session = client.streaming(request, path, codec);
+    let cancellable_session = race(session, receive_cancel(cancel.clone()));
+
+    let r = if let Some(t) = timeout {
+        until_timeout(t, cancellable_session).await.map_err(|e| format!("{e}"))?
+    } else {
+        cancellable_session.await
+    };
+
+    let mut streaming = r.map_err(|e| format!("{e}"))?.into_inner();
+    loop {
+        let r = if let Some(t) = timeout {
+            until_timeout(t, race(streaming.message(), receive_cancel(cancel.clone())))
+            .await
+            .map_err(|_| "timeout waiting for new stream message".to_owned())?
+        } else {
+            race(streaming.message(), receive_cancel(cancel.clone())).await
+        }
+        .map_err(|e| format!("{e}"))?;
+
+        let Some(response) = r else {
+            return Ok::<_, String>(());
+        };
+
+        let value = serde_json::to_value(response)
+            .map_err(|e| format!("failed to convert to json: {e}"))?;
+        output_streams.out.send(value);
+
+        if !is_server_streaming {
+            return Ok(());
+        }
+    }
+}
+
 #[derive(Clone)]
 struct DynamicServiceCodec {
     input: MessageDescriptor,
@@ -221,8 +284,8 @@ struct DynamicServiceCodec {
 }
 
 impl Codec for DynamicServiceCodec {
-    type Encode = DynamicMessage;
-    type Decode = DynamicMessage;
+    type Encode = JsonMessage;
+    type Decode = JsonMessage;
     type Encoder = DynamicMessageCodec;
     type Decoder = DynamicMessageCodec;
 
@@ -240,10 +303,13 @@ struct DynamicMessageCodec {
 }
 
 impl Encoder for DynamicMessageCodec {
-    type Item = DynamicMessage;
+    type Item = JsonMessage;
     type Error = Status;
     fn encode(&mut self, item: Self::Item, dst: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
-        item
+        let msg = DynamicMessage::deserialize(self.descriptor.clone(), item)
+            .map_err(|e| Status::new(Code::InvalidArgument, format!("{e}")))?;
+
+        msg
         .encode(dst)
         .map_err(|_|
             Status::new(
@@ -255,7 +321,7 @@ impl Encoder for DynamicMessageCodec {
 }
 
 impl Decoder for DynamicMessageCodec {
-    type Item = DynamicMessage;
+    type Item = JsonMessage;
     type Error = Status;
 
     fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
@@ -267,7 +333,15 @@ impl Decoder for DynamicMessageCodec {
                 )
             })?;
 
-        Ok(Some(msg))
+        let value = serde_json::to_value(msg)
+            .map_err(|e| {
+                Status::new(
+                    Code::DataLoss,
+                    format!("failed to convert to json: {e}"),
+                )
+            })?;
+
+        Ok(Some(value))
     }
 }
 
