@@ -112,8 +112,8 @@ impl DiagramElementRegistry {
             .no_deserializing()
             .no_cloning()
             .register_node_builder_fallible(
-                NodeBuilderOptions::new("grpc_client_stream")
-                    .with_default_display_text("grpc Stream"),
+                NodeBuilderOptions::new("grpc_client_stream_out")
+                    .with_default_display_text("grpc Stream Out"),
                 move |builder, config: GrpcConfig| {
                     let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
 
