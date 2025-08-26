@@ -4,6 +4,7 @@ pub mod executor;
 mod wasm;
 #[cfg(feature = "wasm")]
 pub use wasm::*;
+#[cfg(feature = "debug")]
 mod websocket;
 
 use axum::{
@@ -53,7 +54,7 @@ impl schemars::JsonSchema for RegistryResponse {
 }
 
 impl RegistryResponse {
-    fn new(value: &DiagramElementRegistry) -> serde_json::Result<Self> {
+    pub fn new(value: &DiagramElementRegistry) -> serde_json::Result<Self> {
         let serialized = serde_json::to_string(value)?;
         Ok(Self(serialized))
     }
