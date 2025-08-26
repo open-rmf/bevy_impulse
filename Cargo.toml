@@ -82,6 +82,7 @@ diagram = [
   "dep:strum",
   "dep:tonic",
   "dep:prost",
+  "dep:prost-build",
   "dep:prost-reflect",
   "dep:http",
   "dep:futures-lite",
@@ -107,3 +108,6 @@ name = "generate_schema"
 path = "src/diagram/generate_schema.rs"
 required-features = ["diagram"]
 doc = false
+
+[build-dependencies]
+prost-build = { version = "0.14.1", optional = true }

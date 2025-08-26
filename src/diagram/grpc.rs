@@ -356,3 +356,16 @@ impl Future for NeverFinish {
         Poll::Pending
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{prelude::*, testing::*, diagram::testing::*};
+    use super::*;
+    use prost_reflect::prost_types::FileDescriptorSet;
+
+    #[test]
+    fn test_simple_grpc_request() {
+        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+    }
+}
