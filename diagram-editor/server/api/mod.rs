@@ -1,9 +1,5 @@
 mod error_responses;
 pub mod executor;
-#[cfg(feature = "wasm")]
-mod wasm;
-#[cfg(feature = "wasm")]
-pub use wasm::*;
 #[cfg(feature = "debug")]
 mod websocket;
 

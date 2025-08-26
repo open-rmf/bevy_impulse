@@ -23,13 +23,9 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tracing::error;
 #[cfg(feature = "debug")]
 use tracing::warn;
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "debug")]
 use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
-#[cfg(feature = "wasm")]
-use crate::api::error_responses::IntoJsResult;
 use crate::api::error_responses::WorkflowCancelledResponse;
 
 #[cfg(feature = "debug")]
@@ -128,19 +124,6 @@ pub async fn post_run(
     .map_err(|_| StatusCode::GATEWAY_TIMEOUT)??;
 
     Ok(Json(response))
-}
-
-#[cfg(feature = "wasm")]
-#[wasm_bindgen]
-pub async fn post_run_wasm(request: JsValue) -> Result<JsValue, JsValue> {
-    let executor_state = super::wasm::executor_state();
-    post_run(
-        State(executor_state.clone()),
-        Json(serde_wasm_bindgen::from_value(request).unwrap()),
-    )
-    .await
-    .into_js_result()
-    .await
 }
 
 #[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]

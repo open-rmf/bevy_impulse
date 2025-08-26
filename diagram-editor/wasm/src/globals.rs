@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use bevy_impulse::DiagramElementRegistry;
 
-use crate::api::executor::{setup_bevy_app, ExecutorOptions, ExecutorState};
+use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorOptions, ExecutorState};
 
 pub(super) static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
 
