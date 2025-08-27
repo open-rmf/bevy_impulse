@@ -361,11 +361,30 @@ impl Future for NeverFinish {
 mod tests {
     use crate::{prelude::*, testing::*, diagram::testing::*};
     use super::*;
-    use prost_reflect::prost_types::FileDescriptorSet;
+    use prost_reflect::Kind;
 
     #[test]
     fn test_simple_grpc_request() {
         let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+        let services: Vec<_> = DescriptorPool::global().services().map(|s| s.full_name().to_owned()).collect();
+        let fibonacci_service = DescriptorPool::global().get_service_by_name("example_protos.fibonacci.Fibonacci").unwrap();
+        let final_number = fibonacci_service.methods().find(|m| m.name() == "FinalNumber").unwrap();
+        let sequence_stream = fibonacci_service.methods().find(|m| m.name() == "SequenceStream").unwrap();
+
+        assert_eq!(final_number.input().name(), "FibonacciRequest");
+        assert_eq!(final_number.is_client_streaming(), false);
+        assert_eq!(final_number.output().name(), "FibonacciReply");
+        assert_eq!(final_number.is_server_streaming(), false);
+
+        assert_eq!(sequence_stream.input().name(), "FibonacciRequest");
+        assert_eq!(sequence_stream.is_client_streaming(), false);
+        assert_eq!(sequence_stream.output().name(), "FibonacciReply");
+        assert!(sequence_stream.is_server_streaming());
+
+        let order = final_number.input().fields().find(|f| f.name() == "order").unwrap();
+        assert_eq!(order.kind(), Kind::Uint64);
+        let value = final_number.output().fields().find(|f| f.name() == "value").unwrap();
+        assert_eq!(value.kind(), Kind::Uint64);
     }
 }

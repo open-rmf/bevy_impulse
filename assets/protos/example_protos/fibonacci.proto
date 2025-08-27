@@ -3,7 +3,7 @@ syntax="proto3";
 package example_protos.fibonacci;
 
 // Calculate a Fibonacci sequence
-service Fiboancci {
+service Fibonacci {
     // Unary request to receive the final number of a Fibonacci sequence up to
     // the requested order.
     rpc FinalNumber(FibonacciRequest) returns (FibonacciReply) {}
