@@ -58,6 +58,7 @@ cel-interpreter = { version = "0.9.0", features = ["json"], optional = true }
 
 tonic = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
+tonic-prost = { version = "0.14", optional = true }
 prost-reflect = { version = "0.16", features = ["serde"], optional = true }
 http = { version = "1.3", optional = true }
 futures-lite = { version = "2.6", features = ["std", "race"], optional = true }
@@ -82,8 +83,10 @@ diagram = [
   "dep:strum",
   "dep:tonic",
   "dep:prost",
-  "dep:prost-build",
+  "dep:tonic-prost",
+  "dep:tonic-prost-build",
   "dep:prost-reflect",
+  "tokio/rt-multi-thread",
   "dep:http",
   "dep:futures-lite",
   "dep:async-std",
@@ -110,4 +113,4 @@ required-features = ["diagram"]
 doc = false
 
 [build-dependencies]
-prost-build = { version = "0.14.1", optional = true }
+tonic-prost-build = { version = "0.14", optional = true }

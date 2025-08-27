@@ -159,6 +159,19 @@ fn new_registry_with_basic_nodes() -> DiagramElementRegistry {
         builder.create_map_block(move |a: i64| a + config)
     });
 
+    registry.register_node_builder(
+        NodeBuilderOptions::new("less_than"),
+        |builder, config: u64| {
+            builder.create_map_block(move |a: u64| {
+                if a < config {
+                    Ok(a)
+                } else {
+                    Err(a)
+                }
+            })
+        })
+        .with_fork_result();
+
     registry
         .opt_out()
         .no_deserializing()

@@ -14,7 +14,7 @@ fn main() -> std::io::Result<()> {
         let file_descriptor_path = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"))
             .join("file_descriptor_set.bin");
 
-        prost_build::Config::new()
+        tonic_prost_build::configure()
             .file_descriptor_set_path(file_descriptor_path)
             .compile_protos(&protos, &includes)?;
     }

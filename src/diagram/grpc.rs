@@ -34,12 +34,17 @@ use tonic::{
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     Status, Code, Request,
 };
-use prost_reflect::{DescriptorPool, MethodDescriptor, MessageDescriptor, DynamicMessage};
+use prost_reflect::{
+    DescriptorPool, MethodDescriptor, MessageDescriptor, DynamicMessage,
+    SerializeOptions,
+};
 use prost::Message;
 use http::uri::PathAndQuery;
 
 use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
+
+use tokio::runtime::Runtime;
 
 use futures::{
     FutureExt, Stream as FutureStream,
@@ -59,7 +64,7 @@ use async_std::future::timeout as until_timeout;
 pub struct GrpcConfig {
     pub service: Arc<str>,
     pub method: Option<NameOrIndex>,
-    pub uri: Box<[u8]>,
+    pub uri: Arc<str>,
     pub timeout: Option<Duration>,
 }
 
@@ -70,35 +75,51 @@ pub struct GrpcStreams {
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
 pub enum NameOrIndex {
     Name(Arc<str>),
     Index(usize),
 }
 
 impl DiagramElementRegistry {
-    pub fn enable_grpc(&mut self) {
+    pub fn enable_grpc(&mut self, runtime: Arc<Runtime>) {
+        let rt = Arc::clone(&runtime);
         self.register_node_builder_fallible(
             NodeBuilderOptions::new("grpc_request")
                 .with_default_display_text("gRPC Request"),
             move |builder, config: GrpcConfig| {
                 let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
 
-                let client = make_client(config.uri.clone()).shared();
+                let uri: Box<[u8]> = config.uri.as_bytes().into();
+                let client = make_client(uri).shared();
                 let is_server_streaming = method.is_server_streaming();
                 let path = PathAndQuery::from_maybe_shared(path.clone())?;
 
+                let rt = Arc::clone(&rt);
                 let node = builder.create_map(move |input: AsyncMap<JsonMessage, GrpcStreams>| {
                     let client = client.clone();
                     let codec = codec.clone();
                     let path = path.clone();
+
+                    // The tonic gRPC client needs to be run inside a tokio
+                    // async runtime, so we spawn a tokio task here and use the
+                    // JoinHandle to pass its result through the workflow.
+                    let task = rt.spawn(
+                        async move {
+                            let client = client.await?;
+
+                            // Convert the request message into a stream of a single dynamic message
+                            let request = input.request;
+                            let request = Request::new(once(async move { request }));
+                            execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
+                        }
+                    );
+
                     async move {
-                        let client = client.await?;
-
-                        // Convert the request message into a stream of a single dynamic message
-                        let request = input.request;
-                        let request = Request::new(once(async move { request }));
-
-                        execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
+                        task
+                        .await
+                        .map_err(|e| format!("{e}"))
+                        .flatten()
                     }
                 });
 
@@ -106,6 +127,7 @@ impl DiagramElementRegistry {
             }
         );
 
+        let rt = runtime;
         self
             .opt_out()
             .no_serializing()
@@ -117,19 +139,34 @@ impl DiagramElementRegistry {
                 move |builder, config: GrpcConfig| {
                     let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
 
-                    let client = make_client(config.uri.clone()).shared();
+                    let uri: Box<[u8]> = config.uri.as_bytes().into();
+                    let client = make_client(uri).shared();
                     let is_server_streaming = method.is_server_streaming();
                     let path = PathAndQuery::from_maybe_shared(path.clone())?;
 
+                    let rt = Arc::clone(&rt);
                     let node = builder.create_map(move |input: AsyncMap<UnboundedReceiver<JsonMessage>, GrpcStreams>| {
                         let client = client.clone();
                         let codec = codec.clone();
                         let path = path.clone();
-                        async move {
-                            let client = client.await?;
 
-                            let request = Request::new(input.request);
-                            execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
+                        // The tonic gRPC client needs to be run inside a tokio
+                        // async runtime, so we spawn a tokio task here and use the
+                        // JoinHandle to pass its result through the workflow.
+                        let task = rt.spawn(
+                            async move {
+                                let client = client.await?;
+
+                                let request = Request::new(input.request);
+                                execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
+                            }
+                        );
+
+                        async move {
+                            task
+                            .await
+                            .map_err(|e| format!("{e}"))
+                            .flatten()
                         }
                     });
 
@@ -333,7 +370,13 @@ impl Decoder for DynamicMessageCodec {
                 )
             })?;
 
-        let value = serde_json::to_value(msg)
+        let value = msg.serialize_with_options(
+            serde_json::value::Serializer,
+            &SerializeOptions::new()
+            .stringify_64_bit_integers(false)
+            .use_proto_field_name(true)
+            .skip_default_fields(false)
+        )
             .map_err(|e| {
                 Status::new(
                     Code::DataLoss,
@@ -362,12 +405,25 @@ mod tests {
     use crate::{prelude::*, testing::*, diagram::testing::*};
     use super::*;
     use prost_reflect::Kind;
+    use tonic::{
+        codegen::tokio_stream::wrappers::UnboundedReceiverStream,
+        transport::Server,
+        Request, Response, Status,
+    };
+    use protos::{
+        fibonacci_server::{FibonacciServer, Fibonacci},
+        FibonacciRequest, FibonacciReply,
+    };
+    use tokio::{
+        runtime::Runtime,
+        sync::mpsc::{UnboundedSender, unbounded_channel},
+    };
+    use serde_json::json;
 
     #[test]
-    fn test_simple_grpc_request() {
+    fn test_file_descriptor_loading() {
         let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
-        let services: Vec<_> = DescriptorPool::global().services().map(|s| s.full_name().to_owned()).collect();
         let fibonacci_service = DescriptorPool::global().get_service_by_name("example_protos.fibonacci.Fibonacci").unwrap();
         let final_number = fibonacci_service.methods().find(|m| m.name() == "FinalNumber").unwrap();
         let sequence_stream = fibonacci_service.methods().find(|m| m.name() == "SequenceStream").unwrap();
@@ -386,5 +442,188 @@ mod tests {
         assert_eq!(order.kind(), Kind::Uint64);
         let value = final_number.output().fields().find(|f| f.name() == "value").unwrap();
         assert_eq!(value.kind(), Kind::Uint64);
+    }
+
+    #[test]
+    fn test_grcp_unary_request() {
+        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+
+        let mut fixture = DiagramTestFixture::new();
+        let port = 50000 + line!();
+        let addr = format!("[::1]:{port}").parse().unwrap();
+
+        let rt = Arc::new(Runtime::new().unwrap());
+        rt.spawn(async move {
+            Server::builder()
+                .add_service(FibonacciServer::new(GenerateFibonacci))
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        fixture.registry.enable_grpc(Arc::clone(&rt));
+
+        let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = rt.block_on(exit_receiver);
+        });
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fibonacci",
+            "ops": {
+                "fibonacci": {
+                    "type": "node",
+                    "builder": "grpc_request",
+                    "config": {
+                        "service": "example_protos.fibonacci.Fibonacci",
+                        "method": "FinalNumber",
+                        "uri": format!("http://localhost:{port}"),
+                    },
+                    "stream_out": {
+                        "out": { "builtin": "terminate" }
+                    },
+                    "next": { "builtin": "terminate" }
+                }
+            }
+        }))
+        .unwrap();
+
+        let request = json!({
+            "order": 10
+        });
+
+        let result: JsonMessage = fixture
+            .spawn_and_run(&diagram, request)
+            .unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        let value = result["value"].as_number().unwrap().as_u64().unwrap();
+        assert_eq!(value, 55);
+
+        let _ = exit_sender.send(());
+    }
+
+    #[test]
+    fn test_grpc_service_streaming() {
+        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+
+        let mut fixture = DiagramTestFixture::new();
+        let port = 50000 + line!();
+        let addr = format!("[::1]:{port}").parse().unwrap();
+
+        let rt = Arc::new(Runtime::new().unwrap());
+        rt.spawn(async move {
+            Server::builder()
+                .add_service(FibonacciServer::new(GenerateFibonacci))
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        fixture.registry.enable_grpc(Arc::clone(&rt));
+
+        let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = rt.block_on(exit_receiver);
+        });
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "fibonacci",
+            "ops": {
+                "fibonacci": {
+                    "type": "node",
+                    "builder": "grpc_request",
+                    "config": {
+                        "service": "example_protos.fibonacci.Fibonacci",
+                        "method": "SequenceStream",
+                        "uri": format!("http://localhost:{port}"),
+                    },
+                    "stream_out": {
+                        "out": "get_value"
+                    },
+                    "next": { "builtin" : "dispose" }
+                },
+                "get_value": {
+                    "type": "transform",
+                    "cel": "request.value",
+                    "next": "evaluate"
+                },
+                "evaluate": {
+                    "type": "node",
+                    "builder": "less_than",
+                    "config": 10,
+                    "next": "fork_result"
+                },
+                "fork_result": {
+                    "type": "fork_result",
+                    "ok": { "builtin" : "dispose" },
+                    "err": { "builtin" : "terminate" }
+                }
+            }
+        }))
+        .unwrap();
+
+        let request = json!({
+            "order": 10
+        });
+
+        let result: u64 = fixture.spawn_and_run(&diagram, request).unwrap();
+        assert!(fixture.context.no_unhandled_errors());
+        assert_eq!(result, 13);
+
+        let _ = exit_sender.send(());
+    }
+
+    pub struct GenerateFibonacci;
+
+    #[tonic::async_trait]
+    impl Fibonacci for GenerateFibonacci {
+        async fn final_number(
+            &self,
+            request: Request<FibonacciRequest>,
+        ) -> Result<Response<FibonacciReply>, Status> {
+            let reply = calculate_fibonacci(request.into_inner().order, None);
+            Ok(Response::new(reply))
+        }
+
+        type SequenceStreamStream = UnboundedReceiverStream<Result<FibonacciReply, Status>>;
+
+        async fn sequence_stream(
+            &self,
+            request: Request<FibonacciRequest>,
+        ) -> Result<Response<Self::SequenceStreamStream>, Status> {
+            let (sender, receiver) = unbounded_channel();
+            std::thread::spawn(move || {
+                calculate_fibonacci(request.into_inner().order, Some(sender));
+            });
+
+            Ok(Response::new(receiver.into()))
+        }
+    }
+
+
+    fn calculate_fibonacci(order: u64, sender: Option<UnboundedSender<Result<FibonacciReply, Status>>>) -> FibonacciReply {
+        let mut current = 0;
+        let mut next = 1;
+        for _ in 0..order {
+            if let Some(sender) = &sender {
+                let _ = sender.send(Ok(FibonacciReply { value: current }));
+            }
+
+            let sum = current + next;
+            current = next;
+            next = sum;
+        }
+
+        if let Some(sender) = &sender {
+            let _ = sender.send(Ok(FibonacciReply { value: current }));
+        }
+
+        FibonacciReply { value: current }
+    }
+
+    mod protos {
+        include!(concat!(env!("OUT_DIR"), "/example_protos.fibonacci.rs"));
     }
 }
