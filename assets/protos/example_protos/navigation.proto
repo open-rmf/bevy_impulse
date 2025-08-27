@@ -1,0 +1,26 @@
+syntax="proto3";
+
+package example_protos.navigation;
+
+service Navigation {
+    rpc Guide (stream NavigationGoal) returns (stream NavigationUpdate) {}
+
+    rpc FetchLocation (LocationIdentifier) returns (NavigationGoal) {}
+}
+
+message NavigationGoal {
+    float x = 1;
+    float y = 2;
+    bool has_yaw_target = 3;
+    float yaw = 4;
+}
+
+message NavigationUpdate {
+    float x = 1;
+    float y = 2;
+    float yaw = 3;
+}
+
+message LocationIdentifier {
+    string name = 1;
+}

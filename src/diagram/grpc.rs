@@ -408,17 +408,20 @@ mod tests {
     use tonic::{
         codegen::tokio_stream::wrappers::UnboundedReceiverStream,
         transport::Server,
-        Request, Response, Status,
+        Request, Response, Status, Streaming,
     };
     use protos::{
         fibonacci_server::{FibonacciServer, Fibonacci},
         FibonacciRequest, FibonacciReply,
+        navigation_server::{NavigationServer, Navigation},
+        NavigationGoal, NavigationUpdate, LocationIdentifier,
     };
     use tokio::{
         runtime::Runtime,
         sync::mpsc::{UnboundedSender, unbounded_channel},
     };
     use serde_json::json;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_file_descriptor_loading() {
@@ -575,7 +578,38 @@ mod tests {
         let _ = exit_sender.send(());
     }
 
-    pub struct GenerateFibonacci;
+    #[test]
+    fn test_grpc_client_streaming() {
+        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+
+        let mut fixture = DiagramTestFixture::new();
+        let port = 50000 + line!();
+        let addr = format!("[::1]:{port}").parse().unwrap();
+
+        let mut locations = HashMap::new();
+        let navigation = TestNavigation {
+            locations,
+            position: Arc::new(Mutex::new(NavigationUpdate::default())),
+        };
+
+        let rt = Arc::new(Runtime::new().unwrap());
+        rt.spawn(async move {
+            Server::builder()
+                .add_service(NavigationServer::new(navigation))
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        fixture.registry.enable_grpc(Arc::clone(&rt));
+
+        let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = rt.block_on(exit_receiver);
+        });
+    }
+
+    struct GenerateFibonacci;
 
     #[tonic::async_trait]
     impl Fibonacci for GenerateFibonacci {
@@ -602,7 +636,6 @@ mod tests {
         }
     }
 
-
     fn calculate_fibonacci(order: u64, sender: Option<UnboundedSender<Result<FibonacciReply, Status>>>) -> FibonacciReply {
         let mut current = 0;
         let mut next = 1;
@@ -623,7 +656,32 @@ mod tests {
         FibonacciReply { value: current }
     }
 
+    struct TestNavigation {
+        locations: HashMap<String, NavigationGoal>,
+        position: Arc<Mutex<NavigationUpdate>>,
+    }
+
+    #[tonic::async_trait]
+    impl Navigation for TestNavigation {
+        type GuideStream = UnboundedReceiverStream<Result<NavigationUpdate, Status>>;
+
+        async fn guide(
+            &self,
+            request: Request<Streaming<NavigationGoal>>
+        ) -> Result<Response<Self::GuideStream>, Status> {
+
+        }
+
+        async fn fetch_location(
+            &self,
+            request: Request<LocationIdentifier>,
+        ) -> Result<Response<NavigationGoal>, Status> {
+
+        }
+    }
+
     mod protos {
         include!(concat!(env!("OUT_DIR"), "/example_protos.fibonacci.rs"));
+        include!(concat!(env!("OUT_DIR"), "/example_protos.navigation.rs"));
     }
 }
