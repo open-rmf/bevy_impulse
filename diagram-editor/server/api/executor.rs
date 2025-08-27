@@ -58,8 +58,8 @@ pub struct ExecutorState {
 #[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Deserialize)]
 pub struct PostRunRequest {
-    diagram: Diagram,
-    request: serde_json::Value,
+    pub diagram: Diagram,
+    pub request: serde_json::Value,
 }
 
 /// Sends a request to the executor system and wait for the response.

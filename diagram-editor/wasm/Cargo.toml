@@ -24,9 +24,6 @@ categories = [
   "game-development",
 ]
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
 axum = { version = "0.8.4", features = ["json"], default-features = false }
 bevy_app = "0.12.1"
@@ -43,5 +40,6 @@ wasm-bindgen-futures = "0.4.50"
 [build-dependencies]
 
 [dev-dependencies]
+wasm-bindgen-test = "0.3.50"
 
 [features]
