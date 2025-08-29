@@ -1,21 +1,40 @@
+use std::{future::Future, task::Poll};
+
 use axum::{extract::State, Json};
 use bevy_impulse_diagram_editor::api;
+use futures::task::noop_waker;
 use wasm_bindgen::prelude::*;
 
-use crate::errors::IntoJsResult;
+use crate::{errors::IntoJsResult, BEVY_APP};
 
 #[wasm_bindgen]
 pub async fn post_run(request: JsValue) -> Result<JsValue, JsValue> {
     let executor_state = super::globals::executor_state();
-    api::executor::post_run(
+    // must convert to json first because `PostRunRequest` does not derive `#[wasm_bindgen]`.
+    let json: serde_json::Value = serde_wasm_bindgen::from_value(request).unwrap();
+
+    let mut fut = Box::pin(api::executor::post_run(
         State(executor_state.clone()),
-        Json(serde_wasm_bindgen::from_value(request).unwrap()),
-    )
-    .await
-    .into_js_result()
-    .await
+        Json(serde_json::from_value(json).unwrap()),
+    ));
+
+    let mut mutex_guard = BEVY_APP.lock().unwrap();
+    let app = mutex_guard.as_mut().expect("`init_wasm` not called");
+    let waker = noop_waker();
+    let mut poll_ctx = std::task::Context::from_waker(&waker);
+    loop {
+        let poll = fut.as_mut().poll(&mut poll_ctx);
+        match poll {
+            Poll::Ready(response) => {
+                return response.into_js_result().await;
+            }
+            Poll::Pending => {}
+        }
+        app.update();
+    }
 }
 
+#[cfg(target_arch = "wasm32")]
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
@@ -51,7 +70,9 @@ mod tests {
             "request": 5,
         });
 
-        let result = post_run(serde_wasm_bindgen::to_value(&request).unwrap()).await;
-        assert_eq!(result.unwrap().as_f64().unwrap(), 8.0);
+        let result = post_run(serde_wasm_bindgen::to_value(&request).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result.as_f64().unwrap(), 8.0);
     }
 }

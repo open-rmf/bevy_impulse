@@ -45,6 +45,7 @@ serde_json = "1.0.140"
 tar = { version = "0.4.44", optional = true }
 thiserror = "2.0.16"
 tokio = { version = "1.45.1", features = ["macros", "time"] }
+tower-http = "0.6.6"
 tracing = "0.1.41"
 
 [build-dependencies]

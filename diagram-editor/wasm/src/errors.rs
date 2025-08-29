@@ -20,6 +20,7 @@ where
         const MAX_SIZE: usize = 4 * 1024 * 1024; // 4MiB
 
         let resp = self.into_response();
+        let status = resp.status();
         if resp.status().is_success() {
             if let Some(val) = resp.headers().get(header::CONTENT_TYPE) {
                 let content_type = val.to_str().map_err(|err| err.to_string())?;
@@ -41,7 +42,11 @@ where
                 .await
                 .map_err(|err| err.to_string())?;
             let body = String::from_utf8(body_bytes.to_vec()).map_err(|err| err.to_string())?;
-            Ok(body.into())
+            if body.is_empty() {
+                Err(status.to_string().into())
+            } else {
+                Err(format!("{}: {}", status, body).into())
+            }
         }
     }
 }

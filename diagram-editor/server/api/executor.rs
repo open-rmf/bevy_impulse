@@ -83,45 +83,38 @@ pub async fn post_run(
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
     }
 
-    let response = tokio::time::timeout(
-        state.response_timeout,
-        (async || -> response::Result<serde_json::Value> {
-            let workflow_response = match response_rx.await {
-                Ok(response) => response,
-                Err(err) => {
-                    error!("{}", err);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
-                }
-            };
+    let workflow_response = match response_rx.await {
+        Ok(response) => response,
+        Err(err) => {
+            error!("{}", err);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
+        }
+    };
 
-            match workflow_response {
-                Ok(promise) => {
-                    let promise_state = promise.await;
-                    if promise_state.is_available() {
-                        if let Some(result) = promise_state.available() {
-                            Ok(result)
-                        } else {
-                            Err(StatusCode::INTERNAL_SERVER_ERROR.into())
-                        }
-                    } else if promise_state.is_cancelled() {
-                        if let Some(cancellation) = promise_state.cancellation() {
-                            Err(WorkflowCancelledResponse(cancellation).into())
-                        } else {
-                            Err(StatusCode::INTERNAL_SERVER_ERROR.into())
-                        }
-                    } else {
-                        Err(StatusCode::INTERNAL_SERVER_ERROR.into())
-                    }
+    let response = (match workflow_response {
+        Ok(promise) => {
+            let promise_state = promise.await;
+            if promise_state.is_available() {
+                if let Some(result) = promise_state.available() {
+                    Ok(result)
+                } else {
+                    Err(StatusCode::INTERNAL_SERVER_ERROR.into())
                 }
-                Err(err) => Err(Response::builder()
-                    .status(StatusCode::UNPROCESSABLE_ENTITY)
-                    .body(err.to_string())
-                    .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |resp| resp.into())),
+            } else if promise_state.is_cancelled() {
+                if let Some(cancellation) = promise_state.cancellation() {
+                    Err(WorkflowCancelledResponse(cancellation).into())
+                } else {
+                    Err(StatusCode::INTERNAL_SERVER_ERROR.into())
+                }
+            } else {
+                Err(StatusCode::INTERNAL_SERVER_ERROR.into())
             }
-        })(),
-    )
-    .await
-    .map_err(|_| StatusCode::GATEWAY_TIMEOUT)??;
+        }
+        Err(err) => Err(Response::builder()
+            .status(StatusCode::UNPROCESSABLE_ENTITY)
+            .body(err.to_string())
+            .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |resp| resp.into())),
+    } as response::Result<serde_json::Value>)?;
 
     Ok(Json(response))
 }
