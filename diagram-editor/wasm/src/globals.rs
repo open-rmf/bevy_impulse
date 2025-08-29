@@ -4,8 +4,8 @@ use bevy_impulse::DiagramElementRegistry;
 
 use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorOptions, ExecutorState};
 
-pub(super) static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
-pub(super) static BEVY_APP: Mutex<Option<bevy_app::App>> = Mutex::new(None);
+static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
+static BEVY_APP: Mutex<Option<bevy_app::App>> = Mutex::new(None);
 
 pub fn setup_wasm(
     mut app: bevy_app::App,
@@ -15,6 +15,18 @@ pub fn setup_wasm(
     let mut executor_state = EXECUTOR_STATE.lock().unwrap();
     *executor_state = Some(setup_bevy_app(&mut app, registry, executor_options));
     BEVY_APP.lock().unwrap().replace(app);
+}
+
+pub(super) fn with_bevy_app<R>(f: impl FnOnce(&mut bevy_app::App) -> R) -> R {
+    let mut mg = BEVY_APP.lock().unwrap();
+    let app = mg.as_mut().expect("`init_wasm` not called");
+    f(app)
+}
+
+pub(super) async fn with_bevy_app_async<R>(f: impl AsyncFnOnce(&mut bevy_app::App) -> R) -> R {
+    let mut mg = BEVY_APP.lock().unwrap();
+    let app = mg.as_mut().expect("`init_wasm` not called");
+    f(app).await
 }
 
 #[macro_export]

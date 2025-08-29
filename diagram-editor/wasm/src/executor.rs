@@ -5,7 +5,7 @@ use bevy_impulse_diagram_editor::api;
 use futures::task::noop_waker;
 use wasm_bindgen::prelude::*;
 
-use crate::{errors::IntoJsResult, BEVY_APP};
+use crate::{errors::IntoJsResult, with_bevy_app_async};
 
 #[wasm_bindgen]
 pub async fn post_run(request: JsValue) -> Result<JsValue, JsValue> {
@@ -18,20 +18,21 @@ pub async fn post_run(request: JsValue) -> Result<JsValue, JsValue> {
         Json(serde_json::from_value(json).unwrap()),
     ));
 
-    let mut mutex_guard = BEVY_APP.lock().unwrap();
-    let app = mutex_guard.as_mut().expect("`init_wasm` not called");
-    let waker = noop_waker();
-    let mut poll_ctx = std::task::Context::from_waker(&waker);
-    loop {
-        let poll = fut.as_mut().poll(&mut poll_ctx);
-        match poll {
-            Poll::Ready(response) => {
-                return response.into_js_result().await;
+    with_bevy_app_async(async |app| {
+        let waker = noop_waker();
+        let mut poll_ctx = std::task::Context::from_waker(&waker);
+        loop {
+            let poll = fut.as_mut().poll(&mut poll_ctx);
+            match poll {
+                Poll::Ready(response) => {
+                    return response.into_js_result().await;
+                }
+                Poll::Pending => {}
             }
-            Poll::Pending => {}
+            app.update();
         }
-        app.update();
-    }
+    })
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
