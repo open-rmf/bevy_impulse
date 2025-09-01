@@ -18,6 +18,7 @@ mod frontend {
         println!("cargo:rerun-if-changed=../pnpm-lock.yaml");
         println!("cargo:rerun-if-changed=rsbuild.config.ts");
         println!("cargo:rerun-if-changed=frontend");
+        println!("cargo:rerun-if-changed=dist.tar.gz");
 
         let status = Command::new("pnpm")
             .arg("install")
