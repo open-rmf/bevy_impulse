@@ -116,16 +116,19 @@ impl DiagramElementRegistry {
                     );
 
                     async move {
-                        task
+                        let r = task
                         .await
                         .map_err(|e| format!("{e}"))
-                        .flatten()
+                        .flatten();
+
+                        dbg!(r)
                     }
                 });
 
                 Ok(node)
             }
-        );
+        )
+            .with_fork_result();
 
         let rt = runtime;
         self
@@ -172,7 +175,8 @@ impl DiagramElementRegistry {
 
                     Ok(node)
                 }
-            );
+            )
+                .with_fork_result();
     }
 }
 
@@ -306,7 +310,7 @@ where
 
         let value = serde_json::to_value(response)
             .map_err(|e| format!("failed to convert to json: {e}"))?;
-        output_streams.out.send(value);
+        output_streams.out.send(dbg!(value));
 
         if !is_server_streaming {
             return Ok(());
@@ -578,36 +582,36 @@ mod tests {
         let _ = exit_sender.send(());
     }
 
-    #[test]
-    fn test_grpc_client_streaming() {
-        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
-        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+    // #[test]
+    // fn test_grpc_client_streaming() {
+    //     let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+    //     DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
 
-        let mut fixture = DiagramTestFixture::new();
-        let port = 50000 + line!();
-        let addr = format!("[::1]:{port}").parse().unwrap();
+    //     let mut fixture = DiagramTestFixture::new();
+    //     let port = 50000 + line!();
+    //     let addr = format!("[::1]:{port}").parse().unwrap();
 
-        let mut locations = HashMap::new();
-        let navigation = TestNavigation {
-            locations,
-            position: Arc::new(Mutex::new(NavigationUpdate::default())),
-        };
+    //     let mut locations = HashMap::new();
+    //     let navigation = TestNavigation {
+    //         locations,
+    //         position: Arc::new(Mutex::new(NavigationUpdate::default())),
+    //     };
 
-        let rt = Arc::new(Runtime::new().unwrap());
-        rt.spawn(async move {
-            Server::builder()
-                .add_service(NavigationServer::new(navigation))
-                .serve(addr)
-                .await
-                .unwrap();
-        });
-        fixture.registry.enable_grpc(Arc::clone(&rt));
+    //     let rt = Arc::new(Runtime::new().unwrap());
+    //     rt.spawn(async move {
+    //         Server::builder()
+    //             .add_service(NavigationServer::new(navigation))
+    //             .serve(addr)
+    //             .await
+    //             .unwrap();
+    //     });
+    //     fixture.registry.enable_grpc(Arc::clone(&rt));
 
-        let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            let _ = rt.block_on(exit_receiver);
-        });
-    }
+    //     let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
+    //     std::thread::spawn(move || {
+    //         let _ = rt.block_on(exit_receiver);
+    //     });
+    // }
 
     struct GenerateFibonacci;
 
@@ -661,24 +665,24 @@ mod tests {
         position: Arc<Mutex<NavigationUpdate>>,
     }
 
-    #[tonic::async_trait]
-    impl Navigation for TestNavigation {
-        type GuideStream = UnboundedReceiverStream<Result<NavigationUpdate, Status>>;
+    // #[tonic::async_trait]
+    // impl Navigation for TestNavigation {
+    //     type GuideStream = UnboundedReceiverStream<Result<NavigationUpdate, Status>>;
 
-        async fn guide(
-            &self,
-            request: Request<Streaming<NavigationGoal>>
-        ) -> Result<Response<Self::GuideStream>, Status> {
+    //     async fn guide(
+    //         &self,
+    //         request: Request<Streaming<NavigationGoal>>
+    //     ) -> Result<Response<Self::GuideStream>, Status> {
 
-        }
+    //     }
 
-        async fn fetch_location(
-            &self,
-            request: Request<LocationIdentifier>,
-        ) -> Result<Response<NavigationGoal>, Status> {
+    //     async fn fetch_location(
+    //         &self,
+    //         request: Request<LocationIdentifier>,
+    //     ) -> Result<Response<NavigationGoal>, Status> {
 
-        }
-    }
+    //     }
+    // }
 
     mod protos {
         include!(concat!(env!("OUT_DIR"), "/example_protos.fibonacci.rs"));

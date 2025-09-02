@@ -67,7 +67,7 @@ impl<T> InputStorage<T> {
     pub fn contains_session(&self, session: Entity) -> bool {
         self.reverse_queue
             .iter()
-            .any(|input| input.session == session)
+            .any(|input| dbg!(input.session) == dbg!(session))
     }
 }
 
@@ -200,6 +200,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
         only_if_active: bool,
         roster: &mut OperationRoster,
     ) -> Result<bool, OperationError> {
+        let id = dbg!(self.id(), session);
         if only_if_active {
             let active_session =
                 if let Some(session_status) = self.world().get::<SessionStatus>(session) {
@@ -212,14 +213,16 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                 // The session being sent is not active, either it is being cleaned
                 // or already despawned. Therefore we should not propogate any inputs
                 // related to it.
+                dbg!(id);
                 return Ok(false);
             }
         }
 
         if let Some(mut storage) = self.get_mut::<InputStorage<T>>() {
+            dbg!(id);
             storage.reverse_queue.insert(0, Input { session, data });
         } else if !self.contains::<UnusedTarget>() {
-            let id = self.id();
+            let id = dbg!(self.id());
             if let Some(detached) = self.get::<Detached>() {
                 if detached.is_detached() {
                     // The input is going to a detached impulse that will not
@@ -227,6 +230,7 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                     // to despawn since it is no longer needed.
                     roster.defer_despawn(id);
 
+                    dbg!(id);
                     // No error occurred, but the caller should not queue the
                     // operation into the roster because it is being despawned.
                     return Ok(false);
@@ -256,6 +260,8 @@ impl<'w> ManageInput for EntityWorldMut<'w> {
                     backtrace: Some(Backtrace::new()),
                 });
             None.or_broken()?;
+        } else {
+            dbg!(id);
         }
         Ok(true)
     }

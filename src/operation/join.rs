@@ -73,7 +73,7 @@ where
             .or_broken()?
             .0
             .clone();
-        if buffers.buffered_count(session, world)? < 1 {
+        if dbg!(buffers.buffered_count(session, world))? < 1 {
             return Err(OperationError::NotReady);
         }
 
@@ -90,6 +90,9 @@ where
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        let buffers = r.world.get::<BufferStorage<Buffers>>(r.source)
+            .or_broken()?;
+
         let inputs = r
             .world
             .get_entity(r.source)
@@ -98,7 +101,11 @@ where
             .or_broken()?;
         for input in &inputs.0 {
             if !r.check_upstream(*input)? {
-                return Ok(false);
+                // This input buffer is no longer reachable, so if it is also
+                // empty then there will be no way to ever perform a join.
+                if buffers.0.buffered_count_for(*input, r.session, r.world)? == 0 {
+                    return Ok(false);
+                }
             }
         }
 

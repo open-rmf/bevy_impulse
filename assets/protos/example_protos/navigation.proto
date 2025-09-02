@@ -6,6 +6,8 @@ service Navigation {
     rpc Guide (stream NavigationGoal) returns (stream NavigationUpdate) {}
 
     rpc FetchLocation (LocationIdentifier) returns (NavigationGoal) {}
+
+    rpc GoToPlace (LocationIdentifier) returns (stream NavigationUpdate) {}
 }
 
 message NavigationGoal {

@@ -862,7 +862,7 @@ impl<T: 'static + Send + Sync + Serialize + DeserializeOwned> JsonBufferAccessIn
         buffer_ref: &EntityRef,
         session: Entity,
     ) -> Result<usize, OperationError> {
-        buffer_ref.buffered_count::<T>(session)
+        dbg!(buffer_ref.buffered_count::<T>(session))
     }
 
     fn ensure_session(&self, buffer_mut: &mut EntityWorldMut, session: Entity) -> OperationResult {
@@ -993,11 +993,19 @@ impl Buffering for JsonBuffer {
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
         let buffer_ref = world.get_entity(self.id()).or_broken()?;
-        self.interface.buffered_count(&buffer_ref, session)
+        dbg!(self.interface.buffered_count(&buffer_ref, session))
+    }
+
+    fn buffered_count_for(&self, buffer: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+        if buffer != self.id() {
+            return Ok(0);
+        }
+
+        self.buffered_count(session, world)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
-        add_listener_to_source(self.id(), listener, world)
+        add_listener_to_source(dbg!(self.id()), listener, world)
     }
 
     fn gate_action(
@@ -1024,7 +1032,7 @@ impl Joining for JsonBuffer {
     type Item = JsonMessage;
     fn pull(&self, session: Entity, world: &mut World) -> Result<Self::Item, OperationError> {
         let mut buffer_mut = world.get_entity_mut(self.id()).or_broken()?;
-        self.interface.pull(&mut buffer_mut, session)
+        dbg!(self.interface.pull(&mut buffer_mut, session))
     }
 }
 

@@ -7,6 +7,7 @@ fn main() -> std::io::Result<()> {
         let protos = [
             "assets/protos/example_protos/fibonacci.proto",
             "assets/protos/example_protos/navigation.proto",
+            "assets/protos/example_protos/door.proto",
         ];
         let includes = [
             "assets/protos/",

@@ -25,7 +25,8 @@ use clap::Parser;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
-use std::{error::Error, fmt::Write, fs::File, str::FromStr, thread};
+use std::{error::Error, fmt::Write, fs::File, str::FromStr, sync::Arc, thread};
+use prost_reflect::DescriptorPool;
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -98,7 +99,12 @@ async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), 
     Ok(())
 }
 
-fn create_registry() -> DiagramElementRegistry {
+fn create_registry(rt: Option<Arc<tokio::runtime::Runtime>>) -> DiagramElementRegistry {
+    if rt.is_some() {
+        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+    }
+
     let mut registry = DiagramElementRegistry::new();
     registry.register_node_builder(
         NodeBuilderOptions::new("add").with_default_display_text("Add"),
@@ -275,6 +281,10 @@ fn create_registry() -> DiagramElementRegistry {
         )
         .with_fork_result();
 
+    if let Some(rt) = rt {
+        registry.enable_grpc(rt);
+    }
+
     registry
 }
 
@@ -284,12 +294,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     tracing_subscriber::fmt::init();
 
-    let registry = create_registry();
+    let rt = Arc::new(tokio::runtime::Runtime::new().unwrap());
+    let registry = create_registry(Some(rt.clone()));
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = rt.block_on(receiver);
+    });
 
-    match cli.command {
+    let r = match cli.command {
         Commands::Run(args) => run(args, registry),
         Commands::Serve(args) => serve(args, registry).await,
-    }
+    };
+
+    let _ = sender.send(());
+    r
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -486,7 +504,7 @@ mod tests {
 
         let mut app = bevy_app::App::new();
         app.add_plugins(ImpulseAppPlugin::default());
-        let registry = create_registry();
+        let registry = create_registry(None);
 
         let mut promise = app
             .world

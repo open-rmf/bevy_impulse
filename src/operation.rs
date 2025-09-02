@@ -133,7 +133,9 @@ impl SingleInputStorage {
         let Some(inputs) = r.world.get_entity(r.source).or_broken()?.get::<Self>() else {
             return Ok(false);
         };
-        for input in &inputs.0 {
+
+        dbg!(r.source);
+        for input in dbg!(&inputs.0) {
             if r.check_upstream(*input)? {
                 return Ok(true);
             }
