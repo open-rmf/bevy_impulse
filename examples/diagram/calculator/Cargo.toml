@@ -22,5 +22,5 @@ assert_cmd = "2.0.16"
 
 [features]
 default = ["api", "frontend"]
-api = ["dep:bevy_impulse_diagram_editor"]
+api = ["bevy_impulse_diagram_editor/router"]
 frontend = ["api", "bevy_impulse_diagram_editor/frontend"]
