@@ -1,0 +1,14 @@
+[package]
+name = "calculator_wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bevy_app = "0.12"
+bevy_impulse = { version = "0.0.2", path = "../../.." }
+bevy_impulse_diagram_editor_wasm = { version = "0.0.1", path = "../../../diagram-editor/wasm" }
+calculator_lib = { version = "0.1.0", path = "../calculator_lib" }
+wasm-bindgen = "0.2.100"

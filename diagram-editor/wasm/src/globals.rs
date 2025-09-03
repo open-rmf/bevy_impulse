@@ -2,7 +2,8 @@ use std::sync::Mutex;
 
 use bevy_impulse::DiagramElementRegistry;
 
-use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorOptions, ExecutorState};
+pub use bevy_impulse_diagram_editor::api::executor::ExecutorOptions;
+use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorState};
 
 static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
 static BEVY_APP: Mutex<Option<bevy_app::App>> = Mutex::new(None);
