@@ -6,6 +6,7 @@
   "scripts": {
     "build": "rsbuild build",
     "generate-types": "node scripts/generate-types.mjs",
+    "generate-wasm": "scripts/generate-wasm.sh",
     "test": "jest --watch",
     "check": "biome check --write",
     "check:ts": "tsc --noEmit",

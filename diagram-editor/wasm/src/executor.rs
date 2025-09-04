@@ -5,11 +5,12 @@ use bevy_impulse_diagram_editor::api;
 use futures::task::noop_waker;
 use wasm_bindgen::prelude::*;
 
+use super::globals;
 use crate::{errors::IntoJsResult, with_bevy_app_async};
 
 #[wasm_bindgen]
 pub async fn post_run(request: JsValue) -> Result<JsValue, JsValue> {
-    let executor_state = super::globals::executor_state();
+    let executor_state = globals::executor_state();
     // must convert to json first because `PostRunRequest` does not derive `#[wasm_bindgen]`.
     let json: serde_json::Value = serde_wasm_bindgen::from_value(request).unwrap();
 
@@ -35,7 +36,6 @@ pub async fn post_run(request: JsValue) -> Result<JsValue, JsValue> {
     .await
 }
 
-#[cfg(target_arch = "wasm32")]
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};

@@ -1,7 +1,7 @@
 mod errors;
 mod executor;
 mod globals;
-#[cfg(target_arch = "wasm32")]
+mod registry;
 #[cfg(test)]
 mod test_utils;
 
