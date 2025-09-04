@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-set -e
+set -euo pipefail
 
 TMPDIR=$(mktemp -d)
 trap "rm -r '$TMPDIR'" EXIT

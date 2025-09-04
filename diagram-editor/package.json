@@ -6,6 +6,7 @@
   "scripts": {
     "build": "rsbuild build --environment rest-backend",
     "build:wasm": "rsbuild build --environment wasm-backend",
+    "build:wasm-example": "scripts/build-wasm-example.sh",
     "generate-types": "node scripts/generate-types.mjs",
     "generate-wasm-stub": "scripts/generate-wasm-stub.sh",
     "test": "jest --watch",
