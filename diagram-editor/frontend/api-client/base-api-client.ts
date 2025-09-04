@@ -1,7 +1,7 @@
 import type { Observable } from 'rxjs';
 import type { Diagram, DiagramElementRegistry } from '../types/api';
 
-export interface ApiClient {
+export interface BaseApiClient {
   getRegistry(): Observable<DiagramElementRegistry>;
   postRunWorkflow(diagram: Diagram, request: unknown): Observable<unknown>;
   // WIP

@@ -5,15 +5,15 @@ import type {
   PostRunRequest,
 } from '../types/api';
 import { getSchema } from '../utils/ajv';
-import type { ApiClient } from './base-api-client';
+import type { BaseApiClient } from './base-api-client';
 import { DebugSession } from './debug-session';
-import * as wasmApi from './wasm/stub';
+import * as wasmApi from './wasm-stub/stub.js';
 
 const validateRegistry = getSchema<DiagramElementRegistry>(
   'DiagramElementRegistry',
 );
 
-export class WasmClient implements ApiClient {
+export class ApiClient implements BaseApiClient {
   getRegistry(): Observable<DiagramElementRegistry> {
     const registry = wasmApi.get_registry();
     if (!validateRegistry(registry)) {

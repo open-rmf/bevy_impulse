@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rsbuild build",
+    "build": "rsbuild build --environment rest-backend",
+    "build:wasm": "rsbuild build --environment wasm-backend",
     "generate-types": "node scripts/generate-types.mjs",
-    "generate-wasm": "scripts/generate-wasm.sh",
+    "generate-wasm-stub": "scripts/generate-wasm-stub.sh",
     "test": "jest --watch",
     "check": "biome check --write",
     "check:ts": "tsc --noEmit",

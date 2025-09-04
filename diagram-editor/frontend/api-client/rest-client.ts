@@ -5,7 +5,7 @@ import type {
   PostRunRequest,
 } from '../types/api';
 import { getSchema } from '../utils/ajv';
-import type { ApiClient } from './base-api-client';
+import type { BaseApiClient } from './base-api-client';
 import { DebugSession } from './debug-session';
 
 const validateRegistry = getSchema<DiagramElementRegistry>(
@@ -17,7 +17,7 @@ async function getErrorMessage(response: Response) {
   return text || `${response.status} ${response.statusText}`;
 }
 
-export class RestClient implements ApiClient {
+export class ApiClient implements BaseApiClient {
   getRegistry(): Observable<DiagramElementRegistry> {
     return from(
       (async () => {
