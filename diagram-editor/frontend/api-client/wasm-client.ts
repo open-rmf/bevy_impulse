@@ -6,7 +6,6 @@ import type {
 } from '../types/api';
 import { getSchema } from '../utils/ajv';
 import type { BaseApiClient } from './base-api-client';
-import { DebugSession } from './debug-session';
 import * as wasmApi from './wasm-stub/stub.js';
 
 const validateRegistry = getSchema<DiagramElementRegistry>(
@@ -14,6 +13,10 @@ const validateRegistry = getSchema<DiagramElementRegistry>(
 );
 
 export class ApiClient implements BaseApiClient {
+  constructor() {
+    wasmApi.init_wasm();
+  }
+
   getRegistry(): Observable<DiagramElementRegistry> {
     const registry = wasmApi.get_registry();
     if (!validateRegistry(registry)) {
@@ -27,25 +30,6 @@ export class ApiClient implements BaseApiClient {
       diagram,
       request,
     };
-    return from(wasmApi.post_run(body));
-  }
-
-  async wsDebugWorkflow(
-    diagram: Diagram,
-    request: unknown,
-  ): Promise<DebugSession> {
-    const ws = new WebSocket('/api/executor/debug');
-    await new Promise((resolve, reject) => {
-      ws.onopen = () => {
-        const body: PostRunRequest = {
-          diagram,
-          request,
-        };
-        ws.send(JSON.stringify(body));
-        resolve(ws);
-      };
-      ws.onerror = reject;
-    });
-    return new DebugSession(ws);
+    return from(wasmApi.post_run(new wasmApi.PostRunRequestWasm(body)));
   }
 }

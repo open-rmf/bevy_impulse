@@ -1,1 +1,1 @@
-export { ApiClient } from './rest-client.ts'
+export { ApiClient } from './rest-client.ts';

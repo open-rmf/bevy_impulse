@@ -8,13 +8,21 @@ use bevy_impulse_diagram_editor::api::executor::{setup_bevy_app, ExecutorState};
 static EXECUTOR_STATE: Mutex<Option<ExecutorState>> = Mutex::new(None);
 static BEVY_APP: Mutex<Option<bevy_app::App>> = Mutex::new(None);
 
+pub struct InitOptions {
+    pub app: bevy_app::App,
+    pub registry: DiagramElementRegistry,
+    pub executor_options: ExecutorOptions,
+}
+
 pub fn setup_wasm(
-    mut app: bevy_app::App,
-    registry: DiagramElementRegistry,
-    executor_options: &ExecutorOptions,
+    InitOptions {
+        mut app,
+        registry,
+        executor_options,
+    }: InitOptions,
 ) {
     let mut executor_state = EXECUTOR_STATE.lock().unwrap();
-    *executor_state = Some(setup_bevy_app(&mut app, registry, executor_options));
+    *executor_state = Some(setup_bevy_app(&mut app, registry, &executor_options));
     BEVY_APP.lock().unwrap().replace(app);
 }
 
@@ -35,7 +43,10 @@ macro_rules! init_wasm {
     { $($statements:stmt)* } => {
         #[wasm_bindgen::prelude::wasm_bindgen]
         pub fn init_wasm() {
-            $($statements)*
+            let init_options: $crate::InitOptions = (|| {
+                $($statements)*
+            })();
+            setup_wasm(init_options);
         }
     };
 }

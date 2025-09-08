@@ -1,7 +1,7 @@
 use bevy_impulse::{DiagramElementRegistry, ImpulseAppPlugin, NodeBuilderOptions};
 use bevy_impulse_diagram_editor::api::executor::ExecutorOptions;
 
-use crate::{init_wasm, setup_wasm};
+use super::{init_wasm, setup_wasm, InitOptions};
 
 init_wasm! {
     let mut app = bevy_app::App::new();
@@ -14,7 +14,7 @@ init_wasm! {
 
     let executor_options = ExecutorOptions::default();
 
-    setup_wasm(app, registry, &executor_options);
+    InitOptions{app, registry, executor_options}
 }
 
 pub(crate) fn setup_test() {

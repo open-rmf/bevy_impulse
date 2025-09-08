@@ -9,7 +9,7 @@ export type NodeFormProps = BaseEditOperationFormProps<'node'>;
 
 function NodeForm(props: NodeFormProps) {
   const registry = useRegistry();
-  const nodes = Object.keys(registry.nodes);
+  const nodes = Object.keys(registry.nodes).sort();
   const [configValue, setConfigValue] = useState(() =>
     props.node.data.op.config ? JSON.stringify(props.node.data.op.config) : '',
   );

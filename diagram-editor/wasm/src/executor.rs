@@ -1,7 +1,7 @@
 use std::{future::Future, task::Poll};
 
 use axum::{extract::State, Json};
-use bevy_impulse_diagram_editor::api;
+use bevy_impulse_diagram_editor::api::{self, executor::PostRunRequest};
 use futures::task::noop_waker;
 use wasm_bindgen::prelude::*;
 
@@ -9,14 +9,24 @@ use super::globals;
 use crate::{errors::IntoJsResult, with_bevy_app_async};
 
 #[wasm_bindgen]
-pub async fn post_run(request: JsValue) -> Result<JsValue, JsValue> {
+pub struct PostRunRequestWasm(PostRunRequest);
+
+#[wasm_bindgen]
+impl PostRunRequestWasm {
+    #[wasm_bindgen(constructor)]
+    pub fn new(js: JsValue) -> Self {
+        let request: PostRunRequest = serde_wasm_bindgen::from_value(js).unwrap();
+        Self(request)
+    }
+}
+
+#[wasm_bindgen]
+pub async fn post_run(request: PostRunRequestWasm) -> Result<JsValue, JsValue> {
     let executor_state = globals::executor_state();
-    // must convert to json first because `PostRunRequest` does not derive `#[wasm_bindgen]`.
-    let json: serde_json::Value = serde_wasm_bindgen::from_value(request).unwrap();
 
     let mut fut = Box::pin(api::executor::post_run(
         State(executor_state.clone()),
-        Json(serde_json::from_value(json).unwrap()),
+        Json(request.0),
     ));
 
     with_bevy_app_async(async |app| {
@@ -41,7 +51,6 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use bevy_impulse::{Diagram, DiagramOperation, NextOperation, NodeSchema, TraceSettings};
-    use serde_json::json;
     use wasm_bindgen_test::*;
 
     use super::*;
@@ -66,14 +75,12 @@ mod tests {
             .unwrap()
             .insert(Arc::clone(&add3_op_id), add_op);
 
-        let request = json!({
-            "diagram": diagram,
-            "request": 5,
-        });
-
-        let result = post_run(serde_wasm_bindgen::to_value(&request).unwrap())
-            .await
-            .unwrap();
+        let result = post_run(PostRunRequestWasm(PostRunRequest {
+            diagram,
+            request: 5.into(),
+        }))
+        .await
+        .unwrap();
         assert_eq!(result.as_f64().unwrap(), 8.0);
     }
 }

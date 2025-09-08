@@ -1,5 +1,5 @@
 use bevy_impulse::ImpulseAppPlugin;
-use bevy_impulse_diagram_editor_wasm::{init_wasm, setup_wasm, ExecutorOptions};
+use bevy_impulse_diagram_editor_wasm::{init_wasm, setup_wasm, ExecutorOptions, InitOptions};
 use calculator_lib::create_registry;
 
 init_wasm! {
@@ -10,5 +10,5 @@ init_wasm! {
 
     let executor_options = ExecutorOptions::default();
 
-    setup_wasm(app, registry, &executor_options);
+    InitOptions{app, registry, executor_options}
 }

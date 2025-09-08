@@ -27,7 +27,7 @@ export default defineConfig({
           './rest-client.ts': './frontend/api-client/wasm-client',
           './wasm-stub/stub.js': `${process.env.WASM_PKG_PATH}/${process.env.WASM_PKG_NAME}.js`,
         },
-      }
+      },
     },
   },
 });
