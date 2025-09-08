@@ -4,7 +4,9 @@
 export function init_wasm(): void;
 export function post_run(request: PostRunRequestWasm): Promise<any>;
 export function get_registry(): any;
+type PostRunRequest = import('../../types/api').PostRunRequest;
+
 export class PostRunRequestWasm {
   free(): void;
-  constructor(js: any);
+  constructor(js: PostRunRequest);
 }

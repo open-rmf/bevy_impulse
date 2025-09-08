@@ -1,9 +1,5 @@
 import { from, type Observable, of } from 'rxjs';
-import type {
-  Diagram,
-  DiagramElementRegistry,
-  PostRunRequest,
-} from '../types/api';
+import type { Diagram, DiagramElementRegistry } from '../types/api';
 import { getSchema } from '../utils/ajv';
 import type { BaseApiClient } from './base-api-client';
 import * as wasmApi from './wasm-stub/stub.js';
@@ -26,10 +22,8 @@ export class ApiClient implements BaseApiClient {
   }
 
   postRunWorkflow(diagram: Diagram, request: unknown): Observable<unknown> {
-    const body: PostRunRequest = {
-      diagram,
-      request,
-    };
-    return from(wasmApi.post_run(new wasmApi.PostRunRequestWasm(body)));
+    return from(
+      wasmApi.post_run(new wasmApi.PostRunRequestWasm({ diagram, request })),
+    );
   }
 }

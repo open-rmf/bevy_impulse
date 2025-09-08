@@ -8,14 +8,25 @@ use wasm_bindgen::prelude::*;
 use super::globals;
 use crate::{errors::IntoJsResult, with_bevy_app_async};
 
+#[wasm_bindgen(typescript_custom_section)]
+const PostRunRequestTs: &'static str =
+    r#"type PostRunRequest = import('../../types/api').PostRunRequest;"#;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(typescript_type = "PostRunRequest")]
+    pub type PostRunRequest_;
+}
+
 #[wasm_bindgen]
 pub struct PostRunRequestWasm(PostRunRequest);
 
 #[wasm_bindgen]
 impl PostRunRequestWasm {
     #[wasm_bindgen(constructor)]
-    pub fn new(js: JsValue) -> Self {
-        let request: PostRunRequest = serde_wasm_bindgen::from_value(js).unwrap();
+    pub fn new(js: PostRunRequest_) -> Self {
+        let request: PostRunRequest =
+            serde_wasm_bindgen::from_value(js.obj).expect("failed to deserialize");
         Self(request)
     }
 }
