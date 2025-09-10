@@ -2,6 +2,9 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 
 export default defineConfig({
+  output: {
+    assetPrefix: process.env.RSBUILD_OUTPUT_PREFIX || '/',
+  },
   server: {
     proxy: {
       '/api': 'http://localhost:3001',
