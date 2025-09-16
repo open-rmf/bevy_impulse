@@ -90,7 +90,9 @@ async fn serve(args: ServeArgs, registry: DiagramElementRegistry) -> Result<(), 
 
     let mut app = bevy_app::App::new();
     app.add_plugins(ImpulseAppPlugin::default());
-    let router = new_router(&mut app, registry, ServerOptions::default());
+    let mut options = ServerOptions::default();
+    options.api.executor.response_timeout = std::time::Duration::from_secs(6000);
+    let router = new_router(&mut app, registry, options);
     thread::spawn(move || app.run());
     let listener = tokio::net::TcpListener::bind(("localhost", args.port))
         .await

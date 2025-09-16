@@ -8,11 +8,14 @@ pub(super) struct WorkflowCancelledResponse<'a>(pub(super) &'a Cancellation);
 
 impl<'a> IntoResponse for WorkflowCancelledResponse<'a> {
     fn into_response(self) -> Response {
-        let msg = match *self.0.cause {
+        let msg = match &*self.0.cause {
             CancellationCause::TargetDropped(_) => "target dropped",
             CancellationCause::Unreachable(_) => "unreachable",
             CancellationCause::Filtered(_) => "filtered",
-            CancellationCause::Triggered(_) => "triggered",
+            CancellationCause::Triggered(e) => {
+                dbg!(e);
+                "triggered"
+            },
             CancellationCause::Supplanted(_) => "supplanted",
             CancellationCause::InvalidSpan(_) => "invalid span",
             CancellationCause::CircularCollect(_) => "circular collect",

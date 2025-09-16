@@ -3,11 +3,11 @@ syntax="proto3";
 package example_protos.navigation;
 
 service Navigation {
-    rpc Guide (stream NavigationGoal) returns (stream NavigationUpdate) {}
+    //rpc Guide (stream NavigationGoal) returns (stream NavigationUpdate) {}
 
-    rpc FetchLocation (LocationIdentifier) returns (NavigationGoal) {}
+    //rpc FetchLocation (LocationIdentifier) returns (NavigationGoal) {}
 
-    rpc GoToPlace (LocationIdentifier) returns (stream NavigationUpdate) {}
+    rpc GoToPlace (LocationGoal) returns (stream NavigationUpdate) {}
 }
 
 message NavigationGoal {
@@ -23,6 +23,7 @@ message NavigationUpdate {
     float yaw = 3;
 }
 
-message LocationIdentifier {
-    string name = 1;
+message LocationGoal {
+    string robot_name = 1;
+    string location_name = 2;
 }
