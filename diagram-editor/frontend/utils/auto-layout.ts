@@ -1,5 +1,5 @@
+import * as dagre from '@dagrejs/dagre';
 import type { NodeChange, Rect } from '@xyflow/react';
-import * as dagre from 'dagre';
 import type { DiagramEditorEdge } from '../edges';
 import { NodeManager } from '../node-manager';
 import {
