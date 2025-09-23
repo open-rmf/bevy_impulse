@@ -18,7 +18,7 @@ if [ $# -gt 0 ]; then
 fi
 
 
-if [ "$SKIP_WASM_PACK" = false ]; then
+if [ "$SKIP_WASM_PACK" == false ]; then
   wasm-pack build --dev ../examples/diagram/calculator_wasm
 fi
 

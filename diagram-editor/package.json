@@ -18,7 +18,8 @@
     "format": "biome format --write",
     "preview": "rsbuild preview",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.5",

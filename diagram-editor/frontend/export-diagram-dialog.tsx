@@ -51,7 +51,7 @@ function ExportDiagramDialog({ open, onClose }: ExportDiagramDialogProps) {
     }
     const base64Diagram = btoa(binaryString);
 
-    const shareLink = `${window.location.origin}?diagram=${encodeURIComponent(base64Diagram)}`;
+    const shareLink = `${window.location.origin}${window.location.pathname}?diagram=${encodeURIComponent(base64Diagram)}`;
 
     const diagramJsonPretty = JSON.stringify(diagram, null, 2);
 
