@@ -27,6 +27,21 @@ function NodeForm(props: NodeFormProps) {
 
   return (
     <BaseEditOperationForm {...props}>
+      <TextField
+        label="Display Text"
+        value={props.node.data.op.display_text || ''}
+        onChange={(ev) => {
+          try {
+            const updatedNode = { ...props.node };
+            updatedNode.data.op.display_text = ev.target.value || undefined;
+            props.onChange?.({
+              type: 'replace',
+              id: props.node.id,
+              item: updatedNode,
+            });
+          } catch {}
+        }}
+      />
       <Autocomplete
         freeSolo
         autoSelect
