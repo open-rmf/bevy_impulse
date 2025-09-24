@@ -34,13 +34,16 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
             isConnectable={props.isConnectable}
             variant={HandleType.Data}
           />
-          <Handle
-            id={HandleId.DataStream}
-            type="source"
-            position={Position.Right}
-            isConnectable={props.isConnectable}
-            variant={HandleType.DataStream}
-          />
+          {builderMetadata?.streams &&
+            Object.keys(builderMetadata.streams).length > 0 && (
+              <Handle
+                id={HandleId.DataStream}
+                type="source"
+                position={Position.Right}
+                isConnectable={props.isConnectable}
+                variant={HandleType.DataStream}
+              />
+            )}
         </>
       }
     />

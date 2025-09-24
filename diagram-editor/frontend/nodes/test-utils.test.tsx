@@ -3,7 +3,7 @@ import {
   type RenderOptions,
 } from '@testing-library/react';
 import { type NodeProps, Position, ReactFlowProvider } from '@xyflow/react';
-import type { ReactElement } from 'react';
+import type { PropsWithChildren, ReactElement } from 'react';
 import { of } from 'rxjs';
 import { ApiClient } from '../api-client';
 import { ApiClientProvider } from '../api-client-provider';
@@ -34,31 +34,35 @@ export function createOperationNodeProps<
   };
 }
 
-const mockApiClient = jest.mocked(new ApiClient());
+function createTestingProviders(registry: DiagramElementRegistry) {
+  return ({ children }: PropsWithChildren) => {
+    const apiClient = new ApiClient();
+    jest.spyOn(apiClient, 'getRegistry').mockReturnValue(of(registry));
 
-const TestingProviders = ({ children }: { children: React.ReactNode }) => {
-  const mockRegistry: DiagramElementRegistry = {
+    return (
+      <ApiClientProvider value={apiClient}>
+        <RegistryProvider>
+          <ReactFlowProvider>{children}</ReactFlowProvider>
+        </RegistryProvider>
+      </ApiClientProvider>
+    );
+  };
+}
+
+export function render(
+  ui: ReactElement,
+  registry?: DiagramElementRegistry,
+  options?: Omit<RenderOptions, 'wrapper'>,
+) {
+  registry = registry || {
     messages: {},
     nodes: {},
     schemas: {},
     sections: {},
     trace_supported: false,
   };
-
-  jest.spyOn(mockApiClient, 'getRegistry').mockReturnValue(of(mockRegistry));
-
-  return (
-    <ApiClientProvider value={mockApiClient}>
-      <RegistryProvider>
-        <ReactFlowProvider>{children}</ReactFlowProvider>
-      </RegistryProvider>
-    </ApiClientProvider>
-  );
-};
-
-export function render(
-  ui: ReactElement,
-  options?: Omit<RenderOptions, 'wrapper'>,
-) {
-  return baseRender(ui, { wrapper: TestingProviders, ...options });
+  return baseRender(ui, {
+    wrapper: createTestingProviders(registry),
+    ...options,
+  });
 }
