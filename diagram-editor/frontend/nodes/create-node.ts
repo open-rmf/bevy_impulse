@@ -6,6 +6,7 @@ import { joinNamespaces } from '../utils/namespace';
 import {
   type DiagramEditorNode,
   type OperationNode,
+  type OperationNodeTypes,
   type SectionBufferNode,
   type SectionInputNode,
   type SectionOutputNode,
@@ -87,13 +88,18 @@ export function createSectionBufferNode(
   };
 }
 
-export function createOperationNode(
+export function createOperationNode<
+  NodeType extends Exclude<OperationNodeTypes, 'scope'> = Exclude<
+    OperationNodeTypes,
+    'scope'
+  >,
+>(
   namespace: string,
   parentId: string | undefined,
   position: XYPosition,
-  op: Exclude<DiagramOperation, { type: 'scope' }>,
+  op: DiagramOperation & { type: NodeType },
   opId: string,
-): OperationNode {
+): OperationNode<NodeType> {
   return {
     id: uuidv4(),
     type: op.type,
