@@ -175,7 +175,8 @@ mod tests {
 
         let mut app = bevy_app::App::new();
         app.add_plugins(ImpulseAppPlugin::default());
-        let registry = create_registry();
+        let mut registry = DiagramElementRegistry::new();
+        calculator_ops_catalog::register(&mut registry);
 
         let mut promise = app
             .world
