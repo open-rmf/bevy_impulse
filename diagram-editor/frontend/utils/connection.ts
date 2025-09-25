@@ -280,11 +280,12 @@ export function validateEdgeSimple(
   );
   switch (outputCardinality) {
     case CardinalityType.Single: {
+      console.log(edges);
       if (
         edges.some(
           (e) =>
             e.source === sourceNode.id &&
-            edge.sourceHandle === e.sourceHandle &&
+            (edge.sourceHandle || null) === (e.sourceHandle || null) &&
             edge.id !== e.id,
         )
       ) {
