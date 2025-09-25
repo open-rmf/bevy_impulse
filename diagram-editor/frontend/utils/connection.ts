@@ -301,7 +301,9 @@ export function validateEdgeSimple(
           count++;
         }
         if (count > 1) {
-          return createValidationError('source node already has two edges');
+          return createValidationError(
+            'This output can only be connected to two inputs',
+          );
         }
       }
       break;
