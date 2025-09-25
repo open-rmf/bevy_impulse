@@ -3,7 +3,7 @@ import type { DiagramElementRegistry } from '../types/api';
 import { ROOT_NAMESPACE } from '../utils/namespace';
 import { createOperationNode } from './create-node';
 import NodeNode from './node-node';
-import { createOperationNodeProps, render } from './test-utils.test';
+import { createOperationNodeProps, render } from './test-utils';
 
 describe('NodeNode', () => {
   test('render successfully', () => {
