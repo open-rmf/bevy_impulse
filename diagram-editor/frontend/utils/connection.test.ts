@@ -118,9 +118,8 @@ describe('validate edges', () => {
         bufferAccessNode,
         null,
       );
-      expect(validEdges.length).toBe(2);
+      expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
-      expect(validEdges).toContain('streamOut');
     }
     {
       const validEdges = getValidEdgeTypes(
@@ -270,9 +269,8 @@ describe('validate edges', () => {
 
     {
       const validEdges = getValidEdgeTypes(node, null, sectionOutput, null);
-      expect(validEdges.length).toBe(2);
+      expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
-      expect(validEdges).toContain('streamOut');
     }
 
     {

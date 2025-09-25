@@ -9,6 +9,19 @@ import type { NodeManager } from '../node-manager';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
 
+/**
+ * List of edge types that a node can output.
+ * TODO: Consider defining for each handle, e.g.
+ *
+ * ```ts
+ * {
+ *   node: {
+ *     default: 'default',
+ *     dataStream: 'streamOut',
+ *   }
+ * }
+ * ```
+ */
 const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
   buffer: ['buffer'],
   buffer_access: ['default'],
@@ -59,6 +72,9 @@ const ALLOWED_HANDLE_OUTPUT_EDGES: Record<string, EdgeTypes[]> = {
   forkResultErr: ['forkResultErr'],
 } satisfies Record<HandleId, EdgeTypes[]>;
 
+/// List of edge types that the default handle should not allow. These edges are expected to have their own handles.
+const DISALLOWED_DEFAULT_HANDLE_OUTPUT_EDGES: EdgeTypes[] = ['streamOut'];
+
 const ALLOWED_HANDLE_INPUT_EDGE_CATEGORIES: Record<string, EdgeCategory[]> = {
   dataStream: [EdgeCategory.Data],
   forkResultOk: [],
@@ -73,6 +89,16 @@ function arrayIntersection<T>(a: T[], b: T[]): T[] {
     }
   }
   return intersection;
+}
+
+function arrayDifference<T>(a: T[], b: T[]): T[] {
+  const result = [];
+  for (const elem of a) {
+    if (!b.includes(elem)) {
+      result.push(elem);
+    }
+  }
+  return result;
 }
 
 export function getValidEdgeTypes(
@@ -93,6 +119,11 @@ export function getValidEdgeTypes(
     } else {
       console.error('failed to get allowed handle output edges');
     }
+  } else {
+    allowedOutputEdges = arrayDifference(
+      allowedOutputEdges,
+      DISALLOWED_DEFAULT_HANDLE_OUTPUT_EDGES,
+    );
   }
 
   let allowedInputEdgeCategories =
