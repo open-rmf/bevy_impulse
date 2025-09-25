@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 bevy_app = "0.12"
 bevy_impulse = { version = "0.0.2", path = "../../.." }
 bevy_impulse_diagram_editor_wasm = { version = "0.0.1", path = "../../../diagram-editor/wasm" }
-calculator_lib = { version = "0.1.0", path = "../calculator_lib" }
+calculator_ops_catalog = { version = "0.1.0", path = "../calculator_ops_catalog" }
 wasm-bindgen = "0.2.100"

@@ -1,12 +1,12 @@
-use bevy_impulse::ImpulseAppPlugin;
+use bevy_impulse::{ImpulseAppPlugin, DiagramElementRegistry};
 use bevy_impulse_diagram_editor_wasm::{init_wasm, setup_wasm, ExecutorOptions, InitOptions};
-use calculator_lib::create_registry;
 
 init_wasm! {
     let mut app = bevy_app::App::new();
     app.add_plugins(ImpulseAppPlugin::default());
 
-    let registry = create_registry();
+    let mut registry = DiagramElementRegistry::new();
+    calculator_ops_catalog::register(&mut registry);
 
     let executor_options = ExecutorOptions::default();
 
