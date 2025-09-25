@@ -965,7 +965,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.unzip_impl.as_ref())
-            .map(|unzip| -> &'a (dyn PerformUnzip) { unzip.as_ref() })
+            .map(|unzip| -> &'a dyn PerformUnzip { unzip.as_ref() })
             .ok_or(DiagramErrorCode::NotUnzippable(*message_info))
     }
 
