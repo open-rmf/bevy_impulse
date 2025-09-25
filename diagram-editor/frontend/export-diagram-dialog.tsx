@@ -13,6 +13,7 @@ import { deflateSync, strToU8 } from 'fflate';
 import React from 'react';
 import { useNodeManager } from './node-manager';
 import { MaterialSymbol } from './nodes';
+import { useRegistry } from './registry-provider';
 import { useTemplates } from './templates-provider';
 import { useEdges } from './use-edges';
 import { exportDiagram } from './utils/export-diagram';
@@ -32,6 +33,7 @@ function ExportDiagramDialog({ open, onClose }: ExportDiagramDialogProps) {
   const edges = useEdges();
   const [dialogData, setDialogData] = React.useState<DialogData | null>(null);
   const [templates] = useTemplates();
+  const registry = useRegistry();
 
   React.useLayoutEffect(() => {
     if (!open) {
@@ -40,7 +42,7 @@ function ExportDiagramDialog({ open, onClose }: ExportDiagramDialogProps) {
       return;
     }
 
-    const diagram = exportDiagram(nodeManager, edges, templates);
+    const diagram = exportDiagram(registry, nodeManager, edges, templates);
     const diagramJsonMin = JSON.stringify(diagram);
     // Compress the JSON string to Uint8Array
     const compressedData = deflateSync(strToU8(diagramJsonMin));
@@ -61,7 +63,7 @@ function ExportDiagramDialog({ open, onClose }: ExportDiagramDialogProps) {
     };
 
     setDialogData(dialogData);
-  }, [open, nodeManager, edges, templates]);
+  }, [registry, open, nodeManager, edges, templates]);
 
   const handleDownload = () => {
     if (!dialogData) {

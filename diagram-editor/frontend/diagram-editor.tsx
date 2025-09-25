@@ -54,6 +54,7 @@ import {
   NODE_TYPES,
   type OperationNode,
 } from './nodes';
+import { useRegistry } from './registry-provider';
 import { useTemplates } from './templates-provider';
 import { EdgesProvider } from './use-edges';
 import { autoLayout } from './utils/auto-layout';
@@ -149,6 +150,7 @@ function DiagramEditor() {
   const savedEdges = React.useRef<DiagramEditorEdge[]>([]);
 
   const [templates] = useTemplates();
+  const registry = useRegistry();
 
   const updateEditorModeAction = React.useCallback(
     (newMode: EditorModeContext) => {
@@ -733,7 +735,11 @@ function DiagramEditor() {
             aria-label="Save"
             sx={{ position: 'absolute', right: 64, bottom: 64 }}
             onClick={() => {
-              const exportedTemplate = exportTemplate(nodeManager, edges);
+              const exportedTemplate = exportTemplate(
+                registry,
+                nodeManager,
+                edges,
+              );
               setTemplates((prev) => ({
                 ...prev,
                 [editorMode.templateId]: exportedTemplate,
