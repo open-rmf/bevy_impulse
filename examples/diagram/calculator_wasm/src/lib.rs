@@ -1,4 +1,4 @@
-use bevy_impulse::{ImpulseAppPlugin, DiagramElementRegistry};
+use bevy_impulse::{DiagramElementRegistry, ImpulseAppPlugin};
 use bevy_impulse_diagram_editor_wasm::{init_wasm, setup_wasm, ExecutorOptions, InitOptions};
 
 init_wasm! {
