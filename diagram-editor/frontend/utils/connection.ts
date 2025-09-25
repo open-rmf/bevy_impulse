@@ -280,7 +280,6 @@ export function validateEdgeSimple(
   );
   switch (outputCardinality) {
     case CardinalityType.Single: {
-      console.log(edges);
       if (
         edges.some(
           (e) =>
@@ -289,7 +288,9 @@ export function validateEdgeSimple(
             edge.id !== e.id,
         )
       ) {
-        return createValidationError('source node already has an edge');
+        return createValidationError(
+          'This output can only be connected to one input',
+        );
       }
       break;
     }
