@@ -781,6 +781,7 @@ function DiagramEditor() {
                 editingEdge.targetNode,
                 editingEdge.edge.targetHandle,
               )}
+              nodeManager={nodeManager}
               onChange={handleEdgeChange}
               onDelete={(changes) => {
                 setEdges((prev) => applyEdgeChanges([changes], prev));

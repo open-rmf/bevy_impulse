@@ -20,6 +20,7 @@ import type {
   StreamOutEdge,
   UnzipEdge,
 } from '../edges';
+import type { NodeManager } from '../node-manager';
 import { MaterialSymbol } from '../nodes';
 import { exhaustiveCheck } from '../utils/exhaustive-check';
 import { BufferEdgeInputForm } from './buffer-edge-form';
@@ -68,6 +69,7 @@ export function defaultEdgeData(type: EdgeTypes): EdgeData {
 export interface EditEdgeFormProps {
   edge: DiagramEditorEdge;
   allowedEdgeTypes: EdgeTypes[];
+  nodeManager: NodeManager;
   onChange: (changes: EdgeChange<DiagramEditorEdge>) => void;
   onDelete: (change: EdgeRemoveChange) => void;
 }
@@ -75,6 +77,7 @@ export interface EditEdgeFormProps {
 function EditEdgeForm({
   edge,
   allowedEdgeTypes,
+  nodeManager,
   onChange,
   onDelete,
 }: EditEdgeFormProps) {
@@ -87,7 +90,11 @@ function EditEdgeForm({
       }
       case 'streamOut': {
         return (
-          <StreamOutEdgeForm edge={edge as StreamOutEdge} onChange={onChange} />
+          <StreamOutEdgeForm
+            edge={edge as StreamOutEdge}
+            nodeManager={nodeManager}
+            onChange={onChange}
+          />
         );
       }
       case 'default':
@@ -114,7 +121,7 @@ function EditEdgeForm({
         throw new Error('unknown edge type');
       }
     }
-  }, [edge, onChange]);
+  }, [edge, nodeManager, onChange]);
 
   const typeLabelId = React.useId();
 
