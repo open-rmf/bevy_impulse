@@ -1,4 +1,9 @@
-import { type NodeProps, Position } from '@xyflow/react';
+import {
+  type NodeProps,
+  Position,
+  useUpdateNodeInternals,
+} from '@xyflow/react';
+import { useRef } from 'react';
 import { Handle, HandleId, HandleType } from '../handles';
 import { useRegistry } from '../registry-provider';
 import type { OperationNode } from '.';
@@ -14,6 +19,16 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
       ? builderMetadata.default_display_text
       : 'Select Builder';
 
+  const hasStreams = !!(
+    builderMetadata?.streams && Object.keys(builderMetadata.streams).length > 0
+  );
+  const prevHasStreams = useRef(hasStreams);
+  const updateNodeInternals = useUpdateNodeInternals();
+  if (hasStreams !== prevHasStreams.current) {
+    prevHasStreams.current = hasStreams;
+    updateNodeInternals(props.id);
+  }
+
   return (
     <BaseNode
       {...props}
@@ -23,27 +38,29 @@ function NodeNodeComp(props: NodeProps<OperationNode<'node'>>) {
       handles={
         <>
           <Handle
+            key="data-target"
             type="target"
             position={Position.Top}
             isConnectable={props.isConnectable}
             variant={HandleType.Data}
           />
           <Handle
+            key="data-source"
             type="source"
             position={Position.Bottom}
             isConnectable={props.isConnectable}
             variant={HandleType.Data}
           />
-          {builderMetadata?.streams &&
-            Object.keys(builderMetadata.streams).length > 0 && (
-              <Handle
-                id={HandleId.DataStream}
-                type="source"
-                position={Position.Right}
-                isConnectable={props.isConnectable}
-                variant={HandleType.DataStream}
-              />
-            )}
+          {hasStreams && (
+            <Handle
+              key="stream-source"
+              id={HandleId.DataStream}
+              type="source"
+              position={Position.Right}
+              isConnectable={props.isConnectable}
+              variant={HandleType.DataStream}
+            />
+          )}
         </>
       }
     />
