@@ -94,3 +94,12 @@ When there are breaking changes in `bevy_impulse`, the typescript definitions ne
 ```bash
 pnpm generate-types
 ```
+
+> [!NOTE]
+> Repo maintainers that want to update the web-hosted demo should run these commands:
+
+```bash
+cargo install wasm-pack rsbuild
+pnpm install -g gh-pages
+pnpm ./scripts/deploy-ghpages.sh
+```
