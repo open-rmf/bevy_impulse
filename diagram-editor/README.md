@@ -103,7 +103,7 @@ We host a live demo of the diagram editor at [this link](https://open-rmf.github
 > Repo maintainers that want to update the web-hosted demo should run these commands:
 
 ```bash
-cargo install wasm-pack rsbuild
-pnpm install -g gh-pages
-pnpm ./scripts/deploy-ghpages.sh
+cargo install wasm-pack
+pnpm install
+pnpm deploy-ghpages
 ```
