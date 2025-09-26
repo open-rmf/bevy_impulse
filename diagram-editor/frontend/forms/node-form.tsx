@@ -9,11 +9,9 @@ export type NodeFormProps = BaseEditOperationFormProps<'node'>;
 
 function NodeForm(props: NodeFormProps) {
   const registry = useRegistry();
-  const nodes = Object.keys(registry.nodes);
+  const nodes = Object.keys(registry.nodes).sort();
   const [configValue, setConfigValue] = useState(() =>
-    props.node.data.op.config
-      ? JSON.stringify(props.node.data.op.config)
-      : 'null',
+    props.node.data.op.config ? JSON.stringify(props.node.data.op.config) : '',
   );
   const configError = useMemo(() => {
     if (configValue === '') {
@@ -29,6 +27,21 @@ function NodeForm(props: NodeFormProps) {
 
   return (
     <BaseEditOperationForm {...props}>
+      <TextField
+        label="Display Text"
+        value={props.node.data.op.display_text || ''}
+        onChange={(ev) => {
+          try {
+            const updatedNode = { ...props.node };
+            updatedNode.data.op.display_text = ev.target.value || undefined;
+            props.onChange?.({
+              type: 'replace',
+              id: props.node.id,
+              item: updatedNode,
+            });
+          } catch {}
+        }}
+      />
       <Autocomplete
         freeSolo
         autoSelect
@@ -58,7 +71,7 @@ function NodeForm(props: NodeFormProps) {
           try {
             const updatedNode = { ...props.node };
             updatedNode.data.op.config =
-              ev.target.value === '' ? null : JSON.parse(ev.target.value);
+              ev.target.value === '' ? undefined : JSON.parse(ev.target.value);
             props.onChange?.({
               type: 'replace',
               id: props.node.id,

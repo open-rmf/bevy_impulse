@@ -2,7 +2,6 @@ import type {
   Edge as ReactFlowEdge,
   Node as ReactFlowNode,
 } from '@xyflow/react';
-import type { HandleId } from '../handles';
 
 export type Node<
   D extends Record<string, unknown>,
@@ -14,7 +13,4 @@ export type Edge<
   I extends { type: string },
   T extends string,
 > = ReactFlowEdge<{ output: O; input: I }, T> &
-  Pick<Required<ReactFlowEdge>, 'type' | 'data'> & {
-    sourceHandle?: HandleId;
-    targetHandle?: HandleId;
-  };
+  Pick<Required<ReactFlowEdge>, 'type' | 'data'>;

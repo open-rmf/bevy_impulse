@@ -86,6 +86,9 @@ members = [
   "examples/diagram/calculator",
   "examples/zenoh-examples",
   "diagram-editor",
+  "diagram-editor/wasm",
+  "examples/diagram/calculator_wasm",
+  "examples/diagram/calculator_ops_catalog",
 ]
 
 [[bin]]

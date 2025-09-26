@@ -15,6 +15,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useApiClient } from './api-client-provider';
 import { useNodeManager } from './node-manager';
 import { MaterialSymbol } from './nodes';
+import { useRegistry } from './registry-provider';
 import { useTemplates } from './templates-provider';
 import { useEdges } from './use-edges';
 import { exportDiagram } from './utils/export-diagram';
@@ -33,6 +34,7 @@ export function RunButton() {
   });
   const apiClient = useApiClient();
   const [templates, _setTemplates] = useTemplates();
+  const registry = useRegistry();
   const [running, setRunning] = useState(false);
 
   const requestError = useMemo(() => {
@@ -59,7 +61,7 @@ export function RunButton() {
   const handleRunClick = () => {
     try {
       const request = JSON.parse(requestJson);
-      const diagram = exportDiagram(nodeManager, edges, templates);
+      const diagram = exportDiagram(registry, nodeManager, edges, templates);
       apiClient.postRunWorkflow(diagram, request).subscribe({
         next: (response) => {
           setResponseContent({ raw: JSON.stringify(response, null, 2) });

@@ -1,15 +1,16 @@
+mod error_responses;
+pub mod executor;
+#[cfg(feature = "debug")]
+mod websocket;
+
 use axum::{
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
-    Router,
 };
+#[cfg(feature = "router")]
+use axum::{routing::get, Router};
 use bevy_impulse::DiagramElementRegistry;
 use mime_guess::mime;
-
-mod error_responses;
-pub mod executor;
-mod websocket;
 
 #[derive(Default)]
 #[non_exhaustive]
@@ -49,12 +50,13 @@ impl schemars::JsonSchema for RegistryResponse {
 }
 
 impl RegistryResponse {
-    fn new(value: &DiagramElementRegistry) -> serde_json::Result<Self> {
+    pub fn new(value: &DiagramElementRegistry) -> serde_json::Result<Self> {
         let serialized = serde_json::to_string(value)?;
         Ok(Self(serialized))
     }
 }
 
+#[cfg(feature = "router")]
 pub fn api_router(
     app: &mut bevy_app::App,
     registry: DiagramElementRegistry,
@@ -67,6 +69,7 @@ pub fn api_router(
     )
 }
 
+#[cfg(feature = "router")]
 #[cfg(test)]
 mod tests {
     use axum::{

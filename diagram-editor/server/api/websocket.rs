@@ -1,11 +1,15 @@
+#[cfg(feature = "router")]
 use axum::extract::ws::{Message, Utf8Bytes};
+#[cfg(feature = "router")]
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::{de::DeserializeOwned, Serialize};
+#[cfg(feature = "router")]
 use std::fmt::Display;
+use std::ops::Deref;
 use tracing::debug;
 
-pub(super) trait WebsocketStreamExt<T: DeserializeOwned> {
-    async fn next_text(&mut self) -> Option<Utf8Bytes>;
+pub(super) trait WebsocketStreamExt<T: DeserializeOwned, Text: Deref<Target = str>> {
+    async fn next_text(&mut self) -> Option<Text>;
 
     async fn next_json(&mut self) -> Option<T> {
         let text = self.next_text().await?;
@@ -19,7 +23,8 @@ pub(super) trait WebsocketStreamExt<T: DeserializeOwned> {
     }
 }
 
-impl<S, T> WebsocketStreamExt<T> for S
+#[cfg(feature = "router")]
+impl<S, T> WebsocketStreamExt<T, Utf8Bytes> for S
 where
     S: Stream<Item = Result<Message, axum::Error>> + Unpin,
     T: DeserializeOwned,
@@ -51,6 +56,7 @@ pub(super) trait WebsocketSinkExt<T: Serialize> {
     async fn send_json(&mut self, value: &T) -> Option<()>;
 }
 
+#[cfg(feature = "router")]
 impl<S, T> WebsocketSinkExt<T> for S
 where
     S: Sink<Message> + Unpin,

@@ -1116,6 +1116,9 @@ export interface NodeRegistration {
   default_display_text: string;
   request: string;
   response: string;
+  streams: {
+    [k: string]: string;
+  };
   [k: string]: unknown;
 }
 /**

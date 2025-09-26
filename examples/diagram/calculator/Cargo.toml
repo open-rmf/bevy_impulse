@@ -8,7 +8,7 @@ axum = "0.8.4"
 bevy_app = "0.12"
 bevy_core = "0.12"
 bevy_impulse = { version = "0.0.2", path = "../../..", features = ["diagram"] }
-bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../../diagram-editor", default-features = false, optional = true}
+bevy_impulse_diagram_editor = { version = "0.0.1", path = "../../../diagram-editor", default-features = false, optional = true }
 bevy_time = "0.12"
 clap = { version = "4.5.23", features = ["derive"] }
 serde = { workspace = true }
@@ -16,15 +16,12 @@ serde_json = { workspace = true }
 schemars = { workspace = true }
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = "0.3.19"
+calculator_ops_catalog = { version = "0.1.0", path = "../calculator_ops_catalog" }
 
 [dev-dependencies]
 assert_cmd = "2.0.16"
 
 [features]
 default = ["api", "frontend"]
-api = ["dep:bevy_impulse_diagram_editor"]
-frontend = [
-  "api",
-  "bevy_impulse_diagram_editor?/frontend",
-]
-
+api = ["bevy_impulse_diagram_editor/router"]
+frontend = ["api", "bevy_impulse_diagram_editor/frontend"]

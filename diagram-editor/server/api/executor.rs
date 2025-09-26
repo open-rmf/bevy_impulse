@@ -1,19 +1,18 @@
-use crate::api::error_responses::WorkflowCancelledResponse;
-
-use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
+#[cfg(feature = "debug")]
 use axum::{
-    extract::{
-        ws::{self},
-        State,
-    },
+    extract::ws,
+    routing::{self},
+};
+use axum::{
+    extract::State,
     http::StatusCode,
     response::{self, Response},
-    routing::{self, post},
-    Json, Router,
+    Json,
 };
+#[cfg(feature = "router")]
+use axum::{routing::post, Router};
 use bevy_ecs::schedule::IntoSystemConfigs;
 use bevy_impulse::{trace, Diagram, DiagramElementRegistry, OperationStarted, Promise, RequestExt};
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -21,8 +20,15 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc::error::TryRecvError;
-use tracing::{error, warn};
+use tracing::error;
+#[cfg(feature = "debug")]
+use tracing::warn;
 
+#[cfg(feature = "debug")]
+use super::websocket::{WebsocketSinkExt, WebsocketStreamExt};
+use crate::api::error_responses::WorkflowCancelledResponse;
+
+#[cfg(feature = "debug")]
 type BroadcastRecvError = tokio::sync::broadcast::error::RecvError;
 
 type WorkflowResponseResult = Result<Promise<serde_json::Value>, Box<dyn Error + Send + Sync>>;
@@ -33,7 +39,7 @@ type WorkflowFeedback = OperationStarted;
 #[derive(bevy_ecs::component::Component)]
 struct FeedbackSender(tokio::sync::broadcast::Sender<WorkflowFeedback>);
 
-struct Context {
+pub struct Context {
     diagram: Diagram,
     request: serde_json::Value,
     registry: Arc<Mutex<DiagramElementRegistry>>,
@@ -42,22 +48,22 @@ struct Context {
 }
 
 #[derive(Clone)]
-struct ExecutorState {
-    registry: Arc<Mutex<DiagramElementRegistry>>,
-    send_chan: tokio::sync::mpsc::Sender<Context>,
-    response_timeout: Duration,
+pub struct ExecutorState {
+    pub registry: Arc<Mutex<DiagramElementRegistry>>,
+    pub send_chan: tokio::sync::mpsc::Sender<Context>,
+    pub response_timeout: Duration,
 }
 
 #[cfg_attr(feature = "json_schema", derive(schemars::JsonSchema))]
 #[cfg_attr(test, derive(serde::Serialize))]
 #[derive(Deserialize)]
 pub struct PostRunRequest {
-    diagram: Diagram,
-    request: serde_json::Value,
+    pub diagram: Diagram,
+    pub request: serde_json::Value,
 }
 
 /// Sends a request to the executor system and wait for the response.
-async fn post_run(
+pub async fn post_run(
     state: State<ExecutorState>,
     Json(body): Json<PostRunRequest>,
 ) -> response::Result<Json<serde_json::Value>> {
@@ -77,45 +83,38 @@ async fn post_run(
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
     }
 
-    let response = tokio::time::timeout(
-        state.response_timeout,
-        (async || -> response::Result<serde_json::Value> {
-            let workflow_response = match response_rx.await {
-                Ok(response) => response,
-                Err(err) => {
-                    error!("{}", err);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
-                }
-            };
+    let workflow_response = match response_rx.await {
+        Ok(response) => response,
+        Err(err) => {
+            error!("{}", err);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
+        }
+    };
 
-            match workflow_response {
-                Ok(promise) => {
-                    let promise_state = promise.await;
-                    if promise_state.is_available() {
-                        if let Some(result) = promise_state.available() {
-                            Ok(result)
-                        } else {
-                            Err(StatusCode::INTERNAL_SERVER_ERROR.into())
-                        }
-                    } else if promise_state.is_cancelled() {
-                        if let Some(cancellation) = promise_state.cancellation() {
-                            Err(WorkflowCancelledResponse(cancellation).into())
-                        } else {
-                            Err(StatusCode::INTERNAL_SERVER_ERROR.into())
-                        }
-                    } else {
-                        Err(StatusCode::INTERNAL_SERVER_ERROR.into())
-                    }
+    let response = (match workflow_response {
+        Ok(promise) => {
+            let promise_state = promise.await;
+            if promise_state.is_available() {
+                if let Some(result) = promise_state.available() {
+                    Ok(result)
+                } else {
+                    Err(StatusCode::INTERNAL_SERVER_ERROR.into())
                 }
-                Err(err) => Err(Response::builder()
-                    .status(StatusCode::UNPROCESSABLE_ENTITY)
-                    .body(err.to_string())
-                    .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |resp| resp.into())),
+            } else if promise_state.is_cancelled() {
+                if let Some(cancellation) = promise_state.cancellation() {
+                    Err(WorkflowCancelledResponse(cancellation).into())
+                } else {
+                    Err(StatusCode::INTERNAL_SERVER_ERROR.into())
+                }
+            } else {
+                Err(StatusCode::INTERNAL_SERVER_ERROR.into())
             }
-        })(),
-    )
-    .await
-    .map_err(|_| StatusCode::REQUEST_TIMEOUT)??;
+        }
+        Err(err) => Err(Response::builder()
+            .status(StatusCode::UNPROCESSABLE_ENTITY)
+            .body(err.to_string())
+            .map_or(StatusCode::INTERNAL_SERVER_ERROR.into(), |resp| resp.into())),
+    } as response::Result<serde_json::Value>)?;
 
     Ok(Json(response))
 }
@@ -129,6 +128,7 @@ pub enum DebugSessionEnd {
     Err(String),
 }
 
+#[cfg(feature = "debug")]
 impl DebugSessionEnd {
     fn err_from_status_code(status_code: StatusCode) -> Self {
         Self::Err(status_code.to_string())
@@ -153,10 +153,12 @@ pub enum DebugSessionMessage {
 }
 
 /// Start a debug session.
-async fn ws_debug<W, R>(mut write: W, mut read: R, state: State<ExecutorState>)
+#[cfg(feature = "debug")]
+async fn ws_debug<W, R, Text>(mut write: W, mut read: R, state: State<ExecutorState>)
 where
     W: WebsocketSinkExt<DebugSessionMessage>,
-    R: WebsocketStreamExt<PostRunRequest>,
+    R: WebsocketStreamExt<PostRunRequest, Text>,
+    Text: std::ops::Deref<Target = str>,
 {
     let req: PostRunRequest = if let Some(req) = read.next_json().await {
         req
@@ -357,7 +359,7 @@ impl Default for ExecutorOptions {
     }
 }
 
-fn setup_bevy_app(
+pub fn setup_bevy_app(
     app: &mut bevy_app::App,
     registry: DiagramElementRegistry,
     options: &ExecutorOptions,
@@ -373,6 +375,7 @@ fn setup_bevy_app(
     }
 }
 
+#[cfg(feature = "router")]
 pub(super) fn new_router(
     app: &mut bevy_app::App,
     registry: DiagramElementRegistry,
@@ -380,36 +383,45 @@ pub(super) fn new_router(
 ) -> Router {
     let executor_state = setup_bevy_app(app, registry, &options);
 
-    Router::new()
-        .route("/run", post(post_run))
-        .route(
-            "/debug",
-            routing::any(
-                async |ws: ws::WebSocketUpgrade, state: State<ExecutorState>| {
-                    ws.on_upgrade(|socket| {
-                        let (write, read) = socket.split();
-                        ws_debug(write, read, state)
-                    })
-                },
-            ),
-        )
-        .with_state(executor_state)
+    let router = Router::new().route("/run", post(post_run));
+
+    #[cfg(feature = "debug")]
+    let router = router.route(
+        "/debug",
+        routing::any(
+            async |ws: ws::WebSocketUpgrade, state: State<ExecutorState>| {
+                ws.on_upgrade(|socket| {
+                    use futures_util::StreamExt;
+
+                    let (write, read) = socket.split();
+                    ws_debug(write, read, state)
+                })
+            },
+        ),
+    );
+
+    let router = router.with_state(executor_state);
+    router
 }
 
+#[cfg(feature = "router")]
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
-    use super::*;
+    #[cfg(feature = "debug")]
+    use axum::extract::ws;
     use axum::{
         body,
         http::{header, Request},
     };
     use bevy_impulse::{ImpulseAppPlugin, NodeBuilderOptions};
+    #[cfg(feature = "debug")]
     use futures_util::SinkExt;
     use mime_guess::mime;
     use serde_json::json;
+    use std::thread;
     use tower::ServiceExt;
+
+    use super::*;
 
     struct TestFixture<CleanupFn> {
         router: Router,
@@ -506,11 +518,13 @@ mod tests {
         cleanup_test();
     }
 
+    #[cfg(feature = "debug")]
     struct WsTestFixture<CleanupFn> {
         executor_state: ExecutorState,
         cleanup_test: CleanupFn,
     }
 
+    #[cfg(feature = "debug")]
     fn setup_ws_test() -> WsTestFixture<impl FnOnce()> {
         let mut app = bevy_app::App::new();
         app.add_plugins(ImpulseAppPlugin::default());
@@ -543,10 +557,13 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "debug")]
     #[ignore = "tracing events in `bevy_impulse` is delayed"]
     #[tokio::test]
     #[test_log::test]
     async fn test_ws_debug() {
+        use futures_util::StreamExt;
+
         let WsTestFixture {
             executor_state,
             cleanup_test,

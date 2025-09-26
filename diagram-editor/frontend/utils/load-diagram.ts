@@ -12,7 +12,12 @@ import {
   isOperationNode,
   START_ID,
 } from '../nodes';
-import type { Diagram, DiagramOperation, SectionTemplate } from '../types/api';
+import type {
+  Diagram,
+  DiagramElementRegistry,
+  DiagramOperation,
+  SectionTemplate,
+} from '../types/api';
 import { getSchema } from './ajv';
 import { exportDiagram } from './export-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
@@ -127,7 +132,14 @@ function buildGraph(diagram: Diagram, initialGraph?: Graph): Graph {
 const validate = getSchema<Diagram>('Diagram');
 
 export function loadTemplate(template: SectionTemplate): Graph {
-  const stubDiagram = exportDiagram(new NodeManager([]), [], {});
+  const stubRegistry: DiagramElementRegistry = {
+    messages: {},
+    nodes: {},
+    schemas: {},
+    sections: {},
+    trace_supported: false,
+  };
+  const stubDiagram = exportDiagram(stubRegistry, new NodeManager([]), [], {});
   stubDiagram.ops = template.ops;
   const initialNodes: DiagramEditorNode[] = [];
 

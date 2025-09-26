@@ -5,6 +5,7 @@ import {
   createForkResultOkEdge,
   type DiagramEditorEdge,
 } from '../edges';
+import { HandleId } from '../handles';
 import { NodeManager } from '../node-manager';
 import {
   createOperationNode,
@@ -117,9 +118,8 @@ describe('validate edges', () => {
         bufferAccessNode,
         null,
       );
-      expect(validEdges.length).toBe(2);
+      expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
-      expect(validEdges).toContain('streamOut');
     }
     {
       const validEdges = getValidEdgeTypes(
@@ -269,9 +269,8 @@ describe('validate edges', () => {
 
     {
       const validEdges = getValidEdgeTypes(node, null, sectionOutput, null);
-      expect(validEdges.length).toBe(2);
+      expect(validEdges.length).toBe(1);
       expect(validEdges).toContain('default');
-      expect(validEdges).toContain('streamOut');
     }
 
     {
@@ -359,7 +358,7 @@ describe('validate edges', () => {
     }
   });
 
-  test('"fork_result" operation only allows 2 outputs', () => {
+  test('"fork_result" operation only allows 1 outputs for each of the output handles', () => {
     const forkResultNode = createOperationNode(
       ROOT_NAMESPACE,
       undefined,
@@ -375,12 +374,18 @@ describe('validate edges', () => {
     const nodeManager = new NodeManager([forkResultNode, terminateNode]);
 
     {
+      // existing "ok" edge, try to add a "err" edge.
       const existingEdges = [
-        createForkResultOkEdge(forkResultNode.id, null, terminateNode.id, null),
+        createForkResultOkEdge(
+          forkResultNode.id,
+          HandleId.ForkResultOk,
+          terminateNode.id,
+          null,
+        ),
       ];
       const newEdge = createForkResultErrEdge(
         forkResultNode.id,
-        null,
+        HandleId.ForkResultErr,
         terminateNode.id,
         null,
       );
@@ -389,18 +394,44 @@ describe('validate edges', () => {
     }
 
     {
+      // existing "err" edge, try to add a "ok" edge.
       const existingEdges = [
-        createForkResultOkEdge(forkResultNode.id, null, terminateNode.id, null),
         createForkResultErrEdge(
           forkResultNode.id,
-          null,
+          HandleId.ForkResultErr,
           terminateNode.id,
           null,
         ),
       ];
-      const newEdge = createForkResultErrEdge(
+      const newEdge = createForkResultOkEdge(
         forkResultNode.id,
+        HandleId.ForkResultOk,
+        terminateNode.id,
         null,
+      );
+      const result = validateEdgeSimple(newEdge, nodeManager, existingEdges);
+      expect(result.valid).toBe(true);
+    }
+
+    {
+      // exisiting "ok" and "err" edge, try to add a "ok" edge.
+      const existingEdges = [
+        createForkResultOkEdge(
+          forkResultNode.id,
+          HandleId.ForkResultOk,
+          terminateNode.id,
+          null,
+        ),
+        createForkResultErrEdge(
+          forkResultNode.id,
+          HandleId.ForkResultErr,
+          terminateNode.id,
+          null,
+        ),
+      ];
+      const newEdge = createForkResultOkEdge(
+        forkResultNode.id,
+        HandleId.ForkResultOk,
         terminateNode.id,
         null,
       );

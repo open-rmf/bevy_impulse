@@ -28,7 +28,7 @@ exclude = ["/build.rs"]
 path = "server/lib.rs"
 
 [dependencies]
-axum = { version = "0.8.4", features = ["ws"] }
+axum = { version = "0.8.4", features = ["json"], default-features = false }
 bevy_app = "0.12.1"
 bevy_ecs = "0.12.1"
 bevy_impulse = { version = "0.0.2", path = "..", features = [
@@ -43,7 +43,8 @@ schemars = { version = "0.9", optional = true }
 serde = "1.0.219"
 serde_json = "1.0.140"
 tar = { version = "0.4.44", optional = true }
-tokio = "1.45.1"
+thiserror = "2.0.16"
+tokio = { version = "1.45.1", features = ["macros"] }
 tracing = "0.1.41"
 
 [build-dependencies]
@@ -57,8 +58,10 @@ tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
 tower = "0.5.2"
 
 [features]
-default = ["frontend"]
-frontend = ["dep:flate2", "dep:tar"]
+default = ["frontend", "router"]
+debug = ["router", "axum/ws"]
+frontend = ["router", "dep:flate2", "dep:tar"]
+router = []
 json_schema = ["dep:schemars", "dep:indexmap"]
 
 [[bin]]
