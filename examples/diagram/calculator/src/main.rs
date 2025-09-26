@@ -21,7 +21,6 @@ use bevy_impulse::{
     RunCommandsOnWorldExt,
 };
 use bevy_impulse_diagram_editor::{new_router, ServerOptions};
-use calculator_lib::create_registry;
 use clap::Parser;
 use std::thread;
 use std::{error::Error, fs::File, str::FromStr};
@@ -103,7 +102,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     tracing_subscriber::fmt::init();
 
-    let registry = create_registry();
+    let mut registry = DiagramElementRegistry::new();
+    calculator_ops_catalog::register(&mut registry);
 
     match cli.command {
         Commands::Run(args) => run(args, registry),
@@ -175,7 +175,8 @@ mod tests {
 
         let mut app = bevy_app::App::new();
         app.add_plugins(ImpulseAppPlugin::default());
-        let registry = create_registry();
+        let mut registry = DiagramElementRegistry::new();
+        calculator_ops_catalog::register(&mut registry);
 
         let mut promise = app
             .world

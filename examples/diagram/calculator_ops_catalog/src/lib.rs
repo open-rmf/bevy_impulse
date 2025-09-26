@@ -136,8 +136,7 @@ pub struct FibonacciStream {
     sequence: u64,
 }
 
-pub fn create_registry() -> DiagramElementRegistry {
-    let mut registry = DiagramElementRegistry::new();
+pub fn register(registry: &mut DiagramElementRegistry) {
     registry.register_node_builder(
         NodeBuilderOptions::new("add").with_default_display_text("Add"),
         |builder, config: Option<f64>| {
@@ -312,6 +311,4 @@ pub fn create_registry() -> DiagramElementRegistry {
             },
         )
         .with_fork_result();
-
-    registry
 }

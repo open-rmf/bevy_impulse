@@ -1,8 +1,8 @@
 [package]
-name = "calculator_lib"
+name = "calculator_ops_catalog"
 version = "0.1.0"
 edition = "2021"
-description = "calculator lib for other examples"
+description = "catalog of reusable calculator operations"
 
 [dependencies]
 bevy_app = "0.12"
