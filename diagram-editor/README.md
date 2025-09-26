@@ -95,6 +95,10 @@ When there are breaking changes in `bevy_impulse`, the typescript definitions ne
 pnpm generate-types
 ```
 
+### Live Demo
+
+We host a live demo of the diagram editor at [this link](https://open-rmf.github.io/bevy_impulse/). The diagram editor and workflow executor both run in the client's web browser. The node catalog includes simple math operations.
+
 > [!NOTE]
 > Repo maintainers that want to update the web-hosted demo should run these commands:
 
