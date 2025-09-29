@@ -122,6 +122,12 @@
           "description": "If the user does not specify a default display text, the node ID will\n be used here.",
           "type": "string"
         },
+        "help_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "request": {
           "type": "string"
         },

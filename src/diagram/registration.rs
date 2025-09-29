@@ -58,6 +58,7 @@ pub struct NodeRegistration {
     pub(super) response: TypeInfo,
     pub(super) streams: HashMap<Cow<'static, str>, TypeInfo>,
     pub(super) config_schema: Schema,
+    pub(super) help_text: Option<String>,
     /// Creates an instance of the registered node.
     #[serde(skip)]
     create_node_impl: CreateNodeFn,
@@ -190,6 +191,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                     serde_json::from_value(config).map_err(DiagramErrorCode::ConfigError)?;
                 Ok(f(builder, config).into())
             })),
+            help_text: None,
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
@@ -1518,6 +1520,8 @@ pub struct NodeBuilderOptions {
     /// If this is not specified, the id field will be used as the default
     /// display text.
     pub default_display_text: Option<BuilderId>,
+    /// Optional text to describe the builder.
+    pub help_text: Option<String>,
 }
 
 impl NodeBuilderOptions {
@@ -1525,11 +1529,17 @@ impl NodeBuilderOptions {
         Self {
             id: id.into(),
             default_display_text: None,
+            help_text: None,
         }
     }
 
     pub fn with_default_display_text(mut self, text: impl Into<DisplayText>) -> Self {
         self.default_display_text = Some(text.into());
+        self
+    }
+
+    pub fn with_help_text(&mut self, text: impl Into<String>) -> &mut Self {
+        self.help_text = Some(text.into());
         self
     }
 }
