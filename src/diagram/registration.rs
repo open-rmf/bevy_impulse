@@ -1540,7 +1540,7 @@ impl NodeBuilderOptions {
         self
     }
 
-    pub fn with_help_text(&mut self, text: impl Into<String>) -> &mut Self {
+    pub fn with_help_text(mut self, text: impl Into<String>) -> Self {
         self.help_text = Some(text.into());
         self
     }
@@ -1572,7 +1572,7 @@ impl SectionBuilderOptions {
         self
     }
 
-    pub fn with_help_text(&mut self, text: impl Into<String>) -> &mut Self {
+    pub fn with_help_text(mut self, text: impl Into<String>) -> Self {
         self.help_text = Some(text.into());
         self
     }
