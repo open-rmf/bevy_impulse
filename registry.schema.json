@@ -225,6 +225,12 @@
         "default_display_text": {
           "type": "string"
         },
+        "help_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "metadata": {
           "$ref": "#/$defs/SectionMetadata"
         }

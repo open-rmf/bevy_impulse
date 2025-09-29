@@ -191,7 +191,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
                     serde_json::from_value(config).map_err(DiagramErrorCode::ConfigError)?;
                 Ok(f(builder, config).into())
             })),
-            help_text: None,
+            help_text: options.help_text,
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
@@ -599,6 +599,7 @@ pub struct SectionRegistration {
     pub(super) default_display_text: DisplayText,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
+    pub(super) help_text: Option<String>,
 
     #[serde(skip)]
     create_section_impl: RefCell<Box<CreateSectionFn>>,
@@ -622,7 +623,7 @@ where
 {
     fn into_section_registration(
         self,
-        name: BuilderId,
+        options: &SectionBuilderOptions,
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration;
 }
@@ -635,17 +636,22 @@ where
 {
     fn into_section_registration(
         mut self,
-        name: BuilderId,
+        options: &SectionBuilderOptions,
         schema_generator: &mut SchemaGenerator,
     ) -> SectionRegistration {
         SectionRegistration {
-            default_display_text: name,
+            default_display_text: options
+                .default_display_text
+                .as_ref()
+                .unwrap_or(&options.id)
+                .clone(),
             metadata: SectionT::metadata().clone(),
             config_schema: schema_generator.subschema_for::<()>(),
             create_section_impl: RefCell::new(Box::new(move |builder, config| {
                 let section = self(builder, serde_json::from_value::<Config>(config).unwrap());
                 Box::new(section)
             })),
+            help_text: options.help_text.clone(),
         }
     }
 }
@@ -1386,12 +1392,8 @@ impl DiagramElementRegistry {
         SectionBuilder: IntoSectionRegistration<SectionT, Config>,
         SectionT: Section,
     {
-        let reg = section_builder.into_section_registration(
-            options
-                .default_display_text
-                .unwrap_or_else(|| options.id.clone()),
-            &mut self.messages.schema_generator,
-        );
+        let reg = section_builder
+            .into_section_registration(&options, &mut self.messages.schema_generator);
         self.sections.insert(options.id, reg);
         SectionT::on_register(self);
     }
@@ -1552,6 +1554,8 @@ pub struct SectionBuilderOptions {
     /// If this is not specified, the id field will be used as the default
     /// display text.
     pub default_display_text: Option<BuilderId>,
+    /// Optional text to describe the builder.
+    pub help_text: Option<String>,
 }
 
 impl SectionBuilderOptions {
@@ -1559,11 +1563,17 @@ impl SectionBuilderOptions {
         Self {
             id: id.into(),
             default_display_text: None,
+            help_text: None,
         }
     }
 
     pub fn with_default_display_text(mut self, text: impl Into<DisplayText>) -> Self {
         self.default_display_text = Some(text.into());
+        self
+    }
+
+    pub fn with_help_text(&mut self, text: impl Into<String>) -> &mut Self {
+        self.help_text = Some(text.into());
         self
     }
 }
