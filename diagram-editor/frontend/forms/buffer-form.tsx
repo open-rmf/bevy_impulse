@@ -11,19 +11,12 @@ import {
 } from '@mui/material';
 import React from 'react';
 import type { RetentionPolicy } from '../types/api';
+import { getRetentionMode, type RetentionMode } from '../utils/buffer-settings';
 import BaseEditOperationForm, {
   type BaseEditOperationFormProps,
 } from './base-edit-operation-form';
 
 export type BufferFormProps = BaseEditOperationFormProps<'buffer'>;
-
-type RetentionMode = 'keep_last' | 'keep_first' | 'keep_all';
-
-function getRetentionMode(retention: RetentionPolicy): RetentionMode {
-  return typeof retention === 'string'
-    ? 'keep_all'
-    : (Object.keys(retention)[0] as RetentionMode);
-}
 
 function BufferForm(props: BufferFormProps) {
   const { node, onChange } = props;
