@@ -2,6 +2,9 @@
 [![ci_linux](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_linux.yaml/badge.svg)](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_linux.yaml)
 [![ci_windows](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_windows.yaml/badge.svg)](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_windows.yaml)
 [![ci_web](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_web.yaml/badge.svg)](https://github.com/open-rmf/bevy_impulse/actions/workflows/ci_web.yaml)
+![Crates.io Version](https://img.shields.io/crates/v/bevy_impulse)
+![Crates.io Bevy Impulse Derive Version](https://img.shields.io/crates/v/bevy_impulse_derive)
+
 
 # Reactive Programming for Bevy
 
