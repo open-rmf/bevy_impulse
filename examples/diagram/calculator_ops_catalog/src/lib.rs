@@ -138,7 +138,9 @@ pub struct FibonacciStream {
 
 pub fn register(registry: &mut DiagramElementRegistry) {
     registry.register_node_builder(
-        NodeBuilderOptions::new("add").with_default_display_text("Add"),
+        NodeBuilderOptions::new("add")
+            .with_default_display_text("Add")
+            .with_help_text("Adds the input with the config value. The input can be a number or an array of numbers, if it is an array, sum all the items in the array and the config value."),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -163,7 +165,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     );
 
     registry.register_node_builder(
-        NodeBuilderOptions::new("sub").with_default_display_text("Subtract"),
+        NodeBuilderOptions::new("sub").with_default_display_text("Subtract").with_help_text("Subtract the config value from the input. The input can be a number or an array of numbers, if it is an array, the first item is subtracted by the rest of the items and the config."),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -188,7 +190,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     );
 
     registry.register_node_builder(
-        NodeBuilderOptions::new("mul").with_default_display_text("Multiply"),
+        NodeBuilderOptions::new("mul").with_default_display_text("Multiply").with_help_text("Multiply the input and the config value. The input can be a number or an array, if it is an array, multiply each item and the config value."),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -213,7 +215,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     );
 
     registry.register_node_builder(
-        NodeBuilderOptions::new("div").with_default_display_text("Divide"),
+        NodeBuilderOptions::new("div").with_default_display_text("Divide").with_help_text("Divide the input by the config value. The input can be a number or an array, if it is an array, divide the first item by the rest of the item and the config."),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -238,7 +240,9 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     );
 
     registry.register_node_builder(
-        NodeBuilderOptions::new("fibonacci").with_default_display_text("Fibonacci"),
+        NodeBuilderOptions::new("fibonacci")
+            .with_default_display_text("Fibonacci")
+            .with_help_text("Streams the fibonacci sequence of the input or config value length. If a config value is given, the input is ignored."),
         |builder, config: Option<u64>| {
             builder.create_map(
                 move |input: AsyncMap<JsonMessage, FibonacciStream>| async move {
@@ -271,7 +275,11 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         .no_serializing()
         .no_deserializing()
         .register_node_builder(
-            NodeBuilderOptions::new("print").with_default_display_text("Print"),
+            NodeBuilderOptions::new("print")
+                .with_default_display_text("Print")
+                .with_help_text(
+                    "Prints the input to stdout. An optional string can be provided in the config to label the output.",
+                ),
             |builder, config: Option<String>| {
                 let header = config.clone();
                 builder.create_map_block(move |request: JsonMessage| {
@@ -290,7 +298,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
 
     registry
         .register_node_builder(
-            NodeBuilderOptions::new("less_than").with_default_display_text("Less Than"),
+            NodeBuilderOptions::new("less_than").with_default_display_text("Less Than").with_help_text("Checks if the input is less than the config value. The input can be a number or an array of numbers, if it is an array, checks that all items in the array is less than the config value. If a config value is not provided, check that all items in the array is less than the next item (check that they are in ascending order)."),
             |builder, config: ComparisonConfig| {
                 let settings: ComparisonSettings = config.into();
                 builder.create_map_block(move |request: JsonMessage| {
@@ -302,7 +310,7 @@ pub fn register(registry: &mut DiagramElementRegistry) {
 
     registry
         .register_node_builder(
-            NodeBuilderOptions::new("greater_than").with_default_display_text("Greater Than"),
+            NodeBuilderOptions::new("greater_than").with_default_display_text("Greater Than").with_help_text("Checks if the input is greater than the config value. The input can be a number or an array of numbers, if it is an array, checks that all items in the array is greater than the config value. If a config value is not provided, check that all items in the array is greater than the next item (check that they are in descending order)."),
             |builder, config: ComparisonConfig| {
                 let settings: ComparisonSettings = config.into();
                 builder.create_map_block(move |request: JsonMessage| {
