@@ -57,20 +57,26 @@ export function autoLayout(
     }
   }
 
+  /**
+   * In some cases, we may want to ensure that the outputs are positioned in order to prevent
+   * the edges from "crossing" each other. dagre does not support this directly, but we can work
+   * around by pushing edges to the back so that dagre process it later.
+   */
+  const prioritizedEdges: DiagramEditorEdge[][] = [[], []];
   for (const edge of edges) {
-    // dagre does not support "2D flow" node ranks. Both the data out and stream out of a node
-    // is the same to dagre, because the `streamOut` handle is to the right of a node, it may
-    // cause dagre to produce an unoptimized layout.
-    //
-    // This work around it by moving the target of a `streamOut` edge to the back, because
-    // js objects iteration order is based on their insertion order, this makes dagre put the
-    // node to the right.
-    if (edge.type === 'streamOut') {
-      const dagreTargetNode = dagreGraph.node(edge.target);
-      dagreGraph.removeNode(edge.target);
-      dagreGraph.setNode(edge.target, dagreTargetNode);
+    switch (edge.type) {
+      case 'streamOut':
+      case 'forkResultErr': {
+        prioritizedEdges[1].push(edge);
+        break;
+      }
+      default: {
+        prioritizedEdges[0].push(edge);
+      }
     }
+  }
 
+  for (const edge of prioritizedEdges.flat()) {
     const sourceNode = nodeManager.getNode(edge.source);
     const targetNode = nodeManager.getNode(edge.target);
 
