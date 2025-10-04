@@ -18,7 +18,6 @@
 mod buffer_schema;
 mod fork_clone_schema;
 mod fork_result_schema;
-mod grpc;
 mod join_schema;
 mod node_schema;
 mod operation_ref;
@@ -32,6 +31,9 @@ mod supported;
 mod transform_schema;
 mod unzip_schema;
 mod workflow_builder;
+
+#[cfg(feature = "grpc")]
+mod grpc;
 
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;

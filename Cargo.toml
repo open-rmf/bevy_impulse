@@ -81,6 +81,10 @@ diagram = [
   "dep:serde",
   "dep:serde_json",
   "dep:strum",
+]
+trace = ["diagram"]
+
+grpc = [
   "dep:tonic",
   "dep:prost",
   "dep:tonic-prost",
@@ -91,7 +95,15 @@ diagram = [
   "dep:futures-lite",
   "dep:async-std",
 ]
-trace = ["diagram"]
+
+# Turn on all capability related features. This differs from --all-features
+# because it would not include single_threaded_async which has a diminishing
+# effect on capabilities.
+maximal = [
+  "diagram",
+  "trace",
+  "grpc",
+]
 
 [dev-dependencies]
 async-std = { version = "1.12" }

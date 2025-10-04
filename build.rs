@@ -1,5 +1,5 @@
 fn main() -> std::io::Result<()> {
-    #[cfg(feature = "diagram")]
+    #[cfg(feature = "grpc")]
     {
         use std::path::PathBuf;
 
