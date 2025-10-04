@@ -134,8 +134,7 @@ impl SingleInputStorage {
             return Ok(false);
         };
 
-        dbg!(r.source);
-        for input in dbg!(&inputs.0) {
+        for input in &inputs.0 {
             if r.check_upstream(*input)? {
                 return Ok(true);
             }

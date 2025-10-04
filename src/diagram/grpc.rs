@@ -32,6 +32,7 @@ use tonic::{
     client::Grpc as Client,
     transport::Channel,
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
+    codegen::tokio_stream::wrappers::UnboundedReceiverStream,
     Status, Code, Request,
 };
 use prost_reflect::{
@@ -48,13 +49,11 @@ use tokio::runtime::Runtime;
 
 use futures::{
     FutureExt, Stream as FutureStream,
-    channel::{
-        oneshot::{self, Sender as OneShotSender},
-        mpsc::UnboundedReceiver,
-    },
+    channel::oneshot::{self, Sender as OneShotSender},
     never::Never,
     stream::once,
 };
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use futures_lite::future::race;
 
@@ -121,7 +120,7 @@ impl DiagramElementRegistry {
                         .map_err(|e| format!("{e}"))
                         .flatten();
 
-                        dbg!(r)
+                        r
                     }
                 });
 
@@ -160,7 +159,7 @@ impl DiagramElementRegistry {
                             async move {
                                 let client = client.await?;
 
-                                let request = Request::new(input.request);
+                                let request = Request::new(UnboundedReceiverStream::new(input.request));
                                 execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
                             }
                         );
@@ -310,7 +309,7 @@ where
 
         let value = serde_json::to_value(response)
             .map_err(|e| format!("failed to convert to json: {e}"))?;
-        output_streams.out.send(dbg!(value));
+        output_streams.out.send(value);
 
         if !is_server_streaming {
             return Ok(());
@@ -418,14 +417,14 @@ mod tests {
         fibonacci_server::{FibonacciServer, Fibonacci},
         FibonacciRequest, FibonacciReply,
         navigation_server::{NavigationServer, Navigation},
-        NavigationGoal, NavigationUpdate, LocationIdentifier,
+        NavigationGoal, NavigationUpdate,
     };
     use tokio::{
         runtime::Runtime,
-        sync::mpsc::{UnboundedSender, unbounded_channel},
+        sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel, error::TryRecvError},
     };
     use serde_json::json;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     #[test]
     fn test_file_descriptor_loading() {
@@ -582,36 +581,113 @@ mod tests {
         let _ = exit_sender.send(());
     }
 
-    // #[test]
-    // fn test_grpc_client_streaming() {
-    //     let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
-    //     DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
+    #[test]
+    fn test_grpc_bidirectional_streaming() {
+        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
 
-    //     let mut fixture = DiagramTestFixture::new();
-    //     let port = 50000 + line!();
-    //     let addr = format!("[::1]:{port}").parse().unwrap();
+        let mut fixture = DiagramTestFixture::new();
+        fixture.registry.register_node_builder(
+            NodeBuilderOptions::new("guide"),
+            create_guide_to_goal,
+        );
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .no_cloning()
+            .register_message::<GoalTracker>();
 
-    //     let mut locations = HashMap::new();
-    //     let navigation = TestNavigation {
-    //         locations,
-    //         position: Arc::new(Mutex::new(NavigationUpdate::default())),
-    //     };
+        let reached_listener = fixture.context.app.spawn_service(check_if_reached.into_blocking_service());
+        fixture
+            .registry
+            .opt_out()
+            .no_serializing()
+            .no_deserializing()
+            .register_node_builder(
+                NodeBuilderOptions::new("reached_listener"),
+                move |builder, _: ()| {
+                    builder.create_node(reached_listener)
+                }
+            )
+            .with_listen();
 
-    //     let rt = Arc::new(Runtime::new().unwrap());
-    //     rt.spawn(async move {
-    //         Server::builder()
-    //             .add_service(NavigationServer::new(navigation))
-    //             .serve(addr)
-    //             .await
-    //             .unwrap();
-    //     });
-    //     fixture.registry.enable_grpc(Arc::clone(&rt));
+        let port = 50000 + line!();
+        let addr = format!("[::1]:{port}").parse().unwrap();
 
-    //     let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
-    //     std::thread::spawn(move || {
-    //         let _ = rt.block_on(exit_receiver);
-    //     });
-    // }
+        let rt = Arc::new(Runtime::new().unwrap());
+        let navigation = TestNavigation::new(Arc::clone(&rt));
+        rt.spawn(async move {
+            Server::builder()
+                .add_service(NavigationServer::new(navigation))
+                .serve(addr)
+                .await
+                .unwrap();
+        });
+        fixture.registry.enable_grpc(Arc::clone(&rt));
+
+        let (exit_sender, exit_receiver) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = rt.block_on(exit_receiver);
+        });
+
+        let diagram = Diagram::from_json(json!({
+            "version": "0.1.0",
+            "start": "guider",
+            "ops": {
+                "guider": {
+                    "type": "node",
+                    "builder": "guide",
+                    "config": {
+                        "goals": [
+                            [10.0, 10.0],
+                            [5.0, 5.0],
+                            [-5.0, 0.0]
+                        ]
+                    },
+                    "stream_out": {
+                        "goal_receiver": "guided",
+                        "goal_tracker": "tracker",
+                    },
+                    "next": { "builtin" : "terminate" }
+                },
+                "guided": {
+                    "type": "node",
+                    "builder": "grpc_client_stream_out",
+                    "config": {
+                        "service": "example_protos.navigation.Navigation",
+                        "method": "Guide",
+                        "uri": format!("http://localhost:{port}"),
+                    },
+                    "stream_out": {
+                        "out": "update_buffer"
+                    },
+                    "next": { "builtin": "dispose" }
+                },
+                "update_buffer": { "type": "buffer" },
+                "tracker": { "type": "buffer" },
+                "listen": {
+                    "type": "listen",
+                    "buffers": {
+                        "navigation_update": "update_buffer",
+                        "goal_tracker": "tracker"
+                    },
+                    "next": "reached_listener"
+                },
+                "reached_listener": {
+                    "type": "node",
+                    "builder": "reached_listener",
+                    "next": { "builtin" : "dispose" }
+                }
+            }
+        }))
+        .unwrap();
+
+        let _: () = fixture.spawn_and_run(&diagram, ()).unwrap();
+
+        let _ = exit_sender.send(());
+    }
 
     struct GenerateFibonacci;
 
@@ -660,29 +736,261 @@ mod tests {
         FibonacciReply { value: current }
     }
 
-    struct TestNavigation {
-        locations: HashMap<String, NavigationGoal>,
-        position: Arc<Mutex<NavigationUpdate>>,
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    struct GuideThroughGoals {
+        goals: Vec<[f32; 2]>,
     }
 
-    // #[tonic::async_trait]
-    // impl Navigation for TestNavigation {
-    //     type GuideStream = UnboundedReceiverStream<Result<NavigationUpdate, Status>>;
+    #[derive(StreamPack)]
+    struct GuideStreams {
+        goal_receiver: UnboundedReceiver<JsonMessage>,
+        goal_tracker: GoalTracker,
+    }
 
-    //     async fn guide(
-    //         &self,
-    //         request: Request<Streaming<NavigationGoal>>
-    //     ) -> Result<Response<Self::GuideStream>, Status> {
+    fn create_guide_to_goal(builder: &mut Builder, config: GuideThroughGoals) -> Node<(), (), GuideStreams> {
+        builder.create_map(move |input: AsyncMap<(), GuideStreams>| {
+            let goals = config.goals.clone();
+            async move {
+                let (goal_sender, goal_receiver) = unbounded_channel::<JsonMessage>();
+                input.streams.goal_receiver.send(goal_receiver);
 
-    //     }
+                for goal in goals {
+                    let goal_msg = json!({
+                        "x": goal[0],
+                        "y": goal[1],
+                        "has_yaw_target": false,
+                    });
 
-    //     async fn fetch_location(
-    //         &self,
-    //         request: Request<LocationIdentifier>,
-    //     ) -> Result<Response<NavigationGoal>, Status> {
+                    if goal_sender.send(goal_msg).is_err() {
+                        return;
+                    }
 
-    //     }
-    // }
+                    let (done_sender, done_receiver) = oneshot::channel();
+                    input.streams.goal_tracker.send(GoalTracker {
+                        goal,
+                        done: Some(done_sender),
+                    });
+
+                    done_receiver.await.unwrap();
+                }
+            }
+        })
+    }
+
+    #[derive(Clone, Accessor)]
+    struct ReachedKeys {
+        navigation_update: BufferKey<JsonMessage>,
+        goal_tracker: BufferKey<GoalTracker>,
+    }
+
+    struct GoalTracker {
+        goal: [f32; 2],
+        done: Option<OneShotSender<()>>,
+    }
+
+    fn check_if_reached(
+        In(keys): In<ReachedKeys>,
+        update_buffer: BufferAccess<JsonMessage>,
+        mut goal_buffer: BufferAccessMut<GoalTracker>,
+    ) {
+        let Some(update) = update_buffer.get_newest(&keys.navigation_update) else {
+            return;
+        };
+
+        let mut tracker_buffer = goal_buffer.get_mut(&keys.goal_tracker).unwrap();
+        let Some(tracker) = tracker_buffer.newest_mut() else {
+            return;
+        };
+        let goal = tracker.goal;
+
+        let x_close = f32::abs(update["x"].as_f64().unwrap() as f32 - goal[0]) < 1e-3;
+        let y_close = f32::abs(update["y"].as_f64().unwrap() as f32 - goal[1]) < 1e-3;
+        let arrived = x_close && y_close;
+
+        if arrived {
+            if let Some(done) = tracker.done.take() {
+                let _ = done.send(());
+            }
+        }
+    }
+
+    struct TestNavigation {
+        goal_sender: UnboundedSender<NavigationGoalInfo>,
+        stream_sender: UnboundedSender<NavigationUpdateSender>,
+        runtime: Arc<Runtime>,
+    }
+
+    struct NavigationGoalInfo {
+        goal: Option<NavigationGoal>,
+        goal_streaming: bool,
+    }
+
+    impl TestNavigation {
+        fn new(runtime: Arc<Runtime>) -> Self {
+            let (goal_sender, mut receive_goal) = unbounded_channel::<NavigationGoalInfo>();
+            let (stream_sender, mut receive_stream) = unbounded_channel();
+
+            std::thread::spawn(move || {
+                let mut current_stream: Option<NavigationUpdateSender> = None;
+                let mut current_position = NavigationUpdate::default();
+                let mut current_goal = None;
+                let mut goal_streaming = false;
+                let linear_speed = 1.0;
+                let angular_speed = 0.1;
+
+                loop {
+                    std::thread::sleep(Duration::from_micros(100));
+                    match receive_stream.try_recv() {
+                        Ok(new_stream) => {
+                            current_stream = Some(new_stream);
+                            current_goal = None;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            break;
+                        }
+                        Err(TryRecvError::Empty) => {}
+                    }
+
+                    match receive_goal.try_recv() {
+                        Ok(NavigationGoalInfo { goal, goal_streaming: streaming }) => {
+                            current_goal = goal;
+                            goal_streaming = streaming;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            break;
+                        }
+                        Err(TryRecvError::Empty) => {}
+                    }
+
+                    if let Some(goal) = current_goal {
+                        let delta_x = clamp(goal.x - current_position.x, linear_speed);
+                        current_position.x += delta_x;
+
+                        let delta_y = clamp(goal.y - current_position.y, linear_speed);
+                        current_position.y += delta_y;
+
+                        let delta_yaw = if goal.has_yaw_target {
+                            clamp(goal.yaw - current_position.yaw, angular_speed)
+                        } else {
+                            0.0
+                        };
+                        current_position.yaw += delta_yaw;
+
+                        if let Some(stream) = &mut current_stream {
+                            let arrived =
+                                f32::abs(delta_x) < 1e-3
+                                && f32::abs(delta_y) < 1e-3
+                                && f32::abs(delta_yaw) < 1e-6;
+
+                            if stream.send(Ok(current_position)).is_err() {
+                                // If the stream has been dropped then we assume the
+                                // goal is cancelled
+                                current_goal = None;
+                            }
+
+                            if arrived {
+                                if !goal_streaming {
+                                    // This is not a client-streaming request, so
+                                    // we should close these down to indicate that
+                                    // the goal has been reached.
+                                    current_goal = None;
+                                    current_stream = None;
+                                }
+                            }
+                        } else {
+                            current_goal = None;
+                        }
+                    }
+                }
+            });
+
+            Self {
+                goal_sender,
+                stream_sender,
+                runtime,
+            }
+        }
+    }
+
+    fn clamp(val: f32, limit: f32) -> f32 {
+        if f32::abs(val) > limit {
+            return f32::signum(val) * limit;
+        }
+
+        val
+    }
+
+    type NavigationUpdateSender = UnboundedSender<Result<NavigationUpdate, Status>>;
+    type NavigationUpdateReceiver = UnboundedReceiverStream<Result<NavigationUpdate, Status>>;
+
+    #[tonic::async_trait]
+    impl Navigation for TestNavigation {
+        type GuideStream = NavigationUpdateReceiver;
+
+        async fn guide(
+            &self,
+            request: Request<Streaming<NavigationGoal>>
+        ) -> Result<Response<Self::GuideStream>, Status> {
+            let _ = self.goal_sender.send(NavigationGoalInfo {
+                goal: None,
+                goal_streaming: true,
+            });
+
+            let (update_sender, update_receiver) = unbounded_channel();
+            let connection = update_sender.downgrade();
+            let _ = self.stream_sender.send(update_sender);
+
+            let goal_sender = self.goal_sender.clone();
+            let mut goal_stream = request.into_inner();
+            self.runtime.spawn(
+                async move {
+                    loop {
+                        match goal_stream.message().await {
+                            Ok(Some(goal)) => {
+                                if connection.strong_count() < 1 {
+                                    // A new request has taken over
+                                    return;
+                                }
+                                let r = goal_sender.send(NavigationGoalInfo {
+                                    goal: Some(goal),
+                                    goal_streaming: true,
+                                });
+
+                                if r.is_err() {
+                                    return;
+                                }
+                            }
+                            Ok(None) => {
+                                // The request has been cancelled
+                                return;
+                            }
+                            Err(err) => {
+                                println!("error while receiving navigation goal: {err}");
+                            }
+                        }
+                    }
+                }
+            );
+
+            Ok(Response::new(update_receiver.into()))
+        }
+
+        type GoToPlaceStream = NavigationUpdateReceiver;
+
+        async fn go_to_place(
+            &self,
+            request: Request<NavigationGoal>,
+        ) -> Result<Response<Self::GoToPlaceStream>, Status> {
+            let (update_sender, update_receiver) = unbounded_channel();
+            let _ = self.stream_sender.send(update_sender);
+            let _ = self.goal_sender.send(NavigationGoalInfo {
+                goal: Some(request.into_inner()),
+                goal_streaming: false,
+            });
+
+            Ok(Response::new(update_receiver.into()))
+        }
+    }
 
     mod protos {
         include!(concat!(env!("OUT_DIR"), "/example_protos.fibonacci.rs"));
