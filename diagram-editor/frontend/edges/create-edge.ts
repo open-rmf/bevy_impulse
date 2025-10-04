@@ -1,6 +1,5 @@
 import { MarkerType } from '@xyflow/react';
 import { v4 as uuidv4 } from 'uuid';
-import type { HandleId } from '../handles';
 import type { DiagramEditorEdge, EdgeOutputData } from '.';
 import type { DefaultEdge } from './default-edge';
 import type {
@@ -11,9 +10,9 @@ import type {
 
 export function createBaseEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   id?: string,
 ): Pick<
   DiagramEditorEdge,
@@ -35,9 +34,9 @@ export function createBaseEdge(
 
 export function createDefaultEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   inputSlot?: DefaultEdge['data']['input'],
 ): DiagramEditorEdge<'default'> {
   return {
@@ -49,9 +48,9 @@ export function createDefaultEdge(
 
 export function createUnzipEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   data: EdgeOutputData<'unzip'>,
 ): DiagramEditorEdge<'unzip'> {
   return {
@@ -66,9 +65,9 @@ export function createUnzipEdge(
 
 export function createForkResultOkEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
 ): DiagramEditorEdge<'forkResultOk'> {
   return {
     ...createBaseEdge(source, sourceHandle, target, targetHandle),
@@ -79,9 +78,9 @@ export function createForkResultOkEdge(
 
 export function createForkResultErrEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
 ): DiagramEditorEdge<'forkResultErr'> {
   return {
     ...createBaseEdge(source, sourceHandle, target, targetHandle),
@@ -92,9 +91,9 @@ export function createForkResultErrEdge(
 
 export function createSplitKeyEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   data: EdgeOutputData<'splitKey'>,
 ): DiagramEditorEdge<'splitKey'> {
   return {
@@ -106,9 +105,9 @@ export function createSplitKeyEdge(
 
 export function createSplitSeqEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   data: EdgeOutputData<'splitSeq'>,
 ): DiagramEditorEdge<'splitSeq'> {
   return {
@@ -120,9 +119,9 @@ export function createSplitSeqEdge(
 
 export function createSplitRemainingEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
 ): DiagramEditorEdge<'splitRemaining'> {
   return {
     ...createBaseEdge(source, sourceHandle, target, targetHandle),
@@ -133,9 +132,9 @@ export function createSplitRemainingEdge(
 
 export function createBufferEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   data:
     | BufferKeyInputSlotData
     | BufferSeqInputSlotData
@@ -150,9 +149,9 @@ export function createBufferEdge(
 
 export function createStreamOutEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   data: EdgeOutputData<'streamOut'>,
 ): DiagramEditorEdge<'streamOut'> {
   return {
@@ -164,9 +163,9 @@ export function createStreamOutEdge(
 
 export function createSectionEdge(
   source: string,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   target: string,
-  targetHandle: HandleId,
+  targetHandle: string | null | undefined,
   data: EdgeOutputData<'section'>,
 ): DiagramEditorEdge<'section'> {
   return {

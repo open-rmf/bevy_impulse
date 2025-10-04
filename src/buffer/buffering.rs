@@ -34,7 +34,12 @@ pub trait Buffering: 'static + Send + Sync + Clone {
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError>;
 
-    fn buffered_count_for(&self, buffer: Entity, session: Entity, world: &World) -> Result<usize, OperationError>;
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError>;
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult;
 
@@ -218,11 +223,15 @@ impl<T: 'static + Send + Sync> Buffering for Buffer<T> {
         dbg!(world
             .get_entity(self.id())
             .or_broken()?
-            .buffered_count::<T>(session)
-        )
+            .buffered_count::<T>(session))
     }
 
-    fn buffered_count_for(&self, buffer: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         if self.id() != buffer {
             return Ok(0);
         }
@@ -299,11 +308,15 @@ impl<T: 'static + Send + Sync + Clone> Buffering for CloneFromBuffer<T> {
         dbg!(world
             .get_entity(self.id())
             .or_broken()?
-            .buffered_count::<T>(session)
-        )
+            .buffered_count::<T>(session))
     }
 
-    fn buffered_count_for(&self, buffer: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         if buffer != self.id() {
             return Ok(0);
         }
@@ -540,7 +553,12 @@ impl<T: Buffering, const N: usize> Buffering for [T; N] {
         dbg!(Ok(min_count.unwrap_or(0)))
     }
 
-    fn buffered_count_for(&self, buffer_entity: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         let mut max_count = None;
         for buffer in self.iter() {
             let count = buffer.buffered_count_for(buffer_entity, session, world)?;
@@ -651,7 +669,12 @@ impl<T: Buffering, const N: usize> Buffering for SmallVec<[T; N]> {
         dbg!(Ok(min_count.unwrap_or(0)))
     }
 
-    fn buffered_count_for(&self, buffer_entity: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         let mut max_count = None;
         for buffer in self.iter() {
             let count = buffer.buffered_count_for(buffer_entity, session, world)?;
@@ -760,7 +783,12 @@ impl<B: Buffering> Buffering for Vec<B> {
         dbg!(Ok(min_count.unwrap_or(0)))
     }
 
-    fn buffered_count_for(&self, buffer_entity: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         let mut max_count = None;
         for buffer in self.iter() {
             let count = buffer.buffered_count_for(buffer_entity, session, world)?;

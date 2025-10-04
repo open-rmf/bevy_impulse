@@ -6,41 +6,25 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { type NodeProps, Position } from '@xyflow/react';
-import { memo } from 'react';
-import { Handle, type HandleProps, HandleType } from '../handles';
+import type { NodeProps } from '@xyflow/react';
+import { type JSX, memo } from 'react';
 import { LAYOUT_OPTIONS } from '../utils/layout';
 
 export interface BaseNodeProps extends NodeProps {
   color?: ButtonProps['color'];
   icon?: React.JSX.Element | string;
   label: string;
-  variant: 'input' | 'output' | 'inputOutput';
-  /**
-   * defaults to `HandleType.Data`.
-   */
-  inputHandleType?: HandleType;
-  /**
-   * defaults to `HandleType.Data`.
-   */
-  outputHandleType?: HandleType;
   caption?: string;
-  extraHandles?: HandleProps[];
+  handles?: JSX.Element;
 }
 
 function BaseNode({
   color,
   icon: materialIconOrSymbol,
   label,
-  variant,
-  inputHandleType = HandleType.Data,
-  outputHandleType = HandleType.Data,
   caption,
-  extraHandles,
-  isConnectable,
+  handles,
   selected,
-  sourcePosition = Position.Bottom,
-  targetPosition = Position.Top,
 }: BaseNodeProps) {
   const icon =
     typeof materialIconOrSymbol === 'string' ? (
@@ -51,14 +35,6 @@ function BaseNode({
 
   return (
     <Paper>
-      {(variant === 'input' || variant === 'inputOutput') && (
-        <Handle
-          type="target"
-          position={targetPosition}
-          isConnectable={isConnectable}
-          variant={inputHandleType}
-        />
-      )}
       <Button
         title={label}
         color={color}
@@ -99,17 +75,7 @@ function BaseNode({
           )}
         </Stack>
       </Button>
-      {(variant === 'output' || variant === 'inputOutput') && (
-        <Handle
-          type="source"
-          position={sourcePosition}
-          isConnectable={isConnectable}
-          variant={outputHandleType}
-        />
-      )}
-      {extraHandles?.map((handleProps, i) => (
-        <Handle key={i.toString()} {...handleProps} />
-      ))}
+      {handles}
     </Paper>
   );
 }

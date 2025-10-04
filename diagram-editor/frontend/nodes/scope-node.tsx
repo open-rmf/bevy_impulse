@@ -1,6 +1,6 @@
 import { Box, useTheme } from '@mui/material';
 import { type NodeProps, Position } from '@xyflow/react';
-import { Handle, HandleType } from '../handles';
+import { Handle, HandleId, HandleType } from '../handles';
 import type { OperationNode } from '.';
 
 function ScopeNodeComp({
@@ -37,6 +37,7 @@ function ScopeNodeComp({
         variant={HandleType.Data}
       />
       <Handle
+        id={HandleId.DataStream}
         type="source"
         position={Position.Right}
         variant={HandleType.DataStream}

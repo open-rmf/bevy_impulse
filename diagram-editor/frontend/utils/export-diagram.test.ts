@@ -14,12 +14,26 @@ import { loadDiagramJson } from './load-diagram';
 import { joinNamespaces, ROOT_NAMESPACE } from './namespace';
 import testDiagram from './test-data/test-diagram.json';
 import testDiagramScope from './test-data/test-diagram-scope.json';
+import type { DiagramElementRegistry } from '../types/api';
+
+const stubRegistry: DiagramElementRegistry = {
+  messages: {},
+  nodes: {},
+  schemas: {},
+  sections: {},
+  trace_supported: false,
+};
 
 test('export diagram', () => {
   const [_diagram, { nodes, edges }] = loadDiagramJson(
     JSON.stringify(testDiagram),
   );
-  const diagram = exportDiagram(new NodeManager(nodes), edges, {});
+  const diagram = exportDiagram(
+    stubRegistry,
+    new NodeManager(nodes),
+    edges,
+    {},
+  );
   expect(diagram).toEqual(testDiagram);
 });
 
@@ -27,7 +41,7 @@ test('export diagram with scope', () => {
   const [_diagram, { nodes, edges }] = loadDiagramJson(
     JSON.stringify(testDiagramScope),
   );
-  let diagram = exportDiagram(new NodeManager(nodes), edges, {});
+  let diagram = exportDiagram(stubRegistry, new NodeManager(nodes), edges, {});
   expect(diagram).toEqual(testDiagramScope);
 
   const nodeManager = new NodeManager(nodes);
@@ -49,7 +63,7 @@ test('export diagram with scope', () => {
     joinNamespaces(ROOT_NAMESPACE, 'scope'),
     'mul4',
   ).id;
-  diagram = exportDiagram(nodeManager, edges, {});
+  diagram = exportDiagram(stubRegistry, nodeManager, edges, {});
   expect(diagram.ops.scope.start).toBe('mul4');
 });
 
@@ -100,7 +114,7 @@ test('export diagram with templates', () => {
       data: { output: {}, input: { type: 'default' } },
     },
   ];
-  const template = exportTemplate(new NodeManager(nodes), edges);
+  const template = exportTemplate(stubRegistry, new NodeManager(nodes), edges);
 
   if (typeof template.inputs !== 'object' || Array.isArray(template.inputs)) {
     throw new Error('expected template inputs to be a mapping');

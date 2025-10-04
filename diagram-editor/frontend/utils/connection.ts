@@ -4,11 +4,24 @@ import {
   EdgeCategory,
   type EdgeTypes,
 } from '../edges';
-import type { HandleId } from '../handles';
+import { HandleId } from '../handles';
 import type { NodeManager } from '../node-manager';
 import type { DiagramEditorNode, NodeTypes } from '../nodes';
 import { exhaustiveCheck } from './exhaustive-check';
 
+/**
+ * List of edge types that a node can output.
+ * TODO: Consider defining for each handle, e.g.
+ *
+ * ```ts
+ * {
+ *   node: {
+ *     default: 'default',
+ *     dataStream: 'streamOut',
+ *   }
+ * }
+ * ```
+ */
 const ALLOWED_OUTPUT_EDGES: Record<NodeTypes, EdgeTypes[]> = {
   buffer: ['buffer'],
   buffer_access: ['default'],
@@ -53,19 +66,83 @@ const ALLOWED_INPUT_EDGE_CATEGORIES: Record<NodeTypes, EdgeCategory[]> = {
   unzip: [EdgeCategory.Data],
 };
 
+const ALLOWED_HANDLE_OUTPUT_EDGES: Record<string, EdgeTypes[]> = {
+  dataStream: ['streamOut'],
+  forkResultOk: ['forkResultOk'],
+  forkResultErr: ['forkResultErr'],
+} satisfies Record<HandleId, EdgeTypes[]>;
+
+/// List of edge types that the default handle should not allow. These edges are expected to have their own handles.
+const DISALLOWED_DEFAULT_HANDLE_OUTPUT_EDGES: EdgeTypes[] = ['streamOut'];
+
+const ALLOWED_HANDLE_INPUT_EDGE_CATEGORIES: Record<string, EdgeCategory[]> = {
+  dataStream: [EdgeCategory.Data],
+  forkResultOk: [],
+  forkResultErr: [],
+} satisfies Record<HandleId, EdgeCategory[]>;
+
+function arrayIntersection<T>(a: T[], b: T[]): T[] {
+  const intersection = [];
+  for (const elem of a) {
+    if (b.includes(elem)) {
+      intersection.push(elem);
+    }
+  }
+  return intersection;
+}
+
+function arrayDifference<T>(a: T[], b: T[]): T[] {
+  const result = [];
+  for (const elem of a) {
+    if (!b.includes(elem)) {
+      result.push(elem);
+    }
+  }
+  return result;
+}
+
 export function getValidEdgeTypes(
   sourceNode: DiagramEditorNode,
-  sourceHandle: HandleId,
+  sourceHandle: string | null | undefined,
   targetNode: DiagramEditorNode,
-  _targetHandle: HandleId,
+  targetHandle: string | null | undefined,
 ): EdgeTypes[] {
-  const allowedOutputEdges: EdgeTypes[] =
-    sourceHandle === 'dataStream'
-      ? ['streamOut']
-      : [...ALLOWED_OUTPUT_EDGES[sourceNode.type]];
-  const allowedInputEdgeCategories =
+  let allowedOutputEdges: EdgeTypes[] = ALLOWED_OUTPUT_EDGES[sourceNode.type];
+  if (sourceHandle) {
+    const allowedHandleOutput = ALLOWED_HANDLE_OUTPUT_EDGES[sourceHandle];
+    if (allowedHandleOutput) {
+      // we are only dealing with very small arrays, no need to create a Set.
+      allowedOutputEdges = arrayIntersection(
+        allowedOutputEdges,
+        allowedHandleOutput,
+      );
+    } else {
+      console.error('failed to get allowed handle output edges');
+    }
+  } else {
+    allowedOutputEdges = arrayDifference(
+      allowedOutputEdges,
+      DISALLOWED_DEFAULT_HANDLE_OUTPUT_EDGES,
+    );
+  }
+
+  let allowedInputEdgeCategories =
     ALLOWED_INPUT_EDGE_CATEGORIES[targetNode.type];
-  return allowedOutputEdges.filter((edgeType) =>
+  if (targetHandle) {
+    const allowedHandleInput =
+      ALLOWED_HANDLE_INPUT_EDGE_CATEGORIES[targetHandle];
+    if (allowedHandleInput) {
+      // we are only dealing with very small arrays, no need to create a Set.
+      allowedInputEdgeCategories = arrayIntersection(
+        allowedInputEdgeCategories,
+        allowedHandleInput,
+      );
+    } else {
+      console.error('failed to get allowed handle input edge categories');
+    }
+  }
+
+  return Array.from(allowedOutputEdges).filter((edgeType) =>
     allowedInputEdgeCategories.includes(EDGE_CATEGORIES[edgeType]),
   );
 }
@@ -78,9 +155,9 @@ enum CardinalityType {
 
 function getOutputCardinality(
   type: NodeTypes,
-  handleId: HandleId,
+  handleId: string | null | undefined,
 ): CardinalityType {
-  if (handleId === 'dataStream') {
+  if (handleId === HandleId.DataStream) {
     return CardinalityType.Single;
   }
 
@@ -92,9 +169,7 @@ function getOutputCardinality(
     case 'split': {
       return CardinalityType.Many;
     }
-    case 'fork_result': {
-      return CardinalityType.Pair;
-    }
+    case 'fork_result':
     case 'node':
     case 'buffer_access':
     case 'join':
@@ -209,11 +284,13 @@ export function validateEdgeSimple(
         edges.some(
           (e) =>
             e.source === sourceNode.id &&
-            edge.sourceHandle === e.sourceHandle &&
+            (edge.sourceHandle || null) === (e.sourceHandle || null) &&
             edge.id !== e.id,
         )
       ) {
-        return createValidationError('source node already has an edge');
+        return createValidationError(
+          'This output can only be connected to one input',
+        );
       }
       break;
     }
@@ -224,7 +301,9 @@ export function validateEdgeSimple(
           count++;
         }
         if (count > 1) {
-          return createValidationError('source node already has two edges');
+          return createValidationError(
+            'This output can only be connected to two inputs',
+          );
         }
       }
       break;

@@ -1,5 +1,4 @@
 fn main() -> std::io::Result<()> {
-
     #[cfg(feature = "diagram")]
     {
         use std::path::PathBuf;
@@ -9,12 +8,11 @@ fn main() -> std::io::Result<()> {
             "assets/protos/example_protos/navigation.proto",
             "assets/protos/example_protos/door.proto",
         ];
-        let includes = [
-            "assets/protos/",
-        ];
+        let includes = ["assets/protos/"];
 
-        let file_descriptor_path = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"))
-            .join("file_descriptor_set.bin");
+        let file_descriptor_path =
+            PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"))
+                .join("file_descriptor_set.bin");
 
         tonic_prost_build::configure()
             .file_descriptor_set_path(file_descriptor_path)

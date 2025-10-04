@@ -15,8 +15,8 @@
  *
 */
 
-use crate::AsyncMap;
 use super::*;
+use crate::AsyncMap;
 
 use std::{
     future::Future,
@@ -28,30 +28,29 @@ use std::{
 
 use anyhow::anyhow;
 
+use http::uri::PathAndQuery;
+use prost::Message;
+use prost_reflect::{
+    DescriptorPool, DynamicMessage, MessageDescriptor, MethodDescriptor, SerializeOptions,
+};
 use tonic::{
     client::Grpc as Client,
-    transport::Channel,
     codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder},
     codegen::tokio_stream::wrappers::UnboundedReceiverStream,
-    Status, Code, Request,
+    transport::Channel,
+    Code, Request, Status,
 };
-use prost_reflect::{
-    DescriptorPool, MethodDescriptor, MessageDescriptor, DynamicMessage,
-    SerializeOptions,
-};
-use prost::Message;
-use http::uri::PathAndQuery;
 
-use serde::{Serialize, Deserialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use tokio::runtime::Runtime;
 
 use futures::{
-    FutureExt, Stream as FutureStream,
     channel::oneshot::{self, Sender as OneShotSender},
     never::Never,
     stream::once,
+    FutureExt, Stream as FutureStream,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -84,10 +83,13 @@ impl DiagramElementRegistry {
     pub fn enable_grpc(&mut self, runtime: Arc<Runtime>) {
         let rt = Arc::clone(&runtime);
         self.register_node_builder_fallible(
-            NodeBuilderOptions::new("grpc_request")
-                .with_default_display_text("gRPC Request"),
+            NodeBuilderOptions::new("grpc_request").with_default_display_text("gRPC Request"),
             move |builder, config: GrpcConfig| {
-                let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
+                let GrpcDescriptions {
+                    method,
+                    codec,
+                    path,
+                } = get_descriptions(&config)?;
 
                 let uri: Box<[u8]> = config.uri.as_bytes().into();
                 let client = make_client(uri).shared();
@@ -103,35 +105,38 @@ impl DiagramElementRegistry {
                     // The tonic gRPC client needs to be run inside a tokio
                     // async runtime, so we spawn a tokio task here and use the
                     // JoinHandle to pass its result through the workflow.
-                    let task = rt.spawn(
-                        async move {
-                            let client = client.await?;
+                    let task = rt.spawn(async move {
+                        let client = client.await?;
 
-                            // Convert the request message into a stream of a single dynamic message
-                            let request = input.request;
-                            let request = Request::new(once(async move { request }));
-                            execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
-                        }
-                    );
+                        // Convert the request message into a stream of a single dynamic message
+                        let request = input.request;
+                        let request = Request::new(once(async move { request }));
+                        execute(
+                            request,
+                            client,
+                            codec,
+                            path,
+                            config.timeout,
+                            input.streams,
+                            is_server_streaming,
+                        )
+                        .await
+                    });
 
                     async move {
-                        let r = task
-                        .await
-                        .map_err(|e| format!("{e}"))
-                        .flatten();
+                        let r = task.await.map_err(|e| format!("{e}")).flatten();
 
                         r
                     }
                 });
 
                 Ok(node)
-            }
+            },
         )
-            .with_fork_result();
+        .with_fork_result();
 
         let rt = runtime;
-        self
-            .opt_out()
+        self.opt_out()
             .no_serializing()
             .no_deserializing()
             .no_cloning()
@@ -139,7 +144,11 @@ impl DiagramElementRegistry {
                 NodeBuilderOptions::new("grpc_client_stream_out")
                     .with_default_display_text("grpc Stream Out"),
                 move |builder, config: GrpcConfig| {
-                    let GrpcDescriptions { method, codec, path } = get_descriptions(&config)?;
+                    let GrpcDescriptions {
+                        method,
+                        codec,
+                        path,
+                    } = get_descriptions(&config)?;
 
                     let uri: Box<[u8]> = config.uri.as_bytes().into();
                     let client = make_client(uri).shared();
@@ -147,35 +156,40 @@ impl DiagramElementRegistry {
                     let path = PathAndQuery::from_maybe_shared(path.clone())?;
 
                     let rt = Arc::clone(&rt);
-                    let node = builder.create_map(move |input: AsyncMap<UnboundedReceiver<JsonMessage>, GrpcStreams>| {
-                        let client = client.clone();
-                        let codec = codec.clone();
-                        let path = path.clone();
+                    let node = builder.create_map(
+                        move |input: AsyncMap<UnboundedReceiver<JsonMessage>, GrpcStreams>| {
+                            let client = client.clone();
+                            let codec = codec.clone();
+                            let path = path.clone();
 
-                        // The tonic gRPC client needs to be run inside a tokio
-                        // async runtime, so we spawn a tokio task here and use the
-                        // JoinHandle to pass its result through the workflow.
-                        let task = rt.spawn(
-                            async move {
+                            // The tonic gRPC client needs to be run inside a tokio
+                            // async runtime, so we spawn a tokio task here and use the
+                            // JoinHandle to pass its result through the workflow.
+                            let task = rt.spawn(async move {
                                 let client = client.await?;
 
-                                let request = Request::new(UnboundedReceiverStream::new(input.request));
-                                execute(request, client, codec, path, config.timeout, input.streams, is_server_streaming).await
-                            }
-                        );
+                                let request =
+                                    Request::new(UnboundedReceiverStream::new(input.request));
+                                execute(
+                                    request,
+                                    client,
+                                    codec,
+                                    path,
+                                    config.timeout,
+                                    input.streams,
+                                    is_server_streaming,
+                                )
+                                .await
+                            });
 
-                        async move {
-                            task
-                            .await
-                            .map_err(|e| format!("{e}"))
-                            .flatten()
-                        }
-                    });
+                            async move { task.await.map_err(|e| format!("{e}")).flatten() }
+                        },
+                    );
 
                     Ok(node)
-                }
+                },
             )
-                .with_fork_result();
+            .with_fork_result();
     }
 }
 
@@ -220,22 +234,21 @@ async fn make_client(uri: Box<[u8]>) -> Result<Client<Channel>, String> {
 fn get_descriptions(config: &GrpcConfig) -> Result<GrpcDescriptions, Anyhow> {
     let descriptors = DescriptorPool::global();
     let service_name = &config.service;
-    let service = descriptors.get_service_by_name(&service_name)
+    let service = descriptors
+        .get_service_by_name(&service_name)
         .ok_or_else(|| anyhow!("could not find service name [{}]", config.service))?;
 
     let method = match config.method.as_ref().unwrap_or(&NameOrIndex::Index(0)) {
-        NameOrIndex::Index(index) => {
-            service
-                .methods()
-                .skip(*index)
-                .next()
-                .ok_or_else(|| anyhow!("service [{service_name}] does not have a method with index [{index}]"))?
-        }
+        NameOrIndex::Index(index) => service.methods().skip(*index).next().ok_or_else(|| {
+            anyhow!("service [{service_name}] does not have a method with index [{index}]")
+        })?,
         NameOrIndex::Name(name) => {
             service
                 .methods()
                 .find(|m| m.name() == &**name)
-                .ok_or_else(|| anyhow!("service [{service_name}] does not have a method with name [{name}]"))?
+                .ok_or_else(|| {
+                    anyhow!("service [{service_name}] does not have a method with name [{name}]")
+                })?
         }
     };
 
@@ -251,7 +264,11 @@ fn get_descriptions(config: &GrpcConfig) -> Result<GrpcDescriptions, Anyhow> {
         method.name(),
     );
 
-    Ok(GrpcDescriptions { method, codec, path })
+    Ok(GrpcDescriptions {
+        method,
+        codec,
+        path,
+    })
 }
 
 async fn execute<S>(
@@ -274,7 +291,10 @@ where
             .map_err(|_| "timeout waiting for server to be ready".to_owned())?
             .map_err(|e| format!("server failed to be ready: {e}"))?;
     } else {
-        client.ready().await.map_err(|e| format!("server failed to be ready: {e}"))?;
+        client
+            .ready()
+            .await
+            .map_err(|e| format!("server failed to be ready: {e}"))?;
     }
 
     // Set up cancellation channel
@@ -287,7 +307,9 @@ where
     let cancellable_session = race(session, receive_cancel(cancel.clone()));
 
     let r = if let Some(t) = timeout {
-        until_timeout(t, cancellable_session).await.map_err(|e| format!("{e}"))?
+        until_timeout(t, cancellable_session)
+            .await
+            .map_err(|e| format!("{e}"))?
     } else {
         cancellable_session.await
     };
@@ -296,8 +318,8 @@ where
     loop {
         let r = if let Some(t) = timeout {
             until_timeout(t, race(streaming.message(), receive_cancel(cancel.clone())))
-            .await
-            .map_err(|_| "timeout waiting for new stream message".to_owned())?
+                .await
+                .map_err(|_| "timeout waiting for new stream message".to_owned())?
         } else {
             race(streaming.message(), receive_cancel(cancel.clone())).await
         }
@@ -330,11 +352,15 @@ impl Codec for DynamicServiceCodec {
     type Decoder = DynamicMessageCodec;
 
     fn encoder(&mut self) -> Self::Encoder {
-        DynamicMessageCodec { descriptor: self.input.clone() }
+        DynamicMessageCodec {
+            descriptor: self.input.clone(),
+        }
     }
 
     fn decoder(&mut self) -> Self::Decoder {
-        DynamicMessageCodec { descriptor: self.output.clone() }
+        DynamicMessageCodec {
+            descriptor: self.output.clone(),
+        }
     }
 }
 
@@ -349,14 +375,12 @@ impl Encoder for DynamicMessageCodec {
         let msg = DynamicMessage::deserialize(self.descriptor.clone(), item)
             .map_err(|e| Status::new(Code::InvalidArgument, format!("{e}")))?;
 
-        msg
-        .encode(dst)
-        .map_err(|_|
+        msg.encode(dst).map_err(|_| {
             Status::new(
                 Code::ResourceExhausted,
                 "unable to encode message because of insufficient buffer",
             )
-        )
+        })
     }
 }
 
@@ -366,26 +390,17 @@ impl Decoder for DynamicMessageCodec {
 
     fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
         let msg = DynamicMessage::decode(self.descriptor.clone(), src)
-            .map_err(|e| {
-                Status::new(
-                    Code::DataLoss,
-                    format!("failed to decode message: {e}"),
-                )
-            })?;
+            .map_err(|e| Status::new(Code::DataLoss, format!("failed to decode message: {e}")))?;
 
-        let value = msg.serialize_with_options(
-            serde_json::value::Serializer,
-            &SerializeOptions::new()
-            .stringify_64_bit_integers(false)
-            .use_proto_field_name(true)
-            .skip_default_fields(false)
-        )
-            .map_err(|e| {
-                Status::new(
-                    Code::DataLoss,
-                    format!("failed to convert to json: {e}"),
-                )
-            })?;
+        let value = msg
+            .serialize_with_options(
+                serde_json::value::Serializer,
+                &SerializeOptions::new()
+                    .stringify_64_bit_integers(false)
+                    .use_proto_field_name(true)
+                    .skip_default_fields(false),
+            )
+            .map_err(|e| Status::new(Code::DataLoss, format!("failed to convert to json: {e}")))?;
 
         Ok(Some(value))
     }
@@ -405,34 +420,41 @@ impl Future for NeverFinish {
 
 #[cfg(test)]
 mod tests {
-    use crate::{prelude::*, testing::*, diagram::testing::*};
     use super::*;
+    use crate::{diagram::testing::*, prelude::*, testing::*};
     use prost_reflect::Kind;
-    use tonic::{
-        codegen::tokio_stream::wrappers::UnboundedReceiverStream,
-        transport::Server,
-        Request, Response, Status, Streaming,
-    };
     use protos::{
-        fibonacci_server::{FibonacciServer, Fibonacci},
-        FibonacciRequest, FibonacciReply,
-        navigation_server::{NavigationServer, Navigation},
-        NavigationGoal, NavigationUpdate,
-    };
-    use tokio::{
-        runtime::Runtime,
-        sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel, error::TryRecvError},
+        fibonacci_server::{Fibonacci, FibonacciServer},
+        navigation_server::{Navigation, NavigationServer},
+        FibonacciReply, FibonacciRequest, NavigationGoal, NavigationUpdate,
     };
     use serde_json::json;
     use std::sync::Arc;
+    use tokio::{
+        runtime::Runtime,
+        sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
+    };
+    use tonic::{
+        codegen::tokio_stream::wrappers::UnboundedReceiverStream, transport::Server, Request,
+        Response, Status, Streaming,
+    };
 
     #[test]
     fn test_file_descriptor_loading() {
-        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        let descriptor_set_bytes =
+            include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
-        let fibonacci_service = DescriptorPool::global().get_service_by_name("example_protos.fibonacci.Fibonacci").unwrap();
-        let final_number = fibonacci_service.methods().find(|m| m.name() == "FinalNumber").unwrap();
-        let sequence_stream = fibonacci_service.methods().find(|m| m.name() == "SequenceStream").unwrap();
+        let fibonacci_service = DescriptorPool::global()
+            .get_service_by_name("example_protos.fibonacci.Fibonacci")
+            .unwrap();
+        let final_number = fibonacci_service
+            .methods()
+            .find(|m| m.name() == "FinalNumber")
+            .unwrap();
+        let sequence_stream = fibonacci_service
+            .methods()
+            .find(|m| m.name() == "SequenceStream")
+            .unwrap();
 
         assert_eq!(final_number.input().name(), "FibonacciRequest");
         assert_eq!(final_number.is_client_streaming(), false);
@@ -444,15 +466,24 @@ mod tests {
         assert_eq!(sequence_stream.output().name(), "FibonacciReply");
         assert!(sequence_stream.is_server_streaming());
 
-        let order = final_number.input().fields().find(|f| f.name() == "order").unwrap();
+        let order = final_number
+            .input()
+            .fields()
+            .find(|f| f.name() == "order")
+            .unwrap();
         assert_eq!(order.kind(), Kind::Uint64);
-        let value = final_number.output().fields().find(|f| f.name() == "value").unwrap();
+        let value = final_number
+            .output()
+            .fields()
+            .find(|f| f.name() == "value")
+            .unwrap();
         assert_eq!(value.kind(), Kind::Uint64);
     }
 
     #[test]
     fn test_grcp_unary_request() {
-        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        let descriptor_set_bytes =
+            include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
 
         let mut fixture = DiagramTestFixture::new();
@@ -499,9 +530,7 @@ mod tests {
             "order": 10
         });
 
-        let result: JsonMessage = fixture
-            .spawn_and_run(&diagram, request)
-            .unwrap();
+        let result: JsonMessage = fixture.spawn_and_run(&diagram, request).unwrap();
         assert!(fixture.context.no_unhandled_errors());
         let value = result["value"].as_number().unwrap().as_u64().unwrap();
         assert_eq!(value, 55);
@@ -511,7 +540,8 @@ mod tests {
 
     #[test]
     fn test_grpc_service_streaming() {
-        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        let descriptor_set_bytes =
+            include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
 
         let mut fixture = DiagramTestFixture::new();
@@ -583,14 +613,14 @@ mod tests {
 
     #[test]
     fn test_grpc_bidirectional_streaming() {
-        let descriptor_set_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
+        let descriptor_set_bytes =
+            include_bytes!(concat!(env!("OUT_DIR"), "/file_descriptor_set.bin"));
         DescriptorPool::decode_global_file_descriptor_set(&descriptor_set_bytes[..]).unwrap();
 
         let mut fixture = DiagramTestFixture::new();
-        fixture.registry.register_node_builder(
-            NodeBuilderOptions::new("guide"),
-            create_guide_to_goal,
-        );
+        fixture
+            .registry
+            .register_node_builder(NodeBuilderOptions::new("guide"), create_guide_to_goal);
         fixture
             .registry
             .opt_out()
@@ -599,7 +629,10 @@ mod tests {
             .no_cloning()
             .register_message::<GoalTracker>();
 
-        let reached_listener = fixture.context.app.spawn_service(check_if_reached.into_blocking_service());
+        let reached_listener = fixture
+            .context
+            .app
+            .spawn_service(check_if_reached.into_blocking_service());
         fixture
             .registry
             .opt_out()
@@ -607,9 +640,7 @@ mod tests {
             .no_deserializing()
             .register_node_builder(
                 NodeBuilderOptions::new("reached_listener"),
-                move |builder, _: ()| {
-                    builder.create_node(reached_listener)
-                }
+                move |builder, _: ()| builder.create_node(reached_listener),
             )
             .with_listen();
 
@@ -716,7 +747,10 @@ mod tests {
         }
     }
 
-    fn calculate_fibonacci(order: u64, sender: Option<UnboundedSender<Result<FibonacciReply, Status>>>) -> FibonacciReply {
+    fn calculate_fibonacci(
+        order: u64,
+        sender: Option<UnboundedSender<Result<FibonacciReply, Status>>>,
+    ) -> FibonacciReply {
         let mut current = 0;
         let mut next = 1;
         for _ in 0..order {
@@ -747,7 +781,10 @@ mod tests {
         goal_tracker: GoalTracker,
     }
 
-    fn create_guide_to_goal(builder: &mut Builder, config: GuideThroughGoals) -> Node<(), (), GuideStreams> {
+    fn create_guide_to_goal(
+        builder: &mut Builder,
+        config: GuideThroughGoals,
+    ) -> Node<(), (), GuideStreams> {
         builder.create_map(move |input: AsyncMap<(), GuideStreams>| {
             let goals = config.goals.clone();
             async move {
@@ -852,7 +889,10 @@ mod tests {
                     }
 
                     match receive_goal.try_recv() {
-                        Ok(NavigationGoalInfo { goal, goal_streaming: streaming }) => {
+                        Ok(NavigationGoalInfo {
+                            goal,
+                            goal_streaming: streaming,
+                        }) => {
                             current_goal = goal;
                             goal_streaming = streaming;
                         }
@@ -877,8 +917,7 @@ mod tests {
                         current_position.yaw += delta_yaw;
 
                         if let Some(stream) = &mut current_stream {
-                            let arrived =
-                                f32::abs(delta_x) < 1e-3
+                            let arrived = f32::abs(delta_x) < 1e-3
                                 && f32::abs(delta_y) < 1e-3
                                 && f32::abs(delta_yaw) < 1e-6;
 
@@ -929,7 +968,7 @@ mod tests {
 
         async fn guide(
             &self,
-            request: Request<Streaming<NavigationGoal>>
+            request: Request<Streaming<NavigationGoal>>,
         ) -> Result<Response<Self::GuideStream>, Status> {
             let _ = self.goal_sender.send(NavigationGoalInfo {
                 goal: None,
@@ -942,35 +981,33 @@ mod tests {
 
             let goal_sender = self.goal_sender.clone();
             let mut goal_stream = request.into_inner();
-            self.runtime.spawn(
-                async move {
-                    loop {
-                        match goal_stream.message().await {
-                            Ok(Some(goal)) => {
-                                if connection.strong_count() < 1 {
-                                    // A new request has taken over
-                                    return;
-                                }
-                                let r = goal_sender.send(NavigationGoalInfo {
-                                    goal: Some(goal),
-                                    goal_streaming: true,
-                                });
-
-                                if r.is_err() {
-                                    return;
-                                }
-                            }
-                            Ok(None) => {
-                                // The request has been cancelled
+            self.runtime.spawn(async move {
+                loop {
+                    match goal_stream.message().await {
+                        Ok(Some(goal)) => {
+                            if connection.strong_count() < 1 {
+                                // A new request has taken over
                                 return;
                             }
-                            Err(err) => {
-                                println!("error while receiving navigation goal: {err}");
+                            let r = goal_sender.send(NavigationGoalInfo {
+                                goal: Some(goal),
+                                goal_streaming: true,
+                            });
+
+                            if r.is_err() {
+                                return;
                             }
+                        }
+                        Ok(None) => {
+                            // The request has been cancelled
+                            return;
+                        }
+                        Err(err) => {
+                            println!("error while receiving navigation goal: {err}");
                         }
                     }
                 }
-            );
+            });
 
             Ok(Response::new(update_receiver.into()))
         }

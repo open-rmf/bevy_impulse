@@ -251,7 +251,12 @@ impl<T: BufferMapStruct> Buffering for T {
         Ok(min_count.unwrap_or(0))
     }
 
-    fn buffered_count_for(&self, buffer_entity: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         let mut max_count = None;
         for buffer in self.buffer_list() {
             let count = buffer.buffered_count_for(buffer_entity, session, world)?;

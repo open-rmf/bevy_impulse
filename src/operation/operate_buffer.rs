@@ -120,7 +120,10 @@ where
             return Ok(false);
         }
 
-        println!(" ---- buffer {:?} reachability {:?}", reachability.source, reachability.session);
+        println!(
+            " ---- buffer {:?} reachability {:?}",
+            reachability.source, reachability.session
+        );
         if reachability.has_input::<T>()? {
             dbg!(reachability.source);
             return Ok(true);

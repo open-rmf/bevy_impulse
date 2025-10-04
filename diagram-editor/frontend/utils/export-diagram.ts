@@ -10,6 +10,7 @@ import {
 import type {
   BufferSelection,
   Diagram,
+  DiagramElementRegistry,
   DiagramOperation,
   NextOperation,
   SectionTemplate,
@@ -307,6 +308,7 @@ function syncEdge(
  * @param root only used to update the `start` field, does not actually populate the operations.
  */
 function syncEdges(
+  registry: DiagramElementRegistry,
   nodeManager: NodeManager,
   root: SubOperations,
   edges: DiagramEditorEdge[],
@@ -379,7 +381,26 @@ function syncEdges(
     }
   }
 
-  for (const edge of edges) {
+  const validEdges = edges.filter((edge) => {
+    // Filter out zombie stream edges that connects to a node without streams
+    // Reactflow does not synchronous the `Node.handles` property to the actual handles of a node,
+    // so we need to rely on the registry to cross reference.
+    if (edge.type === 'streamOut') {
+      const sourceNode = nodeManager.getNode(edge.source);
+      const builderMetadata =
+        isOperationNode(sourceNode) && sourceNode.data.op.type === 'node'
+          ? registry.nodes[sourceNode.data.op.builder]
+          : null;
+      const hasStreams = builderMetadata?.streams
+        ? Object.keys(builderMetadata.streams).length > 0
+        : false;
+      return hasStreams;
+    }
+
+    return true;
+  });
+
+  for (const edge of validEdges) {
     syncEdge(nodeManager, root, edge);
   }
 }
@@ -395,6 +416,7 @@ function splitNodeNamespace(node: DiagramEditorNode): string[] {
 }
 
 export function exportDiagram(
+  registry: DiagramElementRegistry,
   nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
   templates: Record<string, SectionTemplate>,
@@ -408,7 +430,7 @@ export function exportDiagram(
     ops: {},
   };
 
-  syncEdges(nodeManager, diagram, edges);
+  syncEdges(registry, nodeManager, diagram, edges);
 
   // visit the nodes breath first to ensure that the parents exist in the diagram before
   // populating the children.
@@ -432,6 +454,7 @@ export function exportDiagram(
 }
 
 export function exportTemplate(
+  registry: DiagramElementRegistry,
   nodeManager: NodeManager,
   edges: DiagramEditorEdge[],
 ): SectionTemplate {
@@ -446,7 +469,7 @@ export function exportTemplate(
     ops: fakeRoot.ops,
   } satisfies Required<SectionTemplate>;
 
-  syncEdges(nodeManager, fakeRoot, edges);
+  syncEdges(registry, nodeManager, fakeRoot, edges);
 
   // visit the nodes breath first to ensure that the parents exist in the diagram before
   // populating the children.

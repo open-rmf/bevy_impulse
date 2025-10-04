@@ -127,12 +127,19 @@
         },
         "response": {
           "type": "string"
+        },
+        "streams": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "required": [
         "default_display_text",
         "request",
         "response",
+        "streams",
         "config_schema"
       ]
     },

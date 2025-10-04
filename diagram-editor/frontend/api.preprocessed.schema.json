@@ -785,12 +785,19 @@
         },
         "response": {
           "type": "string"
+        },
+        "streams": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         }
       },
       "required": [
         "default_display_text",
         "request",
         "response",
+        "streams",
         "config_schema"
       ],
       "type": "object"

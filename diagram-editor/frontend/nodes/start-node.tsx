@@ -1,6 +1,7 @@
 import { Button, Paper } from '@mui/material';
 import type { NodeProps } from '@xyflow/react';
-import { Handle, Position } from '@xyflow/react';
+import { Position } from '@xyflow/react';
+import { Handle, HandleType } from '../handles';
 import { LAYOUT_OPTIONS } from '../utils/layout';
 import type { BuiltinNode } from '.';
 
@@ -25,6 +26,7 @@ function StartNodeComp({
         type="source"
         position={sourcePosition}
         isConnectable={isConnectable}
+        variant={HandleType.Data}
       />
     </Paper>
   );

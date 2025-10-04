@@ -783,16 +783,10 @@ pub enum DiagramErrorCode {
     BuilderNotFound(BuilderId),
 
     #[error("node builder [{builder}] encountered an error: {error}")]
-    NodeBuildingError {
-        builder: BuilderId,
-        error: Anyhow,
-    },
+    NodeBuildingError { builder: BuilderId, error: Anyhow },
 
     #[error("section builder [{builder}] encountered an error: {error}")]
-    SectionBuildingError {
-        builder: BuilderId,
-        error: Anyhow,
-    },
+    SectionBuildingError { builder: BuilderId, error: Anyhow },
 
     #[error("operation [{0}] not found")]
     OperationNotFound(NextOperation),

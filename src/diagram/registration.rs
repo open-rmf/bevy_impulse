@@ -33,7 +33,7 @@ use crate::{
     Accessor, AnyBuffer, AsAnyBuffer, BufferMap, BufferSettings, Builder, DisplayText,
     IncrementalScopeBuilder, IncrementalScopeRequest, IncrementalScopeRequestResult,
     IncrementalScopeResponse, IncrementalScopeResponseResult, Joined, JsonBuffer, JsonMessage,
-    NamedStream, Node, StreamOf, StreamPack,
+    NamedStream, Node, StreamAvailability, StreamOf, StreamPack,
 };
 
 #[cfg(feature = "trace")]
@@ -59,6 +59,7 @@ pub struct NodeRegistration {
     pub(super) default_display_text: DisplayText,
     pub(super) request: TypeInfo,
     pub(super) response: TypeInfo,
+    pub(super) streams: HashMap<Cow<'static, str>, TypeInfo>,
     pub(super) config_schema: Schema,
 
     /// Creates an instance of the registered node.
@@ -175,10 +176,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
         JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
     {
-        self.register_node_builder_fallible(
-            options,
-            move |builder, config| Ok(f(builder, config)),
-        )
+        self.register_node_builder_fallible(options, move |builder, config| Ok(f(builder, config)))
     }
 
     /// Register a node builder with the specified common operations.
@@ -198,7 +196,9 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
     pub fn register_node_builder_fallible<Config, Request, Response, Streams>(
         mut self,
         options: NodeBuilderOptions,
-        mut f: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow> + Send + 'static,
+        mut f: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow>
+            + Send
+            + 'static,
     ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
@@ -218,10 +218,15 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Response>();
 
         let node_builder_name = Arc::clone(&options.id);
+        let mut availability = StreamAvailability::default();
+        Streams::set_stream_availability(&mut availability);
+        let streams = availability.named_streams();
+
         let registration = NodeRegistration {
             default_display_text: options.default_display_text.unwrap_or(options.id.clone()),
             request: TypeInfo::of::<Request>(),
             response: TypeInfo::of::<Response>(),
+            streams,
             config_schema: self
                 .registry
                 .messages
@@ -230,12 +235,11 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config =
                     serde_json::from_value(config).map_err(DiagramErrorCode::ConfigError)?;
-                let node = f(builder, config).map_err(
-                    |error| DiagramErrorCode::NodeBuildingError {
+                let node =
+                    f(builder, config).map_err(|error| DiagramErrorCode::NodeBuildingError {
                         builder: Arc::clone(&node_builder_name),
-                        error
-                    }
-                )?;
+                        error,
+                    })?;
 
                 Ok(node.into())
             })),
@@ -1014,7 +1018,7 @@ impl MessageRegistry {
         self.messages
             .get(message_info)
             .and_then(|reg| reg.operations.unzip_impl.as_ref())
-            .map(|unzip| -> &'a (dyn PerformUnzip) { unzip.as_ref() })
+            .map(|unzip| -> &'a dyn PerformUnzip { unzip.as_ref() })
             .ok_or(DiagramErrorCode::NotUnzippable(*message_info))
     }
 
@@ -1409,14 +1413,17 @@ impl DiagramElementRegistry {
     pub fn register_node_builder_fallible<Config, Request, Response, Streams: StreamPack>(
         &mut self,
         options: NodeBuilderOptions,
-        builder: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow> + Send + 'static,
+        builder: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow>
+            + Send
+            + 'static,
     ) -> NodeRegistrationBuilder<Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
         Request: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
         Response: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
     {
-        self.opt_out().register_node_builder_fallible(options, builder)
+        self.opt_out()
+            .register_node_builder_fallible(options, builder)
     }
 
     /// Register a single message for general use between nodes. This will
@@ -1634,9 +1641,17 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
+    use crate::*;
 
     fn multiply3(i: i64) -> i64 {
         i * 3
+    }
+
+    #[derive(StreamPack)]
+    struct TestStreamRegistration {
+        foo_stream: i64,
+        bar_stream: f64,
+        baz_stream: String,
     }
 
     /// Some extra impl only used in tests (for now).
@@ -1929,6 +1944,18 @@ mod tests {
             })
             .with_unzip();
 
+        reg.register_node_builder(
+            NodeBuilderOptions::new("stream_test"),
+            |builder, _config: ()| {
+                builder.create_map(|input: BlockingMap<f64, TestStreamRegistration>| {
+                    let value = input.request;
+                    input.streams.foo_stream.send(value as i64);
+                    input.streams.bar_stream.send(value);
+                    input.streams.baz_stream.send(value.to_string());
+                })
+            },
+        );
+
         // print out a pretty json for manual inspection
         println!("{}", serde_json::to_string_pretty(&reg).unwrap());
 
@@ -1940,6 +1967,22 @@ mod tests {
         assert_eq!(bar_schema["$ref"].as_str().unwrap(), "#/schemas/Bar");
         assert!(schemas.get("Bar").is_some());
         assert!(schemas.get("Foo").is_some());
+
+        let nodes = &value["nodes"];
+        let stream_test_schema = &nodes["stream_test"];
+        let streams = &stream_test_schema["streams"];
+        assert_eq!(
+            streams["foo_stream"].as_str().unwrap(),
+            TypeInfo::of::<i64>().type_name
+        );
+        assert_eq!(
+            streams["bar_stream"].as_str().unwrap(),
+            TypeInfo::of::<f64>().type_name
+        );
+        assert_eq!(
+            streams["baz_stream"].as_str().unwrap(),
+            TypeInfo::of::<String>().type_name
+        );
     }
 
     #[test]

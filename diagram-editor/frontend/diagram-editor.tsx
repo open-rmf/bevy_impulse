@@ -46,7 +46,6 @@ import {
 import ExportDiagramDialog from './export-diagram-dialog';
 import { defaultEdgeData, EditEdgeForm, EditNodeForm } from './forms';
 import EditScopeForm from './forms/edit-scope-form';
-import type { HandleId } from './handles';
 import { NodeManager, NodeManagerProvider } from './node-manager';
 import {
   type DiagramEditorNode,
@@ -55,6 +54,7 @@ import {
   NODE_TYPES,
   type OperationNode,
 } from './nodes';
+import { useRegistry } from './registry-provider';
 import { useTemplates } from './templates-provider';
 import { EdgesProvider } from './use-edges';
 import { autoLayout } from './utils/auto-layout';
@@ -150,6 +150,7 @@ function DiagramEditor() {
   const savedEdges = React.useRef<DiagramEditorEdge[]>([]);
 
   const [templates] = useTemplates();
+  const registry = useRegistry();
 
   const updateEditorModeAction = React.useCallback(
     (newMode: EditorModeContext) => {
@@ -531,9 +532,9 @@ function DiagramEditor() {
 
       const validEdges = getValidEdgeTypes(
         sourceNode,
-        conn.sourceHandle as HandleId,
+        conn.sourceHandle,
         targetNode,
-        conn.targetHandle as HandleId,
+        conn.targetHandle,
       );
       if (validEdges.length === 0) {
         showErrorToast(
@@ -545,9 +546,9 @@ function DiagramEditor() {
       const newEdge = {
         ...createBaseEdge(
           conn.source,
-          conn.sourceHandle as HandleId,
+          conn.sourceHandle,
           conn.target,
-          conn.targetHandle as HandleId,
+          conn.targetHandle,
           id,
         ),
         type: validEdges[0],
@@ -641,9 +642,9 @@ function DiagramEditor() {
 
           const allowedEdges = getValidEdgeTypes(
             sourceNode,
-            conn.sourceHandle as HandleId,
+            conn.sourceHandle,
             targetNode,
-            conn.targetHandle as HandleId,
+            conn.targetHandle,
           );
           return allowedEdges.length > 0;
         }}
@@ -734,7 +735,11 @@ function DiagramEditor() {
             aria-label="Save"
             sx={{ position: 'absolute', right: 64, bottom: 64 }}
             onClick={() => {
-              const exportedTemplate = exportTemplate(nodeManager, edges);
+              const exportedTemplate = exportTemplate(
+                registry,
+                nodeManager,
+                edges,
+              );
               setTemplates((prev) => ({
                 ...prev,
                 [editorMode.templateId]: exportedTemplate,
@@ -782,6 +787,7 @@ function DiagramEditor() {
                 editingEdge.targetNode,
                 editingEdge.edge.targetHandle,
               )}
+              nodeManager={nodeManager}
               onChange={handleEdgeChange}
               onDelete={(changes) => {
                 setEdges((prev) => applyEdgeChanges([changes], prev));

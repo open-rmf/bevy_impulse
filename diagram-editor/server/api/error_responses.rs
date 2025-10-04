@@ -15,7 +15,7 @@ impl<'a> IntoResponse for WorkflowCancelledResponse<'a> {
             CancellationCause::Triggered(e) => {
                 dbg!(e);
                 "triggered"
-            },
+            }
             CancellationCause::Supplanted(_) => "supplanted",
             CancellationCause::InvalidSpan(_) => "invalid span",
             CancellationCause::CircularCollect(_) => "circular collect",

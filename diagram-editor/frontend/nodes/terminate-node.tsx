@@ -1,5 +1,6 @@
 import { Button, Paper } from '@mui/material';
-import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { type NodeProps, Position } from '@xyflow/react';
+import { Handle, HandleType } from '../handles';
 import { LAYOUT_OPTIONS } from '../utils/layout';
 import type { BuiltinNode } from '.';
 
@@ -13,6 +14,7 @@ function TerminateNodeComp({
         type="target"
         position={targetPosition}
         isConnectable={isConnectable}
+        variant={HandleType.Data}
       />
       <Button
         fullWidth

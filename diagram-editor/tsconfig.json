@@ -20,5 +20,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["frontend"]
+  "include": ["frontend", "jest-setup.ts"]
 }

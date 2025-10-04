@@ -1028,7 +1028,12 @@ impl Buffering for AnyBuffer {
         self.interface.buffered_count(&entity_ref, session)
     }
 
-    fn buffered_count_for(&self, buffer: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         if buffer != self.id() {
             return Ok(0);
         }

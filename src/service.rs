@@ -17,7 +17,7 @@
 
 use crate::{
     AddOperation, OperateService, ProvideOnce, Provider, RunCommandsOnWorldExt, StreamAvailability,
-    StreamOf, StreamPack,
+    StreamOf, StreamPack, TypeInfo,
 };
 
 use bevy_app::prelude::App;
@@ -29,7 +29,6 @@ use bevy_ecs::{
 pub use bevy_impulse_derive::DeliveryLabel;
 use bevy_utils::{define_label, intern::Interned};
 use std::{
-    any::TypeId,
     borrow::Cow,
     collections::{HashMap, HashSet},
     sync::OnceLock,
@@ -119,8 +118,8 @@ impl<Req, Res, S> Copy for Service<Req, Res, S> {}
 #[error("The original service is missing streams that are needed by the target service")]
 pub struct MissingStreamsError {
     /// These stream types were missing from the original service
-    pub anonymous: HashSet<TypeId>,
-    pub named: HashMap<Cow<'static, str>, TypeId>,
+    pub anonymous: HashSet<TypeInfo>,
+    pub named: HashMap<Cow<'static, str>, TypeInfo>,
 }
 
 impl MissingStreamsError {

@@ -996,7 +996,12 @@ impl Buffering for JsonBuffer {
         dbg!(self.interface.buffered_count(&buffer_ref, session))
     }
 
-    fn buffered_count_for(&self, buffer: Entity, session: Entity, world: &World) -> Result<usize, OperationError> {
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
         if buffer != self.id() {
             return Ok(0);
         }
