@@ -22,7 +22,11 @@ use bevy_ecs::{
 
 use backtrace::Backtrace;
 
-use std::{collections::HashMap, sync::Arc, fmt::{Debug, Display}};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    sync::Arc,
+};
 
 use smallvec::SmallVec;
 
@@ -297,8 +301,7 @@ impl Display for DisposedBranch {
         write!(
             f,
             "branch [{:?}] -> [{:?}] disposed",
-            self.branched_at_node,
-            self.disposed_for_target,
+            self.branched_at_node, self.disposed_for_target,
         )?;
         if let Some(reason) = &self.reason {
             write!(f, ": {}", reason)?;

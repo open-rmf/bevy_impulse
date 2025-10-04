@@ -27,8 +27,8 @@ use thiserror::Error as ThisError;
 use std::{fmt::Display, sync::Arc};
 
 use crate::{
-    CancelFailure, Disposal, Filtered, OperationError, OperationResult, OperationRoster,
-    ScopeStorage, Supplanted, UnhandledErrors, DisplayDebugSlice,
+    CancelFailure, DisplayDebugSlice, Disposal, Filtered, OperationError, OperationResult,
+    OperationRoster, ScopeStorage, Supplanted, UnhandledErrors,
 };
 
 /// Information about the cancellation that occurred.
@@ -196,7 +196,11 @@ pub struct TriggeredCancellation {
 
 impl Display for TriggeredCancellation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "cancellation triggered at node [{:?}]", self.cancelled_at_node)?;
+        write!(
+            f,
+            "cancellation triggered at node [{:?}]",
+            self.cancelled_at_node
+        )?;
         if let Some(value) = &self.value {
             write!(f, " with value [{}]", value)?;
         } else {
@@ -336,7 +340,11 @@ impl Display for Unreachability {
         if self.disposals.len() == 1 {
             write!(f, "termination node cannot be reached after 1 disposal:")?;
         } else {
-            write!(f, "termination node cannot be reached after {} disposals:", self.disposals.len())?;
+            write!(
+                f,
+                "termination node cannot be reached after {} disposals:",
+                self.disposals.len()
+            )?;
         }
         for disposal in &self.disposals {
             write!(f, "\n - {}", disposal.cause)?;
