@@ -1,0 +1,22 @@
+syntax="proto3";
+
+package example_protos.fibonacci;
+
+// Calculate a Fibonacci sequence
+service Fibonacci {
+    // Unary request to receive the final number of a Fibonacci sequence up to
+    // the requested order.
+    rpc FinalNumber (FibonacciRequest) returns (FibonacciReply) {}
+
+    // Server-streaming service that streams the whole Fibonacci sequence up to
+    // the requested order.
+    rpc SequenceStream (FibonacciRequest) returns (stream FibonacciReply) {}
+}
+
+message FibonacciRequest {
+    uint64 order = 1;
+}
+
+message FibonacciReply {
+    uint64 value = 1;
+}

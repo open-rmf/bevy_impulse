@@ -90,6 +90,11 @@ where
     }
 
     fn is_reachable(mut r: OperationReachability) -> ReachabilityResult {
+        let buffers = r
+            .world
+            .get::<BufferStorage<Buffers>>(r.source)
+            .or_broken()?;
+
         let inputs = r
             .world
             .get_entity(r.source)
@@ -98,10 +103,63 @@ where
             .or_broken()?;
         for input in &inputs.0 {
             if !r.check_upstream(*input)? {
-                return Ok(false);
+                // This input buffer is no longer reachable, so if it is also
+                // empty then there will be no way to ever perform a join.
+                if buffers.0.buffered_count_for(*input, r.session, r.world)? == 0 {
+                    return Ok(false);
+                }
             }
         }
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{prelude::*, testing::*};
+
+    #[test]
+    fn test_join_reachability() {
+        // This is a regression test for a subtle bug in how reachability was
+        // being calculated for join. Items already waiting inside the buffer
+        // weren't being accounted for. This test will make sure that one of the
+        // buffers being joined has an item sitting inside it with no other
+        // activity upstream when a disposal notification gets triggered.
+
+        let mut context = TestingContext::minimal_plugins();
+
+        let workflow = context.spawn_io_workflow(|scope, builder| {
+            let node = builder.create_map(|input: AsyncMap<f64, StreamOf<f64>>| async move {
+                input.streams.send(input.request);
+                let never = async_std::future::pending::<()>();
+                let _ = async_std::future::timeout(Duration::from_millis(1), never).await;
+                input.request
+            });
+
+            builder.connect(scope.input, node.input);
+
+            let lhs_buffer = builder.create_buffer(BufferSettings::default());
+            builder.connect(node.streams, lhs_buffer.input_slot());
+
+            let rhs_buffer = builder.create_buffer(BufferSettings::default());
+            builder.connect(node.output, rhs_buffer.input_slot());
+
+            builder
+                .join((lhs_buffer, rhs_buffer))
+                .map_block(|(a, b)| a + b)
+                .connect(scope.terminate);
+        });
+
+        let mut promise =
+            context.command(|commands| commands.request(2.0, workflow).take_response());
+        context.run_with_conditions(&mut promise, Duration::from_secs(2));
+        assert!(
+            context.no_unhandled_errors(),
+            "{:?}",
+            context.get_unhandled_errors()
+        );
+        let r = promise.take().available().unwrap();
+        assert_eq!(r, 4.0);
     }
 }

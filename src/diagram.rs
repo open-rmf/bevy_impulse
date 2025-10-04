@@ -32,6 +32,9 @@ mod transform_schema;
 mod unzip_schema;
 mod workflow_builder;
 
+#[cfg(feature = "grpc")]
+mod grpc;
+
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
@@ -51,6 +54,8 @@ use tracing::debug;
 use transform_schema::{TransformError, TransformSchema};
 use unzip_schema::UnzipSchema;
 pub use workflow_builder::*;
+
+use anyhow::Error as Anyhow;
 
 use std::{
     borrow::Cow,
@@ -322,8 +327,8 @@ impl BuildDiagramOperation for DiagramOperation {
 }
 
 /// Returns the schema for [`String`]
-fn schema_with_string(gen: &mut SchemaGenerator) -> Schema {
-    gen.subschema_for::<String>()
+fn schema_with_string(generator: &mut SchemaGenerator) -> Schema {
+    generator.subschema_for::<String>()
 }
 
 /// deserialize semver and validate that it has a supported version
@@ -778,6 +783,12 @@ impl Display for DiagramErrorContext {
 pub enum DiagramErrorCode {
     #[error("node builder [{0}] is not registered")]
     BuilderNotFound(BuilderId),
+
+    #[error("node builder [{builder}] encountered an error: {error}")]
+    NodeBuildingError { builder: BuilderId, error: Anyhow },
+
+    #[error("section builder [{builder}] encountered an error: {error}")]
+    SectionBuildingError { builder: BuilderId, error: Anyhow },
 
     #[error("operation [{0}] not found")]
     OperationNotFound(NextOperation),

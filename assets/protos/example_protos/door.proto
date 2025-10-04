@@ -1,0 +1,24 @@
+syntax="proto3";
+
+package example_protos.door;
+
+service Door {
+    rpc Open (DoorIdentifier) returns (stream DoorStatus) {}
+
+    rpc Close (DoorIdentifier) returns (stream DoorStatus) {}
+}
+
+message DoorIdentifier {
+    string name = 1;
+}
+
+message DoorStatus {
+    enum Mode {
+        Uninitialized = 0;
+        Moving = 1;
+        Open = 2;
+        Closed = 3;
+    }
+
+    Mode mode = 1;
+}

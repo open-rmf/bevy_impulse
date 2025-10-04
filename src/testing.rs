@@ -528,6 +528,15 @@ impl<T: 'static + Send + Sync> Buffering for NonCopyBuffer<T> {
         self.inner.buffered_count(session, world)
     }
 
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        self.inner.buffered_count_for(buffer, session, world)
+    }
+
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         self.inner.ensure_active_session(session, world)
     }

@@ -1028,6 +1028,19 @@ impl Buffering for AnyBuffer {
         self.interface.buffered_count(&entity_ref, session)
     }
 
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        if buffer != self.id() {
+            return Ok(0);
+        }
+
+        self.buffered_count(session, world)
+    }
+
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         add_listener_to_source(self.id(), listener, world)
     }
