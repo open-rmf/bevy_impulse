@@ -24,11 +24,11 @@ use backtrace::Backtrace;
 
 use thiserror::Error as ThisError;
 
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use crate::{
     CancelFailure, Disposal, Filtered, OperationError, OperationResult, OperationRoster,
-    ScopeStorage, Supplanted, UnhandledErrors,
+    ScopeStorage, Supplanted, UnhandledErrors, DisplayDebugSlice,
 };
 
 /// Information about the cancellation that occurred.
@@ -115,28 +115,35 @@ impl<T: Into<CancellationCause>> From<T> for Cancellation {
 }
 
 /// Get an explanation for why a cancellation occurred.
-#[derive(Debug)]
+#[derive(ThisError, Debug)]
+
 pub enum CancellationCause {
     /// The promise taken by the requester was dropped without being detached.
+    #[error("the promise taken by the requester was dropped without being detached: {:?}", .0)]
     TargetDropped(Entity),
 
     /// There are no terminating nodes for the workflow that can be reached
     /// anymore.
+    #[error("{}", .0)]
     Unreachable(Unreachability),
 
     /// A filtering node has triggered a cancellation.
+    #[error("{}", .0)]
     Filtered(Filtered),
 
     /// The workflow triggered its own cancellation.
+    #[error("{}", .0)]
     Triggered(TriggeredCancellation),
 
     /// Some workflows will queue up requests to deliver them one at a time.
     /// Depending on the label of the incoming requests, a new request might
     /// supplant an earlier one, causing the earlier request to be cancelled.
+    #[error("{}", .0)]
     Supplanted(Supplanted),
 
     /// An operation that acts on nodes within a workflow was given an invalid
     /// span to operate on.
+    #[error("{}", .0)]
     InvalidSpan(InvalidSpan),
 
     /// There is a circular dependency between two or more collect operations.
@@ -148,18 +155,21 @@ pub enum CancellationCause {
     /// this automatic cancellation by putting one or more of the offending
     /// collect operations into a scope that excludes the other collect
     /// operations while including the branches that it needs to collect from.
+    #[error("{}", .0)]
     CircularCollect(CircularCollect),
 
     /// A request became undeliverable because the sender was dropped. This may
     /// indicate that a critical entity within a workflow was manually despawned.
     /// Check to make sure that you are not manually despawning anything that
     /// you shouldn't.
+    #[error("request become undeliverable")]
     Undeliverable,
 
     /// A promise can never be delivered because the mutex inside of a [`Promise`][1]
     /// was poisoned.
     ///
     /// [1]: crate::Promise
+    #[error("mutex poisoned inside of a promise")]
     PoisonedMutexInPromise,
 
     /// A node in the workflow was broken, for example despawned or missing a
@@ -171,16 +181,29 @@ pub enum CancellationCause {
     ///
     /// The entity provided in [`Broken`] is the link where the breakage was
     /// detected.
+    #[error("{}", .0)]
     Broken(Broken),
 }
 
 /// A variant of [`CancellationCause`]
-#[derive(Debug)]
+#[derive(ThisError, Debug)]
 pub struct TriggeredCancellation {
     /// The cancellation node that was triggered.
     pub cancelled_at_node: Entity,
     /// The value that triggered the cancellation, if one was provided.
     pub value: Option<String>,
+}
+
+impl Display for TriggeredCancellation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cancellation triggered at node [{:?}]", self.cancelled_at_node)?;
+        if let Some(value) = &self.value {
+            write!(f, " with value [{}]", value)?;
+        } else {
+            write!(f, " [no value mentioned]")?;
+        }
+        Ok(())
+    }
 }
 
 impl From<TriggeredCancellation> for CancellationCause {
@@ -201,7 +224,7 @@ impl From<Supplanted> for CancellationCause {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(ThisError, Debug, Clone)]
 pub struct Broken {
     pub node: Entity,
     pub backtrace: Option<Backtrace>,
@@ -210,6 +233,19 @@ pub struct Broken {
 impl From<Broken> for CancellationCause {
     fn from(value: Broken) -> Self {
         CancellationCause::Broken(value)
+    }
+}
+
+impl Display for Broken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "operation [{:?}] is broken", self.node)?;
+        if let Some(backtrace) = &self.backtrace {
+            write!(f, " at\n{backtrace:#?}")?;
+        } else {
+            write!(f, " [backtrace not given]")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -269,7 +305,7 @@ impl Cancel {
 }
 
 /// A variant of [`CancellationCause`]
-#[derive(Debug)]
+#[derive(ThisError, Debug)]
 pub struct Unreachability {
     /// The ID of the scope whose termination became unreachable.
     pub scope: Entity,
@@ -295,8 +331,23 @@ impl From<Unreachability> for CancellationCause {
     }
 }
 
+impl Display for Unreachability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.disposals.len() == 1 {
+            write!(f, "termination node cannot be reached after 1 disposal:")?;
+        } else {
+            write!(f, "termination node cannot be reached after {} disposals:", self.disposals.len())?;
+        }
+        for disposal in &self.disposals {
+            write!(f, "\n - {}", disposal.cause)?;
+        }
+        Ok(())
+    }
+}
+
 /// A variant of [`CancellationCause`]
-#[derive(Debug)]
+#[derive(ThisError, Debug)]
+#[error("unable to calculate span from [{:?}] to [{:?}]", .from_point, .to_point)]
 pub struct InvalidSpan {
     /// The starting point of the span
     pub from_point: Entity,
@@ -311,7 +362,8 @@ impl From<InvalidSpan> for CancellationCause {
 }
 
 /// A variant of [`CancellationCause`]
-#[derive(Debug)]
+#[derive(ThisError, Debug)]
+#[error("a circular collect exists for:{}", DisplayDebugSlice(.conflicts))]
 pub struct CircularCollect {
     pub conflicts: Vec<[Entity; 2]>,
 }

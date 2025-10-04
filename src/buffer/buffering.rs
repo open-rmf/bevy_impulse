@@ -220,10 +220,10 @@ impl<T: 'static + Send + Sync> Buffering for Buffer<T> {
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        dbg!(world
+        world
             .get_entity(self.id())
             .or_broken()?
-            .buffered_count::<T>(session))
+            .buffered_count::<T>(session)
     }
 
     fn buffered_count_for(
@@ -305,10 +305,10 @@ impl<T: 'static + Send + Sync + Clone> Buffering for CloneFromBuffer<T> {
     }
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError> {
-        dbg!(world
+        world
             .get_entity(self.id())
             .or_broken()?
-            .buffered_count::<T>(session))
+            .buffered_count::<T>(session)
     }
 
     fn buffered_count_for(
@@ -404,7 +404,7 @@ macro_rules! impl_buffered_for_tuple {
                 let ($($T,)*) = self;
                 Ok([
                     $(
-                        dbg!($T.buffered_count(session, world)?),
+                        $T.buffered_count(session, world)?,
                     )*
                 ].iter().copied().min().unwrap_or(0))
             }
@@ -550,7 +550,7 @@ impl<T: Buffering, const N: usize> Buffering for [T; N] {
             }
         }
 
-        dbg!(Ok(min_count.unwrap_or(0)))
+        Ok(min_count.unwrap_or(0))
     }
 
     fn buffered_count_for(
@@ -666,7 +666,7 @@ impl<T: Buffering, const N: usize> Buffering for SmallVec<[T; N]> {
             }
         }
 
-        dbg!(Ok(min_count.unwrap_or(0)))
+        Ok(min_count.unwrap_or(0))
     }
 
     fn buffered_count_for(
@@ -780,7 +780,7 @@ impl<B: Buffering> Buffering for Vec<B> {
             }
         }
 
-        dbg!(Ok(min_count.unwrap_or(0)))
+        Ok(min_count.unwrap_or(0))
     }
 
     fn buffered_count_for(

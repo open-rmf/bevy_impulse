@@ -46,8 +46,7 @@ impl<'w> InspectBuffer for EntityRef<'w> {
         session: Entity,
     ) -> Result<usize, OperationError> {
         let buffer = self.get::<BufferStorage<T>>().or_broken()?;
-        dbg!(self.id());
-        dbg!(Ok(buffer.count(session)))
+        Ok(buffer.count(session))
     }
 
     fn try_clone_from_buffer<T: 'static + Send + Sync + Clone>(

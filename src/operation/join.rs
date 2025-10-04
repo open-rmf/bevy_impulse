@@ -73,7 +73,7 @@ where
             .or_broken()?
             .0
             .clone();
-        if dbg!(buffers.buffered_count(session, world))? < 1 {
+        if buffers.buffered_count(session, world)? < 1 {
             return Err(OperationError::NotReady);
         }
 

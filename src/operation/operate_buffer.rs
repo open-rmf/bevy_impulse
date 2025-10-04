@@ -120,22 +120,15 @@ where
             return Ok(false);
         }
 
-        println!(
-            " ---- buffer {:?} reachability {:?}",
-            reachability.source, reachability.session
-        );
         if reachability.has_input::<T>()? {
-            dbg!(reachability.source);
             return Ok(true);
         }
 
         if BufferAccessors::is_reachable(&mut reachability)? {
-            dbg!(reachability.source);
             return Ok(true);
         }
 
-        dbg!(reachability.source);
-        dbg!(SingleInputStorage::is_reachable(&mut reachability))
+        SingleInputStorage::is_reachable(&mut reachability)
     }
 }
 

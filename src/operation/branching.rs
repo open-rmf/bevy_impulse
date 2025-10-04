@@ -148,7 +148,10 @@ where
             Ok(a) => target_a_mut.give_input(session, a, roster)?,
             Err(reason) => {
                 let disposal = Disposal::branching(source, target_a, reason);
-                target_a_mut.emit_disposal(session, disposal, roster);
+                world
+                    .get_entity_mut(source)
+                    .or_broken()?
+                    .emit_disposal(session, disposal, roster);
             }
         }
 
@@ -157,7 +160,10 @@ where
             Ok(b) => target_b_mut.give_input(session, b, roster)?,
             Err(reason) => {
                 let disposal = Disposal::branching(source, target_b, reason);
-                target_b_mut.emit_disposal(session, disposal, roster);
+                world
+                    .get_entity_mut(source)
+                    .or_broken()?
+                    .emit_disposal(session, disposal, roster);
             }
         }
 
