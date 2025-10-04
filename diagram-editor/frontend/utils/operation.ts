@@ -223,10 +223,24 @@ export function buildEdges(nodes: DiagramEditorNode[]): DiagramEditorEdge[] {
             op.err,
           )?.id;
           if (okTarget) {
-            edges.push(createForkResultOkEdge(node.id, null, okTarget, null));
+            edges.push(
+              createForkResultOkEdge(
+                node.id,
+                HandleId.ForkResultOk,
+                okTarget,
+                null,
+              ),
+            );
           }
           if (errTarget) {
-            edges.push(createForkResultErrEdge(node.id, null, errTarget, null));
+            edges.push(
+              createForkResultErrEdge(
+                node.id,
+                HandleId.ForkResultErr,
+                errTarget,
+                null,
+              ),
+            );
           }
           break;
         }
