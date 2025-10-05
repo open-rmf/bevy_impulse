@@ -1,9 +1,12 @@
 use std::fmt::Write;
 
-use bevy_impulse::{AsyncMap, DiagramElementRegistry, JsonMessage, NodeBuilderOptions, StreamPack};
+use bevy_impulse::{
+    AsyncMap, ConfigExample, DiagramElementRegistry, JsonMessage,
+    NodeBuilderOptions, StreamPack,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use serde_json::{Number, Value, json};
 
 #[derive(Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -137,10 +140,25 @@ pub struct FibonacciStream {
 }
 
 pub fn register(registry: &mut DiagramElementRegistry) {
+    let add_description = "Add together any set of numbers passed as input and \
+        then add the value in the config. If only one number is passed in as \
+        input, it will be added to the value set in the config.";
+    let add_examples = [
+        ConfigExample::new(
+            "Simply sum the set of numbers passed as input.",
+            json!{null},
+        ),
+        ConfigExample::new(
+            "Sum the set of numbers passed as input, and then add 5.",
+            json!{5.0},
+        ),
+    ];
+
     registry.register_node_builder(
         NodeBuilderOptions::new("add")
             .with_default_display_text("Add")
-            .with_help_text("Adds the input with the config value. The input can be a number or an array of numbers, if it is an array, sum all the items in the array and the config value."),
+            .with_description(add_description)
+            .with_examples_configs(add_examples),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -164,8 +182,26 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         },
     );
 
+    let sub_description = "Subtract some numbers. If an array of numbers is \
+        passed as input then the first number will be subtracted by every \
+        subsequent number. If a number is set in the config, that will also be \
+        subtracted from the output.";
+    let sub_examples = [
+        ConfigExample::new(
+            "Simply subtract the first array element by all subsequent elements.",
+            json!{null},
+        ),
+        ConfigExample::new(
+            "Additionally subtract 5 from the output.",
+            json!{5.0},
+        ),
+    ];
+
     registry.register_node_builder(
-        NodeBuilderOptions::new("sub").with_default_display_text("Subtract").with_help_text("Subtract the config value from the input. The input can be a number or an array of numbers, if it is an array, the first item is subtracted by the rest of the items and the config."),
+        NodeBuilderOptions::new("sub")
+            .with_default_display_text("Subtract")
+            .with_description(sub_description)
+            .with_examples_configs(sub_examples),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -189,8 +225,26 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         },
     );
 
+    let mul_description = "Multiply some numbers. If an array of numbers is \
+        passed as input then all the numbers will be multiplied together. If \
+        a number is set in the config, that will also be multipled into the \
+        output.";
+    let mul_examples = [
+        ConfigExample::new(
+            "Simply multiply the input numbers together.",
+            json!{null},
+        ),
+        ConfigExample::new(
+            "Additionally multiple the output by 5.",
+            json!{5.0},
+        ),
+    ];
+
     registry.register_node_builder(
-        NodeBuilderOptions::new("mul").with_default_display_text("Multiply").with_help_text("Multiply the input and the config value. The input can be a number or an array, if it is an array, multiply each item and the config value."),
+        NodeBuilderOptions::new("mul")
+            .with_default_display_text("Multiply")
+            .with_description(mul_description)
+            .with_examples_configs(mul_examples),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -214,8 +268,26 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         },
     );
 
+    let div_description = "Divide some numbers. If an array of numbers is \
+        passed as input then the first number will be divided by all \
+        subsequent numbers. If a number is set in the config, the final output \
+        will also be divided by that value.";
+    let div_examples = [
+        ConfigExample::new(
+            "Simply divide the first array element by all subsequent elements.",
+            json!{null},
+        ),
+        ConfigExample::new(
+            "Additionally divide the output by 2.",
+            json!{2.0},
+        ),
+    ];
+
     registry.register_node_builder(
-        NodeBuilderOptions::new("div").with_default_display_text("Divide").with_help_text("Divide the input by the config value. The input can be a number or an array, if it is an array, divide the first item by the rest of the item and the config."),
+        NodeBuilderOptions::new("div")
+            .with_default_display_text("Divide")
+            .with_description(div_description)
+            .with_examples_configs(div_examples),
         |builder, config: Option<f64>| {
             builder.create_map_block(move |req: JsonMessage| {
                 let input = match req {
@@ -239,10 +311,30 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         },
     );
 
+    let fibonacci_description = "Stream out a Fibonacci sequence. If a number \
+        is given in the config, that will be used as the order of the \
+        sequence. If no config is given then the input value will be \
+        interpreted as a number and used as the order of the sequence. If no \
+        suitable number can be found for the order then this will return an Err
+        containing the input message.";
+    let fibonacci_examples = [
+        ConfigExample::new(
+            "Generate a Fibonacci sequence whose order is the input value. If \
+            the input message cannot be interpreted as a number then this node \
+            will return an Err.",
+            json!{null},
+        ),
+        ConfigExample::new(
+            "Generate a Fibonacci sequence of order 10.",
+            json!{10.0},
+        ),
+    ];
+
     registry.register_node_builder(
         NodeBuilderOptions::new("fibonacci")
             .with_default_display_text("Fibonacci")
-            .with_help_text("Streams the fibonacci sequence of the input or config value length. If a config value is given, the input is ignored."),
+            .with_description(fibonacci_description)
+            .with_examples_configs(fibonacci_examples),
         |builder, config: Option<u64>| {
             builder.create_map(
                 move |input: AsyncMap<JsonMessage, FibonacciStream>| async move {
@@ -270,6 +362,20 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         },
     );
 
+    let print_description = "Prints the input to stdout. An optional string \
+        can be provided in the config to label the output.";
+
+    let print_examples = [
+        ConfigExample::new(
+            "Print the input as-is",
+            json!{null},
+        ),
+        ConfigExample::new(
+            "Add \"printed from node: \" to the printed message",
+            json!{"printed from node"},
+        ),
+    ];
+
     registry
         .opt_out()
         .no_serializing()
@@ -277,9 +383,8 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         .register_node_builder(
             NodeBuilderOptions::new("print")
                 .with_default_display_text("Print")
-                .with_help_text(
-                    "Prints the input to stdout. An optional string can be provided in the config to label the output.",
-                ),
+                .with_description(print_description)
+                .with_examples_configs(print_examples),
             |builder, config: Option<String>| {
                 let header = config.clone();
                 builder.create_map_block(move |request: JsonMessage| {
@@ -296,9 +401,40 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         )
         .with_deserialize_request();
 
+    let less_than_description = "Compares for a less-than relationship, \
+        returning a Result<Msg> based on the evaluation. Inputs can be an \
+        array of numbers or a single number value. The exact behavior will \
+        depend on the config (see examples).";
+
+    let less_than_examples = [
+        ConfigExample::new(
+            "Verify that every element in the input array is less than the next one.",
+            ComparisonConfig::None,
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is less than OR EQUAL to the next one.",
+            ComparisonConfig::OrEqual(OrEqualTag::OrEqual),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is less than 10.",
+            ComparisonConfig::ComparedTo(10.0),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is less than or \
+            equal to 10.",
+            ComparisonConfig::Settings(ComparisonSettings {
+                compared_to: Some(10.0),
+                or_equal: true,
+            }),
+        ),
+    ];
+
     registry
         .register_node_builder(
-            NodeBuilderOptions::new("less_than").with_default_display_text("Less Than").with_help_text("Checks if the input is less than the config value. The input can be a number or an array of numbers, if it is an array, checks that all items in the array is less than the config value. If a config value is not provided, check that all items in the array is less than the next item (check that they are in ascending order)."),
+            NodeBuilderOptions::new("less_than")
+                .with_default_display_text("Less Than")
+                .with_description(less_than_description)
+                .with_examples_configs(less_than_examples),
             |builder, config: ComparisonConfig| {
                 let settings: ComparisonSettings = config.into();
                 builder.create_map_block(move |request: JsonMessage| {
@@ -308,9 +444,40 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         )
         .with_fork_result();
 
+    let greater_than_description = "Compares for a greater-than relationship, \
+        returning a Result<Msg> based on the evaluation. Inputs can be an \
+        array of numbers or a single number value. The exact behavior will \
+        depend on the config (see examples).";
+
+    let greater_than_examples = [
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than the next one.",
+            ComparisonConfig::None,
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than OR EQUAL to the next one.",
+            ComparisonConfig::OrEqual(OrEqualTag::OrEqual),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than 10.",
+            ComparisonConfig::ComparedTo(10.0),
+        ),
+        ConfigExample::new(
+            "Verify that every element in the input array is greater than or \
+            equal to 10.",
+            ComparisonConfig::Settings(ComparisonSettings {
+                compared_to: Some(10.0),
+                or_equal: true,
+            }),
+        ),
+    ];
+
     registry
         .register_node_builder(
-            NodeBuilderOptions::new("greater_than").with_default_display_text("Greater Than").with_help_text("Checks if the input is greater than the config value. The input can be a number or an array of numbers, if it is an array, checks that all items in the array is greater than the config value. If a config value is not provided, check that all items in the array is greater than the next item (check that they are in descending order)."),
+            NodeBuilderOptions::new("greater_than")
+                .with_default_display_text("Greater Than")
+                .with_description(greater_than_description)
+                .with_examples_configs(greater_than_examples),
             |builder, config: ComparisonConfig| {
                 let settings: ComparisonSettings = config.into();
                 builder.create_map_block(move |request: JsonMessage| {

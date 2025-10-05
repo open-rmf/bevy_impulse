@@ -61,7 +61,8 @@ pub struct NodeRegistration {
     pub(super) response: TypeInfo,
     pub(super) streams: HashMap<Cow<'static, str>, TypeInfo>,
     pub(super) config_schema: Schema,
-    pub(super) help_text: Option<String>,
+    pub(super) description: Option<String>,
+    pub(super) example_configs: Vec<ConfigExample>,
 
     /// Creates an instance of the registered node.
     #[serde(skip)]
@@ -244,7 +245,8 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
 
                 Ok(node.into())
             })),
-            help_text: options.help_text,
+            description: options.description,
+            example_configs: options.examples_configs,
         };
         self.registry.nodes.insert(options.id.clone(), registration);
 
@@ -652,7 +654,8 @@ pub struct SectionRegistration {
     pub(super) default_display_text: DisplayText,
     pub(super) metadata: SectionMetadata,
     pub(super) config_schema: Schema,
-    pub(super) help_text: Option<String>,
+    pub(super) description: Option<String>,
+    pub(super) example_configs: Vec<ConfigExample>,
 
     #[serde(skip)]
     create_section_impl: RefCell<Box<CreateSectionFn>>,
@@ -704,7 +707,8 @@ where
                 let section = self(builder, serde_json::from_value::<Config>(config).unwrap());
                 Box::new(section)
             })),
-            help_text: options.help_text.clone(),
+            description: options.description.clone(),
+            example_configs: options.example_configs.clone(),
         }
     }
 }
@@ -1591,6 +1595,7 @@ impl DiagramElementRegistry {
     }
 }
 
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct NodeBuilderOptions {
     /// The unique identifier for this node builder. Diagrams will use this ID
@@ -1600,7 +1605,40 @@ pub struct NodeBuilderOptions {
     /// display text.
     pub default_display_text: Option<BuilderId>,
     /// Optional text to describe the builder.
-    pub help_text: Option<String>,
+    pub description: Option<String>,
+    /// Examples of configurations that can be used with this node builder.
+    pub examples_configs: Vec<ConfigExample>,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+pub struct ConfigExample {
+    /// A description of what this config is for
+    pub description: String,
+    /// The value of the config
+    pub config: JsonMessage,
+}
+
+impl ConfigExample {
+    /// Create a new config example.
+    ///
+    /// Note that this function will panic if the `config` argument fails to be
+    /// serialized into a [`JsonMessage`], which happens if the data structure
+    /// contains a map with non-string keys or its [`Serialize`] implementation
+    /// produces an error. It's recommended to only use this during application
+    /// startup to avoid runtime failures.
+    ///
+    /// To construct a [`ConfigExample`] with no risk of panicking, you can
+    /// directly use normal structure initialization.
+    pub fn new(
+        description: impl ToString,
+        config: impl Serialize,
+    ) -> Self {
+        Self {
+            description: description.to_string(),
+            config: serde_json::to_value(config)
+                .expect("failed to serialize example config"),
+        }
+    }
 }
 
 impl NodeBuilderOptions {
@@ -1608,7 +1646,8 @@ impl NodeBuilderOptions {
         Self {
             id: id.into(),
             default_display_text: None,
-            help_text: None,
+            description: None,
+            examples_configs: Default::default(),
         }
     }
 
@@ -1617,8 +1656,16 @@ impl NodeBuilderOptions {
         self
     }
 
-    pub fn with_help_text(mut self, text: impl Into<String>) -> Self {
-        self.help_text = Some(text.into());
+    pub fn with_description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
+        self
+    }
+
+    pub fn with_examples_configs(
+        mut self,
+        example_configs: impl IntoIterator<Item = ConfigExample>,
+    ) -> Self {
+        self.examples_configs = example_configs.into_iter().collect();
         self
     }
 }
@@ -1632,7 +1679,9 @@ pub struct SectionBuilderOptions {
     /// display text.
     pub default_display_text: Option<BuilderId>,
     /// Optional text to describe the builder.
-    pub help_text: Option<String>,
+    pub description: Option<String>,
+    /// Examples of configurations that can be used with this section builder.
+    pub example_configs: Vec<ConfigExample>,
 }
 
 impl SectionBuilderOptions {
@@ -1640,7 +1689,8 @@ impl SectionBuilderOptions {
         Self {
             id: id.into(),
             default_display_text: None,
-            help_text: None,
+            description: None,
+            example_configs: Default::default(),
         }
     }
 
@@ -1649,8 +1699,16 @@ impl SectionBuilderOptions {
         self
     }
 
-    pub fn with_help_text(mut self, text: impl Into<String>) -> Self {
-        self.help_text = Some(text.into());
+    pub fn with_description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
+        self
+    }
+
+    pub fn with_example_configs(
+        mut self,
+        example_configs: impl IntoIterator<Item = ConfigExample>,
+    ) -> Self {
+        self.example_configs = example_configs.into_iter().collect();
         self
     }
 }
