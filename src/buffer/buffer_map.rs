@@ -251,6 +251,23 @@ impl<T: BufferMapStruct> Buffering for T {
         Ok(min_count.unwrap_or(0))
     }
 
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        let mut max_count = None;
+        for buffer in self.buffer_list() {
+            let count = buffer.buffered_count_for(buffer_entity, session, world)?;
+            if max_count.is_none_or(|max| max < count) {
+                max_count = Some(count);
+            }
+        }
+
+        Ok(max_count.unwrap_or(0))
+    }
+
     fn ensure_active_session(&self, session: Entity, world: &mut World) -> OperationResult {
         for buffer in self.buffer_list() {
             buffer.ensure_active_session(session, world)?;

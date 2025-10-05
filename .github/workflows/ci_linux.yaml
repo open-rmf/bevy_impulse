@@ -35,7 +35,7 @@ jobs:
       uses: pnpm/action-setup@v4
       with:
         version: latest
-    
+
     - name: Setup nodejs
       run: pnpm env use --global lts
 
@@ -49,6 +49,9 @@ jobs:
 
     - name: Test trace
       run: cargo test --workspace -F=trace
+
+    - name: Test all capabilities combined
+      run: cargo test --workspace -F=maximal
 
     - name: Build single_threaded_async
       run: cargo build --features single_threaded_async

@@ -21,9 +21,12 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     marker::PhantomData,
+    sync::Arc,
 };
 
 use bevy_ecs::prelude::{Commands, Entity};
+
+use anyhow::Error as Anyhow;
 
 pub use crate::dyn_node::*;
 use crate::{
@@ -59,6 +62,7 @@ pub struct NodeRegistration {
     pub(super) streams: HashMap<Cow<'static, str>, TypeInfo>,
     pub(super) config_schema: Schema,
     pub(super) help_text: Option<String>,
+
     /// Creates an instance of the registered node.
     #[serde(skip)]
     create_node_impl: CreateNodeFn,
@@ -145,15 +149,57 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
 {
     /// Register a node builder with the specified common operations.
     ///
+    /// This node builder always succeeds in building its node. If it is possible
+    /// for your node builder to be unable to build its node, you should use
+    /// [`Self::register_node_builder_fallible`] instead.
+    ///
     /// # Arguments
     ///
     /// * `id` - Id of the builder, this must be unique.
     /// * `name` - Friendly name for the builder, this is only used for display purposes.
     /// * `f` - The node builder to register.
     pub fn register_node_builder<Config, Request, Response, Streams>(
-        mut self,
+        self,
         options: NodeBuilderOptions,
         mut f: impl FnMut(&mut Builder, Config) -> Node<Request, Response, Streams> + Send + 'static,
+    ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
+    where
+        Config: JsonSchema + DeserializeOwned,
+        Request: Send + Sync + 'static,
+        Response: Send + Sync + 'static,
+        Streams: StreamPack,
+        DeserializeImpl: DeserializeMessage<Request>,
+        DeserializeImpl: DeserializeMessage<Response>,
+        SerializeImpl: SerializeMessage<Request>,
+        SerializeImpl: SerializeMessage<Response>,
+        Cloneable: PerformForkClone<Request>,
+        Cloneable: PerformForkClone<Response>,
+        JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Request>,
+        JsonRegistration<SerializeImpl, DeserializeImpl>: RegisterJson<Response>,
+    {
+        self.register_node_builder_fallible(options, move |builder, config| Ok(f(builder, config)))
+    }
+
+    /// Register a node builder with the specified common operations.
+    ///
+    /// This node builder is able to fail while building. If it returns an [`Err`]
+    /// instead of a node, then the entire diagram building procedure will be
+    /// cancelled and an error will be provided to the user.
+    ///
+    /// If your node builder will always succeed, you can consider using
+    /// [`Self::register_node_builder`] instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Id of the builder, this must be unique.
+    /// * `name` - Friendly name for the builder, this is only used for display purposes.
+    /// * `f` - The node builder to register.
+    pub fn register_node_builder_fallible<Config, Request, Response, Streams>(
+        mut self,
+        options: NodeBuilderOptions,
+        mut f: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow>
+            + Send
+            + 'static,
     ) -> NodeRegistrationBuilder<'a, Request, Response, Streams>
     where
         Config: JsonSchema + DeserializeOwned,
@@ -172,6 +218,7 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
         self.impl_register_message::<Request>();
         self.impl_register_message::<Response>();
 
+        let node_builder_name = Arc::clone(&options.id);
         let mut availability = StreamAvailability::default();
         Streams::set_stream_availability(&mut availability);
         let streams = availability.named_streams();
@@ -189,7 +236,13 @@ impl<'a, DeserializeImpl, SerializeImpl, Cloneable>
             create_node_impl: RefCell::new(Box::new(move |builder, config| {
                 let config =
                     serde_json::from_value(config).map_err(DiagramErrorCode::ConfigError)?;
-                Ok(f(builder, config).into())
+                let node =
+                    f(builder, config).map_err(|error| DiagramErrorCode::NodeBuildingError {
+                        builder: Arc::clone(&node_builder_name),
+                        error,
+                    })?;
+
+                Ok(node.into())
             })),
             help_text: options.help_text,
         };
@@ -1329,6 +1382,10 @@ impl DiagramElementRegistry {
     /// or unzip. The data types of your node need to be suitable for those
     /// operations or else the compiler will not allow you to enable them.
     ///
+    /// Node builders registered with this cannot fail to build their node when
+    /// asked to. If your builder might be able to fail, use
+    /// [`Self::register_node_builder_fallible`] instead.
+    ///
     /// ```
     /// use bevy_impulse::{NodeBuilderOptions, DiagramElementRegistry};
     ///
@@ -1355,6 +1412,26 @@ impl DiagramElementRegistry {
         Response: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
     {
         self.opt_out().register_node_builder(options, builder)
+    }
+
+    /// Equivalent to [`Self::register_node_builder`] except the builder is allowed
+    /// to fail building the node by returning [`Err`]. When [`Err`] is returned,
+    /// building of the entire diagram will be cancelled and the user will receive
+    /// an error
+    pub fn register_node_builder_fallible<Config, Request, Response, Streams: StreamPack>(
+        &mut self,
+        options: NodeBuilderOptions,
+        builder: impl FnMut(&mut Builder, Config) -> Result<Node<Request, Response, Streams>, Anyhow>
+            + Send
+            + 'static,
+    ) -> NodeRegistrationBuilder<Request, Response, Streams>
+    where
+        Config: JsonSchema + DeserializeOwned,
+        Request: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
+        Response: Send + Sync + 'static + DynType + Serialize + DeserializeOwned + Clone,
+    {
+        self.opt_out()
+            .register_node_builder_fallible(options, builder)
     }
 
     /// Register a single message for general use between nodes. This will

@@ -34,6 +34,13 @@ pub trait Buffering: 'static + Send + Sync + Clone {
 
     fn buffered_count(&self, session: Entity, world: &World) -> Result<usize, OperationError>;
 
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError>;
+
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult;
 
     fn gate_action(
@@ -219,6 +226,19 @@ impl<T: 'static + Send + Sync> Buffering for Buffer<T> {
             .buffered_count::<T>(session)
     }
 
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        if self.id() != buffer {
+            return Ok(0);
+        }
+
+        self.buffered_count(session, world)
+    }
+
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         add_listener_to_source(self.id(), listener, world)
     }
@@ -289,6 +309,19 @@ impl<T: 'static + Send + Sync + Clone> Buffering for CloneFromBuffer<T> {
             .get_entity(self.id())
             .or_broken()?
             .buffered_count::<T>(session)
+    }
+
+    fn buffered_count_for(
+        &self,
+        buffer: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        if buffer != self.id() {
+            return Ok(0);
+        }
+
+        self.buffered_count(session, world)
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
@@ -374,6 +407,20 @@ macro_rules! impl_buffered_for_tuple {
                         $T.buffered_count(session, world)?,
                     )*
                 ].iter().copied().min().unwrap_or(0))
+            }
+
+            fn buffered_count_for(
+                &self,
+                buffer: Entity,
+                session: Entity,
+                world: &World,
+            ) -> Result<usize, OperationError> {
+                let ($($T,)*) = self;
+                Ok([
+                    $(
+                        $T.buffered_count_for(buffer, session, world)?,
+                    )*
+                ].iter().copied().max().unwrap_or(0))
             }
 
             fn add_listener(
@@ -506,6 +553,23 @@ impl<T: Buffering, const N: usize> Buffering for [T; N] {
         Ok(min_count.unwrap_or(0))
     }
 
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        let mut max_count = None;
+        for buffer in self.iter() {
+            let count = buffer.buffered_count_for(buffer_entity, session, world)?;
+            if max_count.is_none_or(|max| max < count) {
+                max_count = Some(count);
+            }
+        }
+
+        Ok(max_count.unwrap_or(0))
+    }
+
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.add_listener(listener, world)?;
@@ -605,6 +669,23 @@ impl<T: Buffering, const N: usize> Buffering for SmallVec<[T; N]> {
         Ok(min_count.unwrap_or(0))
     }
 
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        let mut max_count = None;
+        for buffer in self.iter() {
+            let count = buffer.buffered_count_for(buffer_entity, session, world)?;
+            if max_count.is_none_or(|max| max < count) {
+                max_count = Some(count);
+            }
+        }
+
+        Ok(max_count.unwrap_or(0))
+    }
+
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
         for buffer in self {
             buffer.add_listener(listener, world)?;
@@ -700,6 +781,23 @@ impl<B: Buffering> Buffering for Vec<B> {
         }
 
         Ok(min_count.unwrap_or(0))
+    }
+
+    fn buffered_count_for(
+        &self,
+        buffer_entity: Entity,
+        session: Entity,
+        world: &World,
+    ) -> Result<usize, OperationError> {
+        let mut max_count = None;
+        for buffer in self.iter() {
+            let count = buffer.buffered_count_for(buffer_entity, session, world)?;
+            if max_count.is_none_or(|max| max < count) {
+                max_count = Some(count);
+            }
+        }
+
+        Ok(max_count.unwrap_or(0))
     }
 
     fn add_listener(&self, listener: Entity, world: &mut World) -> OperationResult {
