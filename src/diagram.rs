@@ -35,6 +35,9 @@ mod workflow_builder;
 #[cfg(feature = "grpc")]
 mod grpc;
 
+#[cfg(feature = "zenoh")]
+mod zenoh;
+
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::Commands;
 use buffer_schema::{BufferAccessSchema, BufferSchema, ListenSchema};
@@ -61,8 +64,11 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     fmt::Display,
+    future::Future,
     io::Read,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 
 pub use crate::type_info::TypeInfo;
@@ -78,6 +84,8 @@ use serde::{
     ser::SerializeMap,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+
+use futures::never::Never;
 
 use thiserror::Error as ThisError;
 
@@ -1293,4 +1301,16 @@ mod tests {
 pub(crate) fn is_default<T: std::default::Default + Eq>(value: &T) -> bool {
     let default = T::default();
     *value == default
+}
+
+/// This is used to block a future from ever returning. This should only be used
+/// in a race to force one of the contesting futures to lose. Make sure that at
+/// least one contesting future will finish or else this will lead to a deadlock.
+struct NeverFinish;
+
+impl Future for NeverFinish {
+    type Output = Never;
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Pending
+    }
 }
