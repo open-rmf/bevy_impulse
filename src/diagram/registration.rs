@@ -1629,14 +1629,10 @@ impl ConfigExample {
     ///
     /// To construct a [`ConfigExample`] with no risk of panicking, you can
     /// directly use normal structure initialization.
-    pub fn new(
-        description: impl ToString,
-        config: impl Serialize,
-    ) -> Self {
+    pub fn new(description: impl ToString, config: impl Serialize) -> Self {
         Self {
             description: description.to_string(),
-            config: serde_json::to_value(config)
-                .expect("failed to serialize example config"),
+            config: serde_json::to_value(config).expect("failed to serialize example config"),
         }
     }
 }

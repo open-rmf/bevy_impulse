@@ -1,12 +1,11 @@
 use std::fmt::Write;
 
 use bevy_impulse::{
-    AsyncMap, ConfigExample, DiagramElementRegistry, JsonMessage,
-    NodeBuilderOptions, StreamPack,
+    AsyncMap, ConfigExample, DiagramElementRegistry, JsonMessage, NodeBuilderOptions, StreamPack,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value, json};
+use serde_json::{json, Number, Value};
 
 #[derive(Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -146,11 +145,11 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     let add_examples = [
         ConfigExample::new(
             "Simply sum the set of numbers passed as input.",
-            json!{null},
+            json!(null),
         ),
         ConfigExample::new(
             "Sum the set of numbers passed as input, and then add 5.",
-            json!{5.0},
+            json!(5.0),
         ),
     ];
 
@@ -189,12 +188,9 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     let sub_examples = [
         ConfigExample::new(
             "Simply subtract the first array element by all subsequent elements.",
-            json!{null},
+            json!(null),
         ),
-        ConfigExample::new(
-            "Additionally subtract 5 from the output.",
-            json!{5.0},
-        ),
+        ConfigExample::new("Additionally subtract 5 from the output.", json!(5.0)),
     ];
 
     registry.register_node_builder(
@@ -230,14 +226,8 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         a number is set in the config, that will also be multipled into the \
         output.";
     let mul_examples = [
-        ConfigExample::new(
-            "Simply multiply the input numbers together.",
-            json!{null},
-        ),
-        ConfigExample::new(
-            "Additionally multiple the output by 5.",
-            json!{5.0},
-        ),
+        ConfigExample::new("Simply multiply the input numbers together.", json!(null)),
+        ConfigExample::new("Additionally multiple the output by 5.", json!(5.0)),
     ];
 
     registry.register_node_builder(
@@ -275,12 +265,9 @@ pub fn register(registry: &mut DiagramElementRegistry) {
     let div_examples = [
         ConfigExample::new(
             "Simply divide the first array element by all subsequent elements.",
-            json!{null},
+            json!(null),
         ),
-        ConfigExample::new(
-            "Additionally divide the output by 2.",
-            json!{2.0},
-        ),
+        ConfigExample::new("Additionally divide the output by 2.", json!(2.0)),
     ];
 
     registry.register_node_builder(
@@ -322,12 +309,9 @@ pub fn register(registry: &mut DiagramElementRegistry) {
             "Generate a Fibonacci sequence whose order is the input value. If \
             the input message cannot be interpreted as a number then this node \
             will return an Err.",
-            json!{null},
+            json!(null),
         ),
-        ConfigExample::new(
-            "Generate a Fibonacci sequence of order 10.",
-            json!{10.0},
-        ),
+        ConfigExample::new("Generate a Fibonacci sequence of order 10.", json!(10.0)),
     ];
 
     registry.register_node_builder(
@@ -366,13 +350,10 @@ pub fn register(registry: &mut DiagramElementRegistry) {
         can be provided in the config to label the output.";
 
     let print_examples = [
-        ConfigExample::new(
-            "Print the input as-is",
-            json!{null},
-        ),
+        ConfigExample::new("Print the input as-is", json!(null)),
         ConfigExample::new(
             "Add \"printed from node: \" to the printed message",
-            json!{"printed from node"},
+            json!("printed from node"),
         ),
     ];
 
